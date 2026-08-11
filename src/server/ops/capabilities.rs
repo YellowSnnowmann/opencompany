@@ -94,6 +94,18 @@ struct CapabilityStatusDto {
     /// (`[tools].search_daily_calls`, else the built-in default). Reaching it
     /// makes the tool refuse loudly rather than return an empty result set.
     search_daily_call_cap: u32,
+    /// Whether the agent-side MCP bridge is compiled into this build (issue
+    /// #567). Unlike media/composio/search this is **not** a grant question: the
+    /// `/mcp/servers` management routes ship in every build, so an operator can
+    /// add a server, store a token and watch it probe healthy on a build that
+    /// hands agents no MCP tool at all — `registry_for_agent` is pushed onto the
+    /// belt behind `#[cfg(feature = "mcp")]`. The most misleading case is a
+    /// build with `openhuman` but without `mcp`: live tool discovery and health
+    /// probes answer for real (they ride the harness feature), so every read in
+    /// the console looks correct while no agent can call the server. `false`
+    /// lets the MCP surfaces state that plainly instead of the operator finding
+    /// out by asking an agent and watching nothing happen.
+    mcp_in_build: bool,
 }
 
 /// One tier's budget row.
@@ -173,6 +185,7 @@ fn unconfigured(flags: OptInFlags) -> CapabilityStatusDto {
         search_in_build: cfg!(feature = "openhuman"),
         search_credential_configured: search_credential_configured(),
         search_daily_call_cap: flags.search_daily_call_cap,
+        mcp_in_build: cfg!(feature = "mcp"),
     }
 }
 
@@ -294,6 +307,7 @@ async fn effective_status(runtime: &CompanyRuntime) -> Result<CapabilityStatusDt
         search_in_build: cfg!(feature = "openhuman"),
         search_credential_configured: search_credential_configured(),
         search_daily_call_cap: flags.search_daily_call_cap,
+        mcp_in_build: cfg!(feature = "mcp"),
     })
 }
 
@@ -503,6 +517,71 @@ mod tests {
             crate::company::DEFAULT_SEARCH_DAILY_CALLS,
             "an unset cap reports the built-in default: {dto2}"
         );
+    }
+
+    /// Issue #567: the MCP bridge's build state travels on every response, with
+    /// a `[plan]` and without one. The `/mcp/servers` management routes ship in
+    /// every build while the agent-side registry is pushed onto the belt behind
+    /// `#[cfg(feature = "mcp")]`, so without this flag a console cannot tell a
+    /// deployment that will honour a server from one that never can — the
+    /// operator finds out by asking an agent and watching nothing happen.
+    ///
+    /// Asserted on **both** response paths deliberately: the DTO is built in two
+    /// places (`unconfigured` and the configured branch), so a flag added to one
+    /// alone would report honestly for a company with no plan and lie to every
+    /// company that has one.
+    #[tokio::test]
+    async fn reports_whether_the_mcp_bridge_is_in_this_build() {
+        let unplanned_dir = home();
+        let unplanned = unplanned_dir.path().to_path_buf();
+        let state = state_with_manifest(
+            &unplanned,
+            "[company]\nname = \"Acme\"\n[policy]\nmode = \"full\"\n[tools]\nallow = [\"*\"]\n",
+        )
+        .await;
+        let (status, dto) = get_capabilities(&state).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(dto["configured"], false);
+        assert_eq!(
+            dto["mcpInBuild"],
+            cfg!(feature = "mcp"),
+            "the unconfigured response states the bridge's build state: {dto}"
+        );
+
+        let planned_dir = home();
+        let planned = planned_dir.path().to_path_buf();
+        let state2 = state_with_manifest(
+            &planned,
+            "[company]\nname = \"Acme\"\n[policy]\nmode = \"full\"\n[plan]\nname = \"starter\"\n",
+        )
+        .await;
+        let (_, dto2) = get_capabilities(&state2).await;
+        assert_eq!(dto2["configured"], true, "{dto2}");
+        assert_eq!(
+            dto2["mcpInBuild"],
+            cfg!(feature = "mcp"),
+            "a configured plan reports the same build state: {dto2}"
+        );
+
+        // The without-feature path is the one the console must not misreport:
+        // pinned as a literal so the honest answer cannot regress into a
+        // vacuously-true comparison against the same `cfg!`.
+        #[cfg(not(feature = "mcp"))]
+        {
+            assert_eq!(
+                dto["mcpInBuild"], false,
+                "a build without the bridge must say so: {dto}"
+            );
+            assert_eq!(dto2["mcpInBuild"], false, "{dto2}");
+        }
+        #[cfg(feature = "mcp")]
+        {
+            assert_eq!(
+                dto["mcpInBuild"], true,
+                "a build with the bridge must say so: {dto}"
+            );
+            assert_eq!(dto2["mcpInBuild"], true, "{dto2}");
+        }
     }
 
     #[tokio::test]

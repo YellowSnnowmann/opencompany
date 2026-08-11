@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { LIVE_BRAIN } from "./capabilities";
+
 /**
  * Issue #414 — Settings, MCP Servers must render the servers the host actually
  * serves.
@@ -56,6 +58,19 @@ test("Settings MCP lists the company's servers instead of crashing on open", asy
   await expect(manifest).toBeVisible();
   await expect(manifest).toContainText("manifest");
   await expect(manifest).toContainText("https://mcp.deepwiki.com/mcp");
+
+  // Issue #567: the screen states what this deployment can do with these
+  // servers. Asserted from both sides, because the failure being fixed is a
+  // console that reads identically on a host that honours a server and one that
+  // never can — the default-feature host behind this lane has no `mcp` bridge
+  // and must say so; the live-brain lane compiles it in and must stay quiet.
+  const bridgeAbsent = page.getByTestId("mcp-bridge-absent");
+  if (LIVE_BRAIN) {
+    await expect(bridgeAbsent).toHaveCount(0);
+  } else {
+    await expect(bridgeAbsent).toBeVisible();
+    await expect(bridgeAbsent).toContainText("no teammate ever receives their tools");
+  }
 
   // The page must not be one that renders and throws. `.length` of `undefined`
   // was the exact crash; any uncaught error here is a failure regardless.

@@ -25,6 +25,7 @@ import {
   updateMcpServer,
 } from "@/api/mcp";
 import { ApiError, type McpHealth, type McpServer, type McpToolInfo } from "@/api/types";
+import { type McpBridgeState, mcpAddedMessage, mcpBridgeState } from "@/lib/mcp-bridge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,6 +77,9 @@ interface Props {
  */
 export function McpServersSection({ client, company, canManage, chrome = "inline" }: Props) {
   const [load, setLoad] = useState<McpLoad>("loading");
+  // Whether the agent-side MCP bridge is compiled into this host (issue #567).
+  // Starts `unknown` so nothing is claimed before the capability read lands.
+  const [bridge, setBridge] = useState<McpBridgeState>("unknown");
   const [servers, setServers] = useState<McpServer[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [tools, setTools] = useState<Record<string, ToolsState>>({});
@@ -137,6 +141,27 @@ export function McpServersSection({ client, company, canManage, chrome = "inline
     void refresh();
   }, [refresh]);
 
+  // Whether this build can actually run what this screen manages (issue #567).
+  // Read separately from the server list, and deliberately not fatal to it: the
+  // list is the screen's job, the build state is a caption on it, so a host that
+  // cannot answer the capability read still gets a working MCP tab — it just
+  // gets no claim about the bridge.
+  useEffect(() => {
+    let alive = true;
+    client
+      .capabilityStatus(company)
+      .then((status) => {
+        if (alive) setBridge(mcpBridgeState(status));
+      })
+      // A host with no `…/capabilities` surface 404s. Unknown, not absent.
+      .catch(() => {
+        if (alive) setBridge("unknown");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [client, company]);
+
   // Cancel any in-flight sign-in polls when the view unmounts so their timers
   // don't fire against a torn-down component, and tell a poll that is currently
   // between its own `delete` and its next arm that there is nothing to come
@@ -184,7 +209,10 @@ export function McpServersSection({ client, company, canManage, chrome = "inline
       } else if (res.warning) {
         setAddError(res.warning);
       } else {
-        toast.success(`Added ${name.trim()}. Agents pick it up on the next rebuild.`);
+        // The success path has to agree with the banner (issue #567): a toast
+        // promising pickup, fired at the moment the operator acts, undoes a
+        // statement sitting a few pixels above it.
+        toast.success(mcpAddedMessage(name.trim(), bridge));
       }
       setName("");
       setEndpoint("");
@@ -352,6 +380,23 @@ export function McpServersSection({ client, company, canManage, chrome = "inline
         Remote MCP tool servers your agents can call. Add an HTTP endpoint and (optionally) a token —
         the token is stored securely and never shown again.
       </p>
+
+      {/* Issue #567: this screen's routes ship in every build, the agent-side
+          bridge does not. Said before the list rather than per row, because it
+          is a fact about the deployment and not about any one server — and said
+          only on an explicit `false`, never on a host that stayed silent. */}
+      {bridge === "absent" && (
+        <Alert data-testid="mcp-bridge-absent">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>No agent can use tool servers in this deployment</AlertTitle>
+          <AlertDescription>
+            The MCP bridge isn&apos;t compiled into this build, so servers added here are stored and
+            can be probed, but no teammate ever receives their tools. The configuration survives —
+            rebuild this deployment with the <code className="font-mono">mcp</code> feature and the
+            servers below start reaching agents on the next turn.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {load === "error" ? (
         // Not an empty list: an empty list is a company with no tool servers,

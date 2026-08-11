@@ -767,9 +767,10 @@ export interface McpServer {
 }
 
 /**
- * A mutating MCP response: the resulting server, a rebuild reminder, the live
- * probe result (absent on a non-`openhuman` host), and any non-blocking
- * endpoint advisory.
+ * A mutating MCP response: the resulting server, the host's pickup note (since
+ * issue #566 that is next-turn pickup with no restart, not a rebuild reminder),
+ * the live probe result (absent on a non-`openhuman` host), and any
+ * non-blocking endpoint advisory.
  */
 export interface McpMutationResponse {
   server: McpServer;
@@ -877,6 +878,15 @@ export interface CapabilityStatusDto {
   searchCredentialConfigured?: boolean;
   /** The company's daily `web_search` call ceiling. */
   searchDailyCallCap?: number;
+  /**
+   * Whether the agent-side MCP bridge is compiled into this build (issue #567).
+   * Not a grant question like the flags above: the `/mcp/servers` management
+   * routes ship in every build, so without this an operator can add a server,
+   * store a token and watch it probe healthy on a deployment that hands agents
+   * no MCP tool at all. `undefined` is **unknown** (an older host that does not
+   * send the field) and must never be rendered as "absent".
+   */
+  mcpInBuild?: boolean;
 }
 
 /** One day's token totals in the usage series (`GET .../usage`). */

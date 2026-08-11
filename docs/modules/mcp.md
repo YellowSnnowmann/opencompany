@@ -105,6 +105,35 @@ Discovery is gated on the `openhuman` feature (the MCP transport lives there);
 without it the route reports `not_wired` and the console falls back to the
 declared tool lists. Every mutating response carries a `note` reminder.
 
+## Which builds can honour a server (issue #567)
+
+The management routes above are **ungated** — they ship in every build. The
+agent-side bridge is not: `registry_for_agent` is pushed onto a teammate's belt
+behind `#[cfg(feature = "mcp")]`. Three configurations, only one of which the
+routes alone distinguish:
+
+| Build | CRUD | Discovery / probe | Agent tools |
+|-------|------|-------------------|-------------|
+| default (no `openhuman`) | works | `not_wired` | none — no harness |
+| `openhuman`, no `mcp` | works | **works for real** | **none** |
+| `openhuman` + `mcp` | works | works | yes |
+
+The middle row is the one worth stating outright: every read on the screen
+answers correctly, so a healthy badge and a live tool list sit above a server no
+teammate can call. The console cannot infer this — an empty tool belt is not
+visible over HTTP — so `GET …/capabilities` carries **`mcpInBuild`**
+(`cfg!(feature = "mcp")`, alongside `mediaInBuild` / `composioInBuild` /
+`searchInBuild`), and `McpServersSection` renders a stated degraded state when it
+is explicitly `false`. A host that omits the field is *unknown*, never
+"absent" — an older build must not be reported as broken.
+
+Writes stay open on every build deliberately. A manifest can declare servers for
+a deployment that runs elsewhere with the feature, and configuration entered
+before the capability arrives survives the rebuild; refusing the write would turn
+that into a hard error while fixing nothing an operator can act on. Staging
+builds with `mcp` (`TENANT_FEATURES` in `deploy-staging.yml`); the default
+`docker-compose` build does not.
+
 ## Console surface
 
 One component reads these routes —
