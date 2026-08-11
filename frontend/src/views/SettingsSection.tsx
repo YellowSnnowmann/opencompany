@@ -19,7 +19,11 @@ export const SETTINGS_PAGES = [
   { id: "people", label: "People", icon: UserCog, hint: "Who can sign in, and as what" },
   { id: "connections", label: "Connections", icon: Plug, hint: "Third-party accounts" },
   { id: "mcp", label: "MCP Servers", icon: Blocks, hint: "Tool servers and their tools" },
-  { id: "skills", label: "Skills", icon: Sparkles, hint: "What this company knows how to do" },
+  // "What this company knows how to do" read as capability the company performs
+  // — the implication issue #569 exists to remove, set here *before* the tab
+  // gets a chance to correct it. The siblings describe their content; so does
+  // this now.
+  { id: "skills", label: "Skills", icon: Sparkles, hint: "Playbooks your teammates read" },
   { id: "usage", label: "Usage", icon: ChartColumnBig, hint: "What this company is spending" },
 ] as const satisfies readonly { id: string; label: string; icon: LucideIcon; hint: string }[];
 

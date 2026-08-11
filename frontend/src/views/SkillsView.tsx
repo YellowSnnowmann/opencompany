@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Download, Loader2, Plus, Search, Sparkles, Trash2 } from "lucide-react";
+import { BookOpen, Check, Download, Loader2, Plus, Search, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -39,7 +39,12 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { CATEGORY_STYLES, type SkillCategory } from "@/lib/skills";
+import {
+  CATEGORY_STYLES,
+  SKILLS_READ_ONLY_NOTE,
+  type SkillCategory,
+  skillReachLabel,
+} from "@/lib/skills";
 
 interface Props {
   client: OpenCompanyClient;
@@ -176,13 +181,24 @@ export function SkillsView({ client, company }: Props) {
           <div className="space-y-1">
             <h2 className="text-2xl font-semibold tracking-tight">Skills</h2>
             <p className="text-sm text-muted-foreground">
-              Capabilities your company can use. Enable, install from the registry, or add your own.
+              Playbooks your teammates read. Enable, install from the registry, or add your own.
             </p>
           </div>
           <Button onClick={() => setAddOpen(true)}>
             <Plus className="size-4" /> Add skill
           </Button>
         </div>
+
+        {/* Issue #569: what install / enable actually buy. A desk agent can list,
+            describe and read a skill and can never run one — deliberate, and
+            pinned by `dispatched_belt_excludes_every_deferred_family` — but this
+            screen's vocabulary is the vocabulary of switching a capability on,
+            so without saying it the operator learns the difference by asking a
+            teammate to do something and watching nothing happen. */}
+        <Alert data-testid="skills-read-only-note">
+          <BookOpen className="size-4" />
+          <AlertDescription>{SKILLS_READ_ONLY_NOTE}</AlertDescription>
+        </Alert>
 
         {error && (
           <Alert variant="destructive">
@@ -304,6 +320,11 @@ function InstalledCard({
               {skill.category}
             </Badge>
             <span className="text-xs text-muted-foreground capitalize">{skill.source}</span>
+            {/* What the switch above decides, in the terms it actually decides
+                them: reach, not capability (issue #569). */}
+            <span data-testid="skill-reach" className="text-xs text-muted-foreground">
+              · {skillReachLabel(skill.enabled)}
+            </span>
           </div>
           {skill.source !== "company" && (
             <Button
@@ -417,7 +438,13 @@ function AddSkillDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add a skill</DialogTitle>
-          <DialogDescription>Describe a capability your company should have.</DialogDescription>
+          {/* Not "a capability your company should have" (issue #569): this is
+              where an operator authors one, so it is the earliest point the
+              console can frame a skill as the playbook a teammate reads rather
+              than as something the company will carry out. */}
+          <DialogDescription>
+            Describe a playbook your teammates should follow — what to do, and when.
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-2">
           <Label htmlFor="skill-name">Name</Label>

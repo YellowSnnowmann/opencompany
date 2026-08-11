@@ -47,6 +47,15 @@ test("registry tab lists the live server registry, not a hardcoded array", async
   // names a view, so it would silently canonicalize to Overview.
   await page.goto("/#/settings/skills");
   await dismissOnboarding(page);
+
+  // Issue #569: the tab states what installing one of these buys. A desk agent
+  // reads a skill and can never run it, and this screen's install / enable
+  // vocabulary implies the opposite — so the statement has to be on the page an
+  // operator browses the library from, not only on the installed list.
+  const note = page.getByTestId("skills-read-only-note");
+  await expect(note).toBeVisible();
+  await expect(note).toContainText("orchestrator");
+
   await page.getByRole("tab", { name: "Registry" }).click();
 
   const cards = page.getByTestId("registry-card");
