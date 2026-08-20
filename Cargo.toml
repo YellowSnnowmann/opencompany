@@ -585,3 +585,15 @@ criterion = { version = "0.8", default-features = false, features = [
 [[bench]]
 name = "journal_append"
 harness = false
+
+# The tinycortex pin (bfd2ea21, via vendor/openhuman) takes `tinymemory-api` BY
+# GIT in `tinycortex-api` (tinycortex#149 re-exports the contract instead of
+# duplicating it). Same WS4 rule as the `[patch.crates-io]` block above:
+# openhuman's own `[patch]` table is ignored when openhuman is consumed as a
+# path dependency, so its unification of that git dep onto the vendored path
+# copy must be replicated here, rebased. Without this entry cargo resolves TWO
+# `tinymemory-api` crates — the path one and the git one — which is two
+# nominally distinct `MemoryProvider`/`Memory` traits in one process, and
+# `tinymemory-core` fails with E0308s where the engine trait meets the contract.
+[patch."https://github.com/tinyhumansai/tinymemory"]
+tinymemory-api = { path = "vendor/openhuman/vendor/tinymemory/api" }
