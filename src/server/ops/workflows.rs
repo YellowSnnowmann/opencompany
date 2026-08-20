@@ -683,54 +683,6 @@ impl TryFrom<CreateWorkflowBody> for RawWorkflow {
     }
 }
 
-/// Rejects a draft whose `output` node routes its report to a channel this
-/// runtime cannot deliver to (issue #981).
-///
-/// The delivery layer already refuses such a target at run time with a
-/// `ChannelNotWired` row, and that row stays — desks come and go, so a graph
-/// valid at save can be invalid at run, and this is a guard rather than a
-/// guarantee. What it removes is the case the QA pass found: a workflow saved
-/// against `operator`, which delivery refuses **by name** on every runtime and
-/// so can never succeed, discovered only after a scheduled run nobody watched
-/// silently dropped its report.
-///
-/// Both write routes run it, from the same set the destination picker is served
-/// from and with the same sentence the failed delivery would have carried, so
-/// an author who trips it is told what a run would have told them.
-///
-/// Deliberately narrow. A missing target, a `destination` on a non-`output`
-/// node and an unknown `kind` are [`parse_workflow`](crate::company::parse_workflow)'s
-/// to report — it says something more specific about each, and reporting the
-/// wrong problem first is worse than reporting it second. This is also NOT run
-/// at TOML parse time: seed templates are parsed with no runtime in hand, and
-/// checking there would refuse to boot a template on a company whose desks are
-/// not resolved yet.
-fn reject_undeliverable_channel_destinations(
-    company: &ScopedCompany,
-    draft: &RawWorkflow,
-) -> Result<(), ApiError> {
-    let deliverable = company.runtime.deliverable_channel_ids();
-    for node in &draft.nodes {
-        let Some(destination) = &node.destination else {
-            continue;
-        };
-        if destination.kind.trim() != "channel" || node.kind.trim() != "output" {
-            continue;
-        }
-        let target = destination.target.as_deref().map(str::trim).unwrap_or("");
-        if target.is_empty() || deliverable.iter().any(|id| id == target) {
-            continue;
-        }
-        let live: Vec<&str> = deliverable.iter().map(String::as_str).collect();
-        return Err(ApiError(OpenCompanyError::InvalidRequest(format!(
-            "node `{}`: {}",
-            node.id,
-            crate::runtime::undeliverable_channel_message(target, &live)
-        ))));
-    }
-    Ok(())
-}
-
 /// `POST …/workflows` — authors a new workflow graph (issues #69, #112, #168):
 /// the console's form creator, or any direct API caller, posts the graph shape
 /// and it is persisted on the company record.
@@ -750,13 +702,13 @@ async fn create_workflow(
     Json(body): Json<CreateWorkflowBody>,
 ) -> Result<Json<WorkflowGraph>, ApiError> {
     let draft = RawWorkflow::try_from(body)?;
-    reject_undeliverable_channel_destinations(&company, &draft)?;
     let file = create_company_workflow(
         company.id(),
         company.runtime.source_dir(),
         company.runtime.store(),
         Some(company.runtime.events()),
         draft,
+        Some(&company.runtime.deliverable_channel_ids()),
     )
     .await
     .map_err(ApiError)?;
@@ -866,7 +818,6 @@ async fn update_workflow(
         )));
     };
     let draft = RawWorkflow::try_from(body.graph)?;
-    reject_undeliverable_channel_destinations(&company, &draft)?;
     let file = update_company_workflow(
         company.id(),
         company.runtime.source_dir(),
@@ -875,6 +826,7 @@ async fn update_workflow(
         Some(company.runtime.events()),
         draft,
         Some(expected.as_str()),
+        Some(&company.runtime.deliverable_channel_ids()),
     )
     .await
     .map_err(ApiError)?;
@@ -4332,6 +4284,64 @@ mod tests {
                 "{message}"
             );
             assert!(message.contains("engineering"), "{message}");
+        }
+
+        /// Issue #1191: the refusal is the SAME envelope every sibling node-config
+        /// rule answers with — `workflow_invalid` plus a `problems` array whose
+        /// entry names the node and the field.
+        ///
+        /// It used to be `invalid_request` with no array at all, because the rule
+        /// sat outside the `problems` accumulator on the write route. So the
+        /// console, which reads `problems` to highlight the offending node
+        /// (#1123), got a flat banner for exactly the class of error #836 was
+        /// filed about. Asserting the envelope rather than the sentence is the
+        /// point: the sentence never changed.
+        #[tokio::test]
+        async fn an_undeliverable_channel_answers_with_a_located_problem() {
+            let home_dir = home();
+            let state = desk_state(home_dir.path()).await;
+
+            let response = post_create(
+                state,
+                body_with_destination("channel", Some("engineering-desk")),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = json_body(response).await;
+            assert_eq!(body["code"], "workflow_invalid", "{body}");
+            assert_eq!(body["problems"][0]["node_id"], "done", "{body}");
+            assert_eq!(body["problems"][0]["field"], "destination.target", "{body}");
+            assert!(
+                body["problems"][0]["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("is not a workflow delivery channel"),
+                "{body}"
+            );
+        }
+
+        /// The sibling rule on the same field: a `channel` destination with no
+        /// `target` is located too (issue #1191). It was always a
+        /// `workflow_invalid`, but the entry carried `node_id: null` and
+        /// `field: null` because the load path mints it as a flat string.
+        #[tokio::test]
+        async fn a_channel_destination_with_no_target_is_located_too() {
+            let home_dir = home();
+            let state = desk_state(home_dir.path()).await;
+
+            let response = post_create(state, body_with_destination("channel", None)).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = json_body(response).await;
+            assert_eq!(body["code"], "workflow_invalid", "{body}");
+            assert_eq!(body["problems"][0]["node_id"], "done", "{body}");
+            assert_eq!(body["problems"][0]["field"], "destination.target", "{body}");
+            assert!(
+                body["problems"][0]["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("name the channel to post the report to"),
+                "{body}"
+            );
         }
 
         /// The guard refuses what delivery would refuse and nothing more: a real

@@ -5300,6 +5300,7 @@ mod test {
             runtime.store(),
             None,
             wf_draft("daily_digest", "Daily Digest"),
+            None,
         )
         .await
         .unwrap();

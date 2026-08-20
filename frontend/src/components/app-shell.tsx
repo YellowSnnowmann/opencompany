@@ -559,6 +559,16 @@ export function AppShell({
   // itself gated off in `run_inner`). See PR #125 review.
   const activeTurnThreadRef = useRef<string | null>(null);
   const pendingPostThreadsRef = useRef<Set<string>>(new Set());
+  // Approval ids THIS console is deciding right now, or just decided a moment
+  // ago (issue #1211) — so the generic SSE echo of `approval_resolved` can be
+  // suppressed for exactly the decision this tab made, the same way
+  // `pendingPostThreadsRef` suppresses the `agent_reply` echo of a chat send
+  // this tab POSTed. Added the instant a decide path starts (before the
+  // network call — the SSE frame can race ahead of the awaited response),
+  // consumed (checked-and-cleared) the moment the matching frame arrives, in
+  // `isOwnDecision` below. A single small `Set` — bounded by however many
+  // decisions are in flight or freshly settled, which is never many.
+  const ownApprovalDecisionsRef = useRef<Set<string>>(new Set());
   const feed = useCompany(client, company, initialStatus);
   // Issue #379: the inline approval cards' console-local state, owned here
   // rather than in `ChatView` for the same reason `transcripts` is — the shell
@@ -1202,6 +1212,7 @@ export function AppShell({
     scope: GrantScope = { kind: "once" },
   ) => {
     if (decidingApprovals.has(approval.id)) return;
+    ownApprovalDecisionsRef.current.add(approval.id);
     markDeciding(approval.id, verdict);
     // A retry starts clean: the previous attempt's error must not sit under a
     // live one, or the operator cannot tell which attempt it belongs to.
@@ -1324,6 +1335,15 @@ export function AppShell({
       }
       void feed.refresh();
     },
+    // Issue #1211: pop the id this console just decided so `use-events.ts` can
+    // suppress the generic echo toast for exactly this decision — and only
+    // this one, since a second frame for the same id must not read as "still
+    // mine".
+    isOwnDecision: (approvalId: string) => {
+      const mine = ownApprovalDecisionsRef.current.has(approvalId);
+      ownApprovalDecisionsRef.current.delete(approvalId);
+      return mine;
+    },
     onResync: resyncDurableState,
     onRecoveryError: useCallback(() => {
       toast.error("Live updates couldn't be recovered", {
@@ -1432,7 +1452,7 @@ export function AppShell({
       <SidebarInset className="min-h-0 min-w-0">
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {view === "overview" && (
-            <Overview client={client} company={company} />
+            <Overview client={client} company={company} companyName={feed.status.name} />
           )}
           {view === "company" && (
             <CompanyView
@@ -1628,6 +1648,10 @@ export function AppShell({
               sub={sub}
               onResolved={noteSystem}
               onGoToConversation={() => setView("chat")}
+              // Issue #1211: mark this id as "mine" before the resolve POST
+              // goes out, so the SSE echo for it — which can arrive before the
+              // POST settles — is not toasted a second time.
+              onDecideStart={(approvalId) => ownApprovalDecisionsRef.current.add(approvalId)}
             />
           )}
           {view === "workflows" && (

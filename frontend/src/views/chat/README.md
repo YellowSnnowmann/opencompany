@@ -148,7 +148,7 @@ chart's desk level, since no desk can name a parent desk. See
 | `ChannelRail.tsx` | The channel/DM list, with collapsible sections. |
 | `ChatHeader.tsx` | The bar above the timeline. |
 | `MessageTimeline.tsx` | The scroll body: day dividers, channel intro, loading skeleton, typing row. |
-| `MessageRow.tsx` | One line — avatar gutter, author, body, reactions, hover action bar. |
+| `MessageRow.tsx` | One line — avatar gutter, author, body, reactions, hover action bar, and the board-card chip (link plus its dismissal, issue #984). |
 | `MessageComposer.tsx` | The composer dock; also used compact in the thread panel. |
 | `ThreadPanel.tsx` | Replies to one message, with their own composer. |
 | `MembersPane.tsx` | Who is in this channel, then the rest of the roster. |

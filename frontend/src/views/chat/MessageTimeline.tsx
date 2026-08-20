@@ -37,6 +37,10 @@ interface Props {
   liveSteps?: TurnStep[];
   onOpenThread: (messageId: string) => void;
   onReact: (messageId: string, emoji: string) => void;
+  /** Deletes the board card a line opened, and drops its chip (issue #984). */
+  onDismissCard: (taskId: string) => void;
+  /** The card whose delete is in flight, if any. */
+  dismissingCardId: string | null;
   /**
    * Opens the members pane, for the "Add people" card on an empty channel.
    * Optional so the thread panel — which renders no intro — need not pass it.
@@ -90,6 +94,8 @@ export function MessageTimeline({
   liveSteps,
   onOpenThread,
   onReact,
+  onDismissCard,
+  dismissingCardId,
   onAddPeople,
   now,
   askerNames,
@@ -195,6 +201,8 @@ export function MessageTimeline({
                 threadOpen={item.entry.message.id === openThreadId}
                 onOpenThread={onOpenThread}
                 onReact={onReact}
+                onDismissCard={onDismissCard}
+                dismissingCardId={dismissingCardId}
               />
             </div>
           ) : (

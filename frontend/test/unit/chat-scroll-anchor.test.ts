@@ -137,6 +137,8 @@ function render(ch: Channel, rows: TimelineItem[], historyPending = false) {
         typing: false,
         onOpenThread: () => {},
         onReact: () => {},
+        onDismissCard: () => {},
+        dismissingCardId: null,
       }),
     );
   });

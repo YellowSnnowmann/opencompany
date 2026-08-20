@@ -90,6 +90,13 @@ interface Props {
   sub?: string | null;
   onResolved: (systemLine: string) => void;
   onGoToConversation: () => void;
+  /**
+   * Called the instant a decide click starts, before the network call
+   * (issue #1211) — so the shell can mark this approval as "this tab decided
+   * it" before the SSE echo of the resolution has a chance to race ahead of
+   * the awaited response and arrive first.
+   */
+  onDecideStart?: (approvalId: string) => void;
 }
 
 /** The approvals inbox: the few things the company parked for the operator. */
@@ -100,6 +107,7 @@ export function ApprovalsView({
   sub,
   onResolved,
   onGoToConversation,
+  onDecideStart,
 }: Props) {
   // Issue #373: in-flight state is per approval, not a single module-wide slot.
   //
@@ -179,6 +187,7 @@ export function ApprovalsView({
     // Per-row guard: only a double-press on THIS card is ignored. The global
     // early return that used to live here made every other card inert too.
     if (inFlight.has(a.id)) return;
+    onDecideStart?.(a.id);
     markInFlight(a.id, verdict);
     const startedAt = Date.now();
     try {

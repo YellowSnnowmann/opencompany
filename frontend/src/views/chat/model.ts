@@ -2,7 +2,7 @@
 // rules the timeline reads. Everything here is pure — the view owns the state.
 
 import type { ApprovalSummary, DeskDto, Verdict } from "@/api/types";
-import type { ChatMessage, Reaction } from "@/lib/chat";
+import { clearTaskCard, type ChatMessage, type Reaction } from "@/lib/chat";
 import { defaultDesks, type Desk } from "@/lib/desks";
 import { initials as nameInitials, type TeamMember } from "@/lib/team";
 
@@ -766,4 +766,28 @@ export function reactionChips(reactions: Reaction[] | undefined): ReactionChip[]
     chip.by.push(row.by);
   }
   return chips;
+}
+
+/**
+ * Drop a dismissed card from **every** channel's transcript (issue #984).
+ *
+ * The channel-level counterpart of {@link clearTaskCard}, and it exists for the
+ * same reason one level up. That helper keys on the card rather than the clicked
+ * row because one card can be named by several lines; this one keys on the card
+ * rather than the active channel because those lines can sit in several
+ * *channels* — a dispatch marker lands in the origin thread's channel, not
+ * necessarily the one the operator is looking at. Clearing only the active
+ * channel leaves the rest linking to a card the host no longer has.
+ *
+ * Returns the same object when nothing changed, so React sees no new state.
+ */
+export function clearTaskCardEverywhere(transcripts: Transcripts, taskId: string): Transcripts {
+  let changed = false;
+  const next: Transcripts = {};
+  for (const [channelId, messages] of Object.entries(transcripts)) {
+    const cleared = clearTaskCard(messages, taskId);
+    if (cleared !== messages) changed = true;
+    next[channelId] = cleared;
+  }
+  return changed ? next : transcripts;
 }

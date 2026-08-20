@@ -1318,6 +1318,30 @@ export function workflowProblemLocator(problem: WorkflowProblem): string | undef
   return parts.length ? parts.join(" · ") : undefined;
 }
 
+/**
+ * The per-node breakdown a refusal carries, or `null` when it carries none
+ * (issue #1191).
+ *
+ * A function rather than an inline ternary at each call site because the three
+ * branches are the whole of the decision and the console has no component-test
+ * harness that could catch getting them wrong in JSX:
+ *
+ * * not an {@link ApiError} at all (a network failure, an abort) — no breakdown;
+ * * an `ApiError` the host answered without a `problems` array (every refusal
+ *   that is not a workflow refusal) — no breakdown;
+ * * an `ApiError` carrying an EMPTY array — still no breakdown, because a list
+ *   with nothing in it renders as an empty bullet list under the sentence, which
+ *   reads as a rendering bug rather than as "there was nothing more to say".
+ *
+ * `null` rather than `undefined` so a caller holding it in state can distinguish
+ * "asked and there was none" from "never asked", and so the render guard is a
+ * single truthiness check.
+ */
+export function workflowRefusalProblems(error: unknown): WorkflowProblem[] | null {
+  if (!(error instanceof ApiError)) return null;
+  return error.problems?.length ? error.problems : null;
+}
+
 export class ApiError extends Error {
   /**
    * The raw response body, kept only when it was **not** the host's envelope
