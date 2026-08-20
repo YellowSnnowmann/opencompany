@@ -4,6 +4,17 @@
 //! TinyHumans Rust modules. The default build stays small; enable the `tiny`
 //! feature to compile against the sibling `tiny*` crates.
 
+// Rust 1.98's clippy promoted `result_large_err` into the default set and it
+// fires on ~80 existing Axum handlers: every `Result<_, ApiError>` return,
+// because `ApiError` wraps `OpenCompanyError` by value (>128 bytes). CI runs
+// unpinned stable, so this turned every branch red overnight with no code
+// change. Allowed crate-wide deliberately: the handlers' error path is cold
+// (one construction per failed request, immediately serialized), so boxing
+// ~100 signatures buys latency nothing and costs an allocation on every
+// error. Revisit if OpenCompanyError grows again or a hot path starts
+// returning it.
+#![allow(clippy::result_large_err)]
+
 pub mod app;
 pub mod brain;
 /// Chargebee billing (issue #788): the REST client and the billing operations
