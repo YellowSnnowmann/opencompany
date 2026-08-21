@@ -947,6 +947,12 @@ jobs:
       - name: Test the runner lane
         run: scripts/ci/run-scoped-suite.sh "runner" acp,runner,tinymemory runner
 
+      # Issue #1524: the loadable-module driver's own gate. A separate feature
+      # set (and so a separate compile unit) deliberately: the module host
+      # forwards tinybus's dlopen loader, which no other lane should carry.
+      - name: Test the tinymemory module driver
+        run: scripts/ci/run-scoped-suite.sh "tinymemory module" tinymemory-module store::memory::module
+
       # The ACP surface. Two invocations, not one: `run-scoped-suite.sh` takes
       # exactly one filter, and a second bare argument to `cargo test` narrows
       # the selection to nothing rather than adding a module.
