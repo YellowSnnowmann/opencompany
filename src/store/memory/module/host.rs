@@ -166,10 +166,10 @@ async fn build_runtime() -> tinybus::Result<ModuleRuntime> {
     let host = ModuleHost::new(broker);
     let connection = Connection::connect(transport.connect().await?).await?;
 
-    // Callback objects (EmbeddingHost, ChatHost, RuntimeHost) are served on
-    // this connection BEFORE any module load — the ordering is load-bearing,
-    // because tinymemory installs its embedder during setup — and arrive with
-    // the callbacks commit. Until then the runtime stands alone.
+    // Callback objects BEFORE anything can load: tinymemory installs its
+    // embedder during module setup, before its store is constructed, so a
+    // callback served after a load binds an inert provider silently.
+    super::callbacks::install(&connection).await?;
 
     Ok(ModuleRuntime {
         host,

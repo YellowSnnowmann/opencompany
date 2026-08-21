@@ -12,4 +12,5 @@
 //! AND the `module` driver id is selected; the feature is default-off and no
 //! existing configuration reaches it.
 
+pub mod callbacks;
 pub mod host;
