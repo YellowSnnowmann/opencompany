@@ -55,7 +55,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # `build:pages-sdk` builds `@opencompany/site` — the component subset +
 # postMessage client agent-authored dashboard pages import — into
 # `dist/pages-sdk/`, nested inside the same `dist/` the console itself builds
-# to, so the single `COPY --from=console /console/dist /app/console` below
+# to, so the single `COPY --from=console /console/dist /app/console
+# The TinyMemory module and its digest allowlist, side by side — tinybus reads
+# `modules.toml` from the library's own directory at attach time. root:root
+# 0755 the whole chain: tinybus refuses any group/other-writable ancestor, and
+# /app under the platform's securityContext satisfies its walk where /data
+# (fsGroup-mounted) never could.
+COPY --from=module /module /app/modules` below
 # already carries it into the runtime image with no second COPY needed.
 FROM node:22-slim AS console
 WORKDIR /console
@@ -77,6 +83,34 @@ ENV OPENCOMPANY_BIND=0.0.0.0:8080 \
     OPENCOMPANY_DATA_DIR=/data
 
 # ── runtime ────────────────────────────────────────────────────────────────
+# The TinyMemory loadable module, fetched from its pinned release and digest-
+# verified in this stage so the runtime image needs neither curl nor network.
+# Baked rather than downloaded at boot for three measured reasons (issue
+# #1524): the tenant pod runs uid 10001 on a read-only root filesystem, the
+# PVC mount is fsGroup-writable (tinybus refuses to dlopen under a
+# group-writable ancestor), and a rollback must never depend on network state.
+#
+# The platform bucket is ubuntu-22.04: the runtime below is bookworm-slim
+# (glibc 2.36), inside the 22.04 archive's >=2.35 <2.39 window — CI runners
+# are ~24.04 and reaching for that bucket is a symbol-version dlopen failure
+# at first memory call, not at build. VERSION, PLATFORM and SHA256 move
+# together or the digest check fails the build; take SHA256 verbatim from the
+# release's checksum.toml, never from a local build.
+FROM debian:bookworm-slim AS module
+ARG TINYMEMORY_MODULE_VERSION=1.1.0
+ARG TINYMEMORY_MODULE_PLATFORM=ubuntu-22.04-x86_64
+ARG TINYMEMORY_MODULE_SHA256=66bd6c0e138e4af9c6819992bd27f66f4f49539295f7baa60603e3ee87090aa1
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN set -eu; \
+    archive="tinymemory-module-${TINYMEMORY_MODULE_VERSION}-${TINYMEMORY_MODULE_PLATFORM}.tar.gz"; \
+    curl -fsSL -o "/tmp/${archive}" \
+      "https://github.com/tinyhumansai/tinymemory/releases/download/v${TINYMEMORY_MODULE_VERSION}/${archive}"; \
+    echo "${TINYMEMORY_MODULE_SHA256}  /tmp/${archive}" | sha256sum -c -; \
+    mkdir -p /module; \
+    tar -xzf "/tmp/${archive}" -C /module; \
+    test -f /module/modules.toml
+
 FROM debian:bookworm-slim AS runtime
 # libssl3 + the X11 runtime shared libraries satisfy the dynamic linker for the
 # openssl-sys/native-tls and rdev/arboard links the `openhuman` feature pulls in
@@ -111,7 +145,8 @@ ENV OPENCOMPANY_COMPANY=agentic_marketing_agency \
     OPENCOMPANY_BIND=0.0.0.0:8080 \
     OPENCOMPANY_DATA_DIR=/data \
     OPENCOMPANY_DISCOVERABLE=false \
-    OPENCOMPANY_CONSOLE_DIR=/app/console
+    OPENCOMPANY_CONSOLE_DIR=/app/console \
+    OPENCOMPANY_MEMORY_MODULE_PATH=/app/modules/libtinymemory_module.so
 
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=3s --start-period=8s --retries=5 \
