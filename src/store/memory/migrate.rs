@@ -349,9 +349,46 @@ pub fn resolve_migrate_configs(
                     .into(),
             ));
         }
+        "module" => {
+            // A loaded module is a process singleton — tinybus never unloads
+            // and refuses a second setup — so module→module cannot mean two
+            // stores. Refused by NAME here rather than discovered as a hang
+            // when the second bind waits on a bus that will never serve it
+            // (issue #1524). Every other FROM may migrate INTO the module:
+            // one load, one store, the import writes through it.
+            if from_config
+                .driver_id
+                .as_deref()
+                .is_some_and(|id| id == "module")
+            {
+                return Err(OpenCompanyError::Config(
+                    "--to module while OPENCOMPANY_MEMORY_DRIVER=module is module→module: a \
+                     loaded module is a process singleton serving ONE store, so there is no \
+                     second side to migrate into. Migrate via an intermediate engine, or move \
+                     the data dir offline."
+                        .into(),
+                ));
+            }
+            let data_dir = to_data_dir.clone().or_else(|| settings.data_dir.clone());
+            if data_dir.is_none() {
+                return Err(OpenCompanyError::Config(
+                    "--to module needs a directory for the target store: pass --to-data-dir \
+                     (OPENCOMPANY_DATA_DIR also serves as its default when set)."
+                        .into(),
+                ));
+            }
+            MemoryDriverConfig {
+                mode: MemoryMode::Embedded,
+                driver_id: Some(to.to_string()),
+                url: None,
+                api_key: None,
+                data_dir,
+            }
+        }
         other => {
             return Err(OpenCompanyError::Config(format!(
-                "--to {other} names no migratable driver: namespace, supermemory, mem0, cognee."
+                "--to {other} names no migratable driver: namespace, supermemory, mem0, cognee, \
+                 module."
             )));
         }
     };
@@ -854,6 +891,39 @@ mod test {
                 .to_string();
             assert!(err.contains(needle), "backend {backend:?}: {err}");
         }
+    }
+
+    #[test]
+    fn module_to_module_refuses_by_name_and_other_sources_may_target_the_module() {
+        // module→module: a loaded module is a process singleton serving one
+        // store, so there is no second side — refused with the named reason,
+        // never discovered as a hang (issue #1524).
+        let settings = StorageSettings {
+            memory_backend: MemoryBackend::Tinycortex,
+            memory_driver: Some("module".into()),
+            ..base_settings()
+        };
+        let err = resolve(&settings, "module", None, None)
+            .expect_err("module→module")
+            .to_string();
+        assert!(err.contains("process singleton"), "{err}");
+
+        // Any other FROM may migrate INTO the module: one load, one store.
+        let (from, to) = resolve(&base_settings(), "module", None, None).expect("remote→module");
+        assert_eq!(from.driver_id.as_deref(), Some("supermemory"));
+        assert_eq!(to.driver_id.as_deref(), Some("module"));
+        assert_eq!(to.mode, MemoryMode::Embedded);
+        assert_eq!(to.data_dir.as_deref(), Some(std::path::Path::new("/data")));
+
+        // And the target still needs a directory, in its own vocabulary.
+        let no_dir = StorageSettings {
+            data_dir: None,
+            ..base_settings()
+        };
+        let err = resolve(&no_dir, "module", None, None)
+            .expect_err("no dir")
+            .to_string();
+        assert!(err.contains("--to-data-dir"), "{err}");
     }
 
     #[test]
