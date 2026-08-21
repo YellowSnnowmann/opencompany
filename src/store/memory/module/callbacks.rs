@@ -49,6 +49,13 @@ const SCRUB_MAX_BYTES: usize = 300;
 /// query strings dropped from anything URL-shaped, bearer-ish tokens redacted,
 /// and the result truncated to [`SCRUB_MAX_BYTES`] on a char boundary.
 fn scrub(detail: &str) -> String {
+    // Bound the INPUT first: the word loop below copies a whole token before
+    // the running-length check, so a huge whitespace-free input would be
+    // copied in full before truncation. Four times the output cap leaves
+    // room for redaction markers to shrink words while keeping the
+    // allocation O(cap), not O(input).
+    let detail = crate::store::text::slice_on_char_boundaries(detail, 0..SCRUB_MAX_BYTES * 4);
+    let detail = detail.as_str();
     let mut out = String::with_capacity(detail.len().min(SCRUB_MAX_BYTES));
     let mut redact_next = false;
     for word in detail.split_whitespace() {

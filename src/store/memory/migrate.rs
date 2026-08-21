@@ -350,6 +350,22 @@ pub fn resolve_migrate_configs(
             ));
         }
         "module" => {
+            // The same durability refusal the namespace arm carries: on a
+            // mongodb base the default data dir is ephemeral scratch, and a
+            // migration that "succeeds" into it is data loss with a success
+            // message.
+            if settings.kind == StorageKind::Mongodb
+                && to_data_dir.is_none()
+                && !settings.allow_ephemeral_memory
+            {
+                return Err(OpenCompanyError::Config(
+                    "OPENCOMPANY_STORAGE=mongodb treats the data dir as ephemeral scratch. \
+                     Migrating the module store into it would report success on data the next \
+                     container replacement deletes. Pass --to-data-dir pointing at a durable \
+                     volume, or assert durability with OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL=1."
+                        .into(),
+                ));
+            }
             // A loaded module is a process singleton — tinybus never unloads
             // and refuses a second setup — so module→module cannot mean two
             // stores. Refused by NAME here rather than discovered as a hang

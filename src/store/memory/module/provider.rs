@@ -212,16 +212,26 @@ impl MemoryProvider for ModuleMemoryProvider {
     }
 
     async fn shutdown(&self) -> Result<(), MemoryError> {
-        // Best-effort by contract: shutdown failure never blocks exit, and a
-        // module that was never loaded has nothing to shut down.
+        // Best-effort BY CONTRACT: shutdown failure never blocks exit, and a
+        // module that was never loaded has nothing to shut down — including
+        // the case where a prior load STARTED the runtime and then failed
+        // admission, where resolving a proxy here would only re-surface the
+        // cached load error on the exit path. Log, never propagate.
         if !host::is_started() {
             return Ok(());
         }
-        self.proxy("shutdown", false)
-            .await?
-            .call::<()>(methods::SHUTDOWN, ())
-            .await
-            .map_err(|error| from_bus(&error))
+        let outcome = async {
+            self.proxy("shutdown", false)
+                .await?
+                .call::<()>(methods::SHUTDOWN, ())
+                .await
+                .map_err(|error| from_bus(&error))
+        }
+        .await;
+        if let Err(error) = outcome {
+            tracing::debug!(%error, "[memory-module] shutdown call failed; continuing exit");
+        }
+        Ok(())
     }
 }
 
@@ -402,14 +412,29 @@ mod tests {
     /// external class survives the guard untouched.
     #[test]
     fn missing_taint_is_refused_rather_than_defaulted() {
-        let missing = serde_json::json!([
-            {"namespace": "ns", "key": "k", "content": "c"}
-        ]);
+        // Built from a REAL serialized entry, so the fixture cannot drift
+        // from the contract's schema: the missing-taint case is the full
+        // wire shape minus exactly the one field.
+        let entry = MemoryEntry {
+            id: "e-1".into(),
+            key: "k".into(),
+            content: "c".into(),
+            namespace: Some("ns".into()),
+            category: MemoryCategory::Core,
+            timestamp: String::new(),
+            session_id: None,
+            score: None,
+            taint: MemoryTaint::ExternalSync,
+        };
+        let external = serde_json::to_value(vec![entry]).expect("serialize");
+        let mut missing = external.clone();
+        missing[0]
+            .as_object_mut()
+            .expect("entry object")
+            .remove("taint")
+            .expect("the serialized entry carries taint");
         assert!(refuse_missing_taint(&missing).is_err());
 
-        let external = serde_json::json!([
-            {"namespace": "ns", "key": "k", "content": "c", "taint": "external_sync"}
-        ]);
         refuse_missing_taint(&external).expect("explicit taint passes");
         let decoded: Vec<MemoryEntry> = serde_json::from_value(external).expect("decodes");
         assert_eq!(decoded[0].taint, MemoryTaint::ExternalSync);

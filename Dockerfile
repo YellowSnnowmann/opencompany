@@ -55,13 +55,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # `build:pages-sdk` builds `@opencompany/site` — the component subset +
 # postMessage client agent-authored dashboard pages import — into
 # `dist/pages-sdk/`, nested inside the same `dist/` the console itself builds
-# to, so the single `COPY --from=console /console/dist /app/console
-# The TinyMemory module and its digest allowlist, side by side — tinybus reads
-# `modules.toml` from the library's own directory at attach time. root:root
-# 0755 the whole chain: tinybus refuses any group/other-writable ancestor, and
-# /app under the platform's securityContext satisfies its walk where /data
-# (fsGroup-mounted) never could.
-COPY --from=module /module /app/modules` below
+# to, so the single `COPY --from=console /console/dist /app/console` below
 # already carries it into the runtime image with no second COPY needed.
 FROM node:22-slim AS console
 WORKDIR /console
@@ -135,6 +129,12 @@ COPY skills ./skills
 # unprivileged runtime user (uid 10001 under the platform's securityContext)
 # can read it even with a read-only root filesystem.
 COPY --from=console /console/dist /app/console
+# The TinyMemory module and its digest allowlist, side by side — tinybus reads
+# `modules.toml` from the library's own directory at attach time. root:root
+# 0755 the whole chain: tinybus refuses any group/other-writable ancestor, and
+# /app under the platform's securityContext satisfies its walk where /data
+# (fsGroup-mounted) never could.
+COPY --from=module /module /app/modules
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh && mkdir -p /data
 

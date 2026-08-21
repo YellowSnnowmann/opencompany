@@ -104,7 +104,7 @@ pub fn check() -> Preflight {
 fn digest_matches(library: &Path, allowlist: Option<&Path>) -> Option<bool> {
     let allowlist = allowlist?;
     let source = std::fs::read_to_string(allowlist).ok()?;
-    let table: toml::Value = source.parse().ok()?;
+    let table: toml::Table = source.parse().ok()?;
     let name = library.file_name()?.to_str()?;
     let stem = library.file_stem()?.to_str()?;
     let expected = table

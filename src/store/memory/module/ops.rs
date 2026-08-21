@@ -15,7 +15,6 @@
 //! a different engine is the failure mode #1524 spends a whole section on.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 use tinymemory_api::host::MemoryConfig;
 
@@ -34,8 +33,13 @@ pub const MODULE_PATH_ENV: &str = "OPENCOMPANY_MEMORY_MODULE_PATH";
 /// interleave two schemas silently; [`module_workspace_dir`] refuses it.
 pub const MODULE_STORE_SUBDIR: &str = "memory-module";
 
-/// The load outcome, cached for the process.
-static LOADED: OnceLock<Result<(), String>> = OnceLock::new();
+/// The load outcome, cached for the process. A tokio `OnceCell` rather than
+/// a bare check-then-set: two concurrent FIRST calls must not both reach
+/// artifact admission — the second `claim_process_setup` fails with
+/// `SETUP_FAILED`, and whichever outcome lands last would cache a failure
+/// beside a loaded module. The cell serialises the first load; every later
+/// caller reads the one recorded outcome.
+static LOADED: tokio::sync::OnceCell<Result<(), String>> = tokio::sync::OnceCell::const_new();
 
 /// The workspace root handed to the module for `data_dir`.
 ///
@@ -44,6 +48,19 @@ static LOADED: OnceLock<Result<(), String>> = OnceLock::new();
 /// Refuses a `data_dir` whose module store would land inside the incumbent
 /// engine's `memory/` directory.
 pub fn module_workspace_dir(data_dir: &Path) -> Result<PathBuf, String> {
+    // A data root that IS the incumbent engine's directory nests the module
+    // store inside it: `data_dir=/volume/memory` puts the workspace at
+    // `/volume/memory/memory-module`, inside the tree `UnifiedMemory` and
+    // the EngineCortex overlay treat as theirs. Refuse the misconfiguration
+    // by name rather than interleave two engines' trees.
+    if data_dir.file_name().and_then(|name| name.to_str()) == Some("memory") {
+        return Err(
+            "the data root itself is a `memory` directory — the incumbent engine's own tree. \
+             Point OPENCOMPANY_DATA_DIR at the instance data root, not at the engine store \
+             inside it"
+                .to_string(),
+        );
+    }
     let dir = data_dir.join(MODULE_STORE_SUBDIR);
     // Defence in depth: the constant makes this unreachable, but the property
     // is load-bearing enough (risk #2 in the issue's register) that a future
@@ -92,12 +109,10 @@ fn load_config(workspace_dir: &Path) -> Result<serde_json::Value, String> {
 /// failure this process already cached. Every message is stable and names the
 /// variable, because the boot path prints it as the abort reason.
 pub async fn ensure_loaded(data_dir: &Path) -> Result<(), String> {
-    if let Some(cached) = LOADED.get() {
-        return cached.clone();
-    }
-
-    let outcome = load(data_dir).await;
-    LOADED.get_or_init(|| outcome).clone()
+    LOADED
+        .get_or_init(|| async { load(data_dir).await })
+        .await
+        .clone()
 }
 
 async fn load(data_dir: &Path) -> Result<(), String> {
