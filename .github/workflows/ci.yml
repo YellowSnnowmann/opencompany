@@ -953,6 +953,46 @@ jobs:
       - name: Test the tinymemory module driver
         run: scripts/ci/run-scoped-suite.sh "tinymemory module" tinymemory-module store::memory::module
 
+      # Issue #1524: the module conformance + differential against the REAL
+      # released artifact — the tests are `#[ignore]`d because a loaded module
+      # binds its broker tasks to the runtime that created them and two such
+      # tests in one process HANG, so each runs in its own cargo invocation
+      # with --test-threads=1. The archive is fetched (not built: ~7 MB beats
+      # a 3-minute cdylib build, and these jobs skip submodule checkout of
+      # the module's own workspace anyway) and digest-checked against the
+      # value recorded verbatim from the release's checksum.toml.
+      #
+      # The bucket is ubuntu-24.04: this runner IS ubuntu-24.04 (glibc 2.39),
+      # which sits OUTSIDE the 22.04 archive's >=2.35 <2.39 window — the
+      # tenant image's bucket choice and this one differ for the same
+      # glibc-matching reason, each matched to where it runs.
+      - name: Fetch the pinned tinymemory module artifact
+        run: |
+          version="1.1.0"
+          archive="tinymemory-module-${version}-ubuntu-24.04-x86_64.tar.gz"
+          sha256="f5f10a71d1cdc58f91e6d1ac77c2b966dc9ede322a2ccf63048c1aeaf24e49a5"
+          curl -fsSL -o "$RUNNER_TEMP/$archive"             "https://github.com/tinyhumansai/tinymemory/releases/download/v${version}/${archive}"
+          echo "${sha256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/tinymemory-module"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/tinymemory-module"
+          test -f "$RUNNER_TEMP/tinymemory-module/modules.toml"
+
+      - name: Module conformance against the real artifact
+        env:
+          TINYMEMORY_TEST_MODULE: ${{ runner.temp }}/tinymemory-module/libtinymemory_module.so
+          OPENCOMPANY_MEMORY_MODULE_PATH: ${{ runner.temp }}/tinymemory-module/libtinymemory_module.so
+        run: |
+          cargo test --locked --features tinymemory-module,tinymemory-embedded --lib --             --ignored --test-threads=1 the_module_driver_upholds_the_contract             | tee /tmp/module-e2e.log
+          grep -q "test result: ok. 1 passed" /tmp/module-e2e.log
+
+      - name: Module-vs-namespace differential against the real artifact
+        env:
+          TINYMEMORY_TEST_MODULE: ${{ runner.temp }}/tinymemory-module/libtinymemory_module.so
+          OPENCOMPANY_MEMORY_MODULE_PATH: ${{ runner.temp }}/tinymemory-module/libtinymemory_module.so
+        run: |
+          cargo test --locked --features tinymemory-module,tinymemory-embedded --lib --             --ignored --test-threads=1 the_module_and_namespace_drivers_agree             | tee /tmp/module-diff.log
+          grep -q "test result: ok. 1 passed" /tmp/module-diff.log
+
       # The ACP surface. Two invocations, not one: `run-scoped-suite.sh` takes
       # exactly one filter, and a second bare argument to `cargo test` narrows
       # the selection to nothing rather than adding a module.
