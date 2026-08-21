@@ -14,3 +14,5 @@
 
 pub mod callbacks;
 pub mod host;
+pub mod ops;
+pub mod provider;

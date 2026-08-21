@@ -178,6 +178,14 @@ async fn build_runtime() -> tinybus::Result<ModuleRuntime> {
     })
 }
 
+/// The runtime, when it has already been stood up — for callers already ON
+/// the module runtime's own threads, where the async accessor cannot be
+/// awaited.
+#[must_use]
+pub(super) fn try_runtime() -> Option<&'static ModuleRuntime> {
+    RUNTIME.get()
+}
+
 /// Whether the module runtime has been stood up.
 ///
 /// Lets status reporting answer without starting a broker as a side effect of
