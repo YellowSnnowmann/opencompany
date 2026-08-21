@@ -1814,6 +1814,28 @@ async fn async_main() -> Result<()> {
                 overlay
                     .refresh_health(std::time::Duration::from_secs(5))
                     .await;
+                // The loadable-module driver loads EAGERLY at boot, and a
+                // failure refuses rather than degrades (issue #1524): tinybus
+                // never unloads a library and every terminal module state is
+                // terminal for the process, so the only good failure is one
+                // at boot with a named reason — not a tenant spending a day
+                // believing it was remembering. Unlike the advisory probe
+                // above, this aborts: an absent or refused artifact is a
+                // config/image error, the class that already refuses.
+                #[cfg(feature = "tinymemory-module")]
+                if overlay.descriptor.driver_id
+                    == opencompany::store::memory::module::provider::MODULE_DRIVER_ID
+                {
+                    let data_dir = storage_settings.data_dir.clone().ok_or_else(|| {
+                        opencompany::error::OpenCompanyError::Config(
+                            "the module memory driver needs OPENCOMPANY_DATA_DIR".to_string(),
+                        )
+                    })?;
+                    opencompany::store::memory::module::ops::ensure_loaded(&data_dir)
+                        .await
+                        .map_err(opencompany::error::OpenCompanyError::Config)?;
+                    println!("memory module: loaded");
+                }
                 state = state.with_memory_overlay(overlay);
                 // `as_str`, not `{:?}`: the enum's Debug name is `Tinycortex`
                 // while `/spec` and the docs call that engine `embedded`. An
