@@ -15,4 +15,5 @@
 pub mod callbacks;
 pub mod host;
 pub mod ops;
+pub mod preflight;
 pub mod provider;

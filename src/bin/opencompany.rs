@@ -132,6 +132,12 @@ enum Command {
         #[command(subcommand)]
         cmd: MemoryCmd,
     },
+    /// Loadable-module machinery: today, the operator preflight for the
+    /// TinyMemory module (issue #1524).
+    Modules {
+        #[command(subcommand)]
+        cmd: ModulesCmd,
+    },
     /// Launch a sibling OpenHuman checkout: the core binary (`--mode core`)
     /// or the Tauri desktop host (`--mode desktop`). Desktop calls `cargo tauri`
     /// directly and performs the preflight OpenHuman's own scripts do — install
@@ -194,6 +200,16 @@ enum MemoryCmd {
         #[arg(long)]
         resume_cursor: Option<String>,
     },
+}
+
+/// The `modules` subcommands.
+#[derive(Debug, clap::Subcommand)]
+enum ModulesCmd {
+    /// The operator preflight: resolve the TinyMemory module artifact, check
+    /// the digest allowlist beside it, and walk the same ancestor
+    /// ownership/mode rule tinybus enforces — without loading anything or
+    /// touching memory. Exits non-zero when any gate fails.
+    Check,
 }
 
 impl std::fmt::Debug for MemoryCmd {
@@ -1316,6 +1332,31 @@ async fn run_memory_cmd(cmd: MemoryCmd) -> Result<()> {
     ))
 }
 
+/// `modules check`, the no-load preflight.
+#[cfg(feature = "tinymemory-module")]
+fn run_modules_cmd(cmd: ModulesCmd) -> Result<()> {
+    let ModulesCmd::Check = cmd;
+    let outcome = opencompany::store::memory::module::preflight::check();
+    print!("{}", outcome.report);
+    if outcome.ok {
+        Ok(())
+    } else {
+        Err(opencompany::error::OpenCompanyError::Config(
+            "modules check failed; see the gate verdicts above".into(),
+        ))
+    }
+}
+
+/// Without the loader there is nothing to preflight; refuse by naming the
+/// feature — the `run_memory_cmd` twin's shape.
+#[cfg(not(feature = "tinymemory-module"))]
+fn run_modules_cmd(cmd: ModulesCmd) -> Result<()> {
+    let ModulesCmd::Check = cmd;
+    Err(opencompany::error::OpenCompanyError::Config(
+        "`modules check` requires a build with the `tinymemory-module` feature.".into(),
+    ))
+}
+
 /// Handle the `openhuman` subcommand: build the launch request, reject
 /// passthrough args in Desktop mode via [`OpenHumanLaunch::validate`]
 /// (before the dry-run branch so `--dry-run -- --arg` reports the same error
@@ -2035,6 +2076,7 @@ async fn async_main() -> Result<()> {
         }) => run_export(company, out, include_secrets, home).await,
         Some(Command::Import { path, home }) => run_import(path, home).await,
         Some(Command::Memory { cmd }) => run_memory_cmd(cmd).await,
+        Some(Command::Modules { cmd }) => run_modules_cmd(cmd),
         Some(Command::OpenHuman {
             root,
             mode,
