@@ -124,6 +124,29 @@ enforced rather than documented-and-hoped:
    A rollback nobody has run is a hypothesis. The module's store stays on
    disk under `memory-module/` for the next attempt.
 
+### Prove it with a write and a read, not with a healthy pod
+
+The success criterion is a record stored through the flipped tenant and read
+back through it. "The tenant is up" is not evidence, because two distinct
+failures leave it up:
+
+* **The store is empty by construction.** The module writes under
+  `<data-dir>/memory-module/`, and `namespace` writes under
+  `memory-namespace/` — deliberately separate, because sharing a directory
+  would interleave two schemas silently. So a flipped tenant starts with no
+  memory whatever it had before, and every read succeeds while returning
+  nothing. That is indistinguishable from a working driver with nothing
+  stored yet, which is exactly why the probe has to write first.
+* **A failed module does not fail the boot.** Loading is lazy — the first
+  `proxy()` call resolves it — and `modules check` is an operator command
+  nothing runs automatically. A bad artifact therefore boots a healthy pod
+  whose every memory call errors, and TinyBus never unloads a library, so it
+  stays that way until the process restarts.
+
+Prefer a canary tenant with little or no existing memory. Then "empty" stops
+being ambiguous, and the write-then-read answers the only question that
+matters.
+
 ### What would make the canary a failure worth stopping on
 
 A refused boot is a *good* outcome in the sense that it is loud and
@@ -132,6 +155,14 @@ differently through the Brain view than the tenant's prior engine did, or
 init time close enough to the 5s deadline that a slower node would abort a
 cold start. Neither is visible from CI, which is the whole reason this step
 exists.
+
+One more belongs on that list, and it has no CI analogue at all: a namespace
+that outgrows the bus frame cap stops being readable through this driver
+while staying readable through every other one. `export_page` answers a
+refusal by halving its page; `list` has no page size to shrink and returns a
+whole namespace in one reply, and a reply cannot stream. The facade reads
+built on `list` inherit that. The error names the cap and both remedies, so
+the signal to watch for is that message rather than a silent truncation.
 
 ## Testing
 

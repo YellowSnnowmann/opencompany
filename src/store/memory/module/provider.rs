@@ -150,6 +150,24 @@ fn is_frame_cap_refusal(error: &tinybus::Error) -> bool {
 }
 
 fn from_bus(error: &tinybus::Error) -> MemoryError {
+    // The frame cap first, because the class it would otherwise land in
+    // (`Other`) says nothing an operator can act on. Only `export_page` can
+    // answer a refusal by asking for less — it has a page size to halve. Every
+    // other member returns its whole answer in one frame and a reply cannot
+    // stream, so `list` in particular has no smaller question to ask: a
+    // namespace that outgrows the cap stops being readable through this driver
+    // while remaining readable through every other one. Naming that is the
+    // difference between an operator moving the tenant and an operator staring
+    // at a protocol error.
+    if is_frame_cap_refusal(error) {
+        return MemoryError::Other(anyhow::anyhow!(
+            "the module's answer exceeded the bus frame cap ({error}). Replies cannot be \
+             split, so an operation that returns a whole namespace — `list`, and the \
+             facade reads built on it — cannot ask for less. Reduce what the namespace \
+             retains, or bind this company to a driver that does not cross the bus \
+             (`namespace` in-pod, or a hosted engine)."
+        ));
+    }
     match error {
         tinybus::Error::MethodFailed { .. } => {
             wire::from_wire(error.wire_name(), &error.to_string())
@@ -444,6 +462,38 @@ mod tests {
     /// NOT on unrelated protocol faults — a broad match would turn a real
     /// transport problem into a quiet halving loop that ends in a wrong
     /// "record too large" verdict.
+    /// A frame-cap refusal must arrive as advice, not as `Other`.
+    ///
+    /// `export_page` can answer one by halving; nothing else can, because a
+    /// reply cannot be split and `list` has no page size to shrink. So the
+    /// message is the only thing standing between an operator and a protocol
+    /// string they cannot act on — it has to name the cap and both remedies.
+    #[test]
+    fn a_frame_cap_refusal_names_the_cap_and_what_to_do() {
+        let refusal = tinybus::Error::protocol(
+            "frame of 20000000 bytes exceeds the 16777216-byte cap".to_string(),
+        );
+        let rendered = from_bus(&refusal).to_string();
+        assert!(
+            rendered.contains("frame cap"),
+            "the message must name the cause: {rendered}"
+        );
+        for remedy in ["namespace", "Reduce what the namespace retains"] {
+            assert!(
+                rendered.contains(remedy),
+                "the message must offer `{remedy}`: {rendered}"
+            );
+        }
+
+        // And an unrelated protocol fault must NOT be dressed up as one, or
+        // the advice becomes noise on faults it does not apply to.
+        let unrelated = tinybus::Error::protocol("peer sent a malformed header".to_string());
+        assert!(
+            !from_bus(&unrelated).to_string().contains("frame cap"),
+            "an unrelated protocol error must not be reported as a frame-cap refusal"
+        );
+    }
+
     #[test]
     fn the_frame_cap_detector_is_narrow() {
         // Both phrasings tinybus uses: the encoder's and the length-prefix
