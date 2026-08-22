@@ -782,7 +782,12 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     name: Rust (openhuman, tinycortex)
-    runs-on: ubuntu-latest
+    # PINNED, not `ubuntu-latest`: this job downloads the ubuntu-24.04 module
+    # archive, whose glibc window is bounded (>=2.39 <2.42). `ubuntu-latest`
+    # is a moving alias — when GitHub advances it, the archive stops matching
+    # the runner and the module fails to `dlopen` at the first memory call,
+    # which reads as a broken test rather than an image bump (#1524, #1550).
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       # OpenHuman's agent loop requires the same stack its production runtimes
@@ -975,7 +980,14 @@ jobs:
           echo "${sha256}  $RUNNER_TEMP/$archive" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/tinymemory-module"
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/tinymemory-module"
+          # BOTH files, and the library is the load-bearing one. The tests are
+          # gated on TINYMEMORY_TEST_MODULE pointing at a real file and SKIP
+          # themselves when it does not — and a skipped `#[ignore]`d test still
+          # prints `test result: ok. 1 passed`, so the greps below would pass a
+          # lane that never loaded the module. Checking only `modules.toml`
+          # left exactly that hole open.
           test -f "$RUNNER_TEMP/tinymemory-module/modules.toml"
+          test -f "$RUNNER_TEMP/tinymemory-module/libtinymemory_module.so"
 
       - name: Module conformance against the real artifact
         env:
