@@ -135,13 +135,18 @@ impl ModuleMemoryProvider {
 /// Whether a bus error is the frame-size cap refusing an oversized message.
 ///
 /// Matched on the message because tinybus reports it as a protocol error
-/// carrying the byte counts rather than a distinct variant — `encode` and
-/// `decode_length` both phrase it with the cap. Kept narrow on purpose: a
-/// broader match would silently halve pages for unrelated protocol faults,
-/// turning a real transport problem into a slow, quiet retry loop.
+/// carrying the byte counts rather than a distinct variant. **One marker,
+/// deliberately**: both sites that raise it phrase it with the cap —
+/// `encode`'s "frame of N bytes exceeds the {MAX}-byte cap" and
+/// `decode_length`'s "peer announced an N-byte frame, over the {MAX}-byte
+/// cap" — so `-byte cap` alone covers the pair. An extra alternative like
+/// "over the" would add nothing and would match any protocol error that
+/// happened to contain the phrase, and `Error::Protocol` carries arbitrary
+/// text. That is not a cosmetic risk: a false positive here halves the page
+/// and retries, so an unrelated transport fault would turn into a quiet
+/// retry loop ending in a wrong "this record is too large" verdict.
 fn is_frame_cap_refusal(error: &tinybus::Error) -> bool {
-    let message = error.to_string();
-    message.contains("-byte cap") || message.contains("over the")
+    error.to_string().contains("-byte cap")
 }
 
 fn from_bus(error: &tinybus::Error) -> MemoryError {
@@ -452,11 +457,17 @@ mod tests {
         assert!(is_frame_cap_refusal(&encoded), "{encoded}");
         assert!(is_frame_cap_refusal(&announced), "{announced}");
 
-        // Everything else must not look like the cap.
+        // Everything else must not look like the cap — including a protocol
+        // error that merely shares wording with the reader's phrasing. The
+        // predicate keyed on "over the" as well until review pointed out that
+        // `Error::Protocol` carries arbitrary text; both real messages carry
+        // "-byte cap", so the extra alternative bought nothing and could have
+        // halved pages for an unrelated fault.
         for other in [
             tinybus::Error::ConnectionClosed,
             tinybus::Error::Transport("connection reset".into()),
             tinybus::Error::protocol("unknown method".to_string()),
+            tinybus::Error::protocol("peer skipped over the handshake and sent a body".to_string()),
         ] {
             assert!(
                 !is_frame_cap_refusal(&other),
