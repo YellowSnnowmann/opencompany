@@ -132,6 +132,18 @@ impl ModuleMemoryProvider {
 /// table, so the host and the module cannot disagree about what a name means.
 /// The transport-level variants never carry a wire name and get explicit
 /// arms; everything else degrades to `Other`, never `Invalid`.
+/// Whether a bus error is the frame-size cap refusing an oversized message.
+///
+/// Matched on the message because tinybus reports it as a protocol error
+/// carrying the byte counts rather than a distinct variant — `encode` and
+/// `decode_length` both phrase it with the cap. Kept narrow on purpose: a
+/// broader match would silently halve pages for unrelated protocol faults,
+/// turning a real transport problem into a slow, quiet retry loop.
+fn is_frame_cap_refusal(error: &tinybus::Error) -> bool {
+    let message = error.to_string();
+    message.contains("-byte cap") || message.contains("over the")
+}
+
 fn from_bus(error: &tinybus::Error) -> MemoryError {
     match error {
         tinybus::Error::MethodFailed { .. } => {
@@ -331,16 +343,56 @@ impl MemoryRecall for ModuleMemoryProvider {
 
 #[async_trait]
 impl MemoryPortability for ModuleMemoryProvider {
+    /// Exports one page, **halving the page on a frame-cap refusal** until it
+    /// fits or a single record is left.
+    ///
+    /// A page crosses the bus as one reply, and a reply cannot stream: tinybus
+    /// hands a served object no caller connection, so unlike an inbound
+    /// payload it cannot be split into chunks. `MAX_FRAME_LEN` is 16 MiB, and
+    /// the page size is a count of records, not of bytes — `memory migrate`
+    /// defaults to 500 and lets an operator raise it — so a company whose
+    /// chunks came from document ingest can ask for a page that cannot be
+    /// framed. Without this the migration stops on a protocol error naming a
+    /// byte count, which tells an operator nothing about which knob to turn.
+    ///
+    /// Halving is the honest response: the caller asked for a page, the page
+    /// is a batching detail, and returning a smaller one is a complete answer
+    /// (`ExportPage` carries its own cursor, so the walk simply takes more
+    /// steps). It ends at `1`, where a refusal means one record alone exceeds
+    /// the frame — a real limit rather than a tuning problem, and reported as
+    /// such rather than retried forever.
     async fn export_page(
         &self,
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<ExportPage, MemoryError> {
-        self.proxy("export_page", true)
-            .await?
-            .call(methods::EXPORT_PAGE, (cursor.map(str::to_string), limit))
-            .await
-            .map_err(|error| from_bus(&error))
+        let proxy = self.proxy("export_page", true).await?;
+        let mut limit = limit.max(1);
+        loop {
+            let attempt = proxy
+                .call(methods::EXPORT_PAGE, (cursor.map(str::to_string), limit))
+                .await;
+            return match attempt {
+                Ok(page) => Ok(page),
+                Err(error) if limit > 1 && is_frame_cap_refusal(&error) => {
+                    let smaller = limit / 2;
+                    tracing::warn!(
+                        limit,
+                        smaller,
+                        "memory module: an export page did not fit the bus frame; retrying with \
+                         a smaller page"
+                    );
+                    limit = smaller;
+                    continue;
+                }
+                Err(error) if is_frame_cap_refusal(&error) => Err(MemoryError::Invalid(format!(
+                    "a single memory record does not fit the module bus frame ({error}); \
+                         export cannot carry it, and the record needs to be shortened or \
+                         removed before this company can migrate"
+                ))),
+                Err(error) => Err(from_bus(&error)),
+            };
+        }
     }
 
     async fn import_records(
@@ -383,6 +435,36 @@ mod tests {
     /// Transport-level failures map to the taxonomy's transient classes, and
     /// wire-named failures ride the shared table — including the round trip
     /// that must never reclassify.
+    /// The frame-cap detector must fire on what tinybus actually says, and
+    /// NOT on unrelated protocol faults — a broad match would turn a real
+    /// transport problem into a quiet halving loop that ends in a wrong
+    /// "record too large" verdict.
+    #[test]
+    fn the_frame_cap_detector_is_narrow() {
+        // Both phrasings tinybus uses: the encoder's and the length-prefix
+        // reader's, quoted from `message::codec`.
+        let encoded = tinybus::Error::protocol(
+            "frame of 20000000 bytes exceeds the 16777216-byte cap".to_string(),
+        );
+        let announced = tinybus::Error::protocol(
+            "peer announced a 20000000-byte frame, over the 16777216-byte cap".to_string(),
+        );
+        assert!(is_frame_cap_refusal(&encoded), "{encoded}");
+        assert!(is_frame_cap_refusal(&announced), "{announced}");
+
+        // Everything else must not look like the cap.
+        for other in [
+            tinybus::Error::ConnectionClosed,
+            tinybus::Error::Transport("connection reset".into()),
+            tinybus::Error::protocol("unknown method".to_string()),
+        ] {
+            assert!(
+                !is_frame_cap_refusal(&other),
+                "must not read as the frame cap: {other}"
+            );
+        }
+    }
+
     #[test]
     fn bus_failures_map_onto_the_taxonomy() {
         let timeout = tinybus::Error::MethodFailed {
