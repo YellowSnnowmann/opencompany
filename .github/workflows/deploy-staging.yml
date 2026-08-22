@@ -82,10 +82,30 @@ env:
   # `tinymemory-module` is the loadable TinyMemory module driver (issue #1524):
   # inert until a tenant's env sets OPENCOMPANY_MEMORY=embedded AND
   # OPENCOMPANY_MEMORY_DRIVER=module (both — the driver knob alone does
-  # nothing under the `store` default). Unlike `tinymemory-embedded` it is
-  # slim-image-safe: the provider is a bus proxy, the loader stack is pure
-  # Rust, and `cargo tree -i libsqlite3-sys` / `-i cc` are both empty under
-  # this exact feature set — no bundled rusqlite, no C compiler.
+  # nothing under the `store` default). It is here so a canary tenant can be
+  # flipped onto it at all; that is the whole of what it buys on THIS list.
+  #
+  # It does NOT slim this image, and the arithmetic is worth stating plainly
+  # so nobody re-derives the opposite. Measured on this exact feature set:
+  # 483 crates without it, 487 with, and it removes NOTHING —
+  # `tinymemory-core`, `tinycortex`, `tinyagents`, `libsqlite3-sys` and `cc`
+  # are all still linked. `cargo tree -i` names the reason:
+  #
+  #     tinymemory-core ← openhuman ← opencompany
+  #     libsqlite3-sys  ← rusqlite  ← openhuman ← opencompany
+  #
+  # `openhuman` declares the whole TinyMemory/TinyCortex stack non-optionally
+  # and uses `rusqlite` for its own stores, so the engine rides in through the
+  # runtime whatever the memory driver does. The bus proxy avoids the engine
+  # only in a build WITHOUT `openhuman` — the compose default
+  # (`sqlite,mongodb`), where the module driver measures 16.2% faster on a
+  # clean release build (208s vs 248s for `tinymemory-embedded`) and drops
+  # rusqlite and `cc` entirely.
+  #
+  # Making that true here needs openhuman#5560 (route the tool/query/tree/sync
+  # paths through the provider so `tinymemory-core` leaves the build) — and
+  # even then SQLite stays, because `openhuman` and `tinyagents` link
+  # `rusqlite` for reasons that have nothing to do with memory.
   TENANT_FEATURES: mongodb,openhuman,openhuman-rpc,tinyplace,github,smtp,dns,tinyhumans,webhooks,platform-jwt,export,mcp,media,composio,imap,telegram,medulla,tinycortex,sidecar,chargebee,paypal,tinymemory,tinymemory-module
 
 jobs:
