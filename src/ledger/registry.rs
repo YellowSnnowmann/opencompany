@@ -56,70 +56,78 @@ pub const MAX_DECLARED: usize = 12;
 /// goes through the board's own routes and tools, which is where the dispatch
 /// edge, the planning pass and the run settle all live.
 ///
-/// Its statuses and sections are **built from** [`super::board::COLUMNS`]
-/// rather than written out again beside it. That table is the one declaration
-/// of the board's vocabulary; a column added there gains a status here, a
-/// section in the rendered file, an entry in
-/// [`BOARD_COLUMNS`](crate::ports::tasks::BOARD_COLUMNS), and a labelled column
-/// in the console, with no second list to remember.
+/// Its statuses and sections are **built from**
+/// [`super::board::PHASES`](super::board::PHASES) rather than written out again
+/// beside it. That table is the one declaration of the board's reader-facing
+/// vocabulary; a phase added there gains a status here and a section in the
+/// rendered file, with no second list to remember.
 ///
-/// `done` is the only closed one: a card in review or paused is stopped, not
-/// finished, and calling either closed would make *what is still outstanding*
-/// answer wrong.
+/// # Three statuses, not six (issue #1512)
+///
+/// The board has six *stages* and the ledger declares three *phases*. The
+/// runtime still moves a card through `planning`, `in_progress`, `paused` and
+/// `in_review`, and each of those still means something distinct to the code
+/// that fires it — but all four say the same thing to a reader: **somebody
+/// started this and it is not finished**. Declaring them as four statuses asked
+/// every agent to pick between them on every write, and the pick was
+/// consistently wrong in ways nothing could catch: a card filed `in_review`
+/// because a teammate wanted a second opinion, when `in_review` is defined by
+/// the verdict that lands it in Done.
+///
+/// The stage is not lost. It rides on the row as the `stage` field below, so
+/// *which* kind of working a card is doing is a property somebody reads off the
+/// card, rather than a fourth pile to file it into.
 fn tasks() -> Value {
-    // One status per column, in board order, each carrying the label the
-    // console renders. `closed` is the table's, not a guess made here.
-    let statuses: Vec<Value> = super::board::COLUMNS
+    // One status per phase, in board order, each carrying the label the console
+    // renders. `closed` is the table's, not a guess made here.
+    let statuses: Vec<Value> = super::board::PHASES
         .iter()
-        .map(|column| {
+        .map(|phase| {
             json!({
-                "name": column.id,
-                "label": column.label,
-                "closed": column.closed,
+                "name": phase.id,
+                "label": phase.label,
+                "closed": phase.closed,
             })
         })
         .collect();
-    // One section per distinct heading, holding every column that named it.
-    // The file groups where the board does not: a reader wants *in flight* and
-    // *waiting on a person*, not six lists of one.
-    let sections: Vec<Value> = super::board::sections()
-        .into_iter()
-        .map(|first| {
-            let members: Vec<&str> = super::board::COLUMNS
-                .iter()
-                .filter(|column| column.section == first.section)
-                .map(|column| column.id)
-                .collect();
+    // One section per phase, in the same order. There is no grouping left to
+    // do: the phases *are* the grouping the six columns used to need one.
+    let sections: Vec<Value> = super::board::PHASES
+        .iter()
+        .map(|phase| {
             json!({
-                "heading": first.section,
-                "blurb": first.blurb,
-                "statuses": members,
+                "heading": phase.label,
+                "blurb": phase.blurb,
+                "statuses": [phase.id],
                 "order": "recent",
                 // The archive is the one bounded section. "Recently done" is
                 // what it says and what it was not: unbounded, it becomes the
                 // largest thing in the file and answers a question — what did
                 // we just finish — that five rows answer as well as ninety do.
-                "cap": if first.closed { 5 } else { super::budget::MAX_LISTED },
+                "cap": if phase.closed { 5 } else { super::budget::MAX_LISTED },
             })
         })
         .collect();
     json!({
         "slug": "tasks",
         "title": "Tasks",
-        "purpose": "The company's work board: what is being worked on, what is waiting on a \
-                    person, and what is finished. Cards dispatch when they enter In progress, so \
-                    this ledger is written through the board — not with `record_entry`.",
+        "purpose": "The company's work board: what has not started, what is being worked, and \
+                    what is finished. Cards dispatch when they enter Working, so this ledger is \
+                    written through the board — not with `record_entry`.",
         "source": "native",
         "derived": format!("{DERIVED_DIR}/tasks.md"),
         "writtenBy": "the board — `spawn_task` to open a card, `assign_task` to hand it over, or \
                       the console's board itself. `record_entry` does not write it, because \
-                      entering a column fires real work",
+                      entering a phase fires real work",
         "fields": [
             { "name": "id", "role": "id", "required": true },
             { "name": "title", "role": "title", "required": true,
               "description": "What the work is, in one line." },
             { "name": "column", "role": "status", "required": true,
-              "description": "Which board column the card sits in." },
+              "description": "pending, working or done." },
+            { "name": "stage", "role": "prose",
+              "description": "Which kind of working: planning, in progress, paused, or waiting \
+                              on your verdict. Read it; do not file by it." },
             { "name": "assignee", "role": "owner",
               "description": "The teammate or desk that owns it." },
             { "name": "priority", "role": "prose",
@@ -154,7 +162,8 @@ fn goals() -> Value {
             { "name": "id", "role": "id", "required": true },
             { "name": "goal", "role": "title", "required": true,
               "description": "The outcome, stated so somebody could tell whether it happened." },
-            { "name": "status", "role": "status", "required": true },
+            { "name": "status", "role": "status", "required": true,
+              "description": "active, met or dropped." },
             { "name": "measure", "role": "prose",
               "description": "How anybody would know this is met. A goal with no measure is a \
                               mood." },
@@ -169,40 +178,34 @@ fn goals() -> Value {
             { "name": "refs", "role": "refs",
               "description": "Task ids, artifacts or links that carry the work." }
         ],
+        // Three, like every ledger here (issue #1512). What went: `proposed`
+        // (a goal nobody has committed to is a chat message, and filing it here
+        // made the Active section the minority of the file), `at_risk` (a
+        // status that says how a goal is going, which is what `progress` is
+        // for — and a goal moved there stayed there, because nothing moves it
+        // back), and the `met`/`missed` split (both are "this is over"; which
+        // one it was is the first clause of the reason, which is required).
         "statuses": [
-            { "name": "proposed" },
-            { "name": "active" },
-            { "name": "at_risk" },
+            { "name": "active", "aliases": ["proposed", "at_risk"] },
             { "name": "met", "closed": true, "needs_reason": true },
-            { "name": "missed", "closed": true, "needs_reason": true },
-            { "name": "dropped", "closed": true, "needs_reason": true }
+            { "name": "dropped", "closed": true, "needs_reason": true,
+              "aliases": ["missed"] }
         ],
         "sections": [
             {
                 "heading": "Active",
                 "blurb": "Being worked toward now. Most recently updated first — record against a \
-                          goal to raise it.",
+                          goal to raise it. If one is slipping, say so in `progress` rather than \
+                          looking for a status that means it.",
                 "statuses": ["active"],
                 "order": "recent"
             },
             {
-                "heading": "At risk",
-                "blurb": "Named as slipping. Each of these should say what would put it back on \
-                          track.",
-                "statuses": ["at_risk"],
-                "order": "recent"
-            },
-            {
-                "heading": "Proposed",
-                "blurb": "Suggested, not committed to.",
-                "statuses": ["proposed"],
-                "order": "recent"
-            },
-            {
                 "heading": "Settled",
-                "blurb": "Met, missed or dropped, each with the reason. Kept: a goal abandoned \
-                          without a recorded reason is one somebody proposes again next quarter.",
-                "statuses": ["met", "missed", "dropped"],
+                "blurb": "Over, each with the reason — which is where met, missed and abandoned \
+                          are told apart. Kept: a goal dropped without a recorded reason is one \
+                          somebody proposes again next quarter.",
+                "statuses": ["met", "dropped"],
                 "cap": 20
             }
         ],
@@ -231,7 +234,8 @@ fn decisions() -> Value {
             { "name": "id", "role": "id", "required": true },
             { "name": "decision", "role": "title", "required": true,
               "description": "What was decided, in one line." },
-            { "name": "status", "role": "status", "required": true },
+            { "name": "status", "role": "status", "required": true,
+              "description": "proposed, accepted or retired." },
             { "name": "context", "role": "prose",
               "description": "The question this answers, and what forced it." },
             { "name": "rationale", "role": "prose",
@@ -242,14 +246,20 @@ fn decisions() -> Value {
               "description": "Who made the call." },
             { "name": "decided_on", "role": "date" },
             { "name": "reason", "role": "prose",
-              "description": "Why it was superseded or reversed. Required when it closes." },
+              "description": "Why it was retired — replaced by what, or reversed on what \
+                              evidence. Required when it closes." },
             { "name": "refs", "role": "refs" }
         ],
+        // Three (issue #1512). `superseded` and `reversed` were one status
+        // wearing two words: both mean *this is no longer the answer*, both
+        // require a reason, and the reason is the only place the difference was
+        // ever legible — "replaced by D-14" versus "we were wrong". Asking a
+        // writer to also encode it in the status bought a coin-flip.
         "statuses": [
             { "name": "proposed" },
             { "name": "accepted" },
-            { "name": "superseded", "closed": true, "needs_reason": true },
-            { "name": "reversed", "closed": true, "needs_reason": true }
+            { "name": "retired", "closed": true, "needs_reason": true,
+              "aliases": ["superseded", "reversed"] }
         ],
         "sections": [
             {
@@ -266,10 +276,10 @@ fn decisions() -> Value {
             },
             {
                 "heading": "No longer in force",
-                "blurb": "Superseded or reversed, each with the reason. Kept rather than deleted: \
-                          a decision that was reversed is exactly the one somebody will otherwise \
-                          make again.",
-                "statuses": ["superseded", "reversed"],
+                "blurb": "Retired, each with the reason — say whether it was replaced or reversed, \
+                          and by what. Kept rather than deleted: a decision that was reversed is \
+                          exactly the one somebody will otherwise make again.",
+                "statuses": ["retired"],
                 "cap": 20
             }
         ],

@@ -206,6 +206,40 @@ before touching the filesystem, rather than by canonicalizing: canonical
 comparison resolves symlinks, and whether a bundle is valid must not depend on
 how the checkout was laid out on the reading machine.
 
+### Seeing the assembled prompt
+
+A brief is the most editable thing in a bundle and used to be the least
+inspectable: reading one as the agent receives it meant running the company and
+reading a provider trace. `opencompany prompt` renders the same composition from
+a manifest alone.
+
+```sh
+./scripts/dump-prompt.sh --company companies/agentic_product_team
+./scripts/dump-prompt.sh --company <dir> --agent bug_triager       # one teammate
+./scripts/dump-prompt.sh --company <dir> --agent bug_triager --raw # bytes only
+./scripts/dump-prompt.sh --company <dir> --out /tmp/prompts        # a file each
+./scripts/dump-prompt.sh --company <dir> --json                    # machine-readable
+```
+
+The report names every section, where its bytes came from (a manifest field, a
+bundle file, a brief function), and the agent's effective grants — a missing
+brief is almost always a missing grant. `--raw` prints the concatenation exactly
+as the harness performs it, which is what makes it diffable against a real
+trace.
+
+**What it cannot render, it names.** Routed `context` bodies need a live
+workspace store, the skill catalogue needs a materialized bundle directory, the
+MCP brief needs a configured registry, and the vendored runtime's safety
+preamble and grounding suffix need a live `PromptContext`. Each appears under
+*Not rendered here* with the reason, so a section missing from the dump is
+visibly missing rather than invisibly absent.
+
+The wrapper exists for the feature flag: the harness owns the tool briefs and
+compiles only under `--features openhuman`, so calling the subcommand from a
+default build produces a shorter prompt that would otherwise look complete.
+Composition itself (`src/company/prompt_dump.rs`) is always compiled — a
+debugging surface that only exists in a feature build is one nobody runs.
+
 ### Budgets
 
 Each document section is clamped to `PROMPT_FILE_BUDGET_CHARS` (10,000
@@ -338,6 +372,7 @@ rename can switch off is not a control.
 | --- | --- |
 | Bundle loading, `prompt_files` resolution | `src/company/agent_file.rs` |
 | Prompt composition and clamping | `src/company/prompt.rs` |
+| Rendering a composed prompt back out (`opencompany prompt`) | `src/company/prompt_dump.rs` |
 | Routing table and exclusions | `src/company/context_routing.rs` |
 | Roster type and constants | `src/company/types.rs` |
 | Manifest wiring and validation | `src/company/manifest.rs` |

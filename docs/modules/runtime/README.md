@@ -153,7 +153,8 @@ The workspace store seeds a new company from its `companies/<name>/workspace/**`
 template on first use (`WorkspaceStore::is_empty` gates the seed); skills read
 the company's `skills/<id>/SKILL.md` plus the repo-level shared registry.
 
-Boot also scaffolds the reserved system root `agents/` (issue #551), via
+Boot also scaffolds the reserved system roots `agents/` and `artifacts/`
+(issues #551, #552), via
 `company::workspace_scaffold::ensure_workspace_scaffold`. That call is gated on
 "this is not a rebuild" and on **nothing else** — deliberately not on
 `seed_dir`, since a provisioned tenant and the desktop build have no company
@@ -163,9 +164,11 @@ re-seeding, and an existing company only ever picks the root up on a later
 boot; and deliberately not on the roster, since the root is part of what a
 workspace is. It is idempotent, so it costs one tree read per boot.
 
-The root is created **empty**. `agents/<agent-id>/` and `desks/<desk-id>/`
-are minted on demand by `ensure_agent_folder` / `ensure_desk_folder`, at the
-moment that agent or desk first produces something — a folder per roster member
+The roots are created **empty** (`artifacts/` and `secrets/` each carry one
+explanatory note). `agents/<agent-id>/`, `artifacts/<agent-id>/` and
+`desks/<desk-id>/` are minted on demand by `ensure_agent_folder` /
+`ensure_artifact_folder` / `ensure_desk_folder`, at the moment that agent or desk
+first produces something — a folder per roster member
 would fill the tree with empty directories for teammates who have done nothing.
 The minters find-or-create the root they need, so they double as the repair
 path if boot's fail-soft create ever misses. There is deliberately no

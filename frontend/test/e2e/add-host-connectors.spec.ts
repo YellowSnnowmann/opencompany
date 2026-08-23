@@ -246,9 +246,11 @@ test("the chooser is a screen, and its tabs fit the card they are drawn in", asy
 });
 
 test("a browser is offered only the two connectors it can honour", async ({ page }) => {
-  // A hub, because an ordinary single-host browser console draws a nameplate
-  // rather than a menu — there is nothing to switch between — and "Add a host"
-  // lives in that menu. A hub is the browser shape that genuinely holds N.
+  // A hub, because it is the browser shape that genuinely holds N hosts, and
+  // the connector list is about adding the *next* one. A single-host console
+  // opens the same menu (`hostSwitcherMenu`), but only because it has a host
+  // to manage — this spec is about the choice, so it drives the shape the
+  // choice belongs to.
   await page.goto("/?hub");
   await openTheChooser(page);
 

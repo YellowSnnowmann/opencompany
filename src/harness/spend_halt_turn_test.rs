@@ -272,6 +272,8 @@ tier = "orchestrator"
 
 fn record(budget: Option<f64>) -> CompanyRecord {
     CompanyRecord {
+        overlay_retired_agents: Vec::new(),
+        overlay_agent_edits: Vec::new(),
         id: company(),
         manifest: manifest(budget),
         ledger: Vec::new(),

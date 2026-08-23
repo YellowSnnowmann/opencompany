@@ -909,9 +909,10 @@ async fn gather_company_evidence(runtime: &Arc<CompanyRuntime>) -> crate::Result
             crate::error::OpenCompanyError::CompanyNotFound(runtime.id().to_string())
         })?;
 
-    let roster: Vec<RosterEntry> = record
-        .manifest
-        .agents
+    // The roster as it effectively stands — a teammate the operator removed is
+    // not offered as a step's assignee, since nothing would build it to run one.
+    let live_roster = record.effective_agents();
+    let roster: Vec<RosterEntry> = live_roster
         .iter()
         .map(|a| RosterEntry {
             id: a.id.clone(),
@@ -921,15 +922,21 @@ async fn gather_company_evidence(runtime: &Arc<CompanyRuntime>) -> crate::Result
             description: a.description.clone(),
             global: a.global,
         })
-        .chain(record.overlay_agents.iter().map(|a| RosterEntry {
-            id: a.id.clone(),
-            role: a.role.clone(),
-            name: Some(a.name.clone()),
-            description: a.description.clone(),
-            // An operator added this teammate to *this* company; nothing about
-            // it comes from the baseline.
-            global: false,
-        }))
+        .chain(
+            record
+                .overlay_agents
+                .iter()
+                .filter(|a| !record.is_retired(&a.id))
+                .map(|a| RosterEntry {
+                    id: a.id.clone(),
+                    role: a.role.clone(),
+                    name: Some(a.name.clone()),
+                    description: a.description.clone(),
+                    // An operator added this teammate to *this* company; nothing about
+                    // it comes from the baseline.
+                    global: false,
+                }),
+        )
         .collect();
 
     let workflows = list_workflows_with_globals(

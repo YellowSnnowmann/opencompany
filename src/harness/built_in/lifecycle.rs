@@ -358,7 +358,7 @@ pub fn relay_text(card: &TaskRecord, responder: &str, orchestrator: &str) -> Str
         COLUMN_IN_REVIEW => "is ready for review",
         COLUMN_IN_PROGRESS => "is still in progress",
         COLUMN_PAUSED => "is paused",
-        COLUMN_TODO => "is back in To-do",
+        COLUMN_TODO => "is back in Pending",
         // Nothing lands a card here yet (§4's auto-advance will), but naming it
         // keeps a future relay off the raw-column-id fallback below.
         COLUMN_PLANNING => "is being planned",
@@ -843,10 +843,10 @@ mod test {
 
         let returned = card(COLUMN_TODO, Some("[operator] cancelled while in flight"));
         let text = relay_text(&returned, "maya", "ceo");
-        assert!(text.contains("is back in To-do"), "{text}");
+        assert!(text.contains("is back in Pending"), "{text}");
         // Issue #301: collapsing the backlog pool into To-do is only lossless
         // because the reason rides along on the card. The relay must keep
-        // saying why, or "back in To-do" is indistinguishable from fresh work.
+        // saying why, or "back in Pending" is indistinguishable from fresh work.
         assert!(text.contains("cancelled while in flight"), "{text}");
 
         // Every board column has a sentence. Planning is inert today, so

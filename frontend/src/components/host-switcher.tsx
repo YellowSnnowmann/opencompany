@@ -20,7 +20,7 @@
 // every host, and `data-worst-status` says the same thing to a test. Without it
 // removing the rail would be a net loss for anyone running more than one host.
 
-import { Building2, Check, ChevronsUpDown, Plus } from "lucide-react";
+import { Building2, Check, ChevronsUpDown, Plus, Settings2 } from "lucide-react";
 
 import {
   DropdownMenu,
@@ -134,9 +134,42 @@ export function worstStatus(connections: Connection[]): ConnectionStatus | null 
  *
  * This is the predicate `connectionRailVisible` used to be — same rule, moved
  * with the control it governs.
+ *
+ * It answers **two** of the three questions the switcher asks, and no longer
+ * the third: whether the floating standalone switcher is drawn at all, and
+ * whether the status dot earns its place. Whether the trigger *opens a menu*
+ * is {@link hostSwitcherMenu}, which parted company with this rule once the
+ * menu started carrying host management.
  */
 export function hostSwitcherInteractive(count: number, hub = false): boolean {
   return count >= 2 || hub || isDesktopRuntime();
+}
+
+/**
+ * Whether the trigger opens a menu, or is only a nameplate.
+ *
+ * This used to be {@link hostSwitcherInteractive} exactly, on the argument
+ * that a chevron over a menu of one is furniture. That argument was sound
+ * while the menu held nothing but the roster and "Add a host": with one host
+ * there is nothing to switch to, and adding a second is the desktop's and the
+ * hub's business.
+ *
+ * "Manage hosts" retires it. The menu now carries the *only* way to rename,
+ * re-address or forget a host — and an ordinary browser console with exactly
+ * one connection is precisely the arrangement whose host is most likely to
+ * move, since that bootstrap row is a plain `remote` connector (see
+ * `DEFAULT_CONNECTOR`) and therefore fully manageable. Under the old rule that
+ * console got a nameplate with no menu, so its one host could not be reached
+ * at all: a menu of one is not furniture once one is a menu of something to
+ * *do*.
+ *
+ * So: any host at all opens a menu. The zero cases are unchanged and still
+ * belong to the desktop and the hub, which need "Add a host" to have anything
+ * at all. A single `local` host — the one connector this page cannot manage —
+ * only ever exists on the desktop, which is already true here.
+ */
+export function hostSwitcherMenu(count: number, hub = false): boolean {
+  return count >= 1 || hostSwitcherInteractive(count, hub);
 }
 
 interface Props {
@@ -165,6 +198,7 @@ export function HostSwitcher({ variant = "sidebar", companyName }: Props) {
   const { connections, selected, hub } = hosts;
 
   const interactive = hostSwitcherInteractive(connections.length, hub);
+  const menu = hostSwitcherMenu(connections.length, hub);
   const active = connections.find((c) => c.id === selected) ?? null;
   const worst = worstStatus(connections);
 
@@ -231,7 +265,7 @@ export function HostSwitcher({ variant = "sidebar", companyName }: Props) {
     "data-worst-status": worst ?? "none",
   };
 
-  if (!interactive) {
+  if (!menu) {
     return (
       <SidebarMenu>
         <SidebarMenuItem>
@@ -309,6 +343,19 @@ export function HostSwitcher({ variant = "sidebar", companyName }: Props) {
       >
         <Plus className="size-4" />
         Add a host
+      </DropdownMenuItem>
+      {/* The other half of adding one. Kept out of the rows themselves: a row
+          is a *filter* — clicking it puts that host on screen — and hanging an
+          edit and a delete off the same row makes a menu whose click targets
+          disagree about what a row is for. The page says what each host is,
+          which the menu deliberately does not. */}
+      <DropdownMenuItem
+        data-testid="host-switcher-manage"
+        onClick={() => hosts.setManagingHosts(true)}
+        className="gap-2"
+      >
+        <Settings2 className="size-4" />
+        Manage hosts
       </DropdownMenuItem>
     </DropdownMenuContent>
   );

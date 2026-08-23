@@ -297,11 +297,12 @@ reach behind a value a model chose from free text — what D7's enum prevents.
 
 ## What the host enforces, rather than asks for
 
-Four guarantees hold whatever a model returns — coverage checked against the
-host's own job list, a tool belt asked for rather than inherited, a copy of the
-reference team refused the name "designed", and a fallback that says which
-fallback it is. Each is a boundary rather than a line in a prompt, and each has
-a test that fails when it stops holding:
+Five guarantees hold whatever a model returns — coverage checked against the
+host's own job list, a tool belt asked for rather than inherited, standing
+instructions the host writes rather than the model, a copy of the reference team
+refused the name "designed", and a fallback that says which fallback it is. Each
+is a boundary rather than a line in a prompt, and each has a test that fails when
+it stops holding:
 [company-setup-guarantees.md](company-setup-guarantees.md).
 
 ## Nobody gets stuck

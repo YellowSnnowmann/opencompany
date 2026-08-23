@@ -323,7 +323,7 @@ test("an unparseable body on the document reader falls back to the status line",
   const task = {
     id: "e2e-380-task",
     title: "Reconcile the August ledger",
-    column: "todo",
+    column: "pending",
     priority: "medium",
     assignee: "finance",
     updatedAt: Date.now() - 60_000,

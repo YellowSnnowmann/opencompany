@@ -500,9 +500,11 @@ fn system_prompt() -> String {
          to show you the register to write in, never the text to copy. A mandate that could sit \
          on any company's roster has told this operator nothing.\n\
          - `focus` is the shape of the work, one of: {focuses}. It decides which tools the \
-         teammate is given, so choose the closest fit: `research` finds things out, `writing` \
-         produces the written work, `operations` keeps work moving, `analysis` measures and \
-         reports.\n\
+         teammate is given and how it is told to work, so choose by what the teammate PRODUCES: \
+         `research` findings, `writing` written material, `design` interface and visual work, \
+         `analysis` numbers and what moved them, `build` the product itself, `operations` a \
+         recurring process run end to end, `coordination` people and work kept moving, `support` \
+         answered customers.\n\
          - `covers` is a list of numbers from the job list. Only claim a number when that agent \
          genuinely owns it — a claim you cannot justify is worse than an honest gap, because \
          the operator is shown what was left unowned.\n\

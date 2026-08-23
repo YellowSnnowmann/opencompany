@@ -98,6 +98,8 @@ pub enum MemoryMode {
     Null,
 }
 
+pub use crate::store::select::RemoteDeployment;
+
 /// Everything needed to open a driver, already resolved from env + manifest.
 ///
 /// Holds the credential, so it is not `Debug` — see the manual impl below.
@@ -122,6 +124,9 @@ pub struct MemoryDriverConfig {
     /// `<data_dir>/memory-namespace/` — deliberately beside, never inside, the
     /// incumbent engine's `<data_dir>/memory/`.
     pub data_dir: Option<PathBuf>,
+    /// Which deployment of the named remote engine to speak to. Ignored by
+    /// every mode but [`MemoryMode::Remote`].
+    pub deployment: RemoteDeployment,
 }
 
 impl std::fmt::Debug for MemoryDriverConfig {
@@ -248,7 +253,10 @@ pub fn open_driver(
                 — the key is a secret and env is its only channel",
             )?;
             let class = admit(driver_id, DriverClass::External)?;
-            (remote_provider(driver_id, url, key)?, class)
+            (
+                remote_provider(driver_id, url, key, config.deployment)?,
+                class,
+            )
         }
     };
     audit_capabilities(bound.0.as_ref())?;
@@ -391,16 +399,35 @@ fn admit(driver_id: &str, expected: DriverClass) -> Result<DriverClass> {
 /// and leaves every optional accessor `None`. That is the truth about a hosted
 /// service — no summary tree, no graph, no taint tier — and it is what makes
 /// `audit_provider` pass at bind rather than a call fail later.
-fn remote_provider(driver_id: &str, url: &str, key: &str) -> Result<Arc<dyn MemoryProvider>> {
+fn remote_provider(
+    driver_id: &str,
+    url: &str,
+    key: &str,
+    deployment: RemoteDeployment,
+) -> Result<Arc<dyn MemoryProvider>> {
+    let managed = deployment == RemoteDeployment::Managed;
     let provider: Arc<dyn MemoryProvider> = match driver_id {
+        // Supermemory serves one API to both deployments on one bearer
+        // credential — its own `self_hosted` delegates to `api` — so the
+        // deployment does not change the client.
         SUPERMEMORY_DRIVER_ID => Arc::new(tinymemory_remote::supermemory_provider(
-            tinymemory_remote::SupermemoryMemory::new(url, Some(key)).map_err(open_failed)?,
+            tinymemory_remote::SupermemoryMemory::api(url, key).map_err(open_failed)?,
         )),
         MEM0_DRIVER_ID => Arc::new(tinymemory_remote::mem0_provider(
-            tinymemory_remote::Mem0Memory::new(url, Some(key)).map_err(open_failed)?,
+            if managed {
+                tinymemory_remote::Mem0Memory::api(url, key)
+            } else {
+                tinymemory_remote::Mem0Memory::self_hosted(url, Some(key))
+            }
+            .map_err(open_failed)?,
         )),
         COGNEE_DRIVER_ID => Arc::new(tinymemory_remote::cognee_provider(
-            tinymemory_remote::CogneeMemory::new(url, Some(key)).map_err(open_failed)?,
+            if managed {
+                tinymemory_remote::CogneeMemory::api(url, key)
+            } else {
+                tinymemory_remote::CogneeMemory::self_hosted(url, Some(key))
+            }
+            .map_err(open_failed)?,
         )),
         // Unreachable in practice: `admit` has already rejected any id the
         // registry does not reserve as External. Kept as a refusal rather than
@@ -567,6 +594,7 @@ mod test {
             url: None,
             api_key: None,
             data_dir: None,
+            deployment: Default::default(),
         }
     }
 
@@ -955,6 +983,7 @@ mod test {
             url: Some("https://memory.internal.example".into()),
             api_key: Some("sk-super-secret-value".into()),
             data_dir: None,
+            deployment: Default::default(),
         };
         let rendered = format!("{cfg:?}");
         assert!(!rendered.contains("sk-super-secret-value"), "{rendered}");

@@ -385,6 +385,8 @@ async fn harness(
     };
 
     let record = CompanyRecord {
+        overlay_retired_agents: Vec::new(),
+        overlay_agent_edits: Vec::new(),
         id: CompanyId::new("acme"),
         manifest: manifest(),
         ledger: Vec::new(),

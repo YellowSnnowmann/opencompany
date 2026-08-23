@@ -941,8 +941,10 @@ export function ChatView({
 
   /**
    * Drop a teammate from the roster through the host when it has a record of
-   * them; a manifest teammate can't be removed (409) and a starter-roster row
-   * has no host record at all, so both fall back to a local-only removal.
+   * them. A blueprint teammate is removable too — the host records a tombstone
+   * rather than rewriting `company.toml` — and the only refusal left is the
+   * company's last teammate (409). A starter-roster row has no host record at
+   * all, so it falls back to a local-only removal.
    */
   async function removeMember(member: TeamMember) {
     if (!fromHost) {
@@ -954,7 +956,12 @@ export function ChatView({
       setMembers((ms) => ms.filter((m) => m.id !== member.id));
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        toast.error("This teammate is defined in the company manifest and can't be removed here.");
+        // The only 409 this route still answers: a company must keep at
+        // least one teammate. The host's own message says which teammate and
+        // what to do about it, so it is shown rather than restated.
+        toast.error(
+          error.message || "You can't remove your company's last teammate.",
+        );
       } else {
         toast.error(error instanceof Error ? error.message : "Couldn't remove teammate.");
       }

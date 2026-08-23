@@ -150,7 +150,7 @@ async fn project_usage(
     let record = runtime.store().load(runtime.id()).await.map_err(ApiError)?;
     let roster = record
         .as_ref()
-        .map(|record| roster_display_names(&record.manifest.agents, &record.overlay_agents))
+        .map(|record| roster_display_names(&record.effective_agents(), &record.overlay_agents))
         .unwrap_or_default();
 
     Ok(UsageDto::new(
@@ -234,6 +234,8 @@ mod tests {
         let id = CompanyId::new("acme");
         store
             .save(&CompanyRecord {
+                overlay_retired_agents: Vec::new(),
+                overlay_agent_edits: Vec::new(),
                 id: id.clone(),
                 manifest: manifest.clone(),
                 ledger: Vec::new(),

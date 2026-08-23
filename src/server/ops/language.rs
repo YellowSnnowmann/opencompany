@@ -17,18 +17,15 @@ pub const TEAMMATE: &str = "teammate";
 pub const BUILTIN_UNINSTALL: &str =
     "This is a built-in skill and can't be uninstalled — you can disable it instead.";
 
-/// Error shown when a write tries to remove a teammate defined in the manifest.
-pub const MANIFEST_TEAMMATE_DELETE: &str =
-    "This teammate is part of your company's blueprint and can't be removed here.";
-
-/// Error shown when a write tries to edit a teammate defined in the manifest
-/// (issue #264). Says where the edit belongs, because the answer is not "you
-/// may not" but "not from here" — the blueprint is version-controlled, and the
-/// one thing the console can change on such a teammate is its daily budget,
-/// which is stored as an override rather than as a rewrite.
-pub const MANIFEST_TEAMMATE_EDIT: &str = concat!(
-    "This teammate is part of your company's blueprint. ",
-    "Edit it in company.toml and redeploy; its daily budget can still be changed here.",
+/// Error shown when removing a teammate would leave the company with nobody.
+///
+/// The one refusal the roster keeps. A blueprint teammate *can* be removed —
+/// the runtime records a tombstone rather than rewriting `company.toml` — but a
+/// company with an empty roster has nobody to answer a message, nobody to
+/// delegate to and no orchestrator, and the console offers no way back from it.
+pub const LAST_TEAMMATE_DELETE: &str = concat!(
+    "This is your company's last teammate. ",
+    "Add another one before removing this one.",
 );
 
 /// Error shown when a write tries to remove a desk member defined in the

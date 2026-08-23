@@ -62,8 +62,8 @@ const DELIVERABLES: { value: TaskDeliverable; label: string }[] = [
 /**
  * The columns where the deliverable can still be flipped (issue #580).
  *
- * Once a card leaves To-do/Planning the choice is settled: the builder pass
- * fires on the drag into In Progress, so changing once-vs-workflow afterwards
+ * Once a card leaves Pending (or the Planning stage) the choice is settled: the
+ * builder pass fires on the drag into Working, so changing once-vs-workflow afterwards
  * cannot rebuild what already ran. The control is disabled there rather than
  * hidden — an honest "locked" reads better than a field that silently vanishes —
  * but this is a **UI-honesty** guard, not enforcement: the host is the authority
@@ -71,6 +71,19 @@ const DELIVERABLES: { value: TaskDeliverable; label: string }[] = [
  * a save that does not touch the deliverable never sends it anyway.
  */
 const DELIVERABLE_EDITABLE = new Set(["todo", "planning"]);
+
+/**
+ * Whether the once-vs-workflow choice is still open on this card.
+ *
+ * Matches on the **stage** and falls back to the phase, because since issue
+ * #1512 `column` is `pending`/`working`/`done`: a pending card is editable, a
+ * working one only while it is still `planning`, and matching on the column
+ * alone would either lock every working card or unlock all four stages.
+ */
+function deliverableEditable(task: Task): boolean {
+  const stage = task.stage ?? task.column;
+  return stage === "pending" || DELIVERABLE_EDITABLE.has(stage);
+}
 
 /**
  * Edit a card (or delete it). Open when `task` is non-null; `onClose` fires on
@@ -262,7 +275,7 @@ export function TaskEditDialog({
               onValueChange={(v) =>
                 setDraft((d) => ({ ...d, deliverable: (v as TaskDeliverable) ?? undefined }))
               }
-              disabled={!DELIVERABLE_EDITABLE.has(task.column)}
+              disabled={!deliverableEditable(task)}
             >
               <SelectTrigger id="task-deliverable" data-testid="edit-deliverable">
                 <SelectValue />
@@ -275,7 +288,7 @@ export function TaskEditDialog({
                 ))}
               </SelectContent>
             </Select>
-            {!DELIVERABLE_EDITABLE.has(task.column) && (
+            {!deliverableEditable(task) && (
               <p className="text-2xs text-muted-foreground">
                 Locked once work starts — the workflow is built when a card enters In progress, so
                 this can only be changed while it&apos;s still in To-do or Planning.

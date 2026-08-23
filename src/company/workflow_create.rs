@@ -2440,6 +2440,8 @@ to = "done"
 
     fn record(id: &CompanyId, manifest: CompanyManifest) -> CompanyRecord {
         CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest,
             ledger: Vec::new(),

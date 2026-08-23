@@ -81,9 +81,7 @@ name = "promised"
 [[status]]
 name = "in_progress"
 label = "Being delivered"
-
-[[status]]
-name = "at_risk"
+aliases = ["at_risk"]
 
 [[status]]
 name = "kept"
@@ -100,15 +98,16 @@ name = "released"
 closed = true
 needs_reason = true
 
-[[section]]
-heading = "At risk"
-blurb = "Promised, and currently not going to land as stated. Say what the other side has been told."
-statuses = ["at_risk"]
 order = "recent"
 
 [[section]]
 heading = "Outstanding"
-blurb = "Promised and not yet delivered. Soonest attention first — record against a row to raise it."
+blurb = """
+Promised and not yet delivered. Soonest attention first — record against a row \
+to raise it. If one is not going to land as stated, say so on the row and say \
+what the other side has been told; there is no status that means it, because a \
+status that says how a promise is *going* is one nothing ever moves back out of.\
+"""
 statuses = ["promised", "in_progress"]
 order = "recent"
 

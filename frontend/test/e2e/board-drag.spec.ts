@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 /**
- * Issue #334 — moving a card out of In review by dragging it onto Done.
+ * Issue #334 — moving a card out of Working by dragging it onto Done.
  *
  * QA reported this as "a card cannot be moved out of In review": the drop
  * appeared to work, the counts did not change, and nothing said why. Two
@@ -67,8 +67,8 @@ const BOARD = "/#/ledgers/tasks";
  * These are the host's labels — see the note above on why they are written out
  * here rather than read back from the ledger.
  */
-const COLUMNS = ["To-do", "Planning", "In progress", "Paused", "In review", "Done"];
-const IN_REVIEW = COLUMNS.indexOf("In review");
+const COLUMNS = ["Pending", "Working", "Done"];
+const WORKING = COLUMNS.indexOf("Working");
 const DONE = COLUMNS.indexOf("Done");
 
 test.beforeEach(async ({ page }) => {
@@ -97,11 +97,13 @@ const column = (page: Page, index: number) => board(page).getByTestId("board-col
 /**
  * Opens every column that has collapsed itself to a rail (issue #1101).
  *
- * An empty column is now ~40px wide, and every geometry claim in this file is
- * about the board at its full six-column width: whether the last one is a
- * whole drop target, and whether a drag held against the edge can scroll to
- * reach it. A board of five rails and one column does not overflow at all, so
- * without this the edge-scroll assertion would pass by never being tested.
+ * The board shows the three phases of a ledger (Pending / Working / Done) and
+ * collapses an empty phase to a ~40px rail. The edge-scroll geometry claims in
+ * this file need the board wider than its pane — a board of two rails and one
+ * column does not overflow at all — so this puts the board back to its full
+ * three-phase width before measuring, which is also the state a person
+ * reaches by clicking a rail open. Without it the edge-scroll assertion would
+ * pass by never being tested.
  *
  * Clicking a rail pins it open, which is the operator's own control — so this
  * puts the board in a state a person can reach, rather than defeating the
@@ -109,7 +111,7 @@ const column = (page: Page, index: number) => board(page).getByTestId("board-col
  */
 async function expandAll(page: Page) {
   const rails = board(page).locator("button[aria-label^='Expand ']");
-  // Bounded: each click removes one rail, and the board has six columns.
+  // Bounded: each click removes one rail, and the board has three phases.
   for (let attempt = 0; attempt < 8; attempt += 1) {
     if ((await rails.count()) === 0) return;
     await rails.first().click();
@@ -128,7 +130,14 @@ async function openBoard(page: Page) {
   await expandAll(page);
 }
 
-/** Seeds a card straight into In review and opens the board on it. */
+/**
+ * Seeds a card straight into the `in_review` stage and opens the board on it.
+ *
+ * The stage still exists and is still what a finished run lands in; since issue
+ * #1512 it is not a *column*, so the card renders under Working. The seed
+ * writes the stage word directly because that is the state this spec is about —
+ * a card one drop away from Done, which is where #334's report came from.
+ */
 async function seedInReview(page: Page, request: APIRequestContext, title: string) {
   const created = await request.post(`${API}/tasks`, { data: { title } });
   expect(created.ok()).toBeTruthy();
@@ -192,14 +201,40 @@ test("the whole board fits the window, so the last column is a full drop target"
   expect(Math.min(done!.x + done!.width, width) - done!.x).toBeGreaterThan(200);
 });
 
-test("a card drags from In review to Done, and the board scrolls to get there", async ({
+test("a card drags from Working to Done, and the board scrolls to get there", async ({
   page,
   request,
 }) => {
   const title = `e2e in-review to done ${Date.now()}`;
   const { id, card } = await seedInReview(page, request, title);
 
-  // Park the board so In review is on screen and Done is not. This is the
+  // Three phases of ~260px no longer overflow the default 1280px window, so
+  // the board cannot scroll and the park below lands on zero. Narrow the
+  // window so the board genuinely overflows: the sidebar stays expanded above
+  // `md` (768px), and the park needs ~260px of overflow to land mid-range.
+  const pane = () => board(page).evaluate((el) => el.clientWidth);
+  const wide = await pane();
+  await page.setViewportSize({ width: 800, height: 720 });
+  // The board learns its own width through a `ResizeObserver`, so the frame
+  // after `setViewportSize` is not the frame it has re-measured on. Everything
+  // below turns on that measurement — which columns collapse, and by how much
+  // the board overflows — so wait for it rather than for a timeout.
+  await expect.poll(pane).toBeLessThan(wide);
+
+  // And expand *again*, because narrowing the window is what created the rails.
+  // `openBoard` ran `expandAll` at 1280px, where three phases fit and the board
+  // therefore collapses nothing — so it found no rails and pinned nothing.
+  // Narrowing is what makes the columns stop fitting, and an empty Done folds
+  // itself into a ~40px rail. Dragging onto that rail is a different gesture
+  // from the one this test is about — the rail opens under the drag, reflowing
+  // the board mid-drop — and it also leaves the board barely wider than its
+  // pane, so the park below lands on zero and the edge-scroll claim stops being
+  // tested. Pinning every phase open puts the board back to the full
+  // three-phase width the assertions below assume.
+  await expandAll(page);
+  await expect(board(page).locator('[data-collapsed="true"]')).toHaveCount(0);
+
+  // Park the board so Working is on screen and Done is not. This is the
   // operator's actual starting position, and the case the gesture could not
   // finish before: nothing scrolls a nested container during an HTML5 drag.
   const scrolled = await board(page).evaluate((el) => {
@@ -254,7 +289,7 @@ test("a card drags from In review to Done, and the board scrolls to get there", 
 
   // And the counts the operator was watching.
   await expect(column(page, DONE)).toContainText(title);
-  await expect(column(page, IN_REVIEW)).not.toContainText(title);
+  await expect(column(page, WORKING)).not.toContainText(title);
 });
 
 test("a drop that misses every column says so instead of doing nothing", async ({
@@ -284,8 +319,11 @@ test("a drop that misses every column says so instead of doing nothing", async (
     timeout: 5_000,
   });
   // Saying so is not the same as moving it: the card must stay where it was.
-  expect((await (await request.get(`${API}/tasks/${id}`)).json()).task.column).toBe("in_review");
-  await expect(column(page, IN_REVIEW)).toContainText(title);
+  // Unmoved: still the `in_review` stage, which reads as the Working column.
+  const unmoved = (await (await request.get(`${API}/tasks/${id}`)).json()).task;
+  expect(unmoved.stage).toBe("in_review");
+  expect(unmoved.column).toBe("working");
+  await expect(column(page, WORKING)).toContainText(title);
 });
 
 test("a move the host refuses names the card, the column, and the reason", async ({
@@ -295,7 +333,7 @@ test("a move the host refuses names the card, the column, and the reason", async
   const title = `e2e refused move ${Date.now()}`;
   const { card } = await seedInReview(page, request, title);
 
-  // The host accepts in_review → done, so the refusal has to be induced. This
+  // The host accepts working → done, so the refusal has to be induced. This
   // asserts the console's half of the contract: whatever the host says, the
   // operator reads it rather than watching the card snap back in silence.
   await page.route("**/tasks/*", async (route) => {
@@ -322,5 +360,5 @@ test("a move the host refuses names the card, the column, and the reason", async
   });
   await expect(page.getByText("the board is read-only right now")).toBeVisible();
   // Refused means refused: the optimistic move is rolled back.
-  await expect(column(page, IN_REVIEW)).toContainText(title);
+  await expect(column(page, WORKING)).toContainText(title);
 });

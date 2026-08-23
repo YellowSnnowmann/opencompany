@@ -1,7 +1,7 @@
 # First-run setup: what the host enforces
 
 The product decisions behind first-run setup live in
-[company-setup.md](company-setup.md). This file holds the four things the host
+[company-setup.md](company-setup.md). This file holds the five things the host
 *enforces* rather than requests, and why each is a boundary instead of a line in
 a prompt.
 
@@ -64,14 +64,25 @@ three sentences. The globals teammates sitting next to them already do the
 opposite, and `globals/agents/researcher.toml` says why: a request is intersected
 with `[tools].allow`, so naming one can only ever narrow.
 
-Each proposed agent now carries an `AgentFocus` — `research`, `writing`,
-`operations` or `analysis` — and the host maps it to a belt. The model never
+Each proposed agent now carries an `AgentFocus`, named for what the teammate
+*produces* — `research`, `writing`, `design`, `analysis`, `build`, `operations`,
+`coordination`, `support` — and the host maps it to a belt. The model never
 names a tool. Tool grants are a permission boundary, and letting free text a
 stranger typed reach `[tools]` would put that boundary inside the prompt's blast
 radius; a closed enum means the worst a hostile answer achieves is the wrong belt
-from a list of four the host wrote. `media`, `composio`, `search`, `repo` and
+from a list the host wrote. `media`, `composio`, `search`, `repo` and
 `shell` are unreachable from every focus, and a test quantifies over the whole
 vocabulary so a focus added later cannot quietly widen it.
+
+Six of the eight share one belt, which is what let the vocabulary grow without
+moving anybody's reach. The enum does two jobs — it picks a belt and it picks
+the standing instructions below — and the second wants a finer grain than the
+first: `operations` alone covered 13 of the 30 curated profiles, so a QA
+engineer and an account manager were told the same thing. Splitting it is a
+change to instructions only; every belt is byte-identical either side of it.
+`build` is the case worth naming: the obvious reading of "makes the product" is
+`repo` and `shell`, and it gets neither, because a teammate invented from three
+sentences does not get a shell on the strength of a word the model chose.
 
 An unrecognised focus gets the narrowest working belt, never an empty list. It
 used to inherit, on the reasoning that an unknown value should degrade to the
@@ -83,6 +94,51 @@ one holding a spend authority.
 
 The curated templates declare a focus too. An operator with no credential must
 not end up with the *wider* company.
+
+## A teammate is told how to work, and the host writes it
+
+**Decision D9: the focus that picks a belt also picks a set of standing
+instructions, and the model authors none of them.**
+
+`manifest_from_setup` set `id`, `role`, `description` and `tools` and left
+`prompt` unset. So everything a setup-built teammate was ever told was what
+`persona_prompt` assembles — "You are Ops, the Operations Manager at Acme. Speak
+in the first person as this role." plus a mandate capped at 200 characters.
+Around 150 characters of instruction, sitting on the same roster as a globals
+teammate carrying 500–600 (`globals/agents/*.toml`). The mandate says what a
+teammate owns; nothing said how it works.
+
+`AgentFocus::instructions` supplies that, keyed on the same closed enum that
+already picks the belt, for the same reason D7 gives: an agent's prompt is the
+single field that decides how it behaves, so letting the pass author it would put
+a stranger's free text — read by a model, written into a system prompt —
+inside the prompt's blast radius. The model names a work shape; the host owns
+every word of the standing instructions.
+
+Not every word the teammate is told, which is worth stating exactly because the
+looser claim is easy to write and false: `persona_prompt` already appends the
+**mandate**, and the model wrote that. Model text reaches the system prompt
+today. What it reaches under is a 200-character cap, a field whose only job is
+to name what the teammate owns, and a review screen the operator reads before
+anything is created — a much smaller surface than a free-form instruction block,
+and the reason a per-teammate instruction field is a separate decision rather
+than an obvious extension of this one.
+
+The instructions describe the *shape* of the work and never the business. The
+mandate already carries the business, and a second copy in the same prompt would
+be a staler one. They are written in the globals' register without reusing its
+sentences: a global teammate is on the same roster, and two agents given the
+same instructions are one agent twice.
+
+An unrecognised focus is instructed with **nothing**, which is the opposite of
+what the belt does with the same input — and deliberately. A belt substitutes
+because a permission has a safe direction to fail in; instructions have none.
+Telling an analyst "never invent a detail to make a sentence work" is worse
+guidance than the role framing it already has, so an unknown shape keeps exactly
+the pre-instruction behaviour.
+
+The curated templates declare a focus, so the fallback team is instructed too —
+an operator with no credential must not end up with the *less directed* company.
 
 ## A fallback says which fallback
 

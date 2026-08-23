@@ -231,7 +231,14 @@ pub async fn read(ctx: &Ledgers, spec: &LedgerSpec, query: &Query) -> Result<Rea
             None => true,
         })
         .filter(|entry| match &query.status {
-            Some(status) => entry.status(spec).eq_ignore_ascii_case(status.trim()),
+            // Both sides canonical (issue #1512): a query for a retired status
+            // finds the rows that were stored under it, because they now render
+            // under the status that adopted it and a filter that could not
+            // reach them would report a row that is plainly in the file as
+            // absent.
+            Some(status) => entry
+                .status(spec)
+                .eq_ignore_ascii_case(spec.canonical_status(status.trim())),
             None => true,
         })
         .filter(|entry| match &query.text {
@@ -300,7 +307,10 @@ pub async fn record(
     if let Some(field) = spec.status_field()
         && let Some(Some(status)) = fields.get(&field.name)
     {
-        if !spec.knows_status(status) {
+        // `declares_status`, not `knows_status`: a stored row heals onto a
+        // surviving status when it is read, but a *write* of a retired word is
+        // refused so the client learns the vocabulary once (issue #1512).
+        if !spec.declares_status(status) {
             return Err(OpenCompanyError::InvalidRequest(format!(
                 "`{status}` is not a status on `{}`; use one of: {}",
                 spec.slug,

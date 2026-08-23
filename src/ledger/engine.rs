@@ -68,9 +68,18 @@ impl Entry {
     }
 
     /// The entry's status under `spec`, lowercased, or the empty string.
+    ///
+    /// **Canonical**, so a row stored under a status the spec has since retired
+    /// reports the one that adopted it (issue #1512). Every caller — the
+    /// section membership test, the closed count, the rendered row — asks here,
+    /// which is what keeps them from disagreeing about where a migrated row
+    /// belongs. See [`StatusSpec::aliases`](crate::ledger::spec::StatusSpec::aliases).
     pub fn status(&self, spec: &LedgerSpec) -> String {
         spec.status_field()
-            .map(|field| self.get(&field.name).trim().to_ascii_lowercase())
+            .map(|field| {
+                let stored = self.get(&field.name).trim().to_ascii_lowercase();
+                spec.canonical_status(&stored).to_string()
+            })
             .unwrap_or_default()
     }
 

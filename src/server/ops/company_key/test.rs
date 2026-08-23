@@ -38,6 +38,8 @@ async fn state_with_manifest(
     let id = CompanyId::new(company);
     store
         .save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest.clone(),
             ledger: Vec::new(),

@@ -22,6 +22,7 @@ import {
   type SignIn,
 } from "@/api/auth";
 import { connectWallet, hasWallet, NoWalletError, signMessage } from "@/lib/wallet";
+import { resendLabel, secondsUntilResend } from "@/views/login/resend";
 import type { OpenCompanyClient } from "@/api/client";
 import { ApiError } from "@/api/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -134,6 +135,20 @@ export function Login({
   const [sent, setSent] = useState(false);
   // Only ever set on a host with no mail transport (local dev).
   const [devCode, setDevCode] = useState<string | null>(null);
+  /**
+   * When the last link was asked for, or `null` if none has been.
+   *
+   * Stamped from the *response*, not the submit: the host's window opens when
+   * it mints the code, which is fractionally earlier, and a clock started late
+   * can only ever be conservative. Started early it would let the resend fire
+   * into a throttle that answers `202` regardless — a button that reports a
+   * send which did not happen, which is worse than no button.
+   */
+  const [linkSentAt, setLinkSentAt] = useState<number | null>(null);
+  /** Ticks the countdown. Only advanced while there is one to render. */
+  const [now, setNow] = useState(() => Date.now());
+  /** Set when a *re*send lands, so the second press is acknowledged as one. */
+  const [resent, setResent] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,8 +212,52 @@ export function Login({
     };
   }, [client, company]);
 
+  /**
+   * Seconds before the host would mail another link to this address.
+   *
+   * Derived, never stored: a stored counter and a re-render disagree the moment
+   * a tab is backgrounded, and `setInterval` is throttled to a crawl there.
+   * Recomputing from two timestamps means a tab woken after ten minutes renders
+   * a ready button on its first frame rather than counting the rest of the way
+   * down from where it fell asleep.
+   */
+  const secondsLeft = linkSentAt === null ? 0 : secondsUntilResend(linkSentAt, now);
+  const waitingToResend = secondsLeft > 0;
+
+  /** The line under the heading. Empty means the heading stands alone. */
+  const headingNote = subtitle(authConfig, mode, sent);
+
+  // Four ticks a second, and only while something is counting. The label is in
+  // whole seconds, so a 1s interval would show each number for anywhere between
+  // 0 and 1s depending on when the send landed relative to the tick.
+  useEffect(() => {
+    if (!waitingToResend) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [waitingToResend]);
+
   async function sendLink(e: React.FormEvent) {
     e.preventDefault();
+    setResent(false);
+    await askForLink();
+  }
+
+  /**
+   * Asks for another link from the sent screen.
+   *
+   * The whole reason this exists: the sent card is the terminal screen of the
+   * primary sign-in path and the one people stare at when nothing arrives, and
+   * until #1333 its only control cleared the form. "Retype the address you just
+   * typed" is not a recovery path — it gives no sign it is a *re*send, and no
+   * sign of the minute the host makes you wait.
+   */
+  async function resendLink() {
+    setResent(false);
+    if (await askForLink()) setResent(true);
+  }
+
+  /** The one request both paths make. Reports whether the host acknowledged it. */
+  async function askForLink(): Promise<boolean> {
     setBusy(true);
     setError(null);
     try {
@@ -206,8 +265,11 @@ export function Login({
       // Always the same acknowledgement, whoever they are.
       setSent(true);
       setDevCode(result.dev_code ?? null);
+      setLinkSentAt(Date.now());
+      return true;
     } catch (err) {
       setError(friendly(err));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -297,7 +359,9 @@ export function Login({
             {authConfig.mode === "none" ? "" : "Sign in"}
             {companyName ? (authConfig.mode === "none" ? companyName : ` to ${companyName}`) : ""}
           </h1>
-          <p className="text-sm text-muted-foreground">{subtitle(authConfig, mode)}</p>
+          {headingNote ? (
+            <p className="text-sm text-muted-foreground">{headingNote}</p>
+          ) : null}
         </div>
 
         {/*
@@ -473,16 +537,61 @@ export function Login({
                 </Alert>
               ) : null}
 
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setSent(false);
-                  setDevCode(null);
-                }}
-              >
-                Use a different address
-              </Button>
+              {/*
+                The error alert has to be repeated here rather than lifted out
+                of the form below: until #1333 the only request this screen
+                could make was made from the form, so an alert rendered only
+                inside the form was sufficient. A resend that fails on a screen
+                with no error slot would fail invisibly — the counter would
+                restart and nothing else would change.
+              */}
+              {error ? (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              {resent && !error ? (
+                <p className="text-sm text-muted-foreground" data-testid="login-resent">
+                  Sent again. The newest link is the one that works.
+                </p>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/*
+                  The card's own action, and the strongest thing on it: this is
+                  the screen someone is looking at *because* the mail has not
+                  arrived. Disabled for the host's minute rather than hidden, so
+                  the wait is a visible fact rather than a missing control.
+                */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={resendLink}
+                  disabled={busy || waitingToResend}
+                  data-testid="login-resend"
+                >
+                  {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+                  {resendLabel(secondsLeft)}
+                </Button>
+
+                {/* Demoted below the resend, but still underlined-on-hover
+                    primary text rather than the unadorned `ghost` label it was
+                    — which, as the only control in the state, did not read as
+                    a control at all. */}
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={() => {
+                    setSent(false);
+                    setDevCode(null);
+                    setResent(false);
+                    setError(null);
+                  }}
+                >
+                  Use a different address
+                </Button>
+              </div>
             </div>
           ) : (
             <form
@@ -539,7 +648,15 @@ export function Login({
         </Card>
         ) : null}
 
-        {authConfig.mode === "email" && authConfig.passwords ? (
+        {/*
+          Hidden while the link is out. Offering a different credential type as
+          a peer of "go look in your mailbox" muddles a screen whose whole job
+          at that moment is the mailbox — and pressing it silently threw the
+          link away, since the handler clears `sent` with no acknowledgement
+          (issue #1333). "Use a different address" is the way back to the form,
+          and this returns with it.
+        */}
+        {authConfig.mode === "email" && authConfig.passwords && !(sent && mode === "link") ? (
         <div className="mt-4 text-center">
           <Button
             variant="link"
@@ -566,9 +683,15 @@ export function Login({
 }
 
 /** One line under the heading, saying what this company will actually ask for. */
-function subtitle(config: AuthConfig, mode: Mode): string {
+function subtitle(config: AuthConfig, mode: Mode, sent: boolean): string {
   if (config.mode === "none") return "";
   if (config.mode === "wallet") return "Prove you hold the wallet. Nothing is emailed.";
+  // Nothing, once the link is gone. Every remaining line here is written in the
+  // future tense about a form that is no longer on screen, and "We'll email you
+  // a link" sitting 20px above "Check your email" is two tenses making two
+  // different claims about the same act (issue #1333). The card carries the
+  // whole message by then, so there is nothing left to add.
+  if (sent && mode === "link") return "";
   // Promising a link from a host with no transport is the one line here that
   // sends someone away to wait for nothing.
   if (mode === "link" && !config.magicLink) return "This host can\'t email you a link.";

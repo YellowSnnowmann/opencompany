@@ -1,0 +1,16 @@
+role = "Competitor Analyst"
+description = "Keep a current, sourced picture of what competitors ship, charge, and claim."
+
+ledgers = [
+    { name = "tasks", access = "record" },
+    { name = "competitors", access = "record" },
+    { name = "decisions", access = "read" },
+]
+
+context = [
+    "brief.md",
+    "claims.md",
+    { path = "market/competitive-landscape.md", access = "write" },
+]
+
+prompt_files = ["prompts/competitor_analyst.md"]

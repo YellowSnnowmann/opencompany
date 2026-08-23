@@ -21,6 +21,18 @@ import { listLedgers, type LedgerStatus, type LedgerSummary } from "@/api/ledger
 /** The `tasks` ledger's slug — the board, as the ledger surface names it. */
 export const BOARD_LEDGER = "tasks";
 
+/**
+ * The board's three phases, which are its columns (issue #1512).
+ *
+ * Named here because two writes genuinely need the literal — the drop that
+ * dispatches, and the Resume that re-dispatches — and a string typed twice in
+ * two views is the drift this file's header is about. Everything else reads its
+ * columns off the ledger and never needs to know these words.
+ */
+export const BOARD_PENDING = "pending";
+export const BOARD_WORKING = "working";
+export const BOARD_DONE = "done";
+
 export interface TaskColumn {
   id: string;
   label: string;
@@ -34,8 +46,9 @@ export interface TaskColumn {
  * Used for the ledgers a company declares, whose statuses are already written
  * to be read (`open`, `at_risk`, `kept`), and as the last resort for a stored
  * card carrying a column this build has never heard of. It is deliberately not
- * used for the board: `in_progress` humanises to "In progress" by luck and
- * `todo` becomes "Todo", which is why the host sends the real labels.
+ * used for the board's own columns: the host sends their real labels. It *is*
+ * what renders a card's stage word (`in_review` → "In review"), which the
+ * ledger does not declare and therefore carries no label for.
  */
 export function humanizeStatus(id: string): string {
   const words = id.trim().replace(/[_-]+/g, " ").trim();
@@ -107,11 +120,11 @@ export type TaskPriority = "low" | "medium" | "high";
  * The one column that offers the "+" add-task button (issue #206).
  *
  * New work enters the board in exactly one place. Offering `+` on every column
- * — as the board used to — let an operator create a card straight into
- * `in_progress`, `in_review`, or `done`, which either skips the dispatch edge
- * or fabricates a terminal state for work that never ran.
+ * — as the board used to — let an operator create a card straight into Working
+ * or Done, which either skips the dispatch edge or fabricates a terminal state
+ * for work that never ran.
  */
-export const ADD_TASK_COLUMN = "todo";
+export const ADD_TASK_COLUMN = BOARD_PENDING;
 
 /**
  * Priority badges.
@@ -129,23 +142,26 @@ export const PRIORITY_STYLES: Record<TaskPriority, string> = {
 };
 
 /**
- * The board columns that mean *a teammate is on this right now*.
+ * The card **stages** that mean *a teammate is on this right now*.
  *
- * These are the two ids the host files under its "In flight" section
- * (`src/ledger/board.rs`): `planning` is a planning pass turning a card into a
- * brief, `in_progress` is an open attempt. `paused` and `in_review` are
- * deliberately not here — that module calls them "stopped, not finished", and
- * they are waiting on a person rather than on the teammate.
+ * Stages, not columns, since issue #1512: all four of the host's middle stages
+ * are the one `working` column, and only two of them are somebody actually
+ * working. `planning` is a planning pass turning a card into a brief and
+ * `in_progress` is an open attempt; `paused` and `in_review` are deliberately
+ * not here — `board.rs` calls them "stopped, not finished", and they are
+ * waiting on a person rather than on the teammate. Matching on the column
+ * instead would report all four as activity, which is precisely the
+ * over-claiming this list exists to avoid.
  *
- * Named ids rather than a flag read off the wire, because the section is the
- * one part of the column table the host does not send: `LedgerStatus` carries
- * `name`, `label` and `closed`, and nothing else.
+ * Named ids rather than a flag read off the wire, because the stage table is
+ * the part the host does not send: `LedgerStatus` carries `name`, `label` and
+ * `closed` for the three phases, and nothing else.
  *
  * This is *not* the drift the header of this file warns about. That warning is
- * about a console-side copy of a table a company can extend; this table is
- * explicitly the one ledger a company may **not** declare — entering a column
- * here spends money, so `board.rs` fixes the set at six and says so. A host
- * that renames one of these reports every teammate idle, which is the honest
+ * about a console-side copy of a table a company can extend; the stages are
+ * explicitly the one vocabulary a company may **not** declare — entering one
+ * spends money, so `board.rs` fixes the set at six and says so. A host that
+ * renames one of these reports every teammate idle, which is the honest
  * failure: it under-claims rather than inventing activity.
  */
 export const IN_FLIGHT_COLUMNS = ["planning", "in_progress"];

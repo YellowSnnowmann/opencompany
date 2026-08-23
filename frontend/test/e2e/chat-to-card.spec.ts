@@ -72,11 +72,11 @@ test("any message on a desk thread can be added to the board", async ({ page }) 
   expect(href).toMatch(/^#\/tasks\/.+/);
 
   // The card is real, titled from the message, and — the spend gate — did NOT
-  // land in `in_progress`.
+  // land in the Working phase, which is what dispatch means now (issue #1512).
   await page.goto(href!);
   await dismissWelcome(page);
   await expect(page.getByText(prompt).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("In progress", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Working", { exact: true })).toHaveCount(0);
 
   // …and it knows which conversation opened it.
   await expect(page.getByRole("button", { name: /Opened from chat/ })).toBeVisible();

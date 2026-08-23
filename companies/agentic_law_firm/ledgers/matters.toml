@@ -78,10 +78,7 @@ label = "In intake"
 
 [[status]]
 name = "open"
-
-[[status]]
-name = "on_hold"
-label = "On hold"
+aliases = ["on_hold"]
 
 [[status]]
 name = "concluded"
@@ -116,7 +113,7 @@ order = "recent"
 [[section]]
 heading = "On hold"
 blurb = "Paused, and by whose decision. Each should say what would restart it."
-statuses = ["on_hold"]
+statuses = ["open"]
 order = "recent"
 
 [[section]]

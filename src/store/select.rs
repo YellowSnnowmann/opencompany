@@ -422,6 +422,41 @@ impl std::fmt::Debug for StorageHandles {
     }
 }
 
+/// Which deployment of a hosted engine the credential belongs to.
+///
+/// Not cosmetic, and not inferable from the URL. Mem0 and Cognee each expose
+/// two products that speak *different protocols* under the same driver id:
+/// Mem0's platform authenticates with `Authorization: Token` and serves v3/v1
+/// paths while its open-source server uses `X-API-Key` and un-prefixed ones;
+/// Cognee Cloud uses `X-Api-Key` where an authenticated self-hosted instance
+/// takes a bearer token. Pointing the wrong one at a live service fails at the
+/// first request — a 404 on paths that do not exist there, or a 401 whose body
+/// says `Invalid header` — and neither error names the real cause.
+///
+/// Supermemory is the exception that made this easy to miss: it serves the
+/// same API with the same bearer credential either way, so the single
+/// constructor OpenCompany used worked against it and against nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RemoteDeployment {
+    /// The vendor's managed platform. The default, because that is what
+    /// `remote` mode is for; a self-hosted engine is the deliberate case.
+    #[default]
+    Managed,
+    /// An instance the operator runs themselves.
+    SelfHosted,
+}
+
+impl RemoteDeployment {
+    /// Parses the wire value, or `None` when it names neither deployment.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "managed" | "cloud" | "hosted" | "platform" => Some(Self::Managed),
+            "self-hosted" | "selfhosted" | "self" => Some(Self::SelfHosted),
+            _ => None,
+        }
+    }
+}
+
 /// Connection settings for [`open_storage`]. `fs` needs nothing beyond the
 /// runtime's home directory (handled by the builder's defaults), so it yields
 /// `None` handles.
@@ -485,6 +520,14 @@ pub struct StorageSettings {
     /// The hosted manager injects environment rather than manifests, which is
     /// what makes env sufficient.
     pub memory_api_key: Option<String>,
+    /// Which deployment of the named remote engine the credential belongs to
+    /// (`OPENCOMPANY_MEMORY_DEPLOYMENT`: `managed` or `self-hosted`).
+    ///
+    /// Defaults to managed. Mem0 and Cognee serve different protocols to their
+    /// platform and their self-hosted server under one driver id, so this is
+    /// not inferable from the URL, and getting it wrong fails at the first
+    /// request with an error that names neither the cause nor this setting.
+    pub memory_deployment: RemoteDeployment,
 }
 
 impl std::fmt::Debug for StorageSettings {
@@ -561,6 +604,10 @@ impl StorageSettings {
             memory_driver: non_empty("OPENCOMPANY_MEMORY_DRIVER"),
             memory_url: non_empty("OPENCOMPANY_MEMORY_URL"),
             memory_api_key: non_empty("OPENCOMPANY_MEMORY_API_KEY"),
+            memory_deployment: non_empty("OPENCOMPANY_MEMORY_DEPLOYMENT")
+                .as_deref()
+                .and_then(RemoteDeployment::parse)
+                .unwrap_or_default(),
         })
     }
 
@@ -806,6 +853,7 @@ fn open_provider(settings: &StorageSettings) -> Result<Option<MemoryOverlay>> {
         url: settings.memory_url.clone(),
         api_key: settings.memory_api_key.clone(),
         data_dir: settings.data_dir.clone(),
+        deployment: settings.memory_deployment,
     };
     let Some((provider, class)) = open_driver(&config)? else {
         // Only `embedded` can answer "no driver to bind", and the caller only

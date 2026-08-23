@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   Clock,
   CornerDownRight,
   CornerUpLeft,
@@ -134,12 +135,13 @@ function priorityStyle(priority: string): string {
 }
 
 /**
- * The column id → human label ("in_progress" → "In progress").
+ * The column id → human label ("working" → "Working").
  *
  * Takes the columns because they come from the `tasks` ledger now rather than
  * from a list this module could read at import time. `labelFor` humanises an
- * id the host has not named, so a card whose column predates this build still
- * reads as words.
+ * id the host has not named — which since issue #1512 includes every *stage*
+ * word, since the ledger declares only the three phases — so a card's stage
+ * still reads as words when it is passed through here.
  */
 function columnLabel(columns: TaskColumn[], column: string): string {
   return labelFor(columns, column);
@@ -165,6 +167,19 @@ function columnLabel(columns: TaskColumn[], column: string): string {
  * blocked on.
  */
 const UNSTARTED_COLUMNS = new Set(["todo", "planning"]);
+
+/**
+ * Whether a card has not been dispatched yet, on the stage vocabulary.
+ *
+ * Reads {@link Task.stage} and falls back to the phase, because since issue
+ * #1512 `column` is `pending`/`working`/`done`: `pending` is unstarted, a
+ * working card is unstarted only while it is `planning`, and matching on the
+ * phase alone would call every in-flight card never-dispatched.
+ */
+function neverDispatched(task: Task): boolean {
+  const stage = task.stage ?? task.column;
+  return stage === "pending" || UNSTARTED_COLUMNS.has(stage);
+}
 
 /**
  * Extends a host-computed duration to `now` while its span is still open.
@@ -553,8 +568,8 @@ export function TaskDetailView({
             {/* Issue #580: the built workflow awaiting approval, shown only while
                 the card sits In Review with a proposal. Apply creates the
                 workflow and moves the card to Done (#339 link); reject returns
-                it to To-do. */}
-            {detail.task.column === "in_review" && detail.task.workflowProposal && (
+                it to Pending. */}
+            {detail.task.stage === "in_review" && detail.task.workflowProposal && (
               <TaskWorkflowProposalPanel
                 client={client}
                 company={company}
@@ -713,7 +728,7 @@ function DetailHeader({
   // A card past To-do/Planning has been worked whether or not a dispatch window
   // was journaled for it, so claiming otherwise beside a settled status is the
   // self-contradiction the report caught.
-  const neverStarted = !hasDispatch && UNSTARTED_COLUMNS.has(task.column);
+  const neverStarted = !hasDispatch && neverDispatched(task);
   // `worked` is the whole elapsed run window; waiting sits *inside* it, so
   // working time is the remainder. Clamped at zero because the two figures come
   // from different sources (event log vs journal join) and a clock skew between
@@ -747,6 +762,14 @@ function DetailHeader({
           <Badge variant="secondary" className="font-normal">
             {columnLabel(columns, task.column)}
           </Badge>
+          {/* The stage beside the phase, never instead of it (issue #1512).
+              The board has three columns; what a working card is *waiting on*
+              is a property of the card, and this is where it is read. */}
+          {task.stage && (
+            <Badge variant="outline" className="font-normal">
+              {columnLabel(columns, task.stage)}
+            </Badge>
+          )}
         </span>
         {/* Issue #580: this card builds a reusable workflow rather than doing
             the work once. Stated on the detail header the same as the board
@@ -890,7 +913,9 @@ function ControlBar({
     setBusy(true);
     try {
       const saved = await patchTask(client, company, task.id, {
-        column: "in_progress",
+        // The phase word, not the stage: the host resolves `working` to
+        // `in_progress`, which is what dispatches (issue #1512).
+        column: "working",
       });
       onSaved(saved);
       await onChanged();
@@ -899,6 +924,38 @@ function ControlBar({
       toast.error(
         e instanceof Error ? e.message : "could not dispatch the task",
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Buy one planning pass before any work is dispatched (issue #1512).
+   *
+   * The gesture the Planning **column** used to be. Collapsing the board to
+   * three columns took the drop target away, and the pass is not something to
+   * lose with it: it is the one way to have a card turned into a brief — and to
+   * have its hard prerequisites checked — before an agent turn is paid for.
+   *
+   * So it becomes a control on the card, which is where it belonged anyway. A
+   * column is a *state*, and "plan this first" is an act. It writes the
+   * `planning` stage directly, because there is no phase word that means it:
+   * dropping into Working means dispatch, and always has.
+   *
+   * It spends money, exactly as the drag into Planning did, which is why it is
+   * a deliberate second button rather than something folded into Dispatch.
+   */
+  async function planFirst() {
+    setBusy(true);
+    try {
+      const saved = await patchTask(client, company, task.id, {
+        column: "planning",
+      });
+      onSaved(saved);
+      await onChanged();
+      toast.success("Planning — a brief is being written for this card.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "could not plan the task");
     } finally {
       setBusy(false);
     }
@@ -932,7 +989,7 @@ function ControlBar({
     }
   }
 
-  const resumeLabel = task.column === "paused" ? "Resume" : "Retry";
+  const resumeLabel = task.stage === "paused" ? "Resume" : "Retry";
 
   return (
     <div className="rounded-xl border bg-card/40 p-3">
@@ -995,14 +1052,32 @@ function ControlBar({
             )}
           </>
         ) : (
-          <RetryButton
-            label={resumeLabel}
-            title={task.title}
-            irreversible={irreversible}
-            historyIncomplete={historyIncomplete}
-            disabled={busy}
-            onConfirm={() => void patchColumn()}
-          />
+          <>
+            <RetryButton
+              label={resumeLabel}
+              title={task.title}
+              irreversible={irreversible}
+              historyIncomplete={historyIncomplete}
+              disabled={busy}
+              onConfirm={() => void patchColumn()}
+            />
+            {/* Only before anything has started: planning a card that has
+                already been worked would write a brief for work that exists,
+                which is the one shape the pass has nothing useful to say
+                about (issue #1512). */}
+            {task.column === "pending" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                disabled={busy}
+                onClick={() => void planFirst()}
+              >
+                <ClipboardList className="mr-1.5 size-3.5" />
+                Plan first
+              </Button>
+            )}
+          </>
         )}
 
         <div className="ml-auto flex items-center gap-2">

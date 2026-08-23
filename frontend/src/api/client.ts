@@ -815,10 +815,10 @@ export class OpenCompanyClient {
    * null` clears the instructions and `description: undefined` leaves them,
    * which is why the two must not be collapsed on the way in.
    *
-   * The host refuses a manifest teammate with a 409 — its fields live in the
-   * version-controlled `company.toml`, and the console does not rewrite that.
-   * Ask `getAgent` first: its `editable` list is the host's own statement of
-   * which fields this call will accept.
+   * A manifest teammate is editable too: the host stores the change as an
+   * override on the company record and never rewrites `company.toml`. Ask
+   * `getAgent` first — its `editable` list is the host's own statement of which
+   * fields this call will accept, and `tools` is admin-only.
    */
   updateAgent(
     agentId: string,
@@ -873,7 +873,11 @@ export class OpenCompanyClient {
     );
   }
 
-  /** Remove an operator-added teammate. 409s for a manifest teammate (can't be removed here). */
+  /**
+   * Remove a teammate. A blueprint teammate is removed by tombstone rather than
+   * by rewriting `company.toml`, so it works for both kinds; the only refusal is
+   * a `409` on the company's last teammate.
+   */
   removeTeamMember(agentId: string, company?: string | null): Promise<void> {
     return this.request<void>(
       "DELETE",

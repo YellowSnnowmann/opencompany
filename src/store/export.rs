@@ -32,9 +32,9 @@ use crate::ports::facts::{FactRecord, FactStore};
 use crate::ports::memory::MemoryStore;
 use crate::ports::store::CompanyStore;
 use crate::ports::types::{
-    BudgetOverride, CompanyEvent, CompanyId, CompanyRecord, CompressedTrace, ContextChunk,
-    EventSeq, LedgerEntry, OverlayAgent, OverlayDesk, OverlayDeskMember, OverlayDeskOrder,
-    OverlayWorkflow, PolicyOverride, StoredEvent, TemplateProvenance,
+    AgentOverride, BudgetOverride, CompanyEvent, CompanyId, CompanyRecord, CompressedTrace,
+    ContextChunk, EventSeq, LedgerEntry, OverlayAgent, OverlayDesk, OverlayDeskMember,
+    OverlayDeskOrder, OverlayWorkflow, PolicyOverride, StoredEvent, TemplateProvenance,
 };
 
 /// Canonical bundle file and directory names, matching the fs
@@ -133,6 +133,20 @@ struct BundleMeta {
     /// `#[serde(default)]` for back-compat with older bundles.
     #[serde(default)]
     overlay_budgets: Vec<BudgetOverride>,
+    /// The operator's edits of manifest-declared teammates at export time.
+    /// Preserved so an export→import keeps the roster the operator shaped from
+    /// the console, rather than silently reverting every blueprint teammate to
+    /// the name, role, instructions and scope `company.toml` declared.
+    /// `#[serde(default)]` for back-compat with older bundles.
+    #[serde(default)]
+    overlay_agent_edits: Vec<AgentOverride>,
+    /// The ids of manifest teammates removed from the console at export time.
+    /// Preserved so an import does not silently restore a teammate the operator
+    /// retired — the blueprint still declares it, so without the tombstone it
+    /// comes straight back. `#[serde(default)]` for back-compat with older
+    /// bundles.
+    #[serde(default)]
+    overlay_retired_agents: Vec<String>,
     /// The operator's `[policy]` override at export time (issue #562).
     /// `#[serde(default)]` for back-compat with older bundles, which read as
     /// `None` — the manifest's `[policy]` decides, exactly as before.
@@ -214,6 +228,12 @@ struct BundleContents {
     /// The operator-set per-teammate daily spend caps, carried through the
     /// bundle so export→import preserves console-set budgets (issue #343).
     overlay_budgets: Vec<BudgetOverride>,
+    /// The operator's edits of manifest-declared teammates, carried through the
+    /// bundle so export→import preserves a console-shaped roster.
+    overlay_agent_edits: Vec<AgentOverride>,
+    /// The ids of manifest teammates the operator removed, carried through the
+    /// bundle so an import does not restore them.
+    overlay_retired_agents: Vec<String>,
     /// The operator's `[policy]` override, carried through the bundle so
     /// export→import preserves a console-set autonomy tier (issue #562).
     ///
@@ -286,6 +306,8 @@ impl BundleContents {
             overlay_desks: record.overlay_desks,
             overlay_workflows: record.overlay_workflows,
             overlay_budgets: record.overlay_budgets,
+            overlay_agent_edits: record.overlay_agent_edits,
+            overlay_retired_agents: record.overlay_retired_agents,
             overlay_policy: record.overlay_policy,
             overlay_desk_tools: record.overlay_desk_tools,
             disabled_workflows: record.disabled_workflows,
@@ -327,6 +349,8 @@ impl BundleContents {
         // append-only ledger stays authoritative.
         store
             .save(&CompanyRecord {
+                overlay_agent_edits: self.overlay_agent_edits.clone(),
+                overlay_retired_agents: self.overlay_retired_agents.clone(),
                 id: self.id.clone(),
                 manifest: self.manifest.clone(),
                 ledger: Vec::new(),
@@ -384,6 +408,8 @@ impl BundleContents {
             overlay_desks: self.overlay_desks.clone(),
             overlay_workflows: self.overlay_workflows.clone(),
             overlay_budgets: self.overlay_budgets.clone(),
+            overlay_agent_edits: self.overlay_agent_edits.clone(),
+            overlay_retired_agents: self.overlay_retired_agents.clone(),
             overlay_policy: self.overlay_policy.clone(),
             overlay_desk_tools: self.overlay_desk_tools.clone(),
             disabled_workflows: self.disabled_workflows.clone(),
@@ -474,6 +500,20 @@ impl BundleContents {
                 meta.id
             )));
         }
+        // The roster edits carry the same invariant for the same reason, and are
+        // checked in the same breath: `CompanyRecord::agent_override` also reads
+        // the first match, so two rows for one teammate would apply whichever the
+        // bundle happened to serialize first — restoring a name the operator
+        // changed, or a tool grant they narrowed, with nothing to say which row
+        // won. Both refusals fire before any port is written, so a rejected
+        // bundle leaves the target untouched.
+        if let Some(agent_id) = AgentOverride::duplicate_agent_id(&meta.overlay_agent_edits) {
+            return Err(OpenCompanyError::Store(format!(
+                "invalid {META_JSON}: {} carries more than one edit for teammate \
+                 '{agent_id}'; at most one is allowed",
+                meta.id
+            )));
+        }
 
         let ledger = read_jsonl::<LedgerEntry>(&src.join(LEDGER_JSONL)).await?;
         // Scrubbed on the way IN as well as on the way out (issue #358), which
@@ -519,6 +559,8 @@ impl BundleContents {
             overlay_desks: meta.overlay_desks,
             overlay_workflows: meta.overlay_workflows,
             overlay_budgets: meta.overlay_budgets,
+            overlay_agent_edits: meta.overlay_agent_edits,
+            overlay_retired_agents: meta.overlay_retired_agents,
             overlay_policy: meta.overlay_policy,
             overlay_desk_tools: meta.overlay_desk_tools,
             disabled_workflows: meta.disabled_workflows,
@@ -838,6 +880,8 @@ mod test {
     /// A minimal running company record for tests that only need one to exist.
     fn company_record(id: &CompanyId) -> CompanyRecord {
         CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest(),
             ledger: Vec::new(),
@@ -1069,6 +1113,8 @@ mod test {
 
         let (s1, e1, m1, c1) = fs_ports(&home1);
         s1.save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest(),
             ledger: Vec::new(),
@@ -1150,6 +1196,8 @@ mod test {
 
         let (s1, e1, m1, c1) = fs_ports(&home1);
         s1.save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest(),
             ledger: Vec::new(),
@@ -1282,6 +1330,8 @@ mod test {
 
         let (s1, e1, m1, c1) = fs_ports(&home1);
         s1.save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest(),
             ledger: Vec::new(),
@@ -1374,6 +1424,8 @@ mod test {
         // Register a company carrying template provenance in the source home.
         let (s1, e1, m1, c1) = fs_ports(&home1);
         s1.save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest(),
             ledger: Vec::new(),
@@ -1491,6 +1543,8 @@ mod test {
 
         let (s1, e1, m1, c1) = fs_ports(&home1);
         s1.save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest.clone(),
             ledger: Vec::new(),
@@ -1596,6 +1650,15 @@ mod test {
             id = "cto"
             role = "Tech"
             budget_usd_daily = 9.0
+
+            # Carries no budget override, and exists so the retirement fixture
+            # below can remove a teammate without leaving a cap behind for one
+            # that is no longer on the roster — a pairing the product never
+            # produces, since `remove_member` drops the override with the
+            # teammate.
+            [[agent]]
+            id = "ops"
+            role = "Operations"
         "#,
         )
         .expect("parse manifest")
@@ -1682,6 +1745,25 @@ mod test {
             // an operator had switched off, which is the one direction an
             // import must never move on its own.
             disabled_workflows: vec!["digest".to_string()],
+            // A console-shaped roster rides the same bundle: without the field
+            // an imported company would silently come back on the blueprint's
+            // names, roles and scopes, undoing every edit an operator made.
+            overlay_agent_edits: vec![AgentOverride {
+                agent_id: "ceo".to_string(),
+                role: Some("Chief Vibes".to_string()),
+                ..Default::default()
+            }],
+            // And a tombstone, for the sharper version of the same loss: the
+            // blueprint still declares this teammate, so a bundle that dropped
+            // the field would restore somebody the operator had removed.
+            //
+            // `ops` rather than one of the capped pair on purpose. Removing a
+            // teammate drops its budget override with it, so a record holding
+            // both a tombstone and a cap for the same id is a state no write
+            // path can reach — a fixture that carried one would be asserting
+            // that the bundle faithfully preserves something the product never
+            // writes.
+            overlay_retired_agents: vec!["ops".to_string()],
             template_provenance: None,
             setup: None,
         })
@@ -1709,6 +1791,24 @@ mod test {
         assert!(
             !dst_record.workflow_enabled("digest"),
             "the bundle round-trip re-armed a paused workflow"
+        );
+        assert_eq!(
+            dst_record
+                .effective_agent("ceo")
+                .expect("the roster still names the ceo")
+                .role,
+            "Chief Vibes",
+            "the bundle round-trip restored the blueprint's role over the operator's edit"
+        );
+        assert!(
+            dst_record.effective_agent("ops").is_none(),
+            "the bundle round-trip restored a teammate the operator had removed"
+        );
+        // The capped pair is still on the roster, so the budget assertions below
+        // are read through teammates that actually exist.
+        assert!(
+            dst_record.effective_agent("cto").is_some(),
+            "cto was retired by accident"
         );
         // Issue #562: the console-set tier survives export→import, attribution
         // included. Without this the seeded fixture proves nothing — a bundle
@@ -1775,6 +1875,8 @@ mod test {
 
         let (s1, e1, m1, c1) = fs_ports(&home1);
         s1.save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: budget_manifest(),
             ledger: Vec::new(),
@@ -1830,6 +1932,91 @@ mod test {
         let message = err.to_string();
         assert!(
             message.contains("ceo") && message.contains("budget override"),
+            "the refusal must name the teammate so an operator can fix the bundle: {message}"
+        );
+
+        // And nothing was written: a refused import must not half-apply.
+        assert!(
+            s2.load(&id).await.unwrap().is_none(),
+            "a rejected bundle must not persist a partial company record"
+        );
+
+        for dir in [home1, home2, dest] {
+            tokio::fs::remove_dir_all(&dir).await.ok();
+        }
+    }
+
+    /// The same refusal for the roster edits, which arrive through the same one
+    /// door and are read the same first-match way.
+    ///
+    /// The two rows here disagree about the teammate's role and were set by
+    /// different people, which is the point: there is no correct row to pick.
+    /// Applying whichever deserialized first would restore a name an operator
+    /// changed — or, through `tools`, a grant they narrowed — and attribute it to
+    /// somebody who did not do it.
+    #[tokio::test]
+    async fn a_bundle_with_duplicate_agent_edits_is_rejected() {
+        let home1 = tmp_root("dupedit-src");
+        let home2 = tmp_root("dupedit-dst");
+        let dest = tmp_root("dupedit-bundle");
+        let id = CompanyId::new("dupedit-co");
+
+        let (s1, e1, m1, c1) = fs_ports(&home1);
+        s1.save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
+            id: id.clone(),
+            manifest: budget_manifest(),
+            ledger: Vec::new(),
+            lifecycle: "running".into(),
+            overlay_agents: Vec::new(),
+            overlay_desk_members: Vec::new(),
+            overlay_desk_order: Vec::new(),
+            overlay_desks: Vec::new(),
+            overlay_workflows: Vec::new(),
+            overlay_budgets: Vec::new(),
+            overlay_policy: None,
+            overlay_desk_tools: Default::default(),
+            disabled_workflows: Vec::new(),
+            template_provenance: None,
+            setup: None,
+        })
+        .await
+        .unwrap();
+        export_bundle(&id, &dest, s1, e1, m1, c1, None, ExportOpts::default())
+            .await
+            .unwrap();
+
+        // The shape an import can be handed but `upsert_agent_override` can never
+        // produce: it replaces in place, so a second row for one teammate only
+        // exists in a bundle written elsewhere.
+        let meta_path = dest.join(META_JSON);
+        let mut meta: BundleMeta =
+            serde_json::from_str(&tokio::fs::read_to_string(&meta_path).await.unwrap()).unwrap();
+        meta.overlay_agent_edits = vec![
+            AgentOverride {
+                agent_id: "ceo".into(),
+                role: Some("Chief Vibes".into()),
+                ..Default::default()
+            },
+            AgentOverride {
+                agent_id: "ceo".into(),
+                role: Some("Interim Chief".into()),
+                tools: Some(vec!["docs.read".into()]),
+                ..Default::default()
+            },
+        ];
+        tokio::fs::write(&meta_path, serde_json::to_string(&meta).unwrap())
+            .await
+            .unwrap();
+
+        let (s2, e2, m2, c2) = fs_ports(&home2);
+        let err = import_bundle(&dest, s2.clone(), e2, m2, c2, None)
+            .await
+            .expect_err("import must refuse a bundle with two edits for one teammate");
+        let message = err.to_string();
+        assert!(
+            message.contains("ceo") && message.contains("more than one edit"),
             "the refusal must name the teammate so an operator can fix the bundle: {message}"
         );
 

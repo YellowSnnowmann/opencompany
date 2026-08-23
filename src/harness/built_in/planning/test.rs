@@ -159,6 +159,8 @@ fn manifest() -> CompanyManifest {
 
 fn record() -> CompanyRecord {
     CompanyRecord {
+        overlay_retired_agents: Vec::new(),
+        overlay_agent_edits: Vec::new(),
         id: CompanyId::new("acme"),
         manifest: manifest(),
         ledger: Vec::new(),

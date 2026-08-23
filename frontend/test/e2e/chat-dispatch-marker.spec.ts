@@ -175,7 +175,8 @@ async function raiseAndDispatch(request: APIRequestContext, title: string, chatI
   const id = (await created.json()).id as string;
 
   const dispatched = await request.patch(`${SCOPE}/tasks/${id}`, {
-    data: { column: "in_progress" },
+    // The phase word the host resolves to `in_progress` (issue #1512).
+    data: { column: "working" },
   });
   expect(
     dispatched.ok(),
@@ -247,7 +248,7 @@ test("a card raised on the board leaves no channel marker", async ({ page, reque
   expect(created.ok()).toBeTruthy();
   const id = (await created.json()).id as string;
   expect(
-    (await request.patch(`${SCOPE}/tasks/${id}`, { data: { column: "in_progress" } })).ok(),
+    (await request.patch(`${SCOPE}/tasks/${id}`, { data: { column: "working" } })).ok(),
   ).toBeTruthy();
 
   // Wait for the dispatch to actually *settle*, not merely for time to pass.
@@ -268,9 +269,14 @@ test("a card raised on the board leaves no channel marker", async ({ page, reque
         // `task`, as every other board spec reads it. Deliberately not
         // defaulted: a missing column means the shape moved, and swallowing
         // that would turn a contract change back into a silent timeout.
-        const column = (await res.json()).task?.column as string | undefined;
-        if (column === undefined) throw new Error("task detail carried no column");
-        return column;
+        // The **stage**, not the phase: `working` covers both the dispatched
+        // card and the parked one, so polling the phase could never observe
+        // the settle this waits for (issue #1512).
+        const task = (await res.json()).task as
+          | { column?: string; stage?: string }
+          | undefined;
+        if (task?.column === undefined) throw new Error("task detail carried no column");
+        return task.stage ?? task.column;
       },
       { timeout: 60_000, intervals: [1_000] },
     )

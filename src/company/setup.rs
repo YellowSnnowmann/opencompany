@@ -122,8 +122,20 @@ pub enum AgentFocus {
     Research,
     /// Produces the written work. Writes the workspace; no web.
     Writing,
-    /// Keeps work moving. Same belt as [`Writing`](Self::Writing) today.
+    /// Produces the visual and interface work. Same belt as
+    /// [`Writing`](Self::Writing).
+    Design,
+    /// Runs a recurring process end to end. Same belt as
+    /// [`Writing`](Self::Writing).
     Operations,
+    /// Keeps people and work moving. Same belt as [`Writing`](Self::Writing).
+    Coordination,
+    /// Makes and maintains the product itself. Same belt as
+    /// [`Writing`](Self::Writing) — deliberately **not** `repo` or `shell`,
+    /// which no focus reaches.
+    Build,
+    /// Answers customers. Same belt as [`Writing`](Self::Writing).
+    Support,
     /// Measures and reports. Writes the workspace, and browses to source the
     /// numbers.
     Analysis,
@@ -131,11 +143,15 @@ pub enum AgentFocus {
 
 impl AgentFocus {
     /// Every focus, so a test can quantify over the whole vocabulary rather
-    /// than over the four a reader happened to remember.
-    pub const ALL: [Self; 4] = [
+    /// than over the handful a reader happened to remember.
+    pub const ALL: [Self; 8] = [
         Self::Research,
         Self::Writing,
+        Self::Design,
         Self::Operations,
+        Self::Coordination,
+        Self::Build,
+        Self::Support,
         Self::Analysis,
     ];
 
@@ -144,7 +160,11 @@ impl AgentFocus {
         match self {
             Self::Research => "research",
             Self::Writing => "writing",
+            Self::Design => "design",
             Self::Operations => "operations",
+            Self::Coordination => "coordination",
+            Self::Build => "build",
+            Self::Support => "support",
             Self::Analysis => "analysis",
         }
     }
@@ -159,7 +179,11 @@ impl AgentFocus {
         match value.trim().to_ascii_lowercase().as_str() {
             "research" => Some(Self::Research),
             "writing" => Some(Self::Writing),
+            "design" => Some(Self::Design),
             "operations" => Some(Self::Operations),
+            "coordination" => Some(Self::Coordination),
+            "build" => Some(Self::Build),
+            "support" => Some(Self::Support),
             "analysis" => Some(Self::Analysis),
             _ => None,
         }
@@ -167,17 +191,120 @@ impl AgentFocus {
 
     /// This focus's tool belt.
     ///
-    /// `Writing` and `Operations` return the same list today, and that is not an
-    /// oversight: they differ in mandate and in what the prompt routes to them,
-    /// not in the tools they need. Keeping them distinct is what lets the belts
-    /// diverge later without re-deciding which agents are which.
+    /// Six of the eight return the same list, and that is not an oversight:
+    /// they differ in mandate and in what the prompt routes to them, not in the
+    /// tools they need. Keeping them distinct is what lets the belts diverge
+    /// later without re-deciding which agents are which — and it is what let
+    /// the vocabulary be widened for instruction purposes without moving a
+    /// single teammate's reach.
+    ///
+    /// `Build` sharing the writing belt is a decision, not an omission. The
+    /// obvious reading of "makes the product" is `repo` and `shell`, and no
+    /// focus reaches either: a teammate a stranger's three sentences invented
+    /// does not get a shell on the strength of a word the model chose. A
+    /// company that wants that grants it.
     pub fn tools(self) -> Vec<String> {
         let belt: &[&str] = match self {
             Self::Research => &["workspace.read", "docs.*", "files.*", "web.*"],
-            Self::Writing | Self::Operations => &["workspace.*", "docs.*", "files.*"],
+            Self::Writing
+            | Self::Design
+            | Self::Operations
+            | Self::Coordination
+            | Self::Build
+            | Self::Support => &["workspace.*", "docs.*", "files.*"],
             Self::Analysis => &["workspace.*", "docs.*", "files.*", "web.*"],
         };
         belt.iter().map(|t| (*t).to_string()).collect()
+    }
+
+    /// How a teammate with this focus works — the standing instructions that
+    /// become its `[[agent]].prompt`.
+    ///
+    /// ## Why the host writes these and the model does not
+    ///
+    /// The same argument that keeps `[tools]` out of the model's reach (see the
+    /// type docs): an agent's prompt is the one field that decides how it
+    /// behaves, and letting the setup pass author it would put a stranger's free
+    /// text — read by a model, written into a system prompt — inside the blast
+    /// radius of "what does your company do?". The model names a work *shape*
+    /// from a closed enum; the host owns every word of the standing
+    /// instructions.
+    ///
+    /// Not every word the teammate is told, and the difference is worth being
+    /// exact about: `persona_prompt` already appends the **mandate**, which the
+    /// model wrote. So model text does reach the system prompt today. What it
+    /// reaches under is a 200-character cap and a field whose job is to name
+    /// what the teammate owns — a much smaller surface than a free-form
+    /// instruction block, and one an operator reads on the review screen before
+    /// anything is created.
+    ///
+    /// ## Why they exist at all
+    ///
+    /// [`manifest_from_setup`] left `prompt` unset, so a setup-built teammate's
+    /// entire instruction was what
+    /// [`persona_prompt`](crate::company::prompt::persona_prompt) assembles from
+    /// its role and its one-line mandate — around 150 characters, next to a
+    /// globals teammate carrying 500–600 of standing instruction. The four
+    /// `globals/agents/*.toml` prompts are the register these are written in,
+    /// deliberately without reusing their sentences: a global teammate is on the
+    /// same roster, and two agents given the same instructions are one agent
+    /// twice.
+    ///
+    /// Kept to the *shape* of the work, never the business: the mandate says
+    /// what this teammate owns, and repeating it here would put a second,
+    /// staler copy of the description in the same prompt.
+    pub fn instructions(self) -> &'static str {
+        match self {
+            Self::Research => {
+                "Go and look rather than recalling. Prefer a primary source to somebody's \
+                 summary of one, and say which of the two you actually used. Keep what you found \
+                 apart from what you conclude from it, and mark the second as yours. Hand a \
+                 finding on in a form the next person can act on without repeating your search."
+            }
+            Self::Writing => {
+                "Produce the finished thing, not an outline of it. Match the register this \
+                 company already uses elsewhere instead of inventing a new voice per piece. Put \
+                 the useful part first, so a reader who stops after two lines still has the \
+                 point. Where a sentence needs a fact you do not have, mark it for whoever does \
+                 rather than writing around the hole."
+            }
+            Self::Design => {
+                "Design for the job the screen has to do, not for how it looks on its own. Cover \
+                 the states that actually occur — nothing yet, still loading, far too much, and \
+                 the error — because a flow that only handles the good case is half a flow. Reach \
+                 for an existing pattern before inventing one, and say which you did."
+            }
+            Self::Operations => {
+                "Run the process the same way each time, and notice when it stops behaving. Carry \
+                 a case to its end rather than stopping at the first snag — chase the exception \
+                 yourself. When a run goes wrong, say what it was meant to do, what happened \
+                 instead, and what you changed."
+            }
+            Self::Coordination => {
+                "Hold the shape of the work: who has what, what it waits on, and what is late. \
+                 Settle the small calls yourself and put the large ones in front of whoever owns \
+                 them, with the options already laid out. Chase a thing once, then record the \
+                 answer instead of asking again later."
+            }
+            Self::Build => {
+                "Make the smallest correct version, then say plainly what it does not cover. Try \
+                 your own work before handing it on — the ordinary input, the empty one, and the \
+                 one you expect to break it. Where you touch something you did not write, leave \
+                 it behaving as its callers already expect."
+            }
+            Self::Support => {
+                "Answer the person in front of you first, then deal with the reason they had to \
+                 ask. Say what you know and what you are still checking rather than going quiet. \
+                 Never promise a date or a remedy you cannot deliver — an honest \"not yet\" \
+                 costs less than a commitment that is missed."
+            }
+            Self::Analysis => {
+                "Show the number and where it came from before interpreting it. Say what moved \
+                 and by how much, then what you believe caused it — and keep those two apart, so \
+                 a reader can disagree with the second without losing the first. When the data is \
+                 too thin to carry a conclusion, report the thinness instead of the conclusion."
+            }
+        }
     }
 }
 
@@ -203,6 +330,22 @@ impl AgentFocus {
 /// teammate that cannot browse, not one holding a spend authority.
 pub fn tools_for_focus(focus: Option<AgentFocus>) -> Vec<String> {
     focus.unwrap_or(AgentFocus::Writing).tools()
+}
+
+/// The standing instructions for an optional focus, or `None` when the work
+/// shape is unknown.
+///
+/// **Deliberately not [`tools_for_focus`]'s fallback.** That one substitutes
+/// [`Writing`](AgentFocus::Writing) because a tool belt is a permission
+/// boundary and an unreadable value must never buy more authority than a
+/// readable one — there is a safe direction to fail in. Instructions have no
+/// such direction. Guessing a work shape would put the wrong job's instructions
+/// in a teammate's head, and telling an analyst to "never invent a detail to
+/// make a sentence work" is worse guidance than the role framing it already
+/// has. So an unknown focus keeps exactly today's behaviour: the persona prompt
+/// and its mandate, and nothing invented on top.
+pub fn prompt_for_focus(focus: Option<AgentFocus>) -> Option<String> {
+    focus.map(|f| f.instructions().to_string())
 }
 
 /// Reads a focus off the wire, treating anything unrecognised as absent.
@@ -305,8 +448,8 @@ const ECOMMERCE: RosterTemplate = RosterTemplate {
         TemplateAgent {
             name: "Ops",
             role: "Operations Manager",
-            description: "Keeps the rest of the team moving and unblocks them.",
-            focus: AgentFocus::Operations,
+            description: "Suppliers, stock levels, and what the shop needs to keep selling.",
+            focus: AgentFocus::Coordination,
         },
         TemplateAgent {
             name: "Accounts",
@@ -339,7 +482,7 @@ const CONTENT: RosterTemplate = RosterTemplate {
         TemplateAgent {
             name: "Strategy",
             role: "Content Strategist",
-            description: "Decides what to publish, and when.",
+            description: "Which topics to bet on, and what the week's plan is.",
             focus: AgentFocus::Analysis,
         },
         TemplateAgent {
@@ -351,19 +494,19 @@ const CONTENT: RosterTemplate = RosterTemplate {
         TemplateAgent {
             name: "Editor",
             role: "Editor",
-            description: "Reviews everything before it goes out.",
+            description: "The line edit, the fact-check, and the last read before publishing.",
             focus: AgentFocus::Writing,
         },
         TemplateAgent {
             name: "Social",
             role: "Social Media Manager",
-            description: "Schedules posts and works the comments.",
+            description: "Posting, replies, and the comment threads.",
             focus: AgentFocus::Operations,
         },
         TemplateAgent {
             name: "Analyst",
             role: "Analytics Analyst",
-            description: "Measures what landed and reports back.",
+            description: "Reach, engagement, and which posts earned their slot.",
             focus: AgentFocus::Analysis,
         },
     ],
@@ -388,13 +531,13 @@ const AGENCY: RosterTemplate = RosterTemplate {
             name: "Accounts",
             role: "Account Manager",
             description: "Owns the client relationship and the brief.",
-            focus: AgentFocus::Operations,
+            focus: AgentFocus::Coordination,
         },
         TemplateAgent {
             name: "Creative",
             role: "Creative Director",
-            description: "Holds the concept and the creative bar.",
-            focus: AgentFocus::Writing,
+            description: "Concepts, art direction, and sign-off on what ships.",
+            focus: AgentFocus::Design,
         },
         TemplateAgent {
             name: "Copy",
@@ -405,13 +548,13 @@ const AGENCY: RosterTemplate = RosterTemplate {
         TemplateAgent {
             name: "Media",
             role: "Paid Media Buyer",
-            description: "Plans and runs paid acquisition.",
+            description: "Channel mix, budgets, and bids.",
             focus: AgentFocus::Operations,
         },
         TemplateAgent {
             name: "Analyst",
             role: "Analytics Analyst",
-            description: "Reports performance back to the client.",
+            description: "Campaign performance, spend efficiency, and the client-facing numbers.",
             focus: AgentFocus::Analysis,
         },
     ],
@@ -436,12 +579,12 @@ const CONSULTING: RosterTemplate = RosterTemplate {
             name: "Engagement",
             role: "Engagement Manager",
             description: "Runs the engagement and keeps it on scope.",
-            focus: AgentFocus::Operations,
+            focus: AgentFocus::Coordination,
         },
         TemplateAgent {
             name: "Research",
             role: "Research Analyst",
-            description: "Gathers facts, sources, and context.",
+            description: "Market sizing, comparables, and the data room for the engagement in hand.",
             focus: AgentFocus::Research,
         },
         TemplateAgent {
@@ -453,13 +596,13 @@ const CONSULTING: RosterTemplate = RosterTemplate {
         TemplateAgent {
             name: "Decks",
             role: "Deck Builder",
-            description: "Turns findings into something presentable.",
-            focus: AgentFocus::Writing,
+            description: "Slides, charts, and the story that runs through them.",
+            focus: AgentFocus::Design,
         },
         TemplateAgent {
             name: "Writer",
             role: "Report Writer",
-            description: "Drafts the written deliverable.",
+            description: "The written report — findings, recommendations, appendix.",
             focus: AgentFocus::Writing,
         },
     ],
@@ -485,31 +628,31 @@ const SOFTWARE: RosterTemplate = RosterTemplate {
             name: "Product",
             role: "Product Manager",
             description: "Decides what gets built, and in what order.",
-            focus: AgentFocus::Operations,
+            focus: AgentFocus::Coordination,
         },
         TemplateAgent {
             name: "Engineer",
             role: "Software Engineer",
-            description: "Builds and ships the product.",
-            focus: AgentFocus::Operations,
+            description: "Features, bug fixes, and code review.",
+            focus: AgentFocus::Build,
         },
         TemplateAgent {
             name: "QA",
             role: "QA Engineer",
             description: "Tests changes before they reach anyone.",
-            focus: AgentFocus::Operations,
+            focus: AgentFocus::Build,
         },
         TemplateAgent {
             name: "Design",
             role: "Product Designer",
-            description: "Creates the interface and holds the brand.",
-            focus: AgentFocus::Writing,
+            description: "The product's screens, flows, and the design system they come from.",
+            focus: AgentFocus::Design,
         },
         TemplateAgent {
             name: "Support",
             role: "Support Specialist",
-            description: "Answers customers and closes the loop.",
-            focus: AgentFocus::Operations,
+            description: "Tickets, escalations, and the bugs they turn into.",
+            focus: AgentFocus::Support,
         },
     ],
 };
@@ -526,32 +669,32 @@ const GENERIC: RosterTemplate = RosterTemplate {
         TemplateAgent {
             name: "Ops",
             role: "Operations Lead",
-            description: "Keeps work moving and unblocks the team.",
-            focus: AgentFocus::Operations,
+            description: "Vendors, tools, and the recurring admin nobody else owns.",
+            focus: AgentFocus::Coordination,
         },
         TemplateAgent {
             name: "Research",
             role: "Researcher",
-            description: "Gathers facts, sources, and context.",
+            description: "Background on customers, competitors, and the market this company sells into.",
             focus: AgentFocus::Research,
         },
         TemplateAgent {
             name: "Writer",
             role: "Writer",
-            description: "Drafts copy, docs, and outbound messages.",
+            description: "Site copy, docs, and whatever this company publishes under its own name.",
             focus: AgentFocus::Writing,
         },
         TemplateAgent {
             name: "Analyst",
             role: "Analyst",
-            description: "Measures performance and reports back.",
+            description: "The numbers, what moved them, and the weekly summary.",
             focus: AgentFocus::Analysis,
         },
         TemplateAgent {
             name: "Support",
             role: "Support Specialist",
             description: "Answers customers and closes the loop.",
-            focus: AgentFocus::Operations,
+            focus: AgentFocus::Support,
         },
     ],
 };
@@ -883,6 +1026,12 @@ pub fn manifest_from_setup(
             // media and per-tenant Composio credentials. Intersected with
             // `[tools].allow`, so this can only ever narrow.
             built.tools = tools_for_focus(agent.focus);
+            // Standing instructions for the shape of work this teammate does.
+            // Without them a setup-built teammate carried only its role and its
+            // one-line mandate — around 150 characters of instruction, beside a
+            // globals teammate holding 500–600. The mandate says what it owns;
+            // this says how it works. See `AgentFocus::instructions`.
+            built.prompt = prompt_for_focus(agent.focus);
             built
         })
         .collect();
@@ -1583,6 +1732,207 @@ mod tests {
             assert!(!agent.tools.is_empty(), "{} inherits the lot", agent.id);
         }
         assert_eq!(manifest.validate(), Vec::<String>::new());
+    }
+
+    /// A setup-built teammate carries standing instructions, not only a mandate.
+    ///
+    /// The gap this closes: `manifest_from_setup` left `prompt` unset, so the
+    /// whole of what a teammate was ever told was `persona_prompt`'s role
+    /// framing plus its one-line description — beside a globals teammate
+    /// holding 500–600 characters of standing instruction on the same roster.
+    #[test]
+    fn a_designed_teammate_carries_standing_instructions() {
+        let roster = vec![ProposedAgent {
+            name: "Research".into(),
+            role: "Research Analyst".into(),
+            description: "Finds things out.".into(),
+            focus: Some(AgentFocus::Research),
+        }];
+        let manifest = manifest_from_setup(&answers("a shop", ""), &roster, None);
+        let prompt = manifest.agents[0]
+            .prompt
+            .as_deref()
+            .expect("a focused teammate is instructed");
+        assert_eq!(prompt, AgentFocus::Research.instructions());
+        assert_eq!(manifest.validate(), Vec::<String>::new());
+    }
+
+    /// The asymmetry with [`tools_for_focus`], pinned. A belt substitutes
+    /// because a permission has a safe direction to fail in; instructions have
+    /// none, so an unknown shape keeps exactly the pre-instruction behaviour
+    /// rather than being told the wrong job's rules.
+    #[test]
+    fn an_unreadable_focus_gets_no_invented_instructions() {
+        assert_eq!(prompt_for_focus(None), None);
+        let roster = vec![ProposedAgent {
+            name: "A".into(),
+            role: "Analyst".into(),
+            description: "d".into(),
+            focus: None,
+        }];
+        let manifest = manifest_from_setup(&answers("a shop", ""), &roster, None);
+        assert!(manifest.agents[0].prompt.is_none());
+        // The belt still fails closed on the same input, which is the point of
+        // the contrast.
+        assert!(!manifest.agents[0].tools.is_empty());
+        assert_eq!(manifest.validate(), Vec::<String>::new());
+    }
+
+    /// Widening the vocabulary moved nobody's reach.
+    ///
+    /// The enum does two jobs — it picks a belt and it picks the standing
+    /// instructions — and the second wants a finer grain than the first, which
+    /// is why `operations` was split once it was covering 13 of the 30 curated
+    /// profiles. The split is only defensible if it is instruction-only, so
+    /// that is pinned here rather than asserted in the commit message: every
+    /// shape that exists to say something different about *how* the work is
+    /// done carries the identical belt it had before.
+    #[test]
+    fn the_widened_vocabulary_is_instruction_only() {
+        let writing = AgentFocus::Writing.tools();
+        for shape in [
+            AgentFocus::Design,
+            AgentFocus::Operations,
+            AgentFocus::Coordination,
+            AgentFocus::Build,
+            AgentFocus::Support,
+        ] {
+            assert_eq!(shape.tools(), writing, "{shape:?} moved a belt");
+        }
+        // The two that genuinely differ still do, or the split would have
+        // flattened the distinction it was meant to leave alone.
+        assert_ne!(AgentFocus::Research.tools(), writing);
+        assert_ne!(AgentFocus::Analysis.tools(), writing);
+        // `build` is the one whose name invites a wider belt. It gets neither
+        // `repo` nor `shell`, like every other focus.
+        let build = AgentFocus::Build.tools();
+        for denied in ["repo", "shell", "media", "composio", "search"] {
+            assert!(
+                !build.iter().any(|g| g.starts_with(denied)),
+                "build reaches {denied}"
+            );
+        }
+    }
+
+    /// Every shape round-trips its wire spelling, so a focus added to the enum
+    /// but forgotten in `from_wire` cannot silently become `None` — which would
+    /// cost that teammate its belt narrowing *and* its instructions.
+    #[test]
+    fn every_focus_round_trips_its_wire_spelling() {
+        for focus in AgentFocus::ALL {
+            assert_eq!(
+                AgentFocus::from_wire(focus.as_str()),
+                Some(focus),
+                "{focus:?} does not round-trip"
+            );
+        }
+    }
+
+    /// Eight shapes, eight different sets of instructions. Two teammates given
+    /// the same instructions are one teammate twice — the collision the
+    /// mandates themselves are written to avoid.
+    #[test]
+    fn every_focus_is_instructed_and_no_two_alike() {
+        let all = AgentFocus::ALL;
+        for focus in all {
+            assert!(
+                !focus.instructions().trim().is_empty(),
+                "{focus:?} has no instructions"
+            );
+        }
+        for (i, a) in all.iter().enumerate() {
+            for b in &all[i + 1..] {
+                assert_ne!(
+                    a.instructions(),
+                    b.instructions(),
+                    "{a:?} and {b:?} share instructions"
+                );
+            }
+        }
+    }
+
+    /// And distinct from every globals prompt, because a global teammate sits
+    /// on the same roster. `globals/agents/*.toml` is the register these are
+    /// written in, never the text to copy.
+    ///
+    /// Checked as a shared **run of words** rather than string equality, which
+    /// is the check this needs: the first draft of these four was written by
+    /// reading the globals prompts, and three came back as sentence-for-sentence
+    /// paraphrases — "cut anything that is there only because it was already
+    /// written" beside "cut anything that survives only because it was already
+    /// written". Equality passes that happily. Six words is short enough to
+    /// catch a paraphrase and long enough that shared phrasing like "the next
+    /// person" is not a failure.
+    #[test]
+    fn focus_instructions_do_not_reuse_a_globals_prompt() {
+        const RUN: usize = 6;
+        let runs = |text: &str| -> Vec<String> {
+            let words: Vec<String> = text
+                .split_whitespace()
+                .map(|w| {
+                    w.chars()
+                        .filter(|c| c.is_alphanumeric())
+                        .flat_map(char::to_lowercase)
+                        .collect::<String>()
+                })
+                .filter(|w| !w.is_empty())
+                .collect();
+            words.windows(RUN).map(|w| w.join(" ")).collect()
+        };
+
+        for focus in AgentFocus::ALL {
+            let mine = runs(focus.instructions());
+            for global in crate::globals::agents() {
+                let Some(prompt) = global.prompt.as_deref() else {
+                    continue;
+                };
+                let theirs = runs(prompt);
+                if let Some(shared) = mine.iter().find(|run| theirs.contains(run)) {
+                    panic!(
+                        "{focus:?} reuses the global `{}`'s phrasing: \"{shared}\"",
+                        global.id
+                    );
+                }
+            }
+        }
+    }
+
+    /// The curated fallback is instructed too, for the same reason it is scoped
+    /// too: an operator with no credential must not end up with the *less*
+    /// directed company.
+    #[test]
+    fn the_curated_fallback_is_instructed_too() {
+        let a = answers("I sell homeware online", "");
+        let proposal = template_proposal(&a, FallbackReason::NoModel);
+        let manifest = manifest_from_setup(&a, &proposal.agents, None);
+        for agent in &manifest.agents {
+            assert!(agent.prompt.is_some(), "{} is uninstructed", agent.id);
+        }
+        assert_eq!(manifest.validate(), Vec::<String>::new());
+    }
+
+    /// The payoff, composed: the mandate says what this teammate owns and the
+    /// instructions say how it works, and the agent is told both.
+    #[test]
+    fn the_persona_prompt_carries_the_mandate_and_the_instructions() {
+        let roster = vec![ProposedAgent {
+            name: "Writer".into(),
+            role: "Report Writer".into(),
+            description: "The written report.".into(),
+            focus: Some(AgentFocus::Writing),
+        }];
+        let manifest = manifest_from_setup(&answers("consulting", ""), &roster, None);
+        let persona = crate::company::prompt::persona_prompt("Acme", &manifest.agents[0]);
+        assert!(persona.contains("Report Writer"), "{persona}");
+        assert!(persona.contains("The written report."), "{persona}");
+        // Compared against the instructions themselves rather than a copy of
+        // their text: the first version of this assertion quoted the template
+        // verbatim, the template was reworded, and the test failed for saying
+        // something stale rather than for anything being wrong.
+        assert!(
+            persona.contains(AgentFocus::Writing.instructions()),
+            "{persona}"
+        );
     }
 
     /// Focus survives the round trip through the review screen, which is the

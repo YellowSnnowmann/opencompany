@@ -87,7 +87,9 @@ use crate::Result;
 use crate::error::OpenCompanyError;
 use crate::ports::{CompanyId, ContextStore, FactStore, MemoryStore};
 
-pub use driver::{MemoryDriverConfig, MemoryDriverError, MemoryMode, open_driver};
+pub use driver::{
+    MemoryDriverConfig, MemoryDriverError, MemoryMode, RemoteDeployment, open_driver,
+};
 
 /// A bound memory engine, and the only way to get a memory port out of one.
 ///

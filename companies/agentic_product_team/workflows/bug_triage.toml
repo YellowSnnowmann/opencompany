@@ -1,0 +1,95 @@
+# Workflow graph: bug_triage
+#
+# Referenced by `[workflows].enabled` in ../company.toml. A raw report becomes
+# either a merge into an existing bug or a new, ready row on the queue.
+# Node kinds mirror the tinyflows model.
+
+id = "bug_triage"
+name = "Bug triage"
+description = "A raw report becomes a reproduced, deduplicated, prioritized bug."
+
+[[node]]
+id = "report"
+kind = "trigger"
+name = "Bug reported"
+summary = "A report lands from a customer, from support, or from monitoring."
+
+[[node]]
+id = "reproduce"
+kind = "agent"
+name = "Reproduce it"
+summary = "Establish the steps, the environment, and what actually happens."
+agent = "bug_triager"
+
+[[node]]
+id = "duplicate"
+kind = "condition"
+name = "Already known?"
+summary = "Branch on whether the bug queue already holds this problem."
+[node.config]
+field = "=item.duplicate"
+
+[[node]]
+id = "merge"
+kind = "agent"
+name = "Merge the evidence"
+summary = "Fold the new evidence into the existing row rather than opening a second one."
+agent = "backlog_curator"
+
+[[node]]
+id = "classify"
+kind = "agent"
+name = "Classify it"
+summary = "Set severity and reach separately, name the suspected area, attach the evidence."
+agent = "bug_triager"
+
+[[node]]
+id = "ready"
+kind = "agent"
+name = "Make it ready"
+summary = "Fill in the definition of ready, or record which criterion it fails."
+agent = "backlog_curator"
+
+[[node]]
+id = "queued"
+kind = "output"
+name = "Report to triage"
+summary = "Post the triaged row and anything that needs a human call."
+
+# The triage desk, not roadmap: this pipeline's product is a queue entry, and
+# the people whose next action depends on it are the two who keep the queue.
+# A severity claim that needs arbitration reaches `head_of_product` as a
+# delegation, not as a broadcast.
+[node.destination]
+kind = "channel"
+target = "triage"
+
+[[edge]]
+from = "report"
+to = "reproduce"
+
+[[edge]]
+from = "reproduce"
+to = "duplicate"
+
+[[edge]]
+from = "duplicate"
+to = "merge"
+label = "yes"
+
+[[edge]]
+from = "duplicate"
+to = "classify"
+label = "no"
+
+[[edge]]
+from = "merge"
+to = "queued"
+
+[[edge]]
+from = "classify"
+to = "ready"
+
+[[edge]]
+from = "ready"
+to = "queued"

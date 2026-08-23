@@ -36,7 +36,10 @@ function card(): Task {
   return {
     id: "task-1",
     title: "Triage the release blockers",
-    column: "paused",
+    // Phase, then stage (issue #1512): the board files it under Working and
+    // the card itself says it is paused, which is what puts Resume on it.
+    column: "working",
+    stage: "paused",
     priority: "high",
     assignee: "qa",
     updatedAt: T0,

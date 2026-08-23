@@ -67,9 +67,7 @@ name = "seen"
 
 [[status]]
 name = "diligence"
-
-[[status]]
-name = "committee"
+aliases = ["committee"]
 
 [[status]]
 name = "invested"
@@ -89,7 +87,7 @@ needs_reason = true
 [[section]]
 heading = "Live"
 blurb = "In diligence or at committee. Each should name the single question the investment turns on."
-statuses = ["diligence", "committee"]
+statuses = ["diligence"]
 order = "recent"
 
 [[section]]

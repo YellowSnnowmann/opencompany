@@ -25,6 +25,8 @@ async fn state_at(dir: &std::path::Path) -> AppState {
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            overlay_agent_edits: Vec::new(),
+            overlay_retired_agents: Vec::new(),
             id: id.clone(),
             manifest: manifest.clone(),
             ledger: Vec::new(),

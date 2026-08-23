@@ -2012,10 +2012,13 @@ pub struct ChunkMeta {
     /// (see `server::ops::memory::memory_stats`).
     ///
     /// Chunks are append-only and never rewritten, so this only ever moves for
-    /// a *new* chunk. Backends differ on a re-`put` of an identical body —
-    /// sqlite/mongo dedupe on the content address and keep the first write,
-    /// the fs index appends a second line — so read freshness as the max
-    /// across chunks rather than assuming one row per body.
+    /// a *new* claim: every backend keeps one row per (addr, label) — a
+    /// re-`put` of an identical (body, label) is a no-op everywhere (#1300).
+    /// A *new* label on an existing body stamps per-label on fs/sqlite and
+    /// reports the address's first-write stamp on the single-record backends
+    /// (mongodb, the provider facade, the tinycortex engine) — so read
+    /// freshness as the max across chunks rather than assuming one row per
+    /// body.
     #[serde(default)]
     pub stored_at_millis: u64,
 }
@@ -2631,6 +2634,53 @@ pub struct OverlayAgent {
     pub tools: Vec<String>,
 }
 
+/// An operator's runtime edit of a **manifest-declared** teammate.
+///
+/// The overlay answer to "a company you deployed is still yours to change":
+/// before this, a `[[agent]]` in `company.toml` (and therefore every teammate
+/// from the global baseline, which every company gets) was write-once from the
+/// console — editing its name, role, description or tool scope meant editing
+/// the blueprint and redeploying, which a hosted operator cannot do at all.
+///
+/// Modelled exactly like [`BudgetOverride`]: a layer *on top of* the manifest
+/// row rather than a rewrite of it, so the version-controlled blueprint stays
+/// the record of what the company was launched with and the override records
+/// what an operator has since decided. Read through
+/// [`CompanyRecord::effective_agent`] / [`CompanyRecord::effective_agents`],
+/// never directly, so the roster build and every console surface resolve the
+/// same teammate.
+///
+/// Every field is `None` for "not overridden", so an untouched field keeps
+/// tracking the manifest across a redeploy. The one deliberate collapse is
+/// [`description`](Self::description): an empty string means the operator
+/// cleared it, because the write path already treats a blank description and no
+/// description as the same thing (both frame the persona identically).
+///
+/// **At most one entry per `agent_id`** — mutate through
+/// [`CompanyRecord::upsert_agent_override`] rather than pushing, for the reason
+/// [`CompanyRecord::upsert_budget_override`] gives.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentOverride {
+    /// The manifest teammate this edit applies to.
+    pub agent_id: String,
+    /// A display name for a teammate the manifest names only by role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The teammate's role, when an operator has renamed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// The teammate's description. `Some("")` is the operator clearing it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The teammate's requested tool globs, replacing the manifest's
+    /// `[[agent]].tools` line. An empty list means the company's standard grant
+    /// — the same "empty is not nothing" rule the manifest field carries — and
+    /// is still intersected with `[tools].allow`, so this can only narrow a
+    /// teammate within a grant the company already made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
+}
+
 /// An operator-added desk membership that the version-controlled manifest does
 /// not know about. Persisted as an overlay on the [`CompanyRecord`] and merged
 /// into a desk's effective membership at read/resolve time; the `company.toml`
@@ -2815,6 +2865,35 @@ impl BudgetOverride {
     }
 }
 
+impl AgentOverride {
+    /// The first `agent_id` carried by more than one entry, or `None` when every
+    /// teammate appears at most once.
+    ///
+    /// The counterpart of [`BudgetOverride::duplicate_agent_id`], and it exists
+    /// for the identical reason: [`CompanyRecord::agent_override`] reads the
+    /// *first* match, so a second row for one teammate is not a harmless
+    /// duplicate — it makes the applied name, role, description and tool grant a
+    /// function of serialization order. `upsert_agent_override` is the only
+    /// write path and it replaces in place, so this cannot happen to a record
+    /// this process wrote; a bundle is the one door these arrive through from
+    /// outside, and callers there reject rather than guess. Picking silently
+    /// would restore a name an operator changed, or apply a tool grant they
+    /// narrowed, with nothing to say which row won.
+    ///
+    /// Linear scan: an edit set is one row per edited teammate, so it is bounded
+    /// by roster size.
+    pub fn duplicate_agent_id(entries: &[AgentOverride]) -> Option<&str> {
+        let mut seen: Vec<&str> = Vec::with_capacity(entries.len());
+        for entry in entries {
+            if seen.contains(&entry.agent_id.as_str()) {
+                return Some(&entry.agent_id);
+            }
+            seen.push(&entry.agent_id);
+        }
+        None
+    }
+}
+
 /// An operator-set override of the company's `[policy]` block, persisted on the
 /// [`CompanyRecord`] so a tier change wins over the manifest without rewriting
 /// `company.toml` and without a redeploy (issue #562).
@@ -2937,6 +3016,17 @@ pub struct OverlayBlob {
     /// loads them as empty — which is exactly "the manifest still decides".
     #[serde(default)]
     pub budgets: Vec<BudgetOverride>,
+    /// The operator's edits of manifest-declared teammates. Absent on rows
+    /// written before a blueprint teammate could be edited from the console, so
+    /// `#[serde(default)]` loads them as empty — "the manifest still decides",
+    /// which is exactly how those companies ran.
+    #[serde(default)]
+    pub agent_edits: Vec<AgentOverride>,
+    /// The ids of manifest teammates the operator has removed. Absent on rows
+    /// written before a blueprint teammate could be removed, which
+    /// `#[serde(default)]` loads as empty — "nobody was removed".
+    #[serde(default)]
+    pub retired_agents: Vec<String>,
     /// The operator's `[policy]` override (issue #562). Absent on rows written
     /// before console policy writes existed, and `#[serde(default)]` reads that
     /// absence as `None` — "the manifest's `[policy]` still decides", which is
@@ -2984,6 +3074,8 @@ impl OverlayBlob {
             desks: record.overlay_desks.clone(),
             workflows: record.overlay_workflows.clone(),
             budgets: record.overlay_budgets.clone(),
+            agent_edits: record.overlay_agent_edits.clone(),
+            retired_agents: record.overlay_retired_agents.clone(),
             policy: record.overlay_policy.clone(),
             desk_tools: record.overlay_desk_tools.clone(),
             disabled_workflows: record.disabled_workflows.clone(),
@@ -3011,6 +3103,8 @@ impl OverlayBlob {
                     desks: Vec::new(),
                     workflows: Vec::new(),
                     budgets: Vec::new(),
+                    agent_edits: Vec::new(),
+                    retired_agents: Vec::new(),
                     policy: None,
                     desk_tools: Default::default(),
                     disabled_workflows: Vec::new(),
@@ -3099,6 +3193,36 @@ pub struct CompanyRecord {
     /// check untrusted input with [`Self::duplicate_budget_agent_id`].
     #[serde(default)]
     pub overlay_budgets: Vec<BudgetOverride>,
+    /// Operator edits of **manifest-declared** teammates: the layer that makes a
+    /// deployed company's own roster editable from the console.
+    ///
+    /// Read through [`Self::effective_agent`] / [`Self::effective_agents`],
+    /// never directly, so the harness roster build and the console cannot
+    /// disagree about who a teammate is. Empty means the manifest decides,
+    /// which is byte-for-byte the behaviour of every record written before this
+    /// field existed — the `#[serde(default)]` is a no-op migration.
+    ///
+    /// **At most one entry per `agent_id`**; mutate through
+    /// [`Self::upsert_agent_override`].
+    #[serde(default)]
+    pub overlay_agent_edits: Vec<AgentOverride>,
+    /// Ids of **manifest-declared** teammates the operator has removed from the
+    /// console — the tombstone half of the same layer
+    /// [`Self::overlay_agent_edits`] is the edit half of.
+    ///
+    /// A tombstone rather than a manifest rewrite for the reason every overlay
+    /// here is one: `company.toml` (and the global baseline merged into it) is
+    /// re-read on every rebuild, so a teammate deleted by rewriting the roster
+    /// would simply come back. Read through [`Self::is_retired`] — and, for the
+    /// roster itself, through [`Self::effective_agents`], which filters them out
+    /// so a retired teammate is not built, not dispatchable, not seated on a
+    /// desk and not a delegation target.
+    ///
+    /// An id listed here that names nobody is inert, which is what makes the
+    /// tombstone safe to keep across a redeploy that removes the teammate from
+    /// the blueprint too.
+    #[serde(default)]
+    pub overlay_retired_agents: Vec<String>,
     /// The operator's `[policy]` override, if one is set (issue #562).
     ///
     /// `None` — the manifest's `[policy]` applies, exactly as before this
@@ -3257,6 +3381,12 @@ impl CompanyRecord {
                 members.push(add.agent_id.clone());
             }
         }
+        // A teammate the operator removed keeps its blueprint seat in
+        // `[[group_chat]].members`, so it has to be dropped here rather than at
+        // the source. Otherwise a deleted teammate would still lead a desk, still
+        // receive `delegate_to_desk` hand-offs, and still be named on the org
+        // chart — a delete that removed the card and nothing else.
+        members.retain(|id| !self.is_retired(id));
         // Apply the operator-set ordering as a whole-set permutation. Listed ids
         // sort first in the operator's order; unlisted members keep their base
         // relative order after (stable sort). Stale ids no longer members are
@@ -3360,8 +3490,9 @@ impl CompanyRecord {
     /// operator-overlay teammate. The desk overlay may only add ids that resolve
     /// here.
     pub fn is_roster_agent(&self, agent_id: &str) -> bool {
-        self.manifest.agents.iter().any(|a| a.id == agent_id)
-            || self.overlay_agents.iter().any(|a| a.id == agent_id)
+        !self.is_retired(agent_id)
+            && (self.manifest.agents.iter().any(|a| a.id == agent_id)
+                || self.overlay_agents.iter().any(|a| a.id == agent_id))
     }
 
     /// Mints the roster id for a teammate about to be added under
@@ -3613,6 +3744,127 @@ impl CompanyRecord {
         self.overlay_budgets
             .retain(|held| held.agent_id != entry.agent_id);
         self.overlay_budgets.push(entry);
+    }
+
+    /// The operator's edit of manifest teammate `agent_id`, if one is stored.
+    ///
+    /// Reads the first match, which [`Self::upsert_agent_override`] keeps
+    /// unique. Prefer [`Self::effective_agent`] — this is for the write path and
+    /// for a surface that has to say whether an operator changed anything.
+    pub fn agent_override(&self, agent_id: &str) -> Option<&AgentOverride> {
+        self.overlay_agent_edits
+            .iter()
+            .find(|entry| entry.agent_id == agent_id)
+    }
+
+    /// Stores `entry` as **the** edit for its teammate, replacing any entry
+    /// already held for that `agent_id`, and merging field-wise so a patch that
+    /// touches one field does not drop an earlier edit of another.
+    ///
+    /// The one way a write path should add to [`Self::overlay_agent_edits`], for
+    /// the reason [`Self::upsert_budget_override`] gives: a second row for one
+    /// teammate is not a harmless duplicate, it is a silently unreachable edit.
+    pub fn upsert_agent_override(&mut self, entry: AgentOverride) {
+        if let Some(held) = self
+            .overlay_agent_edits
+            .iter_mut()
+            .find(|held| held.agent_id == entry.agent_id)
+        {
+            if entry.name.is_some() {
+                held.name = entry.name;
+            }
+            if entry.role.is_some() {
+                held.role = entry.role;
+            }
+            if entry.description.is_some() {
+                held.description = entry.description;
+            }
+            if entry.tools.is_some() {
+                held.tools = entry.tools;
+            }
+            return;
+        }
+        self.overlay_agent_edits.push(entry);
+    }
+
+    /// Whether the operator has removed `agent_id` from the roster.
+    ///
+    /// Only a manifest teammate is ever retired this way — an overlay teammate
+    /// is deleted outright, since the record is the only thing that declares it.
+    pub fn is_retired(&self, agent_id: &str) -> bool {
+        self.overlay_retired_agents.iter().any(|id| id == agent_id)
+    }
+
+    /// Records `agent_id` as removed, idempotently.
+    ///
+    /// The one way a write path should add to [`Self::overlay_retired_agents`]:
+    /// a second tombstone for one teammate changes nothing about the roster but
+    /// does move the harness's overlay fingerprint, which would drop every live
+    /// agent session for a delete that had already happened.
+    pub fn retire_agent(&mut self, agent_id: &str) {
+        if !self.is_retired(agent_id) {
+            self.overlay_retired_agents.push(agent_id.to_string());
+        }
+    }
+
+    /// One manifest roster row with the operator's edits applied — who this
+    /// teammate **is**, as opposed to who `company.toml` declared it to be.
+    ///
+    /// Borrowed when nothing is overridden, so the common case allocates
+    /// nothing; owned when an edit applies, because the effective value is a
+    /// field-wise merge of two sources and there is nothing to borrow.
+    pub fn effective_manifest_agent<'a>(
+        &'a self,
+        agent: &'a crate::company::Agent,
+    ) -> std::borrow::Cow<'a, crate::company::Agent> {
+        let Some(entry) = self.agent_override(&agent.id) else {
+            return std::borrow::Cow::Borrowed(agent);
+        };
+        let mut merged = agent.clone();
+        if let Some(name) = entry.name.as_ref() {
+            merged.name = Some(name.clone());
+        }
+        if let Some(role) = entry.role.as_ref() {
+            merged.role = role.clone();
+        }
+        if let Some(description) = entry.description.as_ref() {
+            // An empty stored string is the operator clearing the description —
+            // see [`AgentOverride::description`].
+            merged.description = Some(description.clone()).filter(|text| !text.is_empty());
+        }
+        if let Some(tools) = entry.tools.as_ref() {
+            merged.tools = tools.clone();
+        }
+        std::borrow::Cow::Owned(merged)
+    }
+
+    /// The teammate `agent_id` as it effectively stands, or `None` when no
+    /// manifest row carries that id (an overlay teammate is not one of these —
+    /// it is already stored in the shape an operator edits).
+    pub fn effective_agent(
+        &self,
+        agent_id: &str,
+    ) -> Option<std::borrow::Cow<'_, crate::company::Agent>> {
+        if self.is_retired(agent_id) {
+            return None;
+        }
+        self.manifest
+            .agents
+            .iter()
+            .find(|agent| agent.id == agent_id)
+            .map(|agent| self.effective_manifest_agent(agent))
+    }
+
+    /// The whole manifest roster with every stored edit applied — the list
+    /// shape for callers that render or index the roster rather than looking
+    /// one teammate up.
+    pub fn effective_agents(&self) -> Vec<crate::company::Agent> {
+        self.manifest
+            .agents
+            .iter()
+            .filter(|agent| !self.is_retired(&agent.id))
+            .map(|agent| self.effective_manifest_agent(agent).into_owned())
+            .collect()
     }
 
     /// The `[policy]` actually in force: the operator's override where it sets a
@@ -3875,6 +4127,8 @@ mod test {
             automate: "meta ads, order dispatch".into(),
         };
         let mut record = CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: CompanyId::new("acme"),
             manifest: toml::from_str("[company]\nname = \"Acme\"\n").expect("manifest"),
             ledger: Vec::new(),
@@ -4893,6 +5147,8 @@ mod test {
 
     fn desk_record(toml_src: &str, overlay: Vec<OverlayDeskMember>) -> CompanyRecord {
         CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: CompanyId::new("acme"),
             manifest: toml::from_str(toml_src).expect("parse manifest"),
             ledger: Vec::new(),
@@ -5674,6 +5930,151 @@ mod test {
         record.overlay_policy = Some(policy_entry(Some("full"), Some(vec![])));
         assert_eq!(record.effective_policy().auto_approve_under_usd, Some(2.5));
     }
+
+    /// The roster a company was launched with is still the roster it runs, until
+    /// somebody edits it: with no override stored, every field reads straight off
+    /// the manifest. The regression net that says adding this layer changed
+    /// nothing for a company that never uses it.
+    #[test]
+    fn an_unedited_teammate_reads_straight_off_the_manifest() {
+        let record = desk_record(EDIT_ROSTER, Vec::new());
+        let analyst = record.effective_agent("analyst").expect("on the roster");
+        assert!(matches!(analyst, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(analyst.role, "Analyst");
+        assert_eq!(analyst.description.as_deref(), Some("Weighs evidence."));
+        assert_eq!(analyst.name, None);
+        assert!(record.effective_agent("nobody").is_none());
+    }
+
+    /// An edit wins over the blueprint, field by field — and only field by
+    /// field: what nobody touched keeps tracking `company.toml`, so a redeploy
+    /// that changes it is still felt.
+    #[test]
+    fn an_edit_wins_per_field_and_the_rest_still_tracks_the_manifest() {
+        let mut record = desk_record(EDIT_ROSTER, Vec::new());
+        record.upsert_agent_override(AgentOverride {
+            agent_id: "analyst".to_string(),
+            role: Some("Chief Vibes".to_string()),
+            name: Some("Robin".to_string()),
+            ..Default::default()
+        });
+
+        let analyst = record.effective_agent("analyst").expect("on the roster");
+        assert_eq!(analyst.role, "Chief Vibes");
+        assert_eq!(analyst.name.as_deref(), Some("Robin"));
+        assert_eq!(
+            analyst.description.as_deref(),
+            Some("Weighs evidence."),
+            "an untouched field must still come from the manifest"
+        );
+        assert_eq!(
+            analyst.tools,
+            vec!["workspace.read".to_string()],
+            "and so must an untouched tool line"
+        );
+        // The blueprint itself is never rewritten — that is the whole point of
+        // storing this as an overlay.
+        assert_eq!(record.manifest.agents[0].role, "Analyst");
+    }
+
+    /// A stored empty description is the operator clearing it, not a teammate
+    /// whose instructions are the empty string. Collapsing the two would leave a
+    /// cleared description silently re-inheriting the blueprint's.
+    #[test]
+    fn a_cleared_description_stays_cleared() {
+        let mut record = desk_record(EDIT_ROSTER, Vec::new());
+        record.upsert_agent_override(AgentOverride {
+            agent_id: "analyst".to_string(),
+            description: Some(String::new()),
+            ..Default::default()
+        });
+        assert_eq!(
+            record.effective_agent("analyst").unwrap().description,
+            None,
+            "a cleared description must not fall back to the manifest's"
+        );
+    }
+
+    /// Two patches of different fields are one override, merged — never two
+    /// rows, of which `effective_agent` would read whichever came first.
+    #[test]
+    fn a_second_edit_merges_rather_than_duplicating() {
+        let mut record = desk_record(EDIT_ROSTER, Vec::new());
+        record.upsert_agent_override(AgentOverride {
+            agent_id: "analyst".to_string(),
+            role: Some("Chief Vibes".to_string()),
+            ..Default::default()
+        });
+        record.upsert_agent_override(AgentOverride {
+            agent_id: "analyst".to_string(),
+            tools: Some(vec!["composio".to_string()]),
+            ..Default::default()
+        });
+
+        assert_eq!(record.overlay_agent_edits.len(), 1);
+        let analyst = record.effective_agent("analyst").unwrap();
+        assert_eq!(analyst.role, "Chief Vibes", "the earlier edit survives");
+        assert_eq!(analyst.tools, vec!["composio".to_string()]);
+    }
+
+    /// A removed teammate is off the roster everywhere the roster is read: the
+    /// effective list, the per-id lookup, and the membership predicate the desk
+    /// overlay validates against. Anything that still answered `true` here would
+    /// be a surface on which a deleted teammate is still addressable.
+    #[test]
+    fn a_retired_teammate_is_off_the_roster() {
+        let mut record = desk_record(EDIT_ROSTER, Vec::new());
+        assert!(record.is_roster_agent("analyst"));
+
+        record.retire_agent("analyst");
+        assert!(record.is_retired("analyst"));
+        assert!(record.effective_agent("analyst").is_none());
+        assert!(record.effective_agents().is_empty());
+        assert!(!record.is_roster_agent("analyst"));
+        // The blueprint is untouched — the tombstone is what removes it, which
+        // is the only thing that survives the manifest being re-read on load.
+        assert_eq!(record.manifest.agents[0].id, "analyst");
+    }
+
+    /// Retiring twice is one tombstone. A second entry changes nothing about the
+    /// roster but does move the harness's overlay fingerprint, which would drop
+    /// every live agent session for a delete that had already happened.
+    #[test]
+    fn retiring_a_teammate_twice_records_one_tombstone() {
+        let mut record = desk_record(EDIT_ROSTER, Vec::new());
+        record.retire_agent("analyst");
+        record.retire_agent("analyst");
+        assert_eq!(record.overlay_retired_agents, vec!["analyst".to_string()]);
+    }
+
+    /// A removed teammate loses its blueprint desk seat too. Left in place it
+    /// would still lead the desk, still take `delegate_to_desk` hand-offs and
+    /// still sit on the org chart — a delete that removed the card and nothing
+    /// else.
+    #[test]
+    fn a_retired_teammate_loses_its_desk_seat() {
+        let manifest = "[company]\nname = \"Acme\"\n\
+             [[agent]]\nid = \"analyst\"\nrole = \"Analyst\"\n\
+             [[agent]]\nid = \"writer\"\nrole = \"Writer\"\n\
+             [[group_chat]]\nid = \"studio\"\nname = \"Studio\"\n\
+             members = [\"analyst\", \"writer\"]\n";
+        let mut record = desk_record(manifest, Vec::new());
+        assert_eq!(
+            record.effective_desk_members("studio"),
+            ["analyst", "writer"]
+        );
+
+        record.retire_agent("analyst");
+        assert_eq!(
+            record.effective_desk_members("studio"),
+            ["writer"],
+            "and the desk's lead moves to whoever is actually left"
+        );
+    }
+
+    const EDIT_ROSTER: &str = "[company]\nname = \"Acme\"\n\
+         [[agent]]\nid = \"analyst\"\nrole = \"Analyst\"\n\
+         description = \"Weighs evidence.\"\ntools = [\"workspace.read\"]\n";
 
     /// Issue #343: with no override stored, `effective_budget` is the manifest
     /// value verbatim — the pre-#343 behaviour, and the regression net that says

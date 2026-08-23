@@ -9,8 +9,9 @@
 //!
 //! * #570 made a member folder mean "this teammate produced something", so on a
 //!   pre-#570 tenant the two populations are indistinguishable by eye.
-//! * #552 publishes deliverables into `agents/<agent>/<task-id>/`, so an empty
-//!   folder now reads as "this agent has produced nothing" — a claim, and on
+//! * #552 publishes deliverables into `<agent>/<task-id>/` under a member
+//!   folder — `artifacts/` today, `agents/` when this was written — so an empty
+//!   folder here reads as "this agent has produced nothing" — a claim, and on
 //!   these tenants an unfounded one.
 //! * #607 made the tree searchable with a bounded result set, so a name-matching
 //!   empty folder competes for slots against notes that actually hold something.
@@ -367,7 +368,15 @@ mod tests {
         assert_eq!(swept_names(&removed), vec!["ceo", "cto"]);
         assert_eq!(
             names(&ws, &company).await,
-            vec!["agents", "cmo", "readme.md", "secrets", "task-1"],
+            vec![
+                "agents",
+                "artifacts",
+                "cmo",
+                "readme.md",
+                "readme.md",
+                "secrets",
+                "task-1"
+            ],
             "a folder holding anything at all must survive"
         );
     }
@@ -401,7 +410,14 @@ mod tests {
         assert_eq!(swept_names(&removed), vec!["ceo"]);
         assert_eq!(
             names(&ws, &company).await,
-            vec!["agents", "readme.md", "readme.md", "secrets"]
+            vec![
+                "agents",
+                "artifacts",
+                "readme.md",
+                "readme.md",
+                "readme.md",
+                "secrets"
+            ]
         );
     }
 
@@ -521,10 +537,12 @@ mod tests {
             vec![
                 "agents",
                 "archive",
+                "artifacts",
                 "ceo",
                 "creative-studio",
                 "desks",
                 "drafts",
+                "readme.md",
                 "readme.md",
                 "secrets"
             ],
@@ -621,11 +639,18 @@ mod tests {
 
         assert_eq!(
             names(&ws, &acme).await,
-            vec!["agents", "readme.md", "secrets"]
+            vec!["agents", "artifacts", "readme.md", "readme.md", "secrets"]
         );
         assert_eq!(
             names(&ws, &other).await,
-            vec!["agents", "ceo", "readme.md", "secrets"]
+            vec![
+                "agents",
+                "artifacts",
+                "ceo",
+                "readme.md",
+                "readme.md",
+                "secrets"
+            ]
         );
     }
 

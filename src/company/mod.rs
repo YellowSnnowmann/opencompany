@@ -61,6 +61,11 @@ pub mod mcp_oauth;
 // rules are ordinary text handling with real edge cases, and they are worth
 // testing in the default build rather than only where the agent runtime links.
 pub mod prompt;
+// Rendering that composition back out for a human, from a manifest alone. Same
+// always-compiled argument as `prompt` above, one step further: a debugging
+// surface that only existed in a `--features openhuman` build is one nobody
+// runs, so the default build renders what it can and names the rest.
+pub mod prompt_dump;
 pub mod runtime;
 // First-run company setup (issue: docs/spec/runtime/company-setup.md): the
 // curated starting rosters and the rules a proposed roster obeys. Always

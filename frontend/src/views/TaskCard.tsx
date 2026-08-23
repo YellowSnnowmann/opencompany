@@ -192,8 +192,8 @@ export function TaskItem({
         </div>
       )}
       {task.plan && <PlanBadgeRow plan={task.plan} />}
-      {SHOWS_OUTPUT_LINK.has(task.column) && <OutputLinkRow task={task} />}
-      {task.column === "paused" && (
+      {showsOutputLink(task) && <OutputLinkRow task={task} />}
+      {task.stage === "paused" && (
         <>
           {block && <BlockedRow block={block} now={now} onReview={onReview} />}
           <Button
@@ -300,6 +300,19 @@ function BlockedRow({
  * suggest the work in flight is already finished.
  */
 const SHOWS_OUTPUT_LINK = new Set(["in_review", "done"]);
+
+/**
+ * Whether this card advertises its output.
+ *
+ * Reads the **stage** and falls back to the phase, because since issue #1512 a
+ * card waiting on a verdict is `column: "working", stage: "in_review"` while a
+ * finished one is `column: "done"` with no stage at all. Matching on `column`
+ * alone would put the link on every working card, including the three that
+ * have not produced anything to look at yet.
+ */
+function showsOutputLink(task: Task): boolean {
+  return SHOWS_OUTPUT_LINK.has(task.stage ?? task.column);
+}
 
 /**
  * What a planned card carries, in one line on the board (issue #337).

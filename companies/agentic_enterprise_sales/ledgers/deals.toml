@@ -74,15 +74,11 @@ role = "refs"
 
 [[status]]
 name = "qualifying"
-
-[[status]]
-name = "discovery"
+aliases = ["discovery"]
 
 [[status]]
 name = "proposal"
-
-[[status]]
-name = "negotiation"
+aliases = ["negotiation"]
 
 [[status]]
 name = "won"
@@ -103,21 +99,21 @@ needs_reason = true
 [[section]]
 heading = "Late stage"
 blurb = "Proposal or negotiation. Check the economic buyer — this is where deals with only a champion stall."
-statuses = ["proposal", "negotiation"]
+statuses = ["proposal"]
 order = "recent"
 
 [[section]]
 heading = "Early stage"
 blurb = "Qualifying or in discovery. Each should say what would kill it."
-statuses = ["qualifying", "discovery"]
+statuses = ["qualifying"]
 order = "recent"
 
 [[section]]
 heading = "Closed"
 blurb = """
-Won, lost, or no decision — each with the reason. `no_decision` is a distinct \
-outcome from `lost` and the commonest one in enterprise sales; collapsing the \
-two hides the fact that the competitor was inertia.\
+Won, lost, or no decision — each with the reason. `no_decision` is kept distinct \
+from `lost`, and is the commonest outcome in enterprise sales; collapsing the \
+two would hide the fact that the competitor was inertia.\
 """
 statuses = ["won", "lost", "no_decision"]
 cap = 20

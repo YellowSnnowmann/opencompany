@@ -339,7 +339,12 @@ export function TeamView({
         // No team write plane on this host — drop it from local state only.
         setMembers((ms) => ms.filter((x) => x.id !== member.id));
       } else if (error instanceof ApiError && error.status === 409) {
-        toast.error("This teammate is defined in the company manifest and can't be removed here.");
+        // The only 409 this route still answers: a company must keep at
+        // least one teammate. The host's own message says which teammate and
+        // what to do about it, so it is shown rather than restated.
+        toast.error(
+          error.message || "You can't remove your company's last teammate.",
+        );
       } else {
         toast.error(error instanceof Error ? error.message : "Couldn't remove teammate.");
       }

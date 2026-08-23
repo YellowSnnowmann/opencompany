@@ -69,7 +69,12 @@ import type { ApprovalSummary } from "@/api/types";
 import { CreateTaskDialog } from "@/views/CreateTaskDialog";
 import { LedgerBoard } from "@/views/LedgerBoard";
 import { TaskItem } from "@/views/TaskCard";
-import { BOARD_LEDGER, columnsOf, labelFor } from "@/lib/board-columns";
+import {
+  BOARD_LEDGER,
+  BOARD_WORKING,
+  columnsOf,
+  labelFor,
+} from "@/lib/board-columns";
 import { taskApprovalBlock } from "@/lib/task-approvals";
 import {
   byline,
@@ -534,9 +539,14 @@ export function LedgersView({
     try {
       if (ledger.source === "native") {
         await patchTask(client, company, entry.id, { column: status });
-        if (status === "in_progress") {
+        // `working` is the phase word the host resolves to `in_progress`, which
+        // is what dispatches (issue #1512). The stage the card was in — paused,
+        // or never started — comes off the `Task` record rather than off the
+        // row's status, which is now the phase and therefore says nothing about
+        // which of the two happened.
+        if (status === BOARD_WORKING) {
           toast.success(
-            was === "paused"
+            taskById.get(entry.id)?.stage === "paused"
               ? "Resumed — the assignee is working on it."
               : "Dispatched — the assignee is working on it.",
           );
@@ -559,6 +569,29 @@ export function LedgersView({
       restage(was);
       const label = labelFor(columnsOf(ledger), status);
       toast.error(`Could not move "${entry.title || entry.id}" to ${label}.`, {
+        description:
+          e instanceof Error ? e.message : "the host refused the move",
+      });
+    }
+  };
+
+  /**
+   * Re-dispatch a paused card (issue #1512).
+   *
+   * Not `move`, which is right for a drag and wrong here: a paused card is
+   * already in the `working` phase, so `move` would see the row's status
+   * unchanged and return without doing anything. The gesture is not "put this
+   * in a different column" — it is "run it again", and the write that means
+   * that is the same PATCH a drop into Working sends.
+   */
+  const resume = async (entry: LedgerEntry) => {
+    if (!company || !ledger) return;
+    try {
+      await patchTask(client, company, entry.id, { column: BOARD_WORKING });
+      toast.success("Resumed — the assignee is working on it.");
+      await Promise.all([refreshRead(), refreshTasks()]);
+    } catch (e) {
+      toast.error(`Could not resume "${entry.title || entry.id}".`, {
         description:
           e instanceof Error ? e.message : "the host refused the move",
       });
@@ -927,11 +960,10 @@ export function LedgersView({
                   }
                   approvals={approvals}
                   now={clock}
-                  // Resume is a move, not a second write path: back into In
-                  // progress is what re-dispatches a paused card, and `move`
-                  // above already owns the optimistic write, the revert and the
-                  // words for both outcomes.
-                  onResume={(entry) => void move(entry, "in_progress")}
+                  // Resume has its own write since #1512: a paused card is
+                  // already in the `working` phase, so routing it through
+                  // `move` would be a no-op the operator could not see fail.
+                  onResume={(entry) => void resume(entry)}
                   onReview={onReviewApprovals}
                 />
               ) : (

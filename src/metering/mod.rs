@@ -97,7 +97,13 @@ pub use workflow_build::{record_workflow_build_usage, workflow_build_sample};
 pub fn roster_display_names(agents: &[Agent], overlay: &[OverlayAgent]) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for agent in agents {
-        map.insert(agent.id.clone(), agent.role.clone());
+        // An operator-set name wins over the job title when one exists — a
+        // manifest teammate carries `name` only once somebody has renamed it
+        // from the console.
+        map.insert(
+            agent.id.clone(),
+            agent.name.clone().unwrap_or_else(|| agent.role.clone()),
+        );
     }
     for member in overlay {
         map.insert(member.id.clone(), member.name.clone());

@@ -38,7 +38,11 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useHosts } from "@/connections/HostsContext";
 import type { ConnectorKind, SshTarget } from "@/connections/types";
-import { DEFAULT_REMOTE_PORT, availableConnectors } from "@/connections/types";
+import {
+  CONNECTOR_LABELS,
+  DEFAULT_REMOTE_PORT,
+  availableConnectors,
+} from "@/connections/types";
 
 /**
  * The chooser, and the form for whichever connector is chosen.
@@ -160,14 +164,6 @@ export function AddHostPage() {
 function PanelActions({ children }: { children: React.ReactNode }) {
   return <div className="mt-5 flex items-center justify-end gap-2">{children}</div>;
 }
-
-/** What each connector is called where an operator has to choose between them. */
-const CONNECTOR_LABELS: Record<ConnectorKind, string> = {
-  local: "On this computer",
-  cloud: "TinyHumans Cloud",
-  remote: "Another gateway",
-  ssh: "Over SSH",
-};
 
 /**
  * Which tenant a cloud address names.

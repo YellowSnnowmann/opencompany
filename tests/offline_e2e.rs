@@ -311,8 +311,19 @@ impl Client {
     }
 }
 
-/// Polls `GET /tasks/{id}` until its column is one of `wanted`, or gives up.
-async fn wait_for_column(client: &Client, task_id: &str, wanted: &[&str]) -> String {
+/// Polls `GET /tasks/{id}` until its lifecycle state is one of `wanted`, or
+/// gives up.
+///
+/// The state is the card's **stage** when it has one and its **phase**
+/// otherwise. Since issue #1512 the wire carries both: `column` is one of the
+/// three phases every reader sees (`pending`, `working`, `done`) and `stage` is
+/// the runtime's own word for *which kind of working* — `planning`,
+/// `in_progress`, `paused`, `in_review` — present only while the card is in
+/// the working phase. Reading `column` alone, as this used to, reports every
+/// one of those four as `working`, which is exactly the distinction this test's
+/// central claim turns on: an agent takes a card as far as `in_review` and a
+/// person is what moves it to `done`.
+async fn wait_for_state(client: &Client, task_id: &str, wanted: &[&str]) -> String {
     let deadline = std::time::Instant::now() + Duration::from_secs(120);
     let mut last = String::new();
     while std::time::Instant::now() < deadline {
@@ -320,17 +331,17 @@ async fn wait_for_column(client: &Client, task_id: &str, wanted: &[&str]) -> Str
             .get(&format!("/api/v1/company/tasks/{task_id}"))
             .await;
         if status == 200 {
-            let column = body
-                .get("task")
-                .and_then(|task| task.get("column"))
-                .or_else(|| body.get("column"))
+            let task = body.get("task").unwrap_or(&body);
+            let state = task
+                .get("stage")
                 .and_then(Value::as_str)
+                .or_else(|| task.get("column").and_then(Value::as_str))
                 .unwrap_or_default()
                 .to_string();
-            if wanted.contains(&column.as_str()) {
-                return column;
+            if wanted.contains(&state.as_str()) {
+                return state;
             }
-            last = column;
+            last = state;
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
@@ -389,7 +400,7 @@ async fn a_company_boots_works_a_card_and_reaches_done_with_no_network() {
         .await;
     assert_eq!(status, 200, "dispatch refused: {body}");
 
-    let settled = wait_for_column(&client, &task_id, &["in_review", "done", "paused"]).await;
+    let settled = wait_for_state(&client, &task_id, &["in_review", "done", "paused"]).await;
     assert_eq!(
         settled, "in_review",
         "an agent takes a card as far as In Review and no further"
@@ -406,7 +417,7 @@ async fn a_company_boots_works_a_card_and_reaches_done_with_no_network() {
         status, 200,
         "the operator's approving move was refused: {body}"
     );
-    let finished = wait_for_column(&client, &task_id, &["done"]).await;
+    let finished = wait_for_state(&client, &task_id, &["done"]).await;
     assert_eq!(finished, "done");
 
     // The load-bearing assertion about *offline*: the work above actually went

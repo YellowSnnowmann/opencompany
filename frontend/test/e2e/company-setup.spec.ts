@@ -40,7 +40,7 @@ import { FIRST_RUN_COMPANY } from "./capabilities";
  * ```
  *
  * It was written for a host serving the wrong company. What it actually did,
- * once the global baseline began merging four undeletable teammates into
+ * once the global baseline began merging four teammates of its own into
  * **every** company, was fire on every run — including the right one. So the
  * lane went green while first-run setup could not open anywhere in the shipped
  * product, and nothing said a word. That is `CLAUDE.md`'s "builds, runs and
@@ -78,14 +78,61 @@ function staffed(roster: RosterRow[]): RosterRow[] {
 }
 
 /**
+ * Where one teammate came from: `"manifest"` for a row the company declares in
+ * `company.toml` (the global baseline is merged in as manifest rows too),
+ * `"overlay"` for one somebody added through the console.
+ *
+ * The roster read does not carry it — only the detail read does — and the
+ * distinction is what keeps the guard below honest, so it is worth the extra
+ * request per staffed row.
+ *
+ * It fails **closed**, which is the whole reason it is a separate function. A
+ * manifest teammate is deletable now, so guessing `"overlay"` on a detail read
+ * that failed or answered without a `source` would tombstone a blueprint
+ * teammate on a host this lane was never meant to touch — and `unstaffCompany`
+ * discards DELETE errors, so nothing would say a word. An unreadable source is
+ * not a deletable one: throw, naming the id, and let the run fail on its own
+ * terms.
+ */
+async function sourceOf(request: APIRequestContext, id: string): Promise<string> {
+  const res = await request.get(`${COMPANY_SCOPE}/team/${id}`);
+  expect(res.ok(), `could not read teammate '${id}' to find out where it came from`).toBeTruthy();
+  const source = ((await res.json()) as { source?: string }).source;
+  expect(
+    source,
+    `the host did not say where teammate '${id}' came from, so this helper cannot tell a ` +
+      "blueprint teammate it must leave alone from an operator-added one it may remove",
+  ).toBeDefined();
+  return source as string;
+}
+
+/**
  * Removes every operator-added teammate, so a re-run starts from a first run
- * again. A manifest or baseline teammate 409s and is left alone.
+ * again — and refuses to touch a host that is not this lane's company.
+ *
+ * This used to fire a DELETE at every row and lean on the host to sort them
+ * out: a manifest or baseline teammate answered `409` and was left where it
+ * was, which both unstaffed the company and protected a host serving the wrong
+ * one. Neither holds any more. A manifest teammate is removable now, so the
+ * blanket loop would *wipe* the roster of a host running the rest of the suite;
+ * and the roster's one remaining refusal is its **last** teammate, so the
+ * blanket loop leaves exactly one survivor — the staffed row the guard is
+ * looking for, since the baseline is listed first. That is the leftover
+ * `Accountant` this lane failed on.
+ *
+ * So the sorting happens here instead. Manifest rows are identified and left
+ * strictly alone, which keeps the wrong-host assertion below meaningful (#1404)
+ * rather than something this helper has already deleted its way past; only the
+ * rows the host calls `"overlay"` are removed, and because the baseline stays
+ * the last-teammate refusal is never reached and every delete lands.
  */
 async function unstaffCompany(request: APIRequestContext) {
-  for (const member of await hostRoster(request)) {
-    if (member.id) {
-      await request.delete(`${COMPANY_SCOPE}/team/${member.id}`).catch(() => undefined);
-    }
+  for (const member of staffed(await hostRoster(request))) {
+    if (!member.id) continue;
+    // Deleted only on an explicit `"overlay"`. Anything else — a blueprint row,
+    // or a source this spec does not know — is left where it is.
+    if ((await sourceOf(request, member.id)) !== "overlay") continue;
+    await request.delete(`${COMPANY_SCOPE}/team/${member.id}`).catch(() => undefined);
   }
 }
 
@@ -98,9 +145,10 @@ async function answer(page: Page, field: string, text: string) {
 
 test.beforeEach(async ({ request }) => {
   await unstaffCompany(request);
-  // Anyone still here after unstaffing is declared in the manifest and cannot be
-  // deleted, so setup can never open on this host. Fail now, naming the command
-  // that fixes it — a skip here is what made this whole spec vacuous (#1404).
+  // Anyone still here after unstaffing is declared in the manifest, which
+  // `unstaffCompany` deliberately does not remove, so setup can never open on
+  // this host. Fail now, naming the command that fixes it — a skip here is what
+  // made this whole spec vacuous (#1404).
   const left = staffed(await hostRoster(request));
   expect(
     left.map((member) => member.role),

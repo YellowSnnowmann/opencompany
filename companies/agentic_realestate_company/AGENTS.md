@@ -29,6 +29,17 @@ ledgers below exist for exactly those two.
 Humans keep **purchase approvals**; everything up to the offer is the roster's
 to run.
 
+## Where the role rules live
+
+Each teammate's `.toml` carries wiring only — tier, ledger grants, routed
+context, delegation. The working rules live in `agents/prompts/<id>.md`, named by
+that file's `prompt_files` entry and loaded into the prompt as **Your brief**
+(see `docs/spec/runtime/agents.md`). Edit the brief to change how a role works;
+edit the `.toml` to change what it may touch.
+
+Print what any teammate's prompt assembles into with
+`./scripts/dump-prompt.sh --company companies/<name> --agent <id>`.
+
 ## The desk
 
 One: **Investment committee**, where sourcing, underwriting and rehab scope meet

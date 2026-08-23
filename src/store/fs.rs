@@ -7,7 +7,7 @@
 //! Those locks live in one process-wide registry (`path_lock`) rather than on
 //! each store, so two instances over one bundle actually meet (issue #388).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -733,6 +733,18 @@ struct Meta {
     /// `#[serde(default)]` keeps those loading with the manifest in charge.
     #[serde(default)]
     overlay_budgets: Vec<crate::ports::types::BudgetOverride>,
+    /// The operator's edits of manifest-declared teammates. Absent on meta files
+    /// written before the console could edit a blueprint teammate, and
+    /// `#[serde(default)]` reads that absence as "nothing is overridden" —
+    /// which leaves the manifest in charge, exactly as those companies ran.
+    #[serde(default)]
+    overlay_agent_edits: Vec<crate::ports::types::AgentOverride>,
+    /// The ids of manifest teammates the operator has removed. Absent on meta
+    /// files written before a blueprint teammate could be removed, which
+    /// `#[serde(default)]` reads as "nobody was removed" — exactly how those
+    /// companies ran.
+    #[serde(default)]
+    overlay_retired_agents: Vec<String>,
     /// The operator's `[policy]` override (issue #562). Absent on meta files
     /// written before the console could write a tier, so `#[serde(default)]`
     /// keeps those loading with the manifest's `[policy]` in charge.
@@ -776,6 +788,8 @@ impl Default for Meta {
             overlay_desks: Vec::new(),
             overlay_workflows: Vec::new(),
             overlay_budgets: Vec::new(),
+            overlay_agent_edits: Vec::new(),
+            overlay_retired_agents: Vec::new(),
             overlay_policy: None,
             overlay_desk_tools: Default::default(),
             disabled_workflows: Vec::new(),
@@ -865,6 +879,8 @@ impl CompanyStore for FsCompanyStore {
         }
 
         Ok(Some(CompanyRecord {
+            overlay_agent_edits: meta.overlay_agent_edits,
+            overlay_retired_agents: meta.overlay_retired_agents,
             id: id.clone(),
             manifest,
             ledger,
@@ -899,6 +915,8 @@ impl CompanyStore for FsCompanyStore {
             overlay_desks: record.overlay_desks.clone(),
             overlay_workflows: record.overlay_workflows.clone(),
             overlay_budgets: record.overlay_budgets.clone(),
+            overlay_agent_edits: record.overlay_agent_edits.clone(),
+            overlay_retired_agents: record.overlay_retired_agents.clone(),
             overlay_policy: record.overlay_policy.clone(),
             overlay_desk_tools: record.overlay_desk_tools.clone(),
             disabled_workflows: record.disabled_workflows.clone(),
@@ -1275,6 +1293,25 @@ impl FsContextStore {
     }
 }
 
+/// Removes the unreferenced blob for `addr`, best-effort: the index rows are
+/// already gone, so a blob that will not delete is orphaned and invisible
+/// (list and search are index-driven) rather than turned into an error that
+/// would tell the caller nothing was deleted after the index half already was.
+async fn reap_blob(bundle: &Bundle, addr: &str) {
+    let blob_path = bundle.context_blob(addr);
+    match tokio::fs::remove_file(&blob_path).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => tracing::warn!(
+            addr = %addr,
+            path = %blob_path.display(),
+            error = %e,
+            "context index rows removed but the blob would not delete; \
+             leaving an orphaned, unreferenced blob"
+        ),
+    }
+}
+
 #[async_trait]
 impl ContextStore for FsContextStore {
     async fn put(&self, id: &CompanyId, chunk: ContextChunk) -> Result<ChunkAddr> {
@@ -1297,6 +1334,13 @@ impl ContextStore for FsContextStore {
         // rename publish guarantees the reader full old bytes or full new
         // bytes, never a truncated file.
         write_atomic(&blob_path, &chunk.body).await?;
+        // A plain append, deliberately: the (addr, label) set semantics #1300
+        // pins are applied when the index is READ (see `list`), not by
+        // checking membership here. Checking here would read and parse the
+        // whole index on every write — and the ingest path writes one chunk
+        // per document fragment, so a single folder drop would turn into a
+        // quadratic scan. Appending keeps a write O(1), as it has always
+        // been; a duplicate line costs one row and reads back as one claim.
         let entry = IndexEntry {
             addr: addr.clone(),
             label: chunk.label,
@@ -1309,16 +1353,29 @@ impl ContextStore for FsContextStore {
 
     async fn list(&self, id: &CompanyId, prefix: &str) -> Result<Vec<ChunkMeta>> {
         let index = read_jsonl::<IndexEntry>(&self.bundle(id).context_index_jsonl()).await?;
-        Ok(index
-            .into_iter()
-            .filter(|e| e.label.starts_with(prefix))
-            .map(|e| ChunkMeta {
-                addr: ChunkAddr::new(e.addr),
-                label: e.label,
-                len: e.len,
-                stored_at_millis: e.stored_at_millis,
-            })
-            .collect())
+        // One claim per (addr, label) — the set semantics #1300 pins on every
+        // backend — applied here rather than in `put`, which stays an O(1)
+        // append (see its comment). The FIRST row for a pair wins, so the
+        // stamp reported is the first write's, matching the other backends'
+        // first-write-wins; later duplicate rows are a re-`put` of content
+        // already claimed under that label and carry nothing new.
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        let mut out = Vec::new();
+        for entry in index {
+            if !entry.label.starts_with(prefix) {
+                continue;
+            }
+            if !seen.insert((entry.addr.clone(), entry.label.clone())) {
+                continue;
+            }
+            out.push(ChunkMeta {
+                addr: ChunkAddr::new(entry.addr),
+                label: entry.label,
+                len: entry.len,
+                stored_at_millis: entry.stored_at_millis,
+            });
+        }
+        Ok(out)
     }
 
     async fn peek(
@@ -1358,7 +1415,7 @@ impl ContextStore for FsContextStore {
         }
         crate::store::fs_ops::rewrite_jsonl(&index_path, &kept).await?;
         // The blob is shared by every index entry bearing this address (put
-        // appends an entry per write, all pointing at one content-addressed
+        // appends an entry per label, all pointing at one content-addressed
         // file). The filter above removed all of them, so the blob is
         // unreferenced and goes too — best-effort, because the index is the
         // source of truth and its rows are already gone: an orphaned blob is
@@ -1368,17 +1425,35 @@ impl ContextStore for FsContextStore {
         // already held the body — nothing new is reachable. An `Err` here
         // would instead tell the caller nothing was deleted after the index
         // half already was.
-        let blob_path = bundle.context_blob(addr.as_ref());
-        match tokio::fs::remove_file(&blob_path).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => tracing::warn!(
-                addr = %addr,
-                path = %blob_path.display(),
-                error = %e,
-                "context index rows removed but the blob would not delete; \
-                 leaving an orphaned, unreferenced blob"
-            ),
+        reap_blob(&bundle, addr.as_ref()).await;
+        Ok(true)
+    }
+
+    async fn delete_label(&self, id: &CompanyId, addr: &ChunkAddr, label: &str) -> Result<bool> {
+        let bundle = self.bundle(id);
+        let index_path = bundle.context_index_jsonl();
+        let lock = path_lock(&index_path);
+        let _guard = lock.lock().await;
+        // Strict read, same rule as `delete`: this is a read-modify-write, and
+        // a damaged line must abort the rewrite, not be laundered out.
+        let index = read_jsonl::<IndexEntry>(&index_path).await?;
+        let before = index.len();
+        let kept: Vec<IndexEntry> = index
+            .into_iter()
+            .filter(|e| !(e.addr == addr.as_ref() && e.label == label))
+            .collect();
+        if kept.len() == before {
+            return Ok(false);
+        }
+        crate::store::fs_ops::rewrite_jsonl(&index_path, &kept).await?;
+        // Label-scoped (#1300): only this label's row went. The blob is reaped
+        // exactly when no row references the address any more — decided under
+        // the same lock every put and delete holds, so a concurrent put of
+        // identical content under another label either lands its row before
+        // this read (and keeps the blob) or after this call completes (and
+        // rewrites the blob it needs). Best-effort, per `delete`'s reasoning.
+        if !kept.iter().any(|e| e.addr == addr.as_ref()) {
+            reap_blob(&bundle, addr.as_ref()).await;
         }
         Ok(true)
     }
@@ -1386,10 +1461,19 @@ impl ContextStore for FsContextStore {
     async fn search(&self, id: &CompanyId, query: &str, limit: usize) -> Result<Vec<ChunkHit>> {
         let bundle = self.bundle(id);
         let index = read_jsonl::<IndexEntry>(&bundle.context_index_jsonl()).await?;
+        // One hit per ADDRESS, not per index row: a hit carries no label, and
+        // one address can be claimed by several labels (#1300) — or repeated
+        // by a duplicate row, since `put` appends without reading. Without
+        // this, recall would report the same body once per claim, where every
+        // other backend (which scans bodies, not claims) reports it once.
+        let mut seen: HashSet<String> = HashSet::new();
         let mut hits = Vec::new();
         for entry in index {
             if hits.len() >= limit {
                 break;
+            }
+            if !seen.insert(entry.addr.clone()) {
+                continue;
             }
             let blob_path = bundle.context_blob(&entry.addr);
             let Ok(body) = tokio::fs::read_to_string(&blob_path).await else {
@@ -2198,6 +2282,72 @@ mod test {
         .await;
     }
 
+    #[tokio::test]
+    async fn conformance_context_identical_body_two_labels() {
+        let root_dir = tmp_root();
+        let root = root_dir.path().to_path_buf();
+        conformance::assert_identical_body_two_labels(Arc::new(FsContextStore::new(&root))).await;
+    }
+
+    #[tokio::test]
+    async fn conformance_context_delete_label_scoped() {
+        let root_dir = tmp_root();
+        let root = root_dir.path().to_path_buf();
+        conformance::assert_delete_label_scoped(Arc::new(FsContextStore::new(&root))).await;
+    }
+
+    #[tokio::test]
+    async fn conformance_context_delete_label_survives_a_concurrent_identical_put() {
+        let root_dir = tmp_root();
+        let root = root_dir.path().to_path_buf();
+        conformance::assert_delete_label_survives_a_concurrent_identical_put(Arc::new(
+            FsContextStore::new(&root),
+        ))
+        .await;
+    }
+
+    /// This backend keeps `put` an O(1) append and applies the (addr, label)
+    /// set semantics on the read side (#1300), so the two halves need pinning
+    /// together: a duplicate row on disk, exactly one claim through `list`,
+    /// one hit through `search`, and a `delete_label` that takes every
+    /// duplicate row with it — a survivor would resurrect a forgotten claim.
+    #[tokio::test]
+    async fn a_duplicate_index_row_reads_back_as_one_claim_and_deletes_whole() {
+        let root_dir = tmp_root();
+        let root = root_dir.path().to_path_buf();
+        let context = FsContextStore::new(&root);
+        let id = CompanyId::new("acme");
+        let chunk = || ContextChunk {
+            label: "notes/one".to_string(),
+            body: "remembered twice".to_string(),
+        };
+
+        let addr = context.put(&id, chunk()).await.unwrap();
+        assert_eq!(context.put(&id, chunk()).await.unwrap(), addr);
+
+        // The append really did write a second row — this is the cost the
+        // read-side dedupe exists to absorb, so assert it rather than assume.
+        let index_path = Bundle::new(root.clone(), &id).context_index_jsonl();
+        let rows = read_jsonl::<IndexEntry>(&index_path).await.unwrap();
+        assert_eq!(rows.len(), 2, "put appends without reading the index");
+
+        let metas = context.list(&id, "").await.unwrap();
+        assert_eq!(metas.len(), 1, "the duplicate row is one claim: {metas:?}");
+        assert_eq!(metas[0].stored_at_millis, rows[0].stored_at_millis);
+        assert_eq!(
+            context.search(&id, "remembered", 10).await.unwrap().len(),
+            1,
+            "recall reports the body once, not once per row"
+        );
+
+        assert!(context.delete_label(&id, &addr, "notes/one").await.unwrap());
+        assert!(context.list(&id, "").await.unwrap().is_empty());
+        assert!(
+            context.peek(&id, &addr, None).await.is_err(),
+            "every duplicate row went, so the body is unreferenced and reaped"
+        );
+    }
+
     /// The deterministic half of the atomicity guarantee: a re-`put` publishes
     /// a *new* file over the old name, so the blob's inode changes. A plain
     /// truncating write — the shape that let a reader see a prefix — keeps the
@@ -2446,6 +2596,8 @@ mod test {
         let store = FsCompanyStore::new(&root);
         let id = CompanyId::new("acme");
         let record = CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: sample_manifest(),
             ledger: Vec::new(),
@@ -2504,6 +2656,8 @@ mod test {
         let id = CompanyId::new("acme");
         store
             .save(&CompanyRecord {
+                overlay_retired_agents: Vec::new(),
+                overlay_agent_edits: Vec::new(),
                 id: id.clone(),
                 manifest: sample_manifest(),
                 ledger: Vec::new(),
@@ -2563,6 +2717,8 @@ mod test {
         let id = CompanyId::new("acme");
         store
             .save(&CompanyRecord {
+                overlay_retired_agents: Vec::new(),
+                overlay_agent_edits: Vec::new(),
                 id: id.clone(),
                 manifest: sample_manifest(),
                 ledger: Vec::new(),

@@ -43,6 +43,7 @@ const TREE: FsNode[] = [
     kind: "folder",
     parentId: "agents",
   }),
+  node({ id: "artifacts", name: "Artifacts", kind: "folder" }),
   node({ id: "derived", name: "derived", kind: "folder" }),
   node({ id: "d-child", name: "Goals", kind: "folder", parentId: "derived" }),
   node({ id: "standards", name: "Standards", kind: "folder" }),
@@ -92,6 +93,7 @@ describe("sortedFolders", () => {
     expect(order).toEqual([
       "agents",
       "roster",
+      "artifacts",
       "product",
       "p-drafts",
       "standards",

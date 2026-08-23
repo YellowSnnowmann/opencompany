@@ -28,20 +28,30 @@ pub trait TaskStore: Send + Sync {
 `TaskRecord` carries `{id, title, note, column, priority, assignee,
 updated_at}`.
 
-`column` ∈ `todo|planning|in_progress|paused|in_review|done` — the
-`BOARD_COLUMNS` constant in `src/ports/tasks.rs`, which is the one authority the
-REST write boundary, the dispatch edge and the harness lifecycle seam all read,
-and which the console mirrors in the same order. (`paused` arrived with
+`TaskRecord::column` — the **stage** — ∈
+`todo|planning|in_progress|paused|in_review|done`, the `BOARD_COLUMNS` constant
+in `src/ports/tasks.rs`, which is the one authority the REST write boundary, the
+dispatch edge and the harness lifecycle seam all read. (`paused` arrived with
 steering, issue #111; this line used to omit it.) Entering `in_progress` is what
 dispatches the card; nothing dispatches out of `done`.
 
-`todo` is the one **not started** column, and the board's one manual-entry
-column: the console's `+` button lives there alone and `POST …/tasks` defaults
-to it (issue #206), so an operator cannot create a card straight into
-`in_progress` or a terminal column. The transcript's "Add to board" action
-(issue #246) relies on exactly that default: it omits `column` so the *server*
-decides where a chat-created card lands, which is what keeps the human drag into
-`in_progress` the only thing that spends an agent turn.
+**The wire says less than the record does (issue #1512).** `TaskCard.column` on
+the REST DTO is the stage's *phase* — `pending`, `working` or `done` — and the
+stage rides beside it as `TaskCard.stage`, omitted on a pending or done card.
+That is what the console renders as columns and what an agent reads in
+`derived/tasks.md`: three states, because four of the six meant the same thing
+to everyone who was not the runtime. A write takes a phase and the boundary
+resolves it to that phase's entry stage (`working` → `in_progress`, which
+dispatches); a stage word is still accepted, but the refusal names only the
+three. See `docs/spec/runtime/ledgers.md`.
+
+`todo` is the one **not started** stage, and the board's one manual-entry
+column: the console's `+` button lives on Pending alone and `POST …/tasks`
+defaults to it (issue #206), so an operator cannot create a card straight into
+Working or a terminal column. The transcript's "Add to board" action (issue
+#246) relies on exactly that default: it omits `column` so the *server* decides
+where a chat-created card lands, which is what keeps the human drop into Working
+the only thing that spends an agent turn.
 
 **The collapsed `backlog` pool (issue #301, epic #183 §3).** `todo` used to be
 one of two not-started columns: `backlog` was the unqueued pool *and* where the
@@ -52,7 +62,7 @@ the distinction is **provenance, not position**, and every return path already
 stamps its reason onto the card's note (`review_note`'s "reviewed: needs another
 pass — …", the dispatch error text, `[operator] cancelled while in flight`),
 which the board renders on the card. So a task that cannot proceed goes **back
-to To-do with the reason on the card**, never into a stuck state of its own.
+to Pending with the reason on the card**, never into a stuck state of its own.
 
 Nothing about that is silent for stored data: `backlog` is no longer a board
 column, so a card persisted under it would fail `is_board_column` and vanish
@@ -204,9 +214,9 @@ at boot. Tenancy in the shared bucket is a filter on `metadata.company_id` **and
 `metadata.node_id` for every read, delete and sweep.
 
 **Folder claims (#759).** `adopt_or_create_folder` is the only way the publish
-walk and the `agents/` scaffold create a folder. It is a store primitive rather
+walk and the system-root scaffold create a folder. It is a store primitive rather
 than a read plus a `create` because the read is honest about one instant and the
-create acts on it later: two publishes needing `agents/<agent>/<task>/` both saw
+create acts on it later: two publishes needing `artifacts/<agent>/<task>/` both saw
 it free, and sqlite and mongodb both created — leaving two folders under one
 name. That state does not decay. Path resolution answers a duplicated name with
 `Conflict`, so a race lasting microseconds refuses every later publish beneath
@@ -331,21 +341,25 @@ round-trip, the write stamp, and the rename non-stamp across all three
 backends.
 
 **System workspace roots.** `company::workspace_scaffold` owns `agents/`,
-`desks/`, and the operator-only `secrets/` subtree on different schedules:
+`artifacts/`, `desks/`, and the operator-only `secrets/` subtree on different
+schedules:
 
 * `ensure_workspace_scaffold` adopt-or-creates the roots listed in
-  `SYSTEM_ROOTS` — `Agents` and lowercase `secrets` — from one seam:
+  `SYSTEM_ROOTS` — `agents`, `artifacts` and `secrets` — from one seam:
   `RuntimeBuilder::build` (boot). It takes no roster (a company with no agents
   still gets them), so an existing company picks them up on its next boot.
-  `agents/` stays empty; `secrets/README.md` explains that every agent workspace
-  tool omits or refuses this subtree while operator APIs retain normal access.
-  Idempotent.
-* `ensure_agent_folder` / `ensure_desk_folder` adopt-or-create
-  `agents/<agent-id>/` and `desks/<desk-id>/` **on demand**, returning the node
-  id, called when that agent or desk first produces something. A folder means
+  `agents/` stays empty; `secrets/readme.md` explains that every agent workspace
+  tool omits or refuses this subtree while operator APIs retain normal access,
+  and `artifacts/readme.md` explains that an empty deliverable list is a real
+  outcome rather than a gap. Idempotent.
+* `ensure_agent_folder` / `ensure_artifact_folder` / `ensure_desk_folder`
+  adopt-or-create `agents/<agent-id>/`, `artifacts/<agent-id>/` and
+  `desks/<desk-id>/` **on demand**, returning the node id, called when that agent
+  or desk first produces something. A folder means
   "this member produced something"; an eager folder per roster member would be
   a claim the tree cannot back. `workspace_create` calls the agent minter when
-  an agent writes into its own home; #552's publish path is the next caller.
+  an agent writes into its own home; #552's publish path calls the artifact
+  minter.
 * **`desks/` is not scaffolded** (#645). Both minters have always created an
   absent root on their way down, and `ensure_desk_folder` has no callers yet, so
   scaffolding the root gave every company a permanently empty folder

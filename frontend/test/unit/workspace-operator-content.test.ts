@@ -35,6 +35,13 @@ const SCAFFOLD: FsNode[] = [
   node({ id: "agents", name: "Agents", kind: "folder" }),
   node({ id: "secrets", name: "secrets", kind: "folder" }),
   node({ id: "readme", name: "README.md", kind: "file", parentId: "secrets" }),
+  node({ id: "artifacts", name: "Artifacts", kind: "folder" }),
+  node({
+    id: "artifacts-readme",
+    name: "README.md",
+    kind: "file",
+    parentId: "artifacts",
+  }),
 ];
 
 describe("hasOperatorContent", () => {
@@ -84,6 +91,15 @@ describe("hasOperatorContent", () => {
     ).toBe(true);
   });
 
+  it("counts a note a person files inside Artifacts", () => {
+    expect(
+      hasOperatorContent([
+        ...SCAFFOLD,
+        node({ id: "n1", name: "Plan.md", kind: "file", parentId: "artifacts" }),
+      ]),
+    ).toBe(true);
+  });
+
   it("counts a folder an operator named the same as a system root elsewhere in the tree", () => {
     // The scaffold set is root-scoped; `Product/secrets/` is somebody's folder.
     expect(
@@ -101,7 +117,7 @@ describe("hasOperatorContent", () => {
   });
 
   it("mirrors the host's SYSTEM_ROOTS by name", () => {
-    expect([...SYSTEM_ROOTS]).toEqual(["agents", "secrets"]);
+    expect([...SYSTEM_ROOTS]).toEqual(["agents", "artifacts", "secrets"]);
   });
 });
 

@@ -37,22 +37,30 @@
 //! meant deleting it and starting over.
 //!
 //! A **manifest** teammate is declared in the version-controlled `company.toml`
-//! and is not editable from a browser. This is the same line
-//! [`MANIFEST_TEAMMATE_DELETE`](super::language::MANIFEST_TEAMMATE_DELETE)
-//! already draws for removal, and it is drawn in the same place for the same
-//! reason: the manifest is the company's blueprint, the overlay model exists so
-//! the runtime never rewrites it, and a console PATCH that edited it would make
-//! the deployed company silently diverge from the file in git.
+//! — including every teammate from the global baseline, which is merged into
+//! *every* company's roster. It used to be uneditable here, which meant the
+//! agents a company actually ships with were the ones an operator could never
+//! change: a hosted tenant has no `company.toml` to edit and nothing to
+//! redeploy, so "edit it in the blueprint" was advice with no action behind it.
 //!
-//! The one field that *is* editable on a manifest teammate — its daily budget —
-//! is editable precisely because #343 modelled it as a
-//! [`BudgetOverride`](crate::ports::types::BudgetOverride) layered on top rather
-//! than as a rewrite. It keeps its own route and is untouched here.
+//! It is editable now, through an
+//! [`AgentOverride`](crate::ports::types::AgentOverride) layered on the record —
+//! the shape #343 already used for the one field that was always editable, the
+//! daily budget. Nothing rewrites `company.toml`: the blueprint keeps stating
+//! what the company launched with, the overlay states what the operator has
+//! since decided, and [`CompanyRecord::effective_agent`] is the single place the
+//! two are resolved, so the console card and the built roster cannot disagree.
+//! The merge is per field, so a field nobody edited still tracks the blueprint
+//! across a redeploy.
 //!
-//! `tier` and `tools` are read-only for **both** kinds. There is no override
-//! layer for either, and inventing one is a policy decision (an operator
-//! raising an agent's own tool grants from a browser is a privilege question,
-//! not a form field), not something to smuggle into a detail view.
+//! Removal works the same way — `DELETE …/team/{agent_id}` in
+//! [`super::team`] records a tombstone rather than rewriting the blueprint —
+//! and its only refusal is the company's last teammate.
+//!
+//! `tier` is read-only for both kinds: it has no override layer, and inventing
+//! one is a policy decision rather than something to smuggle into a detail
+//! view. `tools` is editable but admin-only, and can only ever *narrow* a
+//! teammate within the company grant — see [`edit_agent`].
 //!
 //! The server states the rule rather than leaving the console to re-derive it:
 //! every detail response carries an [`editable`](AgentDetailDto::editable) list,
@@ -75,7 +83,6 @@ use crate::ports::types::CompanyRecord;
 use crate::runtime::builder::agent_scoped_grants;
 use crate::server::error::ApiError;
 use crate::server::ops::ScopedCompany;
-use crate::server::ops::language;
 use crate::server::ops::team::{AgentPath, daily_spend_samples, double_option};
 use crate::server::users::admin::require_admin;
 
@@ -100,9 +107,9 @@ pub(super) enum AgentSource {
     Overlay,
 }
 
-/// The fields a `PATCH` accepts for an overlay teammate. Sent to the console so
-/// it renders the same rule the host enforces.
-const OVERLAY_EDITABLE: [&str; 4] = ["name", "role", "description", "tools"];
+/// The fields a `PATCH` accepts for a teammate — manifest-declared or overlay
+/// alike. Sent to the console so it renders the same rule the host enforces.
+const EDITABLE_FIELDS: [&str; 4] = ["name", "role", "description", "tools"];
 
 /// The subset a **non-admin** member may `PATCH` (issue #619).
 ///
@@ -112,7 +119,7 @@ const OVERLAY_EDITABLE: [&str; 4] = ["name", "role", "description", "tools"];
 /// gives: a console renders a field read-only exactly when the host says it is,
 /// so offering `tools` to a member who would meet a `403` on save is precisely
 /// the drift `editable` exists to remove.
-const OVERLAY_EDITABLE_MEMBER: [&str; 3] = ["name", "role", "description"];
+const EDITABLE_FIELDS_MEMBER: [&str; 3] = ["name", "role", "description"];
 
 /// One agent, in full — everything #264 lists as unreachable.
 #[derive(Debug, Serialize)]
@@ -208,10 +215,7 @@ pub(super) struct AgentDeskDto {
 /// miss in the manifest half can only be the overlay half.
 pub(super) fn requested_grants(record: &CompanyRecord, agent_id: &str) -> Vec<String> {
     record
-        .manifest
-        .agents
-        .iter()
-        .find(|agent| agent.id == agent_id)
+        .effective_agent(agent_id)
         .map(|agent| agent.tools.clone())
         .or_else(|| {
             record
@@ -260,7 +264,7 @@ pub(super) fn declared_tier(record: &CompanyRecord, agent_id: &str) -> Option<St
 /// rule picks one. A caller that re-derived the marker from the tier string
 /// would get both of those backwards.
 pub(super) fn is_orchestrator(record: &CompanyRecord, agent_id: &str) -> bool {
-    crate::company::orchestrator_id(&record.manifest.agents) == Some(agent_id)
+    crate::company::orchestrator_id(&record.effective_agents()) == Some(agent_id)
 }
 
 /// Whether `agent_id` came from the **global baseline**
@@ -456,18 +460,23 @@ async fn edit_agent(
 
     // Identity before validation, so an unknown id is a 404 rather than a
     // complaint about the shape of a body nobody could have applied anyway.
-    if record.manifest.agents.iter().any(|a| a.id == agent_id) {
-        return Err(ApiError(OpenCompanyError::Conflict(
-            language::MANIFEST_TEAMMATE_EDIT.to_string(),
-        ))
-        .into_response());
-    }
-    if !record.overlay_agents.iter().any(|a| a.id == agent_id) {
+    //
+    // A **manifest** teammate is edited through the override layer below rather
+    // than refused: a company you have deployed is still yours to change, and
+    // the blueprint is never rewritten either way.
+    // Asked through `is_roster_agent`, which is the same union `detail` reads
+    // back through — and, crucially, excludes a teammate the operator has
+    // removed. A retired manifest id still matches `manifest.agents`, so a
+    // narrower check here would store an override for a teammate that is not on
+    // the roster and then answer `404` from `detail`: a failed request that
+    // mutated the record on its way out.
+    if !record.is_roster_agent(&agent_id) {
         return Err(ApiError(OpenCompanyError::CompanyNotFound(format!(
             "teammate {agent_id}"
         )))
         .into_response());
     }
+    let is_manifest = record.manifest.agents.iter().any(|a| a.id == agent_id);
 
     // Authority **after** existence, and this ordering is forced rather than
     // preferred (review of #745).
@@ -501,7 +510,30 @@ async fn edit_agent(
         .transpose()
         .map_err(|e| e.into_response())?;
 
-    {
+    if is_manifest {
+        // Stored as an overlay on the record, exactly like the daily-budget
+        // override #343 modelled: `company.toml` keeps saying what the company
+        // launched with, and this says what the operator has since decided. The
+        // merge is field-wise, so a field nobody edited keeps tracking the
+        // blueprint across a redeploy.
+        let mut entry = crate::ports::types::AgentOverride {
+            agent_id: agent_id.clone(),
+            name,
+            role,
+            tools,
+            ..Default::default()
+        };
+        // An empty string is the stored form of "cleared" — the write path
+        // already treats a blank description and no description as one state.
+        if let Some(description) = body.description {
+            entry.description = Some(
+                description
+                    .map(|text| text.trim().to_string())
+                    .unwrap_or_default(),
+            );
+        }
+        record.upsert_agent_override(entry);
+    } else {
         let agent = record
             .overlay_agents
             .iter_mut()
@@ -602,7 +634,7 @@ fn trimmed_globs(globs: &[String]) -> Result<Vec<String>, ApiError> {
 }
 
 /// Whether the signed-in caller may administer this company — the question
-/// [`OVERLAY_EDITABLE`] keys off, asked without refusing.
+/// [`EDITABLE_FIELDS`] keys off, asked without refusing.
 ///
 /// [`require_admin`] is the enforcement path and returns a `Response` on
 /// failure, which is right for a write and wrong for a read that must still
@@ -627,15 +659,21 @@ async fn detail(
     agent_id: &str,
     is_admin: bool,
 ) -> Result<Json<AgentDetailDto>, ApiError> {
-    let manifest_agent = record.manifest.agents.iter().find(|a| a.id == agent_id);
+    // The manifest row with the operator's stored edits applied — the same
+    // resolution `build_roster` performs, so the card and the running teammate
+    // cannot disagree about who this is.
+    let manifest_agent = record.effective_agent(agent_id);
     let overlay_agent = record.overlay_agents.iter().find(|a| a.id == agent_id);
 
-    let (source, name, role, description) = match (manifest_agent, overlay_agent) {
+    let (source, name, role, description) = match (manifest_agent.as_deref(), overlay_agent) {
         // A manifest agent wins an id collision, exactly as `build_roster`
         // resolves one: the version-controlled roster is authoritative.
         (Some(agent), _) => (
             AgentSource::Manifest,
-            None,
+            // `None` unless an operator has named this teammate: a manifest
+            // `[[agent]]` is addressed by its role, and the console falls back
+            // to it when there is no name.
+            agent.name.clone(),
             agent.role.clone(),
             agent.description.clone(),
         ),
@@ -678,10 +716,9 @@ async fn detail(
         role,
         description,
         source,
-        editable: match (source, is_admin) {
-            (AgentSource::Overlay, true) => OVERLAY_EDITABLE.to_vec(),
-            (AgentSource::Overlay, false) => OVERLAY_EDITABLE_MEMBER.to_vec(),
-            (AgentSource::Manifest, _) => Vec::new(),
+        editable: match is_admin {
+            true => EDITABLE_FIELDS.to_vec(),
+            false => EDITABLE_FIELDS_MEMBER.to_vec(),
         },
         tier: declared_tier(record, agent_id),
         is_orchestrator: is_orchestrator(record, agent_id),
@@ -799,6 +836,8 @@ members = ["writer", "ceo"]
         )
         .unwrap();
         let mut record = CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: CompanyId::new("acme"),
             manifest,
             ledger: Vec::new(),
@@ -849,6 +888,8 @@ members = ["writer", "ceo"]
         let id = CompanyId::new("acme");
         store
             .save(&CompanyRecord {
+                overlay_retired_agents: Vec::new(),
+                overlay_agent_edits: Vec::new(),
                 id: id.clone(),
                 manifest: manifest.clone(),
                 ledger: Vec::new(),
@@ -1426,22 +1467,62 @@ members = ["writer", "ceo"]
         assert_eq!(cleared["role"], "Growth Lead", "{cleared}");
     }
 
-    /// The blueprint is not editable from a browser: a manifest teammate is a
-    /// `409` naming where the edit belongs, and nothing is written.
+    /// A **manifest** teammate — the shape every default and every global
+    /// baseline agent has — is editable here, and the edit sticks. This is the
+    /// whole point of the override layer: a hosted operator has no
+    /// `company.toml` to edit and no redeploy to make, so a roster that could
+    /// only be changed in the blueprint was a roster nobody could change.
     #[tokio::test]
-    async fn a_manifest_teammate_cannot_be_edited_here() {
+    async fn a_manifest_teammate_can_be_edited_here() {
         let home_dir = home();
         let state = state_with_manifest(home_dir.path(), ROSTER).await;
 
-        let (status, refusal) = patch_agent(&state, "ceo", json!({"role": "Chief Vibes"})).await;
-        assert_eq!(status, StatusCode::CONFLICT, "{refusal}");
+        let (status, edited) = patch_agent(
+            &state,
+            "ceo",
+            json!({"role": "Chief Vibes", "name": "Robin", "description": "Sets the beat."}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{edited}");
 
         let (_, ceo) = get_agent(&state, "ceo").await;
-        assert_eq!(ceo["role"], "Chief Executive", "{ceo}");
-        assert!(
-            ceo["editable"].as_array().unwrap().is_empty(),
-            "and the host says so up front, so the console never offers the \
-             field: {ceo}"
+        assert_eq!(ceo["role"], "Chief Vibes", "{ceo}");
+        assert_eq!(ceo["name"], "Robin", "{ceo}");
+        assert_eq!(ceo["description"], "Sets the beat.", "{ceo}");
+        // Still a blueprint teammate — the manifest was not rewritten, the edit
+        // is an overlay on top of it.
+        assert_eq!(ceo["source"], "manifest", "{ceo}");
+
+        // A second patch merges rather than replacing: a field nobody mentioned
+        // keeps the value the first edit gave it.
+        let (status, again) = patch_agent(&state, "ceo", json!({"description": null})).await;
+        assert_eq!(status, StatusCode::OK, "{again}");
+        assert!(again["description"].is_null(), "{again}");
+        assert_eq!(again["role"], "Chief Vibes", "{again}");
+        assert_eq!(again["name"], "Robin", "{again}");
+    }
+
+    /// An untouched field keeps tracking the blueprint, so a redeploy that
+    /// changes it is still felt. The override is per field, not a snapshot of
+    /// the whole row.
+    #[tokio::test]
+    async fn an_unedited_field_still_comes_from_the_manifest() {
+        let home_dir = home();
+        let state = state_with_manifest(home_dir.path(), ROSTER).await;
+
+        let (status, edited) = patch_agent(&state, "ceo", json!({"role": "Chief Vibes"})).await;
+        assert_eq!(status, StatusCode::OK, "{edited}");
+
+        let (_, ceo) = get_agent(&state, "ceo").await;
+        assert_eq!(
+            ceo["description"], "Sets direction and delegates.",
+            "the manifest still answers for what nobody edited: {ceo}"
+        );
+        assert_eq!(ceo["tier"], "orchestrator", "{ceo}");
+        assert_eq!(
+            strings(&ceo["tools"]["requested"]),
+            vec!["workspace.read", "email.send"],
+            "{ceo}"
         );
     }
 
@@ -1716,16 +1797,29 @@ members = ["writer", "ceo"]
         );
     }
 
-    /// A manifest teammate's tool line lives in the version-controlled
-    /// blueprint, and #619 did not move it: the overlay half became editable,
-    /// the manifest half stayed a `409`.
+    /// A manifest teammate's tool line is editable too, and lands under the
+    /// same ceiling every other grant does: the request is stored verbatim and
+    /// intersected with `[tools].allow` at read time, so this can narrow a
+    /// teammate within the company grant and never past it.
     #[tokio::test]
-    async fn a_manifest_teammates_tools_are_still_not_editable_here() {
+    async fn a_manifest_teammates_tools_can_be_narrowed_here() {
         let home_dir = home();
         let state = state_with_manifest(home_dir.path(), ROSTER).await;
 
-        let (status, refusal) = patch_agent(&state, "ceo", json!({"tools": ["workspace"]})).await;
-        assert_eq!(status, StatusCode::CONFLICT, "{refusal}");
+        let (status, edited) = patch_agent(&state, "ceo", json!({"tools": ["workspace"]})).await;
+        assert_eq!(status, StatusCode::OK, "{edited}");
+
+        let (_, ceo) = get_agent(&state, "ceo").await;
+        assert_eq!(
+            strings(&ceo["tools"]["requested"]),
+            vec!["workspace"],
+            "{ceo}"
+        );
+        assert_eq!(
+            strings(&ceo["tools"]["effective"]),
+            vec!["workspace"],
+            "{ceo}"
+        );
     }
 
     /// A blank name would render a card with no way back to it, so it is a
@@ -1744,6 +1838,49 @@ members = ["writer", "ceo"]
         let (status, trimmed) = patch_agent(&state, &jamie, json!({"name": "  Jamie R  "})).await;
         assert_eq!(status, StatusCode::OK, "{trimmed}");
         assert_eq!(trimmed["name"], "Jamie R", "{trimmed}");
+    }
+
+    /// A teammate the operator has **removed** is an id that names nobody, and
+    /// the refusal has to land before anything is written.
+    ///
+    /// A retired manifest id still matches `manifest.agents`, so the obvious
+    /// existence check passes and the handler stores an override — for a
+    /// teammate `detail` then answers `404` for. That is a failed request that
+    /// mutated the record on its way out, and it leaves an edit waiting to be
+    /// applied to whoever next takes that id: the id is a slug of the display
+    /// name, so a later teammate can inherit a rename nobody made for it.
+    #[tokio::test]
+    async fn a_removed_teammate_is_not_found_and_no_edit_is_stored() {
+        let home_dir = home();
+        let state = state_with_manifest(home_dir.path(), ROSTER).await;
+
+        // Remove `writer` through the route an operator would use, leaving the
+        // blueprint that declares it untouched.
+        let (status, _) = send(&state, "DELETE", "/api/v1/company/team/writer", None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let (status, _) = get_agent(&state, "writer").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "a removed teammate is gone");
+
+        let (status, _) = patch_agent(&state, "writer", json!({"role": "Ghost Writer"})).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        // The record is the assertion that matters: the refusal must be the end
+        // of the request, not a `404` rendered over a write that already landed.
+        let record = state
+            .registry()
+            .get(&CompanyId::new("acme"))
+            .unwrap()
+            .store()
+            .load(&CompanyId::new("acme"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            record.agent_override("writer").is_none(),
+            "the refused edit was stored anyway: {:?}",
+            record.overlay_agent_edits
+        );
     }
 
     /// An id that names nobody is a `404` on both verbs, rather than a detail

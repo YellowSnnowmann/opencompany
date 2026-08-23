@@ -325,6 +325,8 @@ kind = "built_in"
         )
         .expect("valid manifest");
         CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: CompanyId::new("acme"),
             manifest,
             ledger: Vec::new(),

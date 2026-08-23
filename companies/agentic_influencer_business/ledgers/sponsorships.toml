@@ -88,11 +88,7 @@ needs_reason = true
 name = "cancelled"
 closed = true
 needs_reason = true
-
-[[status]]
-name = "declined"
-closed = true
-needs_reason = true
+aliases = ["declined"]
 
 [[section]]
 heading = "Live obligations"
@@ -113,5 +109,5 @@ Delivered, cancelled, or declined — each with the reason. A declined deal's \
 reason is worth keeping: the same brand comes back, and \"we said no because \
 of the exclusivity clause\" saves the whole negotiation.\
 """
-statuses = ["delivered", "cancelled", "declined"]
+statuses = ["delivered", "cancelled"]
 cap = 20

@@ -493,6 +493,8 @@ mod test {
             toml::from_str("[company]\nname = \"Acme\"\nhandle = \"acme\"\n").expect("manifest");
         store
             .save(&CompanyRecord {
+                overlay_retired_agents: Vec::new(),
+                overlay_agent_edits: Vec::new(),
                 id: company.clone(),
                 manifest,
                 ledger: Vec::new(),

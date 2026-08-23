@@ -96,6 +96,7 @@ L0  Substrate       api.tinyhumans.ai, openhuman-core, tiny.place, filesystem
 | [runtime/lifecycle.md](runtime/lifecycle.md) | Company state machine and durability |
 | [runtime/planning.md](runtime/planning.md) | The Planning station: pass contract, prerequisite verdicts, boot sweep |
 | [runtime/ledgers.md](runtime/ledgers.md) | Dynamic ledgers: declared record shapes, the append-only fold, who may delete, the `derived/` folder |
+| [runtime/ledger-statuses.md](runtime/ledger-statuses.md) | How many statuses a ledger may declare, the board's phase/stage split, and how a retired status word heals |
 | [runtime/ledgers-console-ia.md](runtime/ledgers-console-ia.md) | The console surface over ledgers: naming ("ledger" is internal-only), per-list sidebar rows, Manage Lists, the declare wizard |
 | [runtime/pages.md](runtime/pages.md) | Agent-authored internal dashboard pages: the `pages/<slug>/` convention, the compile-on-write contract, and the two-part isolation model |
 | [runtime/orchestration/README.md](runtime/orchestration/README.md) | Making a many-agent company converge: the three collapses, the three principles, phasing |

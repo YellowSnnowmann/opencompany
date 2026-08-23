@@ -71,9 +71,7 @@ name = "raised"
 
 [[status]]
 name = "accepted"
-
-[[status]]
-name = "stalled"
+aliases = ["stalled"]
 
 [[status]]
 name = "resolved"
@@ -94,7 +92,7 @@ needs_reason = true
 [[section]]
 heading = "Stalled"
 blurb = "Escalated and not moving. These are where customers are actively being let down."
-statuses = ["stalled"]
+statuses = ["accepted"]
 order = "recent"
 
 [[section]]

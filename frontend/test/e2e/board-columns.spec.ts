@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { LIVE_BRAIN } from "./capabilities";
 
@@ -31,15 +31,8 @@ import { LIVE_BRAIN } from "./capabilities";
 
 const API = "/api/v1/company";
 
-/** Epic #183 §3's vocabulary, in board order. */
-const EXPECTED_COLUMNS = [
-  "To-do",
-  "Planning",
-  "In progress",
-  "Paused",
-  "In review",
-  "Done",
-];
+/** The board's vocabulary, in board order — three phases since issue #1512. */
+const EXPECTED_COLUMNS = ["Pending", "Working", "Done"];
 
 test.beforeEach(async ({ page }) => {
   // The first-run tour opens a modal over the board and swallows clicks.
@@ -50,26 +43,6 @@ test.beforeEach(async ({ page }) => {
     }
   });
 });
-
-/**
- * Moves every card out of one column, so a claim about that column being empty
- * is a precondition this test set up rather than one it inherited.
- *
- * Needed since issue #1101: an empty column collapses to a rail, and whether a
- * given column is empty at this point in the run depends on what earlier specs
- * left behind — the host's data root survives between runs against a host you
- * brought up yourself.
- */
-async function emptyOut(request: APIRequestContext, column: string) {
-  const listed = await request.get(`${API}/tasks`);
-  expect(listed.ok()).toBeTruthy();
-  const tasks = (await listed.json()) as Array<{ id: string; column: string }>;
-  for (const task of tasks) {
-    if (task.column !== column) continue;
-    const parked = await request.patch(`${API}/tasks/${task.id}`, { data: { column: "done" } });
-    expect(parked.ok()).toBeTruthy();
-  }
-}
 
 async function dismissTour(page: Page) {
   const skip = page.getByRole("button", { name: "Skip for now" });
@@ -123,18 +96,24 @@ test("the retired #/tasks lands on the board, and #/tasks/<id> still opens the c
   expect(new URL(page.url()).hash).toBe(`#/tasks/${id}`);
 });
 
-test("the board renders the six #183 columns in order, with Backlog gone", async ({ page }) => {
+test("the board renders the three phases in order, and none of the retired columns", async ({
+  page,
+}) => {
   await page.goto("/#/ledgers/tasks");
   await dismissTour(page);
 
   // The columns are a read now, not a literal, so the board is not itself
   // until they land.
   await expect(columnLabels(page)).toHaveText(EXPECTED_COLUMNS, { timeout: 15_000 });
-  // The collapse, stated as its own assertion: Backlog is not a column any more.
-  await expect(page.getByText("Backlog", { exact: true })).toHaveCount(0);
+  // The collapse, stated as its own assertion. Backlog went in #301; the four
+  // stages between To-do and Done went in #1512, and they are the ones an
+  // operator would notice missing — so each is named rather than counted.
+  for (const gone of ["Backlog", "To-do", "Planning", "In progress", "Paused", "In review"]) {
+    await expect(columnLabels(page).filter({ hasText: gone })).toHaveCount(0);
+  }
 });
 
-test("new work enters through one prompt box and lands in To-do", async ({ page, request }) => {
+test("new work enters through one prompt box and lands in Pending", async ({ page, request }) => {
   await page.goto("/#/ledgers/tasks");
   await dismissTour(page);
 
@@ -178,7 +157,7 @@ test("new work enters through one prompt box and lands in To-do", async ({ page,
   await expect.poll(async () => (await find()) !== undefined, { timeout: 15_000 }).toBe(true);
   const created = (await find())!;
 
-  expect(created.column).toBe("todo");
+  expect(created.column).toBe("pending");
   expect(created.title.length).toBeLessThanOrEqual(81); // 80 + the ellipsis
   expect(created.note).toBe(long);
   // The #1106 default, and the reason adding the control is a no-op for anyone
@@ -190,6 +169,14 @@ test("new work enters through one prompt box and lands in To-do", async ({ page,
 /**
  * Issue #501. This test states a **no-planner** contract, and only a host
  * without one keeps it.
+ *
+ * **The gesture moved in issue #1512.** Planning used to be a board column, and
+ * this test used to drag a card into it. Collapsing the board to three phases
+ * took the drop target away — `planning` is a stage now, one of the four that
+ * read as Working — so the deliberate "plan this before anything runs" act is a
+ * control on the card instead, which is where an *act* belonged rather than a
+ * *state*. What it writes is unchanged: the `planning` stage, which edge-fires
+ * exactly one pass.
  *
  * Its own comment used to say the no-dispatch assertion "lets the column ship
  * ahead of epic #183 §4's auto-advance". §4 has since landed as the planning
@@ -214,65 +201,43 @@ test("new work enters through one prompt box and lands in To-do", async ({ page,
  * capability skip in the suite. The harness contract is asserted by the test
  * below instead, so the lane loses no coverage.
  */
-test("dragging into Planning moves the card without dispatching it", async ({ page, request }) => {
+test("Plan first moves the card into planning without dispatching it", async ({
+  page,
+  request,
+}) => {
   test.skip(
     LIVE_BRAIN,
     "asserts Planning is inert, which is only true without a planner; the harness " +
       "contract is covered by the live-brain test below. Issue #501.",
   );
-  const title = `e2e planning drag ${Date.now()}`;
-  // Planning has to be empty for the collapse assertions below to mean
-  // anything, and an earlier run of this very test may have left a card in it.
-  await emptyOut(request, "planning");
+  const title = `e2e planning control ${Date.now()}`;
   const seeded = await request.post(`${API}/tasks`, { data: { title } });
   expect(seeded.ok()).toBeTruthy();
   const id = (await seeded.json()).id as string;
 
-  await page.goto("/#/ledgers/tasks");
+  await page.goto(`/#/tasks/${id}`);
   await dismissTour(page);
+  await expect(page.getByRole("heading", { name: title })).toBeVisible({ timeout: 15_000 });
 
-  const card = page.locator("div[draggable=true]").filter({ hasText: title }).first();
-  await expect(card).toBeVisible({ timeout: 15_000 });
-
-  // Playwright's dragTo does not drive React's HTML5 drag handlers reliably
-  // here, so the drop is dispatched directly at the Planning column.
-  //
-  // One **shared `DataTransfer`** across the three events, and it is
-  // load-bearing (issue #501). A bare `dispatchEvent("dragstart")` builds a
-  // `DragEvent` whose `dataTransfer` is `null`, so the board cannot stash the
-  // card id where a real drag puts it, and the drop handler falls back to
-  // React state — `moveTo(col, dropped)` reads `dropped || dragId`. That
-  // fallback exists for browsers that mangle the payload; it is not the path a
-  // real gesture takes, and leaning on it makes the three dispatches straddle a
-  // window in which a re-render matters. Handing the same `DataTransfer` to all
-  // three makes this the gesture a browser actually performs: `setData` at
-  // `dragstart`, `getData` at `drop`, and nothing in between that a re-render
-  // can touch.
-  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
-  const planning = page.getByTestId("board-column").nth(EXPECTED_COLUMNS.indexOf("Planning"));
-  // Issue #1101: the card just seeded makes the board non-empty, so Planning —
-  // which holds nothing — has collapsed to a rail. That is the state this drop
-  // has to survive, and it is not incidental: the columns an operator drags
-  // *into* are exactly the columns that are empty, so a rail that stopped
-  // taking a drop would break the board's main gesture on every board the
-  // collapse is for.
-  await expect(planning).toHaveAttribute("data-collapsed", "true");
-  await card.dispatchEvent("dragstart", { dataTransfer });
-  await planning.dispatchEvent("dragover", { dataTransfer });
-  // And it opened to receive the card rather than taking the drop blind.
-  await expect(planning).toHaveAttribute("data-collapsed", "false");
-  await planning.dispatchEvent("drop", { dataTransfer });
+  // Offered on a pending card, and it is the only route to a planning pass now
+  // that no column takes a drop into one.
+  const planFirst = page.getByRole("button", { name: "Plan first" });
+  await expect(planFirst).toBeVisible();
+  await planFirst.click();
 
   await expect
     .poll(
-      async () => (await (await request.get(`${API}/tasks/${id}`)).json()).task.column,
+      async () => (await (await request.get(`${API}/tasks/${id}`)).json()).task.stage,
       { timeout: 15_000 },
     )
     .toBe("planning");
+  // The phase a reader of the board sees, beside it: still one column, still
+  // "started and not finished" (issue #1512).
+  const parked = await (await request.get(`${API}/tasks/${id}`)).json();
+  expect(parked.task.column).toBe("working");
 
   // Planning is deliberately inert: only `in_progress` spends an agent turn, so
-  // the dispatch toast must NOT appear. This is the assertion that lets the
-  // column ship ahead of epic #183 §4's auto-advance.
+  // the dispatch toast must NOT appear.
   await expect(page.getByText("Dispatched — the assignee is working on it.")).toHaveCount(0);
 
   // The toast is a console-side signal and only fires for `in_progress`, so on
@@ -280,9 +245,8 @@ test("dragging into Planning moves the card without dispatching it", async ({ pa
   // run already finished". Assert the host's own record instead: the task's
   // timeline is folded from the company journal, so a dispatch that happened at
   // any point leaves a `dispatched` entry behind that no later event removes.
-  const detail = await (await request.get(`${API}/tasks/${id}`)).json();
   expect(
-    (detail.timeline ?? []).filter((entry: { kind: string }) => entry.kind === "dispatched"),
+    (parked.timeline ?? []).filter((entry: { kind: string }) => entry.kind === "dispatched"),
   ).toHaveLength(0);
 });
 
@@ -295,12 +259,12 @@ test("dragging into Planning moves the card without dispatching it", async ({ pa
  * holds there.
  *
  * The contract is settlement, not a destination. `src/harness/planning.rs`
- * edge-fires one pass per card entering Planning and lands the card in
- * `in_progress` (plan written, nothing blocking) or back in `todo` (a missing
- * prerequisite, or the pass itself failed) — always with a `[system]` note
- * saying which. The one outcome the product must never produce is a card left
- * parked in `planning` with nothing having happened, which is exactly what a
- * lost drop or a stalled pass would look like.
+ * edge-fires one pass per card entering the `planning` stage and lands the card
+ * in `in_progress` (plan written, nothing blocking) or back in `todo` (a
+ * missing prerequisite, or the pass itself failed) — always with a `[system]`
+ * note saying which. The one outcome the product must never produce is a card
+ * left parked in `planning` with nothing having happened, which is exactly what
+ * a lost click or a stalled pass would look like.
  *
  * So this asserts the negative that matters — the card does not stay put — and
  * then that wherever it landed is one of the two documented landings and says
@@ -311,7 +275,7 @@ test("dragging into Planning moves the card without dispatching it", async ({ pa
  * The window is generous because a pass makes a real model call, bounded by
  * `PLANNING_TIMEOUT` (120s) on the host side.
  */
-test("a card dropped into Planning is planned and settled, never left parked", async ({
+test("a card sent to Plan first is planned and settled, never left parked", async ({
   page,
   request,
 }) => {
@@ -326,26 +290,17 @@ test("a card dropped into Planning is planned and settled, never left parked", a
   expect(seeded.ok()).toBeTruthy();
   const id = (await seeded.json()).id as string;
 
-  await page.goto("/#/ledgers/tasks");
+  await page.goto(`/#/tasks/${id}`);
   await dismissTour(page);
-
-  const card = page.locator("div[draggable=true]").filter({ hasText: title }).first();
-  await expect(card).toBeVisible({ timeout: 15_000 });
-
-  // The same faithful gesture as the test above: one DataTransfer across all
-  // three events, so the id travels where a real drag puts it.
-  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
-  const planning = page.getByTestId("board-column").nth(EXPECTED_COLUMNS.indexOf("Planning"));
-  await card.dispatchEvent("dragstart", { dataTransfer });
-  await planning.dispatchEvent("dragover", { dataTransfer });
-  await planning.dispatchEvent("drop", { dataTransfer });
+  await expect(page.getByRole("heading", { name: title })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Plan first" }).click();
 
   const read = async () => (await (await request.get(`${API}/tasks/${id}`)).json()).task;
 
   // The settle is the signal that matters, and the note is its durable
   // record: every planning outcome writes a `[system]` note and lands the
   // card in the same atomic `upsert`. Poll for the note rather than the
-  // intermediate `planning` column — a fast brain settles the card before a
+  // intermediate `planning` stage — a fast brain settles the card before a
   // poll interval elapses, so `planning` is a transient a pass can skip
   // entirely, and requiring it to be observed is a race masquerading as an
   // assertion. The note, by contrast, only exists once the pass has finished.
@@ -355,9 +310,10 @@ test("a card dropped into Planning is planned and settled, never left parked", a
 
   // Wherever it landed, it is a documented landing, not the parking lot the
   // contract forbids: `in_progress` (a plan, nothing blocking) or `todo` (a
-  // missing prerequisite, or the pass itself failed).
+  // missing prerequisite, or the pass itself failed) — read off the stage,
+  // since both are the one `working` phase and `todo` is `pending`.
   const settled = await read();
-  expect(["todo", "in_progress"]).toContain(settled.column);
+  expect(["pending", "in_progress"]).toContain(settled.stage ?? settled.column);
   // And it says why it moved, rather than moving silently. `[system]` is the
   // attribution every planning outcome writes onto the note.
   expect(settled.note ?? "").toContain("[system]");

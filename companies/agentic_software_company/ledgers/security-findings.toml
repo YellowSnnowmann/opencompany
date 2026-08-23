@@ -70,10 +70,8 @@ description = "The task, the patch, the advisory, the release it went out in."
 name = "triaging"
 
 [[status]]
-name = "confirmed"
-
-[[status]]
 name = "fixing"
+aliases = ["confirmed"]
 
 [[status]]
 name = "fixed"
@@ -94,7 +92,7 @@ needs_reason = true
 [[section]]
 heading = "Confirmed and unfixed"
 blurb = "Real, reproducible, and still there. Anything critical here outranks feature work."
-statuses = ["confirmed", "fixing"]
+statuses = ["fixing"]
 order = "recent"
 
 [[section]]

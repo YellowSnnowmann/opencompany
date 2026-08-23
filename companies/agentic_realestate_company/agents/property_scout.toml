@@ -6,3 +6,9 @@ description = "Find and screen candidate properties."
 # teammate came first. Stating the tier keeps the same agent orchestrating
 # instead of handing the job to whoever sorts first alphabetically.
 tier = "orchestrator"
+
+# The role's working rules, checked in beside this file and read at manifest
+# load. The `.toml` carries the wiring; `prompts/` carries how the role works.
+# A missing path here is a manifest error rather than a skipped entry — a role
+# whose prompt was written around a briefing it never received fails silently.
+prompt_files = ["prompts/property_scout.md"]

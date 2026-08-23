@@ -1,0 +1,16 @@
+role = "User Researcher"
+description = "Turn support threads, interviews, and usage signals into evidence the roadmap can be argued from."
+
+ledgers = [
+    { name = "tasks", access = "record" },
+    { name = "goals", access = "read" },
+    { name = "decisions", access = "read" },
+]
+
+context = [
+    "brief.md",
+    "claims.md",
+    { path = "market/user-signals.md", access = "write" },
+]
+
+prompt_files = ["prompts/user_researcher.md"]

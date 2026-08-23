@@ -74,6 +74,8 @@ async function show(c: OpenCompanyClient) {
           selected: null,
           onSelect: () => {},
           onAdd: () => {},
+          onEditHost: () => {},
+          onRemoveHost: () => {},
           localInstances: [],
           hub: false,
         },

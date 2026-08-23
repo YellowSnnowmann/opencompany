@@ -1,0 +1,88 @@
+# Agent roster for the Agentic Product Team.
+#
+# A product organization rather than a whole software company: nobody here
+# writes the product's code. The team owns the *decisions* around it — what is
+# broken, what is next, what the market already does — and hands each of those
+# to whoever builds. The engineering counterpart is
+# `companies/agentic_software_company`.
+#
+# The OpenCompany host instantiates one runtime agent per `agents/<id>.toml`,
+# backed by the vendored OpenHuman / TinyAgents modules.
+
+[company]
+name = "Agentic Product Team"
+output = "A triaged bug queue, a groomed backlog, a defended roadmap, and a current competitive picture"
+human_role = "Prioritization calls and roadmap sign-off"
+
+[tools]
+# The full belt plus the metered `web_search` (#238), minus `media` and
+# `composio`.
+#
+# `allow` REPLACES the default (`["*", "media", "composio"]`); it never extends
+# it, so every entry that should survive is restated literally. `*` covers
+# files/docs/shell/code/web/subagent — the belt this team reads and writes with.
+#
+# `search` is listed because competitor work is the reason this team exists and
+# nothing in the `web` namespace can *find* a URL: `web_fetch` / `http_request`
+# only read one the agent already holds. Search spend stays bounded by
+# `[tools].search_daily_calls` (200/day by default); set it to `0` to pause
+# search without editing this list.
+#
+# `workspace` is listed because a bare `*` grants workspace *reads* and
+# deliberately not writes (#237): a workspace write overwrites operator-owned
+# guidance every other agent then treats as the company's source of truth, so it
+# is opted into by name. Without this entry every `access = "write"` in a
+# teammate's `context` would be inert — the ownership table in AGENTS.md is
+# built on it, and each teammate's own `context` narrows the grant to the one
+# document it owns.
+#
+# `media` and `composio` are deliberately dropped. This roster produces
+# documents and ledger rows — it has no use for image generation, and no
+# teammate here should be able to act on a third-party account under the
+# company's OAuth grant. Both are real-money / real-consequence namespaces that
+# `*` does not confer, so omitting them is the whole decision.
+allow = ["*", "workspace", "search"]
+
+# Group chats — the desks the human talks to. Each pulls in a few agents from
+# the roster; the first member is the desk's lead (the routing target).
+[[group_chat]]
+id = "triage"
+name = "Triage"
+description = "Incoming bugs and the state of the backlog."
+members = ["bug_triager", "backlog_curator"]
+
+[[group_chat]]
+id = "roadmap"
+name = "Roadmap"
+description = "What we are doing next, and why."
+members = ["head_of_product", "roadmap_planner"]
+
+[[group_chat]]
+id = "market"
+name = "Market"
+description = "Competitors, pricing, and what users are actually asking for."
+members = ["competitor_analyst", "user_researcher"]
+
+# Workflow graphs to enable. The graphs live in this company's workflows/
+# directory (one file per id), not inline here.
+[workflows]
+enabled = ["bug_triage", "roadmap_review", "competitor_scan"]
+
+# Monday morning, before the humans arrive: the week starts from a current
+# picture rather than from whatever anyone remembers. The prompt names the
+# outputs so the run has a terminal, rather than asking for a vague "review".
+[[schedule]]
+cron = "0 7 * * 1"
+prompt = "Run the weekly product review: have the backlog aged and deduplicated, the competitive picture refreshed, and the roadmap re-sequenced against what changed. Post the result to the roadmap desk as a short brief with the top three prioritization calls that need a human."
+
+# Approval tier (issue #605). Declared explicitly rather than left to the serde
+# default, so the tier a shipped company runs on is readable from its own
+# manifest instead of inferred from an absent block.
+#
+# `auto` runs the roster's own sandbox writes and outward reads unattended and
+# still parks everything that leaves the company or spends money — which for
+# this team is the right line: triaging a bug and grooming the backlog are
+# internal bookkeeping, while telling a customer their bug is "won't fix" is
+# not.
+[policy]
+mode = "auto"

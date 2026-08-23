@@ -88,10 +88,20 @@ async fn listing_names_every_ledger_with_its_statuses() {
         .await
         .unwrap();
     let text = format!("{result:?}");
-    for slug in ["tasks", "goals", "decisions"] {
+    // The listing renders each ledger's phase vocabulary (spec.statuses), not
+    // the internal stage names — since three-state ledgers these are the
+    // contract a model reads, so pin them exactly.
+    for (slug, statuses) in [
+        ("tasks", "pending, working, done"),
+        ("goals", "active, met, dropped"),
+        ("decisions", "proposed, accepted, retired"),
+    ] {
         assert!(text.contains(slug), "`{slug}` missing: {text}");
+        assert!(
+            text.contains(statuses),
+            "`{slug}` statuses (`{statuses}`) are listed: {text}"
+        );
     }
-    assert!(text.contains("in_progress"), "statuses are listed: {text}");
 }
 
 /// The discovery path a model actually follows: guess, and learn the real names

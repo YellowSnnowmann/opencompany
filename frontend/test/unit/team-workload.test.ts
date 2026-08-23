@@ -11,18 +11,40 @@ import type { Task } from "@/api/tasks";
 import type { TaskColumn } from "@/lib/board-columns";
 import { workloadByAssignee } from "@/lib/team-workload";
 
-/** The board's real columns, as the `tasks` ledger reports them. */
+/** The board's real columns, as the `tasks` ledger reports them (issue #1512). */
 const COLUMNS: TaskColumn[] = [
-  { id: "todo", label: "To-do", closed: false },
-  { id: "planning", label: "Planning", closed: false },
-  { id: "in_progress", label: "In progress", closed: false },
-  { id: "paused", label: "Paused", closed: false },
-  { id: "in_review", label: "In review", closed: false },
+  { id: "pending", label: "Pending", closed: false },
+  { id: "working", label: "Working", closed: false },
   { id: "done", label: "Done", closed: true },
 ];
 
-function task(assignee: string, column: string, id = `${assignee}-${column}`): Task {
-  return { id, title: id, column, priority: "medium", assignee, updatedAt: 0 };
+/**
+ * A card in one of the host's six **stages**, phased the way the API phases it.
+ *
+ * The tests are written in stages because that is what the distinctions here
+ * are about — paused is not in progress — and the derivation must read them off
+ * `stage` now that all four share the `working` column.
+ */
+const PHASE_OF: Record<string, string> = {
+  todo: "pending",
+  planning: "working",
+  in_progress: "working",
+  paused: "working",
+  in_review: "working",
+  done: "done",
+};
+
+function task(assignee: string, stage: string, id = `${assignee}-${stage}`): Task {
+  const column = PHASE_OF[stage] ?? stage;
+  return {
+    id,
+    title: id,
+    column,
+    ...(column === "working" ? { stage } : {}),
+    priority: "medium",
+    assignee,
+    updatedAt: 0,
+  };
 }
 
 describe("workloadByAssignee", () => {
@@ -42,7 +64,7 @@ describe("workloadByAssignee", () => {
   });
 
   it("is idle while every open card is waiting on a person", () => {
-    // Paused and In review are the host's "stopped, not finished" columns.
+    // Paused and In review are the host's "stopped, not finished" stages.
     // Work sitting in them is not work a teammate is doing.
     const loads = workloadByAssignee([task("maya", "paused"), task("maya", "in_review")], COLUMNS);
 
@@ -50,8 +72,8 @@ describe("workloadByAssignee", () => {
   });
 
   it("is working once a card is planning or in progress", () => {
-    for (const column of ["planning", "in_progress"]) {
-      const loads = workloadByAssignee([task("maya", "todo"), task("maya", column)], COLUMNS);
+    for (const stage of ["planning", "in_progress"]) {
+      const loads = workloadByAssignee([task("maya", "todo"), task("maya", stage)], COLUMNS);
       expect(loads.get("maya")).toEqual({ open: 2, status: "working" });
     }
   });

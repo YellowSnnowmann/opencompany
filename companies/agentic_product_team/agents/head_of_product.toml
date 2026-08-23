@@ -1,0 +1,21 @@
+role = "Head of Product"
+description = "Decide what the team works on next, and defend the decision."
+# This company's orchestrator, declared explicitly. `agents/*.toml` is read in
+# filename order and `orchestrator_id` falls back to the first agent declared
+# when nobody is tagged, so leaving this off would hand the company to
+# `backlog_curator` on alphabetical order alone.
+tier = "orchestrator"
+
+# Unrestricted ledger access: no `ledgers` grant is declared, because the
+# routing picture is this role's whole job. It is also the one teammate allowed
+# to mint a *new* axis — the two this team is built around (`bugs`,
+# `competitors`) ship declared in `ledgers/`, but a company discovers the rest
+# of the axes it needs while it is running, and a declaration that required an
+# operator would be discovered and then not made.
+can_declare_ledgers = true
+
+# Desk lead: may hand one slice to a peer on any desk rather than doing a
+# specialist's job itself. Depth stays capped at 2.
+delegates_to = ["triage", "roadmap", "market"]
+
+prompt_files = ["prompts/head_of_product.md"]
