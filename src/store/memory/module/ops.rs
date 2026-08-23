@@ -136,6 +136,19 @@ fn load_config(workspace_dir: &Path) -> Result<serde_json::Value, String> {
         "workspace_dir": workspace_dir,
         "memory": memory,
         "driver_id": "tinymemory",
+        // The engine's embedder factory opts out of vector search on this
+        // value — `embeddings_provider == "none"` — and on nothing else. Zero
+        // dimensions above is not enough: it describes the SHAPE the host
+        // embeds into, while this decides WHETHER the engine embeds at all.
+        //
+        // Without it the module reaches the same store as the in-process
+        // `namespace` driver and answers recall differently: that driver is
+        // handed a `NoopEmbedding` object directly, so the engine never looks
+        // for a provider, while this one is handed config and looks. It then
+        // embeds the query into a zero-width vector and matches nothing —
+        // silently, because an empty result set is what "nothing matched"
+        // looks like too.
+        "embeddings_provider": "none",
     }))
 }
 
