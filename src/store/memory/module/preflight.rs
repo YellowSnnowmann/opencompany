@@ -194,4 +194,31 @@ mod tests {
             None
         );
     }
+
+    /// A self-owned tree with no group/other write bit passes the ancestor
+    /// gate (issue #1524 risk #3): `tempdir()` owns its whole tree, and the
+    /// default mode carries no `0o022` bit, so the pass case needs no root.
+    #[cfg(unix)]
+    #[test]
+    fn a_self_owned_tree_passes_the_ancestor_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = dir.path().join("libtinymemory_module.so");
+        std::fs::write(&lib, b"x").unwrap();
+        assert!(super::directory_verdict(&lib));
+    }
+
+    /// A group-writable ancestor without the sticky bit fails the gate, even
+    /// though every ancestor is still owned by this uid.
+    #[cfg(unix)]
+    #[test]
+    fn a_group_writable_ancestor_fails_the_gate() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("modules");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o775)).unwrap();
+        let lib = nested.join("libtinymemory_module.so");
+        std::fs::write(&lib, b"x").unwrap();
+        assert!(!super::directory_verdict(&lib));
+    }
 }

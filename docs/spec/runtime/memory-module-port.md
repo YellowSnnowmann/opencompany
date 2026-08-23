@@ -3,7 +3,7 @@
 Issue #1524. The `module` driver binds the separately compiled TinyMemory
 `cdylib` — over TinyBus, in-process — as a `MemoryProvider`, selected by:
 
-```
+```bash
 OPENCOMPANY_MEMORY=embedded
 OPENCOMPANY_MEMORY_DRIVER=module
 ```

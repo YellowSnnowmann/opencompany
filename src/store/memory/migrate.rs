@@ -1020,6 +1020,35 @@ mod test {
             .expect("the operator override must open the path");
     }
 
+    /// The module arm carries the same durability refusal as the namespace
+    /// arm, but only while the store would land on the ephemeral DEFAULT dir:
+    /// an explicit `--to-data-dir` pointing at a durable volume is the whole
+    /// point of passing it, so it must not be caught by the mongodb check.
+    #[test]
+    fn a_mongodb_base_refuses_an_ephemeral_module_target() {
+        let settings = StorageSettings {
+            kind: StorageKind::Mongodb,
+            ..base_settings()
+        };
+        let err = resolve(&settings, "module", None, None)
+            .expect_err("ephemeral module target must refuse")
+            .to_string();
+        assert!(err.contains("OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL"), "{err}");
+
+        // An explicit durable target dir is the escape hatch the error names;
+        // it must not be refused by the mongodb check.
+        resolve(&settings, "module", None, Some("/data/durable"))
+            .expect("an explicit durable target dir must open the path");
+
+        // The operator override opens the default dir.
+        let allowed = StorageSettings {
+            allow_ephemeral_memory: true,
+            ..settings
+        };
+        resolve(&allowed, "module", None, None)
+            .expect("the operator override must open the path");
+    }
+
     #[test]
     fn the_same_engine_guard_fires_remote_to_remote_and_normalizes() {
         // Identical endpoint, spelled with a trailing slash and whitespace:
