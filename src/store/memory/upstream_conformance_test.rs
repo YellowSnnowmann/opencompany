@@ -274,6 +274,7 @@ mod module {
             url: None,
             api_key: None,
             data_dir: Some(dir.to_path_buf()),
+            deployment: Default::default(),
         }
     }
 

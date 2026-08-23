@@ -402,6 +402,7 @@ pub fn resolve_migrate_configs(
                 url: None,
                 api_key: None,
                 data_dir,
+                deployment: Default::default(),
             }
         }
         other => {
