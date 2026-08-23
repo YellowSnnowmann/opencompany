@@ -885,6 +885,18 @@ jobs:
             echo "::error::duplicated tinymemory-* package in the resolve graph"
             exit 1
           fi
+          # The module feature resolves its own graph (loader sub-feature,
+          # `tinybus/modules`); a duplicate reachable only through it would
+          # pass the check above, so the same `-d` / grep gate runs against
+          # this feature set too.
+          if ! report="$(cargo tree --locked -e normal --features tinymemory-module -d)"; then
+            echo "::error::cargo tree failed to resolve the module graph"
+            exit 1
+          fi
+          if grep -E "^tinymemory" <<< "$report"; then
+            echo "::error::duplicated tinymemory-* package in the module resolve graph"
+            exit 1
+          fi
 
       # `--tests` is LOAD-BEARING IN BOTH DIRECTIONS. Do not narrow it back to
       # `--lib`, and do not widen it to a bare `cargo test`.
