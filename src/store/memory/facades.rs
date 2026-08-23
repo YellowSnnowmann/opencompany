@@ -308,7 +308,16 @@ impl Bound {
         );
         Ok(raw
             .iter()
-            .filter_map(|entry| decode(entry, &namespace))
+            .filter_map(|entry| {
+                let decoded = decode(entry, &namespace);
+                if decoded.is_none() {
+                    eprintln!(
+                        "PR1550DEBUG list decode_failed key={} content={:?}",
+                        entry.key, entry.content
+                    );
+                }
+                decoded
+            })
             .collect())
     }
 
