@@ -331,6 +331,7 @@ mod module {
             url: None,
             api_key: None,
             data_dir: Some(namespace_dir.path().to_path_buf()),
+            deployment: Default::default(),
         });
 
         use tinymemory_api::types::{MemoryCategory, MemoryTaint};
