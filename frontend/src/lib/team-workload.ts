@@ -75,7 +75,9 @@ export function workloadByAssignee(
 
     const held = loads.get(assignee) ?? { open: 0, status: "idle" as TeammateStatus };
     held.open += 1;
-    if (IN_FLIGHT_COLUMNS.includes(task.column)) held.status = "working";
+    // The stage, not the column: since issue #1512 all four working stages
+    // share one column, and only these two are somebody actually working.
+    if (IN_FLIGHT_COLUMNS.includes(task.stage ?? "")) held.status = "working";
     loads.set(assignee, held);
   }
 

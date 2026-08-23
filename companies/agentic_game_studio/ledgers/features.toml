@@ -65,10 +65,7 @@ name = "proposed"
 
 [[status]]
 name = "prototyping"
-
-[[status]]
-name = "in_but_rough"
-label = "In, but rough"
+aliases = ["in_but_rough"]
 
 [[status]]
 name = "polished"
@@ -86,7 +83,7 @@ needs_reason = true
 [[section]]
 heading = "In the build"
 blurb = "Playable now, at whatever quality `playable` honestly says. \"In\" is not \"fun\"."
-statuses = ["in_but_rough", "polished"]
+statuses = ["prototyping", "polished"]
 order = "recent"
 
 [[section]]

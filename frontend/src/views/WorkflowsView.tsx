@@ -49,6 +49,7 @@ import {
   workflowRunOutput,
 } from "@/api/workflows";
 import type { CompanyStreamEvent } from "@/hooks/use-events";
+import { withHostParam } from "@/hooks/use-host-route";
 import type { OpenCompanyClient } from "@/api/client";
 import { ApiError } from "@/api/types";
 import type { ApprovalSummary, GrantScope, TeamMemberDto, Verdict } from "@/api/types";
@@ -203,7 +204,10 @@ function readWorkflowHash(): {
 function clearWorkflowFromHash(): void {
   const { onWorkflows, workflowId } = readWorkflowHash();
   if (!onWorkflows || workflowId === null) return;
-  window.history.replaceState(null, "", "#/workflows");
+  // `withHostParam` because this replaces the hash rather than editing it, and
+  // a replace fires no `hashchange` — so a connection scope dropped here has
+  // nothing to put it back (`use-host-route.ts`).
+  window.history.replaceState(null, "", withHostParam("workflows"));
 }
 
 /**
@@ -886,7 +890,8 @@ export function WorkflowsView({
   // selected workflow this early-returns and never touches the URL, so an
   // arriving `#/workflows/x?run=r` keeps its run id; when the selection moves
   // to a different workflow the query is dropped, which is correct — that run
-  // belongs to the graph being left behind.
+  // belongs to the graph being left behind. The connection scope is the one key
+  // that does carry over (`withHostParam`): it names the host, not the graph.
   //
   // Replace vs push is decided by whether the view moved the selection on the
   // operator's behalf.
@@ -930,7 +935,7 @@ export function WorkflowsView({
     // effect): rewriting it would drag the operator back here.
     if (!onWorkflows) return;
     if (workflowId === selectedId) return;
-    const next = `#/workflows/${encodeURIComponent(selectedId)}`;
+    const next = withHostParam(`workflows/${encodeURIComponent(selectedId)}`);
     if (reconciled) window.history.replaceState(null, "", next);
     else window.location.hash = next.slice(1);
   }, [selectedId]);

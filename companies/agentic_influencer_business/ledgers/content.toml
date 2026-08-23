@@ -73,11 +73,9 @@ role = "refs"
 name = "idea"
 
 [[status]]
-name = "scripted"
-
-[[status]]
 name = "in_production"
 label = "In production"
+aliases = ["scripted"]
 
 [[status]]
 name = "scheduled"
@@ -101,7 +99,7 @@ order = "recent"
 [[section]]
 heading = "In production"
 blurb = "Being made. Each should already have its hook written."
-statuses = ["scripted", "in_production"]
+statuses = ["in_production"]
 order = "recent"
 
 [[section]]

@@ -26,6 +26,7 @@ import {
   ChevronRight,
   ChevronUp,
   Crown,
+  Lock,
   Plus,
   Trash2,
   UserPlus,
@@ -37,8 +38,10 @@ import { toast } from "sonner";
 import { listPeople } from "@/api/auth";
 import type { OpenCompanyClient } from "@/api/client";
 import { ApiError, type DeskDto, type TeamMemberDto } from "@/api/types";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TeammateAvatar } from "@/components/teammate-avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,7 +52,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { roleSubtitle } from "@/lib/team";
+import { avatarFor, roleSubtitle, toneFor, type TeamMember } from "@/lib/team";
 import {
   addMemberFailure,
   addOutcome,
@@ -489,7 +492,7 @@ export function OrgChartView({ client, company, focusDeskId, onBack }: Props) {
                 }}
               >
                 <UserPlus className="mr-1.5 size-4" />
-                New teammate
+                Add teammate
               </Button>
             </div>
           </div>
@@ -501,12 +504,9 @@ export function OrgChartView({ client, company, focusDeskId, onBack }: Props) {
         </div>
 
         {error && (
-          <div
-            role="alert"
-            className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          >
-            {error}
-          </div>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
 
         {load === "loading" ? (
@@ -740,7 +740,7 @@ function DeskNode({
   onDelete,
 }: {
   desk: OrgDesk;
-  addable: { id: string; name: string }[];
+  addable: TeamMember[];
   busy: string | null;
   /** This desk is the one a `#/company/<deskId>` link asked for. */
   focused: boolean;
@@ -758,6 +758,13 @@ function DeskNode({
   onDelete: () => void;
 }) {
   const locked = busy !== null;
+  // Whether any seat on this desk was added at runtime rather than declared by
+  // the manifest. Only on such a "mixed provenance" desk does the Blueprint
+  // badge still earn its place — everywhere else the whole desk is blueprint,
+  // so a muted lock says it with far less noise than a badge on every seat.
+  const hasOverlaySeats = desk.seats.some(
+    (s) => s.provenance === "overlay",
+  );
   // Whether the seat currently being dragged (from anywhere on the chart)
   // could land on *this* desk: it must come from a different desk, and it
   // must be an overlay seat — the host refuses to remove a blueprint member
@@ -838,11 +845,18 @@ function DeskNode({
           <div className="min-w-0">
             <p className="flex items-center gap-2 truncate font-medium">
               {desk.name}
-              {desk.provenance === "blueprint" && (
-                <Badge variant="secondary" className="shrink-0 text-3xs">
-                  Blueprint
-                </Badge>
-              )}
+              {desk.provenance === "blueprint" &&
+                (hasOverlaySeats ? (
+                  <Badge variant="secondary" className="shrink-0 text-3xs">
+                    Blueprint
+                  </Badge>
+                ) : (
+                  <Lock
+                    role="img"
+                    aria-label="Part of the company blueprint"
+                    className="size-3.5 shrink-0 text-muted-foreground"
+                  />
+                ))}
             </p>
             {desk.description && (
               <p className="line-clamp-2 text-xs text-muted-foreground">
@@ -894,6 +908,7 @@ function DeskNode({
               index={index}
               deskId={desk.id}
               deskName={desk.name}
+              deskHasOverlaySeats={hasOverlaySeats}
               first={index === 0}
               last={index === desk.seats.length - 1}
               busy={busy === `${desk.id}:${seat.id}`}
@@ -976,6 +991,12 @@ function DeskNode({
                         key={member.id}
                         onClick={() => onAdd(member.id)}
                       >
+                        <TeammateAvatar
+                          name={member.name}
+                          avatar={member.avatar}
+                          tone={member.tone}
+                          className="size-5 shrink-0"
+                        />
                         <span className="truncate">{member.name}</span>
                       </DropdownMenuItem>
                     ))}
@@ -991,7 +1012,7 @@ function DeskNode({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={onCreateMember}
-                  aria-label={`Create teammate on ${desk.name}`}
+                  aria-label={`Add teammate to ${desk.name}`}
                 >
                   <UserPlus className="size-4" />
                   New teammate…
@@ -1011,6 +1032,7 @@ function Seat({
   index,
   deskId,
   deskName,
+  deskHasOverlaySeats,
   first,
   last,
   busy,
@@ -1028,6 +1050,8 @@ function Seat({
   index: number;
   deskId: string;
   deskName: string;
+  /** Whether this seat's desk mixes blueprint and overlay members. */
+  deskHasOverlaySeats: boolean;
   first: boolean;
   last: boolean;
   busy: boolean;
@@ -1105,6 +1129,12 @@ function Seat({
 
   const label = (
     <>
+      <TeammateAvatar
+        name={seat.name}
+        avatar={avatarFor(seat.id)}
+        tone={toneFor(seat.id)}
+        className="size-5 shrink-0"
+      />
       {seat.lead && (
         <Crown
           role="img"
@@ -1142,7 +1172,7 @@ function Seat({
       onDragOver={dragOver}
       onDrop={drop}
       className={cn(
-        "flex cursor-grab items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm active:cursor-grabbing",
+        "flex cursor-grab items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm active:cursor-grabbing",
         busy && "opacity-50",
       )}
     >
@@ -1204,10 +1234,16 @@ function Seat({
           >
             <X className="size-3.5" />
           </Button>
-        ) : (
+        ) : deskHasOverlaySeats ? (
           <Badge variant="secondary" className="shrink-0 text-3xs">
             Blueprint
           </Badge>
+        ) : (
+          <Lock
+            role="img"
+            aria-label="Part of the company blueprint"
+            className="size-3.5 shrink-0 text-muted-foreground"
+          />
         )}
       </span>
     </div>
@@ -1228,7 +1264,7 @@ function Unplaced({ tree }: { tree: OrgTree }) {
     <div className="space-y-4">
       {tree.unassigned.length > 0 && (
         <section className="space-y-2">
-          <h3 className="text-sm font-medium">Not on a desk</h3>
+          <h3 className="text-sm font-medium text-muted-foreground">Not on a desk</h3>
           <p className="text-xs text-muted-foreground">
             Roster teammates the company has not staffed anywhere. Add them to a
             desk above.
@@ -1245,8 +1281,14 @@ function Unplaced({ tree }: { tree: OrgTree }) {
                     <a
                       href={href}
                       title={`Open ${member.name}`}
-                      className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
+                      className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
                     >
+                      <TeammateAvatar
+                        name={member.name}
+                        avatar={member.avatar}
+                        tone={member.tone}
+                        className="size-5 shrink-0"
+                      />
                       {member.name}
                       <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
                     </a>
@@ -1255,6 +1297,12 @@ function Unplaced({ tree }: { tree: OrgTree }) {
                     // rather than as a pill: the border is what made the inert
                     // version of this chip a lie.
                     <InertChip title="This teammate has no id, so their page can't be opened.">
+                      <TeammateAvatar
+                        name={member.name}
+                        avatar={member.avatar}
+                        tone={member.tone}
+                        className="size-5 shrink-0"
+                      />
                       {member.name}
                     </InertChip>
                   )}
@@ -1266,7 +1314,7 @@ function Unplaced({ tree }: { tree: OrgTree }) {
       )}
       {tree.people.length > 0 && (
         <section className="space-y-2">
-          <h3 className="text-sm font-medium">People</h3>
+          <h3 className="text-sm font-medium text-muted-foreground">People</h3>
           <p className="text-xs text-muted-foreground">
             The humans who can sign in. Desks staff teammates, so the company
             declares no desk for a person, and this chart does not guess one.

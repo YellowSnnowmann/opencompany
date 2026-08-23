@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, Mail, Pencil, Sparkles, Users, Wallet, Wrench } from "lucide-react";
 import { toast } from "sonner";
 
@@ -27,6 +27,7 @@ import {
   agentEdits,
   draftFrom,
   draftIsValid,
+  emptyDraft,
   isEditable,
   summarizeGrants,
   tierLabel,
@@ -90,9 +91,11 @@ async function classifyFailure(
  * ## Read-only is a fact about the agent, not a state of this screen
  *
  * A **manifest** teammate is declared in the company's version-controlled
- * `company.toml`. Its fields are shown read-only, with the reason next to them:
- * the console does not rewrite the blueprint, so the edit belongs in the file.
- * An **overlay** teammate was added here and is edited here.
+ * `company.toml` and is edited here too: the host stores the change as an
+ * override on the company record rather than rewriting the blueprint, so a
+ * deployed company's own roster — including the global baseline every company
+ * gets — is the operator's to change without a redeploy they may not be able to
+ * make. An **overlay** teammate was added here and is edited here.
  *
  * Which is which comes from the host's own `editable` list rather than from a
  * rule this file re-implements. A console that decided for itself would
@@ -113,8 +116,18 @@ export function AgentDetailView({
 }) {
   const [load, setLoad] = useState<Load>("loading");
   const [agent, setAgent] = useState<AgentDetailDto | null>(null);
+  /**
+   * The id of the agent currently on screen, kept current even across a
+   * navigation that happens while an async write is in flight. Guards the
+   * reset/save response handling: a slow response for a previous agent must not
+   * clobber the active detail's draft or flip its editor.
+   */
+  const displayedAgentIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    displayedAgentIdRef.current = agent?.id ?? null;
+  }, [agent]);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<AgentDraft>({ name: "", role: "", description: "" });
+  const [draft, setDraft] = useState<AgentDraft>(emptyDraft());
   const [saving, setSaving] = useState(false);
   /**
    * What this teammate is on and carrying (issue #1141), or `null` when the
@@ -330,6 +343,10 @@ export function AgentDetailView({
     setSaving(true);
     try {
       const updated = await client.updateAgent(agentId, edits, company);
+      // A slow save must not clobber the active detail: only fold the response
+      // in when the agent on screen is still the one we saved (the same guard
+      // the reset and budget writes use).
+      if (displayedAgentIdRef.current !== agentId) return;
       setAgent(updated);
       setDraft(draftFrom(updated));
       setEditing(false);
@@ -347,6 +364,38 @@ export function AgentDetailView({
     }
   }
 
+  /**
+   * Drop this teammate's instructions override so its blueprint persona applies
+   * again (issue #1530). Sends `instructions: null` — the three-state reset,
+   * distinct from saving an emptied field only in that it needs no edit form
+   * open. Offered only when an override is actually in force.
+   */
+  async function resetInstructions() {
+    if (!agent) return;
+    setSaving(true);
+    try {
+      const updated = await client.updateAgent(agentId, { instructions: null }, company);
+      // A slow reset must not clobber the active detail: only fold the response
+      // in when the agent on screen is still the one we asked to reset (the same
+      // identity guard the budget writes and inbox toggle use).
+      if (displayedAgentIdRef.current !== agentId) return;
+      setAgent(updated);
+      setDraft(draftFrom(updated));
+      setEditing(false);
+      toast.success("Instructions reset to the blueprint.");
+    } catch (error) {
+      toast.error(
+        error instanceof ApiError && error.status === 409
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Couldn't reset the instructions.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6">
@@ -357,59 +406,31 @@ export function AgentDetailView({
           and this page is linked from the org chart, the chat member pane and
           every "Not on a desk" chip. Arriving from any of those, "Back to team"
           named a page they had never seen.
-
-          The Edit affordance sits on the same row for the same reason. It
-          already existed, buried in the Instructions card halfway down, so a
-          teammate read as a read-only record; the page's one editing action
-          belongs where a page's actions go.
         */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <nav aria-label="Breadcrumb" data-testid="agent-breadcrumb">
-            <ol className="flex flex-wrap items-center gap-1 text-sm">
-              <li>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="-ml-2 h-7 px-2 text-muted-foreground"
-                  onClick={onBack}
-                  data-testid="agent-breadcrumb-company"
-                >
-                  Company
-                </Button>
-              </li>
-              <li aria-hidden className="text-muted-foreground">
-                <ChevronRight className="size-3.5" />
-              </li>
-              <li aria-current="page" className="min-w-0 truncate font-medium">
-                {/* Named as soon as there is a name, and "Teammate" until then.
-                    A crumb that appeared only once the read landed would move
-                    the Edit button across the row as the page settled. */}
-                {agent ? (agent.name?.trim() || agent.role) : "Teammate"}
-              </li>
-            </ol>
-          </nav>
-          {load === "ready" && agent && !editing && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setEditing(true)}
-              // Disabled with the reason, never absent. A manifest teammate is
-              // declared in version control and the host says so through its
-              // own `editable` list — an operator looking for the edit needs to
-              // find out *why* there isn't one, not to conclude the console
-              // forgot to build it.
-              disabled={agent.editable.length === 0}
-              title={
-                agent.editable.length === 0
-                  ? "This teammate is declared in your company blueprint (company.toml), so its name, role and instructions are edited there."
-                  : undefined
-              }
-              data-testid="agent-edit"
-            >
-              <Pencil className="size-4" /> Edit
-            </Button>
-          )}
-        </div>
+        <nav aria-label="Breadcrumb" data-testid="agent-breadcrumb">
+          <ol className="flex flex-wrap items-center gap-1 text-sm">
+            <li>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="-ml-2 h-7 px-2 text-muted-foreground"
+                onClick={onBack}
+                data-testid="agent-breadcrumb-company"
+              >
+                Company
+              </Button>
+            </li>
+            <li aria-hidden className="text-muted-foreground">
+              <ChevronRight className="size-3.5" />
+            </li>
+            <li aria-current="page" className="min-w-0 truncate font-medium">
+              {/* Named as soon as there is a name, and "Teammate" until then.
+                  A crumb that appeared only once the read landed would move
+                  the page's controls across the row as it settled. */}
+              {agent ? (agent.name?.trim() || agent.role) : "Teammate"}
+            </li>
+          </ol>
+        </nav>
 
         {load === "loading" && <Skeleton className="h-64 rounded-xl" />}
 
@@ -436,15 +457,60 @@ export function AgentDetailView({
 
         {load === "ready" && agent && (
           <>
-            <Identity agent={agent} />
+            <Identity
+              agent={agent}
+              action={
+                !editing ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditing(true)}
+                    // Disabled with the reason, never absent — an operator
+                    // looking for the edit needs to find out *why* there isn't
+                    // one, not to conclude the console forgot to build it. What
+                    // makes a teammate uneditable is the host's own `editable`
+                    // list and nothing this file decides: a current host offers
+                    // at least name, role and instructions on every teammate,
+                    // manifest ones included, so an empty list now means a host
+                    // that does not support the edit rather than a blueprint row
+                    // this console must refuse.
+                    disabled={agent.editable.length === 0}
+                    title={
+                      agent.editable.length === 0
+                        ? "This teammate can't be edited from here."
+                        : undefined
+                    }
+                    data-testid="agent-edit"
+                  >
+                    <Pencil className="size-4" /> Edit
+                  </Button>
+                ) : undefined
+              }
+            />
             <FactLine agent={agent} workload={workload} />
 
-            {/* The Edit action used to render here. It is on the page header
-                now (issue #1141) — one editing action, in the place a page's
-                actions live, rather than halfway down inside one of its cards. */}
+            {/* The Edit action sits on the teammate's name row (issue #1434) —
+                one editing action, in the place a page's actions live, rather
+                than halfway down inside one of its cards. */}
             <Section
               title="Instructions"
               subtitle="What this teammate was defined to do. It frames every turn they take."
+              action={
+                // Reset is offered only when an override is actually masking the
+                // blueprint, and only to a viewer the host will let write
+                // instructions — otherwise it is a control that can only 409.
+                isEditable(agent, "instructions") && agent.instructionsOverridden ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void resetInstructions()}
+                    disabled={saving}
+                    data-testid="agent-instructions-reset"
+                  >
+                    Reset to blueprint
+                  </Button>
+                ) : undefined
+              }
             >
               {editing ? (
                 <div className="grid gap-4">
@@ -456,6 +522,15 @@ export function AgentDetailView({
                     }
                     readOnly={(key) => !isEditable(agent, key)}
                   />
+                  {agent.instructionsOverridden && agent.blueprintInstructions?.trim() && (
+                    <p
+                      className="whitespace-pre-wrap text-xs text-muted-foreground"
+                      data-testid="agent-blueprint-hint"
+                    >
+                      Overriding the blueprint. Clearing this field, or “Reset to blueprint”,
+                      restores: {agent.blueprintInstructions.trim()}
+                    </p>
+                  )}
                   <div className="flex justify-end gap-2">
                     <Button
                       variant="ghost"
@@ -482,12 +557,25 @@ export function AgentDetailView({
                     data-testid="agent-description"
                   >
                     {agent.description?.trim() ||
-                      "No instructions were written for this teammate."}
+                      "No description was written for this teammate."}
                   </p>
+                  {agent.instructions?.trim() && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium">
+                        Persona instructions
+                        {agent.instructionsOverridden ? " · overriding the blueprint" : ""}
+                      </p>
+                      <p
+                        className="whitespace-pre-wrap text-sm text-muted-foreground"
+                        data-testid="agent-instructions"
+                      >
+                        {agent.instructions.trim()}
+                      </p>
+                    </div>
+                  )}
                   {agent.editable.length === 0 && (
                     <p className="text-xs text-muted-foreground" data-testid="agent-readonly-note">
-                      This teammate is part of your company blueprint, so its name, role and
-                      instructions are set in company.toml. Its daily budget can still be changed
+                      This teammate can't be edited from here. Its daily budget can still be changed
                       below.
                     </p>
                   )}
@@ -526,7 +614,7 @@ export function AgentDetailView({
 }
 
 /** Name, role, id, and the two facts that classify an agent. */
-function Identity({ agent }: { agent: AgentDetailDto }) {
+function Identity({ agent, action }: { agent: AgentDetailDto; action?: ReactNode }) {
   const display = agent.name?.trim() || agent.role;
   const seed = agent.id || display;
   const tone = toneFor(seed);
@@ -539,44 +627,49 @@ function Identity({ agent }: { agent: AgentDetailDto }) {
   // the title was the title again on every teammate in every shipped company.
   const subtitle = roleSubtitle(display, agent.role);
   return (
-    <div className="flex items-start gap-4">
-      {/* The header of the page a teammate *is* — the one screen that should
-          never be the one showing letters (issue #1181). 56px. */}
-      <TeammateAvatar
-        name={display}
-        tone={tone}
-        avatar={avatar}
-        className="size-14 rounded-xl text-base"
-        data-testid="agent-avatar"
-      />
-      <div className="min-w-0 flex-1 space-y-2">
-        <div>
-          <h1 className="truncate text-2xl font-semibold tracking-tight" data-testid="agent-name">
-            {display}
-          </h1>
-          {subtitle && (
-            <p className="truncate text-sm text-muted-foreground" data-testid="agent-role">
-              {subtitle}
-            </p>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary" className="gap-1" data-testid="agent-tier">
-            <Sparkles className="size-3" /> {tierLabel(agent)}
-          </Badge>
-          <Badge variant="outline" data-testid="agent-source">
-            {agent.source === "manifest" ? "Company blueprint" : "Added here"}
-          </Badge>
-          {agent.inboxEnabled && (
-            <Badge variant="outline" className="gap-1">
-              <Mail className="size-3" /> Inbox
+    <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start gap-4 min-w-0">
+        {/* The header of the page a teammate *is* — the one screen that should
+            never be the one showing letters (issue #1181). 56px. */}
+        <TeammateAvatar
+          name={display}
+          tone={tone}
+          avatar={avatar}
+          className="size-14 rounded-xl text-base"
+          data-testid="agent-avatar"
+        />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div>
+            <h1 className="truncate text-2xl font-semibold tracking-tight" data-testid="agent-name">
+              {display}
+            </h1>
+            {subtitle && (
+              <p className="truncate text-sm text-muted-foreground" data-testid="agent-role">
+                {subtitle}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="gap-1" data-testid="agent-tier">
+              <Sparkles className="size-3" /> {tierLabel(agent)}
             </Badge>
-          )}
-          <span className="font-mono text-xs text-muted-foreground" data-testid="agent-id">
-            {agent.id}
-          </span>
+            <Badge variant="outline" data-testid="agent-source">
+              {agent.source === "manifest" ? "Company blueprint" : "Added here"}
+            </Badge>
+            {agent.inboxEnabled && (
+              <Badge variant="outline" className="gap-1">
+                <Mail className="size-3" /> Inbox
+              </Badge>
+            )}
+            <span className="font-mono text-xs text-muted-foreground" data-testid="agent-id">
+              {agent.id}
+            </span>
+          </div>
         </div>
       </div>
+      {action && (
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">{action}</div>
+      )}
     </div>
   );
 }
@@ -603,7 +696,7 @@ function FactLine({
   const working = workload?.status === "working";
   return (
     <div
-      className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground"
+      className="flex flex-wrap items-center gap-x-2 gap-y-2 text-sm text-muted-foreground"
       data-testid="agent-facts"
     >
       {workload && (
@@ -626,6 +719,7 @@ function FactLine({
               {working ? "Working" : "Idle"}
             </span>
           </span>
+          <span aria-hidden>·</span>
           <span data-testid="agent-tasks">
             {workload.open === 1 ? "1 open task" : `${workload.open} open tasks`}
           </span>
@@ -693,9 +787,11 @@ function Tools({ agent }: { agent: AgentDetailDto }) {
           </div>
         </div>
       )}
-      <p className="text-xs text-muted-foreground">
-        Company tool list: {agent.tools.companyAllow.join(", ") || "nothing allowed"}
-      </p>
+      {!summary.standardGrant && (
+        <p className="text-xs text-muted-foreground">
+          Company tool list: {agent.tools.companyAllow.join(", ") || "nothing allowed"}
+        </p>
+      )}
     </Section>
   );
 }

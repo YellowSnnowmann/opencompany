@@ -3125,6 +3125,8 @@ mod test {
         use crate::ports::CompanyStore;
         store
             .save(&CompanyRecord {
+                overlay_retired_agents: Vec::new(),
+                overlay_agent_edits: Vec::new(),
                 id: id.clone(),
                 manifest: manifest.clone(),
                 ledger: Vec::new(),
@@ -3221,6 +3223,8 @@ mod test {
         use crate::ports::CompanyStore;
         store
             .save(&CompanyRecord {
+                overlay_retired_agents: Vec::new(),
+                overlay_agent_edits: Vec::new(),
                 id: id.clone(),
                 manifest: manifest(),
                 ledger: Vec::new(),
@@ -3384,6 +3388,8 @@ mode = "full"
         use crate::ports::CompanyStore;
         store
             .save(&CompanyRecord {
+                overlay_retired_agents: Vec::new(),
+                overlay_agent_edits: Vec::new(),
                 id: id.clone(),
                 manifest: roster_manifest(),
                 ledger: Vec::new(),
@@ -3911,6 +3917,8 @@ mode = "full"
         .unwrap();
 
         let record = CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest.clone(),
             ledger: Vec::new(),
@@ -3979,6 +3987,7 @@ mode = "full"
             steer: crate::company::steer::InflightRegistry::default(),
             delivery: None,
             search: None,
+            tenant_search: None,
             workspace: None,
             repos: None,
             repo_bindings: Vec::new(),
@@ -4046,6 +4055,8 @@ mode = "full"
         use crate::ports::CompanyStore;
         store
             .save(&CompanyRecord {
+                overlay_retired_agents: Vec::new(),
+                overlay_agent_edits: Vec::new(),
                 id: id.clone(),
                 manifest: manifest.clone(),
                 ledger: Vec::new(),

@@ -15,7 +15,8 @@ import type { OpenCompanyClient } from "./client";
  *
  * Four separate flags rather than one `connected`, because they fail
  * differently and a single boolean sends an operator to the wrong place for
- * three of them — see `BillingView` for how each is worded.
+ * three of them — see `views/finance/health.ts` for the precedence between
+ * them and how each is worded.
  */
 export interface BillingStatus {
   /** Whether an API key is stored. Never the key. */

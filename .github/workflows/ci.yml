@@ -6,7 +6,7 @@ name: CI
 # concurrency groups, therefore neither cancelled the other. The evidence is in
 # the run list: `push` and `pull_request` runs on `fix/1059-…`,
 # `feat/1070-…` and `feat/1113-…` created within two seconds of each other,
-# each carrying the same ~33-minute `Rust (openhuman, tinycortex)` lane. Every
+# each carrying the same ~33-minute `Rust (openhuman, tinymemory)` lane. Every
 # minute of that was spent twice and half of it answered a question nobody
 # asked — the PR run is the one whose result is reported on the PR and required
 # by the ruleset.
@@ -29,7 +29,7 @@ on:
 #
 # It had already stopped working. Of the last fourteen runs on `main`, twelve
 # were `cancelled` and one succeeded — merges were landing minutes apart against
-# a `Rust (openhuman, tinycortex)` lane that takes ~26 minutes, so each merge
+# a `Rust (openhuman, tinymemory)` lane that takes ~26 minutes, so each merge
 # killed its predecessor's verification before it could conclude. The honest
 # state of `main` across that stretch was neither known-good nor known-broken.
 # Nothing was red; the signal simply was not there. Verification thinned out
@@ -71,7 +71,7 @@ permissions:
 
 # Issue #1118. Three compiler knobs, set once for every job below, because the
 # critical path through this workflow is compile-shaped: on run 32223481743 the
-# `Rust (openhuman, tinycortex)` lane spent 306s in one `cargo build`, 140s in
+# `Rust (openhuman, tinymemory)` lane spent 306s in one `cargo build`, 140s in
 # clippy and 132s in `Check (--all-features)` before a single feature-scoped
 # test ran.
 #
@@ -161,7 +161,7 @@ jobs:
   #
   # Before this, every pull request ran every lane. A pull request that edits
   # only `gitbooks/` compiled the vendored openhuman tree three times; one that
-  # edits only `frontend/` ran the ~33 minute `Rust (openhuman, tinycortex)`
+  # edits only `frontend/` ran the ~33 minute `Rust (openhuman, tinymemory)`
   # feature matrix, whose twenty feature-scoped suites cannot be affected by a
   # `.tsx` file. The console still gets its Rust: `Console E2E` runs the host
   # binary, so a frontend change keeps the `rust` and `Gated host binary` jobs
@@ -423,7 +423,7 @@ jobs:
       #
       # No `shared-key`: the default key already carries the job id and is
       # stable run-to-run, and this lane's default feature set is NOT the
-      # `openhuman,tinycortex` set `rust-gated` builds. Pointing both at one key
+      # `openhuman,tinymemory` set `rust-gated` builds. Pointing both at one key
       # would have them overwrite each other's `target/` every run.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -493,7 +493,7 @@ jobs:
       # 24 tests that read as the guarantee the backend is trustworthy. None of
       # them had ever executed. `cargo test` above omits `--features sqlite`, so
       # the module is not compiled into it; `rust-gated` pins
-      # `openhuman,tinycortex`; and the one step that does compile this code,
+      # `openhuman,tinymemory`; and the one step that does compile this code,
       # `Check (--all-features)`, says so in its own comment: "compiling every
       # target is not running any of them". Three lanes touched the file and no
       # lane ran it.
@@ -603,7 +603,7 @@ jobs:
   # the SQLite step rescued: 20 tests over the task / workspace / fact / skill /
   # inbox / usage / run / user / session ports, plus isolation, append-only and
   # monotonic-seq. None had ever executed. `cargo test` omits `--features
-  # mongodb`, `rust-gated` pins `openhuman,tinycortex`, and `Check
+  # mongodb`, `rust-gated` pins `openhuman,tinymemory`, and `Check
   # (--all-features)` compiles the module without running it — three lanes touch
   # the file, no lane ran it. `StorageKind::Mongodb` is what hosted tenants run,
   # so the one storage backend under the deployed product was the one with no
@@ -761,27 +761,28 @@ jobs:
   # Issue #202. The `Rust` job above builds DEFAULT FEATURES ONLY, so every line
   # behind `openhuman` (`src/harness/**`, `src/workflows/**`, `src/runtime/`
   # `delegation*`, and the `live_company_turn` example) and every line behind
-  # `tinycortex` (`src/store/tinycortex_engine.rs` plus its `src/store/select.rs`
-  # seam) is invisible to it — a green `Rust` check is not evidence for a diff
-  # whose lines are all feature-gated. That blind spot let a hard `E0062` in a
-  # test `HarnessDeps` literal and a failing harness test both sit on `main`.
-  # This job compiles, lints and tests that surface.
+  # `tinymemory` (`src/store/memory/**` plus its `src/store/select.rs` seam) is
+  # invisible to it — a green `Rust` check is not evidence for a diff whose lines
+  # are all feature-gated. That blind spot let a hard `E0062` in a test
+  # `HarnessDeps` literal and a failing harness test both sit on `main`. This job
+  # compiles, lints and tests that surface.
   #
   # Deliberately a SEPARATE job rather than extra steps on `rust`: the fast
   # default check keeps its ~3-minute turnaround and its `Rust` check name (any
   # branch-protection rule pinned to it is unaffected), and the two run in
   # parallel.
   #
-  # One combination, not a matrix. Cargo features are additive, and `tinycortex`
-  # adds no new compilation on top of an `openhuman` build — the crate is already
-  # an unconditional dependency of `openhuman_core` — so `openhuman,tinycortex`
-  # covers both rot areas in a single compile. A default/`openhuman`/
-  # `openhuman,tinycortex`/`--all-features` matrix would roughly triple CI
-  # compute for a sliver of extra coverage.
+  # One combination, not a matrix. Cargo features are additive, and the
+  # `tinymemory` contract crate is already an unconditional dependency of
+  # `openhuman_core` — only the hosted `tinymemory-remote` adapter is new on top
+  # of an `openhuman` build — so `openhuman,tinymemory` covers both rot areas in
+  # a single compile. A default/`openhuman`/`openhuman,tinymemory`/
+  # `--all-features` matrix would roughly triple CI compute for a sliver of
+  # extra coverage.
   rust-gated:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    name: Rust (openhuman, tinycortex)
+    name: Rust (openhuman, tinymemory)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -836,8 +837,8 @@ jobs:
       # Steps are ordered to fail fast and cheap: a compile break (the `E0062`
       # class of bug that motivated this job) surfaces before the lint pass
       # spends time on a tree that does not build.
-      - name: Build (openhuman, tinycortex)
-        run: cargo build --locked --features openhuman,tinycortex --all-targets
+      - name: Build (openhuman, tinymemory)
+        run: cargo build --locked --features openhuman --all-targets
 
       # `--no-deps` is LOAD-BEARING — do not "simplify" it away. Cargo treats the
       # vendored `[patch]` crates as local packages, so an unscoped `-D warnings`
@@ -845,8 +846,38 @@ jobs:
       # `large_enum_variant` in OpenHuman's nested `vendor/tinyagents`), and the
       # gate would never reach first-party code. Scoping to the primary package
       # is what makes it meaningful.
-      - name: Clippy (openhuman, tinycortex)
-        run: cargo clippy --locked --no-deps --features openhuman,tinycortex --all-targets -- -D warnings
+      - name: Clippy (openhuman, tinymemory)
+        run: cargo clippy --locked --no-deps --features openhuman --all-targets -- -D warnings
+
+      # Issue #1524 (PR 1). `pub mod memory` is gated on `tinymemory`
+      # (`store/mod.rs`), and neither strict lane enabled that gate: the
+      # default-features clippy lints a tree where the module does not exist,
+      # and the step above compiles without it. `store::memory` was therefore
+      # linted by NO `-D warnings` lane at all — the silent-uncoverage class
+      # this job's own comments keep warning about. Same `--no-deps` reasoning
+      # as the step above; the union set matches the test steps below, so the
+      # compile is shared with them via the cache.
+      - name: Clippy (acp, runner, tinymemory)
+        run: cargo clippy --locked --no-deps --features acp,runner,tinymemory --all-targets -- -D warnings
+
+      # Issue #1524 (PR 1). The nested-vendor path deps must stay
+      # byte-identical to openhuman's own, or cargo resolves the same crate
+      # from two directories and two `MemoryProvider` traits exist in one
+      # process (the hazard recorded at `Cargo.toml:249-252`). `-d` prints
+      # duplicate versions of a package; any `tinymemory` line in that report
+      # is the failure.
+      - name: Assert no duplicated tinymemory crates
+        run: |
+          # Two separate failures, checked separately: a broken resolve must
+          # fail loudly, not read as "no duplicates" through an empty pipe.
+          if ! report="$(cargo tree --locked -e normal --features openhuman,tinymemory -d)"; then
+            echo "::error::cargo tree failed to resolve the graph"
+            exit 1
+          fi
+          if grep -E "^tinymemory" <<< "$report"; then
+            echo "::error::duplicated tinymemory-* package in the resolve graph"
+            exit 1
+          fi
 
       # `--tests` is LOAD-BEARING IN BOTH DIRECTIONS. Do not narrow it back to
       # `--lib`, and do not widen it to a bare `cargo test`.
@@ -877,8 +908,8 @@ jobs:
       # exists to dial a real inference backend with a real credential. `--tests`
       # selects exactly the targets that assert: the lib and bin unit tests, plus
       # every integration target under `tests/`, present and future.
-      - name: Test (openhuman, tinycortex)
-        run: cargo test --locked --features openhuman,tinycortex --tests
+      - name: Test (openhuman, tinymemory)
+        run: cargo test --locked --features openhuman --tests
 
       # The guard for the next one (issue #475). The step above runs whatever
       # `tests/` holds, but "ran the target" and "the target ran anything" are
@@ -933,7 +964,9 @@ jobs:
       # feature, which that table rejects. All of it is offline: the wire tests
       # drive a stub on an ephemeral port and the rest never build a request.
       - name: Test the Chargebee billing integration
-        run: scripts/ci/run-scoped-suite.sh "chargebee" openhuman,tinycortex,chargebee,paypal,composio chargebee
+        run: |
+          scripts/ci/run-scoped-suite.sh "chargebee" openhuman,chargebee,paypal,composio chargebee
+          scripts/ci/run-scoped-suite.sh "finance read plane" openhuman,chargebee,paypal,composio server::ops::finance
 
       # Issue #789: PayPal. Here rather than on the fast default job for the same
       # reason as chargebee above — the toolbelt bridge is under `src/harness/`
@@ -944,10 +977,10 @@ jobs:
       # lane with the gated feature set selects all three. Offline: the token
       # cache and error tests drive a stub on an ephemeral port.
       - name: Test the PayPal integration
-        run: scripts/ci/run-scoped-suite.sh "paypal" openhuman,tinycortex,chargebee,paypal,composio paypal
+        run: scripts/ci/run-scoped-suite.sh "paypal" openhuman,chargebee,paypal,composio paypal
 
       - name: Assert every integration target actually runs
-        run: scripts/ci/assert-integration-targets-run.sh openhuman,tinycortex
+        run: scripts/ci/assert-integration-targets-run.sh openhuman
 
       # Issue #579: the offline claim, executed rather than asserted.
       #
@@ -974,12 +1007,12 @@ jobs:
       # produce a green lane indistinguishable from a working one, and "nothing
       # dialled out" could not be told from "the jail was never locked".
       - name: Build the offline end-to-end target
-        run: cargo test --locked --features openhuman,tinycortex --test offline_e2e --no-run
+        run: cargo test --locked --features openhuman --test offline_e2e --no-run
 
       - name: Run it with no network at all
         run: |
           set -eu
-          binary="$(cargo test --locked --features openhuman,tinycortex --test offline_e2e \
+          binary="$(cargo test --locked --features openhuman --test offline_e2e \
             --no-run --message-format=json 2>/dev/null \
             | jq -r 'select(.executable != null and (.target.name == "offline_e2e")) | .executable' \
             | tail -n 1)"
@@ -996,7 +1029,7 @@ jobs:
       # `--all-targets` is LOAD-BEARING (issue #288). Without it this step
       # checks the lib and bins only, so test code behind a storage feature is
       # compiled by NOTHING in CI: the default `rust` job runs `cargo test`
-      # without `sqlite`, and the gated steps above pin `openhuman,tinycortex`.
+      # without `sqlite`, and the gated steps above pin `openhuman,tinymemory`.
       # That gap let two `E0034`s in `src/store/sqlite.rs`'s own tests sit on
       # `main` unseen — a green check is only evidence for the surface it
       # actually compiles.
@@ -1010,7 +1043,7 @@ jobs:
 
       # The tool belt the SHIPPED tenant image actually builds (issue #297).
       #
-      # Every other lane here runs `openhuman[,tinycortex]`. `mcp` is the one
+      # Every other lane here runs `openhuman[,tinymemory]`. `mcp` is the one
       # feature that changes what an agent's tool belt *contains* rather than
       # only what compiles, so no lane exercised the belt real deployments get —
       # and `dispatched_desk_agent_tool_belt_is_pinned` was failing unseen on
@@ -1077,7 +1110,7 @@ jobs:
       #
       # All offline — the Composio backend is scripted in every one of them.
       #
-      # `openhuman,tinycortex,composio` rather than a bare `--features composio`
+      # `openhuman,composio` rather than a bare `--features composio`
       # (which would imply `openhuman` anyway): matching this job's own set means
       # the vendored tree is already built and only this crate recompiles.
       # `composio` adds no `openhuman_core/*` subfeature, so there is no vendored
@@ -1105,10 +1138,10 @@ jobs:
       # the ACP step above states: the first bare argument is the filter and a
       # second would narrow the selection to nothing.
       - name: Test Composio tenant isolation
-        run: scripts/ci/run-scoped-suite.sh "composio isolation" openhuman,tinycortex,chargebee,paypal,composio harness::built_in::composio::isolation_tests
+        run: scripts/ci/run-scoped-suite.sh "composio isolation" openhuman,chargebee,paypal,composio harness::built_in::composio::isolation_tests
 
       - name: Test the Composio ops helpers
-        run: scripts/ci/run-scoped-suite.sh "composio ops helpers" openhuman,tinycortex,chargebee,paypal,composio harness::built_in::composio::ops_helper_tests
+        run: scripts/ci/run-scoped-suite.sh "composio ops helpers" openhuman,chargebee,paypal,composio harness::built_in::composio::ops_helper_tests
 
       # Issue #820 — which connected account an agent acts as. A third narrow
       # filter for the same reason the two above are narrow, and the same reason
@@ -1119,7 +1152,7 @@ jobs:
       # the negative half is the one protecting every existing single-account
       # company from having its account resolution changed.
       - name: Test which Composio account an execute acts as
-        run: scripts/ci/run-scoped-suite.sh "composio account choice" openhuman,tinycortex,chargebee,paypal,composio harness::built_in::composio::live::live_tests
+        run: scripts/ci/run-scoped-suite.sh "composio account choice" openhuman,chargebee,paypal,composio harness::built_in::composio::live::live_tests
 
       # Issue #820 — a fourth narrow filter, and the first outside `harness::`.
       # The console-plane half of the same decision: the grouping the choice is
@@ -1133,19 +1166,14 @@ jobs:
       # exists to be nameable here: a gated ops test added later joins it and is
       # run, rather than depending on somebody remembering this file.
       - name: Test the Composio account choice on the console plane
-        run: scripts/ci/run-scoped-suite.sh "composio choice ops" openhuman,tinycortex,chargebee,paypal,composio server::ops::composio::tests::gated_tests
+        run: scripts/ci/run-scoped-suite.sh "composio choice ops" openhuman,chargebee,paypal,composio server::ops::composio::tests::gated_tests
 
       # Issue #914. The `tinymemory` feature binds the engine-neutral
-      # `MemoryProvider` contract and adds the `remote`/`null` selection modes.
-      #
-      # Both steps pass `tinymemory` ALONE, deliberately. The feature does not
-      # imply `tinycortex` and must not be made to: `remote`/`null` bind a
-      # provider through this contract while `embedded` uses the `tinycortex`
-      # overlay, and keeping them apart is what lets a hosted-memory tenant build
-      # without linking a bundled SQLite it will never call (tinymemory#18 §D).
-      # Adding `tinycortex` here to "make the build match the lane" would hide a
-      # regression in exactly that separation, because the contract path would
-      # never again be compiled on its own.
+      # `MemoryProvider` contract and adds the `remote`/`null` selection modes
+      # (the embedded backend and its tinycortex overlay were removed in
+      # #1568). `tinymemory` is passed ALONE, deliberately, so a hosted-memory
+      # tenant build compiles only the provider contract, never an engine that
+      # selection will not bind.
       #
       # The lane is a placement choice, not a requirement — every Rust job runs
       # `init-vendored-submodules.sh`, so the `vendor/openhuman/vendor/tinymemory`
@@ -1169,32 +1197,21 @@ jobs:
       - name: Bin tests (tinymemory)
         run: cargo test --locked --features acp,runner,tinymemory --bin opencompany
 
-      # Issue #1113 gave `tinymemory-embedded` its own lane; these two steps are
-      # that lane moved onto the union of the openhuman+tinycortex core and the
-      # provider seam — the first lane that LINKS AND EXECUTES the two together
-      # (the shipped tenant set is neither a subset nor a superset of this lane;
-      # what matters is that the combination stops existing only as a
-      # typecheck). Until now that union existed only as
-      # `Check (--all-features)`: never linked as a
-      # binary, never executed, which is precisely the crack a feature-gated
-      # merge collision (the duplicated-struct-field kind that `fmt`, clippy and
-      # two green suites all missed once already) slips through. The union also
+      # These two steps run the same two halves under BARE `tinymemory` — the
+      # provider contract with no `acp`/`runner`/`openhuman` baggage — so the
+      # seam that hosted tenants actually bind LINKS AND EXECUTES on its own
+      # rather than only typechecking under `Check (--all-features)`. The union
       # runs the upstream driver-conformance suite against the providers
-      # `open_driver` constructs — the regression net for the namespace-driver
-      # defects #1201/#1238, which shipped while the driver's own upstream suite
-      # was green, because nothing ran it through THIS host's construction path.
+      # `open_driver` constructs, through THIS host's construction path.
       #
-      # The two `tinymemory`-ALONE steps above stay, deliberately: per the #914
-      # rationale, the contract-only build (no bundled SQLite) must keep
-      # compiling and running on its own, or a regression in exactly that
-      # separation hides. The old `acp,runner,tinymemory-embedded` steps this
-      # replaces are subsumed — same filters, wider build — and feature-lanes.txt
-      # permits one lane per feature, so the row moved here with them.
+      # The two `acp,runner,tinymemory` steps above stay, deliberately: the
+      # contract under the full shipped tool set must keep compiling and
+      # running, and the bare build must keep standing alone.
       - name: Test the memory engine union the tenant ships
-        run: scripts/ci/run-scoped-suite.sh "memory union contract" openhuman,tinycortex,tinymemory-embedded store::memory
+        run: scripts/ci/run-scoped-suite.sh "memory provider contract" tinymemory store::memory
 
       - name: Test the memory engine union selection
-        run: scripts/ci/run-scoped-suite.sh "memory union selection" openhuman,tinycortex,tinymemory-embedded store::select
+        run: scripts/ci/run-scoped-suite.sh "memory selection" tinymemory store::select
 
       # Issue #477. Before this step, `tinyplace` was COMPILED by CI and
       # EXECUTED by nothing. `Check (--all-features)` above builds every
@@ -1221,7 +1238,7 @@ jobs:
       # That one is scoped because `mcp` changes what a tool belt *contains* and
       # a single module pins that contract, so the rest of the run would be
       # re-proving what an earlier lane already proved. `tinyplace` is the
-      # `openhuman,tinycortex` shape instead — a feature that changes behaviour
+      # `openhuman,tinymemory` shape instead — a feature that changes behaviour
       # at every site it gates — and that lane runs its whole suite for the same
       # reason. The compile is what this costs; the compile is identical either
       # way, so a filter would only discard results already paid for.
@@ -1250,7 +1267,7 @@ jobs:
         run: cargo test --locked --features tinyplace --lib
 
   # Issue #1118. The gated host binary the `Console E2E (live brain)` job needs
-  # is built HERE rather than as the last step of `Rust (openhuman, tinycortex)`
+  # is built HERE rather than as the last step of `Rust (openhuman, tinymemory)`
   # above, and the move is a wall-clock change, not a tidy-up.
   #
   # Issue #467 put it in that lane to avoid a second submodule checkout, a
@@ -1320,7 +1337,7 @@ jobs:
       # `--bin`, not `--all-targets`: this job exists to produce one binary. The
       # tests and examples under this feature set are covered by the lane above.
       - name: Build the gated host binary for the live-brain e2e lane
-        run: cargo build --locked --features openhuman,tinycortex,mcp,composio --bin opencompany
+        run: cargo build --locked --features openhuman,mcp,composio --bin opencompany
 
       - name: Upload the gated host binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1708,7 +1725,7 @@ jobs:
   # existed before:
   #
   #   * a host with the harness in it — the gated binary `rust-gated` now
-  #     uploads (`--features openhuman,tinycortex,mcp`);
+  #     uploads (`--features openhuman,mcp`);
   #   * something for the harness to think with — `test/e2e/mock-brain.mjs`, an
   #     OpenAI-compatible endpoint whose answers are a pure function of the
   #     prompt, which `playwright.config.ts` starts and points the host at;

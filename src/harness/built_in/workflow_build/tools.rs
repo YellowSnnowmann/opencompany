@@ -312,6 +312,7 @@ impl Tool for CheckWorkflowTool {
                 if let Err(err) = courtesy_validate_draft(
                     &raw,
                     &self.ctx.company.record,
+                    self.ctx.company.source_dir.as_deref(),
                     Some(&self.ctx.company.wired_channels),
                 ) {
                     problems.push(err.to_string());
@@ -484,6 +485,7 @@ impl Tool for ProposeWorkflowTool {
                         if let Err(err) = courtesy_validate_draft(
                             &raw,
                             &self.ctx.company.record,
+                            self.ctx.company.source_dir.as_deref(),
                             Some(&self.ctx.company.wired_channels),
                         ) {
                             errors.push(err.to_string());

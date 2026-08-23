@@ -42,9 +42,12 @@ chose.
 Commands: `oc_local_instances` lists, `oc_create_local_instance` adds a root and
 starts it, `oc_start_local_instance` / `oc_stop_local_instance` take and release
 one, `oc_rename_local_instance` changes only the label, and
-`oc_forget_local_instance` drops a row **leaving its data on disk** — the
-reversible half only, because the other half is someone's company. Stopping
-frees the root for an `opencompany serve` in a terminal.
+`oc_forget_local_instance` drops a row **leaving its data on disk**. The distinct
+`oc_delete_local_instance` command permanently deletes a desktop-created
+instance's root. The desktop's “On this computer” screen exposes the latter
+behind an explicit confirmation. The default instance cannot be deleted because
+its root is the application data directory itself. Stopping frees the root for
+an `opencompany serve` in a terminal.
 
 An instance that fails to start is a row carrying its reason, never a launch
 that fails: one busy root must not stop the other instances, or the multi-host

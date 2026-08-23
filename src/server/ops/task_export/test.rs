@@ -36,7 +36,8 @@ fn card(title: &str) -> TaskCard {
         id: "t-1".to_string(),
         title: title.to_string(),
         note: Some("Write the launch post and get it signed off.".to_string()),
-        column: "in_review".to_string(),
+        column: "working".to_string(),
+        stage: Some("in_review".to_string()),
         priority: "high".to_string(),
         assignee: "writer".to_string(),
         updated_at: T0 + 600_000,
@@ -146,11 +147,13 @@ fn the_document_reads_as_prose_not_as_data() {
     ] {
         assert!(html.contains(heading), "missing section: {heading}");
     }
-    // Human labels, not board ids. (The `completed` entry's own label carries
-    // the landing column verbatim, because the document must say what the
-    // screen says — the facts grid is what a reader takes the status from.)
+    // Human labels, not board ids — and both halves of the card's state since
+    // issue #1512: the phase a reader of the board sees, then the stage that
+    // says what it is actually waiting on. (The `completed` entry's own label
+    // carries the landing column verbatim, because the document must say what
+    // the screen says — the facts grid is what a reader takes the status from.)
     assert!(
-        html.contains("<dd>In review</dd>"),
+        html.contains("<dd>Working — In review</dd>"),
         "status is not humanised: {html}"
     );
     assert!(!html.contains("<dd>in_review</dd>"));

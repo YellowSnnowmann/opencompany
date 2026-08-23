@@ -1,0 +1,155 @@
+# Workflow graph: euler_solve
+#
+# Referenced by `[workflows].enabled = ["euler_solve"]` in ../company.toml.
+#
+# One pass at a stated problem: read it, cost the naive method, decide whether
+# structure is needed, write the program, check it independently, and record the
+# answer only if the check agreed.
+#
+# The graph is the same loop the orchestrator runs by hand when an operator
+# states a problem in the main line. It exists as a saved workflow because the
+# hand-run version is a habit and this one is a *record* — an operator can read
+# what the lab will do before it does it, and a run that skipped the check is
+# visible as a node that did not execute rather than as a paragraph that did not
+# mention it.
+#
+# Two structural choices worth reading before editing:
+#
+#   * `cost` is a condition node, and it is the first decision rather than the
+#     last. Half the problems this lab sees are settled by a loop somebody was
+#     too proud to write; the other half are ones where the loop is 10^14
+#     operations and finding that out after writing it is the expensive order.
+#
+#   * `check` runs after `solve` and its disagreement edge goes back to
+#     `approach`, not to `solve`. When two independent programs disagree, the
+#     likely fault is in what was being computed rather than in how; sending it
+#     back to the programmer invites a patch until the numbers match, which is
+#     the one repair that can make both of them wrong.
+
+id = "euler_solve"
+name = "Solve and check"
+description = "Read the problem, cost the naive method, reduce it if it needs reducing, program it, break it independently, and record only what survived."
+
+[[node]]
+id = "problem"
+kind = "trigger"
+name = "A problem is stated"
+summary = "An operator states a problem with an exact answer in the main line."
+# The `agree` gate loops a disagreement back to `approach` for another reduction
+# pass. A guarded cycle needs an explicit bound or the engine rejects it
+# (tinyflows `IllegalCycle`): OpenCompany has no `loop` node kind, so the
+# trigger's `recursion_limit` is the sanctioned way to cap the retry passes.
+[node.config]
+recursion_limit = 100
+
+[[node]]
+id = "restate"
+kind = "agent"
+name = "Restate the problem"
+summary = "Say what is being asked, with the boundary cases spelled out and the ambiguous readings named."
+agent = "theorist"
+
+[[node]]
+id = "cost"
+kind = "condition"
+name = "Does brute force finish?"
+summary = "Cost the naive method as a count of operations. Branch on whether it is worth reducing before programming."
+[node.config]
+field = "=item.brute_force_finishes"
+
+[[node]]
+id = "approach"
+kind = "agent"
+name = "Reduce it"
+summary = "Name the structure being exploited and the cost after it, and produce the small-case table the answer must reproduce."
+agent = "theorist"
+
+[[node]]
+id = "solve"
+kind = "agent"
+name = "Write and run the program"
+summary = "Reproduce the small cases first, then run to completion and report the number, the runtime and the exact command."
+agent = "programmer"
+
+[[node]]
+id = "check"
+kind = "agent"
+name = "Try to break it"
+summary = "A second route written from the statement rather than from the first program, plus brute force at a reduced bound."
+agent = "verifier"
+
+[[node]]
+id = "agree"
+kind = "condition"
+name = "Did the two routes agree?"
+summary = "Branch on agreement. A disagreement is a finding, and it carries the smallest input where the two differ."
+[node.config]
+field = "=item.routes_agree"
+
+[[node]]
+id = "record"
+kind = "agent"
+name = "Record the answer"
+summary = "Write the answer, the method, the check and the failed approaches where the next problem can find them."
+agent = "scribe"
+
+[[node]]
+id = "report"
+kind = "output"
+name = "Report the answer"
+summary = "The number, what it rests on, and what the check ruled out."
+
+# The records desk, because the audience for a finished answer is the next
+# problem rather than the operator who asked for this one — they already have it
+# from the main line. Theory and implementation get the note through the
+# workspace, where it sits beside the approaches that failed.
+[node.destination]
+kind = "channel"
+target = "records"
+
+[[edge]]
+from = "problem"
+to = "restate"
+
+[[edge]]
+from = "restate"
+to = "cost"
+
+# The loop that finishes goes straight to the programmer. An approach note for a
+# problem a ten-line loop settles is the lab making work for itself.
+[[edge]]
+from = "cost"
+to = "solve"
+label = "yes"
+
+[[edge]]
+from = "cost"
+to = "approach"
+label = "no"
+
+[[edge]]
+from = "approach"
+to = "solve"
+
+[[edge]]
+from = "solve"
+to = "check"
+
+[[edge]]
+from = "check"
+to = "agree"
+
+# Back to the reduction, not to the program. See the header.
+[[edge]]
+from = "agree"
+to = "approach"
+label = "no"
+
+[[edge]]
+from = "agree"
+to = "record"
+label = "yes"
+
+[[edge]]
+from = "record"
+to = "report"

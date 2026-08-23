@@ -12,6 +12,7 @@ import {
 } from "@/connections/registry";
 import {
   createLocalInstance,
+  deleteLocalInstance,
   forgetLocalInstance,
   localInstances,
   startLocalInstance,
@@ -288,18 +289,21 @@ describe("asking the core what it runs", () => {
       oc_start_local_instance: { id: "acme", label: "Acme", dataDir: "/d", running: true },
       oc_stop_local_instance: { id: "acme", label: "Acme", dataDir: "/d", running: false },
       oc_forget_local_instance: undefined,
+      oc_delete_local_instance: undefined,
     });
 
     await createLocalInstance("Acme");
     await startLocalInstance("acme");
     await stopLocalInstance("acme");
     await forgetLocalInstance("acme");
+    await deleteLocalInstance("acme");
 
     expect(calls).toEqual([
       { command: "oc_create_local_instance", args: { label: "Acme" } },
       { command: "oc_start_local_instance", args: { id: "acme" } },
       { command: "oc_stop_local_instance", args: { id: "acme" } },
       { command: "oc_forget_local_instance", args: { id: "acme" } },
+      { command: "oc_delete_local_instance", args: { id: "acme" } },
     ]);
     uninstallBridge();
   });

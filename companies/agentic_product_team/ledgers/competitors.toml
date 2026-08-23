@@ -1,0 +1,123 @@
+# One row per competitor claim, with the source and the date it was observed.
+#
+# The axis a memo destroys. A competitive teardown written in March is read in
+# September as though it were still true, because nothing in it says when any
+# individual line was checked — and the model's own recollection of a rival's
+# pricing is a year stale and stated with total confidence, which is the worst
+# combination. A row per claim carries its own source, its own date and its own
+# confidence, so a claim that has aged out is visible rather than quietly wrong.
+#
+# Declared here rather than left to `define_ledger`: the competitor analyst is
+# one of the six teammates this template ships and dated, sourced claims are the
+# entire output of that role.
+
+title = "Competitors"
+purpose = """
+Every claim about a competitor the team is relying on: what was claimed, who \
+about, the source somebody else can open, the date it was observed, and whether \
+it was seen, reported or inferred. Check the date before arguing from a row — an \
+undated competitive claim is a fossil presented as a fact.\
+"""
+written_by = "`record_entry` to record or re-verify a claim, `close_entry` when it is superseded or has gone stale"
+checks = ["required-field", "known-status", "closed-needs-reason"]
+
+[[field]]
+name = "id"
+role = "id"
+required = true
+
+[[field]]
+name = "claim"
+role = "title"
+required = true
+description = "What is true of them, in one line — what they shipped, what they charge, what they say."
+
+[[field]]
+name = "status"
+role = "status"
+required = true
+
+[[field]]
+name = "competitor"
+role = "prose"
+required = true
+description = "Who this is about. One name per row, so a row can be re-verified on its own."
+
+[[field]]
+name = "source"
+role = "prose"
+required = true
+description = "The pricing page, changelog, docs page, filing or public post the claim comes from. Public evidence only."
+
+[[field]]
+name = "observed_on"
+role = "date"
+required = true
+description = "When the source was actually read. The field that separates a fact from a fossil."
+
+[[field]]
+name = "basis"
+role = "prose"
+required = true
+description = "`observed`, `reported` (somebody else says so) or `inferred` (reasoned to it). An inference must never read as an observation."
+
+[[field]]
+name = "implication"
+role = "prose"
+description = "What it would change for us, if anything. A row with no implication is trivia; say so rather than inventing one."
+
+[[field]]
+name = "owner"
+role = "owner"
+
+[[field]]
+name = "reason"
+role = "prose"
+description = "How it closed — superseded by which row, or gone stale and unverifiable. Required when it closes."
+
+[[field]]
+name = "refs"
+role = "refs"
+description = "The decisions and roadmap bets argued from this claim."
+
+[[status]]
+name = "current"
+
+[[status]]
+name = "unverified"
+label = "Awaiting a source"
+
+[[status]]
+name = "disputed"
+label = "Sources disagree"
+
+[[status]]
+name = "superseded"
+closed = true
+needs_reason = true
+
+[[status]]
+name = "stale"
+closed = true
+needs_reason = true
+
+[[section]]
+heading = "Current picture"
+blurb = "Sourced and dated. Re-verify anything the roadmap is about to be argued from."
+statuses = ["current"]
+order = "recent"
+
+[[section]]
+heading = "Not settled"
+blurb = """
+Claims with no source yet, and claims whose sources disagree. A disagreement is \
+reported as a disagreement rather than resolved toward the convenient side.\
+"""
+statuses = ["unverified", "disputed"]
+order = "recent"
+
+[[section]]
+heading = "Retired"
+blurb = "Superseded or aged out, each saying which. Kept so a claim's history is visible when it comes back."
+statuses = ["superseded", "stale"]
+cap = 20

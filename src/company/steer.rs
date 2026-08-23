@@ -203,7 +203,12 @@ impl InflightRegistry {
         Self::default()
     }
 
-    /// Whether any company in this process has a run in flight.
+    /// Whether any run this registry tracks is in flight.
+    ///
+    /// The map is keyed by company, but the builder mints one registry per
+    /// company runtime, so in practice this answers for a single company;
+    /// `GET /healthz/busy` is what ORs the answer across every company in the
+    /// process.
     ///
     /// The manager consults this — through the workload's busy endpoint — before
     /// scaling a tenant to zero. Its own notion of "idle" is inbound proxied

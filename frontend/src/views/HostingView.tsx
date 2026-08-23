@@ -69,7 +69,7 @@ export function HostingView({ client, company }: Props) {
   // typed-but-unsaved API key. `SettingsSection` renders this with
   // `key={company}` so a company switch remounts rather than carrying a key
   // typed for one company into another company's Save. See the same note in
-  // BillingView.
+  // the Finance section's provider forms.
   const load = useCallback(async () => {
     try {
       const next = await getHosting(client, company);

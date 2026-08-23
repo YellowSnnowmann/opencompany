@@ -188,6 +188,8 @@ export function SetupWizard({ client, onDone, onCancel }: Props) {
 
   /** The three answers. */
   const [draft, setDraft] = useState<SetupDraft>(emptySetupDraft);
+  /** The shipped company template the operator explicitly chose. */
+  const [template, setTemplate] = useState("");
   /** The address that will be able to sign in. */
   const [email, setEmail] = useState("");
   /** Whether the operator has been shown a problem on the current step yet. */
@@ -213,7 +215,11 @@ export function SetupWizard({ client, onDone, onCancel }: Props) {
    * that traps them.
    */
   const [tested, setTested] = useState<
-    { kind: "untested" } | { kind: "testing" } | { kind: "ok"; baseUrl: string } | { kind: "failed"; error: string } | { kind: "skipped" }
+    | { kind: "untested" }
+    | { kind: "testing" }
+    | { kind: "ok"; baseUrl: string; model?: string | null }
+    | { kind: "failed"; error: string }
+    | { kind: "skipped" }
   >({ kind: "untested" });
   /**
    * The team, once the host has designed one — and `null` until then.
@@ -372,10 +378,14 @@ export function SetupWizard({ client, onDone, onCancel }: Props) {
   // See `changedFields`: unchanged fields are omitted, env-owned ones are never
   // sent (the host refuses them and an apply is all-or-nothing), and a secret
   // goes only when the operator typed one.
-  const changed = useMemo(
-    () => (status ? changedFields(status, values) : {}),
-    [status, values],
-  );
+  const changed = useMemo(() => {
+    const fields = status ? changedFields(status, values) : {};
+    // BYOK/local credentials belong to the new company's write-only inference
+    // store. Writing the same bytes into the host-wide TinyHumans key would
+    // both duplicate the secret and falsely report a process restart.
+    if (provider !== "managed") delete fields.tinyhumans_api_key;
+    return fields;
+  }, [status, values, provider]);
 
   /**
    * The steps this host actually shows. `STEPS` stays the source of order.
@@ -423,7 +433,11 @@ export function SetupWizard({ client, onDone, onCancel }: Props) {
         industry: draft.industry,
         teamHint: draft.teamHint,
         automate: draft.automate,
+        template: template || null,
         inferenceKey: values.tinyhumans_api_key || null,
+        inferenceProvider: tested.kind === "ok" ? provider : null,
+        inferenceBaseUrl: tested.kind === "ok" ? tested.baseUrl : null,
+        inferenceModel: tested.kind === "ok" ? tested.model : null,
       });
       // The host is contracted never to answer with an empty roster, so a
       // missing or empty one is a failure rather than a team of nobody — and
@@ -438,7 +452,7 @@ export function SetupWizard({ client, onDone, onCancel }: Props) {
     } finally {
       setDesigning(false);
     }
-  }, [client, draft, values.tinyhumans_api_key]);
+  }, [client, draft, template, provider, tested, values.tinyhumans_api_key]);
 
   const submit = useCallback(async () => {
     if (!status) return;
@@ -461,6 +475,15 @@ export function SetupWizard({ client, onDone, onCancel }: Props) {
                 // As reviewed, not as proposed.
                 agents: roster.agents,
                 adminEmail: email.trim() || null,
+                inference:
+                  tested.kind === "ok" && provider !== "managed"
+                    ? {
+                        provider,
+                        baseUrl: tested.baseUrl,
+                        model: tested.model ?? null,
+                        key: values.tinyhumans_api_key?.trim() || null,
+                      }
+                    : null,
               }
             : null,
       });
@@ -471,7 +494,7 @@ export function SetupWizard({ client, onDone, onCancel }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [client, status, changed, roster, draft, email]);
+  }, [client, status, changed, roster, draft, email, provider, tested, values.tinyhumans_api_key]);
 
   if (loadError) {
     return (
@@ -625,7 +648,15 @@ export function SetupWizard({ client, onDone, onCancel }: Props) {
         ? "That connection did not work. Fix it, or continue without a model."
         : "Test the connection first, or continue without a model.";
     }
-    if (current.id === "business" && !draft.industry.trim()) {
+    if (current.id === "business" && needsCompany && status.templates.length > 0 && !template) {
+      return "Choose the kind of company you want to start with.";
+    }
+    if (
+      current.id === "business" &&
+      needsCompany &&
+      status.templates.length === 0 &&
+      !draft.industry.trim()
+    ) {
       return "Tell us a little about the company first.";
     }
     if (current.id === "account" && needsCompany) {
@@ -735,7 +766,21 @@ export function SetupWizard({ client, onDone, onCancel }: Props) {
     >
       <div className="space-y-6" data-testid="setup-wizard">
         {current.id === "business" && (
-          <BusinessStep draft={draft} onChange={setDraft} onEnter={advance} />
+          <BusinessStep
+            draft={draft}
+            templates={status.templates}
+            template={template}
+            onTemplate={(id) => {
+              setTemplate(id);
+              const selected = status.templates.find((candidate) => candidate.id === id);
+              if (selected && !draft.industry.trim()) {
+                setDraft((current) => ({ ...current, industry: selected.name }));
+              }
+              setRoster(null);
+            }}
+            onChange={setDraft}
+            onEnter={advance}
+          />
         )}
 
         {current.id === "signin" && (
@@ -1084,7 +1129,7 @@ function PowerStep({
       });
       onTested(
         result.ok
-          ? { kind: "ok", baseUrl: result.baseUrl }
+          ? { kind: "ok", baseUrl: result.baseUrl, model: result.model }
           : { kind: "failed", error: result.error ?? "Could not reach the provider." },
       );
     } catch (err: unknown) {
@@ -1144,7 +1189,8 @@ function PowerStep({
             Endpoint
           </Label>
           <p className="mt-0.5 text-sm leading-snug text-muted-foreground">
-            The base URL of the chat API, ending in <code>/v1</code>.
+            Paste the local address as shown, for example <code>localhost:6969</code>. We&apos;ll
+            add <code>http://</code> and <code>/v1</code> when needed.
           </p>
           <Input
             id="setup-base-url"
@@ -1263,7 +1309,8 @@ function PowerStep({
             watched us produce. */}
         {tested.kind === "ok" && (
           <p className="text-sm leading-snug text-status-done-text" data-testid="setup-test-ok">
-            Reached {tested.baseUrl} and got a reply.
+            Reached {tested.baseUrl}
+            {tested.model ? ` using ${tested.model}` : ""} and got a reply.
           </p>
         )}
         {tested.kind === "failed" && (
@@ -1304,7 +1351,7 @@ function PowerStep({
 type TestState =
   | { kind: "untested" }
   | { kind: "testing" }
-  | { kind: "ok"; baseUrl: string }
+  | { kind: "ok"; baseUrl: string; model?: string | null }
   | { kind: "failed"; error: string }
   | { kind: "skipped" };
 
@@ -1625,10 +1672,16 @@ function AdvancedStep({
  */
 function BusinessStep({
   draft,
+  templates,
+  template,
+  onTemplate,
   onChange,
   onEnter,
 }: {
   draft: SetupDraft;
+  templates: SetupStatus["templates"];
+  template: string;
+  onTemplate: (id: string) => void;
   onChange: (update: (d: SetupDraft) => SetupDraft) => void;
   onEnter: () => void;
 }) {
@@ -1641,24 +1694,57 @@ function BusinessStep({
             breathing room belongs *before the field*, not inside the sentence.
             A uniform `space-y` gave all three the same gap and the question
             read as three unrelated lines. */}
-        <Label htmlFor="setup-industry" className="text-base font-medium leading-snug">
+        <Label htmlFor="setup-template" className="text-base font-medium leading-snug">
           What kind of company are you setting up?
         </Label>
         <p className="mt-0.5 text-sm leading-snug text-muted-foreground">
-          A sentence is plenty. What you sell, or what you do.
+          Pick one of the teams bundled with OpenCompany. You can tailor it below.
         </p>
-        <Input
-          id="setup-industry"
-          autoFocus
-          value={draft.industry}
-          placeholder="e.g. E-commerce — I sell homeware online"
-          data-testid="setup-field-industry"
-          className="mt-2.5"
-          onChange={(e) => onChange((d) => ({ ...d, industry: e.target.value }))}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onEnter();
-          }}
-        />
+        {templates.length > 0 ? (
+          <select
+            id="setup-template"
+            autoFocus
+            value={template}
+            data-testid="setup-field-template"
+            className="mt-2.5 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            onChange={(event) => onTemplate(event.target.value)}
+          >
+            <option value="" disabled>
+              Choose a company template…
+            </option>
+            {templates.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name} ({option.agent_count} teammates)
+              </option>
+            ))}
+          </select>
+        ) : (
+          <Input
+            id="setup-industry"
+            autoFocus
+            value={draft.industry}
+            placeholder="e.g. E-commerce — I sell homeware online"
+            data-testid="setup-field-industry"
+            className="mt-2.5"
+            onChange={(e) => onChange((d) => ({ ...d, industry: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onEnter();
+            }}
+          />
+        )}
+        {template && (
+          <Input
+            id="setup-industry"
+            value={draft.industry}
+            placeholder="Optional details about what makes yours different"
+            data-testid="setup-field-industry"
+            className="mt-2"
+            onChange={(e) => onChange((d) => ({ ...d, industry: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onEnter();
+            }}
+          />
+        )}
       </div>
 
       <div>

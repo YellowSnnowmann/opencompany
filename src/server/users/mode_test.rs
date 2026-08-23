@@ -102,6 +102,8 @@ async fn state_in_mode_on(
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest.clone(),
             ledger: Vec::new(),
@@ -218,6 +220,93 @@ async fn auth_config_publishes_the_mode_to_an_anonymous_caller() {
         let body = body_json(response).await;
         assert_eq!(body["mode"], mode.as_str(), "{mode}");
         assert_eq!(body["passwords"], passwords, "{mode}");
+    }
+}
+
+/// The sign-in screen is the one place a person confirms *what* they are
+/// signing in to before handing over a credential, and on the hosted platform
+/// every tenant is a separate company on its own URL. The console cannot ask
+/// anything else for the name — every other route that reports it is behind the
+/// very sign-in being drawn — so it has to come back here (issue #1334).
+#[tokio::test]
+async fn auth_config_names_the_company_to_an_anonymous_caller() {
+    for mode in [AuthMode::Email, AuthMode::Wallet, AuthMode::None] {
+        let dir = home();
+        let state = state_in_mode(dir.path(), mode, None).await;
+        let response = router(state)
+            .oneshot(get("/api/v1/company/auth/config"))
+            .await
+            .unwrap();
+        let body = body_json(response).await;
+        // The manifest's display name, not the id it is stored under — the
+        // fixture spells them differently ("Acme" vs `acme`) precisely so a
+        // fallback to the id cannot pass this.
+        assert_eq!(
+            body["name"], "Acme",
+            "every mode draws a heading, so every mode needs the name: {body}"
+        );
+    }
+}
+
+/// A manifest that names the company nothing still has to produce a heading.
+/// The id is what every other surface calls it in that case — `status` makes
+/// the same substitution — and a blank `h1` is the bug this field exists to
+/// remove, so it must not be reachable by writing `name = ""`.
+#[tokio::test]
+async fn auth_config_falls_back_to_the_company_id_when_the_manifest_has_no_name() {
+    let dir = home();
+    let state = state_in_mode(dir.path(), AuthMode::Email, None).await;
+    let id = CompanyId::new("acme");
+    let store = crate::store::FsCompanyStore::new(dir.path().to_path_buf());
+    let mut record = store.load(&id).await.unwrap().expect("the fixture record");
+    record.manifest.company.name = "   ".to_string();
+    store.save(&record).await.unwrap();
+
+    let response = router(state)
+        .oneshot(get("/api/v1/company/auth/config"))
+        .await
+        .unwrap();
+    let body = body_json(response).await;
+    assert_eq!(
+        body["name"], "acme",
+        "a blank name is not a heading; the id is: {body}"
+    );
+}
+
+/// The record the name comes from is not there, or is not readable.
+///
+/// Both are the same statement: a heading is decoration on a route whose real
+/// payload is the mode, and a console that cannot learn the mode draws the
+/// wrong screen entirely. So neither case may fail the request — they fall back
+/// to the id, exactly as a blank name does.
+///
+/// The two are separate paths in `display_name`: a missing bundle is `Ok(None)`
+/// from the store, an unreadable one is `Err`, and the `Err` arm is the one that
+/// would take the route down if it were propagated.
+#[tokio::test]
+async fn auth_config_falls_back_to_the_company_id_when_the_record_cannot_be_read() {
+    for (case, contents) in [("gone", None), ("unreadable", Some("}} not toml {{"))] {
+        let dir = home();
+        let state = state_in_mode(dir.path(), AuthMode::Email, None).await;
+        let manifest_path =
+            crate::store::paths::Bundle::new(dir.path(), &CompanyId::new("acme")).company_toml();
+        match contents {
+            Some(garbage) => std::fs::write(&manifest_path, garbage).unwrap(),
+            None => std::fs::remove_file(&manifest_path).unwrap(),
+        }
+
+        let response = router(state)
+            .oneshot(get("/api/v1/company/auth/config"))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "a missing name must not cost the console the mode ({case})"
+        );
+        let body = body_json(response).await;
+        assert_eq!(body["name"], "acme", "({case}) {body}");
+        assert_eq!(body["mode"], "email", "({case}) {body}");
     }
 }
 

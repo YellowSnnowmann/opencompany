@@ -178,7 +178,7 @@ pub(crate) async fn resolve(
     let record = runtime.store().load(runtime.id()).await?;
     let roster = record
         .as_ref()
-        .map(|record| roster_display_names(&record.manifest.agents, &record.overlay_agents))
+        .map(|record| roster_display_names(&record.effective_agents(), &record.overlay_agents))
         .unwrap_or_default();
 
     Ok(UsageGql::new(

@@ -20,8 +20,7 @@ not specific enough to ship.
 # path that does not exist is a manifest error rather than a skipped entry,
 # because a role whose prompt was written around a briefing it never received
 # fails silently and confidently.
-prompt_files = ["prompts/house-style.md"]
-
+prompt_files = ["prompts/house-style.md", "prompts/copywriter.md"]
 # Live workspace documents, placed last in the prompt — after every tool brief —
 # because they are the most volatile thing in it. Unlike `prompt_files` these are
 # operator-owned and may not exist yet, so a missing one is skipped rather than

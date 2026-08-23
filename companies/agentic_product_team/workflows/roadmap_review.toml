@@ -1,0 +1,83 @@
+# Workflow graph: roadmap_review
+#
+# The weekly loop the `[[schedule]]` entry in ../company.toml drives: refresh
+# the evidence, then re-sequence against it, then decide.
+
+id = "roadmap_review"
+name = "Roadmap review"
+description = "Refresh the evidence, re-sequence the roadmap, and record the calls."
+
+[[node]]
+id = "cadence"
+kind = "trigger"
+name = "Weekly review due"
+summary = "The Monday schedule fires, or the operator asks for a review."
+
+[[node]]
+id = "signals"
+kind = "agent"
+name = "Refresh user signals"
+summary = "Turn the week's support threads and usage into findings with a stated signal strength."
+agent = "user_researcher"
+
+[[node]]
+id = "market"
+kind = "agent"
+name = "Refresh the market picture"
+summary = "Re-check what competitors shipped and charge, with dates on every claim."
+agent = "competitor_analyst"
+
+[[node]]
+id = "groom"
+kind = "agent"
+name = "Groom the backlog"
+summary = "Dedupe, split, age out, and report what became ready this week."
+agent = "backlog_curator"
+
+[[node]]
+id = "sequence"
+kind = "agent"
+name = "Re-sequence"
+summary = "Order the ready work by dependency, evidence, reversibility, then cost."
+agent = "roadmap_planner"
+
+[[node]]
+id = "decide"
+kind = "agent"
+name = "Make the calls"
+summary = "Resolve the conflicts, record a decisions row per move, and name what needs the operator."
+agent = "head_of_product"
+
+[[node]]
+id = "brief"
+kind = "output"
+name = "Post the brief"
+summary = "The new order, what changed, and the calls reserved for the human."
+
+[node.destination]
+kind = "channel"
+target = "roadmap"
+
+[[edge]]
+from = "cadence"
+to = "signals"
+
+[[edge]]
+from = "signals"
+to = "market"
+
+[[edge]]
+from = "market"
+to = "groom"
+
+[[edge]]
+from = "groom"
+to = "sequence"
+
+[[edge]]
+from = "sequence"
+to = "decide"
+
+[[edge]]
+from = "decide"
+to = "brief"

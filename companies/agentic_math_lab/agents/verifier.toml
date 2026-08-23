@@ -1,0 +1,23 @@
+role = "Verifier"
+description = "Try to break the answer: a second method, written without reading the first, and a brute force that settles any disagreement."
+tier = "reasoning"
+# Deliberately NOT given `attempts.md`'s narrative or the programmer's note in
+# context. What this role is told is the problem and the house method; the
+# answer it is checking arrives in the hand-off, and the program that produced
+# it stays on disk where the verifier can choose not to look at it.
+context = ["GOAL.md", "brief.md", "METHOD.md"]
+
+tools = ["files", "shell", "code", "workspace.read"]
+
+ledgers = [
+    { name = "tasks", access = "record" },
+    { name = "goals", access = "read" },
+    { name = "decisions", access = "read" },
+    { name = "risks", access = "record" },
+    { name = "commitments", access = "read" },
+    { name = "learnings", access = "record" },
+    { name = "attempts", access = "record" },
+    { name = "answers", access = "read" },
+]
+
+prompt_files = ["prompts/verifier.md"]

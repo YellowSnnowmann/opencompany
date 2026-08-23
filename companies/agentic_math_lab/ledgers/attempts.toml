@@ -1,0 +1,107 @@
+# Every route the lab has tried at the problem in front of it, and what became
+# of it.
+#
+# The axis a task board cannot carry. A card says who is doing what; this says
+# what was *tried*, which is the thing a lab repeats when nobody wrote it down.
+# Three of the four runs that motivated this bundle re-derived an approach a
+# previous run had already ruled out, because the only record of the ruling-out
+# was a sentence in a chat thread nobody re-read.
+#
+# A refuted attempt is worth more than a missing one: it names something that
+# looked right and was not, with the input that showed it.
+
+title = "Attempts"
+purpose = """
+Every approach tried at the current problem — what it was, what it cost, what \
+number it produced, and why it was abandoned or accepted. Read it before \
+proposing an approach; record against an existing row rather than opening a \
+second one for the same idea.\
+"""
+written_by = "`record_entry` to open or revise an attempt, `close_entry` when it lands or is abandoned"
+checks = ["required-field", "known-status", "closed-needs-reason"]
+
+[[field]]
+name = "id"
+role = "id"
+required = true
+
+[[field]]
+name = "problem"
+role = "prose"
+required = true
+description = "Which problem this attempt addresses, named the way the operator named it (e.g. \"Project Euler 61\") — matching `answers.toml`'s `problem` field, so an attempt survives the active problem changing."
+
+[[field]]
+name = "approach"
+role = "title"
+required = true
+description = "The route, in one line — the structure it exploits, not the language it is written in."
+
+[[field]]
+name = "status"
+role = "status"
+required = true
+
+[[field]]
+name = "cost"
+role = "prose"
+description = "What it costs, as a count of operations or a measured wall-clock time. Not an adjective."
+
+[[field]]
+name = "result"
+role = "prose"
+description = "The number it produced, and the exact command that produced it. A number with no command cannot be reproduced."
+
+[[field]]
+name = "small_cases"
+role = "prose"
+description = "Which small cases it reproduces, and by what independent method they were established."
+
+[[field]]
+name = "checked_by"
+role = "prose"
+description = "The independent route that agreed, and what it ruled out. Empty means unchecked, which is not the same as wrong."
+
+[[field]]
+name = "owner"
+role = "owner"
+
+[[field]]
+name = "reason"
+role = "prose"
+description = "Why it closed — accepted, or abandoned and what killed it. Required when it closes."
+
+[[status]]
+name = "proposed"
+
+[[status]]
+name = "running"
+
+[[status]]
+name = "produced"
+label = "Produced a number"
+
+[[status]]
+name = "accepted"
+closed = true
+needs_reason = true
+
+[[status]]
+name = "abandoned"
+closed = true
+needs_reason = true
+
+[[section]]
+heading = "Live"
+blurb = "Proposed, running, or holding a number nobody has checked yet."
+statuses = ["proposed", "running", "produced"]
+order = "recent"
+
+[[section]]
+heading = "Settled"
+blurb = """
+Accepted, or abandoned with the reason. Read the abandoned rows before \
+proposing anything — they are the cheapest thing in this lab.\
+"""
+statuses = ["accepted", "abandoned"]
+cap = 40

@@ -34,6 +34,7 @@ The operator console is a separate, company-agnostic app at
 | --- | --- | --- |
 | [`agentic_venture_studio`](agentic_venture_studio/) | A portfolio of startups | Capital allocation, major strategy |
 | [`agentic_software_company`](agentic_software_company/) | An entire SaaS product | Product direction |
+| [`agentic_product_team`](agentic_product_team/) | A triaged queue, a groomed backlog, a defended roadmap | Prioritization calls & roadmap sign-off |
 | [`startup_accelerator`](startup_accelerator/) | A funded, mentored cohort | Investment & demo-day decisions |
 | [`agentic_venture_capital`](agentic_venture_capital/) | Investment memos & a managed portfolio | Investment decisions |
 | [`agentic_consultation_firm`](agentic_consultation_firm/) | Strategy decks & implementation plans | Executive workshops |

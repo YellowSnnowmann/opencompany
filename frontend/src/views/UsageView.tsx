@@ -428,16 +428,23 @@ export function composioStatus(caps: CapabilityStatusDto): {
 function SearchStatusRow({ caps }: { caps: CapabilityStatusDto }) {
   const { label, variant } = searchStatus(caps);
   const cap = caps.searchDailyCallCap;
+  // A company searching through its own provider is billed by that provider, so
+  // neither the managed-credential sentence nor the daily cap describes it —
+  // both would be numbers about somebody else's bill.
+  const ownProvider = Boolean(caps.searchProvider && caps.searchProvider !== "managed");
   return (
     <div className="flex items-center justify-between gap-3 border-t pt-4 text-sm">
       <div className="space-y-0.5">
         <span className="font-medium">Web search</span>
         <p className="text-xs text-muted-foreground">
-          Source discovery for research — opt-in, runs on the managed platform credential, and
-          billed per search.{" "}
-          {typeof cap === "number"
-            ? `Capped at ${cap} searches per day; past that the tool refuses rather than returning nothing.`
-            : "Capped per day; past that the tool refuses rather than returning nothing."}
+          {ownProvider
+            ? `Source discovery for research — running on this company's own ${caps.searchProvider} account, billed there rather than here, so the daily cap does not apply.`
+            : "Source discovery for research — opt-in, runs on the managed platform credential, and billed per search."}{" "}
+          {ownProvider
+            ? ""
+            : typeof cap === "number"
+              ? `Capped at ${cap} searches per day; past that the tool refuses rather than returning nothing.`
+              : "Capped per day; past that the tool refuses rather than returning nothing."}
         </p>
       </div>
       <Badge variant={variant} className="shrink-0">
@@ -496,9 +503,16 @@ export function mcpDirectoryStatus(caps: CapabilityStatusDto): {
   }
 }
 
-function searchStatus(caps: CapabilityStatusDto): { label: string; variant: BadgeVariant } {
+export function searchStatus(caps: CapabilityStatusDto): { label: string; variant: BadgeVariant } {
   if (caps.searchInBuild === false) return { label: "Not in this build", variant: "outline" };
   if (!caps.searchGranted) return { label: "Not granted", variant: "secondary" };
+  // A company on its own provider is working whatever the host's managed
+  // credential says, and the daily cap below does not apply to it — that cap
+  // bounds the platform's bill, and this company is paying its own. Checked
+  // before both, or a self-hosted instance with no platform credential would
+  // badge a working search "Awaiting credential".
+  if (caps.searchProvider && caps.searchProvider !== "managed")
+    return { label: "Own provider", variant: "default" };
   if (!caps.searchCredentialConfigured)
     return { label: "Awaiting credential", variant: "destructive" };
   // A zero cap leaves the grant in place but spends nothing — say so rather

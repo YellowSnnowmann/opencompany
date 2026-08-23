@@ -47,6 +47,57 @@ left: this client's own label for its host, at a loopback address. Narrow on
 purpose — a host an operator added by hand is labelled by authority
 (`127.0.0.1:8080`), never with that string.
 
+### Which host the address names
+
+Selection is a **filter over N live things** — choosing a host changes what is
+rendered and tears nothing down — but it is not private state. A console holding
+more than one host scopes its hash: `#/ledgers/tasks?host=<connectionId>`.
+
+Three things follow, and each was a defect without it (issue #1358):
+
+- **Back undoes a switch.** Selection used to be plain React state, so nothing
+  was pushed and the most natural recovery from "I picked the wrong host and it
+  is down" did nothing at all.
+- **The address stops lying.** The hash used to keep naming a page of the host
+  you had just left for the whole time the failed host's "Can't connect" screen
+  was up.
+- **Nothing rewinds silently.** Those two combined into the symptom that was
+  actually reported: a Back pressed on the error screen popped an entry
+  belonging to the *working* host. Its console is not mounted, so no pixel
+  changed — and switching back landed two pages shallower than where the
+  operator had been, with nothing having told them.
+
+One host writes no scope. There is nothing ambiguous about its address, and
+connection ids are minted per client, so an opaque id in a copied link means
+nothing to whoever receives it. The scope appears with the second host, and
+`selectHost` stamps the entry being left on the way out so even the first switch
+is undoable.
+
+The scope is a *scope*, not a page, so a view change carries it and the
+transient hash flags (`?new`, see `use-hash-flag.ts`) do not. Writers that
+replace the hash wholesale must carry it themselves — a `replaceState` fires no
+`hashchange`, so there is no event to repair it on; `useHostAddress` covers the
+writers that merely assign.
+
+An address naming a connection this client no longer holds is not an error: it
+resolves to whatever `App` would otherwise have opened, and the bar is corrected
+to say so.
+
+### What a failure may say
+
+A host that cannot be reached renders its own full-screen error, with the
+switcher over it. What that screen says depends on how many hosts this console
+holds, because the two situations are not the same one.
+
+Alone, it keeps the boot hint — *set the host with `?api=`, or run `opencompany
+serve`* — which is advice for a console that has not found its host yet. With a
+roster, that hint tells somebody who picked a row out of a switcher to configure
+a host they already configured, so it is dropped, and **Forget this host** is
+offered beside Retry instead. Forgetting is local to this client (see
+`removeConnection`); it is never offered for the only host, because a console
+with no connections at all is a worse place to be left than one with a host that
+is down.
+
 ## Authenticating as a person
 
 **About remote hosts.** The embedded host on this machine has no sign-in to

@@ -227,6 +227,8 @@ fn company() -> CompanyId {
 
 fn record(overlays: Vec<OverlayAgent>) -> CompanyRecord {
     CompanyRecord {
+        overlay_retired_agents: Vec::new(),
+        overlay_agent_edits: Vec::new(),
         id: company(),
         manifest: manifest(),
         ledger: Vec::new(),
@@ -309,6 +311,7 @@ fn build_brain(
         repo_bindings: Vec::new(),
         checkouts: crate::harness::repo::CheckoutLedger::default(),
         search: None,
+        tenant_search: None,
     };
     (
         HarnessBrain::new(Arc::new(HarnessPool::new()), deps, record(overlays)),

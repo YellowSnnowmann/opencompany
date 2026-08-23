@@ -4,7 +4,7 @@
 // (issue #467).
 //
 // Four of the suite's specs need an agent that actually executes, which needs
-// a host built with `--features openhuman,tinycortex,mcp` **and** something for
+// a host built with `--features openhuman,mcp` **and** something for
 // that harness to think with. This is that something: an OpenAI-compatible
 // chat-completions endpoint with no model behind it, whose answers are very
 // nearly a function of the prompt.
@@ -57,12 +57,18 @@
 //      emit the named call with the arguments the instruction dictates. The
 //      directive that produced the parked call has already been served, so
 //      without this arm no approval-gated tool can run in this lane at all.
-//   3. a message carrying `__MOCK_TOOL_CALL__ {"name":…,"arguments":{…}}` —
+//   3. a message carrying `__MOCK_PLAN__ [[{…},{…}],[…]]` — a whole scripted
+//      turn: several calls in one assistant message, and several steps across
+//      one turn's tool loop. `orchestration-simulation.spec.ts` drives a goal
+//      to completion with it. Served only when the request's own `tools` carry
+//      every name the step uses, which is what stops a teammate reading the
+//      operator's message second-hand from honouring the orchestrator's plan.
+//   4. a message carrying `__MOCK_TOOL_CALL__ {"name":…,"arguments":{…}}` —
 //      emit exactly that tool call, once. `mcp.spec.ts` uses it to make an
 //      agent call a named MCP tool without a model that might decide not to.
-//   4. a message carrying `SPAWNONE` — call `spawn_task` once, which is what
+//   5. a message carrying `SPAWNONE` — call `spawn_task` once, which is what
 //      `chat-to-card.spec.ts` needs an orchestrator to do.
-//   5. anything else — a fixed line carrying the `__MOCK_LLM__` marker.
+//   6. anything else — a fixed line carrying the `__MOCK_LLM__` marker.
 //
 // # Why the plain reply quotes nothing
 //
@@ -124,6 +130,8 @@
 
 import { createServer } from "node:http";
 
+import { embeddings } from "./embedding.mjs";
+
 /** The marker every text reply carries, so a spec can prove the reply is ours. */
 const MARKER = "__MOCK_LLM__";
 
@@ -164,6 +172,56 @@ function slowMillis(messages) {
 const SPAWN_DIRECTIVE = "SPAWNONE";
 
 /**
+ * A whole scripted **turn**, for the orchestration simulation (this is what
+ * `orchestration-simulation.spec.ts` drives).
+ *
+ * `SPAWNONE` and `__MOCK_TOOL_CALL__` can each buy exactly one tool call from
+ * one turn, which is enough to prove a chat message reaches a card and no more.
+ * An orchestrator pursuing a goal does something they cannot express: it fans
+ * out to several teammates in **one** turn, and then keeps going across the
+ * several turns a goal takes to close. So this directive carries a plan —
+ *
+ *   __MOCK_PLAN__ [[{"name":"spawn_task","arguments":{…}},
+ *                   {"name":"spawn_task","arguments":{…}}],
+ *                  []]
+ *
+ * — an array of steps, each step an array of calls to emit together in one
+ * assistant message. Step *n* answers the *n*th time this plan is asked for;
+ * past the end (or on an empty step) the turn falls through to the ordinary
+ * text reply, which is how a turn *ends* rather than looping forever.
+ *
+ * # Two things it must not do, and how each is prevented
+ *
+ * **It must not fire for an agent that cannot make the call.** One operator
+ * message reaches the orchestrator and then every teammate the turn hands work
+ * to, each inside its own wrapper — so a plan naming `spawn_task` is in the
+ * *engineer's* prompt too, and the engineer has no such tool. A step is
+ * therefore served only when every tool it names is on the belt the request
+ * actually carries ({@link offeredTools}); otherwise it is left alone,
+ * unconsumed, and the teammate answers with prose like any other turn. This is
+ * a check on the request rather than on the prompt's wording, which is the only
+ * form of it that cannot be fooled by a re-wrapping.
+ *
+ * **A step must not be served twice.** `spawn_task` is serviced by the
+ * runtime's delegation seam rather than the agent's own tool loop, so its
+ * result never enters the model-visible transcript — the history looks
+ * untouched on the next call of the same turn (the same trap
+ * {@link servedDirectives} exists for). Progress is therefore counted here,
+ * per plan, in {@link servedPlans}, keyed by the directive and the rest of its
+ * line. So a spec writes its `Date.now()` marker AFTER the payload —
+ * `__MOCK_PLAN__ [[…]] goal-1787…` — and two plans holding identical steps
+ * stay two plans rather than sharing one cursor.
+ */
+const PLAN_DIRECTIVE = "__MOCK_PLAN__";
+
+/**
+ * How many steps of each plan have been served, keyed by the plan's own text.
+ *
+ * @type {Map<string, number>}
+ */
+const servedPlans = new Map();
+
+/**
  * The host's own re-issue instruction, sent to the agent when an operator
  * approves a parked tool call (`src/harness/brain.rs`):
  *
@@ -184,13 +242,6 @@ const SPAWN_DIRECTIVE = "SPAWNONE";
  */
 const REISSUE_PATTERN =
   /Operator approved your `([^`]+)` call\. Re-issue it now with EXACTLY these arguments: /;
-
-/**
- * Width of every vector `/embeddings` returns. `HostedEmbeddings` compares this
- * against its declared dimensionality and errors on a mismatch rather than
- * truncating, and its default is 1024 (`embedding-v1`'s only allowed size).
- */
-const EMBEDDING_DIM = 1024;
 
 /** How much of a tool result is quoted back in the reply that follows it. */
 const TOOL_ECHO_LIMIT = 2000;
@@ -228,7 +279,25 @@ function textOf(message) {
  * @returns {any | null} the parsed value, or null if nothing balanced parses
  */
 function readJsonObject(text, from) {
-  const start = text.indexOf("{", from);
+  return readJsonValue(text, from, "{", "}");
+}
+
+/**
+ * The balance scanner both directive payloads are read with: an object for
+ * `__MOCK_TOOL_CALL__`, an array for `__MOCK_PLAN__`.
+ *
+ * Parameterised over the delimiters rather than duplicated, because the string
+ * handling is the part that has to be right and a second copy of it is a second
+ * place for it to be wrong.
+ *
+ * @param {string} text
+ * @param {number} from
+ * @param {string} open
+ * @param {string} close
+ * @returns {any | null} the parsed value, or null if nothing balanced parses
+ */
+function readJsonValue(text, from, open, close) {
+  const start = text.indexOf(open, from);
   if (start < 0) return null;
 
   let depth = 0;
@@ -243,8 +312,8 @@ function readJsonObject(text, from) {
       continue;
     }
     if (ch === '"') inString = true;
-    else if (ch === "{") depth += 1;
-    else if (ch === "}") {
+    else if (ch === open) depth += 1;
+    else if (ch === close) {
       depth -= 1;
       if (depth === 0) {
         try {
@@ -338,6 +407,66 @@ function findDirective(messages) {
     }
   }
   return null;
+}
+
+/**
+ * The last {@link PLAN_DIRECTIVE} in the thread, or null.
+ *
+ * Scanned from the end so the newest plan wins: a goal takes several operator
+ * messages to close, and each of them carries the plan for the turn it opens.
+ *
+ * @param {any[]} messages
+ * @returns {{id: string, steps: any[][]} | null}
+ */
+function findPlan(messages) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const text = textOf(messages[i]);
+    const at = text.indexOf(PLAN_DIRECTIVE);
+    if (at < 0) continue;
+    const steps = readJsonValue(text, at + PLAN_DIRECTIVE.length, "[", "]");
+    if (!Array.isArray(steps)) {
+      // A broken spec, not a plain turn. Say so loudly rather than answering
+      // with text the spec will then fail on obscurely.
+      process.stderr.write(
+        `[mock brain] ${PLAN_DIRECTIVE} found but its JSON payload did not parse\n`,
+      );
+      return null;
+    }
+    // Identity is the directive and the rest of its LINE — the same key shape
+    // `SPAWNONE` uses, and for both of its reasons. It is stable across the
+    // wrappers each agent's prompt puts in FRONT of the message, and it keeps
+    // two plans that happen to hold identical steps apart, because the marker a
+    // spec writes after the payload is part of the key. Keying on the parsed
+    // steps alone would have made "the same two cards, opened by a later goal"
+    // share a cursor with the first goal and silently start half way through.
+    const line = text.slice(at).split("\n")[0].trim();
+    return { id: `plan:${line}`, steps };
+  }
+  return null;
+}
+
+/**
+ * The tool names this request actually offers, which is what tells an
+ * orchestrator turn from a teammate's turn on the same operator message.
+ *
+ * The orchestrator's belt really does carry `spawn_task`, `review_task` and the
+ * rest on the wire — 27 tools on the harness company, against the teammate's
+ * fourteen — so this is a sufficient check and not a heuristic. It was worth
+ * confirming rather than assuming: the delegation tools are *intrinsic*, in the
+ * sense that the runtime services them rather than the agent's own tool loop,
+ * and it would have been reasonable to guess they were therefore absent from
+ * `tools[]`.
+ *
+ * @param {any} body the parsed request
+ * @returns {Set<string>}
+ */
+function offeredTools(body) {
+  const tools = Array.isArray(body?.tools) ? body.tools : [];
+  return new Set(
+    tools
+      .map((tool) => tool?.function?.name ?? tool?.name)
+      .filter((name) => typeof name === "string"),
+  );
 }
 
 /**
@@ -504,6 +633,22 @@ function chatCompletion(body) {
   const messages = Array.isArray(body?.messages) ? body.messages : [];
   const model = typeof body?.model === "string" ? body.model : "mock-brain";
 
+  // `MOCK_BRAIN_DEBUG=1` dumps what actually arrived. Three of the arms below
+  // key on the *shape* of a request — the opening words of a system prompt, the
+  // names in `tools[]` — and when one of them stops matching, the only useful
+  // next question is what the host really sent. Guessing at that from a spec
+  // failure forty seconds downstream is how an afternoon goes.
+  if (process.env.MOCK_BRAIN_DEBUG === "1") {
+    process.stderr.write(
+      `[mock brain] REQUEST roles=[${messages.map((m) => m?.role).join(", ")}] ` +
+        `tools=[${(body?.tools ?? []).map((t) => t?.function?.name).join(", ")}]\n` +
+        messages
+          .map((m, i) => `  [${i}] ${m?.role}: ${textOf(m).slice(0, 400).replace(/\n/g, " ")}`)
+          .join("\n") +
+        "\n",
+    );
+  }
+
   // A triage escalation is a classification, not a turn (issue #678). It is
   // handed the operator's RAW message, so it carries any `__MOCK_TOOL_CALL__`
   // the message carried — and `servedDirectives` is per-process, so serving it
@@ -563,6 +708,57 @@ function chatCompletion(body) {
     );
   }
 
+  // The scripted-turn arm, ahead of the single-call directives: a plan is the
+  // whole turn, and a message carrying one carries nothing else.
+  const plan = findPlan(messages);
+  if (plan) {
+    const served = servedPlans.get(plan.id) ?? 0;
+    const step = plan.steps[served];
+    const calls = Array.isArray(step) ? step : [];
+    if (calls.length > 0) {
+      const offered = offeredTools(body);
+      const missing = calls.map((call) => call?.name).filter((name) => !offered.has(name));
+      if (missing.length > 0) {
+        // NOT consumed: this is a teammate reading the operator's message
+        // second-hand, not the orchestrator. Answering with prose is the same
+        // thing a real model does when it is offered no such tool.
+        // The belt is named as well as the gap: "this agent is not the one the
+        // plan was written for" and "the agent lost a tool it should have" are
+        // the same line otherwise, and they are opposite bugs.
+        process.stderr.write(
+          `[mock brain] plan step ${served} left unserved; this belt has no ` +
+            `${missing.join(", ")} — it carries [${[...offered].join(", ")}]\n`,
+        );
+      } else {
+        servedPlans.set(plan.id, served + 1);
+        process.stderr.write(
+          `[mock brain] plan step ${served}: ${calls.map((c) => c.name).join(" + ")}\n`,
+        );
+        return completion(
+          model,
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: calls.map((call, index) => ({
+              id: `mock-plan-${served}-${index}`,
+              type: "function",
+              function: {
+                name: call.name,
+                arguments: JSON.stringify(call.arguments ?? {}),
+              },
+            })),
+          },
+          "tool_calls",
+        );
+      }
+    } else if (Array.isArray(step)) {
+      // An explicitly empty step: the turn is meant to answer in prose here.
+      // Consumed, so the next call moves on rather than re-reading this one.
+      servedPlans.set(plan.id, served + 1);
+      process.stderr.write(`[mock brain] plan step ${served}: text reply\n`);
+    }
+  }
+
   const directive = findDirective(messages);
 
   if (
@@ -617,47 +813,6 @@ function completion(model, message, finishReason) {
     model,
     choices: [{ index: 0, message, finish_reason: finishReason }],
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-  };
-}
-
-/**
- * A deterministic unit-ish vector for one input. Never random: two runs of the
- * suite must not disagree about what a note means.
- *
- * @param {string} input
- * @returns {number[]}
- */
-function embedding(input) {
-  let seed = 2166136261;
-  for (let i = 0; i < input.length; i += 1) {
-    seed = Math.imul(seed ^ input.charCodeAt(i), 16777619) >>> 0;
-  }
-  const vector = new Array(EMBEDDING_DIM);
-  for (let i = 0; i < EMBEDDING_DIM; i += 1) {
-    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
-    vector[i] = seed / 4294967295 - 0.5;
-  }
-  return vector;
-}
-
-/**
- * The embeddings reply for one request, in input order.
- *
- * @param {any} body
- * @returns {any}
- */
-function embeddings(body) {
-  const raw = body?.input;
-  const inputs = Array.isArray(raw) ? raw : [raw ?? ""];
-  return {
-    object: "list",
-    model: typeof body?.model === "string" ? body.model : "mock-embedding",
-    data: inputs.map((input, index) => ({
-      object: "embedding",
-      index,
-      embedding: embedding(String(input)),
-    })),
-    usage: { prompt_tokens: 0, total_tokens: 0 },
   };
 }
 

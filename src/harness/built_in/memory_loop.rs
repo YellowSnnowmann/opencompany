@@ -11,8 +11,8 @@
 //! memory-store tool, so without this nothing persists a completed task — the
 //! compounding loop stays open and every turn starts cold. Retrieval reads and
 //! storage writes go through the same [`ContextStore`](crate::ports::ContextStore)
-//! the agent's own recall uses, so an `OPENCOMPANY_MEMORY=tinycortex` overlay
-//! (or any base backend) applies uniformly.
+//! the agent's own recall uses, so a hosted-memory overlay (or any base
+//! backend) applies uniformly.
 //!
 //! The helpers here are pure so they unit-test without a live agent;
 //! [`HarnessPool::run`](super::HarnessPool::run) wires them around the turn.

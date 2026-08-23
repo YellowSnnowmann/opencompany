@@ -941,8 +941,10 @@ export function ChatView({
 
   /**
    * Drop a teammate from the roster through the host when it has a record of
-   * them; a manifest teammate can't be removed (409) and a starter-roster row
-   * has no host record at all, so both fall back to a local-only removal.
+   * them. A blueprint teammate is removable too — the host records a tombstone
+   * rather than rewriting `company.toml` — and the only refusal left is the
+   * company's last teammate (409). A starter-roster row has no host record at
+   * all, so it falls back to a local-only removal.
    */
   async function removeMember(member: TeamMember) {
     if (!fromHost) {
@@ -954,7 +956,12 @@ export function ChatView({
       setMembers((ms) => ms.filter((m) => m.id !== member.id));
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        toast.error("This teammate is defined in the company manifest and can't be removed here.");
+        // The only 409 this route still answers: a company must keep at
+        // least one teammate. The host's own message says which teammate and
+        // what to do about it, so it is shown rather than restated.
+        toast.error(
+          error.message || "You can't remove your company's last teammate.",
+        );
       } else {
         toast.error(error instanceof Error ? error.message : "Couldn't remove teammate.");
       }
@@ -971,18 +978,25 @@ export function ChatView({
 
   return (
     <div className="flex min-h-0 flex-1">
+      {/* The channel rail and the chat pane share the viewport with the app
+          sidebar. That sidebar is on from `md` (≥768), so a rail that also came
+          in at `md` gave two rails plus content a ~290px pane from 768–1023px —
+          Send fell off the right edge with no scroll to reach it (issue #1383).
+          The rail now waits for `lg` (≥1024); from 768–1023 the pane runs
+          single-column and the "Show channels" toggle in the header (also
+          `lg:hidden`) swaps to the rail, mirroring the sub-`md` mobile flow. */}
       <ChannelRail
         sections={sections}
         activeId={channel.id}
         unread={unread ?? {}}
         onSelect={selectChannel}
-        className={cn("md:flex", mobilePane === "rail" ? "flex" : "hidden")}
+        className={cn("lg:flex", mobilePane === "rail" ? "flex" : "hidden")}
       />
 
       <div
         className={cn(
           "min-w-0 flex-1 flex-col",
-          mobilePane === "chat" ? "flex" : "hidden md:flex",
+          mobilePane === "chat" ? "flex" : "hidden lg:flex",
         )}
       >
         <ChatHeader

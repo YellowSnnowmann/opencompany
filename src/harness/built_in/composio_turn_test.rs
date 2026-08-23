@@ -41,7 +41,7 @@
 //! Gated on the `composio` feature, which CI builds (`--all-features`) but never
 //! *runs*; the narrowing and truncation logic these tests exercise therefore
 //! also carries its own tests in [`composio_catalog`], which the
-//! `--features openhuman,tinycortex` test lane does run.
+//! `--features openhuman,tinymemory` test lane does run.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -378,6 +378,7 @@ async fn harness(
         run_supervisor: crate::runtime::RunSupervisor::default(),
         delivery: None,
         search: None,
+        tenant_search: None,
         workspace: None,
         repos: None,
         repo_bindings: Vec::new(),
@@ -385,6 +386,8 @@ async fn harness(
     };
 
     let record = CompanyRecord {
+        overlay_retired_agents: Vec::new(),
+        overlay_agent_edits: Vec::new(),
         id: CompanyId::new("acme"),
         manifest: manifest(),
         ledger: Vec::new(),

@@ -79,7 +79,7 @@
 //! Everything here is pure: no network, no credential, no `openhuman` Composio
 //! type. The live tools in [`composio`](crate::harness::composio) are gated on
 //! the opt-in `composio` feature, and **CI never builds that feature** (it runs
-//! `--features openhuman,tinycortex`; `--all-features` is a `cargo check`, not a
+//! `--features openhuman,tinymemory`; `--all-features` is a `cargo check`, not a
 //! `cargo test`). Keeping the narrowing and the truncation notice out here means
 //! the behaviour this issue is about is exercised by the test lane that actually
 //! runs, rather than by a lane that only type-checks.

@@ -45,8 +45,8 @@ PUT    …/skills/{slug}                       enable / disable a skill
 POST   …/team                               add an operator-overlay teammate
 GET    …/tools/catalog                       everything this company can grant
 GET    …/team/{agentId}                      one agent in full (tier, tools, desks)
-PATCH  …/team/{agentId}                      edit an overlay teammate
-DELETE …/team/{agentId}                      remove an overlay teammate
+PATCH  …/team/{agentId}                      edit a teammate
+DELETE …/team/{agentId}                      remove a teammate
 PUT    …/team/{agentId}/inbox                toggle a teammate's inbox
 PUT    …/team/{agentId}/budget               set / change / remove a daily cap
 DELETE …/team/{agentId}/budget               reset the cap to the manifest default
@@ -247,26 +247,56 @@ write. See [runtime/tools.md](tools.md).
 a company that tags nobody still names its orchestrator.
 
 `global` marks the teammates the [global baseline](globals.md) merged in — the
-ones every company has whichever vertical it started from, and the ones
-`DELETE …/team/{agentId}` refuses. It is sent on every row because a client
+ones every company has whichever vertical it started from. It is sent on every
+row because a client
 cannot otherwise tell a company somebody staffed from one nobody has: the
 baseline is on every roster, so `length === 0` is a question with one answer.
 The console's first-run gate turns on it
 ([company-setup.md](company-setup.md)); before the field existed that gate could
 never open.
 
-`PATCH …/team/{agentId}` edits an **overlay** teammate's `name`, `role` and
-`description`. It is a patch: an omitted key is left alone, and `"description":
-null` clears it — the two must stay apart or every partial save would erase an
-agent's instructions. A blank `name`/`role` is `400`, an unknown teammate `404`,
-and a **manifest** teammate is `409`: its fields live in the version-controlled
-`company.toml`, and the console does not rewrite the blueprint. The one thing
-that *is* changeable on such a teammate is its daily budget, and that works
-because #343 modelled it as an override rather than as a rewrite. Every detail
-response carries an `editable` list naming the fields this route will accept, so
-a client renders read-only from the host's answer instead of re-deriving the
-rule. `tier` and `tools` are read-only for both kinds: there is no override
-layer for either, and adding one is a policy decision rather than a form field.
+`PATCH …/team/{agentId}` edits a teammate's `name`, `role`, `description` and
+`tools`. It is a patch: an omitted key is left alone, and `"description": null`
+clears it — the two must stay apart or every partial save would erase an agent's
+instructions. A blank `name`/`role` is `400` and an unknown teammate `404`.
+
+A **manifest** teammate is edited here too, and this is the one thing the route
+does differently: instead of rewriting `company.toml`, the host stores the change
+as an `overlay_agent_edits` entry on the company record and resolves it through
+`CompanyRecord::effective_agent`, the same call `build_roster` makes. So the
+blueprint keeps stating what the company launched with, the overlay states what
+the operator has since decided, and the console card and the running teammate
+cannot disagree. The merge is per field, so a field nobody edited still tracks
+the blueprint across a rebuild. This is what makes a *deployed* company's roster
+— including the global-baseline agents every company gets — changeable at all: a
+hosted tenant has no `company.toml` to edit and no redeploy to make. The edit
+reaches the next turn rather than the next restart, because it moves the pool's
+overlay fingerprint (`overlay_fingerprint`, see
+[ports-state.md](ports-state.md)).
+
+Every detail response carries an `editable` list naming the fields this route
+will accept, so a client renders read-only from the host's answer instead of
+re-deriving the rule. `tools` is admin-only for both kinds — an empty list means
+"the company's standard grant", so a `tools` edit is a potential *widening* —
+and `tier` is read-only for both: it has no override layer, and adding one is a
+policy decision rather than a form field.
+
+`DELETE …/team/{agentId}` removes a teammate. An overlay teammate is deleted
+outright — the record is the only thing that declares it. A **manifest**
+teammate is removed by recording a tombstone in `overlay_retired_agents`, for
+the reason an edit is an overlay: `company.toml` and the baseline merged into it
+are re-read on every rebuild, so a teammate deleted by rewriting the roster
+would simply come back. `CompanyRecord::effective_agents` filters the tombstoned
+ids out, which is what takes the teammate off the roster, off its desks, out of
+the delegation targets and out of the harness build — rather than merely off the
+Team page. If it was the orchestrator, the role moves to the next teammate that
+is actually there.
+
+Either way the teammate's operator-added desk seats, its edit overlay and its
+budget override go with it; a blueprint desk seat is left in the manifest and
+filtered at read time. The **one refusal** is the company's last teammate
+(`409`): an empty roster has no orchestrator, nobody to answer a message and no
+way back from the console.
 
 The two **budget** routes (issue #343) are how a teammate's `budget_usd_daily`
 becomes changeable without a redeploy. Both are **admin-only** — a member gets

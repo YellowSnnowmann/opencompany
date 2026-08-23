@@ -293,7 +293,7 @@ a replacement for it.
 ## What the console is told
 
 `GET …/auth/config` →
-`{"mode": "email"|"wallet"|"none", "passwords": bool, "magicLink": bool}`.
+`{"mode": "email"|"wallet"|"none", "name": string, "passwords": bool, "magicLink": bool}`.
 
 Unauthenticated by construction, like every other login route: the console asks
 before anyone has a credential, because it cannot choose a screen otherwise. It
@@ -301,6 +301,15 @@ must branch on this rather than on which routes fail — a wallet company and a
 misconfigured email company both refuse `auth/request`, and only one of them
 should be offered a wallet button. A console that cannot reach this route assumes
 `email`, which is what every host predating it does.
+
+`name` is what the company calls itself — the manifest's display name, falling
+back to the company id, never empty. It is here because the sign-in screen is
+where a person confirms *what* they are handing a credential to, and every other
+route that reports the name is behind the very sign-in being drawn. On the
+hosted platform each tenant is a separate company on its own URL, so the host
+knows this for certain; publishing it discloses no membership, exactly as the
+mode does not. A console talking to a host that omits it draws the bare
+"Sign in" it drew before the field existed.
 
 `magicLink` is whether a link asked for here reaches anybody: a wired mail
 transport, or a loopback host that hands the code back in the response. It is

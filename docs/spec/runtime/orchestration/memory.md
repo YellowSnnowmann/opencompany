@@ -13,8 +13,8 @@ here.
 ## The situation
 
 OpenCompany independently built a thin version of the seam `tinymemory` exists
-to provide. [`src/store/tinycortex.rs`](../../../../src/store/tinycortex.rs)
-defines a bespoke `CortexClient` trait with `CortexMemoryStore: MemoryStore` and
+to provide. `src/store/tinycortex.rs` (removed in #1568) defined a bespoke
+`CortexClient` trait with `CortexMemoryStore: MemoryStore` and
 `CortexContextStore: ContextStore` over it, alongside an in-process engine
 implementation.
 
@@ -125,7 +125,7 @@ resolved while landing the phase, and the distinction is load-bearing:
 |---|---|---|---|
 | `vendor/openhuman/vendor/tinymemory/api` | `tinymemory-api` | `(2, 0)` | The contract. **Bind this.** |
 | `vendor/openhuman/vendor/tinycortex/api` | `tinycortex-api` | `(1, 0)` | Deprecated re-export of the above |
-| `vendor/openhuman/vendor/tinycortex` | `tinycortex` | — | The default embedded **engine** |
+| `vendor/openhuman/vendor/tinycortex` | `tinycortex` | — | The engine OpenHuman pins (removed as an OpenCompany memory backend in #1568) |
 
 `is_compatible` is major-equality only, so the two contract crates are declared
 incompatible — and since they are separate crates, their `MemoryProvider` traits
@@ -136,10 +136,10 @@ live binding uses; its module docs call `tinycortex-api` "now a deprecated
 re-export of this one" and treat the string `tinycortex` as a legacy driver-id
 alias.
 
-So the engine keeps its name and stays pinned by path; only the *contract*
-moved. `Cargo.toml` path-deps `tinymemory-api` at the same directory
-`vendor/openhuman/Cargo.toml` names, because Cargo unifies two path deps only
-when they resolve to the same directory.
+So the engine keeps its name and stays pinned by path for OpenHuman's own
+build; only the *contract* moved. `Cargo.toml` path-deps `tinymemory-api` at
+the same directory `vendor/openhuman/Cargo.toml` names, because Cargo unifies
+two path deps only when they resolve to the same directory.
 
 The registry, the HTTP adapters for hosted engines, and the vendor adapter all
 already exist in `vendor/openhuman/vendor/tinymemory` — they were never in

@@ -689,8 +689,9 @@ mod tests {
     /// iterates nothing and returns `false` without consulting any runtime, so
     /// this cannot fail for an aggregation bug. The direction that matters —
     /// that the endpoint can report `true` — is covered by
-    /// `is_busy_sees_a_cycle_holding_the_serial_lock` in `company::runtime`,
-    /// which exercises the real signal against a real runtime.
+    /// `is_busy_sees_every_source_of_work` in `company::runtime`, which
+    /// exercises the real signal against a real runtime, and by
+    /// `is_busy_fails_closed_on_a_poisoned_run_supervisor` alongside it.
     #[tokio::test]
     async fn busy_is_false_when_nothing_is_running() {
         let app = router(AppState::new(AppConfig::default()));

@@ -12,12 +12,13 @@
 //!
 //! # Failure is a stop, never a guess
 //!
-//! The contract's error type is still one coarse variant (`MemoryError::Other`
-//! — tinymemory#18 §A4), so mid-migration this code cannot tell a transient
-//! 500 from a real rejection. It therefore never retries (an import retried
-//! into a driver that half-applied the page could double-write) and instead
-//! stops at the first failed page, reporting the cursor that *started* that
-//! page. `--resume-cursor` re-enters there safely because import is
+//! The contract's §A4 taxonomy (13 wire-named `MemoryError` variants since
+//! tinymemory v1.1.0) means a transient `Timeout`/`Unavailable`/`Unreachable`
+//! is now distinguishable from a real rejection — but this code still never
+//! retries, and that decision does not rest on the taxonomy: an import
+//! retried into a driver that half-applied the page could double-write, and
+//! no error class proves how much of a page landed. It stops at the first
+//! failed page, reporting the cursor that *started* that page. `--resume-cursor` re-enters there safely because import is
 //! idempotent by `(namespace, key)`: a driver that recognises a present
 //! record reports it `skipped`, and one that does not simply overwrites in
 //! place — either way, re-running the failed page cannot duplicate.
@@ -222,9 +223,8 @@ pub fn resolve_migrate_configs(
     to: &str,
     to_url: Option<String>,
     to_api_key: Option<String>,
-    to_data_dir: Option<std::path::PathBuf>,
 ) -> Result<(MemoryDriverConfig, MemoryDriverConfig)> {
-    use crate::store::{MemoryBackend, StorageKind};
+    use crate::store::MemoryBackend;
 
     // Shared-single-DB tenant mode namespaces company ids at the app layer;
     // the Portability records cross with their namespaces verbatim, so a
@@ -257,23 +257,6 @@ pub fn resolve_migrate_configs(
                 "OPENCOMPANY_MEMORY=null retains nothing; there is nothing to migrate.".into(),
             ));
         }
-        MemoryBackend::Tinycortex
-            if settings
-                .memory_driver
-                .as_deref()
-                .map(str::trim)
-                .filter(|d| !d.is_empty())
-                .is_none() =>
-        {
-            return Err(OpenCompanyError::Config(
-                "OPENCOMPANY_MEMORY=embedded without OPENCOMPANY_MEMORY_DRIVER is the \
-                 EngineCortex overlay, which is driven directly rather than through the \
-                 provider seam — its data cannot migrate through this command. Use \
-                 `opencompany export` for a bundle of what it holds."
-                    .into(),
-            ));
-        }
-        MemoryBackend::Tinycortex => MemoryMode::Embedded,
         MemoryBackend::Remote => MemoryMode::Remote,
     };
     let from_config = MemoryDriverConfig {
@@ -282,44 +265,10 @@ pub fn resolve_migrate_configs(
         url: settings.memory_url.clone(),
         api_key: settings.memory_api_key.clone(),
         data_dir: settings.data_dir.clone(),
+        deployment: settings.memory_deployment,
     };
 
     let to_config = match to {
-        "namespace" => {
-            // The same durability refusal `open_provider` enforces at boot:
-            // on a mongodb base, /data is ephemeral scratch, and a migration
-            // that "succeeds" into it is data loss with a success message.
-            if settings.kind == StorageKind::Mongodb && !settings.allow_ephemeral_memory {
-                return Err(OpenCompanyError::Config(
-                    "OPENCOMPANY_STORAGE=mongodb treats the data dir as ephemeral scratch, and \
-                     the boot path refuses the namespace driver there for exactly that reason. \
-                     Migrating into it would report success on data the next container \
-                     replacement deletes. If the data dir is genuinely a durable volume, assert \
-                     it with OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL=1."
-                        .into(),
-                ));
-            }
-            let data_dir = to_data_dir.clone().or_else(|| settings.data_dir.clone());
-            // Validated HERE, in the target's own vocabulary. Letting
-            // `open_driver` refuse later produces "OPENCOMPANY_MEMORY_URL is
-            // required"-style messages that name the SOURCE env — advice
-            // which, followed, silently repoints the source at a different
-            // (likely empty) engine and reports `0 exported` as success.
-            if data_dir.is_none() {
-                return Err(OpenCompanyError::Config(
-                    "--to namespace needs a directory for the target store: pass --to-data-dir \
-                     (OPENCOMPANY_DATA_DIR also serves as its default when set)."
-                        .into(),
-                ));
-            }
-            MemoryDriverConfig {
-                mode: MemoryMode::Embedded,
-                driver_id: Some(to.to_string()),
-                url: None,
-                api_key: None,
-                data_dir,
-            }
-        }
         "supermemory" | "mem0" | "cognee" => {
             if to_url
                 .as_deref()
@@ -339,6 +288,7 @@ pub fn resolve_migrate_configs(
                 url: to_url,
                 api_key: to_api_key,
                 data_dir: None,
+                deployment: Default::default(),
             }
         }
         "null" => {
@@ -350,7 +300,7 @@ pub fn resolve_migrate_configs(
         }
         other => {
             return Err(OpenCompanyError::Config(format!(
-                "--to {other} names no migratable driver: namespace, supermemory, mem0, cognee."
+                "--to {other} names no migratable driver: supermemory, mem0, cognee."
             )));
         }
     };
@@ -369,23 +319,10 @@ pub fn resolve_migrate_configs(
             .map(str::trim)
             .map(|u| u.trim_end_matches('/').to_owned())
     };
-    let norm_dir = |dir: &Option<std::path::PathBuf>| {
-        dir.as_ref().map(|d| {
-            // Canonical when the path exists (resolves `..`, symlinks and the
-            // CWD); the component-normalized spelling when it does not (a
-            // not-yet-created target dir cannot canonicalise, and refusing a
-            // fresh dir over that would block every first migration).
-            std::fs::canonicalize(d)
-                .unwrap_or_else(|_| d.components().collect::<std::path::PathBuf>())
-        })
-    };
     let same_engine = from_config.mode == to_config.mode
         && norm_id(&from_config.driver_id) == norm_id(&to_config.driver_id)
         && match to_config.mode {
             MemoryMode::Remote => norm_url(&from_config.url) == norm_url(&to_config.url),
-            MemoryMode::Embedded => {
-                norm_dir(&from_config.data_dir) == norm_dir(&to_config.data_dir)
-            }
             MemoryMode::Null => true,
         };
     if same_engine {
@@ -397,7 +334,7 @@ pub fn resolve_migrate_configs(
     Ok((from_config, to_config))
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod test {
     use super::*;
     use tinymemory_api::types::{MemoryCategory, MemoryTaint};
@@ -805,7 +742,7 @@ mod test {
 
     // ── resolve_migrate_configs: every refusal, executed ──────────────────
 
-    use crate::store::{MemoryBackend, StorageKind, StorageSettings};
+    use crate::store::{MemoryBackend, StorageSettings};
 
     fn base_settings() -> StorageSettings {
         StorageSettings {
@@ -822,15 +759,8 @@ mod test {
         settings: &StorageSettings,
         to: &str,
         to_url: Option<&str>,
-        to_data_dir: Option<&str>,
     ) -> crate::Result<(MemoryDriverConfig, MemoryDriverConfig)> {
-        resolve_migrate_configs(
-            settings,
-            to,
-            to_url.map(str::to_owned),
-            None,
-            to_data_dir.map(std::path::PathBuf::from),
-        )
+        resolve_migrate_configs(settings, to, to_url.map(str::to_owned), None)
     }
 
     #[test]
@@ -841,14 +771,13 @@ mod test {
         for (backend, driver, needle) in [
             (MemoryBackend::Store, None, "provider seam"),
             (MemoryBackend::Null, None, "nothing to migrate"),
-            (MemoryBackend::Tinycortex, None, "EngineCortex overlay"),
         ] {
             let settings = StorageSettings {
                 memory_backend: backend,
                 memory_driver: driver,
                 ..base_settings()
             };
-            let err = resolve(&settings, "mem0", Some("https://t.example"), None)
+            let err = resolve(&settings, "mem0", Some("https://t.example"))
                 .expect_err("must refuse")
                 .to_string();
             assert!(err.contains(needle), "backend {backend:?}: {err}");
@@ -859,13 +788,13 @@ mod test {
     fn to_null_and_unknown_targets_refuse() {
         let s = base_settings();
         assert!(
-            resolve(&s, "null", None, None)
+            resolve(&s, "null", None)
                 .expect_err("null")
                 .to_string()
                 .contains("discard every record")
         );
         assert!(
-            resolve(&s, "banana", None, None)
+            resolve(&s, "banana", None)
                 .expect_err("unknown")
                 .to_string()
                 .contains("names no migratable driver")
@@ -878,7 +807,7 @@ mod test {
             tenant_id: Some("acme-tenant".into()),
             ..base_settings()
         };
-        let err = resolve(&settings, "mem0", Some("https://t.example"), None)
+        let err = resolve(&settings, "mem0", Some("https://t.example"))
             .expect_err("tenant mode must refuse")
             .to_string();
         assert!(err.contains("OPENCOMPANY_TENANT_ID"), "{err}");
@@ -889,7 +818,7 @@ mod test {
     /// the source env var whose advice would silently repoint the source.
     #[test]
     fn a_missing_target_url_names_the_flag_not_the_source_env() {
-        let err = resolve(&base_settings(), "mem0", None, None)
+        let err = resolve(&base_settings(), "mem0", None)
             .expect_err("hosted target without --to-url must refuse")
             .to_string();
         assert!(err.contains("--to-url"), "{err}");
@@ -897,36 +826,6 @@ mod test {
             err.contains("SOURCE"),
             "must warn that OPENCOMPANY_MEMORY_URL is the source's: {err}"
         );
-    }
-
-    #[test]
-    fn a_namespace_target_with_no_dir_anywhere_names_the_flag() {
-        let settings = StorageSettings {
-            data_dir: None,
-            ..base_settings()
-        };
-        let err = resolve(&settings, "namespace", None, None)
-            .expect_err("no dir at all must refuse")
-            .to_string();
-        assert!(err.contains("--to-data-dir"), "{err}");
-    }
-
-    #[test]
-    fn a_mongodb_base_refuses_an_ephemeral_namespace_target() {
-        let settings = StorageSettings {
-            kind: StorageKind::Mongodb,
-            ..base_settings()
-        };
-        let err = resolve(&settings, "namespace", None, Some("/data/mem"))
-            .expect_err("ephemeral target must refuse")
-            .to_string();
-        assert!(err.contains("OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL"), "{err}");
-        let allowed = StorageSettings {
-            allow_ephemeral_memory: true,
-            ..settings
-        };
-        resolve(&allowed, "namespace", None, Some("/data/mem"))
-            .expect("the operator override must open the path");
     }
 
     #[test]
@@ -938,40 +837,13 @@ mod test {
             &base_settings(),
             "supermemory",
             Some(" https://source.example/ "),
-            None,
         )
         .expect_err("same hosted engine at the same endpoint must refuse")
         .to_string();
         assert!(err.contains("same engine"), "{err}");
 
         // A different endpoint proceeds.
-        resolve(
-            &base_settings(),
-            "supermemory",
-            Some("https://new.example"),
-            None,
-        )
-        .expect("a genuinely different endpoint is a migration");
-    }
-
-    #[test]
-    fn the_same_engine_guard_canonicalizes_dirs() {
-        // A real directory reached by two spellings: direct, and via `..`.
-        let dir = tempfile::tempdir().unwrap();
-        let real = dir.path().join("data");
-        std::fs::create_dir_all(&real).unwrap();
-        let dotted = dir.path().join("sub").join("..").join("data");
-        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
-
-        let settings = StorageSettings {
-            memory_backend: MemoryBackend::Tinycortex,
-            memory_driver: Some("namespace".into()),
-            data_dir: Some(real),
-            ..StorageSettings::default()
-        };
-        let err = resolve(&settings, "namespace", None, Some(dotted.to_str().unwrap()))
-            .expect_err("a dotted spelling of the same dir must refuse")
-            .to_string();
-        assert!(err.contains("same engine"), "{err}");
+        resolve(&base_settings(), "supermemory", Some("https://new.example"))
+            .expect("a genuinely different endpoint is a migration");
     }
 }

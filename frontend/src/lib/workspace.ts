@@ -418,6 +418,41 @@ export function isAgentsFolder(folder: FsNode | undefined): boolean {
 }
 
 /**
+ * The roots whose direct child folders are named by roster id, not by anything
+ * a person chose. Mirrors the host: `ensure_agent_folder` and
+ * `ensure_artifact_folder` mint `agents/<agent-id>/` and
+ * `artifacts/<agent-id>/` from the same id.
+ *
+ * Lowercase, and compared lowercased below, because a company that booted
+ * before the lowercase-dashed rule still carries `Agents/` and `Artifacts/` —
+ * the host adopts those spellings rather than renaming them, so the console has
+ * to read both.
+ */
+const ROSTER_ROOTS = ["agents", "artifacts"] as const;
+
+/**
+ * Whether `folder` is a root whose children carry roster ids for names.
+ *
+ * {@link isAgentsFolder} named only `agents/`, which was the whole story until
+ * `artifacts/` shipped: it files every published deliverable under
+ * `artifacts/<agent-id>/<task-id>/`, so its direct children are roster ids
+ * exactly as `agents/`'s are. A resolver scoped to one root printed raw ULIDs
+ * on the surface an operator opens to see what the company produced — issue
+ * #973's bug again, one root over.
+ *
+ * Root-scoped (`parentId === null`) for the same reason `isAgentsFolder` is: a
+ * folder somebody named "artifacts" inside their own subtree is theirs, and its
+ * children must keep the names they were given.
+ */
+export function isRosterRoot(folder: FsNode | undefined): boolean {
+  return (
+    folder?.kind === "folder" &&
+    folder.parentId === null &&
+    (ROSTER_ROOTS as readonly string[]).includes(folder.name.toLowerCase())
+  );
+}
+
+/**
  * A folder's full path as one line, with roster ids resolved (issue #1381).
  *
  * The Move dialog listed every folder by bare `name`, so two `Drafts` under
@@ -432,7 +467,7 @@ export function folderPathLabel(
 ): string {
   return pathOf(nodes, id)
     .map((node) =>
-      isAgentsFolder(nodeById(nodes, node.parentId))
+      isRosterRoot(nodeById(nodes, node.parentId))
         ? rosterDisplayName(node.name, names)
         : node.name,
     )
@@ -472,14 +507,17 @@ export function sortedFolders(
  *
  * Mirrors `SYSTEM_ROOTS` in `src/company/workspace_scaffold.rs`. Kept in step
  * by name rather than by a wire field, and the risk is the same one
- * {@link isDerivedNode} documents: if the host scaffolds a third root, this
+ * {@link isDerivedNode} documents: if the host scaffolds another root, this
  * const has to follow or a fresh company will briefly look as though somebody
  * has already been working in it.
  */
-export const SYSTEM_ROOTS = ["agents", "secrets"] as const;
+export const SYSTEM_ROOTS = ["agents", "artifacts", "secrets"] as const;
 
 /** The note the host provisions inside `secrets/` on first boot. */
 const SECRETS_README = "readme.md";
+
+/** The note the host provisions inside `artifacts/` on first boot. */
+const ARTIFACTS_README = "readme.md";
 
 /**
  * Whether anything in this tree was put there by a person (issue #1481).
@@ -510,7 +548,7 @@ export function hasOperatorContent(nodes: FsNode[]): boolean {
     if (
       node.parentId &&
       systemRootIds.has(node.parentId) &&
-      node.name.toLowerCase() === SECRETS_README
+      (node.name.toLowerCase() === SECRETS_README || node.name.toLowerCase() === ARTIFACTS_README)
     ) {
       return false;
     }

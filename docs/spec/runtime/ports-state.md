@@ -19,6 +19,35 @@ console cannot be honoured by one surface and ignored by another. At most one
 `overlay_budgets` entry may exist per teammate — the console write path upserts
 through `CompanyRecord::upsert_budget_override`, and a bundle import carrying two
 entries for the same teammate is rejected rather than resolved by guesswork.
+And `overlay_agent_edits`: an operator's edits of the **manifest-declared**
+teammates — their name, role, description and tool scope — read through
+`CompanyRecord::effective_agent` / `effective_agents`, which the harness roster
+build and every console read share, so a teammate renamed on the Team page is
+the teammate that takes the next turn. Before it, a `[[agent]]` in
+`company.toml` (which includes every agent from the global baseline, merged into
+every company) was uneditable from the console: the answer was "edit the
+blueprint and redeploy", which a hosted tenant can do neither half of. The merge
+is **per field**, so a field nobody edited keeps tracking the blueprint across a
+rebuild, and a stored empty description is the operator clearing it rather than
+"not overridden". `company.toml` is never rewritten. At most one entry per
+teammate — the write path merges through
+`CompanyRecord::upsert_agent_override`.
+
+And `overlay_retired_agents`: the tombstone half of the same layer — the ids of
+manifest teammates the operator has removed. A tombstone rather than a manifest
+rewrite for the reason the edits are an overlay: `company.toml` and the baseline
+merged into it are re-read on every rebuild, so a teammate "deleted" by editing
+the roster would simply come back. `effective_agents` filters them out and
+`is_roster_agent` / `effective_desk_members` answer accordingly, so a removed
+teammate is not built, not dispatchable, not seated on a desk, not a delegation
+target and not the orchestrator (the role moves to the next teammate that is
+actually there). `retire_agent` is idempotent — a second tombstone would change
+no roster but would move the harness's overlay fingerprint and drop every live
+session for a delete that had already happened. An id that names nobody is
+inert, which is what makes the tombstone safe to keep across a redeploy that
+drops the teammate from the blueprint too. The one refusal left is the
+company's **last** teammate: an empty roster has no orchestrator, nobody to
+answer a message, and no way back from the console.
 And (issue #562) `overlay_policy`: the operator's `[policy]` override — the
 autonomy tier and always-ask list an admin sets from the console, read through
 `CompanyRecord::effective_policy`, which resolves it *ahead* of the manifest for
@@ -155,8 +184,8 @@ that keeps growing: these files own the port *traits*, that one owns the
 
 ## MemoryStore
 
-The equivalent of Medulla's `CyclePersistence`; TinyCortex is the target
-backend ([integrations/tinycortex.md](../integrations/tinycortex.md)).
+The equivalent of Medulla's `CyclePersistence`; a hosted provider is the
+target backend ([memory-engine.md](memory-engine.md)).
 
 ```rust
 // src/ports/memory.rs
@@ -181,10 +210,25 @@ pub trait ContextStore: Send + Sync {
     async fn list(&self, id: &CompanyId, prefix: &str) -> Result<Vec<ChunkMeta>>;
     async fn peek(&self, id: &CompanyId, addr: &ChunkAddr, range: Option<Range<usize>>)
         -> Result<String>;
+    async fn peek_many(&self, id: &CompanyId, addrs: &[ChunkAddr])
+        -> Result<Vec<Option<String>>>; // defaulted: loops peek
     async fn search(&self, id: &CompanyId, query: &str, limit: usize)
         -> Result<Vec<ChunkHit>>;
+    async fn delete(&self, id: &CompanyId, addr: &ChunkAddr) -> Result<bool>;
+    async fn delete_label(&self, id: &CompanyId, addr: &ChunkAddr, label: &str)
+        -> Result<bool>;
 }
 ```
+
+Chunks are content-addressed: byte-identical bodies share one address, and
+every backend keeps one claim per `(addr, label)` (issue #1300 — a re-`put`
+of an identical body under a new label lands that label's claim; under an
+identical label it is a no-op). `delete` is address-level and takes every
+claim with the body — the operator's hard-delete. `delete_label` removes one
+claim and reaps the body only with the last one, decided atomically inside
+the backend, which is what lets `memory_forget` and the fact-mirror reap
+remove their own claim on a shared address without racing a concurrent
+identical-content write.
 
 ## SecretStore
 
@@ -197,6 +241,20 @@ pub trait SecretStore: Send + Sync {
     async fn set(&self, company: &CompanyId, key: &str, value: SecretValue) -> Result<()>;
 }
 ```
+
+There is no `delete`: callers clear a secret by writing an empty value
+(`src/company/mcp.rs::clear_auth`, `src/company/inference.rs::clear_key`), so an
+empty value and an unset key are **different states** and a backend must keep
+them apart — collapsing `""` into `None` would fall back to whatever the
+manifest or the environment supplies and silently undo the operator's
+revocation.
+
+`assert_secret_store` in `src/store/conformance.rs` is the contract every
+backend is checked against (issue #1505): read-back, absence, per-key
+independence, overwrite, the empty-value distinction above, and isolation in
+both directions. See
+[storage.md](storage.md#conformance-coverage) for what it deliberately does not
+assert yet.
 
 ## UserStore, SessionStore, LoginCodeStore
 

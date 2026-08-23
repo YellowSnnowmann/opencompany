@@ -78,8 +78,8 @@ pub fn router() -> Router<AppState> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOption {
-    /// What a `PUT` sends back: `store`, `embedded`, `namespace`,
-    /// `supermemory`, `mem0`, `cognee`, `null`.
+    /// What a `PUT` sends back: `store`, `supermemory`, `mem0`, `cognee`, or
+    /// `null`.
     ///
     /// Deliberately flatter than the `(backend, driver)` pair the runtime
     /// takes: "embedded, driver namespace" and "remote, driver mem0" are one
@@ -209,8 +209,6 @@ fn catalog() -> Vec<EngineOption> {
     // so the catalog is one list in one order in every build — an option that
     // disappears entirely reads as "this product has no such engine".
     let tinymemory = cfg!(feature = "tinymemory");
-    let embedded_contract = cfg!(feature = "tinymemory-embedded");
-    let engine = cfg!(feature = "tinycortex");
     let feature = |on: bool, name: &str| {
         (!on).then(|| format!("this build was compiled without the `{name}` feature"))
     };
@@ -222,28 +220,6 @@ fn catalog() -> Vec<EngineOption> {
                           network call, nothing to configure.",
             available: true,
             unavailable_reason: None,
-            requires_url: false,
-            requires_key: false,
-            durable: true,
-        },
-        EngineOption {
-            id: "embedded",
-            label: "TinyCortex",
-            description: "The in-pod engine: vector-first recall over a persistent per-company \
-                          store, with lexical and recency fallback.",
-            available: engine,
-            unavailable_reason: feature(engine, "tinycortex"),
-            requires_url: false,
-            requires_key: false,
-            durable: true,
-        },
-        EngineOption {
-            id: "namespace",
-            label: "TinyMemory (in-pod)",
-            description: "The memory contract's own durable store, in this pod. Graph and \
-                          keyword recall; starts empty — nothing migrates from TinyCortex.",
-            available: embedded_contract,
-            unavailable_reason: feature(embedded_contract, "tinymemory-embedded"),
             requires_url: false,
             requires_key: false,
             durable: true,
@@ -302,14 +278,9 @@ fn option_for(engine: &str) -> Option<EngineOption> {
 
 /// The `(backend, driver)` pair an engine id resolves to.
 ///
-/// This is the whole reason the wire carries one id: `embedded` with no driver
-/// is the incumbent engine and `embedded` with `namespace` is the contract
-/// store, a distinction no console should have to encode.
 fn split_engine(engine: &str) -> Option<(MemoryBackend, Option<&'static str>)> {
     match engine {
         "store" => Some((MemoryBackend::Store, None)),
-        "embedded" => Some((MemoryBackend::Tinycortex, None)),
-        "namespace" => Some((MemoryBackend::Tinycortex, Some("namespace"))),
         "supermemory" => Some((MemoryBackend::Remote, Some("supermemory"))),
         "mem0" => Some((MemoryBackend::Remote, Some("mem0"))),
         "cognee" => Some((MemoryBackend::Remote, Some("cognee"))),
@@ -327,8 +298,6 @@ fn split_engine(engine: &str) -> Option<(MemoryBackend, Option<&'static str>)> {
 fn engine_id(selection: &MemorySelection) -> String {
     match (selection.backend, selection.driver.as_deref()) {
         (MemoryBackend::Store, _) => "store".to_string(),
-        (MemoryBackend::Tinycortex, None) => "embedded".to_string(),
-        (MemoryBackend::Tinycortex, Some(driver)) => driver.to_string(),
         (MemoryBackend::Remote, Some(driver)) => driver.to_string(),
         (MemoryBackend::Remote, None) => "remote".to_string(),
         (MemoryBackend::Null, _) => "null".to_string(),

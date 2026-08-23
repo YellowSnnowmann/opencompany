@@ -69,7 +69,7 @@ the multi-tenant platform case with the same type.
 | --- | --- | --- |
 | `Brain` | `HostedMedullaBrain` (`src/brain/hosted.rs`) | stub, sidecar, native |
 | `CompanyStore`, `EventLog` | fs bundle (TOML + JSONL) | sqlite, operator-supplied |
-| `MemoryStore`, `ContextStore` | fs (JSONL + content-addressed blobs) | tinycortex, operator-supplied |
+| `MemoryStore`, `ContextStore` | fs (JSONL + content-addressed blobs) | hosted provider, operator-supplied |
 | `ToolProvider` | OpenHuman RPC, built-ins fallback | TinyAgents-native |
 | `ChannelAdapter` | built-in operator chat | OpenHuman channels |
 | `AgentEconomy` | none (companies work offline) | tinyplace |

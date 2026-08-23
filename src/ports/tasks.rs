@@ -227,23 +227,32 @@ pub fn column_for_settled_run(status: RunStatus) -> Option<&'static str> {
     }
 }
 
-/// The human label for a column id (`in_progress` → `In progress`).
+/// The human label for a phase or a stage id (`working` → `Working`,
+/// `in_progress` → `In progress`).
 ///
 /// The board's ids are wire words; anything a person reads needs the label.
 /// Added for the exported task record (issue #352), which is read by people who
 /// have never seen the board and must not be shown `in_review`.
 ///
-/// Read out of [`crate::ledger::board::COLUMNS`] rather than out of a `match`
-/// beside it, so a renamed label is one edit and cannot half-land. The console
-/// no longer keeps a copy at all — it reads the same labels off the `tasks`
-/// ledger, which is built from the same table.
+/// **Both vocabularies**, because since #1512 the same field can be either: a
+/// `TaskCard` carries a phase, a `TaskRecord` carries a stage, and this is
+/// called with both. Phases are looked up first — a genuine ambiguity exists
+/// (`done` is both) and they agree on it.
+///
+/// Read out of [`crate::ledger::board`] rather than out of a `match` beside it,
+/// so a renamed label is one edit and cannot half-land. The console no longer
+/// keeps a copy at all — it reads the same labels off the `tasks` ledger, which
+/// is built from the same table.
 ///
 /// An unknown id falls back to itself rather than to a guess, so a stored card
-/// carrying a column this build does not know still prints something truthful.
+/// carrying a state this build does not know still prints something truthful.
 ///
 /// `pub(crate)`: presentation is not part of the port's contract, and the only
 /// consumer is the exported record. Widen it if a second surface needs it.
 pub(crate) fn column_label(column: &str) -> &str {
+    if let Some(phase) = crate::ledger::board::phase(column) {
+        return phase.label;
+    }
     crate::ledger::board::column(column).map_or(column, |held| held.label)
 }
 

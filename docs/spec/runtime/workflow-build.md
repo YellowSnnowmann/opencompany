@@ -152,7 +152,7 @@ envelope, so the console names the node rather than only the sentence.
 
 ### `POST …/tasks/{id}/workflow-proposal/reject`
 
-Clears the proposal and returns the card to **To-do** (decision D2c). The card
+Clears the proposal and returns the card to **Pending** (decision D2c). The card
 keeps its `workflow` deliverable, so dragging it back into In Progress builds
 again; an operator who wants a one-off instead flips `deliverable` with a patch.
 

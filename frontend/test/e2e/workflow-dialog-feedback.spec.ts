@@ -229,6 +229,134 @@ test("garbage in the cron field previews the parser's message without blocking",
   });
 });
 
+/**
+ * The condition branch control, and the host pre-flight behind it (issue #1074).
+ *
+ * Both are only real in a browser. `conditionBranchChoice` is unit-tested, but a
+ * correct helper stays green while `EdgeRow` renders the old free-text box, or
+ * passes it node ids and so never sees the source node's `kind`. And the
+ * pre-flight is a debounce, a round trip and a render — the same shape as the
+ * cron preview above, and observable nowhere else.
+ */
+test("a condition's branches are picked, not typed, and the host checks the graph (#1074)", async ({
+  page,
+}) => {
+  const stamp = Date.now();
+  const dialog = await openCreateDialog(page);
+
+  await dialog.getByLabel("Workflow ID", { exact: true }).fill(`e2e_branch_${stamp}`);
+  await dialog.getByLabel("Name", { exact: true }).fill(`Branch probe ${stamp}`);
+
+  // Trigger → condition → output, the smallest graph with a branch in it.
+  await dialog.getByLabel("Node id").first().fill("start");
+  await dialog.getByLabel("Node name").first().fill("Start");
+
+  await dialog.getByRole("button", { name: "Add node" }).click();
+  await dialog.getByLabel("Node id").nth(1).fill("gate");
+  await dialog.getByLabel("Node name").nth(1).fill("Gate");
+  await dialog.getByLabel("Node kind").nth(1).click();
+  await page.getByRole("option", { name: /^Condition/ }).click();
+  // A condition with no `config.field` always routes true, so the host requires
+  // one — filled here so the branch rule is the only thing under test.
+  // By test id, not by label: the label renders as "Field *" for a required
+  // field, so a label match is a substring match on rendered decoration.
+  await dialog.getByTestId("config-field-field").fill("=item.approved");
+
+  await dialog.getByRole("button", { name: "Add node" }).click();
+  await dialog.getByLabel("Node id").nth(2).fill("done");
+  await dialog.getByLabel("Node name").nth(2).fill("Ship it");
+  await dialog.getByLabel("Node kind").nth(2).click();
+  await page.getByRole("option", { name: /^Output(?! parser)/ }).click();
+
+  await dialog.getByRole("button", { name: "Add edge" }).click();
+  await dialog.getByLabel("Edge from").first().click();
+  await page.getByRole("option", { name: "start", exact: true }).click();
+  await dialog.getByLabel("Edge to").first().click();
+  await page.getByRole("option", { name: "gate", exact: true }).click();
+
+  // An edge OUT of the condition: this is the row whose control must change.
+  await dialog.getByRole("button", { name: "Add edge" }).click();
+  await dialog.getByLabel("Edge from").nth(1).click();
+  await page.getByRole("option", { name: "gate", exact: true }).click();
+  await dialog.getByLabel("Edge to").nth(1).click();
+  await page.getByRole("option", { name: "done", exact: true }).click();
+
+  // The wiring: a branch row is a combobox, not the free-text box every other
+  // edge keeps. The first edge leaves a `trigger`, so it must still be a
+  // textbox — the control swaps on the SOURCE node's kind, and asserting both
+  // is what proves it swapped rather than being replaced everywhere.
+  const branchLabel = dialog.getByLabel("Edge label").nth(1);
+  await expect(branchLabel).toHaveRole("combobox");
+  await expect(dialog.getByLabel("Edge label").first()).toHaveRole("textbox");
+
+  // And it offers exactly the host's branches. `error` is absent because this
+  // condition is not `on_error = "route"` — the narrow exception a hand-written
+  // client check gets wrong.
+  await branchLabel.click();
+  await expect(page.getByRole("option", { name: "yes", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "no", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "error", exact: true })).toHaveCount(0);
+  await page.getByRole("option", { name: "yes", exact: true }).click();
+
+  // The pre-flight: the host is asked about this graph and answers before
+  // anyone presses Create. This is what #1074 asked for — the dialog no longer
+  // submits blind.
+  await expect(dialog.getByTestId("preflight-ok")).toBeVisible({
+    timeout: PREVIEW_TIMEOUT,
+  });
+
+  // And the graph the pre-flight approved is the graph Create accepts.
+  await dialog.getByRole("button", { name: "Create workflow" }).click();
+  await expect(dialog).toBeHidden({ timeout: 30_000 });
+});
+
+/**
+ * The other direction: a rule the client cannot pre-empt without mirroring it.
+ *
+ * An unreachable node is a graph-wide reachability question — the client-side
+ * BFS #1074 argues against — so the dialog's own checks pass and only the host
+ * knows. Before this, the operator learned it from Create's error; now the
+ * pre-flight says so first, in the host's own words.
+ */
+test("the host's refusal of an unreachable node arrives before Create (#1074)", async ({
+  page,
+}) => {
+  const stamp = Date.now();
+  const dialog = await openCreateDialog(page);
+
+  await dialog.getByLabel("Workflow ID", { exact: true }).fill(`e2e_unreach_${stamp}`);
+  await dialog.getByLabel("Name", { exact: true }).fill(`Unreachable probe ${stamp}`);
+
+  await dialog.getByLabel("Node id").first().fill("start");
+  await dialog.getByLabel("Node name").first().fill("Start");
+
+  await dialog.getByRole("button", { name: "Add node" }).click();
+  await dialog.getByLabel("Node id").nth(1).fill("done");
+  await dialog.getByLabel("Node name").nth(1).fill("Ship it");
+  await dialog.getByLabel("Node kind").nth(1).click();
+  await page.getByRole("option", { name: /^Output(?! parser)/ }).click();
+
+  // A third node nothing points at. Every client-side check passes: the ids are
+  // unique, the kinds are fine, there is exactly one trigger, and no edge names
+  // a node that is not there.
+  await dialog.getByRole("button", { name: "Add node" }).click();
+  await dialog.getByLabel("Node id").nth(2).fill("orphan");
+  await dialog.getByLabel("Node name").nth(2).fill("Orphan");
+  await dialog.getByLabel("Node kind").nth(2).click();
+  await page.getByRole("option", { name: /^Output(?! parser)/ }).click();
+
+  await dialog.getByRole("button", { name: "Add edge" }).click();
+  await dialog.getByLabel("Edge from").click();
+  await page.getByRole("option", { name: "start", exact: true }).click();
+  await dialog.getByLabel("Edge to").click();
+  await page.getByRole("option", { name: "done", exact: true }).click();
+
+  const refused = dialog.getByTestId("preflight-refused");
+  await expect(refused).toBeVisible({ timeout: PREVIEW_TIMEOUT });
+  await expect(refused).toContainText("orphan");
+  await expect(refused).toContainText("cannot be reached");
+});
+
 test("a valid workflow still saves", async ({ page }) => {
   // The id AND the name must both be fresh: the host rejects a duplicate of
   // either, so a fixed name would pass on a clean company and fail on the

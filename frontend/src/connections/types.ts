@@ -211,6 +211,21 @@ export function availableConnectors(desktop: boolean): ConnectorKind[] {
   return desktop ? ["local", "cloud", "remote", "ssh"] : ["cloud", "remote"];
 }
 
+/**
+ * What each connector is called wherever one has to be named to an operator.
+ *
+ * Beside {@link ConnectorKind} rather than in either surface that prints it:
+ * "Add a host" names the connector an operator is choosing between, and
+ * "Manage hosts" names the one a row already has. Two copies would drift, and
+ * a host would be offered under one word and then listed under another.
+ */
+export const CONNECTOR_LABELS: Record<ConnectorKind, string> = {
+  local: "On this computer",
+  cloud: "TinyHumans Cloud",
+  remote: "Another gateway",
+  ssh: "Over SSH",
+};
+
 export interface Connection {
   id: ConnectionId;
   /**

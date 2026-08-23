@@ -67,49 +67,66 @@ fn the_board_is_native_and_says_it_is_not_written_with_record_entry() {
     );
 }
 
-/// The board's statuses are its columns, and only Done ends a card's life. A
-/// card in review or paused is stopped, not finished.
+/// The board's statuses are its three phases, and only Done ends a card's life.
+/// A card in review or paused is stopped, not finished — and both read as
+/// `working`, which is the whole of issue #1512.
 #[test]
-fn the_boards_statuses_are_its_columns() {
+fn the_boards_statuses_are_its_three_phases() {
     let registry = Registry::build([]);
     let tasks = registry.find("tasks").expect("built in");
     let names: Vec<&str> = tasks.statuses.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(
         names,
-        crate::ports::tasks::BOARD_COLUMNS.to_vec(),
-        "the ledger's statuses must be the board's columns, in board order"
+        crate::ledger::board::phase_ids().to_vec(),
+        "the ledger's statuses must be the board's phases, in board order"
     );
-    assert_eq!(tasks.closing_statuses(), [crate::ports::tasks::COLUMN_DONE]);
+    assert_eq!(tasks.closing_statuses(), [crate::ledger::board::PHASE_DONE]);
 }
 
-/// The point of the table: one edit adds a column to the port's list, the
-/// ledger's statuses, the rendered file's sections and the console's labels.
-/// This asserts the three host-side halves agree, item for item — the check the
-/// hand-maintained lists could never make.
+/// The cap that makes this issue's point on every ledger at once: nothing a
+/// company reads or writes is asked to hold more than three states.
 #[test]
-fn the_board_ledger_is_built_from_the_column_table() {
+fn no_built_in_ledger_declares_more_than_three_statuses() {
     let registry = Registry::build([]);
-    let tasks = registry.find("tasks").expect("built in");
-    assert_eq!(tasks.statuses.len(), crate::ledger::board::COLUMNS.len());
-    for (status, column) in tasks.statuses.iter().zip(crate::ledger::board::COLUMNS) {
-        assert_eq!(status.name, column.id);
-        assert_eq!(status.closed, column.closed);
-        // The label is what let the console delete its own copy of this table.
-        assert_eq!(status.label, column.label, "`{}` lost its label", column.id);
+    for spec in registry.specs() {
         assert!(
-            !status.label.is_empty(),
-            "`{}` reaches the console as a wire word",
-            column.id
+            spec.statuses.len() <= 3,
+            "`{}` declares {} statuses; three is the ceiling — a fourth is a \
+             question being answered in the wrong place",
+            spec.slug,
+            spec.statuses.len()
         );
     }
 }
 
-/// Every column renders somewhere in `derived/tasks.md`. A column that named a
-/// heading no section carried would leave its cards out of the file entirely —
-/// the silent disappearance the column vocabulary exists to prevent, arrived at
-/// from the file's side.
+/// The point of the table: one edit adds a phase to the ledger's statuses, the
+/// rendered file's sections and the console's labels. This asserts the
+/// host-side halves agree, item for item — the check the hand-maintained lists
+/// could never make.
 #[test]
-fn every_column_lands_in_a_rendered_section() {
+fn the_board_ledger_is_built_from_the_phase_table() {
+    let registry = Registry::build([]);
+    let tasks = registry.find("tasks").expect("built in");
+    assert_eq!(tasks.statuses.len(), crate::ledger::board::PHASES.len());
+    for (status, phase) in tasks.statuses.iter().zip(crate::ledger::board::PHASES) {
+        assert_eq!(status.name, phase.id);
+        assert_eq!(status.closed, phase.closed);
+        // The label is what let the console delete its own copy of this table.
+        assert_eq!(status.label, phase.label, "`{}` lost its label", phase.id);
+        assert!(
+            !status.label.is_empty(),
+            "`{}` reaches the console as a wire word",
+            phase.id
+        );
+    }
+}
+
+/// Every stage renders somewhere in `derived/tasks.md` — through its phase. A
+/// stage whose phase no section carried would leave its cards out of the file
+/// entirely: the silent disappearance the column vocabulary exists to prevent,
+/// arrived at from the file's side.
+#[test]
+fn every_stage_lands_in_a_rendered_section() {
     let registry = Registry::build([]);
     let tasks = registry.find("tasks").expect("built in");
     for column in crate::ledger::board::COLUMNS {
@@ -117,7 +134,7 @@ fn every_column_lands_in_a_rendered_section() {
             tasks
                 .sections
                 .iter()
-                .any(|section| section.statuses.iter().any(|name| name == column.id)),
+                .any(|section| section.statuses.iter().any(|name| name == column.phase)),
             "`{}` renders in no section of the file",
             column.id
         );
@@ -274,5 +291,40 @@ fn a_declared_ledgers_closing_statuses_demand_a_reason() {
                 status.name
             );
         }
+    }
+}
+
+/// Every status the built-ins retired in issue #1512 still resolves, and
+/// resolves to a status that renders. A row recorded last quarter as `at_risk`
+/// or `superseded` is a row somebody wrote; a narrowed vocabulary that dropped
+/// it on the floor would take it out of the rendered file with nothing saying
+/// so — the silent disappearance the derived file exists to prevent, reached
+/// from the declaration's side.
+#[test]
+fn every_retired_status_still_resolves_to_one_that_renders() {
+    let registry = Registry::build([]);
+    for (slug, retired, lands_on) in [
+        ("goals", "proposed", "active"),
+        ("goals", "at_risk", "active"),
+        ("goals", "missed", "dropped"),
+        ("decisions", "superseded", "retired"),
+        ("decisions", "reversed", "retired"),
+    ] {
+        let spec = registry.find(slug).expect("built in");
+        assert_eq!(
+            spec.canonical_status(retired),
+            lands_on,
+            "`{slug}`'s `{retired}` resolves nowhere"
+        );
+        assert!(
+            spec.sections
+                .iter()
+                .any(|section| section.statuses.iter().any(|name| name == lands_on)),
+            "`{slug}`'s `{lands_on}` renders in no section, so `{retired}` still vanishes"
+        );
+        // Healed on read, refused on write: the client learns the surviving
+        // vocabulary once rather than being kept on the retired one.
+        assert!(spec.knows_status(retired), "{slug}/{retired}");
+        assert!(!spec.declares_status(retired), "{slug}/{retired}");
     }
 }

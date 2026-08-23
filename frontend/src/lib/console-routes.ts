@@ -117,7 +117,14 @@ const ROUTABLE: Record<View, true> = {
    * has no URL to be reachable by.
    */
   pages: true,
-  /** No nav row: parked by issue #302, alongside Inbox. */
+  /**
+   * Un-parked. Issue #302 took the nav row off a flat Finances page; what has a
+   * row again is a *section* — the same ledger projection as its Overview, plus
+   * Invoicing (Chargebee) and Wallet (PayPal), which are live provider surfaces
+   * the host had no HTTP route for until `server::ops::finance`. Its sub-pages
+   * ride the second hash segment (`#/finances/wallet`), so this one entry
+   * routes all three; see docs/spec/runtime/finance-console.md.
+   */
   finances: true,
   settings: true,
   /** No nav row: linked from the sidebar footer instead. */

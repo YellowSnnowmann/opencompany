@@ -120,7 +120,7 @@ export function TaskWorkflowProposalPanel({
       const saved = await rejectWorkflowProposal(client, company, task.id);
       onSaved(saved);
       await onReload();
-      toast.success("Proposal rejected — the card is back in To-do.");
+      toast.success("Proposal rejected — the card is back in Pending.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "The proposal could not be rejected.");
     } finally {

@@ -242,6 +242,7 @@ fn deps(model_url: String, dir: &std::path::Path) -> HarnessDeps {
         run_supervisor: crate::runtime::RunSupervisor::default(),
         delivery: None,
         search: None,
+        tenant_search: None,
         workspace: None,
         repos: None,
         repo_bindings: Vec::new(),
@@ -295,6 +296,7 @@ async fn company_agent(
         &["docs".to_string()],
         &[],
         &[],
+        None,
         false,
     )
     .expect("agent builds");

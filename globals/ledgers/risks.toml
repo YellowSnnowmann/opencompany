@@ -83,11 +83,7 @@ label = "Realised"
 name = "retired"
 closed = true
 needs_reason = true
-
-[[status]]
-name = "accepted"
-closed = true
-needs_reason = true
+aliases = ["accepted"]
 
 [[status]]
 name = "materialised"
@@ -116,9 +112,11 @@ order = "recent"
 [[section]]
 heading = "Settled"
 blurb = """
-Retired, accepted, or materialised and dealt with — each with the reason. Kept: \
+No longer tracked, or materialised and dealt with — each with the reason, which \
+is where retired (it is gone) and accepted (we are living with it) are told \
+apart. Kept: \
 a risk accepted without a recorded reason is one somebody re-raises next month, \
 and a realised one is the company's only record of what it actually cost.\
 """
-statuses = ["retired", "accepted", "materialised"]
+statuses = ["retired", "materialised"]
 cap = 20

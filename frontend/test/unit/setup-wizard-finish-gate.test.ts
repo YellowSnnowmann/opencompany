@@ -29,9 +29,7 @@ function status(over: Partial<SetupStatus> = {}): SetupStatus {
     complete: false,
     config_path: "/data/config.toml",
     fields: [],
-    templates: [
-      { id: "starter", name: "Starter", agent_count: 2, output: null },
-    ],
+    templates: [],
     auth_modes: ["email"],
     build: {
       acp_in_build: false,
@@ -167,6 +165,36 @@ const finishButton = () =>
   container.querySelector('[data-testid="setup-finish"]') as HTMLButtonElement | null;
 
 describe("finishing setup with no companies on the host", () => {
+  it("offers the shipped company templates as a dropdown", async () => {
+    await show(
+      clientWith(
+        status({
+          templates: [
+            { id: "agentic_software_company", name: "Agentic Software Company", agent_count: 5, output: "Software" },
+            { id: "agentic_law_firm", name: "Agentic Law Firm", agent_count: 4, output: "Legal work" },
+          ],
+        }),
+      ),
+    );
+    await skipModel();
+
+    const picker = container.querySelector(
+      '[data-testid="setup-field-template"]',
+    ) as HTMLSelectElement;
+    expect(picker).toBeTruthy();
+    expect(Array.from(picker.options).map((option) => option.textContent)).toContain(
+      "Agentic Software Company (5 teammates)",
+    );
+
+    await act(async () => {
+      picker.value = "agentic_software_company";
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(
+      (container.querySelector('[data-testid="setup-field-industry"]') as HTMLInputElement).value,
+    ).toBe("Agentic Software Company");
+  });
+
   /**
    * The design call fails in this environment (no host behind the client), so
    * Review renders its error rather than a roster — which is precisely the

@@ -34,7 +34,7 @@ use tinymemory::registry::DriverClass;
 use tinymemory_api::provider::MemoryProvider;
 
 use super::BoundMemory;
-use super::driver::{MemoryDriverConfig, MemoryMode, open_driver};
+use super::driver::{MemoryDriverConfig, MemoryMode, RemoteDeployment, open_driver};
 use crate::ports::{CompanyId, CompressedTrace, ContextChunk, FactKind, FactRecord};
 
 /// Opens a driver through the production path and fails the test on refusal.
@@ -119,6 +119,57 @@ async fn facade_round_trip(provider: Arc<dyn MemoryProvider>, class: DriverClass
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].body, "lathe parts come from Initech");
 
+    // Characters a hosted engine sanitises out of `content` (tinymemory#80).
+    // The envelope escapes them precisely so this assertion can hold, and the
+    // assertion lives here — in the shared facade path — rather than beside
+    // the escaping, because the escaping is only worth anything if the record
+    // survives the whole way to an engine and back. Against live Supermemory
+    // this failed before the escape landed: `U+FFFD` came back missing from
+    // the middle of the body, so the record decoded to a string one character
+    // shorter than the one that was stored, with nothing raising an error.
+    //
+    // `U+0000` rides along as the control. JSON already escapes it, so it
+    // survived even before the fix — which is what makes it useful here: if a
+    // later change to the envelope broke escaping wholesale, the two would
+    // fail together, and if only `U+FFFD` fails then the strip is engine-side.
+    //
+    // Under its OWN company, and deleted afterwards. A hosted engine retains
+    // what this writes, so a fact left in `acme` is still there on the next
+    // run — and the `listed.len() == 1` above would then fail on a second run
+    // of a suite that passed on the first, blaming the engine for the test's
+    // own litter.
+    let awkward = CompanyId::new("acme-awkward-content");
+    for (label, character) in [("nul", '\u{0}'), ("replacement", '\u{FFFD}')] {
+        let body = format!("before{character}after");
+        let id = format!("fact-awkward-{label}");
+        facts
+            .upsert(
+                &awkward,
+                &FactRecord {
+                    id: id.clone(),
+                    kind: FactKind::Fact,
+                    title: format!("awkward {label}"),
+                    body: body.clone(),
+                    source: "cto".into(),
+                    updated_at_millis: 1_700_000_000_002,
+                },
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{label} fact upsert: {error}"));
+        let listed = facts.list(&awkward, None, None).await.expect("fact list");
+        let stored = listed.iter().find(|fact| fact.id == id);
+        assert_eq!(
+            stored.map(|fact| fact.body.as_str()),
+            Some(body.as_str()),
+            "{label}: the record must read back as it was written, not with the \
+             character removed from the middle of it"
+        );
+        facts
+            .delete(&awkward, &id)
+            .await
+            .unwrap_or_else(|error| panic!("{label} cleanup: {error}"));
+    }
+
     let context = bound.context();
     context
         .put(
@@ -139,46 +190,24 @@ async fn facade_round_trip(provider: Arc<dyn MemoryProvider>, class: DriverClass
         1,
         "context must be recallable through the engine"
     );
-}
 
-// ── The embedded `namespace` driver, on a real store ─────────────────────────
-
-#[cfg(feature = "tinymemory-embedded")]
-mod embedded {
-    use super::*;
-
-    fn namespace_config(dir: &std::path::Path) -> MemoryDriverConfig {
-        MemoryDriverConfig {
-            mode: MemoryMode::Embedded,
-            driver_id: Some("namespace".into()),
-            url: None,
-            api_key: None,
-            data_dir: Some(dir.to_path_buf()),
-        }
-    }
-
-    /// #1201/#1238 regression net: the durable SQLite store this host binds
-    /// under `OPENCOMPANY_MEMORY=embedded` + `OPENCOMPANY_MEMORY_DRIVER=
-    /// namespace`, under the upstream suite, through `open_driver`.
-    #[tokio::test]
-    async fn the_namespace_driver_upholds_the_contract() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let (provider, _) = open(&namespace_config(dir.path()));
-        assert_retains_then_conforms(provider).await;
-    }
-
-    /// The #1201 regression net, armed. On the pre-#1248 driver the
-    /// card-shaped digits in `facade_round_trip` tripped the scrubber into
-    /// corrupting the stored envelope, and the record was silently gone.
-    /// Post-#1248 the scrubber may still redact the digits — that is its job
-    /// — but the record, its identity and its prose must survive, which is
-    /// exactly what the round-trip asserts.
-    #[tokio::test]
-    async fn the_namespace_driver_round_trips_the_facades() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let (provider, class) = open(&namespace_config(dir.path()));
-        facade_round_trip(provider, class).await;
-    }
+    // The port-level `(addr, label)` contract, over whatever engine is bound
+    // (issue #1300). Every backend that implements `ContextStore` directly —
+    // fs, sqlite, mongodb — proves these in its own test module; the engines
+    // reached through `ProviderContextStore` did not, because nothing ran the
+    // HOST's port suite against them. That gap matters precisely for the
+    // hosted drivers: `delete_label` is a read-merge-write over `get`/`put`,
+    // which on supermemory, mem0 and cognee is three HTTP calls against an
+    // engine whose `get` and `list` shapes this host does not control. A
+    // divergence there is a claim silently lost or a body reaped while
+    // another label still points at it — and it would have been invisible
+    // until an operator noticed a memory missing.
+    //
+    // Run against `bound.context()` rather than a fresh binding so the
+    // envelope, namespace and decode path under test are the ones the rest of
+    // this function already exercised.
+    crate::store::conformance::assert_identical_body_two_labels(bound.context()).await;
+    crate::store::conformance::assert_delete_label_scoped(bound.context()).await;
 }
 
 // ── Vendor doubles ───────────────────────────────────────────────────────────
@@ -236,6 +265,94 @@ fn remote_config(driver: &str, endpoint: &str) -> MemoryDriverConfig {
         url: Some(endpoint.into()),
         api_key: Some("test-key".into()),
         data_dir: None,
+        // The doubles below speak each vendor's SELF-HOSTED dialect, ported
+        // from the adapters' own tests — un-prefixed paths, `X-API-Key` where
+        // the platform would want `Authorization: Token`. So the config has to
+        // say so: pointing the managed client at them would 404 on paths that
+        // exist only on the platform, and the failure would read as a broken
+        // adapter rather than a mismatched double.
+        //
+        // Managed is what production defaults to, and it is covered against
+        // the real services in `live_hosted` plus, offline, by
+        // `the_managed_deployment_speaks_the_platform_dialect` below.
+        deployment: RemoteDeployment::SelfHosted,
+    }
+}
+
+/// The deployment knob must actually change the wire conversation.
+///
+/// This is the offline guard for a defect the live lane found: OpenCompany
+/// built every remote engine with the self-hosted constructor, so a tenant
+/// pointed at Mem0's or Cognee's managed platform spoke the wrong protocol
+/// entirely — `X-API-Key` and un-prefixed paths at Mem0 (HTTP 404), a bearer
+/// token at Cognee Cloud (HTTP 401 `Invalid header`). Supermemory hid it,
+/// because it serves the same API to both deployments on one bearer
+/// credential, so the one engine anybody tested against kept working.
+///
+/// Asserting on the *credential header* rather than the path is deliberate:
+/// it is the half that cannot be papered over by a permissive router, and it
+/// is what each vendor actually distinguishes its two products by.
+#[tokio::test]
+async fn the_deployment_selects_each_vendors_dialect() {
+    use axum::http::HeaderMap;
+
+    /// Captures the first request's headers, then fails the call.
+    async fn capture(
+        State(seen): State<Arc<Mutex<Vec<String>>>>,
+        headers: HeaderMap,
+    ) -> (axum::http::StatusCode, Json<Value>) {
+        let rendered: Vec<String> = ["authorization", "x-api-key"]
+            .iter()
+            .filter_map(|name| {
+                headers
+                    .get(*name)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| format!("{name}: {v}"))
+            })
+            .collect();
+        seen.lock().expect("lock").extend(rendered);
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"detail": "capture double"})),
+        )
+    }
+
+    for (driver, deployment, expected) in [
+        (
+            "mem0",
+            RemoteDeployment::Managed,
+            "authorization: Token test-key",
+        ),
+        ("mem0", RemoteDeployment::SelfHosted, "x-api-key: test-key"),
+        ("cognee", RemoteDeployment::Managed, "x-api-key: test-key"),
+        (
+            "cognee",
+            RemoteDeployment::SelfHosted,
+            "authorization: Bearer test-key",
+        ),
+    ] {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let app = Router::new()
+            .fallback(axum::routing::any(capture))
+            .with_state(seen.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let endpoint = format!("http://{}", listener.local_addr().expect("addr"));
+        tokio::spawn(async move { axum::serve(listener, app).await.expect("serve") });
+
+        let mut config = remote_config(driver, &endpoint);
+        config.deployment = deployment;
+        let (provider, _) = open(&config);
+        // The call is expected to fail — the double refuses everything. What
+        // is under test is the credential it carried getting there.
+        let _ = provider.get("any", "thing").await;
+
+        let headers = seen.lock().expect("lock").clone();
+        assert!(
+            headers.iter().any(|h| h.eq_ignore_ascii_case(expected)),
+            "{driver} as {deployment:?} must authenticate with `{expected}`; sent {headers:?}"
+        );
     }
 }
 
@@ -652,5 +769,196 @@ mod cognee {
         let endpoint = cognee_backend().await;
         let (provider, class) = open(&remote_config("cognee", &endpoint));
         facade_round_trip(provider, class).await;
+    }
+}
+
+// ── The same suites, against the REAL hosted services ────────────────────────
+
+/// Everything above runs against doubles: HTTP servers this repo writes to the
+/// vendors' documented request and response shapes. That is the right default —
+/// `cargo test` stays offline, and a shape change in a vendor's docs is caught
+/// here rather than in a tenant.
+///
+/// It is also not the same claim as "this works against supermemory". A double
+/// agrees with the documentation; a service agrees with itself. The gap between
+/// those is exactly where an integration breaks — pagination that stops early,
+/// a delete that is eventually consistent, a namespace filter the server
+/// applies more loosely than the docs say — and none of it is visible from a
+/// double, because the double was written from the same reading of the docs
+/// that the adapter was.
+///
+/// So the identical suites run against a live endpoint when one is offered:
+///
+/// ```sh
+/// OPENCOMPANY_TEST_SUPERMEMORY_URL=https://api.supermemory.ai \
+/// OPENCOMPANY_TEST_SUPERMEMORY_KEY=sk-... \
+///   cargo test --features tinymemory --lib live_hosted
+/// ```
+///
+/// Same for `MEM0` and `COGNEE`. Without the pair, each test skips, so this
+/// costs an offline run nothing.
+///
+/// **These tests write to the account they are given.** They store, recall and
+/// forget under the `oc-live-test` company's namespace and clean up after
+/// themselves, but a shared production account is the wrong thing to point
+/// them at — use a scratch project or a free tier.
+///
+/// # What the first live run found, and why the split below exists
+///
+/// Run against the real Supermemory API on 2026-08-22, the **provider
+/// contract** failed and the **host ports** passed. Both results are correct,
+/// and the difference between them is the point.
+///
+/// Supermemory strips two characters from content, server-side: `U+0000` and
+/// `U+FFFD`. That is not inferred from a read-back — `POST /v4/memories`
+/// answers `201` and echoes the stored memory back already missing them, in
+/// the creation response itself. Everything else offered to it survives,
+/// including every other C0 control, so it is not a control-character policy.
+/// The conformance suite hands raw content through, so it sees them vanish and
+/// fails — correctly, because the engine really does alter what it is given.
+/// Filed and fixed upstream as tinymemory#80; the provider-contract test here
+/// stays red until the vendored pin picks that fix up.
+///
+/// Only one of the two was insulated by this host, and the difference is worth
+/// keeping because the wrong half of it is the intuitive one. The facades
+/// JSON-encode every record into `content` (see `encode`), and RFC 8259
+/// requires escaping `U+0000`, so a NUL crosses the wire as the six ASCII
+/// characters of its escape and arrives as text there is nothing to strip.
+/// `U+FFFD` is not a control character, nothing required it to be escaped, and
+/// it therefore crossed as itself and was eaten — every affected record read
+/// back one character shorter than it was written, with no error anywhere.
+/// `encode` now escapes it deliberately for exactly that reason.
+///
+/// So the reasoning "the envelope insulates us" was right in form and wrong in
+/// fact, and it was wrong in the direction that loses data quietly. It held for
+/// the character that had been measured and failed for the one that had only
+/// been argued about. A live lane is what separates those two states; keep the
+/// facade assertions running real characters through it rather than trusting
+/// the shape of the argument.
+///
+/// The split still generalises: an engine's contract failures reach OpenCompany
+/// only where the failing shape is one the facades actually produce. Keep the
+/// two tests apart so the next divergence lands on whichever question it
+/// belongs to — and answer "does this shape reach us?" by sending it.
+#[cfg(test)]
+mod live_hosted {
+    use super::*;
+
+    /// Whether a missing endpoint must FAIL rather than skip.
+    ///
+    /// Same shape and same reasoning as the MongoDB suite's
+    /// `OPENCOMPANY_TEST_MONGODB_REQUIRED` (issue #555): the skip is right for
+    /// a laptop with no vendor keys and wrong for a lane whose entire purpose
+    /// is running these. There, an unset pair is a misconfigured job, and the
+    /// skip would report it as a pass — the whole suite silently absent behind
+    /// a green tick.
+    ///
+    /// `0` and the empty string read as unset, so it can be threaded through a
+    /// workflow matrix that always defines it.
+    fn required() -> bool {
+        matches!(
+            std::env::var("OPENCOMPANY_TEST_HOSTED_REQUIRED").as_deref(),
+            Ok(value) if !value.is_empty() && value != "0"
+        )
+    }
+
+    /// The `(url, key)` pair for one engine, or `None` to skip.
+    fn credentials(engine: &str) -> Option<(String, String)> {
+        let upper = engine.to_uppercase();
+        let url = std::env::var(format!("OPENCOMPANY_TEST_{upper}_URL")).ok();
+        let key = std::env::var(format!("OPENCOMPANY_TEST_{upper}_KEY")).ok();
+        match (url, key) {
+            (Some(url), Some(key)) if !url.is_empty() && !key.is_empty() => Some((url, key)),
+            _ => {
+                assert!(
+                    !required(),
+                    "OPENCOMPANY_TEST_HOSTED_REQUIRED is set but \
+                     OPENCOMPANY_TEST_{upper}_URL / _KEY are not. This lane exists to run \
+                     the port suite against the real {engine} service, so a skip here is a \
+                     misconfigured job rather than a pass."
+                );
+                eprintln!("skipping {engine}: OPENCOMPANY_TEST_{upper}_URL / _KEY are not set");
+                None
+            }
+        }
+    }
+
+    /// Binds the live engine named by the environment, or `None` to skip.
+    fn live_driver(engine: &str) -> Option<(Arc<dyn MemoryProvider>, DriverClass)> {
+        let (url, key) = credentials(engine)?;
+        let config = MemoryDriverConfig {
+            mode: MemoryMode::Remote,
+            driver_id: Some(engine.into()),
+            url: Some(url),
+            api_key: Some(key),
+            data_dir: None,
+            // Every engine reachable this way is the vendor's managed
+            // platform; a self-hosted instance is not something this lane can
+            // reach from CI.
+            deployment: RemoteDeployment::Managed,
+        };
+        Some(
+            open_driver(&config)
+                .expect("the live driver binds")
+                .expect("remote with a driver named yields a provider"),
+        )
+    }
+
+    /// The **provider contract** against the live service: what the engine
+    /// promises about raw content it is handed.
+    ///
+    /// Kept separate from the port suite below, because the two can disagree
+    /// and the difference decides who has to act. A vendor that alters raw
+    /// content fails here; whether that reaches this host depends on what this
+    /// host actually sends, which is the next test's question.
+    async fn live_provider_contract(engine: &str) {
+        let Some((provider, _)) = live_driver(engine) else {
+            return;
+        };
+        assert_retains_then_conforms(provider).await;
+    }
+
+    /// The **host's ports** against the live service: what OpenCompany itself
+    /// depends on, through the facades it really uses.
+    ///
+    /// This is the claim that decides whether a tenant can run on this engine.
+    /// It is deliberately not the same as the provider contract: the facades
+    /// JSON-encode every record into `content`, so a byte that an engine
+    /// mangles in raw text may never reach it as raw text at all.
+    async fn live_host_ports(engine: &str) {
+        let Some((provider, class)) = live_driver(engine) else {
+            return;
+        };
+        facade_round_trip(provider, class).await;
+    }
+
+    #[tokio::test]
+    async fn the_live_supermemory_service_upholds_the_provider_contract() {
+        live_provider_contract("supermemory").await;
+    }
+
+    #[tokio::test]
+    async fn the_live_supermemory_service_upholds_the_host_ports() {
+        live_host_ports("supermemory").await;
+    }
+
+    #[tokio::test]
+    async fn the_live_mem0_service_upholds_the_provider_contract() {
+        live_provider_contract("mem0").await;
+    }
+
+    #[tokio::test]
+    async fn the_live_mem0_service_upholds_the_host_ports() {
+        live_host_ports("mem0").await;
+    }
+
+    #[tokio::test]
+    async fn the_live_cognee_service_upholds_the_provider_contract() {
+        live_provider_contract("cognee").await;
+    }
+
+    #[tokio::test]
+    async fn the_live_cognee_service_upholds_the_host_ports() {
+        live_host_ports("cognee").await;
     }
 }

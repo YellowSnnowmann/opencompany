@@ -36,7 +36,10 @@ function card(): Task {
   return {
     id: "task-1",
     title: "Triage the release blockers",
-    column: "paused",
+    // Phase, then stage (issue #1512): the board files it under Working and
+    // the card itself says it is paused, which is what puts Resume on it.
+    column: "working",
+    stage: "paused",
     priority: "high",
     assignee: "qa",
     updatedAt: T0,
@@ -59,13 +62,13 @@ let container: HTMLDivElement;
 let root: Root;
 let resumes: number;
 
-async function render(approvals: ApprovalSummary[]) {
+async function render(approvals: ApprovalSummary[], dragging = false) {
   resumes = 0;
   await act(async () => {
     root.render(
       createElement(TaskItem, {
         task: card(),
-        dragging: false,
+        dragging,
         block: taskApprovalBlock(approvals, "task-1"),
         now: NOW,
         onOpen: () => {},
@@ -99,6 +102,17 @@ afterEach(async () => {
 });
 
 describe("a paused card with approvals outstanding", () => {
+  it("looks lifted while the board is carrying it", async () => {
+    await render([], true);
+
+    const card = container.firstElementChild;
+    expect(card).not.toBeNull();
+    expect(card?.className).toContain("-translate-y-1");
+    expect(card?.className).toContain("rotate-1");
+    expect(card?.className).toContain("shadow-xl");
+    expect(card?.className).not.toContain("opacity-50");
+  });
+
   it("names the one call it is blocked on, rather than the mechanism", async () => {
     await render([parked("a1", "web_fetch")]);
     // `approvalAction`'s words — the same function the Approvals page and the

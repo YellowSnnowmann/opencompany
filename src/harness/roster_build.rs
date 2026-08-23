@@ -126,12 +126,54 @@ impl RosterBuilder {
     /// the honest trade.
     pub fn for_setup(
         env: &dyn crate::app::config::EnvSource,
+        provider: Option<&str>,
+        base_url: Option<&str>,
         credential: Option<&str>,
+        model: Option<&str>,
     ) -> Option<Self> {
         use crate::harness::provider::{
             DEFAULT_HOSTED_MODEL, DEFAULT_TINYHUMANS_INFERENCE_URL, HostedProvider,
             HostedProviderConfig, harness_inference_from_env,
         };
+
+        let selected_provider = provider.map(str::trim).filter(|value| !value.is_empty());
+        if let Some(provider) = selected_provider.filter(|provider| *provider != "managed") {
+            let base_url = crate::company::inference::normalize_setup_base_url(provider, base_url)
+                .unwrap_or_else(|| crate::company::inference::effective_base_url(provider, None));
+            let credential = credential
+                .map(str::trim)
+                .filter(|key| !key.is_empty())
+                .map_or(crate::company::Credential::None, |key| {
+                    crate::company::Credential::from_value(key.to_string())
+                });
+            let extra_headers =
+                if crate::company::inference::normalize_provider(provider) == "openrouter" {
+                    vec![
+                        (
+                            "HTTP-Referer".to_string(),
+                            "https://opencompany.ai".to_string(),
+                        ),
+                        ("X-Title".to_string(), "OpenCompany".to_string()),
+                    ]
+                } else {
+                    Vec::new()
+                };
+            let model_name = model
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .unwrap_or(DEFAULT_HOSTED_MODEL);
+            return Some(Self::new(
+                Arc::new(HostedProvider::new_direct(
+                    HostedProviderConfig {
+                        base_url,
+                        credential,
+                        extra_headers,
+                    },
+                    provider,
+                )),
+                model_name,
+            ));
+        }
 
         let typed = credential
             .map(str::trim)
@@ -151,7 +193,12 @@ impl RosterBuilder {
             });
 
         let (config, model_override) = typed.or_else(|| harness_inference_from_env(env))?;
-        let model_name = model_override.unwrap_or_else(|| DEFAULT_HOSTED_MODEL.to_string());
+        let model_name = model
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .map(str::to_string)
+            .or(model_override)
+            .unwrap_or_else(|| DEFAULT_HOSTED_MODEL.to_string());
         Some(Self::new(Arc::new(HostedProvider::new(config)), model_name))
     }
 
@@ -500,9 +547,11 @@ fn system_prompt() -> String {
          to show you the register to write in, never the text to copy. A mandate that could sit \
          on any company's roster has told this operator nothing.\n\
          - `focus` is the shape of the work, one of: {focuses}. It decides which tools the \
-         teammate is given, so choose the closest fit: `research` finds things out, `writing` \
-         produces the written work, `operations` keeps work moving, `analysis` measures and \
-         reports.\n\
+         teammate is given and how it is told to work, so choose by what the teammate PRODUCES: \
+         `research` findings, `writing` written material, `design` interface and visual work, \
+         `analysis` numbers and what moved them, `build` the product itself, `operations` a \
+         recurring process run end to end, `coordination` people and work kept moving, `support` \
+         answered customers.\n\
          - `covers` is a list of numbers from the job list. Only claim a number when that agent \
          genuinely owns it — a claim you cannot justify is worse than an honest gap, because \
          the operator is shown what was left unowned.\n\

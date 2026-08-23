@@ -67,12 +67,9 @@ name = "hypothesis"
 label = "Hypothesis"
 
 [[status]]
-name = "hit_finding"
-label = "Hit finding"
-
-[[status]]
-name = "lead_optimization"
-label = "Lead optimization"
+name = "discovery"
+label = "Discovery"
+aliases = ["hit_finding", "lead_optimization"]
 
 [[status]]
 name = "preclinical"
@@ -90,7 +87,7 @@ needs_reason = true
 [[section]]
 heading = "Active"
 blurb = "In progress. Each should carry kill criteria agreed before they are needed."
-statuses = ["hit_finding", "lead_optimization", "preclinical"]
+statuses = ["discovery", "preclinical"]
 order = "recent"
 
 [[section]]

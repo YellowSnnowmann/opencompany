@@ -39,16 +39,16 @@ const ROSTER = [
 ];
 
 /**
- * The board, as the host's fixed column table declares it (`src/ledger/board.rs`).
+ * The board, as the host's fixed phase table declares it (`src/ledger/board.rs`).
  * `closed` is what makes a card open or finished, and it comes from here rather
  * than from any console-side list.
+ *
+ * Three since issue #1512. The *stage* a card is in rides on the card itself,
+ * which is why the fixtures below carry both.
  */
 const STATUSES = [
-  { name: "todo", label: "To-do", closed: false },
-  { name: "planning", label: "Planning", closed: false },
-  { name: "in_progress", label: "In progress", closed: false },
-  { name: "paused", label: "Paused", closed: false },
-  { name: "in_review", label: "In review", closed: false },
+  { name: "pending", label: "Pending", closed: false },
+  { name: "working", label: "Working", closed: false },
   { name: "done", label: "Done", closed: true },
 ];
 
@@ -62,10 +62,10 @@ const STATUSES = [
  *   person. So she reads idle with nothing, not working with one.
  */
 const TASKS = [
-  { id: "t1", title: "Scan competitor pricing", column: "in_progress", priority: "high", assignee: "maya", updatedAt: 0 },
-  { id: "t2", title: "Draft the weekly brief", column: "todo", priority: "medium", assignee: "maya", updatedAt: 0 },
+  { id: "t1", title: "Scan competitor pricing", column: "working", stage: "in_progress", priority: "high", assignee: "maya", updatedAt: 0 },
+  { id: "t2", title: "Draft the weekly brief", column: "pending", priority: "medium", assignee: "maya", updatedAt: 0 },
   { id: "t3", title: "Q3 cohort numbers", column: "done", priority: "medium", assignee: "ravi", updatedAt: 0 },
-  { id: "t4", title: "Rewrite the landing copy", column: "in_progress", priority: "medium", assignee: "research", updatedAt: 0 },
+  { id: "t4", title: "Rewrite the landing copy", column: "working", stage: "in_progress", priority: "medium", assignee: "research", updatedAt: 0 },
 ];
 
 async function mockApi(page: Page) {
@@ -301,7 +301,7 @@ test("#1193 desk management survives — a desk can still be created and reached
     timeout: 30_000,
   });
   await expect(page.getByRole("button", { name: "New desk" })).toBeEnabled({ timeout: 30_000 });
-  await expect(page.getByRole("button", { name: "New teammate" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Add teammate" }).first()).toBeEnabled();
 });
 
 test("#485 a desk address still opens the chart at that desk", async ({ page }) => {

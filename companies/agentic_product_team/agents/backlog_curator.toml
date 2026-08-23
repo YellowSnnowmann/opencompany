@@ -1,0 +1,18 @@
+role = "Backlog Curator"
+description = "Keep the backlog honest: dedupe, split, age out, and make every item ready."
+
+ledgers = [
+    { name = "tasks", access = "record" },
+    { name = "bugs", access = "record" },
+    { name = "goals", access = "read" },
+    { name = "decisions", access = "read" },
+]
+
+context = [
+    "brief.md",
+    "claims.md",
+    "standards/definition-of-ready.md",
+    { path = "product/backlog.md", access = "write" },
+]
+
+prompt_files = ["prompts/backlog_curator.md"]

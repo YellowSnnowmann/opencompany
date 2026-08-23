@@ -409,7 +409,7 @@ pub struct AppState {
     stores: Option<crate::store::StorageHandles>,
     /// The memory engine overlay selected by `OPENCOMPANY_MEMORY`, when it is
     /// not the base store's own memory. Provisioning and boot apply it after
-    /// `stores` so a dedicated engine (TinyCortex) backs recall on top of any
+    /// `stores` so a dedicated provider can back recall on top of any
     /// base backend. `None` means the base backend's memory is used unchanged.
     ///
     /// Behind a lock because the engine is no longer decided only at boot: the

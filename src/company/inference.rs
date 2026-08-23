@@ -454,6 +454,31 @@ pub fn effective_base_url(provider: &str, override_url: Option<&str>) -> String 
     }
 }
 
+/// Normalizes an endpoint typed by a person during setup.
+///
+/// Local model applications commonly advertise themselves as `localhost:1234`
+/// even though the OpenAI-compatible client needs
+/// `http://localhost:1234/v1`. Accept that familiar spelling while preserving
+/// explicit schemes and non-root paths.
+pub fn normalize_setup_base_url(provider: &str, raw: Option<&str>) -> Option<String> {
+    let raw = raw.map(str::trim).filter(|value| !value.is_empty())?;
+    if !matches!(normalize_provider(provider), "ollama" | "openai_compatible") {
+        return Some(raw.trim_end_matches('/').to_string());
+    }
+
+    let mut url = if raw.starts_with("http://") || raw.starts_with("https://") {
+        raw.to_string()
+    } else {
+        format!("http://{raw}")
+    };
+    url = url.trim_end_matches('/').to_string();
+    let after_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or("");
+    if !after_scheme.contains('/') {
+        url.push_str("/v1");
+    }
+    Some(url)
+}
+
 /// Loads the runtime inference override, or `None` when unset/blank. A malformed
 /// blob is a store error (surfaced, not silently dropped).
 pub async fn load_runtime_config(
@@ -1532,6 +1557,22 @@ mod tests {
         assert_eq!(
             effective_base_url("openrouter", Some("https://proxy/v1")),
             "https://proxy/v1"
+        );
+    }
+
+    #[test]
+    fn setup_accepts_the_localhost_spelling_local_model_apps_display() {
+        assert_eq!(
+            normalize_setup_base_url("ollama", Some("localhost:6969")),
+            Some("http://localhost:6969/v1".to_string())
+        );
+        assert_eq!(
+            normalize_setup_base_url("openai_compatible", Some("http://127.0.0.1:1234/v1/")),
+            Some("http://127.0.0.1:1234/v1".to_string())
+        );
+        assert_eq!(
+            normalize_setup_base_url("openai_compatible", Some("https://llm.test/api")),
+            Some("https://llm.test/api".to_string())
         );
     }
 }

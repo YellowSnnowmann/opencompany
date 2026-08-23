@@ -185,6 +185,25 @@ async function openApprovals(page: Page) {
   await expect(approvalCard(page)).toBeVisible({ timeout: 15_000 });
 }
 
+/**
+ * Move the operator's attention off the queue.
+ *
+ * `useStableList` (#1414, `frontend/src/hooks/use-stable-list.ts`) freezes the
+ * rendered order — and holds removals, deliberately, including the row the
+ * operator just decided — for as long as the pointer is over the queue OR
+ * keyboard focus is inside it, thawing only once BOTH clear. Clicking a decide
+ * button leaves both true: the click puts the pointer over the container, and
+ * Chromium focuses a `<button>` on click, so focus is inside it too. Neither
+ * this test nor a real operator has to do anything special to *cause* the
+ * freeze — the click already did. This mirrors what "moving away" means to the
+ * hook: the mouse leaves the container, and focus is dropped rather than
+ * merely moved to a still-inside sibling.
+ */
+async function leaveQueue(page: Page) {
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+}
+
 test("a proxy timeout does not claim the decision failed, and clears the card", async ({
   page,
 }) => {
@@ -216,9 +235,11 @@ test("a proxy timeout does not claim the decision failed, and clears the card", 
   // Defect 2, on the exact body that produced the field report.
   expect(text).not.toContain("<");
 
-  // The queue reconciles. The bound is deliberately under the feed's 5s poll
-  // (`POLL_MS` in `use-company.ts`) so that passing means the fix's own
+  // The queue reconciles once the operator is no longer interacting with it
+  // (#1414 — see `leaveQueue`). The bound is deliberately under the feed's 5s
+  // poll (`POLL_MS` in `use-company.ts`) so that passing means the fix's own
   // `feed.refresh()` cleared the card, not the next scheduled tick.
+  await leaveQueue(page);
   await expect(approvalCard(page)).toHaveCount(0, { timeout: 2_500 });
 });
 
@@ -248,6 +269,8 @@ test("a declined approval that times out reads as recorded, not failed", async (
   // must not imply otherwise.
   expect(text).not.toContain("may still be working");
   expect(text).not.toContain("<");
+  // Same reconciliation gate as the timeout test above — see `leaveQueue`.
+  await leaveQueue(page);
   await expect(approvalCard(page)).toHaveCount(0, { timeout: 2_500 });
 });
 
@@ -323,7 +346,7 @@ test("an unparseable body on the document reader falls back to the status line",
   const task = {
     id: "e2e-380-task",
     title: "Reconcile the August ledger",
-    column: "todo",
+    column: "pending",
     priority: "medium",
     assignee: "finance",
     updatedAt: Date.now() - 60_000,

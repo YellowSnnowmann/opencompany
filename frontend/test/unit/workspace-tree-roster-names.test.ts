@@ -115,6 +115,28 @@ describe("the workspace tree", () => {
     expect(text.indexOf("Zoe")).toBeGreaterThan(text.indexOf("Alex"));
   });
 
+  it("names an artifacts/ folder by its teammate too", async () => {
+    // `artifacts/` files every published deliverable under the agent that
+    // published it, so its direct children are roster ids exactly as
+    // `agents/`'s are. A resolver scoped to one root would print raw ids on the
+    // surface an operator opens to see what the company produced.
+    //
+    // Spelled lowercase where the fixtures above are spelled `Agents` on
+    // purpose: the host mints lowercase now and adopts the legacy capitalized
+    // root rather than renaming it, so both spellings reach the console and
+    // between them these cases pin that the resolver reads either.
+    const tree = [
+      node({ id: "artifacts-root", name: "artifacts", kind: "folder" }),
+      node({ id: "n-zeta", name: "zeta-id", kind: "folder", parentId: "artifacts-root" }),
+    ];
+    const team = [member("zeta-id", "Alex")];
+
+    await render(client(tree, team));
+
+    expect(container.textContent).toContain("Alex");
+    expect(container.textContent).not.toContain("zeta-id");
+  });
+
   it("keeps a raw folder name outside agents/ unresolved even if it matches a roster id", async () => {
     // The resolver is scoped to agents/'s direct children, not a blanket
     // find-and-replace over every folder name in the tree — a folder an

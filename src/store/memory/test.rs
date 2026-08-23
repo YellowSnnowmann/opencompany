@@ -669,132 +669,19 @@ async fn conformance_context_multibyte_bodies() {
     conformance::assert_multibyte_bodies_survive_search_and_ranged_peek(engine().context()).await;
 }
 
-/// The port conformance suite over the REAL `namespace` driver — not the fake.
-///
-/// Everything above proves the decorator against `FakeEngine`; the driver
-/// tests in `driver.rs` prove the namespace driver against the raw provider
-/// contract. Neither proves the two composed: that the three ports a company
-/// actually holds — traces, chunks with search, facts — round-trip through
-/// `BoundMemory`'s facades into `tinymemory-core`'s durable store and back.
-/// This is that proof, run over the same shared asserts every other backend
-/// answers, so the embedded contract driver cannot quietly drift below the
-/// bar the fs/sqlite/mongodb stores are held to.
-#[cfg(feature = "tinymemory-embedded")]
-mod namespace_driver_conformance {
-    use super::*;
-    use crate::store::{FsCompanyStore, FsEventLog};
+#[tokio::test]
+async fn conformance_context_identical_body_two_labels() {
+    conformance::assert_identical_body_two_labels(engine().context()).await;
+}
 
-    /// A `BoundMemory` over the real driver, plus the tempdir keeping the
-    /// store alive for the test's duration.
-    fn real_engine() -> (tempfile::TempDir, BoundMemory) {
-        let dir = tempfile::tempdir().unwrap();
-        let config = crate::store::memory::MemoryDriverConfig {
-            mode: crate::store::memory::MemoryMode::Embedded,
-            driver_id: Some("namespace".into()),
-            url: None,
-            api_key: None,
-            data_dir: Some(dir.path().to_path_buf()),
-        };
-        let (provider, class) = crate::store::memory::open_driver(&config)
-            .expect("the namespace driver binds")
-            .expect("embedded with a driver named yields a provider");
-        (dir, BoundMemory::bind(provider, class).unwrap())
-    }
+#[tokio::test]
+async fn conformance_context_delete_label_scoped() {
+    conformance::assert_delete_label_scoped(engine().context()).await;
+}
 
-    #[tokio::test]
-    async fn isolation_by_company_holds_on_the_namespace_driver() {
-        let dir = tempfile::tempdir().unwrap();
-        let (store_dir, engine) = real_engine();
-        conformance::assert_isolation_by_company(
-            Arc::new(FsCompanyStore::new(dir.path().to_path_buf())),
-            Arc::new(FsEventLog::new(dir.path().to_path_buf())),
-            engine.memory(),
-            engine.context(),
-        )
-        .await;
-        drop(store_dir);
-    }
-
-    #[tokio::test]
-    async fn export_totality_holds_on_the_namespace_driver() {
-        let dir = tempfile::tempdir().unwrap();
-        let (store_dir, engine) = real_engine();
-        conformance::assert_export_totality(
-            Arc::new(FsCompanyStore::new(dir.path().to_path_buf())),
-            Arc::new(FsEventLog::new(dir.path().to_path_buf())),
-            engine.memory(),
-            engine.context(),
-        )
-        .await;
-        drop(store_dir);
-    }
-
-    #[tokio::test]
-    async fn the_fact_store_contract_holds_on_the_namespace_driver() {
-        let (store_dir, engine) = real_engine();
-        conformance::assert_fact_store(engine.facts()).await;
-        drop(store_dir);
-    }
-
-    #[tokio::test]
-    async fn context_chunk_stamps_hold_on_the_namespace_driver() {
-        let (store_dir, engine) = real_engine();
-        conformance::assert_context_chunk_stamps(engine.context()).await;
-        drop(store_dir);
-    }
-
-    #[tokio::test]
-    async fn context_peek_many_answers_positionally_on_the_namespace_driver() {
-        let (store_dir, engine) = real_engine();
-        conformance::assert_context_peek_many_answers_positionally(engine.context()).await;
-        drop(store_dir);
-    }
-
-    #[tokio::test]
-    async fn multibyte_bodies_survive_search_and_peek_on_the_namespace_driver() {
-        let (store_dir, engine) = real_engine();
-        conformance::assert_multibyte_bodies_survive_search_and_ranged_peek(engine.context()).await;
-        drop(store_dir);
-    }
-
-    /// #1201: the conformance suite failed at random on this driver because
-    /// its write path runs a PII scrubber over the serialized envelope, and a
-    /// 13-digit `at_millis` that happens to pass Luhn (~10% of epoch-millis
-    /// stamps do) was redacted into unparseable JSON — the read side then
-    /// dropped the whole record. Deterministic pin: the middle stamp below is
-    /// the Luhn-valid one from the original failure, so this test fails 100%
-    /// of the time on a driver with that defect, not 10%.
-    #[tokio::test]
-    async fn luhn_valid_timestamps_round_trip_on_the_namespace_driver() {
-        let (store_dir, engine) = real_engine();
-        let memory = engine.memory();
-        let traces = vec![
-            CompressedTrace {
-                cycle_id: "c0".into(),
-                summary: "summary 0".into(),
-                at_millis: 1_787_178_633_770,
-            },
-            CompressedTrace {
-                cycle_id: "c1".into(),
-                summary: "summary 1".into(),
-                at_millis: 1_787_178_633_773,
-            },
-            CompressedTrace {
-                cycle_id: "c2".into(),
-                summary: "summary 2".into(),
-                at_millis: 1_787_178_633_774,
-            },
-        ];
-        for trace in &traces {
-            memory.save_trace(&acme_id(), trace.clone()).await.unwrap();
-        }
-        let read = memory.recent_traces(&acme_id(), usize::MAX).await.unwrap();
-        assert_eq!(
-            read, traces,
-            "every trace round-trips regardless of its timestamp's digits"
-        );
-        drop(store_dir);
-    }
+#[tokio::test]
+async fn conformance_context_delete_label_survives_a_concurrent_identical_put() {
+    conformance::assert_delete_label_survives_a_concurrent_identical_put(engine().context()).await;
 }
 
 /// #914's acceptance names "taint survives export and re-import" and #1113

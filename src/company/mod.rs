@@ -61,7 +61,16 @@ pub mod mcp_oauth;
 // rules are ordinary text handling with real edge cases, and they are worth
 // testing in the default build rather than only where the agent runtime links.
 pub mod prompt;
+// Rendering that composition back out for a human, from a manifest alone. Same
+// always-compiled argument as `prompt` above, one step further: a debugging
+// surface that only existed in a `--features openhuman` build is one nobody
+// runs, so the default build renders what it can and names the rest.
+pub mod prompt_dump;
 pub mod runtime;
+// Per-company web search configuration: which provider a company's agents
+// search through, and the BYO credential behind it. Keys only — the tools that
+// spend them live behind `openhuman` in `crate::harness::search_byo`.
+pub mod search;
 // First-run company setup (issue: docs/spec/runtime/company-setup.md): the
 // curated starting rosters and the rules a proposed roster obeys. Always
 // compiled and model-free on purpose — it is both the input to the optional
@@ -183,14 +192,19 @@ pub(crate) use workflow_create::{
     rollback_company_workflow, seed_file_exists, set_company_workflow_enabled,
     update_company_workflow, workflow_version,
 };
-// Issue #580: the builder pass's courtesy validation, gated with the harness
-// builder that is its only caller. Issue #753 adds the copilot's tool grounding
-// on the same footing, split by #874 into the effective set a proposal may name
+// Issue #580: the builder pass's courtesy validation. Ungated since issue #1074
+// for the same reason `create_company_workflow` above is: its second caller is
+// the REST `POST …/workflows/validate` route, which is in the default build, and
+// a shared validator gated behind a feature its caller lacks is how the two
+// create surfaces drifted apart in #168.
+pub(crate) use workflow_create::courtesy_validate_draft;
+// Issue #753: the copilot's tool grounding, gated with the harness builder that
+// is its only caller. Split by #874 into the effective set a proposal may name
 // and the granted-but-unwired remainder that is reported, not offered.
 #[cfg(feature = "openhuman")]
 pub(crate) use workflow_create::{
-    courtesy_validate_draft, workflow_effective_tool_slugs,
-    workflow_granted_but_unwired_tool_slugs, workflow_graph_from_spec, workflow_spec_from_graph,
+    workflow_effective_tool_slugs, workflow_granted_but_unwired_tool_slugs,
+    workflow_graph_from_spec, workflow_spec_from_graph,
 };
 pub use workspace_seed::{NodeKind, SeedNode, extract_wikilinks, walk_workspace};
 

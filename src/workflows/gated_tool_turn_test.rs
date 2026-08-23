@@ -273,12 +273,15 @@ pub(super) fn deps(base_url: String, dir: &std::path::Path) -> (HarnessDeps, Arc
         repo_bindings: Vec::new(),
         checkouts: crate::harness::repo::CheckoutLedger::default(),
         search: None,
+        tenant_search: None,
     };
     (deps, journal)
 }
 
 pub(super) fn record() -> CompanyRecord {
     CompanyRecord {
+        overlay_retired_agents: Vec::new(),
+        overlay_agent_edits: Vec::new(),
         id: CompanyId::new("acme"),
         manifest: manifest(),
         ledger: Vec::new(),

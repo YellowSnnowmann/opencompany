@@ -127,6 +127,10 @@ Supporting docs:
   `wallet`, or `none` (no sign-in, for the desktop app), and what each changes
 - [hub-console.md](hub-console.md) — one console deployment operating many hosts
   on other origins: the carried session, CORS, and what it costs
+- [finance-console.md](finance-console.md) — the Finance section: Invoicing
+  (Chargebee) and Wallet (PayPal) as sub-pages, the host read plane that makes
+  provider data reachable from the console at all, and how an operator tests a
+  connection without billing a real customer
 - [connectors.md](connectors.md) — where the runtime runs: the four connectors
   (this computer, TinyHumans Cloud, a remote gateway, over SSH), why the choice
   is per host rather than per application, and what each one costs
@@ -185,7 +189,7 @@ port returns the crate `Result<T>`.
 | *(default)* | kernel, fs store, hosted brain client, operator API |
 | `tiny` | TinyAgents embedding (existing flag; used by stub brain and local workers) |
 | `sqlite` | SQLite store implementations |
-| `tinycortex` | TinyCortex `MemoryStore`/`ContextStore` adapters |
+| `tinymemory` | Hosted/null memory engine seam (`MemoryProvider` contract) |
 | `tinyplace` | tiny.place economy adapter and A2A routes |
 | `sidecar` | Node sidecar brain for self-hosters |
 

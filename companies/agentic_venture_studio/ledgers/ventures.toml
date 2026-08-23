@@ -68,11 +68,8 @@ name = "refs"
 role = "refs"
 
 [[status]]
-name = "thesis"
-label = "Thesis"
-
-[[status]]
 name = "validating"
+aliases = ["thesis"]
 
 [[status]]
 name = "building"
@@ -100,7 +97,7 @@ order = "recent"
 [[section]]
 heading = "Early"
 blurb = "Thesis or validating. Each should name the riskiest assumption and what would kill it."
-statuses = ["thesis", "validating"]
+statuses = ["validating"]
 order = "recent"
 
 [[section]]

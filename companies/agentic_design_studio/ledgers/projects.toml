@@ -66,9 +66,7 @@ name = "briefed"
 
 [[status]]
 name = "exploring"
-
-[[status]]
-name = "refining"
+aliases = ["refining"]
 
 [[status]]
 name = "awaiting_review"
@@ -87,7 +85,7 @@ needs_reason = true
 [[section]]
 heading = "In flight"
 blurb = "Being worked. Check `approved` and `rounds` before starting anything new on one of these."
-statuses = ["exploring", "refining"]
+statuses = ["exploring"]
 order = "recent"
 
 [[section]]

@@ -19,8 +19,10 @@ import { ConsoleChrome } from "@/components/host-switcher";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConnectionScopeProvider } from "@/connections/ConnectionContext";
+import { useHosts } from "@/connections/HostsContext";
 import { adoptSession, probe, useConnection } from "@/connections/registry";
 import type { ConnectionId } from "@/connections/types";
+import { withHostParam } from "@/hooks/use-host-route";
 import { Login } from "@/views/Login";
 import { SetupWizard } from "@/views/setup/SetupWizard";
 
@@ -74,6 +76,10 @@ export function ConnectionConsole({
   // (every other connection's stream died with it).
   const [bootEpoch, setBootEpoch] = useState(0);
   const connection = useConnection(connectionId);
+  // Read unconditionally, though only the `error` phase uses it: a hook cannot
+  // hide inside a switch arm. What it decides is what a failure is allowed to
+  // say — see the `error` case below.
+  const { connections, onRemoveHost } = useHosts();
 
   // The registry marks this connection `unauthenticated` when its client sees a
   // 401 — that is the *only* 401 handler, so one host refusing a credential
@@ -247,7 +253,22 @@ export function ConnectionConsole({
         </ConsoleChrome>
       );
 
-    case "error":
+    // The failure of ONE host, said to somebody who may hold several.
+    //
+    // Both halves of this used to address a console with exactly one host, and
+    // both were wrong the moment there were two (issue #1358). The hint is the
+    // single-host boot message — telling an operator who reached this screen by
+    // picking a row out of a switcher to "set the host with ?api=" asks them to
+    // configure a host they already configured. And Retry was the only way off
+    // the screen, so a host that is simply gone had no disposal: the switcher
+    // above can move them elsewhere, but the dead row stays in the roster
+    // forever.
+    //
+    // `connections.length` is what separates the two situations, and it is
+    // known here rather than in `connectionError` — which sees a client and an
+    // error, not a roster.
+    case "error": {
+      const alone = connections.length <= 1;
       return (
         <FullScreen>
           <div className="w-full max-w-md space-y-4" data-testid="connection-error">
@@ -255,17 +276,36 @@ export function ConnectionConsole({
               <AlertTitle>Can&apos;t connect</AlertTitle>
               <AlertDescription>
                 {phase.message}
-                {phase.hint && (
+                {alone && phase.hint && (
                   <span className="mt-1 block font-mono text-xs opacity-80">{phase.hint}</span>
                 )}
               </AlertDescription>
             </Alert>
-            <Button className="w-full" onClick={() => location.reload()}>
-              Retry
-            </Button>
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={() => location.reload()}>
+                Retry
+              </Button>
+              {/* Forgetting is local to this client — the host itself is
+                  untouched — so it is offered beside Retry rather than behind
+                  Manage hosts, which is two screens away from the failure it
+                  answers. Never when it is the only host: a console with no
+                  connections at all is a worse place to be left than one with a
+                  host that is down. */}
+              {!alone && (
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  data-testid="connection-error-forget"
+                  onClick={() => onRemoveHost(connectionId)}
+                >
+                  Forget this host
+                </Button>
+              )}
+            </div>
           </div>
         </FullScreen>
       );
+    }
 
     case "no-company":
       return (
@@ -326,7 +366,11 @@ function clearEntityHash() {
   // A hash sub-route names an entity within the current company. The shell
   // remounts for a company switch, so remove that stale identity before the
   // new shell reads the route as an intentional deep link.
-  window.history.replaceState(null, "", `#/${view}`);
+  //
+  // The connection scope survives it: the company changed, the host did not,
+  // and a `replaceState` fires no `hashchange` for `useHostAddress` to put it
+  // back with (`use-host-route.ts`).
+  window.history.replaceState(null, "", withHostParam(view));
 }
 
 /**

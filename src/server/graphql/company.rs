@@ -306,14 +306,16 @@ impl CompanyGql {
                 budget_set_at_millis: attribution.map(|entry| entry.at_millis as f64),
             }
         };
-        let mut out: Vec<TeamMemberGql> = record
-            .manifest
-            .agents
+        // Resolved through the record for the same reason the caps are: a
+        // manifest teammate an operator edited from the console reads back as
+        // what it now is, here and in the REST `list_team`, identically.
+        let effective = record.effective_agents();
+        let mut out: Vec<TeamMemberGql> = effective
             .iter()
             .map(|agent| {
                 row(
                     &agent.id,
-                    None,
+                    agent.name.clone(),
                     agent.role.clone(),
                     agent.description.clone(),
                 )

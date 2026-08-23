@@ -83,6 +83,40 @@ The honest consequence: a company that ran before this change still has refusal
 messages in its artifact list, now visibly demoted rather than silently
 masquerading as output.
 
+## Where it lands in the shared tree
+
+The record is one half; the other is a node in the company workspace, so a
+deliverable is something an operator and every other agent can navigate to
+rather than a row behind one card's Artifacts tab. `company::artifact_mirror`
+files it at:
+
+```text
+artifacts/<agent-id>/<task-id>/<source…>
+```
+
+`artifacts/` is an eagerly-scaffolded system root carrying a `readme.md`; the
+member folder beneath it is minted the first time that agent publishes
+(`workspace_scaffold::ensure_artifact_folder`), so the list under it is a record
+of who has delivered rather than a copy of the roster.
+
+It used to be `agents/<agent-id>/<task-id>/…`, which filed a deliverable in the
+same folder as its author's scratch notes — the two populations were
+indistinguishable by eye, and "what has this company produced?" had no answer
+that was a place. Filing by kind first and author second keeps the attribution
+and makes the deliverable list navigable.
+
+**Nothing migrates.** A record that already carries a node id keeps revising
+that node, so a company that published before this change keeps its existing
+nodes and every console deep link into them; only new paths land under
+`artifacts/`. Moving nodes an operator may have organised by hand, to fix
+something untidy rather than wrong, is the worse trade.
+
+The node is a **projection**: it holds the current body, while the artifact
+chain remains authoritative for the version history and for
+`human_edit_diff`. The invariant, the write ordering that protects it, and what
+an operator edit to one of these nodes records are all in
+`src/company/artifact_mirror.rs`.
+
 ## Bodies, caps and references
 
 `MAX_ARTIFACT_BODY_BYTES` is 256 KiB.

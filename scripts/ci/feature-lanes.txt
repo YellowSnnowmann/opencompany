@@ -48,10 +48,8 @@ default        | tested       | (default)                       | The `Rust` job
 oauth          | tested       | (default)                       | In the default set, so the default lanes run it.
 platform-jwt   | tested       | (default)                       | In the default set (see Cargo.toml for why it ships by default).
 documents      | tested       | (default)                       | In the default set: the Brain drop zone is a console surface, so a shipped build must read a dropped PDF (see Cargo.toml).
-openhuman      | tested       | openhuman,tinycortex            | `rust-gated` runs `--tests`, which selects lib+bin units and every tests/ target.
-tinycortex     | tested       | openhuman,tinycortex            | Same lane, same unfiltered `--tests`.
+openhuman      | tested       | openhuman                       | `rust-gated` runs `--tests`, which selects lib+bin units and every tests/ target.
 tinymemory     | partial      | acp,runner,tinymemory | store::memory store::select
-tinymemory-embedded | partial | openhuman,tinycortex,tinymemory-embedded | store::memory store::select
 tinyplace      | tested       | tinyplace                       | Runs the whole `--lib` deliberately (issue #477) — it gates code across the tree.
 
 # --- Partial: a lane exists, but filtered ----------------------------------
@@ -62,11 +60,11 @@ acp            | partial      | acp,runner,tinymemory | server::acp harness::acp
 runner         | partial      | acp,runner,tinymemory | runner
 mcp            | partial      | openhuman,mcp,telegram,media    | harness::built_in::build::tests app::types
 media          | partial      | openhuman,mcp,telegram,media    | harness::built_in::build::tests harness::built_in::toolbelt
-composio       | partial      | openhuman,tinycortex,chargebee,paypal,composio | harness::built_in::composio::isolation_tests harness::built_in::composio::ops_helper_tests harness::built_in::composio::live::live_tests server::ops::composio::tests::gated_tests
+composio       | partial      | openhuman,chargebee,paypal,composio | harness::built_in::composio::isolation_tests harness::built_in::composio::ops_helper_tests harness::built_in::composio::live::live_tests server::ops::composio::tests::gated_tests
 export         | partial      | export                          | store::export
 imap           | partial      | imap,smtp                       | server::ops::imap
-chargebee      | partial      | openhuman,tinycortex,chargebee,paypal,composio | chargebee
-paypal         | partial      | openhuman,tinycortex,chargebee,paypal,composio | paypal
+chargebee      | partial      | openhuman,chargebee,paypal,composio | chargebee server::ops::finance
+paypal         | partial      | openhuman,chargebee,paypal,composio | paypal server::ops::finance
 sidecar        | partial      | sidecar                         | brain::sidecar
 
 # --- Owed a lane: gated tests exist, and they are currently RED -------------

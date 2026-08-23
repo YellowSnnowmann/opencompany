@@ -13,7 +13,7 @@
 //!
 //! Gated on `openhuman` alone, deliberately: `scripts/ci/assert-integration-
 //! targets-run.sh` asserts a NON-ZERO test count for every target under
-//! `tests/` in the `openhuman,tinycortex` lane, so a target gated on a feature
+//! `tests/` in the `openhuman,tinymemory` lane, so a target gated on a feature
 //! that lane lacks would compile to an empty binary and fail that check rather
 //! than silently guarding nothing.
 #![cfg(feature = "openhuman")]

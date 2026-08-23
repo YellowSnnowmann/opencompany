@@ -22,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { CompanyFeed } from "@/hooks/use-company";
+import { useStableList } from "@/hooks/use-stable-list";
 import {
   approvedByRuntimeLine,
   approvedLine,
@@ -154,6 +155,19 @@ export function ApprovalsView({
     () => (focusTaskId === null ? approvals : approvalsForTask(approvals, focusTaskId)),
     [approvals, focusTaskId],
   );
+  /**
+   * The same rows, but in a pointer-stable order (#1414).
+   *
+   * A poll swaps `visible` wholesale every 5s, and mapping that straight to
+   * cards let the queue reflow under the operator's pointer — a card removed
+   * above the pointer slid the next card's Approve button under an in-flight
+   * click. `useStableList` holds the rendered order (and holds removals) for as
+   * long as the pointer is over the queue or focus is inside it, then
+   * reconciles to the latest poll the moment the operator moves away. Every
+   * branch below reads `rows` rather than `visible` so the count, the empty
+   * state and the list all agree on the one frozen view.
+   */
+  const { items: rows, containerProps: queueHold } = useStableList(visible);
   const askerNames = useAskerNames(client, company, approvals);
   const { grants, granterNames, refreshGrants } = useStandingGrants(client, company);
   /**
@@ -333,7 +347,7 @@ export function ApprovalsView({
           ) : (
             <UnreadableApprovals onRetry={() => void feed.refresh()} />
           )
-        ) : visible.length === 0 ? (
+        ) : rows.length === 0 ? (
           focusTaskId !== null ? (
             <ClearedForTask />
           ) : (
@@ -343,9 +357,9 @@ export function ApprovalsView({
           <>
             <div className="mb-4 flex items-baseline justify-between">
               <h2 className="text-sm font-medium text-muted-foreground">
-                {visible.length === 1
+                {rows.length === 1
                   ? "1 thing needs your approval"
-                  : `${visible.length} things need your approval`}
+                  : `${rows.length} things need your approval`}
               </h2>
             </div>
             {/* #971: nothing may vanish unannounced. Requests now age out on
@@ -357,8 +371,8 @@ export function ApprovalsView({
               Each one has a deadline. Anything still undecided by then is
               declined on its own, and the work behind it moves on.
             </p>
-            <div className="flex flex-col gap-3">
-              {visible.map((a) => (
+            <div className="flex flex-col gap-3" {...queueHold}>
+              {rows.map((a) => (
                 <ApprovalCard
                   key={a.id}
                   approval={a}
@@ -588,7 +602,7 @@ function granterLabel(g: StandingGrant, granterNames: Map<string, string>): stri
  * line simply do not render and what is left is the headline, the amount and
  * the relative time — exactly what shipped before.
  */
-function ApprovalCard({
+export function ApprovalCard({
   approval: a,
   now,
   askerNames,
@@ -626,43 +640,16 @@ function ApprovalCard({
   return (
     <Card data-approval-id={a.id}>
       <CardContent className="flex flex-col gap-3 py-4">
-        <ApprovalHeadline
-          approval={a}
-          /* Disabled on THIS card's own state only — a decision in flight on
-             another card leaves these live. That is the whole of #373's
-             first cause. */
-          actions={
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={deciding !== null}
-                /* A decline never carries a scope — there is nothing to grant,
-                   and the host refuses the pairing anyway. */
-                onClick={() => onDecide("deny", { kind: "once" })}
-              >
-                {deciding === "deny" ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <X className="size-4" />
-                )}{" "}
-                Decline
-              </Button>
-              <Button
-                size="sm"
-                disabled={deciding !== null}
-                onClick={() => onDecide("approve", scope)}
-              >
-                {deciding === "approve" ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Check className="size-4" />
-                )}{" "}
-                Approve
-              </Button>
-            </>
-          }
-        />
+        {/* Issue #1406: the headline no longer carries the decide buttons.
+            Approve and Decline used to sit here, level with the title and above
+            everything an operator reads to decide — the payload, and the scope
+            control that changes what Approve even means. On a tall card the
+            scope control was ~200px below the button, or off-screen entirely,
+            so the commit affordance was reachable before the evidence was seen.
+            The buttons now live in a footer row below the scope control, so the
+            card reads what will happen → what it will do → who asked and by
+            when → decide, the order every working consent pattern uses. */}
+        <ApprovalHeadline approval={a} />
 
         {/* Issue #596: for a workflow pre-publish gate, show the VERBATIM content
             the run is about to publish — the draft awaiting sign-off — above the
@@ -701,6 +688,43 @@ function ApprovalCard({
                 : undefined
           }
         />
+
+        {/* The decide footer (#1406) — deliberately the LAST thing in the card,
+            after the scope control it depends on. Disabled on THIS card's own
+            state only; a decision in flight on another card leaves these live,
+            which is the whole of #373's first cause. */}
+        <div
+          data-testid="approval-decide"
+          className="flex flex-wrap justify-end gap-2 border-t border-border pt-3"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={deciding !== null}
+            /* A decline never carries a scope — there is nothing to grant,
+               and the host refuses the pairing anyway. */
+            onClick={() => onDecide("deny", { kind: "once" })}
+          >
+            {deciding === "deny" ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <X className="size-4" />
+            )}{" "}
+            Decline
+          </Button>
+          <Button
+            size="sm"
+            disabled={deciding !== null}
+            onClick={() => onDecide("approve", scope)}
+          >
+            {deciding === "approve" ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Check className="size-4" />
+            )}{" "}
+            Approve
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

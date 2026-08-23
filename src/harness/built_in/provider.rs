@@ -735,6 +735,8 @@ pub struct HostedProviderConfig {
 pub struct HostedProvider {
     config: HostedProviderConfig,
     client: reqwest::Client,
+    product_identity: bool,
+    telemetry_provider: &'static str,
 }
 
 impl HostedProvider {
@@ -743,6 +745,20 @@ impl HostedProvider {
         Self {
             config,
             client: reqwest::Client::new(),
+            product_identity: true,
+            telemetry_provider: "subscription",
+        }
+    }
+
+    /// Builds the short-lived direct provider used before a company exists in
+    /// onboarding. It speaks the same wire format without attaching the
+    /// TinyHumans product header to a third-party or local endpoint.
+    pub fn new_direct(config: HostedProviderConfig, provider: &str) -> Self {
+        Self {
+            config,
+            client: reqwest::Client::new(),
+            product_identity: false,
+            telemetry_provider: inference::provider_slug(provider),
         }
     }
 }
@@ -782,20 +798,14 @@ impl ChatModel<()> for HostedProvider {
             "{}/chat/completions",
             self.config.base_url.trim_end_matches('/')
         );
-        let (product_header_name, product_header_value) = crate::product::product_identity_header();
-        let mut http = self
-            .client
-            .post(&url)
-            .json(&body)
-            // `HostedProvider` always speaks to the TinyHumans-owned managed
-            // endpoint (`DEFAULT_TINYHUMANS_INFERENCE_URL`), never a
-            // third-party BYOK host, so tagging it with our product identity
-            // is unconditional. This client is a bespoke `reqwest::Client`,
-            // not one built through `openhuman_core`'s `IntegrationClient`,
-            // so it does not inherit the header set by
-            // `set_product_identity` and must attach it itself — see
-            // `crate::product`.
-            .header(product_header_name, product_header_value);
+        let mut http = self.client.post(&url).json(&body);
+        if self.product_identity {
+            // The normal constructor is the managed TinyHumans path. The
+            // direct setup constructor deliberately skips this on local/BYOK
+            // endpoints, matching `request_plan`'s privacy boundary.
+            let (name, value) = crate::product::product_identity_header();
+            http = http.header(name, value);
+        }
         // Resolved per request, never captured: on the hosted platform this reads
         // a token file the cluster rewrites in place every few minutes.
         let bearer = self.config.credential.current().await.map_err(|e| {
@@ -835,10 +845,11 @@ impl ChatModel<()> for HostedProvider {
 
 impl HarnessModel for HostedProvider {
     fn telemetry_provider_id(&self) -> String {
-        // `HostedProvider` is the platform-credentialed path by construction —
-        // it exists only where the env default supplied both endpoint and key —
-        // so its spend is the subscription's.
-        "subscription".to_string()
+        // The normal constructor is the subscription path. First-run setup has
+        // no tenant store to hang `TenantProvider` from, so its direct
+        // constructor carries the selected provider's slug for that one
+        // unmetered roster-design call.
+        self.telemetry_provider.to_string()
     }
 }
 

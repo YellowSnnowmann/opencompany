@@ -170,7 +170,7 @@ impl std::fmt::Debug for OperatorChannel {
 /// assert is "how many times did the report reach the channel", and a refusal
 /// answers a different question. This carries an ordinary channel id so it
 /// clears the refusal, and keeps the buffer so the counting still works.
-// Every consumer of this lives behind `openhuman`/`tinycortex`, so a
+// Every consumer of this lives behind `openhuman`/`tinymemory`, so a
 // default-feature build compiles it and constructs it nowhere. That is a
 // feature-configuration fact, not dead code: the runner and delivery suites
 // that use it are simply not selected in that lane (issue #770).

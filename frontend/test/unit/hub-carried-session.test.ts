@@ -222,8 +222,10 @@ describe("the host switcher in a hub", () => {
   });
 
   it("still stays out of the way of an ordinary single-host console", () => {
-    // One host in a browser is a nameplate, not a control: no chevron, and
-    // nothing to open. Same rule the rail used for whether to draw at all.
+    // One host in a browser draws no status dot and no standalone chrome —
+    // the same rule the rail used for whether to draw at all. It does open a
+    // menu now, because that menu is where a host is managed
+    // (`hostSwitcherMenu`); what the hub adds on top is the zero case.
     expect(hostSwitcherInteractive(1, false)).toBe(false);
     expect(hostSwitcherInteractive(2, false)).toBe(true);
   });

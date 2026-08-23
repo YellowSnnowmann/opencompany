@@ -1,0 +1,96 @@
+# What this lab is prepared to say the answer is.
+#
+# One row per problem, and a row only exists once two independent routes agreed.
+# That rule is the entire product: a single program's output is a result, and
+# the difference between a result and an answer is that somebody tried to break
+# it.
+#
+# `answer` is deliberately a plain string rather than a number. The answers here
+# are exact — big integers, sometimes a decimal to a stated precision — and a
+# float column would silently round the one thing the row exists to hold.
+
+title = "Answers"
+purpose = """
+The answer to each problem the lab has settled, with the method that reached it \
+and the check that survived. A row here is quotable; anything short of one is \
+an attempt, and lives on the `attempts` ledger.\
+"""
+written_by = "`record_entry` when a checked answer lands, `close_entry` when it is accepted or withdrawn"
+checks = ["required-field", "known-status", "closed-needs-reason"]
+
+[[field]]
+name = "id"
+role = "id"
+required = true
+
+[[field]]
+name = "problem"
+role = "title"
+required = true
+description = "Which problem, named the way the operator named it (e.g. \"Project Euler 61\")."
+
+[[field]]
+name = "status"
+role = "status"
+required = true
+
+[[field]]
+name = "answer"
+role = "prose"
+required = true
+description = "The answer itself, exactly, and nothing else in the field. No units, no commas, no prose."
+
+[[field]]
+name = "method"
+role = "prose"
+required = true
+description = "How it was reached, in enough detail to rewrite the program from."
+
+[[field]]
+name = "check"
+role = "prose"
+required = true
+description = "The independent route that agreed, and what it ruled out. \"It ran\" is not a check."
+
+[[field]]
+name = "runtime"
+role = "prose"
+description = "Wall-clock time of the run that produced it."
+
+[[field]]
+name = "owner"
+role = "owner"
+
+[[field]]
+name = "reason"
+role = "prose"
+description = "Why it closed — accepted by the operator, or withdrawn and what was wrong. Required when it closes."
+
+[[status]]
+name = "checked"
+label = "Checked"
+
+[[status]]
+name = "accepted"
+closed = true
+needs_reason = true
+
+[[status]]
+name = "withdrawn"
+closed = true
+needs_reason = true
+
+[[section]]
+heading = "Checked"
+blurb = "Two routes agreed. Waiting on the operator to accept."
+statuses = ["checked"]
+order = "recent"
+
+[[section]]
+heading = "Settled"
+blurb = """
+Accepted, or withdrawn with what was wrong. A withdrawn answer stays: it is the \
+record of a check this lab did not run and should have.\
+"""
+statuses = ["accepted", "withdrawn"]
+cap = 50

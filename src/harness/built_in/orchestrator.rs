@@ -1504,12 +1504,18 @@ impl Tool for QueryCompanyTool {
         // shows the same model, so the two surfaces cannot drift apart.
         let mut roster: Vec<(String, Option<String>, String)> = Vec::new();
         if let Some(record) = &record {
-            for agent in &record.manifest.agents {
-                // A manifest `[[agent]]` has no display name; its role is its
-                // label.
-                roster.push((agent.id.clone(), None, agent.role.clone()));
+            // Resolved through the record: a teammate the operator removed is not
+            // a delegation target, and one they renamed is named as it is now.
+            for agent in record.effective_agents() {
+                // A manifest `[[agent]]` has no display name unless an operator
+                // gave it one; otherwise its role is its label.
+                roster.push((agent.id.clone(), agent.name.clone(), agent.role.clone()));
             }
-            for overlay in &record.overlay_agents {
+            for overlay in record
+                .overlay_agents
+                .iter()
+                .filter(|a| !record.is_retired(&a.id))
+            {
                 roster.push((
                     overlay.id.clone(),
                     Some(overlay.name.clone()).filter(|n| !n.trim().is_empty()),
@@ -1618,7 +1624,7 @@ fn summarize_event(event: &CompanyEvent) -> String {
         CompanyEvent::AgentReply { agent_id, .. } => format!("reply from {agent_id}"),
         CompanyEvent::TaskDispatched { task_id, .. } => format!("task dispatched: {task_id}"),
         // Issue #464. Structural only, like every arm here: the id, the change
-        // word (fixed vocabulary) and the column (one of six). The card's title
+        // word (fixed vocabulary) and the stage (one of six). The card's title
         // is deliberately not named — it is operator- or agent-authored free
         // text, and this string is a non-sensitive one-liner for the insight
         // surface, which is exactly where free text does not belong.
@@ -7131,6 +7137,8 @@ name = "Morning"
 
     fn seeded_record(id: &CompanyId) -> CompanyRecord {
         CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: empty_manifest(),
             ledger: Vec::new(),
@@ -8108,6 +8116,8 @@ name = "Morning"
         )
         .expect("valid manifest");
         CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: company.clone(),
             manifest,
             ledger: Vec::new(),

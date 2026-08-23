@@ -154,9 +154,10 @@ impl Namespace {
 /// computationally infeasible — which is the property that matters, because
 /// company ids can be chosen by a caller.
 ///
-/// This mirrors `EngineCortex::workspace_name`, which solved the same problem
-/// for on-disk workspace directories. The two are intentionally separate —
-/// that one names a filesystem path, this one names a namespace inside a
+/// This mirrors the removed in-pod engine's `workspace_name` (deleted with
+/// the `tinycortex` backend in #1568), which solved the same problem for
+/// on-disk workspace directories. The two are intentionally separate —
+/// that one named a filesystem path, this one names a namespace inside a
 /// possibly-remote engine — but the collision argument is identical, and a
 /// change to one should prompt a look at the other.
 fn workspace_segment(company: &str) -> String {

@@ -20,7 +20,7 @@
  *
  * Four of the suite's best specs sit behind `LIVE_BRAIN`, and they are the ones
  * that exercise the product rather than the console's own rendering. CI runs
- * them: `Console E2E (live brain)` builds `--features openhuman,tinycortex,mcp`
+ * them: `Console E2E (live brain)` builds `--features openhuman,mcp`
  * and `playwright.config.ts` stands up `mock-brain.mjs` and `mcp-server.mjs`
  * behind it. The default-feature `Console E2E` lane still skips them, because
  * on a host without the harness the thing they test is not compiled in — that
@@ -28,7 +28,7 @@
  */
 
 /**
- * A host built with `--features openhuman,tinycortex,mcp` **and** an inference
+ * A host built with `--features openhuman,mcp` **and** an inference
  * backend behind it — either the mock that echoes `__MOCK_LLM__` or one whose
  * tool choices are scripted (`SPAWNONE`).
  *
@@ -109,9 +109,46 @@ export const MCP_SERVER =
 
 /** The reason string a `LIVE_BRAIN` skip carries, so no skip is ever bare. */
 export const LIVE_BRAIN_REASON =
-  "needs a --features openhuman,tinycortex,mcp host plus an inference backend; " +
+  "needs a --features openhuman,mcp host plus an inference backend; " +
   "set PW_LIVE_BRAIN=1 to run. The `Console E2E (live brain)` CI lane does " +
   "(issue #467).";
+
+/**
+ * A host built with the harness features and pointed at a **real model**
+ * (`test/e2e/live-brain-proxy.mjs`) rather than at the scripted mock.
+ *
+ * Set `PW_LIVE_LLM=1`, or run `npm run e2e:live-llm`, which sets it and — when
+ * this config manages the host — starts the proxy and points the host at it.
+ *
+ * ## Why this is a run of its own rather than a flag inside a spec
+ *
+ * The same reason {@link FIRST_RUN} is: the two lanes need different hosts.
+ * Every other spec in this suite asserts on the mock's scripted answers, and a
+ * host whose inference is a real model answers none of them — a `__MOCK_LLM__`
+ * marker no longer appears, a `SPAWNONE` no longer opens exactly one card.
+ * Conversely `orchestration-live.spec.ts` asserts that a model *decided*
+ * something, which is unpassable against a fixture that decides nothing. So
+ * `playwright.config.ts` selects that spec only in this run, and every other
+ * spec only outside one, and neither can be pointed at a host it cannot pass
+ * against.
+ *
+ * The lane is **not** run by CI, and deliberately: it spends real tokens and its
+ * verdict depends on a model's judgement, which is the one thing a required
+ * check must not. It exists to be run by a person — before changing an
+ * orchestrator prompt, a tool description, or the delegation seam — and its
+ * scripted twin, `orchestration-simulation.spec.ts`, is what guards the same
+ * chain on every push.
+ */
+export const LIVE_LLM = process.env.PW_LIVE_LLM === "1";
+
+/** Where `live-brain-proxy.mjs` listens when this run starts it. */
+export const LIVE_LLM_BIND = process.env.PW_LIVE_LLM_BIND || "127.0.0.1:8096";
+
+/** The reason string a `LIVE_LLM` skip carries, so no skip is ever bare. */
+export const LIVE_LLM_REASON =
+  "needs a --features openhuman,mcp host pointed at a real model; " +
+  "run `npm run e2e:live-llm` (which sets PW_LIVE_LLM=1 and starts " +
+  "test/e2e/live-brain-proxy.mjs in front of the configured router).";
 
 /**
  * Whether this run's host serves the **unstaffed first-run fixture**
@@ -151,3 +188,38 @@ export const FIRST_RUN = process.env.PW_FIRST_RUN === "1";
 
 /** The company a first-run run must be serving, relative to the repository root. */
 export const FIRST_RUN_COMPANY = "companies/e2e_setup";
+
+/**
+ * Whether this run is the **Project Euler lane**: the live-LLM host, but
+ * serving `companies/agentic_math_lab` and running the one spec whose verdict
+ * is a published integer rather than a shape on the board.
+ *
+ * Set `PW_EULER=1` alongside `PW_LIVE_LLM=1`, or run `npm run e2e:euler`, which
+ * sets both and — when this config manages the host — points it at that company
+ * and at a data root of its own.
+ *
+ * ## Why a lane rather than one more spec in the live-LLM run
+ *
+ * The same reason {@link FIRST_RUN} and {@link LIVE_LLM} are lanes: it needs a
+ * different host. `orchestration-live.spec.ts` drives the harness company,
+ * whose roster is a CEO, an engineer and a writer; this spec drives a lab whose
+ * roster, tool grants and *withheld* tool grants are the thing being exercised.
+ * Neither company can serve the other's spec.
+ *
+ * It also wants a data root of its own, for the reason the first-run lane does:
+ * the answers ledger is read at the end of a run, and a root still holding the
+ * previous run's rows would let a stale answer pass for a fresh one.
+ *
+ * Like the live-LLM lane it is **not** run by CI — real tokens, tens of
+ * minutes, and a verdict that depends on a model's reasoning.
+ */
+export const EULER = process.env.PW_EULER === "1";
+
+/** The company a Project Euler run must be serving, relative to the repository root. */
+export const EULER_COMPANY = "companies/agentic_math_lab";
+
+/** The reason string a `EULER` skip carries, so no skip is ever bare. */
+export const EULER_REASON =
+  "needs a host serving companies/agentic_math_lab and thinking with a real model; " +
+  "run `npm run e2e:euler` (which sets PW_EULER=1 and PW_LIVE_LLM=1). " +
+  "Point it at another problem with PW_EULER_PROBLEM=<number>.";

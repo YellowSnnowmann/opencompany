@@ -266,6 +266,13 @@ nothing: finding out a key is wrong must not require having stored it. Provider
 errors are summarised to one actionable line rather than forwarded, since a
 failure body can echo request material into a browser on an unauthenticated host.
 
+Local endpoints get one onboarding-only convenience before that shared
+resolution: a bare `localhost:port` gains `http://` and `/v1`. Setup reads the
+OpenAI-compatible `/models` catalog and probes its concrete model rather than
+sending the abstract `agentic-v1` tier to a server that cannot resolve it. The
+successful provider, endpoint and tier mapping are persisted only when Finish
+creates the company; the probe itself remains write-free.
+
 The step is a **gate with an escape**. `GET /api/v1/setup` reports whether the
 host already holds a credential, so a hosted tenant — whose operator has no key
 and no way to get one — arrives with the step already answered and only needs to
@@ -297,11 +304,12 @@ reach behind a value a model chose from free text — what D7's enum prevents.
 
 ## What the host enforces, rather than asks for
 
-Four guarantees hold whatever a model returns — coverage checked against the
-host's own job list, a tool belt asked for rather than inherited, a copy of the
-reference team refused the name "designed", and a fallback that says which
-fallback it is. Each is a boundary rather than a line in a prompt, and each has
-a test that fails when it stops holding:
+Five guarantees hold whatever a model returns — coverage checked against the
+host's own job list, a tool belt asked for rather than inherited, standing
+instructions the host writes rather than the model, a copy of the reference team
+refused the name "designed", and a fallback that says which fallback it is. Each
+is a boundary rather than a line in a prompt, and each has a test that fails when
+it stops holding:
 [company-setup-guarantees.md](company-setup-guarantees.md).
 
 ## Nobody gets stuck

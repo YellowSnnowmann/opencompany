@@ -76,9 +76,7 @@ name = "proposed"
 
 [[status]]
 name = "active"
-
-[[status]]
-name = "at_risk"
+aliases = ["at_risk"]
 
 [[status]]
 name = "delivered"
@@ -98,7 +96,7 @@ needs_reason = true
 [[section]]
 heading = "At risk"
 blurb = "Active and not going to land as sold. Say what the client has been told."
-statuses = ["at_risk"]
+statuses = ["active"]
 order = "recent"
 
 [[section]]

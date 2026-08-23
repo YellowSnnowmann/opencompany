@@ -32,7 +32,20 @@ pub fn entries_from_tasks(tasks: &[TaskRecord]) -> Entries {
         .map(|(position, task)| {
             let mut fields: BTreeMap<String, String> = BTreeMap::new();
             fields.insert("title".to_string(), task.title.clone());
-            fields.insert("column".to_string(), task.column.clone());
+            // The row's **status** is the phase, because that is the ledger's
+            // declared vocabulary and the console's column list. The stage
+            // rides alongside as prose, so a reader still learns that a working
+            // card is specifically waiting on their verdict — without the board
+            // growing a fourth pile to put it in. See `super::board`.
+            fields.insert(
+                "column".to_string(),
+                super::board::phase_of(&task.column).to_string(),
+            );
+            if let Some(column) = super::board::column(&task.column)
+                && column.phase == super::board::PHASE_WORKING
+            {
+                fields.insert("stage".to_string(), column.label.to_string());
+            }
             fields.insert("priority".to_string(), task.priority.clone());
             if !task.assignee.trim().is_empty() {
                 fields.insert("assignee".to_string(), task.assignee.clone());
@@ -78,7 +91,10 @@ pub fn entries_from_tasks(tasks: &[TaskRecord]) -> Entries {
 mod test {
     use super::*;
     use crate::ledger::registry::Registry;
-    use crate::ports::tasks::{COLUMN_DONE, COLUMN_IN_PROGRESS, COLUMN_TODO, TaskDeliverable};
+    use crate::ports::tasks::{
+        COLUMN_DONE, COLUMN_IN_PROGRESS, COLUMN_IN_REVIEW, COLUMN_PAUSED, COLUMN_TODO,
+        TaskDeliverable,
+    };
 
     fn card(id: &str, column: &str, updated: u64) -> TaskRecord {
         TaskRecord {
@@ -108,8 +124,43 @@ mod test {
         let entries = entries_from_tasks(&[card("t1", COLUMN_IN_PROGRESS, 10)]);
         let entry = entries.find("t1").expect("the card projects");
         assert_eq!(entry.title(spec), "card t1");
-        assert_eq!(entry.status(spec), COLUMN_IN_PROGRESS);
+        assert_eq!(entry.status(spec), crate::ledger::board::PHASE_WORKING);
         assert_eq!(entry.get("assignee"), "ops");
+    }
+
+    /// The four working stages project onto one status, and each says which
+    /// one it is on the row rather than in the pile it landed in (issue #1512).
+    #[test]
+    fn every_working_stage_reads_as_one_status_and_keeps_its_own_name() {
+        use crate::ledger::board::PHASE_WORKING;
+        use crate::ports::tasks::COLUMN_PLANNING;
+
+        let registry = Registry::build([]);
+        let spec = registry.find("tasks").expect("tasks is built in");
+        let entries = entries_from_tasks(&[
+            card("planning", COLUMN_PLANNING, 40),
+            card("running", COLUMN_IN_PROGRESS, 30),
+            card("parked", crate::ports::tasks::COLUMN_PAUSED, 20),
+            card("waiting", crate::ports::tasks::COLUMN_IN_REVIEW, 10),
+        ]);
+        for id in ["planning", "running", "parked", "waiting"] {
+            let entry = entries.find(id).expect("the card projects");
+            assert_eq!(entry.status(spec), PHASE_WORKING, "{id}");
+        }
+        assert_eq!(entries.find("waiting").unwrap().get("stage"), "In review");
+        assert_eq!(entries.find("planning").unwrap().get("stage"), "Planning");
+    }
+
+    /// Pending and done carry no stage: there is only one way to be either, so
+    /// a line saying which would be a line saying nothing.
+    #[test]
+    fn a_pending_or_done_card_carries_no_stage_line() {
+        let entries = entries_from_tasks(&[
+            card("waiting", COLUMN_TODO, 20),
+            card("shipped", COLUMN_DONE, 10),
+        ]);
+        assert_eq!(entries.find("waiting").unwrap().get("stage"), "");
+        assert_eq!(entries.find("shipped").unwrap().get("stage"), "");
     }
 
     /// The board lists most-recently-updated first; `Recent` sorts descending
@@ -127,7 +178,7 @@ mod test {
         assert_eq!(ids, ["newest", "middle", "oldest"]);
     }
 
-    /// Done is the board's one closed column, so it is the one that lands in an
+    /// Done is the board's one closed phase, so it is the one that lands in an
     /// index's archive rather than in its open list.
     #[test]
     fn only_done_reads_as_closed() {
@@ -140,5 +191,31 @@ mod test {
         ]);
         assert_eq!(entries.closed_count(spec), 1);
         assert_eq!(entries.open_count(spec), 2);
+    }
+
+    /// The file an agent actually reads: three headings, and a working card that
+    /// still says what it is waiting on (issue #1512).
+    #[test]
+    fn the_rendered_board_has_three_headings_and_keeps_the_stage_on_the_row() {
+        let registry = Registry::build([]);
+        let spec = registry.find("tasks").expect("tasks is built in");
+        let entries = entries_from_tasks(&[
+            card("a", COLUMN_TODO, 40),
+            card("b", COLUMN_PAUSED, 30),
+            card("c", COLUMN_IN_REVIEW, 20),
+            card("d", COLUMN_DONE, 10),
+        ]);
+        let rendered = crate::ledger::engine::render(spec, &entries);
+        let headings: Vec<&str> = rendered
+            .lines()
+            .filter(|line| line.starts_with("## "))
+            .collect();
+        assert_eq!(
+            headings,
+            ["## Pending", "## Working", "## Done"],
+            "{rendered}"
+        );
+        assert!(rendered.contains("In review"), "{rendered}");
+        assert!(rendered.contains("Paused"), "{rendered}");
     }
 }

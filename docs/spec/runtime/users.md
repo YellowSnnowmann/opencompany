@@ -161,7 +161,7 @@ addressing forms work: `/api/v1/companies/{id}/…` and `/api/v1/company/…`.
 
 | Route | Purpose |
 |---|---|
-| `GET …/auth/config` | The sign-in mode this company uses, so the console knows which screen to draw |
+| `GET …/auth/config` | The sign-in mode this company uses and the name it goes by, so the console knows which screen to draw and what to call it |
 | `POST …/auth/request` | Mail a magic link. Always `{"sent": true}` |
 | `POST …/auth/verify` | Redeem a link → session cookie |
 | `POST …/auth/login` | Email + password → session cookie |
@@ -361,6 +361,19 @@ Routes: `GET/POST …/devices`, `POST …/devices/claim`, `DELETE …/devices/{i
 Listing and revocation are scoped to the caller's own devices by querying
 `list_for_user`, so another user's id is simply not found.
 
+The console half is **Settings → Devices** (`#/settings/devices`,
+`frontend/src/views/DevicesView.tsx`): mint a code, see the machines paired to
+your account, revoke one. It calls `GET/POST …/devices` and `DELETE
+…/devices/{id}` and deliberately never touches `claim` — that redemption belongs
+to the machine being enrolled, so the session token reaches its keychain without
+passing through a webview.
+
+For one release these routes had no caller at all while the desktop's pairing
+prompt told people to go to "Settings → devices" (issue #1476). The prompt now
+reads its destination out of the sub-page table in
+`frontend/src/views/settings-pages.ts`, so a page id that is not a real page
+does not compile.
+
 Every claim failure — unknown, expired, already redeemed, suspended user,
 removed user — returns one indistinguishable response. The route is reachable
 without any credential, and separating them would tell an anonymous caller which
@@ -448,6 +461,15 @@ admin's request open.
   mailbox to spare there, only the plaintext's hash is stored (so a throttled
   answer cannot re-echo the live code), and throttling would lock the sole local
   sign-in path for a minute after every use.
+
+  The silence has a cost the console has to absorb: nothing in the response
+  distinguishes a mailed link from a swallowed one, so the "check your email"
+  card cannot ask whether a resend would land. It therefore keeps its own copy
+  of the window — it stamps the moment each `202` arrives and disables its
+  "Resend link" button, with the remaining seconds in the label, until a minute
+  has passed (`frontend/src/views/login/resend.ts`, issue #1333). The constant
+  there must track `RESEND_INTERVAL_MILLIS`: too short and the button fires
+  into the throttle and reports a send that never happened.
 - **Login codes are never echoed** from a host that is reachable from anywhere
   else. `dev_code` appears only on a loopback-only bind with no mail
   transport. A routable host with broken mail lets nobody in rather than

@@ -30,8 +30,8 @@ L4  Surfaces        Axum HTTP (operator API, A2A, webhooks), CLI, future UI
 L3  Company Brain   cycle loop, approvals, effect routing, feedback loop
 L2  Kernel ports    Brain, CompanyStore, EventLog, MemoryStore, ContextStore,
                     ChannelAdapter, ToolProvider, AgentEconomy, ApprovalGate
-L1  Adapters        hosted-medulla | openhuman-rpc | tinyagents | tinycortex |
-                    tinyplace | fs (default)
+L1  Adapters        hosted-medulla | openhuman-rpc | tinyagents |
+                    hosted-memory | tinyplace | fs (default)
 L0  Substrate       api.tinyhumans.ai, openhuman-core, tiny.place, filesystem
 ```
 
@@ -96,6 +96,7 @@ L0  Substrate       api.tinyhumans.ai, openhuman-core, tiny.place, filesystem
 | [runtime/lifecycle.md](runtime/lifecycle.md) | Company state machine and durability |
 | [runtime/planning.md](runtime/planning.md) | The Planning station: pass contract, prerequisite verdicts, boot sweep |
 | [runtime/ledgers.md](runtime/ledgers.md) | Dynamic ledgers: declared record shapes, the append-only fold, who may delete, the `derived/` folder |
+| [runtime/ledger-statuses.md](runtime/ledger-statuses.md) | How many statuses a ledger may declare, the board's phase/stage split, and how a retired status word heals |
 | [runtime/ledgers-console-ia.md](runtime/ledgers-console-ia.md) | The console surface over ledgers: naming ("ledger" is internal-only), per-list sidebar rows, Manage Lists, the declare wizard |
 | [runtime/pages.md](runtime/pages.md) | Agent-authored internal dashboard pages: the `pages/<slug>/` convention, the compile-on-write contract, and the two-part isolation model |
 | [runtime/orchestration/README.md](runtime/orchestration/README.md) | Making a many-agent company converge: the three collapses, the three principles, phasing |
@@ -108,6 +109,7 @@ L0  Substrate       api.tinyhumans.ai, openhuman-core, tiny.place, filesystem
 | [runtime/orchestration/sandbox.md](runtime/orchestration/sandbox.md) | Containerised programming tools: posture, placement, the code library, checkpointing |
 | [runtime/api.md](runtime/api.md) | HTTP surface and auth model |
 | [runtime/config.md](runtime/config.md) | Configuration and the one-key story |
+| [runtime/search.md](runtime/search.md) | Web search: the managed surface, a company's own provider, the gates, and who is billed |
 | [runtime/repos.md](runtime/repos.md) | Bound repositories: mirror cache, credential handling, quota |
 | [runtime/data-root.md](runtime/data-root.md) | Data-root resolution, the single-writer lock, instance identity |
 | [runtime/desktop.md](runtime/desktop.md) | The desktop client: connections, transport seam, embedded host |
@@ -123,7 +125,6 @@ L0  Substrate       api.tinyhumans.ai, openhuman-core, tiny.place, filesystem
 | [integrations/medulla.md](integrations/medulla.md) | Brain contract and the hosted wire protocol |
 | [integrations/openhuman.md](integrations/openhuman.md) | OpenHuman seams and upstream PR list |
 | [integrations/tinyagents.md](integrations/tinyagents.md) | TinyAgents harness usage |
-| [integrations/tinycortex.md](integrations/tinycortex.md) | TinyCortex expectations behind the memory port |
 | [integrations/tinyplace.md](integrations/tinyplace.md) | tiny.place protocol integration |
 | [feedback-loop/README.md](feedback-loop/README.md) | Feedback capture → GitHub issue → release loop |
 | [feedback-loop/privacy.md](feedback-loop/privacy.md) | Redaction rules (normative) |

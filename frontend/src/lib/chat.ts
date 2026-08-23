@@ -139,6 +139,11 @@ export function liveReplyIdentity(event: { seq: number }): { messageId: string }
  * literals.
  */
 const COLUMN_LABELS: Record<string, string> = {
+  // Both vocabularies (issue #1512): a journalled event names the stage it
+  // wrote, and anything reading a card off the API names the phase. This line
+  // is rendered from either, so it has to label either.
+  pending: "Pending",
+  working: "Working",
   todo: "To-do",
   planning: "Planning",
   in_progress: "In progress",

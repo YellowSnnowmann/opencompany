@@ -13,6 +13,15 @@
 //! sequences are 0-based and strictly monotonic per company, and that
 //! everything written through the ports reads back byte-identically (the
 //! export-totality precondition).
+//!
+//! **Fixtures are non-empty on purpose.** An empty vec, map or `None` survives
+//! every possible bug, including a backend that never persisted the field at
+//! all, so seeding one certifies the gap it was meant to close. Issue #1504 was
+//! exactly that: `overlay_agents` seeded as `Vec::new()` with no assertion, so a
+//! backend that dropped every console-created teammate passed the whole suite.
+//!
+//! **No credential material appears here.** [`assert_secret_store`] uses
+//! obviously fake placeholder values (`sk-not-a-real-key-…`).
 
 use std::sync::Arc;
 
@@ -33,8 +42,8 @@ use crate::ports::skills_state::{SkillSource, SkillState, SkillStateStore};
 use crate::ports::store::CompanyStore;
 use crate::ports::tasks::{TaskRecord, TaskStore};
 use crate::ports::types::{
-    ChunkAddr, CompanyEvent, CompanyId, CompanyRecord, CompressedTrace, ContextChunk, EventSeq,
-    LedgerEntry, TemplateProvenance,
+    ChunkAddr, ChunkMeta, CompanyEvent, CompanyId, CompanyRecord, CompressedTrace, ContextChunk,
+    EventSeq, LedgerEntry, SecretValue, TemplateProvenance,
 };
 use crate::ports::usage::{SampleKind, UsageMeter, UsageSample};
 use crate::ports::users::{InviteRecord, UserRecord, UserRole, UserStatus, UserStore};
@@ -142,25 +151,120 @@ fn sample_policy_override() -> crate::ports::types::PolicyOverride {
     }
 }
 
+/// The console-created teammates the fixture seeds every record with, so each
+/// backend (fs, sqlite, mongodb) proves an operator-added agent survives
+/// persistence (issue #1504).
+///
+/// This overlay is the **only** copy of such a teammate — it is deliberately not
+/// written back into the version-controlled `company.toml` — so a backend that
+/// dropped it would delete the teammate on the next restart, and on a hosted
+/// tenant there would be nothing to restore from.
+///
+/// Deliberately **two** rows that differ in their optional fields, because the
+/// field's whole point is that those states stay apart across a round-trip:
+///
+/// - `aria_stone` has a `description` and a **narrowed** `tools` grant. Both are
+///   `skip_serializing_if`-elided when empty, so a backend that persisted only
+///   the required `id`/`name`/`role` triple would still round-trip a bare agent
+///   and pass. This row is what makes that fail.
+/// - `pax_ivory` has `description: None` and an **empty** `tools` list, which
+///   means the standard company-wide grant rather than "no tools" (see
+///   [`OverlayAgent::tools`](crate::ports::types::OverlayAgent::tools)). A
+///   backend that rehydrated the absent key as anything other than empty would
+///   silently re-scope that teammate's tool belt.
+fn sample_overlay_agents() -> Vec<crate::ports::types::OverlayAgent> {
+    use crate::ports::types::OverlayAgent;
+    vec![
+        OverlayAgent {
+            id: "aria_stone".to_string(),
+            name: "Aria Stone".to_string(),
+            role: "Head of Support".to_string(),
+            description: Some("Answers customer mail and escalates refunds.".to_string()),
+            tools: vec!["docs.*".to_string(), "web".to_string()],
+        },
+        OverlayAgent {
+            id: "pax_ivory".to_string(),
+            name: "Pax Ivory".to_string(),
+            role: "Analyst".to_string(),
+            description: None,
+            tools: Vec::new(),
+        },
+    ]
+}
+
+/// The console-created desk the fixture seeds every record with, so each backend
+/// proves an operator-created group chat survives persistence (issue #1504).
+///
+/// Its `members` name one manifest agent (`ceo`) and one overlay agent
+/// (`aria_stone`), which is the mixed case a real console desk produces, and
+/// `description` is `Some` so the `skip_serializing_if` field is exercised.
+fn sample_overlay_desks() -> Vec<crate::ports::types::OverlayDesk> {
+    use crate::ports::types::OverlayDesk;
+    vec![OverlayDesk {
+        id: "support".to_string(),
+        name: "Support".to_string(),
+        description: Some("Customer mail triage.".to_string()),
+        members: vec!["ceo".to_string(), "aria_stone".to_string()],
+    }]
+}
+
+/// The console-added desk memberships the fixture seeds every record with, so
+/// each backend proves an operator's "add to desk" survives persistence
+/// (issue #1504). Targets the manifest-shaped desk id used by the desk-order
+/// overlay, so the two overlays are proven to persist independently.
+fn sample_overlay_desk_members() -> Vec<crate::ports::types::OverlayDeskMember> {
+    use crate::ports::types::OverlayDeskMember;
+    vec![OverlayDeskMember {
+        desk_id: "studio".to_string(),
+        agent_id: "pax_ivory".to_string(),
+    }]
+}
+
+/// The operator's edits of a manifest-declared teammate: a renamed role, a
+/// cleared description (the empty-string form) and a narrowed tool scope, so a
+/// backend that drops the field — or that collapses "cleared" back into "not
+/// overridden" — is caught by the round-trip rather than in a console that
+/// silently re-inherits the blueprint after a restart.
+fn sample_agent_overrides() -> Vec<crate::ports::types::AgentOverride> {
+    vec![crate::ports::types::AgentOverride {
+        agent_id: "ceo".to_string(),
+        name: Some("Robin".to_string()),
+        role: Some("Chief Vibes".to_string()),
+        description: Some(String::new()),
+        tools: Some(vec!["docs.*".to_string()]),
+        instructions: Some("Be exceedingly concise and decisive.".to_string()),
+    }]
+}
+
 /// Builds a running record for `id` carrying a non-empty desk-order overlay (so
 /// the store round-trip covers the operator desk-hierarchy field, issue #131), a
 /// runtime-authored workflow body (issue #168), a populated budget-override set
 /// (issue #343), a `[policy]` override (issue #562), a paused workflow id
-/// (issue #276), and stamped with the sample template provenance (so round-trips
+/// (issue #276), console-created teammates, desks and desk memberships
+/// (issue #1504), and stamped with the sample template provenance (so round-trips
 /// assert it survives persistence, issue #85).
 fn record(id: &CompanyId) -> CompanyRecord {
     CompanyRecord {
+        overlay_agent_edits: sample_agent_overrides(),
+        // Non-empty so a backend that drops the field is caught: without the
+        // tombstone the manifest is re-read on load and the removed teammate
+        // comes straight back.
+        overlay_retired_agents: vec!["eng".to_string()],
         id: id.clone(),
         manifest: sample_manifest(),
         ledger: Vec::new(),
         lifecycle: "running".to_string(),
-        overlay_agents: Vec::new(),
-        overlay_desk_members: Vec::new(),
+        // Non-empty for the same reason `overlay_desk_tools` below is: an empty
+        // vec survives every possible bug, including not persisting the field at
+        // all. Issue #1504 — this was the one overlay field left empty, so a
+        // backend that dropped console-created teammates passed the whole suite.
+        overlay_agents: sample_overlay_agents(),
+        overlay_desk_members: sample_overlay_desk_members(),
         overlay_desk_order: vec![crate::ports::types::OverlayDeskOrder {
             desk_id: "studio".to_string(),
             ordered: vec!["ceo".to_string(), "eng".to_string()],
         }],
-        overlay_desks: Vec::new(),
+        overlay_desks: sample_overlay_desks(),
         overlay_workflows: vec![sample_overlay_workflow()],
         overlay_budgets: sample_budget_overrides(),
         overlay_policy: Some(sample_policy_override()),
@@ -267,6 +371,71 @@ pub async fn assert_isolation_by_company(
     // `alpha` still sees its own data.
     let loaded = store.load(&alpha).await.unwrap().expect("alpha record");
     assert_eq!(loaded.ledger.len(), 1);
+    // The console-created teammates survive the store round-trip (issue #1504).
+    // Until this assertion existed the fixture seeded an empty vec, so a backend
+    // that never persisted the field passed the entire suite — and the overlay
+    // is the only copy of an operator-added teammate, so losing it deletes them.
+    assert_eq!(
+        loaded.overlay_agents,
+        sample_overlay_agents(),
+        "overlay_agents did not survive save/load"
+    );
+    // Spelled out per optional field, because equality alone would not say which
+    // half broke and both halves are elided from the persisted JSON when empty.
+    let aria = loaded
+        .overlay_agents
+        .iter()
+        .find(|agent| agent.id == "aria_stone")
+        .expect("the console-created teammate survived save/load");
+    assert_eq!(
+        aria.description,
+        Some("Answers customer mail and escalates refunds.".to_string()),
+        "the teammate's mandate decayed into an absent description"
+    );
+    assert_eq!(
+        aria.tools,
+        vec!["docs.*".to_string(), "web".to_string()],
+        "the teammate's narrowed tool grant decayed into the standard company grant"
+    );
+    let pax = loaded
+        .overlay_agents
+        .iter()
+        .find(|agent| agent.id == "pax_ivory")
+        .expect("the standard-grant teammate survived save/load");
+    assert!(
+        pax.tools.is_empty(),
+        "the standard-grant teammate came back with a narrowed tool belt"
+    );
+    // And the round-tripped teammate is on the roster, which is what the overlay
+    // is for: a backend could persist the rows and still fail to make them count.
+    assert!(
+        loaded.is_roster_agent("aria_stone"),
+        "the console-created teammate did not rejoin the roster after save/load"
+    );
+    // The operator-created desk survives too (issue #1504) — the desk analogue
+    // of the teammate overlay, and equally the only copy of that group chat.
+    assert_eq!(
+        loaded.overlay_desks,
+        sample_overlay_desks(),
+        "overlay_desks did not survive save/load"
+    );
+    assert!(
+        loaded.desk_exists("support"),
+        "the console-created desk did not survive save/load"
+    );
+    // As does the operator's "add this teammate to that desk" (issue #1504),
+    // which is a separate overlay and can be dropped on its own.
+    assert_eq!(
+        loaded.overlay_desk_members,
+        sample_overlay_desk_members(),
+        "overlay_desk_members did not survive save/load"
+    );
+    assert!(
+        loaded
+            .effective_desk_members("studio")
+            .contains(&"pax_ivory".to_string()),
+        "the console-added desk membership did not survive save/load"
+    );
     // The operator desk-order overlay survives the store round-trip (issue #131).
     assert_eq!(
         loaded.overlay_desk_order,
@@ -291,6 +460,16 @@ pub async fn assert_isolation_by_company(
         loaded.overlay_budgets,
         sample_budget_overrides(),
         "overlay_budgets did not survive save/load"
+    );
+    assert_eq!(
+        loaded.overlay_agent_edits,
+        sample_agent_overrides(),
+        "overlay_agent_edits did not survive save/load"
+    );
+    assert_eq!(
+        loaded.overlay_retired_agents,
+        vec!["eng".to_string()],
+        "overlay_retired_agents did not survive save/load"
     );
     assert!(
         loaded
@@ -860,6 +1039,24 @@ pub async fn assert_export_totality(
         Some(sample_setup_answers()),
         "setup answers did not round-trip through the store"
     );
+    // Issue #1504: the console-created teammates, desks and desk memberships
+    // round-trip on every backend. An export that dropped them would lose the
+    // only copy of every teammate the operator added outside the manifest.
+    assert_eq!(
+        loaded.overlay_agents,
+        sample_overlay_agents(),
+        "overlay_agents did not round-trip through the store"
+    );
+    assert_eq!(
+        loaded.overlay_desks,
+        sample_overlay_desks(),
+        "overlay_desks did not round-trip through the store"
+    );
+    assert_eq!(
+        loaded.overlay_desk_members,
+        sample_overlay_desk_members(),
+        "overlay_desk_members did not round-trip through the store"
+    );
     // Issue #168: the runtime-authored graph bodies round-trip too — an export
     // that dropped them would lose every console-created workflow.
     assert_eq!(
@@ -874,6 +1071,20 @@ pub async fn assert_export_totality(
         loaded.overlay_budgets,
         sample_budget_overrides(),
         "overlay_budgets did not round-trip through the store"
+    );
+    // The console-shaped roster round-trips on every backend, for the same
+    // reason: a teammate renamed from the Team page has to still be renamed
+    // after the process restarts, or the edit was never really made.
+    assert_eq!(
+        loaded.overlay_agent_edits,
+        sample_agent_overrides(),
+        "overlay_agent_edits did not round-trip through the store"
+    );
+    assert_eq!(
+        loaded.overlay_retired_agents,
+        vec!["eng".to_string()],
+        "overlay_retired_agents did not round-trip through the store — a removed \
+         teammate would come back on the next load"
     );
     // Issue #562: the console-set tier round-trips on every backend, for the
     // same reason — an approval gate that forgets across a restart is not a gate.
@@ -2225,6 +2436,207 @@ pub async fn assert_workflow_run_output_store(outputs: Arc<dyn WorkflowRunOutput
     );
 }
 
+/// Asserts the [`SecretStore`] contract: read-back, absence, overwrite, per-key
+/// independence, and — the property with security consequences — isolation
+/// between companies (issue #1505).
+///
+/// Before this function existed the port had **no** conformance case on any
+/// backend, while holding a tenant's inference credential, its MCP OAuth tokens,
+/// its Composio connected-account tokens and its SMTP password. A backend that
+/// failed to persist, failed to scope a read by company, or returned a stale
+/// value after an overwrite would have passed the entire suite. On a hosted
+/// deployment the storage backend *is* the tenant boundary, so "all three
+/// behave identically here" is a security guarantee, not a tidiness one.
+///
+/// The port intentionally exposes no `delete` — callers clear a secret by
+/// writing an empty value (`src/company/mcp.rs::clear_auth`,
+/// `src/company/inference.rs::clear_key`) — so there is no deletion case, and
+/// the empty-value case below is the one that stands in for it.
+///
+/// Keys are the real shapes the runtime uses (`inference/key`,
+/// `mcp/<name>/auth`, `harness/<id>/…`). **Every value is an obviously fake
+/// placeholder**; nothing here resembles a live credential.
+///
+/// # One property this does NOT yet assert, and why
+///
+/// **Two distinct keys must stay distinct.** They do not on the filesystem
+/// backend: `Bundle::secret` slugs the key through
+/// [`slug`](crate::store::paths), which folds every character outside
+/// `[A-Za-z0-9._-]` to `_` and is therefore not injective, so `mcp/acme
+/// prod/auth` and `mcp/acme_prod/auth` are one file. SQLite and MongoDB keep
+/// them apart. Two MCP servers whose names differ only by such a character
+/// consequently share one credential on fs — issue #1510, found while writing
+/// this function.
+///
+/// The case is left out rather than added-and-failing because the fix is an
+/// on-disk filename change with a migration to think about, not a test fix.
+/// It is named here so the gap is countable instead of silent, which is the
+/// same complaint #1505 was filed about one level up.
+pub async fn assert_secret_store(secrets: Arc<dyn crate::ports::secrets::SecretStore>) {
+    let alpha = CompanyId::new("alpha");
+    let beta = CompanyId::new("beta");
+    // Compare the exposed `&str` rather than `Option<SecretValue>` so an
+    // assertion message never carries a `SecretValue`'s `Debug` rendering.
+    let read = |company: &CompanyId, key: &'static str| {
+        let secrets = secrets.clone();
+        let company = company.clone();
+        async move {
+            secrets
+                .get(&company, key)
+                .await
+                .unwrap()
+                .map(|value| value.expose().to_string())
+        }
+    };
+
+    // 1. An unset key reads `None` — not an empty string, and not an error.
+    assert_eq!(
+        read(&alpha, "inference/key").await,
+        None,
+        "an unset secret must read as absent"
+    );
+
+    // 2. Write, then read back byte-identically. The value carries a newline and
+    //    a non-ASCII character on purpose: the filesystem backend writes the raw
+    //    bytes to a file, so a backend that appended a trailing newline, trimmed
+    //    one, or round-tripped through a lossy encoding fails here.
+    let token = "sk-not-a-real-key-alpha\nline2 café";
+    secrets
+        .set(&alpha, "inference/key", SecretValue(token.to_string()))
+        .await
+        .unwrap();
+    assert_eq!(
+        read(&alpha, "inference/key").await.as_deref(),
+        Some(token),
+        "a stored secret did not read back byte-identically"
+    );
+
+    // 3. Distinct keys are independent. `mcp/<name>/auth` and `mcp/<name>/health`
+    //    are the real pair the MCP surface writes, and only one of them is a
+    //    credential — a backend that conflated them would serve a scrubbed
+    //    health record where a token belongs, or worse, the reverse.
+    secrets
+        .set(
+            &alpha,
+            "mcp/conformance/auth",
+            SecretValue("{\"bearer\":\"not-a-real-token\"}".to_string()),
+        )
+        .await
+        .unwrap();
+    secrets
+        .set(
+            &alpha,
+            "mcp/conformance/health",
+            SecretValue("{\"ok\":true}".to_string()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        read(&alpha, "mcp/conformance/auth").await.as_deref(),
+        Some("{\"bearer\":\"not-a-real-token\"}"),
+        "writing a second key overwrote the first"
+    );
+    assert_eq!(
+        read(&alpha, "mcp/conformance/health").await.as_deref(),
+        Some("{\"ok\":true}"),
+        "the second key did not persist alongside the first"
+    );
+    assert_eq!(
+        read(&alpha, "inference/key").await.as_deref(),
+        Some(token),
+        "writing unrelated keys disturbed an existing secret"
+    );
+
+    // 4. Overwrite replaces. A backend that appended, or that served a cached or
+    //    stale row, would hand a rotated credential's *predecessor* to the next
+    //    outbound call — which fails as an authentication error days later, far
+    //    from the rotation that caused it.
+    secrets
+        .set(
+            &alpha,
+            "inference/key",
+            SecretValue("sk-not-a-real-key-alpha-rotated".to_string()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        read(&alpha, "inference/key").await.as_deref(),
+        Some("sk-not-a-real-key-alpha-rotated"),
+        "an overwritten secret still reads as its previous value"
+    );
+
+    // 5. Clearing writes an empty value, and an empty value is NOT absence. This
+    //    distinction is load-bearing: `clear_auth`/`clear_key` clear a credential
+    //    by writing `""`, and a backend that collapsed that into "unset" would
+    //    fall back to whatever the manifest or the environment supplies — so the
+    //    operator's revocation would silently not take.
+    secrets
+        .set(&alpha, "mcp/conformance/auth", SecretValue(String::new()))
+        .await
+        .unwrap();
+    assert_eq!(
+        read(&alpha, "mcp/conformance/auth").await.as_deref(),
+        Some(""),
+        "a cleared secret decayed into an unset one, so the revocation did not take"
+    );
+
+    // 6. ISOLATION — the property with security consequences. `beta` has written
+    //    nothing, and must not observe `alpha`'s credentials under any key.
+    for key in [
+        "inference/key",
+        "mcp/conformance/auth",
+        "mcp/conformance/health",
+    ] {
+        assert_eq!(
+            read(&beta, key).await,
+            None,
+            "company beta read company alpha's secret at `{key}` — a cross-tenant \
+             credential disclosure"
+        );
+    }
+
+    // 7. And the isolation holds in both directions once `beta` writes the SAME
+    //    key: neither company sees the other's value. A backend that keyed only
+    //    on `key` (dropping the company scope) passes step 6 and fails here,
+    //    because until `beta` writes there is nothing for the missing scope to
+    //    confuse.
+    secrets
+        .set(
+            &beta,
+            "inference/key",
+            SecretValue("sk-not-a-real-key-beta".to_string()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        read(&beta, "inference/key").await.as_deref(),
+        Some("sk-not-a-real-key-beta"),
+        "beta could not read back its own secret"
+    );
+    assert_eq!(
+        read(&alpha, "inference/key").await.as_deref(),
+        Some("sk-not-a-real-key-alpha-rotated"),
+        "beta's write overwrote alpha's secret at the same key — the company scope \
+         is not part of the key"
+    );
+
+    // 8. A key that exists only for `beta` is still absent for `alpha`, which is
+    //    the mirror of step 6 and catches a scope applied on write but not read.
+    secrets
+        .set(
+            &beta,
+            "harness/second/inference/key",
+            SecretValue("sk-not-a-real-key-beta-second".to_string()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        read(&alpha, "harness/second/inference/key").await,
+        None,
+        "alpha read a secret only beta ever wrote"
+    );
+}
+
 /// Asserts the [`FactStore`] contract: isolation, query/kind filtering, upsert,
 /// and delete.
 pub async fn assert_fact_store(facts: Arc<dyn FactStore>) {
@@ -2301,11 +2713,13 @@ pub async fn assert_fact_store(facts: Arc<dyn FactStore>) {
 /// so without a per-chunk stamp the stat can only reflect operator-authored
 /// facts (see `server::ops::memory::memory_stats`).
 ///
-/// Deliberately says nothing about re-`put`ting an identical body: the backends
-/// genuinely differ there (sqlite/mongo dedupe on the content address and keep
-/// the first write, the fs index appends a second line), and pinning one
-/// behaviour here would assert a contract the suite's own backends do not share.
-/// Readers of the stamp take the max across chunks for that reason.
+/// Deliberately says nothing about a re-`put`'s effect on the stamp: every
+/// backend keeps one claim per (addr, label) since #1300 (see
+/// [`assert_identical_body_two_labels`]), but a *new* label on an existing
+/// body stamps per-label on fs/sqlite and keeps the address's first-write
+/// stamp on the single-record backends (mongodb, the provider facade).
+/// Readers of the stamp take the max across chunks for
+/// that reason.
 pub async fn assert_context_chunk_stamps(context: Arc<dyn ContextStore>) {
     let alpha = CompanyId::new("alpha");
     let beta = CompanyId::new("beta");
@@ -2429,6 +2843,302 @@ pub async fn assert_multibyte_bodies_survive_search_and_ranged_peek(
 
     // A range ending inside the first "é" widens to its boundary.
     assert_eq!(context.peek(&alpha, &addr, Some(0..1)).await.unwrap(), "é");
+}
+
+/// Asserts byte-identical bodies under two labels both land (issue #1300):
+/// one content address, one claim per (addr, label), on every backend.
+///
+/// Before #1300 the backends diverged exactly here — the fs index appended a
+/// row per put (including duplicates), while sqlite/mongodb/the provider
+/// facade were first-write-wins on the address, answering a success receipt
+/// for a second label that never landed. A caller listing by their label then
+/// found nothing on those backends and everything on fs, and nothing pinned
+/// either behaviour because every other case in this suite uses distinct
+/// bodies.
+pub async fn assert_identical_body_two_labels(context: Arc<dyn ContextStore>) {
+    let company = CompanyId::new("alpha");
+    let twin = "twin body: byte-identical under two labels";
+    let first = context
+        .put(
+            &company,
+            ContextChunk {
+                label: "labels/first".to_string(),
+                body: twin.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let second = context
+        .put(
+            &company,
+            ContextChunk {
+                label: "labels/second".to_string(),
+                body: twin.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(first, second, "identical bodies share one content address");
+
+    let labels_at = |metas: &[ChunkMeta]| -> Vec<String> {
+        metas
+            .iter()
+            .filter(|m| m.addr == first)
+            .map(|m| m.label.clone())
+            .collect()
+    };
+    let mut labels = labels_at(&context.list(&company, "labels/").await.unwrap());
+    labels.sort();
+    assert_eq!(
+        labels,
+        ["labels/first", "labels/second"],
+        "both labels must claim the shared address"
+    );
+
+    // And each label's claim is findable through its own prefix — the exact
+    // read that used to answer empty on the first-write-wins backends.
+    let second_only = context.list(&company, "labels/second").await.unwrap();
+    assert_eq!(labels_at(&second_only), ["labels/second"]);
+
+    // Set semantics: a re-put of an identical (body, label) adds nothing.
+    context
+        .put(
+            &company,
+            ContextChunk {
+                label: "labels/first".to_string(),
+                body: twin.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let again = labels_at(&context.list(&company, "labels/").await.unwrap());
+    assert_eq!(
+        again
+            .iter()
+            .filter(|l| l.as_str() == "labels/first")
+            .count(),
+        1,
+        "a re-put of an identical (body, label) must not duplicate the claim: {again:?}"
+    );
+}
+
+/// Asserts [`ContextStore::delete_label`] removes one claim, reaps the body
+/// with the last claim, and answers `false` for claims that are not there
+/// (issue #1300) — and that address-level [`ContextStore::delete`] still
+/// takes every claim at once.
+pub async fn assert_delete_label_scoped(context: Arc<dyn ContextStore>) {
+    let company = CompanyId::new("alpha");
+    let body = "shared claim body for the label-scoped delete";
+    let addr = context
+        .put(
+            &company,
+            ContextChunk {
+                label: "scoped/mine".to_string(),
+                body: body.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    context
+        .put(
+            &company,
+            ContextChunk {
+                label: "scoped/theirs".to_string(),
+                body: body.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        !context
+            .delete_label(&company, &addr, "scoped/absent")
+            .await
+            .unwrap(),
+        "an absent label answers false"
+    );
+    assert!(
+        context
+            .delete_label(&company, &addr, "scoped/mine")
+            .await
+            .unwrap()
+    );
+    assert!(
+        !context
+            .delete_label(&company, &addr, "scoped/mine")
+            .await
+            .unwrap(),
+        "a second delete of the same claim answers false"
+    );
+
+    let labels: Vec<String> = context
+        .list(&company, "scoped/")
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|m| m.addr == addr)
+        .map(|m| m.label)
+        .collect();
+    assert_eq!(
+        labels,
+        ["scoped/theirs"],
+        "only the named label's claim goes"
+    );
+    assert_eq!(
+        context.peek(&company, &addr, None).await.unwrap(),
+        body,
+        "the body survives while any label claims it"
+    );
+
+    assert!(
+        context
+            .delete_label(&company, &addr, "scoped/theirs")
+            .await
+            .unwrap()
+    );
+    assert!(
+        context
+            .list(&company, "scoped/")
+            .await
+            .unwrap()
+            .iter()
+            .all(|m| m.addr != addr),
+        "no claim may remain after the last label goes"
+    );
+    assert!(
+        context.peek(&company, &addr, None).await.is_err(),
+        "the body is reaped with its last claim"
+    );
+    assert!(
+        !context
+            .delete_label(&company, &addr, "scoped/theirs")
+            .await
+            .unwrap(),
+        "a fully-reaped address answers false"
+    );
+
+    // Address-level delete still takes every claim at once — the operator
+    // semantics `delete_label` deliberately is not.
+    let addr = context
+        .put(
+            &company,
+            ContextChunk {
+                label: "scoped/a".to_string(),
+                body: "whole-address body".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    context
+        .put(
+            &company,
+            ContextChunk {
+                label: "scoped/b".to_string(),
+                body: "whole-address body".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(context.delete(&company, &addr).await.unwrap());
+    assert!(
+        context
+            .list(&company, "scoped/")
+            .await
+            .unwrap()
+            .iter()
+            .all(|m| m.addr != addr),
+        "address-level delete takes every label's claim"
+    );
+    assert!(!context.delete(&company, &addr).await.unwrap());
+}
+
+/// Asserts a `delete_label` cannot lose a byte-identical write that lands
+/// beside it (issue #1300's TOCTOU half).
+///
+/// The defect this locks: both shared-address guards used to read a snapshot,
+/// decide nothing else claimed the address, and then delete it — so a write
+/// of identical content under another label landing in that window lost its
+/// row. `delete_label` closes it *by construction* only if each backend makes
+/// the claim-removal and the last-claim reap one atomic step (a lock, a
+/// transaction, or a conditional delete). This drives both operations
+/// concurrently, many times, and demands the second writer's claim and body
+/// survive every round.
+///
+/// What it can and cannot prove, stated plainly: the backends that serialise
+/// the two calls against each other (fs on its index lock, sqlite on its
+/// connection, the facade and the engine on their own locks) satisfy this
+/// whatever the interleaving, so here it is a **regression lock** — it fails
+/// if someone removes that serialisation. Only mongodb runs the two against a
+/// server that can genuinely interleave them, and it is the backend whose
+/// atomicity rests on a conditional delete rather than a lock, which is the
+/// case most worth driving. The tasks are spawned rather than awaited in
+/// order, so they interleave at every `.await` even on a current-thread
+/// runtime.
+pub async fn assert_delete_label_survives_a_concurrent_identical_put(
+    context: Arc<dyn ContextStore>,
+) {
+    let company = CompanyId::new("alpha");
+    // Each round uses a fresh body, so a round can never be satisfied by the
+    // previous round's surviving row.
+    for round in 0..32 {
+        let body = format!("racing body {round}");
+        let addr = context
+            .put(
+                &company,
+                ContextChunk {
+                    label: "race/first".to_string(),
+                    body: body.clone(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let deleter = {
+            let context = Arc::clone(&context);
+            let company = company.clone();
+            let addr = addr.clone();
+            tokio::spawn(async move { context.delete_label(&company, &addr, "race/first").await })
+        };
+        let writer = {
+            let context = Arc::clone(&context);
+            let company = company.clone();
+            let body = body.clone();
+            tokio::spawn(async move {
+                context
+                    .put(
+                        &company,
+                        ContextChunk {
+                            label: "race/second".to_string(),
+                            body,
+                        },
+                    )
+                    .await
+            })
+        };
+        deleter.await.unwrap().unwrap();
+        writer.await.unwrap().unwrap();
+
+        let labels: Vec<String> = context
+            .list(&company, "race/")
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|m| m.addr == addr)
+            .map(|m| m.label)
+            .collect();
+        assert!(
+            labels.iter().any(|label| label == "race/second"),
+            "round {round}: the concurrent writer's claim was lost to the delete: {labels:?}"
+        );
+        assert_eq!(
+            context.peek(&company, &addr, None).await.unwrap(),
+            body,
+            "round {round}: the body was reaped while a claim still held it"
+        );
+
+        // Leave nothing behind for the next round.
+        context.delete(&company, &addr).await.unwrap();
+    }
 }
 
 /// Asserts the [`UsageMeter`] contract: isolation, record, and windowed query.

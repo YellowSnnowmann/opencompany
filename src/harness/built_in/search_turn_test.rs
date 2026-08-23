@@ -318,6 +318,7 @@ async fn harness(
             Credential::from_value("stub-platform-token"),
             daily_calls,
         )),
+        tenant_search: None,
         // Issue #237's workspace tools are off in this fixture: the turn under
         // test exercises the #238 search path only, and an unwired store is the
         // fail-closed default everywhere but the runtime builder.
@@ -328,6 +329,8 @@ async fn harness(
     };
 
     let record = CompanyRecord {
+        overlay_retired_agents: Vec::new(),
+        overlay_agent_edits: Vec::new(),
         id: CompanyId::new("acme"),
         manifest: manifest(grants, mode, daily_calls),
         ledger: Vec::new(),

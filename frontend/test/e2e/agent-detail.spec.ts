@@ -112,12 +112,28 @@ test("a company agent opens from its card and shows what it is", async ({ page }
   // This agent sits on no desk, and says so rather than rendering nothing.
   await expect(page.getByTestId("agent-desks-empty")).toBeVisible();
 
-  // A blueprint teammate is read-only here, and the screen says why instead of
-  // offering an edit that would 409. Since #1141 the affordance is *present and
-  // disabled* rather than absent: an operator hunting for the edit needs to
-  // learn why there isn't one, not to conclude the console forgot to build it.
-  await expect(page.getByTestId("agent-edit")).toBeDisabled();
-  await expect(page.getByTestId("agent-readonly-note")).toContainText("company.toml");
+  // `ceo` is a blueprint teammate, and this is the assertion that used to pin
+  // the opposite. The Edit affordance was *present and disabled* (#1141) with a
+  // note saying the edit belonged in `company.toml` — which is advice with no
+  // action behind it for a hosted tenant that has no checkout to edit and no
+  // redeploy to make. A manifest teammate is editable now, through an overlay
+  // layered on the record rather than a rewrite of the blueprint, so the button
+  // is live and the read-only note is gone.
+  await expect(page.getByTestId("agent-edit")).toBeEnabled();
+  await expect(page.getByTestId("agent-readonly-note")).toHaveCount(0);
+
+  // And it is a real editor rather than a live-looking button: clicking opens
+  // the same fields a console-created teammate is edited through, so a manifest
+  // teammate follows one flow and not a second, weaker one. Persona instructions
+  // remain a distinct field layered on top of main's description editor.
+  await page.getByTestId("agent-edit").click();
+  await expect(page.getByTestId("agent-field-description")).toBeVisible();
+  await expect(page.getByTestId("agent-field-instructions")).toBeVisible();
+
+  // What does *not* change: the source still names the blueprint. Editing does
+  // not launder a manifest teammate into an overlay one — the operator can
+  // still see where this teammate came from.
+  await expect(page.getByTestId("agent-source")).toHaveText("Company blueprint");
 
   // The breadcrumb returns to the Company page (issue #1141, replacing "Back to
   // team" — this page is linked into from the org chart and the chat pane, and

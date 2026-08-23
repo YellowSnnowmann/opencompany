@@ -37,6 +37,22 @@ describe("fetchAuthConfig", () => {
     });
   });
 
+  it("carries the company's name, blank-normalised", async () => {
+    // The sign-in screen has no other source for it: every route that reports
+    // the name is behind the sign-in being drawn (issue #1334). A blank one is
+    // normalised away here, once, so no view has to decide whether `""` means
+    // "unnamed" or "not reported".
+    const named = client({
+      get: async () => ({ mode: "email", passwords: true, magicLink: true, name: " Acme " }),
+    });
+    expect((await fetchAuthConfig(named, null)).name).toBe("Acme");
+
+    const blank = client({
+      get: async () => ({ mode: "email", passwords: true, magicLink: true, name: "  " }),
+    });
+    expect((await fetchAuthConfig(blank, null)).name).toBeUndefined();
+  });
+
   it("falls back to email when the host has no such route", async () => {
     // A host predating this feature 404s here, and it signs people in by email.
     // Anything else would put an unusable screen in front of every existing

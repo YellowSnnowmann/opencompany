@@ -1,0 +1,134 @@
+# The triaged bug queue.
+#
+# The axis a chat log destroys. A bug reported in a thread is severity, reach,
+# repro and area all mixed into one paragraph, re-argued from scratch every time
+# somebody asks "is this the one that broke export?" — and closed by the thread
+# going quiet. One row holds the reproduction, the two claims that decide
+# priority (severity and reach, kept apart on purpose), and the reason the row
+# closed, which is the cheapest way to stop the same bug being re-triaged in a
+# month.
+#
+# Declared here rather than left to `define_ledger` at run time: this team is
+# *about* the queue, and a template that ships a bug triager, a triage policy
+# and a triage workflow but no queue for them to write into is short the axis it
+# was built around.
+
+title = "Bugs"
+purpose = """
+Every report that survived triage: what it does, how to reproduce it, how bad \
+it is and for how many, which area is at fault, and — once it closes — why. \
+Read it before opening a row: a duplicate splits the evidence for one problem \
+across two rows and makes both look less severe than the problem is.\
+"""
+written_by = "`record_entry` to open or re-triage a bug, `close_entry` when it is fixed, withdrawn or rejected"
+checks = ["required-field", "known-status", "closed-needs-reason"]
+
+[[field]]
+name = "id"
+role = "id"
+required = true
+
+[[field]]
+name = "bug"
+role = "title"
+required = true
+description = "What goes wrong, in the reporter's terms rather than the suspected cause."
+
+[[field]]
+name = "status"
+role = "status"
+required = true
+
+[[field]]
+name = "repro"
+role = "prose"
+required = true
+description = "The exact steps, the environment, and what was observed instead of what was expected. A row an engineer has to ask a follow-up question about is not triaged."
+
+[[field]]
+name = "severity"
+role = "prose"
+required = true
+description = "`critical`, `high`, `medium` or `low` — impact on the user, never how annoying it is to fix."
+
+[[field]]
+name = "reach"
+role = "prose"
+required = true
+description = "How many are affected. Kept apart from severity on purpose: collapsing the two into one number is how a cosmetic bug outranks data loss."
+
+[[field]]
+name = "area"
+role = "prose"
+description = "The part of the product believed to be at fault, with how confident that guess is. A guess stated as fact sends someone into the wrong subsystem for a day."
+
+[[field]]
+name = "evidence"
+role = "prose"
+description = "The log line, screenshot, request id or support thread behind the claim. A row citing nothing is a rumor with a number."
+
+[[field]]
+name = "owner"
+role = "owner"
+
+[[field]]
+name = "reason"
+role = "prose"
+description = "How it closed — fixed, withdrawn, or rejected and on what grounds. Required when it closes."
+
+[[field]]
+name = "refs"
+role = "refs"
+description = "The tickets, user signals and backlog items that point at this bug."
+
+[[status]]
+name = "triaged"
+
+[[status]]
+name = "needs_info"
+label = "Needs info"
+
+[[status]]
+name = "accepted"
+label = "Accepted for work"
+
+[[status]]
+name = "fixed"
+closed = true
+needs_reason = true
+
+# One closed status for every row that ends without a change to the product,
+# rather than the `wont_fix`/`not_a_bug` pair this shipped with (issue #1512).
+# Both said the same thing about where the row stands — it is over and nothing
+# was fixed — and differed only in *why*, which `reason` is required to carry
+# anyway. Splitting them asked the triager to relitigate "is this a bug we are
+# declining, or not a bug at all" on the way out, which is the argument the row
+# was closed to end. The retired words stay as aliases so rows already stored
+# under them still render here.
+[[status]]
+name = "rejected"
+label = "Rejected"
+aliases = ["wont_fix", "not_a_bug"]
+closed = true
+needs_reason = true
+
+[[section]]
+heading = "Open"
+blurb = "Reproduced and waiting on a call or on a fix. Severity and reach are the two claims to argue with."
+statuses = ["triaged", "accepted"]
+order = "recent"
+
+[[section]]
+heading = "Blocked on the reporter"
+blurb = """
+Not reproducible yet. Each carries the specific question that would unblock it \
+— "cannot reproduce" with no question attached is not a finding.\
+"""
+statuses = ["needs_info"]
+order = "recent"
+
+[[section]]
+heading = "Closed"
+blurb = "Fixed, or rejected as declined or not a bug — each with the reason, which is what tells those apart and what stops the row being re-triaged next month."
+statuses = ["fixed", "rejected"]
+cap = 20

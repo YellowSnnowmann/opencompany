@@ -457,7 +457,11 @@ export function LedgerBoard<T extends BoardRow>({
                 "flex min-h-0 shrink-0 flex-col rounded-xl border bg-gradient-to-b from-card to-muted/60 transition-colors",
                 collapsed ? RAIL_WIDTH : COLUMN_WIDTH,
                 over === column.id &&
-                  "border-primary/40 from-accent/50 to-accent/50",
+                  // A populated target has no empty-state copy to announce
+                  // itself, so its surface has to carry the same clear landing
+                  // affordance: a primary border, a full accent wash, and a
+                  // visible focus ring.
+                  "border-primary from-accent/80 to-accent/50 ring-2 ring-primary/25",
               )}
             >
               {collapsed ? (

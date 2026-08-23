@@ -78,7 +78,7 @@ describe("what an edit sends", () => {
     // A manifest teammate's fields are rendered, disabled, so the draft still
     // holds their values. Echoing one back would earn a 409 for the whole save.
     const detail = manifest();
-    expect(agentEdits(detail, { name: "Nope", role: "Chief Vibes", description: "New" })).toBeNull();
+    expect(agentEdits(detail, { name: "Nope", role: "Chief Vibes", description: "New", instructions: "" })).toBeNull();
     expect(isEditable(detail, "role")).toBe(false);
   });
 });
@@ -86,16 +86,16 @@ describe("what an edit sends", () => {
 describe("whether a draft can be saved", () => {
   it("requires a name and a role, but not instructions", () => {
     const detail = agent();
-    expect(draftIsValid(detail, { name: "Jamie", role: "Growth", description: "" })).toBe(true);
-    expect(draftIsValid(detail, { name: "  ", role: "Growth", description: "x" })).toBe(false);
-    expect(draftIsValid(detail, { name: "Jamie", role: "", description: "x" })).toBe(false);
+    expect(draftIsValid(detail, { name: "Jamie", role: "Growth", description: "", instructions: "" })).toBe(true);
+    expect(draftIsValid(detail, { name: "  ", role: "Growth", description: "x", instructions: "" })).toBe(false);
+    expect(draftIsValid(detail, { name: "Jamie", role: "", description: "x", instructions: "" })).toBe(false);
   });
 
   it("does not block on a read-only field being blank", () => {
     // A manifest teammate carries no name of its own, so the disabled name box
     // is empty. That must not make Save unreachable for a form that has no
     // editable fields to begin with.
-    expect(draftIsValid(manifest(), { name: "", role: "Chief Executive", description: "" })).toBe(
+    expect(draftIsValid(manifest(), { name: "", role: "Chief Executive", description: "", instructions: "" })).toBe(
       true,
     );
   });

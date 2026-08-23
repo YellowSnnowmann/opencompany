@@ -24,9 +24,8 @@ use crate::company::steer::{InflightEntry, MAX_REDIRECT_CHARS, SteerAction, Stee
 use crate::company::{WorkflowGraphSpec, create_company_workflow, raw_workflow_from_spec};
 use crate::error::OpenCompanyError;
 use crate::ports::tasks::{
-    BOARD_COLUMNS, COLUMN_DONE, COLUMN_TODO, TaskDeliverable, TaskOutput, TaskOutputAction,
-    TaskOutputSource, TaskOutputWorkflow, TaskRecord, TaskWorkflowProposal, cap_discussion,
-    is_board_column,
+    COLUMN_DONE, COLUMN_TODO, TaskDeliverable, TaskOutput, TaskOutputAction, TaskOutputSource,
+    TaskOutputWorkflow, TaskRecord, TaskWorkflowProposal, cap_discussion, is_board_column,
 };
 use crate::ports::types::CompanyEvent;
 use crate::ports::{generate_id, now_millis};
@@ -87,7 +86,24 @@ pub(crate) struct TaskCard {
     pub(crate) title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) note: Option<String>,
+    /// Which of the board's three phases this card is in — `pending`,
+    /// `working` or `done` (issue #1512).
+    ///
+    /// The name is unchanged and the meaning is narrower: it used to carry the
+    /// stored stage, so a client saw six words here and had to know which of
+    /// four meant "started". It is the board's column, and the board now has
+    /// three of them.
     pub(crate) column: String,
+    /// Which kind of working, when the card is working: `planning`,
+    /// `in_progress`, `paused` or `in_review` (issue #1512).
+    ///
+    /// Omitted for a pending or done card, because there is only one way to be
+    /// either. This is what the console reads for the affordances that are
+    /// genuinely stage-specific — Resume on a paused card, the review link on
+    /// one waiting for a verdict — which used to be read off `column` and
+    /// therefore forced `column` to stay six-valued.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) stage: Option<String>,
     pub(crate) priority: String,
     pub(crate) assignee: String,
     pub(crate) updated_at: u64,
@@ -174,7 +190,8 @@ impl From<TaskRecord> for TaskCard {
             id: t.id,
             title: t.title,
             note: t.note,
-            column: t.column,
+            column: crate::ledger::board::phase_of(&t.column).to_string(),
+            stage: stage_of(&t.column),
             priority: t.priority,
             assignee: t.assignee,
             updated_at: t.updated_at_millis,
@@ -340,20 +357,42 @@ fn validate_parent(
     Ok(())
 }
 
-/// Rejects a `column` the board does not render (issue #205).
+/// Resolves a written `column` to the stage that is actually stored, rejecting
+/// a word the board does not know (issue #205, issue #1512).
 ///
 /// `column` is a free string on the wire, and nothing checked it: a typo'd
 /// `"in-progress"` was persisted verbatim, so the card disappeared from every
 /// rendered column *and* — since only the exact literal `in_progress`
 /// edge-fires a dispatch — silently never ran. Refusing at the write boundary
-/// is the cheap place to keep the board's six columns the only six.
-fn validate_column(column: &str) -> Result<(), ApiError> {
+/// is the cheap place to keep the board's vocabulary the only vocabulary.
+///
+/// # Two words in, one word stored
+///
+/// Since #1512 the board *reads* as three phases and *stores* six stages, so a
+/// drop sends `working` where it used to send `in_progress`. Both are accepted
+/// and they are not equivalent:
+///
+/// * a **phase** resolves to that phase's [`entry_stage`](crate::ledger::board::BoardPhase::entry_stage)
+///   — `working` becomes `in_progress`, which dispatches. This is what the
+///   console, the tools and any ordinary client send.
+/// * a **stage** is stored verbatim. Nothing in the product needs this any
+///   more, but the runtime's own paths and every stored card speak it, and a
+///   boundary that refused `in_review` would refuse to describe a state the
+///   board can be in.
+///
+/// The error names the phases only. A caller who guessed wrong is a caller who
+/// should be sending one of three words, and listing the six would teach them
+/// the vocabulary this issue exists to stop teaching.
+fn resolve_column(column: &str) -> Result<String, ApiError> {
+    if let Some(stage) = crate::ledger::board::entry_stage(column) {
+        return Ok(stage.to_string());
+    }
     if is_board_column(column) {
-        return Ok(());
+        return Ok(column.to_string());
     }
     Err(ApiError(OpenCompanyError::InvalidRequest(format!(
         "\"{column}\" is not a board column — use one of: {}",
-        BOARD_COLUMNS.join(", ")
+        crate::ledger::board::phase_ids().join(", ")
     ))))
 }
 
@@ -413,8 +452,10 @@ async fn create_task(
     // into To-do, and every lifecycle return now lands here too, carrying its
     // reason on the note. So this default is no longer a choice between two
     // columns; it is simply where not-started work lives.
-    let column = body.column.unwrap_or_else(|| COLUMN_TODO.to_string());
-    validate_column(&column)?;
+    let column = match body.column {
+        Some(column) => resolve_column(&column)?,
+        None => COLUMN_TODO.to_string(),
+    };
     let assignee = resolve_assignee(&company, body.assignee.unwrap_or_default()).await?;
     let record = TaskRecord {
         id: generate_id(),
@@ -489,8 +530,7 @@ async fn patch_task(
     // so returning the `400` from here discards the partial edit rather than
     // persisting half of it.
     if let Some(column) = body.column {
-        validate_column(&column)?;
-        record.column = column;
+        record.column = resolve_column(&column)?;
     }
     if let Some(priority) = body.priority {
         record.priority = priority;
@@ -735,7 +775,7 @@ async fn reject_workflow_proposal(
     record.note = Some(crate::runtime::advance::append_result(
         record.note.as_deref(),
         crate::runtime::advance::SYSTEM_ATTRIBUTION,
-        "the proposed workflow was rejected — the card is back in To-do",
+        "the proposed workflow was rejected — the card is back in Pending",
     ));
     record.column = COLUMN_TODO.to_string();
     record.updated_at_millis = now_millis();
@@ -917,6 +957,7 @@ impl From<crate::runtime::journal::ExecutedEffect> for IrreversibleEffect {
 pub(crate) struct LineageRef {
     pub(crate) id: String,
     pub(crate) title: String,
+    /// The card's phase, on the same terms as [`TaskCard::column`].
     pub(crate) column: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) cost: Option<CostDisplay>,
@@ -927,10 +968,22 @@ impl LineageRef {
         Self {
             id: t.id.clone(),
             title: t.title.clone(),
-            column: t.column.clone(),
+            column: crate::ledger::board::phase_of(&t.column).to_string(),
             cost,
         }
     }
+}
+
+/// The stage word a card carries, for the cards where it says something.
+///
+/// `None` for pending and done: there is exactly one way to be either, so a
+/// field naming which would be a field naming nothing — and an omitted field
+/// is what tells a client "do not offer a stage-specific control here" without
+/// it needing the phase table to work that out.
+fn stage_of(stored: &str) -> Option<String> {
+    crate::ledger::board::column(stored)
+        .filter(|column| column.phase == crate::ledger::board::PHASE_WORKING)
+        .map(|column| column.id.to_string())
 }
 
 /// A positive USD amount or an explicit role-redacted state. A true zero is
@@ -2617,6 +2670,8 @@ mod steer_redirect_test {
         let id = CompanyId::new("acme");
         FsCompanyStore::new(home.to_path_buf())
             .save(&CompanyRecord {
+                overlay_retired_agents: Vec::new(),
+                overlay_agent_edits: Vec::new(),
                 id: id.clone(),
                 manifest: manifest(),
                 ledger: Vec::new(),

@@ -210,7 +210,15 @@ fn render_document(
 
     // --- the facts anyone reading this needs first --------------------------
     out.push_str("<dl class=\"facts\">\n");
-    fact(&mut out, "Status", column_label(&task.column));
+    // Phase first, then the stage when there is one: "Working — In review"
+    // says both what a reader of the board would see and what the card is
+    // actually waiting on, which is the pairing issue #1512 put on the card
+    // instead of in the column heading.
+    let status = match task.stage.as_deref() {
+        Some(stage) => format!("{} — {}", column_label(&task.column), column_label(stage)),
+        None => column_label(&task.column).to_string(),
+    };
+    fact(&mut out, "Status", &status);
     fact(&mut out, "Priority", &sentence_case(&task.priority));
     fact(
         &mut out,

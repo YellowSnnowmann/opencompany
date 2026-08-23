@@ -34,7 +34,7 @@
 
 set -eu
 
-FEATURES="${1:-openhuman,tinycortex}"
+FEATURES="${1:-openhuman}"
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH='' cd -- "${SCRIPT_DIR}/../.." && pwd)

@@ -1,0 +1,14 @@
+role = "Solve Lead"
+description = "Turn a stated problem into approach, program and check, hand each to the desk that owns it, and accept only an answer that survived the check."
+tier = "orchestrator"
+# Everything that decides what to do next: the problem as stated, the house
+# method, the attempts so far, and the board.
+context = ["GOAL.md", "brief.md", "board.md", "attempts.md", "answers.md"]
+
+# The lead reads the workspace and never writes it. Deliberately no `shell`:
+# a lead that can run the program will run the program, and the split this
+# roster is built on lasts exactly as long as the lead cannot do the work
+# itself.
+tools = ["workspace.read"]
+
+prompt_files = ["prompts/orchestrator.md"]

@@ -74,6 +74,8 @@ async fn with_company(state: &AppState, home: &std::path::Path) -> CompanyId {
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest(),
             ledger: Vec::new(),
@@ -1191,6 +1193,72 @@ async fn an_apply_seeds_the_company_the_wizard_designed() {
         manifest.policy.mode,
         crate::company::PROVISIONED_POLICY_MODE
     );
+}
+
+#[tokio::test]
+async fn onboarding_persists_the_local_model_it_tested() {
+    let home = home();
+    let state = fresh_state(home.path());
+    let mut company = designed_company(None);
+    company["inference"] = serde_json::json!({
+        "provider": "ollama",
+        "baseUrl": "localhost:6969",
+        "model": "qwen3:8b"
+    });
+
+    let (status, body) = post_setup(state.clone(), serde_json::json!({ "company": company })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let seeded = body["seeded_company"].as_str().expect("seeded");
+    let manifest = seeded_manifest(home.path(), seeded).await;
+    assert_eq!(manifest.inference.provider.as_deref(), Some("ollama"));
+    assert_eq!(
+        manifest.inference.base_url.as_deref(),
+        Some("http://localhost:6969/v1")
+    );
+    for tier in crate::company::INFERENCE_TIERS {
+        assert_eq!(
+            manifest.inference.models.get(*tier).map(String::as_str),
+            Some("qwen3:8b")
+        );
+    }
+}
+
+#[cfg(feature = "openhuman")]
+#[tokio::test]
+async fn local_model_probe_normalizes_the_address_and_detects_its_model() {
+    let app = axum::Router::new()
+        .route(
+            "/v1/models",
+            axum::routing::get(|| async {
+                axum::Json(serde_json::json!({ "data": [{ "id": "qwen3:8b" }] }))
+            }),
+        )
+        .route(
+            "/v1/chat/completions",
+            axum::routing::post(|| async {
+                axum::Json(serde_json::json!({
+                    "choices": [{ "message": { "content": "pong" } }]
+                }))
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let result = super::probe_inference(
+        &super::InferenceTestRequest {
+            provider: "ollama".to_string(),
+            base_url: Some(address.to_string()),
+            ..Default::default()
+        },
+        &MapEnv::default(),
+    )
+    .await;
+    server.abort();
+
+    assert!(result.ok, "{:?}", result.error);
+    assert_eq!(result.base_url, format!("http://{address}/v1"));
+    assert_eq!(result.model.as_deref(), Some("qwen3:8b"));
 }
 
 /// A designed company beats a template slug. An operator who answered three

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { withHostParam } from "@/hooks/use-host-route";
+
 /** The hash split into path segments: `#/settings/people` → `["settings", "people"]`. */
 function readSegments(): string[] {
   return window.location.hash
@@ -59,11 +61,16 @@ export function useHashView<T extends string>(
    * Replace semantics, never push: pushing leaves the unknown hash in the
    * history stack, so Back returns to it, this rewrite bounces forward again,
    * and the operator is stuck in a ping-pong they cannot Back out of.
+   *
+   * `withHostParam` carries the connection scope across the rewrite. The host
+   * is part of the address (`use-host-route.ts`), and a `replaceState` fires no
+   * `hashchange` — so a scope dropped here has nothing to put it back, and the
+   * console would go on rendering one host under an address naming none.
    */
   const canonicalize = useCallback((next: [T, string | null]) => {
     const path = next[1] ? `${next[0]}/${next[1]}` : next[0];
     if (readSegments().join("/") === path) return;
-    window.history.replaceState(null, "", `#/${path}`);
+    window.history.replaceState(null, "", withHostParam(path));
   }, []);
 
   // Reflect the resolved view into the URL when the page arrived with no hash
@@ -84,9 +91,14 @@ export function useHashView<T extends string>(
     return () => window.removeEventListener("hashchange", onHash);
   }, [resolve, canonicalize]);
 
+  // The host scope rides along; every other query key is dropped, which is what
+  // `useHashFlag`'s flags want — `?new` belongs to the screen it was opened
+  // over, not to the one being navigated to.
   const navigate = useCallback((next: T, nextSub?: string) => {
     const path = nextSub ? `${next}/${nextSub}` : next;
-    if (readSegments().join("/") !== path) window.location.hash = `/${path}`;
+    if (readSegments().join("/") !== path) {
+      window.location.hash = withHostParam(path).slice(1);
+    }
     setRoute([next, nextSub ?? null]);
   }, []);
 

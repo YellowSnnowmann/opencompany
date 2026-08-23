@@ -66,18 +66,12 @@ env:
   # every tenant can do, so treat edits here as a product change, not a CI
   # tweak. Full belt: adds mcp/media/composio (the credential/real-money tool
   # families, fail-closed until their config exists), imap/telegram (channels),
-  # medulla (hosted brain transport), tinycortex (local memory backend), and
-  # sidecar. `sqlite` is intentionally omitted — its bundled rusqlite needs a C
+  # medulla (hosted brain transport), and sidecar. `sqlite` is intentionally omitted — its bundled rusqlite needs a C
   # compiler the slim build image lacks, and it is redundant on a mongodb tenant.
   #
   # `tinymemory` is the hosted-memory contract: `OPENCOMPANY_MEMORY=remote` +
   # `OPENCOMPANY_MEMORY_DRIVER=supermemory|mem0|cognee` (plus `null`), inert
-  # until an operator sets those. `tinymemory-embedded` is deliberately NOT
-  # here for the same two reasons `sqlite` isn't: tinymemory-core links a
-  # bundled rusqlite (the C compiler the slim image lacks), and its `namespace`
-  # store on a mongodb tenant is refused by the ephemeral-/data guard anyway.
-  # Self-hosters wanting the embedded contract driver compile it via
-  # OPENCOMPANY_FEATURES (deploy/README.md).
+  # until an operator sets those.
   #
   # `tinymemory-module` is the loadable TinyMemory module driver (issue #1524):
   # inert until a tenant's env sets OPENCOMPANY_MEMORY=embedded AND
@@ -85,28 +79,23 @@ env:
   # nothing under the `store` default). It is here so a canary tenant can be
   # flipped onto it at all; that is the whole of what it buys on THIS list.
   #
-  # It does NOT slim this image, and the arithmetic is worth stating plainly
-  # so nobody re-derives the opposite. Measured on this exact feature set:
-  # 483 crates without it, 487 with, and it removes NOTHING —
-  # `tinymemory-core`, `tinycortex`, `tinyagents`, `libsqlite3-sys` and `cc`
-  # are all still linked. `cargo tree -i` names the reason:
+  # It does NOT slim this image. #1568 removed OpenCompany's own TinyCortex
+  # dependency and dropped `tinycortex` from this list, but the engine still
+  # arrives through the runtime:
   #
+  #     tinycortex      ← openhuman ← opencompany
   #     tinymemory-core ← openhuman ← opencompany
-  #     libsqlite3-sys  ← rusqlite  ← openhuman ← opencompany
   #
-  # `openhuman` declares the whole TinyMemory/TinyCortex stack non-optionally
-  # and uses `rusqlite` for its own stores, so the engine rides in through the
-  # runtime whatever the memory driver does. The bus proxy avoids the engine
-  # only in a build WITHOUT `openhuman` — the compose default
-  # (`sqlite,mongodb`), where the module driver measures 16.2% faster on a
-  # clean release build (208s vs 248s for `tinymemory-embedded`) and drops
-  # rusqlite and `cc` entirely.
+  # `vendor/openhuman` declares the TinyMemory/TinyCortex stack non-optionally
+  # and links `rusqlite` for its own stores, so this image compiles the engine
+  # whatever the memory driver does. The bus proxy avoids it only in a build
+  # WITHOUT `openhuman` — the compose default (`sqlite,mongodb`), where the
+  # module driver measured 16.2% faster on a clean release build.
   #
-  # Making that true here needs openhuman#5560 (route the tool/query/tree/sync
-  # paths through the provider so `tinymemory-core` leaves the build) — and
-  # even then SQLite stays, because `openhuman` and `tinyagents` link
-  # `rusqlite` for reasons that have nothing to do with memory.
-  TENANT_FEATURES: mongodb,openhuman,openhuman-rpc,tinyplace,github,smtp,dns,tinyhumans,webhooks,platform-jwt,export,mcp,media,composio,imap,telegram,medulla,tinycortex,sidecar,chargebee,paypal,tinymemory,tinymemory-module
+  # Making that true here needs openhuman#5560, and even then SQLite stays:
+  # `openhuman` and `tinyagents` link `rusqlite` for reasons unrelated to
+  # memory.
+  TENANT_FEATURES: mongodb,openhuman,openhuman-rpc,tinyplace,github,smtp,dns,tinyhumans,webhooks,platform-jwt,export,mcp,media,composio,imap,telegram,medulla,sidecar,chargebee,paypal,tinymemory,tinymemory-module
 
 jobs:
   deploy:
@@ -140,7 +129,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Build and push image to ECR
         id: build

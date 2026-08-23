@@ -3,3 +3,9 @@ description = "Break a question into lines of inquiry, delegate them, and combin
 tier = "orchestrator"
 # Sees everything that decides what to do next, including the assertion board.
 context = ["GOAL.md", "brief.md", "claims.md", "threads.md", "DEMANDS.md", "board.md", "INDEX.md"]
+
+# The role's working rules, checked in beside this file and read at manifest
+# load. The `.toml` carries the wiring; `prompts/` carries how the role works.
+# A missing path here is a manifest error rather than a skipped entry — a role
+# whose prompt was written around a briefing it never received fails silently.
+prompt_files = ["prompts/orchestrator.md"]

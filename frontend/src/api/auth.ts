@@ -32,6 +32,19 @@ export type AuthMode = "email" | "wallet" | "none";
 /** What the console must know before it can draw a sign-in screen. */
 export interface AuthConfig {
   mode: AuthMode;
+  /**
+   * What this company calls itself, so the sign-in screen can name what a
+   * credential is being handed to.
+   *
+   * It has to arrive here rather than from `status`: every route that reports
+   * the name is behind the very sign-in being drawn, and on the hosted platform
+   * each tenant is a separate company on its own URL, so "which one is this"
+   * is a real question at that moment.
+   *
+   * Optional only for a host predating the field. The console draws a heading
+   * with no name there — the same one it drew before this existed.
+   */
+  name?: string;
   /** Whether a password may be offered. Only ever true in `email` mode. */
   passwords: boolean;
   /**
@@ -68,7 +81,13 @@ export async function fetchAuthConfig(
 ): Promise<AuthConfig> {
   try {
     const config = await client.get<AuthConfig>(`${client.scopeFor(company)}/auth/config`);
-    return { ...config, magicLink: config.magicLink ?? true };
+    // A blank name is not a name. Normalised here, once, so no view has to
+    // decide whether `""` means "unnamed" or "not reported".
+    return {
+      ...config,
+      name: config.name?.trim() || undefined,
+      magicLink: config.magicLink ?? true,
+    };
   } catch {
     return { mode: "email", passwords: true, magicLink: true };
   }

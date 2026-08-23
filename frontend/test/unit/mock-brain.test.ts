@@ -58,15 +58,40 @@ afterAll(() => {
   server?.kill();
 });
 
-/** POSTs a chat-completions request and returns the parsed reply. */
-async function chat(messages: unknown[]): Promise<any> {
+/**
+ * POSTs a chat-completions request and returns the parsed reply.
+ *
+ * `tools` is the belt the request offers, and it is optional because most arms
+ * do not read it — but `__MOCK_PLAN__` does: a step is served only to a request
+ * that could actually make the calls it names. Passing none is therefore the
+ * same as asking as an agent with an empty belt.
+ */
+async function chat(messages: unknown[], tools: string[] = []): Promise<any> {
   const response = await fetch(`${origin}/v1/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model: "chat-v1", messages }),
+    body: JSON.stringify({
+      model: "chat-v1",
+      messages,
+      ...(tools.length
+        ? { tools: tools.map((name) => ({ type: "function", function: { name } })) }
+        : {}),
+    }),
   });
   expect(response.status).toBe(200);
   return response.json();
+}
+
+/**
+ * The plan directive for `steps`, with a marker so each test owns its cursor.
+ *
+ * The marker goes AFTER the payload, which is where the fixture keys off it:
+ * two of the tests below script the same single `spawn_task`, and a key taken
+ * from the parsed steps alone would hand the second one the first one's spent
+ * cursor.
+ */
+function plan(marker: string, steps: unknown[][]): string {
+  return `close this out __MOCK_PLAN__ ${JSON.stringify(steps)} ${marker}`;
 }
 
 describe("the mock inference backend", () => {
@@ -241,6 +266,102 @@ describe("the mock inference backend", () => {
     ]);
 
     expect(reply.choices[0].message.tool_calls[0].function.name).toBe("spawn_task");
+  });
+
+  it("emits every call in one plan step together, then walks to the next step", async () => {
+    // The shape a fan-out actually has: one assistant message, two calls. An
+    // orchestrator that could only make one call per turn could not delegate a
+    // goal to two teammates without two operator messages.
+    const directive = plan("p-101", [
+      [
+        { name: "spawn_task", arguments: { title: "gather", assignee: "engineer" } },
+        { name: "spawn_task", arguments: { title: "write", assignee: "writer" } },
+      ],
+      [{ name: "review_task", arguments: { task_id: "t-1", decision: "approve" } }],
+    ]);
+    const belt = ["spawn_task", "review_task"];
+    const history = [{ role: "user", content: directive }];
+
+    const first = await chat(history, belt);
+    const calls = first.choices[0].message.tool_calls;
+    expect(calls).toHaveLength(2);
+    expect(calls.map((c: any) => c.function.name)).toEqual(["spawn_task", "spawn_task"]);
+    expect(JSON.parse(calls[1].function.arguments)).toEqual({
+      title: "write",
+      assignee: "writer",
+    });
+    expect(first.choices[0].finish_reason).toBe("tool_calls");
+
+    // The SAME history again — which is what the host sends, because a
+    // delegation tool's result never enters the model-visible transcript. The
+    // cursor is what makes this the second step rather than the first one over.
+    const second = await chat(history, belt);
+    expect(second.choices[0].message.tool_calls).toHaveLength(1);
+    expect(second.choices[0].message.tool_calls[0].function.name).toBe("review_task");
+
+    // Past the end the turn ends: prose, not a loop.
+    const third = await chat(history, belt);
+    expect(third.choices[0].message.tool_calls).toBeUndefined();
+    expect(third.choices[0].message.content).toContain("__MOCK_LLM__");
+  });
+
+  it("leaves a plan unserved for an agent whose belt cannot make the call", async () => {
+    // The teammate case, and the reason the belt is the key. One operator
+    // message reaches the orchestrator and then everyone it hands work to, so
+    // this exact directive is in the engineer's prompt as well — and the
+    // engineer's belt really is narrower: fourteen tools on the harness
+    // company against the orchestrator's twenty-seven, with no `spawn_task`
+    // among them. Serving it there would spend the step on an agent that
+    // cannot make the call, and the orchestrator would then get the step
+    // after it.
+    const directive = plan("p-202", [
+      [{ name: "spawn_task", arguments: { title: "gather" } }],
+    ]);
+
+    const teammate = await chat([{ role: "user", content: `The operator asked: ${directive}` }], [
+      "workspace_read",
+    ]);
+    expect(teammate.choices[0].message.tool_calls).toBeUndefined();
+    expect(teammate.choices[0].message.content).toContain("__MOCK_LLM__");
+
+    // …and the step is still there for the agent that can.
+    const orchestrator = await chat([{ role: "user", content: directive }], ["spawn_task"]);
+    expect(orchestrator.choices[0].message.tool_calls[0].function.name).toBe("spawn_task");
+  });
+
+  it("does not let a triage classification consume a plan step", async () => {
+    // The same hazard #678 fixed for `__MOCK_TOOL_CALL__`, one directive later.
+    const directive = plan("p-303", [
+      [{ name: "spawn_task", arguments: { title: "gather" } }],
+    ]);
+
+    const classification = await chat(
+      [
+        {
+          role: "system",
+          content: "You classify one message an operator sent to their company's chat.",
+        },
+        { role: "user", content: directive },
+      ],
+      ["spawn_task"],
+    );
+    expect(classification.choices[0].message.content).toBe("chatter");
+
+    const turn = await chat([{ role: "user", content: directive }], ["spawn_task"]);
+    expect(turn.choices[0].message.tool_calls[0].function.name).toBe("spawn_task");
+  });
+
+  it("answers in prose for an explicitly empty plan step", async () => {
+    // How a spec says "and then just reply": the step is consumed rather than
+    // re-read, so a turn that follows it moves on.
+    const directive = plan("p-404", [[], [{ name: "spawn_task", arguments: { title: "later" } }]]);
+    const history = [{ role: "user", content: directive }];
+
+    const first = await chat(history, ["spawn_task"]);
+    expect(first.choices[0].message.tool_calls).toBeUndefined();
+
+    const second = await chat(history, ["spawn_task"]);
+    expect(second.choices[0].message.tool_calls[0].function.name).toBe("spawn_task");
   });
 
   it("returns embeddings at the width the host validates against", async () => {

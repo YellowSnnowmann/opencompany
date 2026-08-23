@@ -59,6 +59,39 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Print the system prompt each of a company's agents would be built with.
+    ///
+    /// A brief (`agents/prompts/*.md`, an inline `prompt`, a routed `context`
+    /// entry) is the most editable thing in a bundle and used to be the least
+    /// inspectable: seeing it meant running the company and reading a provider
+    /// trace. This renders the same composition from the manifest alone, names
+    /// every section's origin, and says plainly which sections need a live
+    /// runtime instead of guessing at them.
+    ///
+    /// Build with `--features openhuman` to include the harness's own tool
+    /// briefs (workspace, ledgers, deliverables, delegation); the default build
+    /// renders the persona and the checked-in briefs and reports the rest as
+    /// deferred. `scripts/dump-prompt.sh` is the wrapper that gets the feature
+    /// flag right.
+    Prompt {
+        /// Company bundle directory, or a manifest file.
+        #[arg(long = "company", value_name = "DIR", default_value = ".")]
+        company: PathBuf,
+        /// Only this agent id. Repeat for several.
+        #[arg(long = "agent", value_name = "ID")]
+        agents: Vec<String>,
+        /// Print the prompt body verbatim, with no report around it — the bytes
+        /// to diff against a provider trace. Requires exactly one agent.
+        #[arg(long)]
+        raw: bool,
+        /// Print the report as JSON instead of Markdown.
+        #[arg(long)]
+        json: bool,
+        /// Write one `<agent-id>.prompt.md` per agent into this directory
+        /// instead of printing.
+        #[arg(long = "out", value_name = "DIR")]
+        out: Option<PathBuf>,
+    },
     /// Report the effective runtime configuration, which layer set each value,
     /// and what is missing per optional capability.
     Doctor {
@@ -180,10 +213,6 @@ enum MemoryCmd {
         /// Target credential (hosted engines only).
         #[arg(long)]
         to_api_key: Option<String>,
-        /// Target data root (`namespace` only). Defaults to the env data dir —
-        /// refused when that resolves to the source's own store.
-        #[arg(long)]
-        to_data_dir: Option<PathBuf>,
         /// Records per page.
         #[arg(long, default_value_t = 500)]
         page_size: usize,
@@ -207,7 +236,6 @@ impl std::fmt::Debug for MemoryCmd {
                 to,
                 to_url,
                 to_api_key,
-                to_data_dir,
                 page_size,
                 dry_run,
                 resume_cursor,
@@ -216,7 +244,6 @@ impl std::fmt::Debug for MemoryCmd {
                 .field("to", to)
                 .field("to_url", &to_url.as_ref().map(|_| "<set>"))
                 .field("to_api_key", &to_api_key.as_ref().map(|_| "<set>"))
-                .field("to_data_dir", to_data_dir)
                 .field("page_size", page_size)
                 .field("dry_run", dry_run)
                 .field("resume_cursor", &resume_cursor.is_some())
@@ -245,6 +272,78 @@ impl From<ModeArg> for LaunchMode {
 /// file inside it (`companies/<name>/company.toml`); the file form is normalized
 /// to its parent so workspace seeding and the skill/workflow read resolvers look
 /// under the company directory rather than under `company.toml/…`.
+/// `opencompany prompt`: render each agent's composed system prompt.
+///
+/// Selection is by id and is **fail-loud** — a `--agent` naming nobody is an
+/// error listing the roster, not an empty report. A typo'd id that printed
+/// nothing would read exactly like an agent whose prompt is empty, which is the
+/// one thing this command exists to distinguish.
+fn run_prompt(
+    company: &std::path::Path,
+    agents: &[String],
+    raw: bool,
+    json: bool,
+    out: Option<&std::path::Path>,
+) -> Result<()> {
+    let manifest = CompanyManifest::from_path(company)?;
+    let all = opencompany::company::prompt_dump::dump(&manifest);
+
+    let selected: Vec<_> = if agents.is_empty() {
+        all
+    } else {
+        for wanted in agents {
+            if !all.iter().any(|agent| &agent.agent_id == wanted) {
+                let roster: Vec<&str> = all.iter().map(|a| a.agent_id.as_str()).collect();
+                return Err(opencompany::error::OpenCompanyError::Config(format!(
+                    "no agent `{wanted}` in {} — the roster is {roster:?}",
+                    company.display()
+                )));
+            }
+        }
+        all.into_iter()
+            .filter(|agent| agents.contains(&agent.agent_id))
+            .collect()
+    };
+
+    if raw {
+        // One agent, because raw output has no framing to say whose prompt is
+        // whose: concatenating two would produce a document that looks like one
+        // agent's prompt and is not.
+        let [agent] = &selected[..] else {
+            return Err(opencompany::error::OpenCompanyError::Config(format!(
+                "`--raw` prints one prompt with no framing around it, so it needs exactly one \
+                 `--agent` (got {})",
+                selected.len()
+            )));
+        };
+        print!("{}", agent.body());
+        return Ok(());
+    }
+
+    if let Some(dir) = out {
+        std::fs::create_dir_all(dir)?;
+        for agent in &selected {
+            let path = dir.join(format!("{}.prompt.md", agent.agent_id));
+            std::fs::write(&path, agent.to_markdown())?;
+            println!("wrote {}", path.display());
+        }
+        return Ok(());
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&selected)?);
+        return Ok(());
+    }
+
+    for (index, agent) in selected.iter().enumerate() {
+        if index > 0 {
+            println!("---\n");
+        }
+        print!("{}", agent.to_markdown());
+    }
+    Ok(())
+}
+
 fn company_source_dir(path: &std::path::Path) -> std::path::PathBuf {
     if path.is_file() {
         path.parent()
@@ -1126,18 +1225,17 @@ async fn import_from_dir(dir: &std::path::Path, home: Option<PathBuf>) -> Result
 /// what a boot would bind — you migrate *before* flipping the environment, so
 /// the environment still names the source. Only provider-backed engines can
 /// migrate (the seam is what `export_page`/`import_records` live on); the
-/// `store` default and the EngineCortex overlay are refused by name.
+/// `store` default is refused by name.
 #[cfg(feature = "tinymemory")]
 async fn run_memory_cmd(cmd: MemoryCmd) -> Result<()> {
     use opencompany::store::StorageSettings;
-    use opencompany::store::memory::driver::{MemoryMode, open_driver};
+    use opencompany::store::memory::driver::open_driver;
     use opencompany::store::memory::migrate::migrate;
 
     let MemoryCmd::Migrate {
         to,
         to_url,
         to_api_key,
-        to_data_dir,
         page_size,
         dry_run,
         resume_cursor,
@@ -1158,27 +1256,12 @@ async fn run_memory_cmd(cmd: MemoryCmd) -> Result<()> {
     // (`store::memory::migrate::resolve_migrate_configs`), where the feature
     // lanes execute the guards' tests; the bin drives the loop and reports.
     let (from_config, to_config) = opencompany::store::memory::migrate::resolve_migrate_configs(
-        &settings,
-        &to,
-        to_url,
-        to_api_key,
-        to_data_dir,
+        &settings, &to, to_url, to_api_key,
     )?;
 
-    // The same exclusive root lock serve holds, whenever an embedded store is
-    // on either side: a migration reading a SQLite store a live host is
-    // writing walks a shifting export cursor (skipped or repeated records).
-    // Hosted-to-hosted has no local store to lock; the pause-first
-    // precondition printed below still applies to the remote writer.
-    let _home_lock = if matches!(from_config.mode, MemoryMode::Embedded)
-        || matches!(to_config.mode, MemoryMode::Embedded)
-    {
-        Some(opencompany::store::lock::acquire(&resolve_home_migrated(
-            None,
-        )?)?)
-    } else {
-        None
-    };
+    // Hosted providers have no local memory store to lock. The pause-first
+    // precondition printed below still applies to remote writers.
+    let _home_lock: Option<()> = None;
 
     let (from, _) = open_driver(&from_config)?.ok_or_else(|| {
         opencompany::error::OpenCompanyError::Config(
@@ -1984,6 +2067,13 @@ async fn async_main() -> Result<()> {
                 std::process::exit(1);
             }
         }
+        Some(Command::Prompt {
+            company,
+            agents,
+            raw,
+            json,
+            out,
+        }) => run_prompt(&company, &agents, raw, json, out.as_deref()),
         Some(Command::Doctor { company, json }) => {
             let env = ProcessEnv;
             // Locate config.toml under the resolved data dir (env override or

@@ -176,6 +176,8 @@ export interface InferenceTestResult {
   ok: boolean;
   /** The endpoint actually reached — a tick from the wrong URL is not a pass. */
   baseUrl: string;
+  /** Concrete model discovered from the endpoint's OpenAI-compatible catalog. */
+  model?: string | null;
   /** Present only on failure, already summarised into one actionable line. */
   error?: string;
 }
@@ -237,6 +239,16 @@ export interface DesignedCompany {
    * nobody. Omitted only on a host that needs no sign-in at all.
    */
   adminEmail?: string | null;
+  /** The tested provider to persist onto the new company. */
+  inference?: SetupInferenceInput | null;
+}
+
+export interface SetupInferenceInput {
+  provider: string;
+  baseUrl?: string | null;
+  model?: string | null;
+  /** Write-only; stored in the company's secret store. */
+  key?: string | null;
 }
 
 export interface DesignedAgent {  name: string;
@@ -325,7 +337,11 @@ export function proposeSetupRoster(
     industry: string;
     teamHint: string;
     automate: string;
+    template?: string | null;
     inferenceKey?: string | null;
+    inferenceProvider?: string | null;
+    inferenceBaseUrl?: string | null;
+    inferenceModel?: string | null;
   },
 ): Promise<SetupRoster> {
   return client.post<SetupRoster>("/api/v1/setup/roster", body);

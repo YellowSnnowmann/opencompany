@@ -97,6 +97,8 @@ async fn state_with(
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest(),
             ledger: Vec::new(),
@@ -215,8 +217,9 @@ async fn tasks_crud_round_trips_under_both_scopes() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(task["title"], "Q2 brief");
-    // Issue #206/#301: manual entry lands in To-do, the board's one intake lane.
-    assert_eq!(task["column"], "todo");
+    // Issue #206/#301: manual entry lands in To-do, the board's one intake lane
+    // — which reads as `pending`, its phase, since issue #1512.
+    assert_eq!(task["column"], "pending");
     let id = task["id"].as_str().unwrap().to_string();
 
     // Drag (PATCH column) via the {id} scope.
@@ -348,7 +351,7 @@ async fn task_writes_reject_a_column_the_board_cannot_render() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        body.to_string().contains("in_progress"),
+        body.to_string().contains("working"),
         "the refusal must list the columns that do exist: {body}"
     );
 
@@ -371,7 +374,11 @@ async fn task_writes_reject_a_column_the_board_cannot_render() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     let (_, board) = send(&state, "GET", "/api/v1/company/tasks", None).await;
-    assert_eq!(board.as_array().expect("board")[0]["column"], "paused");
+    // The refused patch left the card where it was: paused, which reads as the
+    // `working` phase with `paused` named as the stage (issue #1512).
+    let card = &board.as_array().expect("board")[0];
+    assert_eq!(card["column"], "working");
+    assert_eq!(card["stage"], "paused");
 }
 
 /// #334: `in_review → done` is a move the write boundary accepts, and the one
@@ -447,7 +454,7 @@ async fn created_tasks_default_to_the_todo_column() {
         Some(json!({"title": "queued work"})),
     )
     .await;
-    assert_eq!(defaulted["column"], crate::ports::tasks::COLUMN_TODO);
+    assert_eq!(defaulted["column"], crate::ledger::board::PHASE_PENDING);
 
     // An explicit column is still honored verbatim — `spawn_task`, the
     // orchestrator's `revise`, and a failed run all place their own card.
@@ -459,7 +466,8 @@ async fn created_tasks_default_to_the_todo_column() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(explicit["column"], crate::ports::tasks::COLUMN_PLANNING);
+    assert_eq!(explicit["column"], crate::ledger::board::PHASE_WORKING);
+    assert_eq!(explicit["stage"], crate::ports::tasks::COLUMN_PLANNING);
 
     // Issue #301: `backlog` is gone from the board, so a client still writing
     // it is refused rather than persisting a card nothing renders. Legacy data
@@ -474,7 +482,7 @@ async fn created_tasks_default_to_the_todo_column() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        refused.to_string().contains("todo"),
+        refused.to_string().contains("pending"),
         "the refusal must name the columns that replaced it: {refused}"
     );
 
@@ -670,14 +678,21 @@ async fn a_chat_created_card_lands_off_the_dispatch_trigger() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    // Asserted on `stage`, not on `column`: since issue #1512 the DTO's
+    // `column` is the phase, and `working` covers both the dispatched stage and
+    // three that are not — so a phase assertion could not tell "dispatched"
+    // from "being planned", which is the only thing this test is about.
     assert_ne!(
-        created["column"], COLUMN_IN_PROGRESS,
+        created["stage"], COLUMN_IN_PROGRESS,
         "a chat-created card must never arrive already dispatched"
     );
     assert_eq!(
-        created["column"], COLUMN_TODO,
+        created["column"],
+        crate::ledger::board::PHASE_PENDING,
         "it lands in the board's intake lane, where the human drag is the gate"
     );
+    assert_eq!(created["stage"], serde_json::Value::Null, "{created}");
+    let _ = COLUMN_TODO;
 
     // Issue #301 added a second pre-dispatch column and made To-do the only
     // intake lane, so the spend gate is re-checked across every creation shape
@@ -691,7 +706,7 @@ async fn a_chat_created_card_lands_off_the_dispatch_trigger() {
     ] {
         let (status, created) = send(&state, "POST", "/api/v1/company/tasks", Some(body)).await;
         assert_eq!(status, StatusCode::OK);
-        assert_ne!(created["column"], COLUMN_IN_PROGRESS, "{created}");
+        assert_ne!(created["stage"], COLUMN_IN_PROGRESS, "{created}");
     }
 
     let journal = runtime
@@ -1343,7 +1358,7 @@ async fn workspace_tree_and_file_reads_reflect_writes() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         provisioned_names(&tree),
-        vec!["agents", "readme.md", "secrets"],
+        vec!["agents", "artifacts", "readme.md", "readme.md", "secrets"],
         "a fresh company starts with its system scaffold and nothing else"
     );
     let provisioned = tree.as_array().unwrap().len();
@@ -1552,7 +1567,7 @@ async fn workspace_reads_are_isolated_between_companies() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         provisioned_names(&tree_b),
-        vec!["agents", "readme.md", "secrets"]
+        vec!["agents", "artifacts", "readme.md", "readme.md", "secrets"]
     );
 
     // Even naming A's node id explicitly, B's scope does not resolve it.
@@ -1830,8 +1845,10 @@ async fn workspace_sweep_previews_then_removes_only_the_empty_agent_folders() {
         provisioned_names(&tree),
         vec![
             "agents".to_string(),
+            "artifacts".to_string(),
             "cmo".to_string(),
             "launch-brief.md".to_string(),
+            "readme.md".to_string(),
             "readme.md".to_string(),
             "readme.md".to_string(),
             "secrets".to_string(),
@@ -2565,7 +2582,7 @@ async fn skills_install_toggle_custom_and_builtin_uninstall_conflict() {
 }
 
 #[tokio::test]
-async fn team_overlay_add_delete_and_manifest_delete_conflict() {
+async fn team_overlay_and_manifest_teammates_can_both_be_added_and_deleted() {
     let home_dir = home();
     let home = home_dir.path().to_path_buf();
     let state = state_with_company(&home).await;
@@ -2604,11 +2621,6 @@ async fn team_overlay_add_delete_and_manifest_delete_conflict() {
     assert_eq!(dana["name"], "Dana");
     assert_eq!(dana["role"], "Designer");
 
-    // Deleting a manifest teammate is a 409.
-    let (status, body) = send(&state, "DELETE", "/api/v1/company/team/ceo", None).await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["code"], "conflict");
-
     // Deleting the overlay teammate is a 204.
     let (status, _) = send(
         &state,
@@ -2639,6 +2651,22 @@ async fn team_overlay_add_delete_and_manifest_delete_conflict() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(ack["key"], "ceo");
+
+    // And a manifest teammate deletes too — recorded as a tombstone on the
+    // record, never as a rewrite of `company.toml`, so the blueprint being
+    // re-read on the next load does not bring it back.
+    let (status, _) = send(&state, "DELETE", "/api/v1/company/team/ceo", None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, roster) = send(&state, "GET", "/api/v1/company/team", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        roster
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["id"] != "ceo"),
+        "the manifest teammate is still listed after its delete: {roster:?}"
+    );
 }
 
 #[tokio::test]
@@ -3233,6 +3261,8 @@ async fn state_with_manifest_and_defaults(
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest.clone(),
             ledger: Vec::new(),
@@ -3276,6 +3306,8 @@ async fn state_with_manifest_and_overlays(
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest.clone(),
             ledger: Vec::new(),
@@ -3834,6 +3866,8 @@ async fn state_with_source_dir(
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest.clone(),
             ledger: Vec::new(),
@@ -4230,6 +4264,8 @@ async fn state_with_telegram_at(
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: id.clone(),
             manifest: manifest(),
             ledger: Vec::new(),
@@ -5629,7 +5665,7 @@ async fn task_export_serves_a_readable_document_and_alters_nothing() {
     let html = String::from_utf8(bytes.to_vec()).expect("the document is utf-8");
     assert!(html.starts_with("<!doctype html>"));
     assert!(html.contains("Launch post"));
-    assert!(html.contains("<dd>In review</dd>"));
+    assert!(html.contains("<dd>Working — In review</dd>"));
     assert!(html.contains("First draft is up."));
 
     let after_board = runtime.tasks().list(&company).await.unwrap();
@@ -7712,7 +7748,7 @@ async fn a_proposal_that_fails_validation_keeps_the_card_in_review() {
     // The card is untouched save for the reason on its note: still In Review,
     // still carrying the proposal to retry once the roster is fixed.
     let (_status, card) = send(&state, "GET", &format!("/api/v1/company/tasks/{id}"), None).await;
-    assert_eq!(card["task"]["column"], "in_review");
+    assert_eq!(card["task"]["stage"], "in_review");
     assert!(card["task"].get("workflowProposal").is_some(), "{card}");
 
     // …and no workflow was created.
@@ -7806,7 +7842,7 @@ async fn applying_a_proposal_with_an_unwired_channel_is_refused_and_keeps_the_ca
     // The card is recoverable, exactly as it is for roster drift: still In
     // Review, still carrying its proposal, with the reason on its note.
     let (_status, card) = send(&state, "GET", &format!("/api/v1/company/tasks/{id}"), None).await;
-    assert_eq!(card["task"]["column"], "in_review", "{card}");
+    assert_eq!(card["task"]["stage"], "in_review", "{card}");
     assert!(card["task"].get("workflowProposal").is_some(), "{card}");
     assert!(
         card["task"]["note"]
@@ -7896,7 +7932,7 @@ async fn rejecting_a_proposal_returns_the_card_to_todo() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{card}");
-    assert_eq!(card["column"], "todo");
+    assert_eq!(card["column"], "pending");
     assert!(card.get("workflowProposal").is_none(), "{card}");
     assert_eq!(
         card["deliverable"], "workflow",

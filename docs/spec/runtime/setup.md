@@ -53,6 +53,10 @@ chosen template when the registry is empty, and stamps `setup_completed_at`.
 Validation happens before anything is written — a partial apply is worse than a
 refused one, because nothing tells the operator which half landed.
 
+The Business step renders that catalog as a dropdown. The selected preset is
+sent with the optional details to the roster pass, so matching is anchored to a
+real shipped company type instead of inferred from a free-text keyword alone.
+
 `GET /spec` additionally carries `setup_complete`. It is reported on that
 unauthenticated handshake because an instance nobody has configured has nobody
 who *can* sign in; gating the answer behind auth would make the wizard
@@ -67,6 +71,14 @@ Model is first because its failure is silent everywhere else — the design pass
 falls back to a curated team on a missing or bad credential, so an untested key
 produces a *plausible* company and the operator finds out several screens later,
 if at all. It is a gate, not a wall: skipping is a first-class answer.
+
+For a local OpenAI-compatible provider, setup accepts the address local model
+apps normally display (`localhost:6969`), normalizes it to
+`http://localhost:6969/v1`, reads `/models`, and probes a concrete model id.
+That provider, normalized endpoint, model mapping, and optional write-only key
+are then persisted on the company the wizard creates. The roster-design pass
+uses the same tested provider before the company exists; a green test is not a
+temporary connection that setup forgets at Finish.
 
 Sign-in comes before the address, and that is the point of it having a step. It
 used to be the first card inside Advanced — one screen *after* the wizard asked

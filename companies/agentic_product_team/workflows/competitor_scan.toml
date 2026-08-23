@@ -1,0 +1,79 @@
+# Workflow graph: competitor_scan
+#
+# A single competitor, read from public sources and written up honestly enough
+# that the roadmap can be argued against it.
+
+id = "competitor_scan"
+name = "Competitor scan"
+description = "Re-read one competitor from public sources and report what changed."
+
+[[node]]
+id = "asked"
+kind = "trigger"
+name = "Scan requested"
+summary = "A competitor is named — by the operator, or by a launch somebody noticed."
+
+[[node]]
+id = "gather"
+kind = "agent"
+name = "Gather the sources"
+summary = "Find and read the pricing, changelog, and docs pages; date every claim."
+agent = "competitor_analyst"
+
+[[node]]
+id = "asked_for"
+kind = "condition"
+name = "Have users asked for this?"
+summary = "Branch on whether the gap shows up in our own user signals."
+[node.config]
+field = "=item.user_demand"
+
+[[node]]
+id = "corroborate"
+kind = "agent"
+name = "Corroborate with user signals"
+summary = "Say how strong our own evidence for the same gap is, and what contradicts it."
+agent = "user_researcher"
+
+[[node]]
+id = "call"
+kind = "agent"
+name = "Decide what it changes"
+summary = "Record whether this changes the roadmap, and the reason either way."
+agent = "head_of_product"
+
+[[node]]
+id = "report"
+kind = "output"
+name = "Post the teardown"
+summary = "What they ship, what they charge, where they are better, and what we are doing about it."
+
+[node.destination]
+kind = "channel"
+target = "market"
+
+[[edge]]
+from = "asked"
+to = "gather"
+
+[[edge]]
+from = "gather"
+to = "asked_for"
+
+[[edge]]
+from = "asked_for"
+to = "corroborate"
+label = "yes"
+
+[[edge]]
+from = "asked_for"
+to = "call"
+label = "no"
+
+[[edge]]
+from = "corroborate"
+to = "call"
+
+[[edge]]
+from = "call"
+to = "report"

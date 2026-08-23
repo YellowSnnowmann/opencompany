@@ -227,6 +227,17 @@ describe("a board whose work has moved to the later columns", () => {
 });
 
 describe("dragging a card into a collapsed column", () => {
+  it("makes a populated target visibly ready for the drop", async () => {
+    await render(laterColumnsOnly());
+    await pickUp("p0");
+
+    await fire(column("in_review"), "dragover");
+
+    expect(column("in_review").className).toContain("border-primary");
+    expect(column("in_review").className).toContain("from-accent/80");
+    expect(column("in_review").className).toContain("ring-2");
+  });
+
   it("opens the rail under the drag and takes the drop", async () => {
     await render(laterColumnsOnly());
     await pickUp("p0");

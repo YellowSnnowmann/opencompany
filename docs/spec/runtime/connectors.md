@@ -383,6 +383,43 @@ for a desktop, "No company connected yet" and what the choice *is* for a hub —
 and both carry a button that opens the chooser. The switcher stays above it,
 because that is where an operator will look next time.
 
+### Modifying one afterwards
+
+Adding a host was long the only thing that could be done to one, and the missing
+half is not cosmetic: a host's address changes — a gateway gets a domain, a VPS
+moves, a tenant is renamed — and the only recourse was to forget it and add it
+again. That mints a **new connection id**, and every browser-local key is scoped
+by it, so re-adding a host that merely moved silently resets its tour progress,
+its last-read channel and its drafts.
+
+So the switcher offers **"Manage hosts"** beside "Add a host", and it opens a
+page rather than a menu of row-level buttons: a switcher row is a *filter*, so
+hanging a rename and a delete off it makes a control whose click targets
+disagree about what a row is for. That menu now opens on **any** host rather
+than only on two (`hostSwitcherMenu`): one host was furniture while the menu held
+nothing but the roster, but it is the only route to this page now, and a
+single-connection browser console was getting a nameplate with nothing behind it.
+
+The page does three things; `editConnection` in `registry.ts` does the first two:
+
+- **rename**, which is the only edit a host reached over `ssh` accepts. A
+  `local` host is not renamed here at all: its name and its address are
+  re-applied from the local instance roster on every refresh, so the page
+  offers it no edit control rather than one that would not survive;
+- **re-address**, offered for `remote` and `cloud` only. `local` and `ssh`
+  addresses are assigned by this application — an ephemeral port and a loopback
+  port this client chose — so an address typed here would be overwritten by the
+  next launch. A move drops the identity, the company list and the error — all of
+  which describe the host that *was* there — and re-probes, discarding any probe
+  still in flight against the old address rather than letting it answer for the
+  new one. Moving onto an address another row already holds is refused, over
+  `canonicalAddress` values: the same-origin row's `""`, a trailing slash,
+  hostname case and a default port must not mint a second id for one host;
+- **forget**, which is `removeConnection`: local to this client, closing an
+  `ssh` tunnel opened for it, and confirmed — the connection id goes with it,
+  and with it every scoped key underneath. Not offered for a `local` host,
+  which the instance roster would re-adopt under a fresh id.
+
 The **setup wizard is deliberately not** one of these places. It is served by a
 host that is already running, so by the time anyone sees it the question has
 been answered; a connector step there would be a decision that cannot be acted
@@ -428,9 +465,6 @@ one, and the UI must not imply it does. The data root is on the machine the
 runtime runs on; moving a company between connectors is the tar export/import of
 the company bundle, and it belongs to the company, not to the connection.
 
-Stating this on the chooser is worth a sentence, because "choose where to run"
-reads to a new operator as a switch that moves their work.
-
 ## What has landed, and what has not
 
 Landed:
@@ -443,7 +477,9 @@ Landed:
   says so;
 - `ssh` end to end: the supervised tunnel roster in `src-tauri/src/ssh.rs` over
   the system `ssh`, opened from the chooser and re-opened by every probe;
-- the first-host screen offering the choice rather than describing it.
+- the first-host screen offering the choice rather than describing it;
+- "Manage hosts": renaming, re-addressing and forgetting a connection without
+  minting a new id.
 
 Not yet:
 

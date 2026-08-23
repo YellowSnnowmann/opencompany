@@ -362,7 +362,7 @@ fn dto_from_decl(
 /// id, matching `bucket_usage`.
 pub(super) fn roster_grants(record: &CompanyRecord) -> Vec<(RosterAgentDto, Vec<String>)> {
     let allow = &record.manifest.tools.allow;
-    let names = roster_display_names(&record.manifest.agents, &record.overlay_agents);
+    let names = roster_display_names(&record.effective_agents(), &record.overlay_agents);
     let roster_agent = |id: &str| RosterAgentDto {
         id: id.to_string(),
         name: names.get(id).cloned().unwrap_or_else(|| id.to_string()),
@@ -1033,6 +1033,8 @@ role = "Chief Executive"
         )
         .expect("manifest parses");
         CompanyRecord {
+            overlay_retired_agents: Vec::new(),
+            overlay_agent_edits: Vec::new(),
             id: CompanyId::new("acme"),
             manifest,
             ledger: Vec::new(),

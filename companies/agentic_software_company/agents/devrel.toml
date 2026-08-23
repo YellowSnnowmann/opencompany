@@ -35,3 +35,9 @@ context = [
     "brief.md", "claims.md",
     { path = "product/billing-v2.md", access = "write" },
 ]
+
+# The role's working rules, checked in beside this file and read at manifest
+# load. The `.toml` carries the wiring; `prompts/` carries how the role works.
+# A missing path here is a manifest error rather than a skipped entry — a role
+# whose prompt was written around a briefing it never received fails silently.
+prompt_files = ["prompts/devrel.md"]

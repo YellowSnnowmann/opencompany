@@ -1,7 +1,7 @@
 # The memory engine overlay
 
-`OPENCOMPANY_MEMORY` and the in-pod engine: what each mode does, and why an
-ephemeral data root refuses to boot rather than silently losing memory.
+`OPENCOMPANY_MEMORY` and the provider seam: what each mode does, and why a
+hosted engine refuses to boot rather than silently losing memory.
 
 Split out of [`storage.md`](storage.md), which was over the repository's 500-line
 ceiling.
@@ -17,17 +17,14 @@ dedicated memory engine layered on top of that base. The base still owns every o
 | Value | Engine | Feature flag | Notes |
 |---|---|---|---|
 | `store` (default) | The base backend's own memory | — | fs substring recall, or sqlite/mongodb |
-| `embedded` (or `tinycortex`) | In-pod TinyCortex engine | `tinycortex` | Persistent per-company store; vector-first recall with lexical/recency fallback when no embeddings backend resolves |
-| `embedded` + `OPENCOMPANY_MEMORY_DRIVER=namespace` | In-pod contract store | `tinymemory-embedded` | `tinymemory-core`'s durable `UnifiedMemory`, bound through the `MemoryProvider` contract; no network call |
 | `remote` | A hosted memory service | `tinymemory` | Bound through the `MemoryProvider` contract; needs a URL and a credential |
 | `null` | Nothing | `tinymemory` | Writes accepted and discarded, reads empty |
 
-`embedded` and `tinycortex` are the **same value**. Issue #914 introduced the
-first spelling; the second keeps parsing indefinitely, because renaming it would
-break every deployment that already sets it — including hosted tenants whose
-environment the control plane injects — for a cosmetic gain. The same applies to
-`cortex`, and to `mongo` on `OPENCOMPANY_STORAGE`. Only one name is reported
-back out (`/spec` says `embedded`), so a client never has to know both.
+The in-pod `embedded`/`tinycortex` engine and its `namespace` provider-store
+mode were removed in #1568; a deployment that still sets
+`OPENCOMPANY_MEMORY=embedded`, `tinycortex` or `cortex` is refused at boot,
+naming the removed value. Only the `store` default, the hosted `remote` modes
+and `null` remain.
 
 ## Choosing a hosted engine (`remote`)
 
@@ -49,7 +46,7 @@ capability audit asserts the advertised families match the reachable surface
 on every boot. `remote` is an ordinary choice: a driver, a URL, a credential.
 
 **Every one of these refuses at boot when missing, naming the knob.** There is
-deliberately no fall back to the embedded engine. A company that believes it is
+deliberately no fall back to the base store's memory. A company that believes it is
 writing to its hosted memory and is not is worse off than one that fails to
 start: the second failure is visible immediately, and the first is invisible
 until the memory is needed and turns out not to be there.
@@ -73,8 +70,8 @@ should be able to read that rather than discover it from a failed cycle.
 ### Class is decided by the host, never by the driver
 
 `OPENCOMPANY_MEMORY=remote` pins the driver class to `External` and cross-checks
-it against the registry's reserved table, so naming the embedded engine under
-the remote mode is refused rather than quietly resolved. The contract crate
+it against the registry's reserved table, so naming an embedded-class driver
+under the remote mode is refused rather than quietly resolved. The contract crate
 excludes driver class on purpose: a driver that self-reported it could claim to
 be embedded and skip the egress and trust checks that class gates.
 
@@ -109,48 +106,10 @@ would quietly stop holding.
 
 `tinymemory-api`, at `vendor/openhuman/vendor/tinymemory/api` — the same path
 `vendor/openhuman` itself path-depends on, which is what keeps the
-`MemoryProvider` trait identity single across the process.
-
-**Not `tinycortex-api`.** They are distinct crates on incompatible contract
-majors (`(1, 0)` against `(2, 0)`, and `is_compatible` is major-equality only),
-and OpenHuman's own inlined contract documents `tinycortex-api` as a deprecated
-re-export. The `tinycortex` crate remains pinned as the *engine* behind the
-embedded mode; only the contract moved.
-
-## `embedded` through the provider seam (`namespace`)
-
-`remote` and `null` bind a provider. Plain `embedded` keeps the `EngineCortex`
-overlay it has always had — today's companies have their data in those tables,
-and swapping the default out from under them would strand it. But the mode is
-no longer *confined* to that overlay: `OPENCOMPANY_MEMORY_DRIVER=namespace`
-binds `tinymemory-core`'s `UnifiedMemory` — the contract's own durable SQLite
-store, whose `Memory` implementation reports `name() == "namespace"` — through
-the same seam as the hosted engines. Same registry admission (the id is
-host-reserved at class `Embedded`), same bind-time capability audit, same
-`BoundMemory` tenant-namespace facades, full three-port overlay with the
-inbound-taint and scratch partitions. No network call; the store persists
-under `<OPENCOMPANY_DATA_DIR>/memory-namespace/` — beside, never inside, the
-incumbent engine's `memory/`, and nothing migrates between the two. An
-operator who switches starts that store empty.
-
-It rides the `tinymemory-embedded` feature (which implies `tinymemory`),
-separate on purpose: the store lives in `tinymemory-core`, which pulls the
-in-pod engine weight — `tinycortex` and a bundled SQLite — that a
-hosted-memory tenant deliberately builds without (tinymemory#18 §D). Selecting
-the driver without the feature refuses at boot, naming the feature; naming any
-other driver id under `embedded` refuses too, never a silent fallback to the
-engine the operator did not ask for. The `/data`-is-scratch durability refusal
-below applies to this store exactly as it does to `EngineCortex`, and there is
-no in-memory fallback when the data dir is missing.
-
-Recall honesty: no embedding backend is injected, so every chunk is stored
-vector-less and recall runs on the store's graph and keyword tiers. That is
-the same loud degraded-mode contract `EngineCortex` ships under.
-
-The earlier form of this section said the seam needed "a durable `Memory`
-implementation over the engine's KV tier first". `UnifiedMemory` is that
-implementation — it was the store, not the engine's KV tier, that supplied
-it.
+`MemoryProvider` trait identity single across the process. The historical
+`tinycortex-api` re-export and the in-pod `tinycortex` engine that used to back
+the `embedded` mode are removed; only the hosted drivers and `null` bind
+through this seam.
 
 ## Tenant isolation across the seam
 
@@ -195,136 +154,18 @@ The contract deliberately carries no policy, which leaves these host-side:
   `Memory` trait, which is why nothing here wraps a bare `Memory`.
 - **Per-agent and per-desk scoping**, which neither cognition port has.
 
-This is why TinyCortex is not a `StorageKind`: it implements only memory +
-context, so it cannot be a full backend — it overlays. `serve` and platform
-provisioning build the overlay once (`open_memory_overlay`,
-`src/store/select.rs`) and apply it to each company's `RuntimeBuilder` via
-`with_memory_overlay`, **after** `with_stores`, so the engine's ports win while
-the base keeps the rest. A selected-but-unavailable engine (feature disabled)
+`open_memory_overlay` (`src/store/select.rs`) builds the overlay once per boot
+and `RuntimeBuilder::with_memory_overlay` applies it to each company's
+`RuntimeBuilder`, **after** `with_stores`, so the engine's ports win while the
+base keeps the rest. A selected-but-unavailable engine (feature disabled)
 aborts boot, same as the storage backend.
 
-### In-pod engine (`EngineCortex`)
-
-With the `tinycortex` feature and a data directory present, the overlay is
-`EngineCortex` (`src/store/tinycortex_engine.rs`): the OpenHuman `tinycortex`
-engine crate running **inside the pod** with durable local storage. Each company
-gets its own workspace at `<OPENCOMPANY_DATA_DIR>/memory/<workspace-name>/` — the
-path-safe, stable name derived from the full company ID (`EngineCortex::workspace_name`
-sanitizes the id and appends a stable hash), the same `<workspace>` the config
-examples below render — and the engine's canonical per-workspace SQLite database
-(opened + migrated through the crate's own shared connection) holds that
-company's traces, task results, and context chunks. The local workspace
-persistence layer does not make network calls; a configured hosted embeddings
-backend may make outbound requests during embedding and recall. When no data
-directory is present (tests, no-data-dir callers) the overlay selects the
-offline in-memory backend (`InMemoryCortex`). An error opening a company
-workspace propagates to the caller rather than silently switching to in-memory.
-
-**Vector-first recall, with a loud lexical/recency fallback (188c2).** This
-slice builds the engine's `MemoryConfig` directly with `embedding.strict =
-false`, so the crate's own summary-tree embedder stays inert regardless — but
-when a hosted embeddings backend resolves from the environment (see
-"Embeddings configuration" below), each stored chunk is separately embedded
-into a per-company [`VectorStore`], and `search_chunks` runs cosine recall
-**first**, topped up with the existing lexical token-overlap scorer (the same
-`[0, 1]`-scored, snippet-bearing contract the in-memory backend defines) up to
-the caller's limit — see the two-tier recall in
-`src/store/tinycortex_engine.rs`. When **no** embeddings backend resolves — or
-on any embedding/search outage — recall degrades to **pure lexical**
-(substring/recency token-overlap), **not** the vector/semantic recall the
-`tinycortex` name implies, so the overlay announces the degraded mode once,
-loudly, at open (`tracing::warn` in `src/store/select.rs`). Because the
-crate's retrieval primitives rank only by admission-score/recency in fully
-degraded mode (their keyword/graph scorers are defined but not yet wired), and
-its `ingest` path re-chunks documents under its own ids — which cannot
-round-trip OpenCompany's content-address / label-prefix / peek contract —
-chunk bodies and metadata are persisted through the engine's **KV tier** (on
-the same per-company workspace database) rather than the crate's
-ingest/retrieval primitives, with the vector index layered beside it. Wiring
-the crate's own retrieval-scorer `Embedder` / summary-tree seal path (the
-hard-768-dim path, plus a full-corpus reconcile beyond the bounded backfill) is
-deferred to #198 — this slice injects only the `VectorStore` store+search
-compute, which is dimension-agnostic and runs at the configured embedding
-dimension (1024 by default).
-
-#### Embeddings configuration
-
-The hosted embeddings backend (`src/harness/embeddings.rs`, `openhuman`-gated
-harness build only) shares its credential + base URL with the chat inference
-client and layers two overrides on top:
-
-| Env var | Default | Notes |
-|---|---|---|
-| `OPENCOMPANY_EMBEDDINGS_MODEL` | `embedding-v1` | The managed embeddings model id. `embedding-v1` is 1024-dim and rejects the OpenAI `dimensions` request param. |
-| `OPENCOMPANY_EMBEDDINGS_DIM` | `1024` | The model's native dimensionality. Must parse as a positive integer; only meaningful alongside a model whose native dim differs from 1024. |
-
-Every returned vector is validated against the configured dimensionality; a
-wrong length is an error, never silently truncated.
-
-### Durability contract & the `/data`-is-scratch caveat
-
-`EngineCortex` is durable **only to the extent the data directory is durable**.
-On a host with a persistent `OPENCOMPANY_DATA_DIR` (a mounted volume, or the
-default `$HOME/.opencompany`), engine memory survives restarts. But under the
-hosted multi-tenant model with `OPENCOMPANY_STORAGE=mongodb`, the durable base is
-the database and the container's `/data` is treated as **ephemeral scratch** — so
-engine memory written to `<data_dir>/memory` would **not** survive a container
-restart. Because that failure mode is *silent* memory loss on restart, selecting
-`OPENCOMPANY_MEMORY=tinycortex` together with `OPENCOMPANY_STORAGE=mongodb` is by
-default a hard **refuse-to-open** error at boot (`src/store/select.rs`), not a
-warning: the overlay never opens a doomed engine.
-
-Storage-kind is only a *proxy* for "ephemeral `/data`", though — a mongodb
-deployment that HAS mounted a persistent volume at the data dir is perfectly
-safe to run the in-pod engine on. So the refusal is an explicit **durability
-contract**, not a hard storage-kind rejection. To run the in-pod engine you can:
-
-- mount a persistent volume at `OPENCOMPANY_DATA_DIR` and use
-  `OPENCOMPANY_STORAGE=fs` or `sqlite` (durable `/data`); or
-- keep memory on the base store (`OPENCOMPANY_MEMORY=store`); or
-- under `OPENCOMPANY_STORAGE=mongodb`, if you have mounted a genuinely durable
-  volume at `OPENCOMPANY_DATA_DIR`, set **`OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL=1`**
-  to assert that durability and lift the refusal. Unset (or any non-truthy value)
-  keeps the safe default: refuse. Truthy values are `1`/`true`/`yes`/`on`.
-
-#### Config examples
-
-**(a) Supported persistent config** — durable base + in-pod engine. The data dir
-is a real mounted volume, so engine memory survives restarts and no override is
-needed:
-
-```sh
-OPENCOMPANY_STORAGE=sqlite            # durable /data (single SQLite file)
-OPENCOMPANY_MEMORY=tinycortex         # in-pod engine overlay
-OPENCOMPANY_DATA_DIR=/data            # a persistent volume mount
-# → boots; per-company workspaces persist under /data/memory/<workspace>/
-```
-
-**(b) MongoDB config — the boot-time refusal and how the opt-in changes it.**
-With mongodb as the durable base, `/data` is treated as ephemeral scratch, so the
-engine is refused by default:
-
-```sh
-OPENCOMPANY_STORAGE=mongodb           # durable base is the database; /data is scratch
-OPENCOMPANY_MEMORY=tinycortex
-OPENCOMPANY_DATA_DIR=/data
-OPENCOMPANY_MONGODB_URI=mongodb://…   # (tenant-scoped)
-# → REFUSES to boot: hard OpenCompanyError::Config. The operator-visible result is
-#   a boot abort naming the silent-memory-loss risk and the OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL
-#   opt-in — the engine never opens, so no memory is written to a doomed /data.
-```
-
-If — and only if — the operator has actually mounted a durable volume at
-`/data`, asserting it lifts the refusal:
-
-```sh
-OPENCOMPANY_STORAGE=mongodb
-OPENCOMPANY_MEMORY=tinycortex
-OPENCOMPANY_DATA_DIR=/data            # a genuinely persistent volume
-OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL=1  # operator asserts /data is durable
-OPENCOMPANY_MONGODB_URI=mongodb://…
-# → boots; engine memory persists under /data/memory/<workspace>/ as usual.
-```
+The removed in-pod engine wrote durable state to `<OPENCOMPANY_DATA_DIR>/memory/`
+and was refused under `OPENCOMPANY_STORAGE=mongodb` (the `/data`-is-scratch
+caveat). The hosted modes write to their provider and the `store` default
+reuses the base backend, so neither has an ephemeral-`/data` hazard; the
+`OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL` flag is retained as a no-op for deployment
+compatibility.
 
 ## Choosing an engine from the console
 
@@ -392,11 +233,15 @@ re-derives them:
   `memory_recall`, `memory_forget` — over the company's own `ContextStore`,
   company and agent captured at build time, never a model-supplied
   namespace. Forget reaches only the agent's own `agent-memory/<id>/` rows;
-  task outcomes and operator facts are not an agent's to delete. And because
-  chunks are content-addressed with an ADDRESS-level `ContextStore::delete`,
-  a forget whose identical content is indexed under any other label (another
-  agent's byte-identical memory, a task outcome with the same text) refuses
-  rather than deleting theirs too — store a correction instead. The
+  task outcomes and operator facts are not an agent's to delete. Chunks are
+  content-addressed, and since #1300 every backend keeps one claim per
+  (addr, label) with a **label-scoped** `ContextStore::delete_label`: a
+  forget whose identical content is indexed under other labels (another
+  agent's byte-identical memory, a task outcome with the same text) removes
+  exactly the agent's own claims, the other labels keep the body, and the
+  body is reaped — atomically inside the port — only with its last claim.
+  (Before #1300 this case refused outright, which let anyone make an
+  agent's memory permanently un-forgettable by storing identical text.) The
   vendored upstream memory tools stay unwired: they resolve their store
   ambiently, which under multi-tenant-in-one-process is a cross-company
   leak (`src/harness/built_in/build.rs`, `memory_tools`).
@@ -431,10 +276,11 @@ comes first.
    the `--resume-cursor` to re-enter at (import is idempotent by
    `(namespace, key)`, so re-running a failed page cannot duplicate — drivers
    that detect presence report `skipped`, the rest overwrite in place). Hosted targets warn about
-   their enumeration-based write cost. The `store` default and the
-   EngineCortex overlay have no provider seam and are refused by name — for
-   those, `opencompany export` now reads the live engine (base backend plus
-   memory overlay, operator facts included) and is the capture tool.
+   their enumeration-based write cost. The `store` default has no provider
+   seam and is refused by name — for those, `opencompany export` reads the
+   live engine (base backend plus memory overlay, operator facts included)
+   and is the capture tool. Target drivers are the hosted engines
+   `supermemory`, `mem0` and `cognee`.
 
    Two hosted-deployment cautions. The copy is **engine-level**: every
    namespace the source credential can see crosses, which is exactly right
@@ -449,25 +295,14 @@ comes first.
    the migration's own counters.
 2. **Set the variables** for the target engine (the `.env.example` block names
    all five). A hosted engine needs the build to carry the `tinymemory`
-   feature; `namespace` needs `tinymemory-embedded`. A feature-less build
-   refuses at boot naming the missing feature.
+   feature; a feature-less build refuses at boot naming the missing feature.
 3. **Restart.** Selection is read once at boot; a running process never
    re-reads it.
 4. **Verify on `GET /spec`**: `memory.backend` and `memory.driver_id` name
    what you selected, `memory.capabilities` lists what it negotiated, and
    `memory.healthy` reports the boot-time reachability probe — `false` means
    bound-but-unreachable (bad endpoint or credential); absent means "not
-   probed" (the `store` default or the direct engine overlay).
+   probed" (the `store` default).
 
 Misconfiguration never falls back: an unknown mode, a missing driver, URL or
 key, or a missing cargo feature is a boot refusal naming the knob to change.
-
-> **`namespace` caveat (2026-08-20):** #1201 (writes corrupted by the PII
-> scrubber redacting Luhn-valid digit runs — most often `at_millis` timestamps
-> — into broken JSON) is fixed in this change's own stack: the scrubber now
-> corroborates before redacting, and two regression nets pin it (the
-> Luhn-timestamp round-trip, and the survival contract in
-> `store::memory::upstream_conformance_test`). One defect remains open —
-> #1238 (a dropped context chunk and reordered traces under the port
-> conformance suite). Until it lands, prefer the incumbent `embedded` engine
-> overlay or a hosted engine for anything real.

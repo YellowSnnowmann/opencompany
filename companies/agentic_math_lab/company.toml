@@ -1,0 +1,117 @@
+# A lab that answers computational mathematics problems, and can prove it did.
+#
+# Every other company in this directory produces prose: a plan, a draft, a
+# report. Whether it is any good is a judgement. This one produces a **number**,
+# and a number is either right or it is not — which makes it the one bundle here
+# whose end-to-end run has a pass/fail an operator does not have to read.
+#
+# The acceptance test is Project Euler: problems stated in a paragraph, answered
+# by a single integer, and hard enough that the answer has to be *computed*
+# rather than recalled. `frontend/test/e2e/euler-live.spec.ts` states one in the
+# main line, dispatches whatever the orchestrator opens, and checks the integer
+# this lab reaches against the published one. Nothing in that spec asserts a
+# method, a tool or a wording — a lab that gets the right number a different way
+# has done the job.
+#
+# The roster is the argument. A single agent asked for the answer to a hard
+# problem writes a plausible program, runs it once, and reports whatever it
+# printed; there is nobody to say the program answered a different question from
+# the one asked. So the work is split three ways — decide the approach, write
+# the program, break the result — and the split is enforced by what each role
+# can reach, not by asking it nicely.
+
+[company]
+name = "Agentic Math Lab"
+output = "Verified answers to computational problems, with the programs that produced them"
+human_role = "State the problem and accept the answer"
+
+[policy]
+# `full`, and this is the one manifest decision in the bundle that is not
+# stylistic.
+#
+# The lab's whole method is running programs. Under `auto`, a shell command the
+# vendored classifier grades as anything but a *read* parks for a human — and
+# `python3 solve.py` is not a read, so the tier that sounds unattended stops
+# this company on its first useful move (`src/policy/consequence.rs`, and the
+# `auto`/`supervised` arm in `harness/built_in/policy.rs`). The high-risk
+# judgement arm still parks `rm -rf` and its relatives under `full`, and no
+# agent here holds a tool that spends money or leaves the company: no `search`,
+# no `web`, no `composio`, no `media`. So the blast radius `full` opens is the
+# agent's own sandbox, which is exactly where the work happens.
+mode = "full"
+
+[users]
+# The address the end-to-end suite signs in as, matching `companies/e2e_harness`
+# so `frontend/test/e2e/global-setup.ts` needs no second identity.
+admins = ["harness-e2e@tinyhumans.ai"]
+
+[tools]
+# Named namespaces rather than `*`, and the omission is the point.
+#
+# `*` would confer `web` — `web_fetch`, `http_request`, `curl` — and this
+# company's acceptance test is a Project Euler problem. A lab that can reach the
+# public internet can look the answer up, and a run that looked the answer up
+# passes the spec while proving nothing about whether these agents can solve
+# anything. Withholding the `web` namespace is what stops that shortcut being a
+# named, discoverable tool call.
+#
+# It is not a network boundary: `shell` is still granted, there is no sandbox
+# (`docs/spec/security/agent-isolation.md`), and a shell command can `curl` the
+# same as `web_fetch` could. `shell` stays granted because the lab's whole
+# method is running programs; what withholding `web` buys is narrower than
+# "no network" — it removes the tool an agent would otherwise reach for
+# first, and default-deny egress at the pod is the actual boundary, as
+# documented there.
+#
+# What is left is what solving needs: a sandbox to write programs in (`files`),
+# a way to run them (`shell`), patch and diff tooling (`code`), and the shared
+# note tree the roles hand work to each other through (`workspace`, plus
+# `workspace.*` — the list is matched with exact/glob semantics, so the bare
+# token and the sub-grants are two separate entries).
+#
+# `search` is absent for the same reason `web` is, and additionally because it
+# is metered: a company that never asked for it never spends on it.
+allow = ["files", "docs", "shell", "code", "workspace", "workspace.*"]
+
+# ---------------------------------------------------------------------------
+# Desks.
+#
+# One member each, which looks like ceremony until you notice what desks are
+# for here: they are the orchestrator's address space. `delegate_to_desk` takes
+# a desk id, opens a card and runs that desk's lead in the same turn, where
+# `spawn_task` opens a card that waits for an operator to start it. Both are
+# legitimate and the lab uses both — but the hand-off that runs is the one that
+# makes an unattended solve possible, and it cannot be addressed without a desk
+# to address.
+#
+# Named after the *stage* rather than the person, so a desk can grow a second
+# member without the orchestrator's habits having to change.
+# ---------------------------------------------------------------------------
+
+[[group_chat]]
+id = "theory"
+name = "Theory desk"
+description = "Reducing a problem to something a program can finish. Approach, complexity, and the small cases the answer must reproduce."
+members = ["theorist"]
+
+[[group_chat]]
+id = "implementation"
+name = "Implementation desk"
+description = "Writing and running the program that produces the number."
+members = ["programmer"]
+
+[[group_chat]]
+id = "verification"
+name = "Verification desk"
+description = "Trying to break the answer: a second method, an independent implementation, and the brute force that settles a disagreement."
+members = ["verifier"]
+
+[[group_chat]]
+id = "records"
+name = "Records desk"
+description = "Writing the accepted answer and its method down where the next problem can find them."
+members = ["scribe"]
+
+[workflows]
+# The graph lives in this company's workflows/ directory, one file per id.
+enabled = ["euler_solve"]

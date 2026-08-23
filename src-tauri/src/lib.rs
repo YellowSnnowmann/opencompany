@@ -57,43 +57,13 @@ pub struct AppHandleState {
     pub ssh: tokio::sync::Mutex<SshTunnels>,
 }
 
-/// The platform directory this instance keeps its data in.
+/// The canonical directory this instance keeps its data in.
 ///
-/// Resolved from the OS rather than from `HOME`. The crate's own fallback ends
-/// at a *relative* `.opencompany` when neither `HOME` nor `USERPROFILE` is set,
-/// which for a double-clicked application resolves against whatever working
-/// directory the launcher gave it — plausibly unwritable, and plausibly
-/// different between launches.
+/// This must remain identical to the host binary's resolution: an explicit
+/// `OPENCOMPANY_DATA_DIR`, otherwise `$HOME/.opencompany` (or `%USERPROFILE%`
+/// on Windows), with a relative `.opencompany` only when no home is available.
 pub fn default_data_dir() -> PathBuf {
-    // `OPENCOMPANY_DATA_DIR` still wins, so a developer can point one build at
-    // a scratch root without touching the installed app's.
-    if let Some(explicit) = std::env::var_os("OPENCOMPANY_DATA_DIR")
-        && !explicit.is_empty()
-    {
-        return PathBuf::from(explicit);
-    }
-    let base = dirs_next_data_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.join("ai.tinyhumans.opencompany")
-}
-
-/// The per-OS application-data directory, without taking a `dirs` dependency
-/// for four lines of `std`.
-fn dirs_next_data_dir() -> Option<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support"))
-    }
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        std::env::var_os("XDG_DATA_HOME")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
-    }
+    opencompany::app::config::data_dir_from_env()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -153,10 +123,39 @@ pub fn run() {
             commands::oc_stop_local_instance,
             commands::oc_rename_local_instance,
             commands::oc_forget_local_instance,
+            commands::oc_delete_local_instance,
             commands::oc_open_ssh_tunnel,
             commands::oc_close_ssh_tunnel,
             commands::oc_ssh_tunnels,
         ])
         .run(tauri::generate_context!())
         .expect("run the desktop shell");
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn desktop_defaults_to_dot_opencompany_under_home() {
+        const CHILD: &str = "OPENCOMPANY_DESKTOP_DATA_DIR_TEST_CHILD";
+        let home = PathBuf::from("/opencompany-test-home");
+
+        if std::env::var_os(CHILD).is_some() {
+            assert_eq!(default_data_dir(), home.join(".opencompany"));
+            return;
+        }
+
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("test::desktop_defaults_to_dot_opencompany_under_home")
+            .env(CHILD, "1")
+            .env("HOME", &home)
+            .env_remove("USERPROFILE")
+            .env_remove("OPENCOMPANY_DATA_DIR")
+            .status()
+            .unwrap();
+
+        assert!(status.success());
+    }
 }

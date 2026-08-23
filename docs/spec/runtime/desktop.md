@@ -361,13 +361,11 @@ holding the data root's lock (see [`data-root.md`](data-root.md)). It becomes an
 ordinary connection in the console, discovered through `oc_embedded` because
 only the core knows which port the OS chose.
 
-That root is the **platform application-data directory** — on macOS
-`~/Library/Application Support/ai.tinyhumans.opencompany` — resolved by
-`default_data_dir` in `src-tauri/src/lib.rs` and passed explicitly to
-`app::prepare_instance`, not `$HOME/.opencompany`. A default desktop install and
-a default `opencompany serve` are therefore two separate instances that share
-nothing; `OPENCOMPANY_DATA_DIR` points both at one root where that is wanted.
-See [the desktop root](data-root.md#the-desktop-root-is-not-the-cli-root).
+That root is the same canonical data directory as the CLI: `$HOME/.opencompany`
+(or `%USERPROFILE%\.opencompany` on Windows). `default_data_dir` in
+`src-tauri/src/lib.rs` delegates to the host resolver and passes the result
+explicitly to `app::prepare_instance`. `OPENCOMPANY_DATA_DIR` overrides it for
+both launchers. See [the desktop root](data-root.md#the-desktop-root-is-the-cli-root).
 
 Loopback and never `0.0.0.0`: an embedded instance is this machine's, and
 binding a routable address would publish someone's company to their network.

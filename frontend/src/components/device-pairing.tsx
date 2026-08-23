@@ -33,6 +33,14 @@ import { Input } from "@/components/ui/input";
 import { getConnection, useConnection } from "@/connections/registry";
 import { pairedConnection, unpairConnection } from "@/connections/registry";
 import { useLocalScope } from "@/connections/ConnectionContext";
+import { settingsPageLabel } from "@/views/settings-pages";
+
+// Where a code comes from, read off the sub-page table rather than written out
+// here. This sentence named a page that did not exist for a whole release
+// (issue #1476); read from the table, it cannot name one again — an id that is
+// not a real page does not compile, and renaming the page rewrites the
+// sentence.
+const CODE_SOURCE = `Settings → ${settingsPageLabel("devices")}`;
 
 export function DevicePairing() {
   const scope = useLocalScope();
@@ -86,7 +94,7 @@ export function DevicePairing() {
           {paired
             ? "This machine is paired with this host and signs in as you."
             : encrypted
-              ? "Pair this machine so it acts as you rather than anonymously. Ask this host's web console for a pairing code under Settings → devices."
+              ? `Pair this machine so it acts as you rather than anonymously. Ask this host's web console for a pairing code under ${CODE_SOURCE}.`
               : "This host is reached over an unencrypted connection, so pairing is unavailable — a session sent to it could be read by anyone on the network path."}
         </CardDescription>
       </CardHeader>

@@ -61,9 +61,7 @@ name = "received"
 
 [[status]]
 name = "screening"
-
-[[status]]
-name = "interviewed"
+aliases = ["interviewed"]
 
 [[status]]
 name = "admitted"
@@ -83,7 +81,7 @@ needs_reason = true
 [[section]]
 heading = "In review"
 blurb = "Being screened or interviewed, each assessed against named criteria rather than an impression."
-statuses = ["screening", "interviewed"]
+statuses = ["screening"]
 order = "recent"
 
 [[section]]

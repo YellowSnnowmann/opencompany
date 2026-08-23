@@ -6,6 +6,7 @@ resolve_demo_company() {
         fund | vc | venture-capital) echo "agentic_venture_capital" ;;
         marketing | agency) echo "agentic_marketing_agency" ;;
         software | saas | dev) echo "agentic_software_company" ;;
+        product | product-team) echo "agentic_product_team" ;;
         studio | venture-studio) echo "agentic_venture_studio" ;;
         accelerator) echo "startup_accelerator" ;;
         law | legal) echo "agentic_law_firm" ;;
