@@ -1162,7 +1162,18 @@ export function WorkflowCreateDialog({
     let live = true;
     const timer = setTimeout(() => {
       setPreflight({ status: "asking", key: preflightKey });
-      validateWorkflow(client, company, JSON.parse(preflightKey) as WorkflowGraph)
+      // Started inside a promise so a SYNCHRONOUS throw lands in the `catch`
+      // below rather than escaping this timer callback as an uncaught
+      // exception. Two things here can throw before any promise exists:
+      // `JSON.parse` on a malformed key, and `validateWorkflow` itself if the
+      // client does not implement `post`. Neither is a verdict on the graph,
+      // so both belong in the same `unavailable` disposition as a transport
+      // failure — and an uncaught exception in a debounce timer cannot be
+      // handled by anything, which is what made this surface as a flake.
+      Promise.resolve()
+        .then(() =>
+          validateWorkflow(client, company, JSON.parse(preflightKey) as WorkflowGraph),
+        )
         .then(() => {
           if (live) setPreflight({ status: "ok", key: preflightKey });
         })
