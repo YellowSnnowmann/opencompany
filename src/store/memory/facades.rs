@@ -298,24 +298,11 @@ impl Bound {
             .list(Some(namespace.as_str()), None, None)
             .await
             .map_err(store_error)?;
-        eprintln!(
-            "PR1550DEBUG list namespace={} provider_returned={} entries_namespaces={:?}",
-            namespace.as_str(),
-            raw.len(),
-            raw.iter()
-                .map(|e| e.namespace.clone().unwrap_or_default())
-                .collect::<Vec<_>>()
-        );
         Ok(raw
             .iter()
             .filter_map(|entry| {
                 let decoded = decode(entry, &namespace);
-                if decoded.is_none() {
-                    eprintln!(
-                        "PR1550DEBUG list decode_failed key={} content={:?}",
-                        entry.key, entry.content
-                    );
-                }
+                if decoded.is_none() {}
                 decoded
             })
             .collect())
@@ -347,15 +334,6 @@ impl Bound {
             .recall(query, limit, &opts, None)
             .await
             .map_err(store_error)?;
-        eprintln!(
-            "PR1550DEBUG recall namespace={} query={} provider_returned={} entries_namespaces={:?}",
-            namespace.as_str(),
-            query,
-            hits.len(),
-            hits.iter()
-                .map(|e| e.namespace.clone().unwrap_or_default())
-                .collect::<Vec<_>>()
-        );
         let hits = hits
             .into_iter()
             .filter(|entry| namespace.contains(entry.namespace.as_deref().unwrap_or_default()))
@@ -641,23 +619,9 @@ impl ContextStore for ProviderContextStore {
         // label either lands its claim before this read or re-creates the
         // envelope after the forget — never loses its claim in between.
         let _guard = self.label_lock.lock().await;
-        eprintln!(
-            "PR1550DEBUG delete_label company={} addr={} label={}",
-            company.as_ref(),
-            addr.as_ref(),
-            label
-        );
         let get_result = self.bound.get::<StoredChunk>(company, addr.as_ref()).await;
-        eprintln!(
-            "PR1550DEBUG delete_label get_result={:?}",
-            get_result
-                .as_ref()
-                .map(|o| o.as_ref().map(|c| (&c.label, &c.labels)))
-                .map_err(|e| e.to_string())
-        );
         let Some(existing) = get_result? else {
             let exists = self.bound.exists(company, addr.as_ref()).await?;
-            eprintln!("PR1550DEBUG delete_label exists_result={exists}");
             // `get` answering `None` is two different facts, and only one of
             // them is "nothing to forget". If the engine DOES hold a record
             // here, this build simply cannot read its envelope — and returning
@@ -721,10 +685,6 @@ impl ContextStore for ProviderContextStore {
                 let chunk: StoredChunk = match decode(entry, &namespace) {
                     Some(chunk) => chunk,
                     None => {
-                        eprintln!(
-                            "PR1550DEBUG search decode_failed key={} content={:?}",
-                            entry.key, entry.content
-                        );
                         return None;
                     }
                 };

@@ -1045,8 +1045,7 @@ mod test {
             allow_ephemeral_memory: true,
             ..settings
         };
-        resolve(&allowed, "module", None, None)
-            .expect("the operator override must open the path");
+        resolve(&allowed, "module", None, None).expect("the operator override must open the path");
     }
 
     #[test]

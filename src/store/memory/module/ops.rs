@@ -51,9 +51,21 @@ fn normalized_lexically(path: &Path) -> PathBuf {
     for component in path.components() {
         match component {
             Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
+            Component::ParentDir => match out.components().next_back() {
+                // Nothing to walk up from. `pop` returns false here and
+                // silently drops the `..`, which turns `../data` into `data`
+                // — a different directory, and the opposite of what the doc
+                // above promises. Keep it instead.
+                None => out.push(".."),
+                // Already walking up, so `..` composes rather than cancels:
+                // `../..` must not collapse to `..`.
+                Some(Component::ParentDir) => out.push(".."),
+                // At an absolute root there is nowhere above to go.
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                _ => {
+                    out.pop();
+                }
+            },
             other => out.push(other.as_os_str()),
         }
     }
@@ -187,6 +199,38 @@ fn runtime_load(path: &Path, config: serde_json::Value) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// `..` on a relative root is preserved, not swallowed.
+    ///
+    /// `PathBuf::pop` answers `false` on an empty buffer and changes nothing,
+    /// so walking components with a bare `pop()` turns `../data` into `data`.
+    /// That is a different directory — the module would write beside the data
+    /// root instead of above it — and it fails silently, because both paths
+    /// are perfectly valid.
+    #[test]
+    fn a_relative_parent_survives_normalisation() {
+        assert_eq!(
+            module_workspace_dir(std::path::Path::new("../data")).expect("relative parent"),
+            std::path::PathBuf::from("../data").join(MODULE_STORE_SUBDIR),
+        );
+        // `..` composes rather than cancelling itself.
+        assert_eq!(
+            normalized_lexically(std::path::Path::new("../../data")),
+            std::path::PathBuf::from("../../data"),
+        );
+        // A `..` that DOES have somewhere to go still resolves.
+        assert_eq!(
+            normalized_lexically(std::path::Path::new("a/b/../c")),
+            std::path::PathBuf::from("a/c"),
+        );
+        // At an absolute root there is nowhere above to go.
+        assert_eq!(
+            normalized_lexically(std::path::Path::new("/../x")),
+            std::path::PathBuf::from("/x"),
+        );
+    }
+
     use super::module_workspace_dir;
 
     /// The module's store is beside — never inside — the incumbent engine's
