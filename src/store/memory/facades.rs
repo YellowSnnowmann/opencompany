@@ -293,11 +293,20 @@ impl Bound {
     /// Lists every typed record in this company's partition.
     async fn list<T: DeserializeOwned>(&self, company: &CompanyId) -> Result<Vec<T>> {
         let namespace = self.namespace(company);
-        Ok(self
+        let raw = self
             .provider
             .list(Some(namespace.as_str()), None, None)
             .await
-            .map_err(store_error)?
+            .map_err(store_error)?;
+        eprintln!(
+            "PR1550DEBUG list namespace={} provider_returned={} entries_namespaces={:?}",
+            namespace.as_str(),
+            raw.len(),
+            raw.iter()
+                .map(|e| e.namespace.clone().unwrap_or_default())
+                .collect::<Vec<_>>()
+        );
+        Ok(raw
             .iter()
             .filter_map(|entry| decode(entry, &namespace))
             .collect())
