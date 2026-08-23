@@ -197,4 +197,25 @@ mod tests {
         assert_eq!(dir, std::path::PathBuf::from("/data/memory-module"));
         assert_ne!(dir.file_name().unwrap(), "memory");
     }
+
+    /// A data root whose FINAL COMPONENT is `..` must refuse just like the
+    /// literal `memory` spelling: `/volume/memory/child/..` derives the
+    /// workspace at `/volume/memory/memory-module`, inside the incumbent
+    /// tree. The refusal is about where the path resolves, not its spelling.
+    #[test]
+    fn a_normalized_path_that_resolves_into_memory_is_refused() {
+        let err = module_workspace_dir(std::path::Path::new("/volume/memory/child/.."))
+            .expect_err("a data root that resolves into `memory` must be refused");
+        assert!(err.contains("`memory`"), "{err}");
+    }
+
+    /// A `..` that resolves OUT of the incumbent tree stays allowed, and the
+    /// derived workspace carries the normalized spelling — no stray `..`
+    /// segment reaches the module's data dir.
+    #[test]
+    fn a_normalized_path_that_resolves_beside_memory_stays_allowed() {
+        let dir = module_workspace_dir(std::path::Path::new("/volume/memory/child/../.."))
+            .expect("allowed: resolves beside `memory`");
+        assert_eq!(dir, std::path::PathBuf::from("/volume/memory-module"));
+    }
 }
