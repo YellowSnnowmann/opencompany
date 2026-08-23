@@ -632,11 +632,18 @@ impl ContextStore for ProviderContextStore {
         // label either lands its claim before this read or re-creates the
         // envelope after the forget — never loses its claim in between.
         let _guard = self.label_lock.lock().await;
-        let Some(existing) = self
-            .bound
-            .get::<StoredChunk>(company, addr.as_ref())
-            .await?
-        else {
+        eprintln!(
+            "PR1550DEBUG delete_label company={} addr={} label={}",
+            company.as_ref(),
+            addr.as_ref(),
+            label
+        );
+        let get_result = self.bound.get::<StoredChunk>(company, addr.as_ref()).await;
+        eprintln!("PR1550DEBUG delete_label get_result={:?}", get_result.as_ref().map(|o| o.as_ref().map(|c| (&c.label, &c.labels))).map_err(|e| e.to_string()));
+        let exists_result = self.bound.exists(company, addr.as_ref()).await;
+        eprintln!("PR1550DEBUG delete_label exists_result={:?}", exists_result.as_ref().map_err(|e| e.to_string()));
+        let Some(existing) = get_result? else {
+            if exists_result? {
             // `get` answering `None` is two different facts, and only one of
             // them is "nothing to forget". If the engine DOES hold a record
             // here, this build simply cannot read its envelope — and returning
