@@ -860,9 +860,12 @@ jobs:
       # linted by NO `-D warnings` lane at all — the silent-uncoverage class
       # this job's own comments keep warning about. Same `--no-deps` reasoning
       # as the step above; the union set matches the test steps below, so the
-      # compile is shared with them via the cache.
-      - name: Clippy (acp, runner, tinymemory)
-        run: cargo clippy --locked --no-deps --features acp,runner,tinymemory --all-targets -- -D warnings
+      # compile is shared with them via the cache. `tinymemory-module` rides
+      # along because it gates the `module/` submodule (ops, host, preflight,
+      # provider) that this lane would otherwise lint only at default
+      # features — i.e. not at all.
+      - name: Clippy (acp, runner, tinymemory, module)
+        run: cargo clippy --locked --no-deps --features acp,runner,tinymemory,tinymemory-module --all-targets -- -D warnings
 
       # Issue #1524 (PR 1). The nested-vendor path deps must stay
       # byte-identical to openhuman's own, or cargo resolves the same crate
