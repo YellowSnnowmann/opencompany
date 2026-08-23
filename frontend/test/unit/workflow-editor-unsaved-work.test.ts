@@ -51,7 +51,10 @@ function savedGraph(): WorkflowGraph {
 
 /** A host that answers every read the dialog makes on open, and records writes.
  * `put` rejects if it is ever called: a save that failed to serialise must not
- * have reached the host. */
+ * have reached the host. `post` answers the pre-flight validate route the
+ * dialog fires 700ms after a postable graph appears (issue #1074) — without it
+ * the debounce timer throws `client.post is not a function` outside every test
+ * body and Vitest fails the run on the unhandled error. */
 function stubClient(): OpenCompanyClient & { puts: unknown[] } {
   const puts: unknown[] = [];
   return {
@@ -64,6 +67,8 @@ function stubClient(): OpenCompanyClient & { puts: unknown[] } {
       puts.push(body);
       return savedGraph();
     },
+    post: async (path: string) =>
+      path.endsWith("/workflows/validate") ? { valid: true } : {},
   } as unknown as OpenCompanyClient & { puts: unknown[] };
 }
 
