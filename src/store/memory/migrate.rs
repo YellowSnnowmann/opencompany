@@ -1035,6 +1035,11 @@ mod test {
             .to_string();
         assert!(err.contains("OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL"), "{err}");
 
+        // An explicit durable target dir is the escape hatch the error names;
+        // it must not be refused by the mongodb check.
+        resolve(&settings, "module", None, Some("/data/durable"))
+            .expect("an explicit durable target dir must open the path");
+
         // The operator override opens the default dir.
         let allowed = StorageSettings {
             allow_ephemeral_memory: true,
@@ -1042,11 +1047,6 @@ mod test {
         };
         resolve(&allowed, "module", None, None)
             .expect("the operator override must open the path");
-
-        // An explicit durable target dir is the escape hatch the error names;
-        // it must not be refused by the mongodb check.
-        resolve(&settings, "module", None, Some("/data/durable"))
-            .expect("an explicit durable target dir must open the path");
     }
 
     #[test]
