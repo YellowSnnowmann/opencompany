@@ -127,8 +127,8 @@ enforced rather than documented-and-hoped:
 ### Prove it with a write and a read, not with a healthy pod
 
 The success criterion is a record stored through the flipped tenant and read
-back through it. "The tenant is up" is not evidence, because two distinct
-failures leave it up:
+back through it. "The tenant is up" is not evidence on its own, because the
+failure that matters most here leaves it up:
 
 * **The store is empty by construction.** The module writes under
   `<data-dir>/memory-module/`, and `namespace` writes under
@@ -137,11 +137,12 @@ failures leave it up:
   memory whatever it had before, and every read succeeds while returning
   nothing. That is indistinguishable from a working driver with nothing
   stored yet, which is exactly why the probe has to write first.
-* **A failed module does not fail the boot.** Loading is lazy — the first
-  `proxy()` call resolves it — and `modules check` is an operator command
-  nothing runs automatically. A bad artifact therefore boots a healthy pod
-  whose every memory call errors, and TinyBus never unloads a library, so it
-  stays that way until the process restarts.
+* **A failed module fails the boot, loudly.** `serve` calls `ensure_loaded`
+  before it finishes starting and propagates the error, so a bad artifact
+  refuses to come up rather than serving a pod whose every memory call errors.
+  That is the outcome to want, and it is why this list has only one quiet
+  failure on it rather than two. TinyBus never unloads a library, so recovery
+  is a restart with a fixed artifact, not a retry.
 
 Prefer a canary tenant with little or no existing memory. Then "empty" stops
 being ambiguous, and the write-then-read answers the only question that

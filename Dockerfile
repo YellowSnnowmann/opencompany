@@ -103,7 +103,13 @@ RUN set -eu; \
     echo "${TINYMEMORY_MODULE_SHA256}  /tmp/${archive}" | sha256sum -c -; \
     mkdir -p /module; \
     tar -xzf "/tmp/${archive}" -C /module; \
-    test -f /module/modules.toml
+    # BOTH files, and the library is the load-bearing one. The digest above
+    # proves the archive is the one that was pinned; it says nothing about what
+    # the archive contains. An archive carrying `modules.toml` but no `.so`
+    # would build a green image whose module load fails at boot — and boot is
+    # where that failure lands, because the driver is loaded eagerly there.
+    test -f /module/modules.toml; \
+    test -f /module/libtinymemory_module.so
 
 FROM debian:bookworm-slim AS runtime
 # libssl3 + the X11 runtime shared libraries satisfy the dynamic linker for the
