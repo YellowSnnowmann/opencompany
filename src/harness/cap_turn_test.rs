@@ -349,6 +349,7 @@ fn deps_for(base_url: String, dir: &std::path::Path) -> (HarnessDeps, Arc<FsOps>
         repo_bindings: Vec::new(),
         checkouts: crate::harness::repo::CheckoutLedger::default(),
         search: None,
+        tenant_search: None,
     };
     (deps, ops)
 }

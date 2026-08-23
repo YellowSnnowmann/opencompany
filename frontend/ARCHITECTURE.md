@@ -42,6 +42,13 @@ Which applies is **derived, not configured**: `needsCarriedSession` compares the
 host's origin with the document's, so a console cannot be told to hold a token
 where a cookie would have worked.
 
+Which of the N is on screen is part of the **address**, not private state: a
+console holding more than one host writes `#/<view>?host=<connectionId>`, so
+switching is a history entry Back can undo and the bar names the host being
+looked at even when that host answers nothing. `src/hooks/use-host-route.ts`
+owns the rule; see
+[desktop-hosts.md](../docs/spec/runtime/desktop-hosts.md#which-host-the-address-names).
+
 Every surface is built to one pattern so the backend can land incrementally:
 
 1. **Real** — the endpoint exists; the console uses it directly. **This is now
@@ -92,10 +99,18 @@ workload or committed.
 | GET | `…/{id}/approvals` | parked approvals |
 | POST | `…/{id}/approvals/{approvalId}` | `{verdict, note?}` → follow-up reply |
 | POST | `…/{id}/feedback` | scrub-then-preview feedback |
-| POST | `…/{id}/{pause\|resume\|suspend\|archive}` | lifecycle control |
+| POST | `…/{id}/{pause\|resume}` | lifecycle control (company-scoped) |
+| POST | `…/{id}/{suspend\|archive}` | lifecycle control (**platform-scoped**) |
 
 These back Overview, Conversation (send/reply), Approvals, Feedback, Settings
-(connection + lifecycle). Everything below is now **delivered** too — the
+(connection + lifecycle). The two scopes are not interchangeable, and the
+Settings lifecycle card renders accordingly: `suspend` and `archive` resolve
+through `resolve_claims`, which cannot return a human, so a console
+authenticating with a session cookie can never reach them — it offers them only
+when it carries a platform bearer, and otherwise says so in the page rather than
+failing after the confirmation (issue #1401). `resume` is company-scoped but the
+handler refuses a non-platform caller on a `suspended` company, so that button is
+withheld there too. Everything below is now **delivered** too — the
 sections document the surface, its read (GraphQL) and its writes (REST).
 
 ---
@@ -114,8 +129,25 @@ it. Responses mirror the TypeScript models in `src/lib/*` and `src/api/types.ts`
 - **Note:** overlay teammates are **roster-only in v1** — they show in the
   roster and get an inbox, but no harness agent is built for them yet.
 
-### Conversation threads — `src/views/Conversation.tsx`, `src/lib/threads.ts`
+### Conversation threads — `src/views/Conversation.tsx`, `src/views/conversation/`, `src/lib/threads.ts`
 - WhatsApp-style two-pane; left list = the company's **desks** (group chats).
+- **The transcript half runs on `@assistant-ui/react`**, through its
+  **external-store** runtime (`src/views/conversation/runtime.ts`). The library
+  owns the composer, the scroll viewport and the run state; `AppShell` keeps
+  owning the transcripts, which is why that runtime and not one of the others:
+  a reply can arrive over SSE while this view is unmounted, and a turn can
+  outlive the request that started it (issue #983), so the message array cannot
+  move into the library. **The transport is unchanged** — still `POST …/chat`
+  and the company event stream, never a data-stream protocol.
+- Everything around the transcript stays this console's own. The left list is
+  the company's desks and teammates rather than an assistant's saved
+  conversations, so it is not a `ThreadListPrimitive`; the strip above the
+  composer steers **named** in-flight runs (issue #111), which is why the
+  runtime is handed no `onCancel`.
+- assistant-ui renders one message at a time, so who a line is from, how
+  consecutive lines group and where a day separator falls are decided up front
+  by a pure `decorate` pass in `src/views/conversation/model.ts` — covered by
+  `test/unit/conversation-model.test.ts` rather than only by a browser.
 - **Source:** ✅ real — `Company.chats` / `Company.chat(id)` (GraphQL) list the
   desks from `[[group_chat]]` and page their history; send uses the `chat`
   endpoint. Desk-scoped routing of replies is single-responder in v1 (the full
@@ -254,6 +286,39 @@ it. Responses mirror the TypeScript models in `src/lib/*` and `src/api/types.ts`
   the three into the rows `ProvidersSection` renders. `ComposioSection` keeps
   only the credential layer.
 
+### Domain & Email (Settings) — `src/components/domain-settings.tsx`, `src/api/domain.ts`, `src/api/smtp.ts`
+- Custom domain with the DNS records the host wants created (verification TXT,
+  CNAME, DKIM, SPF) + per-record verification results; SMTP credentials + test.
+- **Source:** ✅ real — `GET …/domain` and `GET …/smtp` read non-secret status;
+  `PUT …/domain` + `POST …/domain/verify` (server-side DNS check) and `PUT
+  …/smtp` (credentials to the **secret store**) + `POST …/smtp/test` write. The
+  DNS/SMTP network seams are dependency-inverted and feature-gated —
+  `verify`/`test` `404 not_wired` when absent. The same non-secret status is
+  also on `Company.domain`/`Company.smtp` in GraphQL, minus `checks` and the
+  SMTP `security`/from fields.
+- **Records are the host's answer; the console derives nothing.** It used to:
+  `src/lib/domain.ts::dnsRecords` hashed the domain into a verification token
+  client-side and pasted it into a hardcoded target, so every row an operator
+  copied into their registrar was a guess. That generator is gone, and so is the
+  `oc-mail` `localStorage` draft the card kept beside it (issue #1460) — a
+  remembered copy is only a second answer that can disagree with the
+  authoritative one, and the SMTP password was in it. `src/lib/domain.ts` is now
+  a domain pre-flight plus a one-shot purge of what older builds already wrote.
+### Devices (Settings) — `src/views/DevicesView.tsx`, `src/api/devices.ts`
+- The machines paired to the signed-in user: mint a pairing code, list paired
+  devices, revoke one.
+- **Source:** ✅ real — `GET/POST …/devices` and `DELETE …/devices/{id}`. The
+  routes shipped with device pairing and had no caller in the console for a
+  release, while the desktop's prompt pointed people here (issue #1476).
+- **Never `…/devices/claim`.** Redemption happens on the machine being enrolled,
+  through the Tauri bridge, so the session token goes host → OS keychain without
+  passing through a webview. A console that called it would hold the credential
+  the design says it cannot.
+- The sub-page table lives in `src/views/settings-pages.ts` rather than in
+  `SettingsSection.tsx`, so prose that sends someone to a sub-page (the desktop
+  pairing prompt) can name one without importing the section back through
+  itself — and cannot name one that does not exist.
+
 ### Domain & Email (Settings) — `src/components/domain-settings.tsx`, `src/lib/domain.ts`
 - Custom domain with generated DNS records (verification TXT, CNAME, DKIM, SPF)
   + verification status; SMTP credentials + test.
@@ -276,7 +341,9 @@ The console's models are the response contract. Keep host payloads aligned with:
   `src/lib/tasks-sample.ts` `TaskCard`, `src/lib/skills.ts` `InstalledSkill`,
   `src/lib/workspace.ts` `FsNode`, `src/lib/memory.ts` `MemoryEntry`,
   `src/lib/usage-sample.ts` `UsageData`, `src/lib/finance-sample.ts` `FinanceData`,
-  `src/lib/domain.ts` `DnsRecord`/`SmtpConfig`, `src/lib/workflow-sample.ts` `WorkflowNodeData`.
+  `src/api/domain.ts` `DomainStatus`/`DnsRecord`/`RecordCheck`,
+  `src/api/smtp.ts` `SmtpStatus`/`SmtpConfig`,
+  `src/lib/workflow-sample.ts` `WorkflowNodeData`.
 
 The reads now come from GraphQL (one `Company` query per view) rather than a
 `localStorage` seed; the fallback seam remains only where a write path is

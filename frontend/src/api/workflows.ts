@@ -967,6 +967,33 @@ export function createWorkflow(
 }
 
 /**
+ * Asks the host whether Create would accept this graph, **without saving it**
+ * (issue #1074).
+ *
+ * Two of Create's rules cannot be pre-empted by a client without
+ * re-implementing them — node reachability, and the condition branch-label rule
+ * — and a client-side copy of a host rule drifts. So the console asks instead of
+ * mirroring. The host runs the same validation Create runs, so a `200` here and
+ * a refusal there (or the reverse) is not a state the two can be in.
+ *
+ * **A rejection is an `ApiError`, not a return value**, unlike {@link previewCron}
+ * and {@link draftFromDescription}: the body is byte-for-byte the `400` Create
+ * would have answered with, so a caller can render one code path for both. It
+ * does NOT answer id/name uniqueness — that is decided under a write lock at
+ * save time, so a `200` here still permits a `409` there.
+ */
+export function validateWorkflow(
+  client: OpenCompanyClient,
+  company: string | null,
+  graph: WorkflowGraph,
+): Promise<{ valid: boolean }> {
+  return client.post<{ valid: boolean }>(
+    `${client.scopeFor(company)}/workflows/validate`,
+    graph,
+  );
+}
+
+/**
  * What the create-time copilot drafted from an operator's description (issue
  * #753).
  *

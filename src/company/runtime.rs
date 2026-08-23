@@ -717,10 +717,18 @@ impl CompanyRuntime {
     ///   otherwise be covered — it is kept for the case where a turn's steerable
     ///   run outlives the cycle that started it.
     ///
-    /// Cheap by construction: a non-blocking `try_lock`, a map emptiness check,
-    /// and one `std::sync::Mutex` acquisition. The platform calls this once per
-    /// idle tenant per reconcile scan against a short timeout, so anything that
-    /// could block would turn a slow company into a stalled sweep.
+    /// Every arm fails closed: the two registries report **busy** on a poisoned
+    /// mutex rather than panicking, because a panic here reaches an axum handler
+    /// with no `CatchPanicLayer` and the manager's reading of a reset connection
+    /// is to park (issues #1133, #1239).
+    ///
+    /// Cheap by construction: a non-blocking `try_lock` and at most two
+    /// `std::sync::Mutex` acquisitions — one for the run supervisor's map (the
+    /// emptiness check *is* a lock) and one for the steer registry. `||`
+    /// short-circuits, so a company already holding its cycle lock takes
+    /// neither. The platform calls this once per idle tenant per reconcile scan
+    /// against a short timeout, so anything that could block would turn a slow
+    /// company into a stalled sweep.
     pub fn is_busy(&self) -> bool {
         self.serial.try_lock().is_err()
             || !self.run_supervisor.is_empty()
@@ -2660,6 +2668,32 @@ impl CompanyRuntime {
             })
     }
 
+    /// The company's display name — what the manifest calls it, falling back to
+    /// its id.
+    ///
+    /// Split out of [`Self::status`] for the one caller that needs the name
+    /// *before* anybody has signed in: `GET …/auth/config`, which draws the
+    /// sign-in heading. That route is public, so it must not be handed a status
+    /// snapshot — the pending-approval count alone is a fact about the company's
+    /// work, and the name is the only field on it a stranger may see.
+    ///
+    /// A store failure yields the id rather than an error: the name decorates a
+    /// screen whose real payload is the mode, and a heading is not worth
+    /// refusing to tell the console how this company signs people in.
+    pub async fn display_name(&self) -> String {
+        let named = self
+            .store
+            .load(&self.id)
+            .await
+            .ok()
+            .flatten()
+            .map(|record| record.manifest.company.name);
+        match named {
+            Some(name) if !name.trim().is_empty() => name.trim().to_string(),
+            _ => self.id.to_string(),
+        }
+    }
+
     /// A status snapshot, loading the company record for name and lifecycle.
     pub async fn status(&self) -> Result<CompanyStatus> {
         let record = self.store.load(&self.id).await?;
@@ -3209,6 +3243,33 @@ mod tests {
             assert!(runtime.is_busy(), "a registered steer run must report busy");
         }
         assert!(!runtime.is_busy(), "the steer guard must clear it on drop");
+    }
+
+    /// A poisoned run supervisor must make `is_busy` report **busy**.
+    ///
+    /// The predicate's advertised invariant is that it fails closed, and #1133
+    /// only delivered that for two of its three sources: `steer.any_inflight`
+    /// was made poison-tolerant, but the `run_supervisor` arm still reached a
+    /// `.expect` through `len`. `GET /healthz/busy` has no `CatchPanicLayer`, so
+    /// that panic reset the connection, the manager read it as "cannot tell",
+    /// and its default is to park — losing the work the endpoint exists to
+    /// protect (issue #1239).
+    ///
+    /// Outside any feature gate on purpose, matching
+    /// `is_busy_sees_every_source_of_work`: the run supervisor is wired on the
+    /// default build, and this must not be a test that only CI's `openhuman`
+    /// lane runs.
+    #[tokio::test]
+    async fn is_busy_fails_closed_on_a_poisoned_run_supervisor() {
+        let (runtime, _record, _home) = runtime_and_record().await;
+        assert!(!runtime.is_busy(), "an idle runtime must not report busy");
+
+        runtime.run_supervisor().poison_for_test();
+
+        assert!(
+            runtime.is_busy(),
+            "a poisoned run supervisor must report busy rather than panic in the handler"
+        );
     }
 
     async fn runtime_and_record() -> (

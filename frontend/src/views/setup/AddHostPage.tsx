@@ -28,10 +28,21 @@
 // live connection's streams and re-boot it.
 
 import { useState } from "react";
-import { ArrowLeft, Loader2, Play, Square } from "lucide-react";
+import { ArrowLeft, Loader2, Play, Square, Trash2 } from "lucide-react";
 
 import type { LocalInstance } from "@/api/transport/desktop";
 import { OnboardingShell } from "@/components/onboarding-shell";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,6 +74,7 @@ export function AddHostPage() {
     onAddSsh,
     onStartLocal,
     onStopLocal,
+    onDeleteLocal,
   } = hosts;
   const close = () => setAddingHost(false);
   // The two connectors that need a process on this machine are offered only
@@ -130,6 +142,7 @@ export function AddHostPage() {
               onAdd={onAddLocal}
               onStart={onStartLocal}
               onStop={onStopLocal}
+              onDelete={onDeleteLocal}
             />
           </TabsContent>
         ) : null}
@@ -349,11 +362,13 @@ function LocalInstances({
   onAdd,
   onStart,
   onStop,
+  onDelete,
 }: {
   instances: LocalInstance[];
   onAdd: (label: string) => Promise<void>;
   onStart?: (id: string) => Promise<void>;
   onStop?: (id: string) => Promise<void>;
+  onDelete?: (id: string) => Promise<void>;
 }) {
   const [label, setLabel] = useState("");
   /** Which instance has a command in flight, or `"new"` for the create. */
@@ -396,35 +411,44 @@ function LocalInstances({
                 {instance.running ? instance.baseUrl : (instance.error ?? "Stopped")}
               </div>
             </div>
-            {instance.running ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!onStop || busy !== null}
-                onClick={() => void run(instance.id, () => onStop!(instance.id))}
-              >
-                {busy === instance.id ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Square className="size-4" />
-                )}
-                Stop
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!onStart || busy !== null}
-                onClick={() => void run(instance.id, () => onStart!(instance.id))}
-              >
-                {busy === instance.id ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Play className="size-4" />
-                )}
-                Start
-              </Button>
-            )}
+            <div className="flex shrink-0 items-center gap-1">
+              {instance.running ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!onStop || busy !== null}
+                  onClick={() => void run(instance.id, () => onStop!(instance.id))}
+                >
+                  {busy === instance.id ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Square className="size-4" />
+                  )}
+                  Stop
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!onStart || busy !== null}
+                  onClick={() => void run(instance.id, () => onStart!(instance.id))}
+                >
+                  {busy === instance.id ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Play className="size-4" />
+                  )}
+                  Start
+                </Button>
+              )}
+              {instance.id !== "default" && onDelete ? (
+                <DeleteLocalInstance
+                  instance={instance}
+                  disabled={busy !== null}
+                  onConfirm={() => run(instance.id, () => onDelete(instance.id))}
+                />
+              ) : null}
+            </div>
           </li>
         ))}
       </ul>
@@ -465,5 +489,53 @@ function LocalInstances({
         </Button>
       </PanelActions>
     </div>
+  );
+}
+
+/** Deletes a desktop-created company only after spelling out the consequence. */
+function DeleteLocalInstance({
+  instance,
+  disabled,
+  onConfirm,
+}: {
+  instance: LocalInstance;
+  disabled: boolean;
+  onConfirm: () => Promise<void>;
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger
+        render={
+          <Button
+            data-testid={`local-instance-delete-${instance.id}`}
+            variant="ghost"
+            size="sm"
+            disabled={disabled}
+            aria-label={`Delete ${instance.label}`}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        }
+      />
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {instance.label} from this computer?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This permanently deletes the company and all of its data in {instance.dataDir}.
+            This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            data-testid={`local-instance-delete-confirm-${instance.id}`}
+            className="bg-destructive text-white hover:bg-destructive/90"
+            onClick={() => void onConfirm()}
+          >
+            Delete company
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

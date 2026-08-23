@@ -125,6 +125,11 @@ pub mod repo;
 pub mod run_trace;
 pub mod run_turn;
 pub mod search;
+/// A company's **own** search provider (the BYO half of issue #238): Brave,
+/// Exa, Querit or a self-hosted SearXNG, wired from that company's stored key
+/// through OpenHuman's own search tools. Falls back to [`search`]'s metered
+/// managed surface whenever nothing is configured.
+pub mod search_byo;
 /// End-to-end proof that the #238 `web_search` tool is reachable from a real
 /// turn — the harness, the grant gates, the approval policy, the cap and the
 /// meter are all real; only the model's choices and the search backend's
@@ -192,8 +197,8 @@ use crate::harness::orchestrator::DelegationQueue;
 use crate::harness::policy::{ApprovalPolicy, ApprovalRequestQueue};
 use crate::ports::skills_state::{SkillState, SkillStateStore};
 use crate::ports::types::{
-    BudgetOverride, CompanyId, CompanyRecord, OverlayAgent, OverlayDesk, OverlayDeskMember,
-    PolicyOverride, TurnStep,
+    AgentOverride, BudgetOverride, CompanyId, CompanyRecord, OverlayAgent, OverlayDesk,
+    OverlayDeskMember, PolicyOverride, TurnStep,
 };
 use crate::ports::{
     ArtifactStore, CompanyStore, ContextStore, EventLog, FactStore, SecretStore, TaskStore,
@@ -510,6 +515,22 @@ pub struct HarnessDeps {
     /// these deps across a roster gives every agent of the company one budget
     /// rather than one each.
     pub search: Option<search::SearchBackend>,
+    /// The company's **own** search provider connection, when it configured one
+    /// in the console (Brave / Exa / Querit / a self-hosted SearXNG).
+    ///
+    /// `None` — the default at every construction site — means "search through
+    /// the managed surface above", which is the fallback OpenHuman's own
+    /// registry takes for a BYO engine with no key. When `Some` **and** the
+    /// company **explicitly** grants `search`, [`build::build_agent`] wires
+    /// [`search_byo::byo_search_tools`] *instead of* the metered managed tool:
+    /// two "search the web" tools on one belt is how a model comes to spend the
+    /// platform's money by accident.
+    ///
+    /// Resolved from that company's own secret store and re-resolved each turn
+    /// like `composio` / `hosting`, so a key set or rotated in the console takes
+    /// effect on the next turn with no restart. Never from the environment: a
+    /// BYO key is billed to the company that pasted it.
+    pub tenant_search: Option<search_byo::TenantSearch>,
     /// Issue #111 — the shared registry of in-flight, steerable runs. The
     /// [`HarnessBrain`] registers a dispatched task / desk delegation here before
     /// running it (and installs the steer stop-hook over the slot's control), so
@@ -1216,6 +1237,20 @@ pub struct HarnessPool {
     /// A company that never sets an override keeps an empty set and a stable
     /// fingerprint — no rebuild, byte-identical to the pre-#343 behaviour.
     budget_fingerprints: RwLock<HashMap<CompanyId, u64>>,
+    /// Fingerprint of the operator per-agent persona-override set the cached
+    /// roster was built from, keyed by company (issue #1530). Drives persona
+    /// freshness: [`ensure`](Self::ensure) re-resolves the overrides from
+    /// [`HarnessDeps::store`] on every call and rebuilds the roster whenever a
+    /// persona is edited, cleared or reset — so an instructions edit on the
+    /// console Team page reaches the agent's system prompt on the company's
+    /// **next** turn, with no restart and no redeploy. Needed for the same reason
+    /// as [`Self::budget_fingerprints`]: the persona is assembled once per roster,
+    /// not once per call, so without this axis every other fingerprint is stable
+    /// on a persona-only change and the fast path would keep serving the old
+    /// instructions until the process restarted. A company that never edits a
+    /// persona keeps an empty set and a stable fingerprint — no rebuild,
+    /// byte-identical to the pre-#1530 behaviour.
+    override_fingerprints: RwLock<HashMap<CompanyId, u64>>,
     /// Per-company fingerprint of the operator `[policy]` override (issue #562),
     /// so a console tier change rebuilds the roster instead of waiting for a
     /// restart. Without this axis the override persists and is silently ignored:
@@ -1293,6 +1328,7 @@ impl HarnessPool {
             repo_fingerprints: RwLock::new(HashMap::new()),
             skill_fingerprints: RwLock::new(HashMap::new()),
             budget_fingerprints: RwLock::new(HashMap::new()),
+            override_fingerprints: RwLock::new(HashMap::new()),
             policy_fingerprints: RwLock::new(HashMap::new()),
             desk_fingerprints: RwLock::new(HashMap::new()),
             context_fingerprints: RwLock::new(HashMap::new()),
@@ -1383,6 +1419,11 @@ impl HarnessPool {
         let overlay_fp =
             overlay_fingerprint(&overlay.agents, &overlay.agent_edits, &overlay.retired);
         let budget_fp = budget_fingerprint(&overlay.budgets);
+        // Issue #1530: the persona overrides ride the same store read, and go
+        // stale the same way a budget does — the persona is assembled once per
+        // roster, so an edit unseen by any fingerprint would not reach the
+        // system prompt until a restart.
+        let override_fp = override_fingerprint(&overlay.agent_edits);
         let policy_fp = policy_fingerprint(overlay.policy.as_ref());
         // Desk scoping now decides capability (the middle level of the
         // three-level narrowing), so it joins the staleness check: without this
@@ -1417,6 +1458,10 @@ impl HarnessPool {
         // The hosting credential is set from the same settings surface and goes
         // stale the same way, so it rides the same axis.
         let hosting_config = self.resolve_hosting(company, deps).await;
+        // The company's own search provider is set from that same settings
+        // surface and goes stale the same way, so it rides the same axis: a key
+        // pasted in the console must reach the next turn, not the next restart.
+        let tenant_search_config = self.resolve_tenant_search(company, deps).await;
         // A build without either feature has no billing axis to go stale on, so
         // the fingerprint is a constant and this company never rebuilds on it.
         let billing_fp = {
@@ -1428,6 +1473,7 @@ impl HarnessPool {
             #[cfg(feature = "paypal")]
             hasher.write_u64(paypal::TenantPaypal::fingerprint(&paypal_config));
             hasher.write_u64(hosting::TenantHosting::fingerprint(&hosting_config));
+            hasher.write_u64(search_byo::TenantSearch::fingerprint(&tenant_search_config));
             hasher.finish()
         };
 
@@ -1483,6 +1529,7 @@ impl HarnessPool {
             let repo_fingerprints = self.repo_fingerprints.read().await;
             let skill_fingerprints = self.skill_fingerprints.read().await;
             let budget_fingerprints = self.budget_fingerprints.read().await;
+            let override_fingerprints = self.override_fingerprints.read().await;
             let policy_fingerprints = self.policy_fingerprints.read().await;
             let desk_fingerprints = self.desk_fingerprints.read().await;
             let context_fingerprints = self.context_fingerprints.read().await;
@@ -1495,6 +1542,7 @@ impl HarnessPool {
                 && repo_fingerprints.get(&company.id) == Some(&repo_fp)
                 && skill_fingerprints.get(&company.id) == Some(&skill_fp)
                 && budget_fingerprints.get(&company.id) == Some(&budget_fp)
+                && override_fingerprints.get(&company.id) == Some(&override_fp)
                 && policy_fingerprints.get(&company.id) == Some(&policy_fp)
                 && desk_fingerprints.get(&company.id) == Some(&desk_fp)
                 && context_fingerprints.get(&company.id) == Some(&context_fp)
@@ -1525,6 +1573,9 @@ impl HarnessPool {
             fresh_deps.paypal = paypal_config;
         }
         fresh_deps.hosting = hosting_config;
+        // And the company's own search provider, so a key pasted (or cleared) in
+        // the console decides what the rebuilt agents search through.
+        fresh_deps.tenant_search = tenant_search_config;
         // And the freshly-read bindings (issue #245), so a repository bound or
         // revoked in the console is what the rebuilt agents' tools resolve
         // against — including the descriptions that name what is bound.
@@ -1613,6 +1664,10 @@ impl HarnessPool {
             .write()
             .await
             .insert(company.id.clone(), budget_fp);
+        self.override_fingerprints
+            .write()
+            .await
+            .insert(company.id.clone(), override_fp);
         self.policy_fingerprints
             .write()
             .await
@@ -1774,6 +1829,41 @@ impl HarnessPool {
                      connection: {err}"
                 );
                 deps.hosting.clone()
+            }
+        }
+    }
+
+    /// The company's own search provider, for the same reasons as `hosting`.
+    ///
+    /// Only companies that **explicitly** grant `search` read at all — the same
+    /// gate the metered managed tool passes, because this is the same namespace
+    /// wearing a different credential. A company that never opted into web
+    /// search does not get a store read per turn for a setting it cannot use.
+    ///
+    /// A transient read error keeps the last known connection with a warning,
+    /// like `hosting`: degrading to `None` would silently move the company's
+    /// searches back onto the platform's metered account — a bill moving between
+    /// two parties because a store hiccuped.
+    async fn resolve_tenant_search(
+        &self,
+        company: &CompanyRecord,
+        deps: &HarnessDeps,
+    ) -> Option<search_byo::TenantSearch> {
+        if !crate::company::grants_search_explicit(&company.manifest.tools.allow) {
+            return None;
+        }
+        let Some(secrets) = &deps.secrets else {
+            return deps.tenant_search.clone();
+        };
+        match search_byo::TenantSearch::resolve(secrets, &company.id).await {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                tracing::warn!(
+                    company = %company.id,
+                    "[search] could not read the company's search provider; keeping the last known \
+                     connection: {err}"
+                );
+                deps.tenant_search.clone()
             }
         }
     }
@@ -2025,6 +2115,19 @@ impl HarnessPool {
     #[cfg(test)]
     pub async fn budget_fingerprint_of(&self, company: &CompanyId) -> Option<u64> {
         self.budget_fingerprints.read().await.get(company).copied()
+    }
+
+    /// The current persona-override fingerprint for a company (test-only), so a
+    /// persona-freshness test can assert the roster was actually rebuilt after a
+    /// console instructions edit rather than inferring it (issue #1530). This is
+    /// the observable that makes "no restart" testable.
+    #[cfg(test)]
+    pub async fn override_fingerprint_of(&self, company: &CompanyId) -> Option<u64> {
+        self.override_fingerprints
+            .read()
+            .await
+            .get(company)
+            .copied()
     }
 
     /// The current billing-connection fingerprint for a company (test-only), so
@@ -2939,6 +3042,40 @@ fn budget_fingerprint(overrides: &[BudgetOverride]) -> u64 {
     hasher.finish()
 }
 
+/// A stable fingerprint of a company's operator persona-override set (issue
+/// #1530), used to detect a persona set / changed / cleared / reset between
+/// [`HarnessPool::ensure`] calls. Mirrors [`budget_fingerprint`]'s shape; an
+/// [`AgentOverride`] holds no secret.
+///
+/// **Sorted by `agent_id`** first, for the reason [`budget_fingerprint`]
+/// documents: the write routes push and retain rather than maintain an order, so
+/// an order-sensitive hash would rebuild the roster (dropping live agent
+/// sessions) on a save that changed nothing an agent can observe. The
+/// instructions text is hashed as an `Option` discriminant plus its bytes, so a
+/// stored `Some("")` stays distinct from `None` — the same distinction the
+/// resolver's reset-to-blueprint contract depends on.
+fn override_fingerprint(overrides: &[AgentOverride]) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut ordered: Vec<&AgentOverride> = overrides.iter().collect();
+    ordered.sort_by(|a, b| a.agent_id.cmp(&b.agent_id));
+
+    let mut hasher = DefaultHasher::new();
+    ordered.len().hash(&mut hasher);
+    for entry in ordered {
+        entry.agent_id.hash(&mut hasher);
+        match &entry.instructions {
+            Some(text) => {
+                1u8.hash(&mut hasher);
+                text.hash(&mut hasher);
+            }
+            None => 0u8.hash(&mut hasher),
+        }
+    }
+    hasher.finish()
+}
+
 /// A stable fingerprint of a company's operator skill-delta set (issue #41),
 /// used to detect a skill authored / edited / enabled / disabled between
 /// [`HarnessPool::ensure`] calls. Mirrors [`mcp_fingerprint`]'s shape.
@@ -3113,6 +3250,12 @@ pub(crate) fn build_roster(
         // built below — the `ApprovalPolicy` arm and `CompanyAgent`'s copy that
         // the L1 dispatch gate reads — from this one call.
         let effective_budget = company.effective_budget(&manifest_agent.id);
+        // Issue #1530: the persona in force, not the one the manifest shipped
+        // with. `effective_instructions` is an operator override when one is
+        // stored and the manifest `prompt` otherwise, so a console persona edit
+        // reaches the system prompt this agent is built with — and it wins over
+        // the blueprint without cloning the borrowed `&ManifestAgent`.
+        let effective_instructions = company.effective_instructions(&manifest_agent.id);
         let mut agent_policy = ApprovalPolicy::new(policy, effective_budget)
             .with_requests(deps.approval_requests.clone())
             // Issue #243: stamp who the parked effect belongs to, so approving it
@@ -3148,6 +3291,7 @@ pub(crate) fn build_roster(
                 .get(&manifest_agent.id)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]),
+            effective_instructions.as_deref(),
             is_orchestrator,
         )?;
         roster.push(Arc::new(CompanyAgent {
@@ -3180,6 +3324,11 @@ pub(crate) fn build_roster(
         // limitation" this lifts. `effective_budget` gives it a stored cap when
         // an operator set one, and `None` (as before) when nobody has.
         let effective_budget = company.effective_budget(&manifest_agent.id);
+        // Issue #1530: the same persona resolution as the manifest loop. A bare
+        // overlay teammate has no manifest `prompt`, so this is `None` unless an
+        // operator set an override for it — and an override wins uniformly, the
+        // one reason `overlay_agent_to_manifest` can keep `prompt: None`.
+        let effective_instructions = company.effective_instructions(&manifest_agent.id);
         let mut agent_policy = ApprovalPolicy::new(policy, effective_budget)
             .with_requests(deps.approval_requests.clone())
             // An overlay teammate is a real roster agent and re-dispatches the
@@ -3209,6 +3358,7 @@ pub(crate) fn build_roster(
                 .get(&manifest_agent.id)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]),
+            effective_instructions.as_deref(),
             /* is_orchestrator */ false,
         )?;
         roster.push(Arc::new(CompanyAgent {
@@ -3260,6 +3410,11 @@ fn overlay_agent_to_manifest(overlay: &OverlayAgent) -> ManifestAgent {
         delegates_to: Vec::new(),
         context: None,
         budget_usd_daily: None,
+        // Issue #1530: still `None`, and deliberately so. An overlay teammate's
+        // persona is carried by the record's per-agent override (resolved through
+        // `effective_instructions` and threaded into `build_agent` by the caller),
+        // not by this synthetic `ManifestAgent` — the same shape the budget cap
+        // takes, where the override rather than a manifest field is the source.
         prompt: None,
         prompt_files: Vec::new(),
         prompt_files_resolved: Vec::new(),
@@ -3334,6 +3489,7 @@ pub(crate) fn workflow_wiring_deps(
         hosting: None,
         // The staging shape in issue #874: `searchCredentialConfigured: false`.
         search: None,
+        tenant_search: None,
         steer: crate::company::steer::InflightRegistry::default(),
         run_supervisor: crate::runtime::RunSupervisor::default(),
         delivery: None,
@@ -3502,7 +3658,7 @@ mod tests {
         let manifest = overlay_agent_to_manifest(&overlay);
         assert_eq!(manifest.name.as_deref(), Some("Alex"));
         // And it reaches the one place it has to: the persona the model reads.
-        let persona = crate::company::prompt::persona_prompt("Acme", &manifest);
+        let persona = crate::company::prompt::persona_prompt("Acme", &manifest, None);
         assert!(
             persona.contains("You are Alex, the Content Writer at Acme"),
             "{persona}"
@@ -3918,6 +4074,7 @@ description = "Builds the product."
                 run_supervisor: crate::runtime::RunSupervisor::default(),
                 delivery: None,
                 search: None,
+                tenant_search: None,
                 workspace: None,
                 repos: None,
                 repo_bindings: Vec::new(),
@@ -4132,6 +4289,7 @@ description = "Builds the product."
             run_supervisor: crate::runtime::RunSupervisor::default(),
             delivery: None,
             search: None,
+            tenant_search: None,
             workspace: None,
             repos: None,
             repo_bindings: Vec::new(),
@@ -4899,6 +5057,7 @@ description = "Builds the product."
             run_supervisor: crate::runtime::RunSupervisor::default(),
             delivery: None,
             search: None,
+            tenant_search: None,
             workspace: None,
             repos: None,
             repo_bindings: Vec::new(),
@@ -5086,6 +5245,7 @@ description = "Builds the product."
             run_supervisor: crate::runtime::RunSupervisor::default(),
             delivery: None,
             search: None,
+            tenant_search: None,
             workspace: None,
             repos: None,
             repo_bindings: Vec::new(),
@@ -5759,6 +5919,7 @@ description = "Builds the product."
             run_supervisor: crate::runtime::RunSupervisor::default(),
             delivery: None,
             search: None,
+            tenant_search: None,
             workspace: None,
             repos: None,
             repo_bindings: Vec::new(),
@@ -5943,6 +6104,7 @@ description = "Sets direction."
             run_supervisor: crate::runtime::RunSupervisor::default(),
             delivery: None,
             search: None,
+            tenant_search: None,
             workspace: None,
             repos: None,
             repo_bindings: Vec::new(),
@@ -6103,6 +6265,7 @@ description = "Sets direction."
             run_supervisor: crate::runtime::RunSupervisor::default(),
             delivery: None,
             search: None,
+            tenant_search: None,
             workspace: None,
             repos: None,
             repo_bindings: Vec::new(),
@@ -6630,6 +6793,132 @@ description = "Builds the product."
         assert_eq!(pool.budget_fingerprint_of(&rec.id).await, Some(fp_cleared));
     }
 
+    /// `override_fingerprint` detects a persona edit, keeps `Some("")` distinct
+    /// from `None` (the reset-to-blueprint distinction), and does not depend on
+    /// the stored order — the `HashMap` the overrides come from has none, so an
+    /// order-sensitive hash would rebuild the roster (dropping live sessions) on
+    /// a save that changed nothing (issue #1530).
+    #[test]
+    fn override_fingerprint_detects_edits_and_ignores_order() {
+        use crate::ports::types::AgentOverride;
+        let entry = |id: &str, text: Option<&str>| AgentOverride {
+            agent_id: id.to_string(),
+            instructions: text.map(str::to_string),
+            ..Default::default()
+        };
+
+        assert_ne!(
+            override_fingerprint(&[]),
+            override_fingerprint(&[entry("ceo", Some("x"))]),
+            "adding an override must move the fingerprint"
+        );
+        assert_ne!(
+            override_fingerprint(&[entry("ceo", Some("a"))]),
+            override_fingerprint(&[entry("ceo", Some("b"))]),
+            "editing the text must move the fingerprint"
+        );
+        assert_ne!(
+            override_fingerprint(&[entry("ceo", Some(""))]),
+            override_fingerprint(&[entry("ceo", None)]),
+            "an empty-string override and a cleared one must not hash alike"
+        );
+        let ab = [entry("ceo", Some("a")), entry("eng", Some("b"))];
+        let ba = [entry("eng", Some("b")), entry("ceo", Some("a"))];
+        assert_eq!(
+            override_fingerprint(&ab),
+            override_fingerprint(&ba),
+            "the fingerprint must not depend on the stored order"
+        );
+    }
+
+    /// A persona override written through the store reaches the roster on the
+    /// next dispatch — the cache-invalidation the whole feature turns on (#1530).
+    /// The pool is never reconstructed (`resident_companies()` stays 1), so the
+    /// only thing carrying the edit is `override_fingerprint` flipping and
+    /// `ensure` rebuilding the roster in place. Reset-to-blueprint returns the
+    /// fingerprint to its pre-edit value, proving the clear is a real change the
+    /// roster picks up too.
+    #[tokio::test]
+    async fn a_persona_override_written_through_the_store_rebuilds_the_roster() {
+        use crate::ports::types::AgentOverride;
+
+        let dir = tempfile::tempdir().unwrap();
+        let context = Arc::new(MockContext::default());
+        let rec = capped_record();
+
+        // A live store, so `ensure` re-resolves the overrides as production does.
+        let live_store = Arc::new(LiveStore::default());
+        live_store.save(&rec).await.unwrap();
+
+        let mut deps = deps_with_plan(dir.path(), context.clone(), None, None);
+        deps.store = live_store.clone();
+
+        // ONE pool for the whole test — nothing below reconstructs it, so nothing
+        // below can smuggle in a restart.
+        let pool = HarnessPool::new();
+
+        fn with_instructions(base: &CompanyRecord, text: Option<&str>) -> CompanyRecord {
+            let mut next = base.clone();
+            next.overlay_agent_edits = match text {
+                Some(text) => vec![AgentOverride {
+                    agent_id: "ceo".to_string(),
+                    instructions: Some(text.to_string()),
+                    ..Default::default()
+                }],
+                None => Vec::new(),
+            };
+            next
+        }
+
+        // A. Blueprint — the CEO runs on its manifest persona, no override.
+        pool.ensure(&rec, &deps).await.expect("ensure A");
+        let fp_blueprint = pool
+            .override_fingerprint_of(&rec.id)
+            .await
+            .expect("fingerprinted");
+
+        // B. An operator edits the CEO's persona from the console.
+        live_store
+            .save(&with_instructions(&rec, Some("Answer only in haiku.")))
+            .await
+            .unwrap();
+        pool.ensure(&rec, &deps).await.expect("ensure B");
+        let fp_edited = pool
+            .override_fingerprint_of(&rec.id)
+            .await
+            .expect("fingerprinted");
+        assert_ne!(
+            fp_blueprint, fp_edited,
+            "editing a persona must move the override fingerprint, or the cached \
+             roster is reused and the edit never reaches the next turn"
+        );
+        assert_eq!(
+            pool.resident_companies().await,
+            1,
+            "the same company, rebuilt in place — not a new process"
+        );
+
+        // C. Reset-to-blueprint clears the override; the persona returns to seed.
+        live_store
+            .save(&with_instructions(&rec, None))
+            .await
+            .unwrap();
+        pool.ensure(&rec, &deps).await.expect("ensure C");
+        let fp_reset = pool
+            .override_fingerprint_of(&rec.id)
+            .await
+            .expect("fingerprinted");
+        assert_ne!(fp_edited, fp_reset, "clearing the override is a change");
+        assert_eq!(
+            fp_reset, fp_blueprint,
+            "reset-to-blueprint must return to the pre-edit fingerprint"
+        );
+
+        // An unchanged `ensure` is a no-op: the axis is not thrashing the roster.
+        pool.ensure(&rec, &deps).await.expect("ensure idempotent");
+        assert_eq!(pool.override_fingerprint_of(&rec.id).await, Some(fp_reset));
+    }
+
     /// An **overlay** teammate — one added from the console, with no manifest
     /// row — can be capped through the same override, and is refused when it has
     /// spent it. Before #343 an overlay teammate was unconditionally uncapped
@@ -6920,6 +7209,7 @@ budget_usd_daily = 0.0
             &grants,
             &[],
             &[],
+            None,
             is_orchestrator,
         )
         .expect("agent builds");
@@ -7039,6 +7329,7 @@ budget_usd_daily = 0.0
             &["*".to_string()],
             &[],
             &[],
+            None,
             true,
         )
         .expect("agent builds");

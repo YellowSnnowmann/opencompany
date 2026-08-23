@@ -311,6 +311,7 @@ fn build_brain(
         repo_bindings: Vec::new(),
         checkouts: crate::harness::repo::CheckoutLedger::default(),
         search: None,
+        tenant_search: None,
     };
     (
         HarnessBrain::new(Arc::new(HarnessPool::new()), deps, record(overlays)),

@@ -56,7 +56,7 @@ export function ChatHeader({
         <Button
           variant="ghost"
           size="icon"
-          className="size-8 md:hidden"
+          className="size-8 lg:hidden"
           onClick={onOpenRail}
           aria-label="Show channels"
         >

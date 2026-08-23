@@ -928,6 +928,25 @@ export interface AgentDetailDto {
    */
   description?: string;
   /**
+   * The persona instructions **in force** for this teammate (issue #1530): the
+   * per-agent override when one is set, otherwise the blueprint seed. This is
+   * the text the agent actually runs with, and the draft an edit starts from.
+   */
+  instructions?: string | null;
+  /**
+   * The blueprint's own instructions — the manifest seed a manifest teammate
+   * was declared with, kept beside the effective value so the console can show
+   * what "Reset to blueprint" restores. Absent for a bare overlay teammate,
+   * which has no blueprint.
+   */
+  blueprintInstructions?: string;
+  /**
+   * Whether an override is currently masking the blueprint. The console shows
+   * the Reset-to-blueprint control exactly when this is true — an agent running
+   * on its blueprint has nothing to reset.
+   */
+  instructionsOverridden?: boolean;
+  /**
    * Which half of the roster this teammate comes from. `manifest` teammates are
    * declared in the version-controlled `company.toml`; `overlay` teammates were
    * added at runtime. Both are editable and both are removable — a manifest
@@ -999,6 +1018,15 @@ export interface EditAgentInput {
   name?: string;
   role?: string;
   description?: string | null;
+  /**
+   * The persona instructions, three-state exactly like `description` (issue
+   * #1530): `undefined` leaves the override untouched, `null` clears it —
+   * resetting the teammate to its blueprint — and a string sets it. The three
+   * are different on the wire (`JSON.stringify` keeps `null`, drops `undefined`)
+   * and must never be collapsed, or a partial save would silently reset a
+   * persona the operator did not touch.
+   */
+  instructions?: string | null;
 }
 
 /**
@@ -1396,6 +1424,17 @@ export interface CapabilityStatusDto {
   searchCredentialConfigured?: boolean;
   /** The company's daily `web_search` call ceiling. */
   searchDailyCallCap?: number;
+  /**
+   * Which provider the company's searches actually reach: `managed` (the
+   * platform's own account, metered and daily-capped) or the slug it configured
+   * in Settings → Search.
+   *
+   * Read beside `searchCredentialConfigured` rather than instead of it: the two
+   * disagree in both directions. A host with no platform credential still
+   * searches for a company that brought its own key, and a company that picked a
+   * provider without finishing it is still on `managed`.
+   */
+  searchProvider?: string;
   /**
    * Bound repositories (issue #245, agent half): whether the company
    * **explicitly** grants the `repo` namespace (a `*` wildcard does not count).

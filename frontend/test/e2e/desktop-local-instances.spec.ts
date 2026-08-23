@@ -113,6 +113,17 @@ async function installDesktopShell(page: Page, roster: Instance[]): Promise<void
               instance.running = false;
               return Promise.resolve(instance);
             }
+            case "oc_delete_local_instance": {
+              const index = instances.findIndex((instance) => instance.id === args.id);
+              if (index < 0) return Promise.reject(new Error(`no such instance: ${args.id}`));
+              if (args.id === "default") {
+                return Promise.reject(
+                  new Error("the instance on this computer cannot be removed"),
+                );
+              }
+              instances.splice(index, 1);
+              return Promise.resolve();
+            }
             case "oc_connect":
               hosts.set(args.connectionId, args.baseUrl);
               return Promise.resolve();
@@ -241,4 +252,31 @@ test("a second company can be created on this computer", async ({ page, baseURL 
   );
   // Three instances now, two of them listening: the new one and the original.
   await expect(hostCount(page)).toHaveAttribute("data-host-count", "2");
+});
+
+test("a desktop-created company can be deleted after confirmation", async ({
+  page,
+  baseURL,
+}) => {
+  await installDesktopShell(page, seed(baseURL ?? ""));
+  await page.goto("/");
+  await openTheRoster(page);
+
+  const scratch = page.getByTestId("local-instance-scratch");
+  await scratch.getByRole("button", { name: "Delete Scratch" }).click();
+
+  await expect(page.getByText("Delete Scratch from this computer?")).toBeVisible();
+  await expect(scratch).toBeVisible();
+  await page.getByTestId("local-instance-delete-confirm-scratch").click();
+
+  await expect(scratch).not.toBeVisible();
+  await expect(page.getByTestId("local-instance-default")).toBeVisible();
+});
+
+test("the default desktop company cannot be deleted", async ({ page, baseURL }) => {
+  await installDesktopShell(page, seed(baseURL ?? ""));
+  await page.goto("/");
+  await openTheRoster(page);
+
+  await expect(page.getByTestId("local-instance-delete-default")).toHaveCount(0);
 });

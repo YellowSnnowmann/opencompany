@@ -146,9 +146,19 @@ struct CapabilityStatusDto {
     /// tests it rather than a real-money surface shipping untested.
     search_in_build: bool,
     /// Whether a MANAGED search credential is resolvable from the environment on
-    /// this build. Never reflects a tenant secret — search runs only on the
-    /// platform identity.
+    /// this build. Never reflects a tenant secret: it answers "can this
+    /// deployment search on the platform's account", which is a different
+    /// question from [`search_provider`](Self::search_provider) below.
     search_credential_configured: bool,
+    /// The provider this company's searches actually go to — `managed`, or the
+    /// slug it configured in Settings → Search and finished configuring.
+    ///
+    /// Reported beside the managed flag rather than folded into it because the
+    /// two can disagree in both directions: a deployment with no platform
+    /// credential still searches for a company that brought its own key, and a
+    /// company that selected Exa and pasted nothing is still on managed. Never
+    /// the key — only the slug, which is not a secret.
+    search_provider: String,
     /// The company's daily `web_search` call ceiling
     /// (`[tools].search_daily_calls`, else the built-in default). Reaching it
     /// makes the tool refuse loudly rather than return an empty result set.
@@ -263,6 +273,7 @@ struct OptInFlags {
     mcp_directory_credential: Option<DirectoryKeySource>,
     search_granted: bool,
     search_daily_call_cap: u32,
+    search_provider: String,
     repo_granted: bool,
     /// Issue #1192. Carried on the flags rather than derived per DTO site for
     /// the reason the `composio_credential_source` note above already states:
@@ -289,6 +300,7 @@ impl OptInFlags {
             mcp_directory_credential: None,
             search_granted: false,
             search_daily_call_cap: crate::company::DEFAULT_SEARCH_DAILY_CALLS,
+            search_provider: crate::company::search::MANAGED_PROVIDER.to_string(),
             repo_granted: false,
             publish_granted: false,
         }
@@ -320,6 +332,7 @@ fn unconfigured(flags: OptInFlags) -> CapabilityStatusDto {
         search_in_build: cfg!(feature = "openhuman"),
         search_credential_configured: search_credential_configured(),
         search_daily_call_cap: flags.search_daily_call_cap,
+        search_provider: flags.search_provider.clone(),
         repo_granted: flags.repo_granted,
         publish_granted: flags.publish_granted,
         publish_in_build: cfg!(feature = "openhuman"),
@@ -471,6 +484,16 @@ async fn effective_status(runtime: &CompanyRuntime) -> Result<CapabilityStatusDt
             .tools
             .search_daily_calls
             .unwrap_or(crate::company::DEFAULT_SEARCH_DAILY_CALLS),
+        // Which provider the company's own settings point at. Degrades to the
+        // managed answer on a transient secret-store error rather than failing
+        // the whole /capabilities response, like the Composio probe above — the
+        // panel's other cards are unrelated to search.
+        search_provider: crate::company::search::resolve_effective_provider(
+            runtime.id(),
+            runtime.secrets().as_ref(),
+        )
+        .await
+        .unwrap_or_else(|_| crate::company::search::MANAGED_PROVIDER.to_string()),
         // Issue #245: opt-in per tool grant like the three above, and read from
         // the same manifest field, so the repositories card can tell an operator
         // which half of the setup is missing.
@@ -540,6 +563,7 @@ async fn effective_status(runtime: &CompanyRuntime) -> Result<CapabilityStatusDt
         search_in_build: cfg!(feature = "openhuman"),
         search_credential_configured: search_credential_configured(),
         search_daily_call_cap: flags.search_daily_call_cap,
+        search_provider: flags.search_provider.clone(),
         repo_granted: flags.repo_granted,
         publish_granted: flags.publish_granted,
         publish_in_build: cfg!(feature = "openhuman"),
@@ -1172,6 +1196,58 @@ mod tests {
                 dto["mcpDirectoryCredential"], "company",
                 "the company's own key is its own tier, not a shared one: {dto}"
             );
+        }
+    }
+
+    /// Both DTO construction sites report which provider a company's searches
+    /// actually reach, and it tracks what the Search settings page stored.
+    ///
+    /// Same #567 precedent as the two tests above: a field wired into one branch
+    /// alone tells the truth to a company with no plan and lies to every company
+    /// that has one.
+    #[tokio::test]
+    async fn both_response_paths_carry_the_effective_search_provider() {
+        use crate::company::search::{API_KEY_SECRET, PROVIDER_SECRET};
+        use crate::ports::types::SecretValue;
+
+        let grants_search = "[company]\nname = \"Acme\"\n[policy]\nmode = \"full\"\n[tools]\nallow = [\"search\"]\n";
+        for manifest in [
+            grants_search.to_string(),
+            format!("{grants_search}[plan]\nname = \"starter\"\n"),
+        ] {
+            let home_dir = home();
+            let home = home_dir.path().to_path_buf();
+            let state = state_with_manifest(&home, &manifest).await;
+            let runtime = state.registry().get(&CompanyId::new("acme")).unwrap();
+
+            let (_, dto) = get_capabilities(&state).await;
+            assert_eq!(
+                dto["searchProvider"], "managed",
+                "nothing configured, so the platform's account answers: {dto}"
+            );
+
+            // A provider selected with no key is NOT a connection — the panel
+            // must not report one, because the agents are still on managed.
+            runtime
+                .secrets()
+                .set(runtime.id(), PROVIDER_SECRET, SecretValue("exa".into()))
+                .await
+                .unwrap();
+            let (_, dto) = get_capabilities(&state).await;
+            assert_eq!(dto["searchProvider"], "managed", "{dto}");
+
+            runtime
+                .secrets()
+                .set(runtime.id(), API_KEY_SECRET, SecretValue("exa_key".into()))
+                .await
+                .unwrap();
+            let (_, dto) = get_capabilities(&state).await;
+            assert_eq!(
+                dto["searchProvider"], "exa",
+                "a finished connection is what the company searches through: {dto}"
+            );
+            // And never the key itself, on either path.
+            assert!(!dto.to_string().contains("exa_key"), "{dto}");
         }
     }
 

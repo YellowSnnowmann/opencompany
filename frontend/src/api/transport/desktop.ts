@@ -270,6 +270,13 @@ export async function forgetLocalInstance(id: string): Promise<void> {
   await desktop.invoke<void>("oc_forget_local_instance", { id });
 }
 
+/** Permanently deletes a desktop-created host and everything in its data root. */
+export async function deleteLocalInstance(id: string): Promise<void> {
+  const desktop = tauriCore();
+  if (!desktop) throw new Error("deleting a local company needs the desktop application");
+  await desktop.invoke<void>("oc_delete_local_instance", { id });
+}
+
 /**
  * One tunnel this application is holding open. Mirrors `SshTunnelInfo` in Rust.
  */

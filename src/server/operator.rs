@@ -3987,6 +3987,7 @@ mode = "full"
             steer: crate::company::steer::InflightRegistry::default(),
             delivery: None,
             search: None,
+            tenant_search: None,
             workspace: None,
             repos: None,
             repo_bindings: Vec::new(),

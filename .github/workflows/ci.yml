@@ -1021,7 +1021,9 @@ jobs:
       # feature, which that table rejects. All of it is offline: the wire tests
       # drive a stub on an ephemeral port and the rest never build a request.
       - name: Test the Chargebee billing integration
-        run: scripts/ci/run-scoped-suite.sh "chargebee" openhuman,tinycortex,chargebee,paypal,composio chargebee
+        run: |
+          scripts/ci/run-scoped-suite.sh "chargebee" openhuman,tinycortex,chargebee,paypal,composio chargebee
+          scripts/ci/run-scoped-suite.sh "finance read plane" openhuman,tinycortex,chargebee,paypal,composio server::ops::finance
 
       # Issue #789: PayPal. Here rather than on the fast default job for the same
       # reason as chargebee above — the toolbelt bridge is under `src/harness/`

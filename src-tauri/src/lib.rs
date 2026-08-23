@@ -153,6 +153,7 @@ pub fn run() {
             commands::oc_stop_local_instance,
             commands::oc_rename_local_instance,
             commands::oc_forget_local_instance,
+            commands::oc_delete_local_instance,
             commands::oc_open_ssh_tunnel,
             commands::oc_close_ssh_tunnel,
             commands::oc_ssh_tunnels,

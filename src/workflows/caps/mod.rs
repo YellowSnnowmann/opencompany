@@ -291,6 +291,7 @@ pub async fn build_capabilities(
             grants,
             &deps.capabilities,
             deps.search.as_ref(),
+            deps.tenant_search.as_ref(),
             search_metering,
             wiring,
         );

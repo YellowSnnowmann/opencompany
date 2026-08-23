@@ -2679,6 +2679,9 @@ pub struct AgentOverride {
     /// teammate within a grant the company already made.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<String>>,
+    /// The operator's replacement persona prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
 }
 
 /// An operator-added desk membership that the version-controlled manifest does
@@ -2872,7 +2875,7 @@ impl AgentOverride {
     /// The counterpart of [`BudgetOverride::duplicate_agent_id`], and it exists
     /// for the identical reason: [`CompanyRecord::agent_override`] reads the
     /// *first* match, so a second row for one teammate is not a harmless
-    /// duplicate — it makes the applied name, role, description and tool grant a
+    /// duplicate — it makes the applied name, role, description, tool grant and instructions a
     /// function of serialization order. `upsert_agent_override` is the only
     /// write path and it replaces in place, so this cannot happen to a record
     /// this process wrote; a bundle is the one door these arrive through from
@@ -2891,6 +2894,21 @@ impl AgentOverride {
             seen.push(&entry.agent_id);
         }
         None
+    }
+
+    /// Whether this override changes nothing and can be dropped rather than
+    /// stored.
+    ///
+    /// An override whose every optional field is absent carries no edit and
+    /// resolves to a no-op. The write boundary drops such a record rather than
+    /// persisting a row the console would render as "overridden" — the same
+    /// contract [`PolicyOverride`] draws for its own absent fields.
+    pub fn is_empty(&self) -> bool {
+        self.name.is_none()
+            && self.role.is_none()
+            && self.description.is_none()
+            && self.tools.is_none()
+            && self.instructions.is_none()
     }
 }
 
@@ -3782,6 +3800,9 @@ impl CompanyRecord {
             if entry.tools.is_some() {
                 held.tools = entry.tools;
             }
+            if entry.instructions.is_some() {
+                held.instructions = entry.instructions;
+            }
             return;
         }
         self.overlay_agent_edits.push(entry);
@@ -3834,6 +3855,9 @@ impl CompanyRecord {
         }
         if let Some(tools) = entry.tools.as_ref() {
             merged.tools = tools.clone();
+        }
+        if let Some(instructions) = entry.instructions.as_ref() {
+            merged.prompt = Some(instructions.clone());
         }
         std::borrow::Cow::Owned(merged)
     }
@@ -3920,6 +3944,60 @@ impl CompanyRecord {
     /// any. See [`BudgetOverride::duplicate_agent_id`].
     pub fn duplicate_budget_agent_id(&self) -> Option<&str> {
         BudgetOverride::duplicate_agent_id(&self.overlay_budgets)
+    }
+
+    /// The persona instructions actually in force for `agent_id`: the operator's
+    /// override when one is stored, else the manifest agent's `prompt` (the
+    /// blueprint seed), else `None`.
+    ///
+    /// **The single source of truth for "what instructions frame this teammate"**,
+    /// in the shape of [`Self::effective_budget`]. The roster build reads through
+    /// here in both halves — manifest and overlay — so a persona edited in the
+    /// console cannot be honoured by one and ignored by another.
+    ///
+    /// The override **wins** over the blueprint `prompt`, symmetric with
+    /// `effective_budget`/`effective_policy`: it is how a manifest/blueprint
+    /// agent's persona is edited without rewriting read-only `company.toml`, and
+    /// "reset to blueprint" is clearing the override (dropping the row), never a
+    /// second manifest write. An **overlay** teammate has no manifest row, so it
+    /// falls through to `None` unless an override names it — correct, since a
+    /// bare overlay agent's persona is only ever what an operator gave it.
+    pub fn effective_instructions(&self, agent_id: &str) -> Option<String> {
+        match self
+            .agent_override(agent_id)
+            .and_then(|o| o.instructions.clone())
+        {
+            Some(instructions) => Some(instructions),
+            None => self
+                .manifest
+                .agents
+                .iter()
+                .find(|a| a.id == agent_id)
+                .and_then(|a| a.prompt.clone()),
+        }
+    }
+
+    /// Drops `agent_id`'s persona override so the manifest `prompt` applies again
+    /// — "reset to blueprint" (issue #1530).
+    ///
+    /// A no-op when nothing is stored: the caller's intent ("this teammate should
+    /// follow the blueprint") is already satisfied, exactly as `clear_budget`
+    /// treats a missing budget override.
+    pub fn clear_agent_override(&mut self, agent_id: &str) {
+        if let Some(entry) = self
+            .overlay_agent_edits
+            .iter_mut()
+            .find(|entry| entry.agent_id == agent_id)
+        {
+            entry.instructions = None;
+        }
+        self.overlay_agent_edits.retain(|entry| {
+            entry.name.is_some()
+                || entry.role.is_some()
+                || entry.description.is_some()
+                || entry.tools.is_some()
+                || entry.instructions.is_some()
+        });
     }
 
     /// Whether `wid` is switched on (issue #276) — the single predicate the
@@ -6231,6 +6309,150 @@ mod test {
             OverlayBlob::parse("[]")
                 .expect("legacy array")
                 .budgets
+                .is_empty()
+        );
+    }
+
+    // ---- per-agent persona override (issue #1530) ------------------------
+
+    /// A roster with one manifest agent carrying a blueprint `prompt` and one
+    /// without — the two starting positions every persona-override case builds on.
+    const PERSONA_ROSTER: &str = "[company]\nname = \"Acme\"\n\
+         [[agent]]\nid = \"ceo\"\nrole = \"Chief\"\nprompt = \"Blueprint persona.\"\n\
+         [[agent]]\nid = \"eng\"\nrole = \"Engineer\"\n";
+
+    fn override_entry(agent_id: &str, instructions: Option<&str>) -> AgentOverride {
+        AgentOverride {
+            agent_id: agent_id.to_string(),
+            instructions: instructions.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    /// A stored override wins over the manifest `prompt`: this is how a
+    /// manifest/blueprint agent's persona is edited without rewriting
+    /// `company.toml`.
+    #[test]
+    fn effective_instructions_prefers_override() {
+        let mut record = desk_record(PERSONA_ROSTER, Vec::new());
+        record.overlay_agent_edits = vec![override_entry("ceo", Some("Be terse."))];
+        assert_eq!(
+            record.effective_instructions("ceo"),
+            Some("Be terse.".to_string())
+        );
+    }
+
+    /// With no override stored, the manifest `prompt` is returned verbatim — the
+    /// pre-#1530 behaviour, and the net that says adding the field changed
+    /// nothing for a company that never edits a persona.
+    #[test]
+    fn effective_instructions_falls_back_to_manifest_prompt() {
+        let record = desk_record(PERSONA_ROSTER, Vec::new());
+        assert_eq!(
+            record.effective_instructions("ceo"),
+            Some("Blueprint persona.".to_string())
+        );
+    }
+
+    /// A bare overlay teammate (no manifest row) and a manifest agent that
+    /// declares no `prompt` both resolve to `None` when nothing overrides them.
+    #[test]
+    fn effective_instructions_none_for_bare_overlay_or_promptless_agent() {
+        let record = desk_record(PERSONA_ROSTER, Vec::new());
+        assert_eq!(record.effective_instructions("eng"), None);
+        assert_eq!(record.effective_instructions("nobody"), None);
+    }
+
+    /// An override whose `instructions` is `None` carries nothing, so resolution
+    /// falls through to the blueprint — the "reset to blueprint" contract. A
+    /// stored empty-instructions row must never blank the persona.
+    #[test]
+    fn effective_instructions_empty_override_resets_to_blueprint() {
+        let mut record = desk_record(PERSONA_ROSTER, Vec::new());
+        record.overlay_agent_edits = vec![override_entry("ceo", None)];
+        assert_eq!(
+            record.effective_instructions("ceo"),
+            Some("Blueprint persona.".to_string()),
+            "an override that carries no instructions must fall through to the manifest"
+        );
+    }
+
+    /// `upsert_agent_override` replaces the teammate's row in place rather than
+    /// accumulating a second one — the invariant `agent_override`'s first-match
+    /// read depends on.
+    #[test]
+    fn upsert_agent_override_replaces_not_appends() {
+        let mut record = desk_record(PERSONA_ROSTER, Vec::new());
+        record.upsert_agent_override(override_entry("ceo", Some("first")));
+        record.upsert_agent_override(override_entry("ceo", Some("second")));
+        assert_eq!(record.overlay_agent_edits.len(), 1);
+        assert_eq!(
+            record.effective_instructions("ceo"),
+            Some("second".to_string())
+        );
+    }
+
+    /// `clear_agent_override` drops the row so the blueprint applies again, and
+    /// is a no-op when nothing is stored.
+    #[test]
+    fn clear_agent_override_drops_the_row() {
+        let mut record = desk_record(PERSONA_ROSTER, Vec::new());
+        record.upsert_agent_override(override_entry("ceo", Some("custom")));
+        record.clear_agent_override("ceo");
+        assert!(record.overlay_agent_edits.is_empty());
+        assert_eq!(
+            record.effective_instructions("ceo"),
+            Some("Blueprint persona.".to_string())
+        );
+        // No-op when absent.
+        record.clear_agent_override("ceo");
+        assert!(record.overlay_agent_edits.is_empty());
+    }
+
+    /// Duplicates are detectable, so a caller holding overrides it did not write
+    /// (a bundle import) can refuse them rather than apply whichever sorts first.
+    #[test]
+    fn duplicate_override_agent_id_detects() {
+        let mut record = desk_record(PERSONA_ROSTER, Vec::new());
+        assert_eq!(
+            AgentOverride::duplicate_agent_id(&record.overlay_agent_edits),
+            None
+        );
+        record.overlay_agent_edits = vec![
+            override_entry("ceo", Some("a")),
+            override_entry("eng", Some("b")),
+            override_entry("ceo", Some("c")),
+        ];
+        assert_eq!(
+            AgentOverride::duplicate_agent_id(&record.overlay_agent_edits),
+            Some("ceo")
+        );
+    }
+
+    /// An override carrying no instructions is empty; one carrying text is not.
+    #[test]
+    fn agent_override_is_empty_only_when_nothing_is_set() {
+        assert!(override_entry("ceo", None).is_empty());
+        assert!(!override_entry("ceo", Some("x")).is_empty());
+    }
+
+    /// The persona overrides round-trip through the `OverlayBlob` the
+    /// sqlite/mongodb stores persist, and pre-#1530 rows load as "no overrides"
+    /// (the manifest still decides) rather than failing to parse.
+    #[test]
+    fn overlay_blob_round_trips_agent_overrides() {
+        let mut record = desk_record(PERSONA_ROSTER, Vec::new());
+        record.overlay_agent_edits = vec![override_entry("ceo", Some("Be terse."))];
+        let json = serde_json::to_string(&OverlayBlob::from_record(&record)).expect("serialize");
+        let blob = OverlayBlob::parse(&json).expect("reparse");
+        assert_eq!(blob.agent_edits, record.overlay_agent_edits);
+
+        // A pre-#1530 object row (no `agent_overrides` key) loads as empty.
+        let legacy = r#"{"agents":[],"desk_members":[]}"#;
+        assert!(
+            OverlayBlob::parse(legacy)
+                .expect("pre-persona object")
+                .agent_edits
                 .is_empty()
         );
     }

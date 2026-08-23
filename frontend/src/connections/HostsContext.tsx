@@ -52,6 +52,8 @@ export interface HostsValue {
   onAddLocal?: (label: string) => Promise<void>;
   onStartLocal?: (id: string) => Promise<void>;
   onStopLocal?: (id: string) => Promise<void>;
+  /** Permanently deletes a non-default local host and its data. */
+  onDeleteLocal?: (id: string) => Promise<void>;
   /**
    * Opens a tunnel to a host on another machine and registers it.
    *

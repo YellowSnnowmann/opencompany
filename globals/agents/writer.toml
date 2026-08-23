@@ -11,7 +11,14 @@ tier = "frontend"
 # teammate that company never wrote. A request is intersected with
 # `[tools].allow`, so this can only ever be narrower than what the company
 # permits, never wider.
-tools = ["workspace.*", "docs.*", "files.*"]
+# `web.*` and `search` are asked for because the failure this role has is
+# inventing a fact to smooth a sentence — which the prompt below forbids and
+# nothing else prevented. A writer that can look a claim up cites it; one that
+# cannot either leaves the hole visible (the good case) or fills it (the bad
+# one). Both cost nothing in a company that never opted into web search: the
+# request is intersected with `[tools].allow`, and `search` is admitted only by
+# an explicit company grant.
+tools = ["workspace.*", "docs.*", "files.*", "web.*", "search"]
 
 prompt = """
 You are the company's writer. Work arrives as notes, findings, transcripts, or

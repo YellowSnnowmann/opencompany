@@ -130,6 +130,42 @@ be a staler one. They are written in the globals' register without reusing its
 sentences: a global teammate is on the same roster, and two agents given the
 same instructions are one agent twice.
 
+### The shape is a floor, and the profile sits on it
+
+A shape cannot be the whole answer, because a shape is shared. `analysis` covers
+seven of the thirty curated profiles, so an SEO Specialist and an Accountant were
+told the same thing however carefully that text was written — the collision
+above, one level down.
+
+So each curated profile carries its own line too, appended after the shape's:
+what *this role* is judged on, rather than how its kind of work is done. "A
+stock-out costs more than reordering slightly early" is not something the
+`coordination` shape can say. Every template now reads five distinct instruction
+sets for five teammates, where the widened vocabulary alone got `software` to
+four and `ecommerce` to three.
+
+Shape first, profile second, because the profile qualifies the general case —
+the order the persona already reads in, where role and mandate arrive before
+anything about how to work.
+
+**The profile text is looked up, never carried.** The obvious implementation
+hangs it on `ProposedAgent` beside `focus` and lets it ride the review-screen
+round trip. That would be a hole. `focus` survives the trip safely *because* it
+is a value from a closed enum the host re-parses — the worst a crafted request
+achieves is the wrong belt from a list the host wrote. Free-form instruction text
+posted back would reach a teammate's system prompt verbatim, authored by whoever
+made the call, and the company-scoped setup route is deliberately open to any
+member rather than only the operator. So `manifest_from_setup` re-matches the
+template from the same answers and reads the text out of its own compiled-in
+tables. A request that invents an `instructions` field is ignored, and a test
+posts one to prove it.
+
+An operator who **renames** a role on the review screen drops its profile line
+and keeps its shape. That is the answer rather than a gap: once "Report Writer"
+is "Reports", the host no longer knows the teammate is that profile, and
+inheriting a mandate from a role somebody deliberately changed is worse than
+falling back.
+
 An unrecognised focus is instructed with **nothing**, which is the opposite of
 what the belt does with the same input — and deliberately. A belt substitutes
 because a permission has a safe direction to fail in; instructions have none.

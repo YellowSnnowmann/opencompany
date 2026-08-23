@@ -10,6 +10,7 @@ import {
   Settings2,
   ShieldCheck,
   BookText,
+  Wallet,
   Workflow,
 } from "lucide-react";
 
@@ -109,9 +110,11 @@ const WorkflowsView = lazy(() =>
 const WorkspaceView = lazy(() =>
   import("@/views/WorkspaceView").then((m) => ({ default: m.WorkspaceView })),
 );
-// Recharts-backed — load on demand.
-const FinancesView = lazy(() =>
-  import("@/views/FinancesView").then((m) => ({ default: m.FinancesView })),
+// The Finance section: Overview (the ledger fold), Invoicing (Chargebee) and
+// Wallet (PayPal). Load on demand — its Overview page is Recharts-backed and
+// its two provider pages are only reached by an operator who went looking.
+const FinanceSection = lazy(() =>
+  import("@/views/finance/FinanceSection").then((m) => ({ default: m.FinanceSection })),
 );
 // Hosts a sandboxed iframe and the postMessage bridge — load on demand, same
 // as the other heavier, less-visited surfaces.
@@ -162,6 +165,12 @@ const NAV: NavItem[] = [
   { view: "memory", label: "Brain", icon: Brain },
   { view: "workspace", label: "Workspace", icon: FolderClosed },
   { view: "approvals", label: "Approvals", icon: ShieldCheck },
+  // Re-listed. Issue #302 parked the flat Finances page — a single ledger
+  // projection with nowhere to go. What comes back is a section: that same
+  // projection as Overview, plus Invoicing and Wallet, which are the live
+  // Chargebee and PayPal surfaces the host had no HTTP route for until
+  // `server::ops::finance`. See docs/spec/runtime/finance-console.md.
+  { view: "finances", label: "Finance", icon: Wallet },
   { view: "workflows", label: "Workflows", icon: Workflow },
   // Agent-authored internal dashboard pages, rendered in a sandboxed iframe
   // (docs/spec/runtime/pages.md). Placed beside Workflows: both are the
@@ -2047,6 +2056,8 @@ export function AppShell({
               // Skipping setup must not be a dead end: an unstaffed company keeps
               // a visible way back in.
               onRunSetup={() => setSetupForced(true)}
+              // A desk chip on a teammate's detail page opens that desk (issue #1440).
+              onNavigateToDesk={(deskId) => navigate("company", deskId)}
             />
           )}
           {view === "memory" && <MemoryView client={client} company={company} />}
@@ -2160,7 +2171,12 @@ export function AppShell({
                 </div>
               }
             >
-              <FinancesView client={client} company={company} />
+              <FinanceSection
+                client={client}
+                company={company}
+                sub={sub}
+                onNavigate={(page) => navigate("finances", page)}
+              />
             </Suspense>
           )}
           {view === "settings" && (

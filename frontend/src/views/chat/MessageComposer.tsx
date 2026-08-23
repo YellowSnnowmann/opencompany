@@ -169,7 +169,12 @@ export function MessageComposer({
           className="field-sizing-content max-h-48 min-h-10 w-full resize-none bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
         />
 
-        <div className="flex items-center gap-0.5 px-2 pb-1.5">
+        {/* `flex-wrap` keeps Send reachable in a narrow pane (issue #1383):
+            when the intent group and icon buttons can't share a line with it,
+            the row wraps and Send drops to its own line — still `ml-auto`, so
+            right-aligned and in-flow — rather than overflowing off-screen with
+            no way to scroll to it. On a roomy composer it stays a single row. */}
+        <div className="flex flex-wrap items-center gap-0.5 px-2 pb-1.5">
           {deliverableChoice && !compact && (
             <div
               className="mr-1 flex items-center gap-0.5 rounded-lg border p-0.5"

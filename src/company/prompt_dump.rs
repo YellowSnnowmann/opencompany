@@ -201,7 +201,11 @@ fn dump_agent(manifest: &CompanyManifest, agent: &Agent, orchestrator: bool) -> 
             "generated framing + `role` / `description` / `prompt` in `agents/{}.toml`",
             agent.id
         ),
-        body: crate::company::prompt::persona_prompt(&manifest.company.name, agent),
+        body: crate::company::prompt::persona_prompt(
+            &manifest.company.name,
+            agent,
+            agent.prompt.as_deref(),
+        ),
     });
 
     let bundle = crate::company::prompt::bundle_section(agent);

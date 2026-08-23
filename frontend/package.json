@@ -22,10 +22,13 @@
     "e2e:headed": "playwright test --headed",
     "e2e:live": "PW_LIVE_BRAIN=1 playwright test",
     "e2e:first-run": "PW_FIRST_RUN=1 playwright test",
+    "e2e:live-llm": "PW_LIVE_LLM=1 playwright test",
+    "e2e:euler": "PW_LIVE_LLM=1 PW_EULER=1 playwright test",
     "tauri:dev": "../scripts/desktop-dev.sh",
     "tauri:build": "npm run build && cd ../src-tauri && ../frontend/node_modules/.bin/tauri build"
   },
   "dependencies": {
+    "@assistant-ui/react": "^0.15.16",
     "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.3.0",

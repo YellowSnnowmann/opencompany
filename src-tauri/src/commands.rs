@@ -424,6 +424,18 @@ pub async fn oc_forget_local_instance(
     local.forget(&id)
 }
 
+/// Permanently deletes a desktop-created host and everything in its data root.
+///
+/// This is intentionally distinct from [`oc_forget_local_instance`], whose
+/// recoverable contract leaves the data root intact.
+#[tauri::command]
+pub async fn oc_delete_local_instance(
+    state: State<'_, crate::AppHandleState>,
+    id: String,
+) -> Result<(), String> {
+    state.local.lock().await.delete(&id).await
+}
+
 /// Every coding harness this shell knows how to drive over ACP, and whether
 /// each is actually usable right now.
 ///

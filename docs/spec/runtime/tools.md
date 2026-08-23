@@ -75,7 +75,7 @@ deliberately does **not** confer four namespaces, each of which must be named:
 | --- | --- |
 | `media` | Spends real money per generated image or video. |
 | `composio` | Reaches the tenant's connected third-party accounts and moves real side effects — sends email, opens PRs. |
-| `search` | Every call is a billed request on the managed platform. |
+| `search` | The queries leave the building, and a call is billed — to the managed platform, or to the company's own provider account. See [search.md](search.md). |
 | `repo` | Materializes a third party's source inside a sandbox where the agent may also hold `shell`. |
 
 `repo.write` is tighter still: only the exact string confers it. A bare `repo`

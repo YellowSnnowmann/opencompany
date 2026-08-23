@@ -30,6 +30,7 @@
 //! than the single one it replaces.
 
 use std::collections::HashSet;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -62,10 +63,18 @@ struct RosterEntry {
     /// stop button is undone by every quit.
     #[serde(default = "yes")]
     autostart: bool,
+    /// Set only when this application provisions the root. A path shaped like
+    /// one of ours is not proof that the application owns its contents.
+    #[serde(default, skip_serializing_if = "is_false")]
+    desktop_created: bool,
 }
 
 fn yes() -> bool {
     true
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +218,7 @@ impl LocalHosts {
             id,
             label: label.to_string(),
             autostart: true,
+            desktop_created: true,
         };
         self.instances.push(Instance {
             entry,
@@ -274,6 +284,54 @@ impl LocalHosts {
         let index = self.index_of(id)?;
         self.instances.remove(index);
         self.persist();
+        Ok(())
+    }
+
+    /// Permanently removes a desktop-created instance and its data root.
+    ///
+    /// The default instance is deliberately excluded: its root is the
+    /// application's data directory, which also owns the roster and every
+    /// desktop-created instance below it. Only roots minted under
+    /// `instances/` are eligible for recursive deletion.
+    pub async fn delete(&mut self, id: &str) -> Result<(), String> {
+        if id == DEFAULT_INSTANCE_ID {
+            return Err("the instance on this computer cannot be deleted".to_string());
+        }
+        let index = self.index_of(id)?;
+        let Some(relative_root) = self.instances[index].entry.root.as_deref() else {
+            return Err("only desktop-created instances can be deleted".to_string());
+        };
+        if relative_root != format!("{INSTANCES_DIR}/{id}") {
+            return Err("only desktop-created instances can be deleted".to_string());
+        }
+        if !self.instances[index].entry.desktop_created {
+            return Err("only desktop-created instances can be deleted".to_string());
+        }
+        let root = self.data_dir.join(relative_root);
+
+        // Release the server and root lock, then durably disable autostart
+        // before removing anything beneath it. If the final roster write
+        // fails, the stopped row remains safe to retry: a relaunch cannot
+        // recreate an empty root over data that was already deleted.
+        self.instances[index].host = None;
+        let was_autostart = self.instances[index].entry.autostart;
+        self.instances[index].entry.autostart = false;
+        if let Err(error) = self.try_persist() {
+            self.instances[index].entry.autostart = was_autostart;
+            return Err(error);
+        }
+        match tokio::fs::remove_dir_all(&root).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!("could not delete {}: {error}", root.display()));
+            }
+        }
+        let removed = self.instances.remove(index);
+        if let Err(error) = self.try_persist() {
+            self.instances.insert(index, removed);
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -352,6 +410,24 @@ impl LocalHosts {
     }
 
     fn persist(&self) {
+        if let Err(error) = self.try_persist() {
+            let path = self.data_dir.join(ROSTER_FILE);
+            // Not fatal for reversible state changes: the instances running
+            // right now keep running, and the roster stays at its last
+            // successful write. Permanent deletion uses `try_persist`
+            // directly because it cannot safely suppress this failure.
+            tracing::error!(%error, path = %path.display(), "could not write the instance roster");
+        }
+    }
+
+    fn try_persist(&self) -> Result<(), String> {
+        self.try_persist_with(|| Ok(()))
+    }
+
+    fn try_persist_with<F>(&self, before_replace: F) -> Result<(), String>
+    where
+        F: FnOnce() -> std::io::Result<()>,
+    {
         let roster = Roster {
             instances: self
                 .instances
@@ -363,14 +439,23 @@ impl LocalHosts {
         let write = std::fs::create_dir_all(&self.data_dir).and_then(|()| {
             let body = serde_json::to_vec_pretty(&roster)
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
-            std::fs::write(&path, body)
+            let mut temporary = tempfile::Builder::new()
+                .prefix(".instances.json.")
+                .tempfile_in(&self.data_dir)?;
+            temporary.as_file_mut().write_all(&body)?;
+            temporary.as_file().sync_all()?;
+            before_replace()?;
+            temporary.persist(&path).map_err(|error| error.error)?;
+            #[cfg(unix)]
+            std::fs::File::open(&self.data_dir)?.sync_all()?;
+            Ok(())
         });
-        if let Err(error) = write {
-            // Not fatal: the instances running right now keep running, and the
-            // cost is that the roster is what it was at the last successful
-            // write. Failing the operator's action over it would be worse.
-            tracing::error!(%error, path = %path.display(), "could not write the instance roster");
-        }
+        write.map_err(|error| {
+            format!(
+                "could not write the instance roster at {}: {error}",
+                path.display()
+            )
+        })
     }
 }
 
@@ -420,6 +505,7 @@ fn read_roster(data_dir: &Path) -> Roster {
                 label: DEFAULT_INSTANCE_LABEL.to_string(),
                 root: None,
                 autostart: true,
+                desktop_created: false,
             },
         );
     }
@@ -724,6 +810,90 @@ mod test {
 
         assert_eq!(hosts.list().len(), 1);
         assert!(root.exists(), "forgetting is not deleting");
+    }
+
+    #[tokio::test]
+    async fn deleting_removes_a_created_instance_and_its_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut hosts = LocalHosts::load(dir.path().to_path_buf()).await;
+        hosts.create("Acme").await.expect("it starts");
+        let root = dir.path().join("instances/acme");
+        std::fs::write(root.join("company-data"), "valuable").unwrap();
+
+        hosts.delete("acme").await.expect("a created instance");
+
+        assert_eq!(hosts.list().len(), 1);
+        assert!(!root.exists(), "delete removes the instance data root");
+        assert!(
+            hosts.delete(DEFAULT_INSTANCE_ID).await.is_err(),
+            "the application data root is never recursively deleted"
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_keeps_data_when_the_roster_cannot_be_updated() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut hosts = LocalHosts::load(dir.path().to_path_buf()).await;
+        hosts.create("Acme").await.expect("it starts");
+        let root = dir.path().join("instances/acme");
+        std::fs::write(root.join("company-data"), "valuable").unwrap();
+
+        let roster = dir.path().join(ROSTER_FILE);
+        let saved_roster = dir.path().join("instances.saved.json");
+        std::fs::rename(&roster, &saved_roster).unwrap();
+        std::fs::create_dir(&roster).unwrap();
+
+        let error = hosts
+            .delete("acme")
+            .await
+            .expect_err("an unwritable roster must fail deletion");
+
+        assert!(error.contains("could not write the instance roster"));
+        assert!(root.join("company-data").exists(), "data stays retryable");
+        assert!(hosts.list().iter().any(|instance| instance.id == "acme"));
+
+        std::fs::remove_dir(&roster).unwrap();
+        std::fs::rename(&saved_roster, &roster).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_failed_atomic_roster_replace_keeps_the_previous_roster() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut hosts = LocalHosts::load(dir.path().to_path_buf()).await;
+        hosts.create("Acme").await.expect("it starts");
+        let roster = dir.path().join(ROSTER_FILE);
+        let before = std::fs::read(&roster).unwrap();
+        hosts.instances[1].entry.label = "Changed only in memory".to_string();
+
+        let error = hosts
+            .try_persist_with(|| Err(std::io::Error::other("injected before replace")))
+            .expect_err("the injected replacement failure must be reported");
+
+        assert!(error.contains("injected before replace"));
+        assert_eq!(
+            std::fs::read(&roster).unwrap(),
+            before,
+            "a failed replacement must not truncate or change the live roster"
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_refuses_a_hand_written_root() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(ROSTER_FILE),
+            r#"{"instances":[{"id":"kept","label":"Kept","root":"instances/kept"}]}"#,
+        )
+        .unwrap();
+        let mut hosts = LocalHosts::load(dir.path().to_path_buf()).await;
+        let root = dir.path().join("instances/kept");
+        assert!(root.exists());
+
+        assert!(hosts.delete("kept").await.is_err());
+        assert!(
+            root.exists(),
+            "delete only owns roots it minted under instances"
+        );
     }
 
     #[tokio::test]

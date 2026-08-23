@@ -124,9 +124,11 @@ test("a company agent opens from its card and shows what it is", async ({ page }
 
   // And it is a real editor rather than a live-looking button: clicking opens
   // the same fields a console-created teammate is edited through, so a manifest
-  // teammate follows one flow and not a second, weaker one.
+  // teammate follows one flow and not a second, weaker one. Persona instructions
+  // remain a distinct field layered on top of main's description editor.
   await page.getByTestId("agent-edit").click();
   await expect(page.getByTestId("agent-field-description")).toBeVisible();
+  await expect(page.getByTestId("agent-field-instructions")).toBeVisible();
 
   // What does *not* change: the source still names the blueprint. Editing does
   // not launder a manifest teammate into an overlay one — the operator can

@@ -273,6 +273,7 @@ pub(super) fn deps(base_url: String, dir: &std::path::Path) -> (HarnessDeps, Arc
         repo_bindings: Vec::new(),
         checkouts: crate::harness::repo::CheckoutLedger::default(),
         search: None,
+        tenant_search: None,
     };
     (deps, journal)
 }

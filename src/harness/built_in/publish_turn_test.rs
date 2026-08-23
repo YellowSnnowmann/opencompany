@@ -355,6 +355,7 @@ fn brain_with(
         repo_bindings: Vec::new(),
         checkouts: crate::harness::repo::CheckoutLedger::default(),
         search: None,
+        tenant_search: None,
     };
     let record = CompanyRecord {
         overlay_retired_agents: Vec::new(),

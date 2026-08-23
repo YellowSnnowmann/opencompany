@@ -163,7 +163,7 @@ uuid = { version = "1", features = ["v4"], optional = true }
 # entropy) and URL building for the `/authorize` redirect. Already in the tree
 # via `openhuman_core` + `reqwest`, so pinning it as a direct dep adds no new
 # Cargo.lock entry; it links only under the `mcp` feature.
-base64 = { version = "0.22", optional = true }
+base64 = { version = "0.23", optional = true }
 # NOT optional, deliberately (issue #673). `src/policy/consequence.rs` derives a
 # standing grant's host scope with this parser, and it must be *the same* parser
 # `reqwest` uses to perform the fetch — a grant key computed by a second,

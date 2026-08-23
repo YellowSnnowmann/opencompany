@@ -153,6 +153,14 @@ pub fn namespace_of(tool_name: &str) -> Option<&'static str> {
         // `web_search` compiles under the plain `openhuman` feature, which is
         // what CI actually builds and tests.
         "web_search" => Some("search"),
+        // The same namespace under a company's OWN provider (the BYO half of
+        // #238). `web_search` above is the canonical slot whichever provider
+        // serves it — these are the provider extras that ride beside it. Mapped
+        // here for the same reason: a company that budgets `search` must budget
+        // every search tool, not only the metered one, or a capability ceiling
+        // set on one provider evaporates when the operator switches to another.
+        "exa_find_similar" | "exa_get_contents" | "brave_news_search" | "brave_image_search"
+        | "brave_video_search" => Some("search"),
         // Bound repositories (issue #245, agent half). Lives in
         // [`repo`](crate::harness::repo) rather than this module because it
         // reaches a host-owned mirror and a forge, not the agent's own sandbox —
@@ -791,6 +799,15 @@ mod tests {
             "composio_authorize",
             "composio_execute",
             "web_search",
+            // The BYO search extras (issue #238 follow-up). Listed by name
+            // rather than spliced in from `BYO_SEARCH_TOOLS` so this test keeps
+            // saying what it checks: every tool a belt can carry is mapped onto
+            // a gateable namespace.
+            "exa_find_similar",
+            "exa_get_contents",
+            "brave_news_search",
+            "brave_image_search",
+            "brave_video_search",
             "repo_checkout",
             "repo_pr",
         ];

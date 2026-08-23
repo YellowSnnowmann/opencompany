@@ -116,9 +116,18 @@ const SEARCH_GRANTED_COMPANIES: [&str; 9] = [
 
 /// Templates that must NEVER reach the metered search backend: `e2e_harness` and
 /// `e2e_setup` are deterministic fixtures (a priced network call would make them
-/// non-hermetic and flaky), and `openhuman_demo` is a walkthrough nobody opted
-/// into spend for.
-const SEARCH_DENIED_COMPANIES: [&str; 3] = ["e2e_harness", "e2e_setup", "openhuman_demo"];
+/// non-hermetic and flaky), `openhuman_demo` is a walkthrough nobody opted
+/// into spend for, and `agentic_math_lab` is denied for a reason of its own —
+/// its whole claim is that it *computes* an exact answer, and a lab that can
+/// search can look one up. A run that looked the answer up passes the lab's
+/// end-to-end spec while proving nothing about whether the roster can solve
+/// anything, so withholding the network is what makes the number evidence.
+const SEARCH_DENIED_COMPANIES: [&str; 4] = [
+    "agentic_math_lab",
+    "e2e_harness",
+    "e2e_setup",
+    "openhuman_demo",
+];
 
 /// Templates that simply do not grant `search` today. Unlike
 /// [`SEARCH_DENIED_COMPANIES`] there is no rule keeping them off the priced

@@ -207,14 +207,58 @@ impl RunSupervisor {
             .collect()
     }
 
-    /// How many runs are currently registered. For tests and diagnostics.
+    /// How many runs are currently registered.
+    ///
+    /// For tests and diagnostics, and it stays that way: it keeps the `expect`,
+    /// so [`is_empty`](Self::is_empty) — which *is* on a production path —
+    /// deliberately does not route through it.
     pub fn len(&self) -> usize {
         self.inner.lock().expect("run supervisor poisoned").len()
     }
 
     /// Whether no run is registered.
+    ///
+    /// Poison-tolerant, and it reports **not empty** — that is, busy — rather
+    /// than panicking. [`CompanyRuntime::is_busy`] reads this for
+    /// `GET /healthz/busy`, and a panic there reaches an axum handler with no
+    /// `CatchPanicLayer`: the connection resets, the manager reads that as
+    /// "cannot tell", and its default is to park — losing the very work this
+    /// exists to protect, at the one moment the registry is in an unknown state.
+    ///
+    /// Reporting busy on poison is bounded: the manager parks anyway once a
+    /// tenant exceeds its idle timeout plus the busy extension, so a permanently
+    /// poisoned supervisor delays a park rather than preventing one.
+    ///
+    /// This mirrors [`InflightRegistry::any_inflight`], the sibling arm of the
+    /// same predicate, which was given this treatment in #1133 while this one
+    /// was missed (issue #1239).
+    ///
+    /// [`CompanyRuntime::is_busy`]: crate::company::runtime::CompanyRuntime::is_busy
+    /// [`InflightRegistry::any_inflight`]: crate::company::steer::InflightRegistry::any_inflight
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        let Ok(runs) = self.inner.lock() else {
+            return false;
+        };
+        runs.is_empty()
+    }
+
+    /// Poisons the inner mutex so a test can exercise the fail-closed read.
+    ///
+    /// Test-only: nothing in production has a reason to poison a lock. The
+    /// panic it provokes is caught by the joined thread, but the default panic
+    /// hook still prints one line to the test output — that line is expected.
+    #[cfg(test)]
+    pub(crate) fn poison_for_test(&self) {
+        let inner = Arc::clone(&self.inner);
+        let _ = std::thread::spawn(move || {
+            let _guard = inner.lock().expect("run supervisor poisoned");
+            panic!("poisoning the run supervisor for a test");
+        })
+        .join();
+        assert!(
+            self.inner.lock().is_err(),
+            "the helper must actually leave the mutex poisoned"
+        );
     }
 }
 
@@ -245,6 +289,32 @@ impl Drop for RunGuard {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// A poisoned supervisor must report **busy**, not panic.
+    ///
+    /// `is_empty` is read by `CompanyRuntime::is_busy` behind
+    /// `GET /healthz/busy`, whose router has no `CatchPanicLayer`. A panic there
+    /// resets the connection, the manager reads that as "cannot tell", and its
+    /// default is to park — destroying the in-flight work the endpoint exists to
+    /// protect, at the one moment the registry's state is unknown (issue #1239).
+    ///
+    /// `len` is the other half of the contract: it is test-and-diagnostics only,
+    /// so it keeps its `expect`, and `is_empty` therefore cannot be written as
+    /// `self.len() == 0` — which is precisely how the panic got onto the
+    /// production path in the first place.
+    #[test]
+    fn a_poisoned_supervisor_reports_busy_instead_of_panicking() {
+        let supervisor = RunSupervisor::new();
+        assert!(supervisor.is_empty(), "an untouched supervisor is empty");
+
+        supervisor.poison_for_test();
+
+        assert!(
+            !supervisor.is_empty(),
+            "a poisoned supervisor must read as not-empty, so is_busy reports busy \
+             and the manager does not park a company mid-run"
+        );
+    }
 
     /// The core loop: a begun run is registered under the id its context
     /// carries, cancelling fires the signal that context holds, and the guard

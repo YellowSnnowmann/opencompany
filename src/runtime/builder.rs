@@ -1943,10 +1943,6 @@ impl RuntimeBuilder {
         // a restart), so a console rename would revert and a removed teammate
         // would walk back onto the roster. The same reasoning as
         // `overlay_budgets` below, and the same failure mode.
-        let overlay_agent_edits = existing
-            .as_ref()
-            .map(|r| r.overlay_agent_edits.clone())
-            .unwrap_or_default();
         let overlay_retired_agents = existing
             .as_ref()
             .map(|r| r.overlay_retired_agents.clone())
@@ -2036,6 +2032,15 @@ impl RuntimeBuilder {
         let overlay_budgets = existing
             .as_ref()
             .map(|r| r.overlay_budgets.clone())
+            .unwrap_or_default();
+        // Issue #1530: the operator-set per-agent persona overrides. Carried
+        // across the rebuild for the same reason as the budget caps above — the
+        // manifest is a read-only boot snapshot on a hosted tenant, so dropping
+        // these would silently revert every console-edited persona to the text
+        // baked into the image on the next restart.
+        let overlay_agent_edits = existing
+            .as_ref()
+            .map(|r| r.overlay_agent_edits.clone())
             .unwrap_or_default();
         // Issue #562: the operator's `[policy]` override, carried across the
         // rebuild — but ONLY while the seed's `[policy]` has not itself changed.
@@ -2420,6 +2425,28 @@ impl RuntimeBuilder {
                             } else {
                                 None
                             };
+                            // The company's own search provider, resolved from
+                            // the same store for the same reason: a BYO search
+                            // key is billed to the company that pasted it, so
+                            // there is no environment fallback. Absent, the
+                            // agents search through the managed surface below.
+                            let tenant_search_config = if crate::company::grants_search_explicit(
+                                &self.manifest.tools.allow,
+                            ) {
+                                crate::harness::search_byo::TenantSearch::resolve(&secrets, &id)
+                                    .await
+                                    .unwrap_or_else(|err| {
+                                        tracing::warn!(
+                                            company = %id,
+                                            "[search] could not read the company's search \
+                                             provider at boot; falling back to managed search this \
+                                             turn: {err}"
+                                        );
+                                        None
+                                    })
+                            } else {
+                                None
+                            };
                             let composio_config = if crate::company::grants_composio_explicit(
                                 &self.manifest.tools.allow,
                             ) {
@@ -2623,6 +2650,7 @@ impl RuntimeBuilder {
                                 #[cfg(feature = "paypal")]
                                 paypal: paypal_config,
                                 hosting: hosting_config,
+                                tenant_search: tenant_search_config,
                                 steer,
                                 run_supervisor: supervisor,
                                 // Issue #170: the ports an `output` node's
@@ -6501,6 +6529,7 @@ needs_reason = true
             role: Some("Managing Director".to_string()),
             description: None,
             tools: None,
+            instructions: None,
         });
         record.retire_agent("cto");
         store.save(&record).await.unwrap();

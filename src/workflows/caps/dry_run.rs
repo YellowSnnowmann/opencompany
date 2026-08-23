@@ -261,6 +261,7 @@ mod tests {
         assert!(
             matches!(refused, Err(EngineError::Capability(ref message))
                 if message.contains("no managed search backend")
+                    && message.contains("Settings → Search")
                     && message.contains("ask the platform operator")),
             "{refused:?}"
         );

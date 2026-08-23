@@ -1,0 +1,19 @@
+role = "Programmer"
+description = "Write the program the approach calls for, run it, and report what it printed and how long it took."
+tier = "reasoning"
+context = ["GOAL.md", "brief.md", "METHOD.md", "attempts.md"]
+
+tools = ["files", "docs", "shell", "code", "workspace.read"]
+
+ledgers = [
+    { name = "tasks", access = "record" },
+    { name = "goals", access = "read" },
+    { name = "decisions", access = "read" },
+    { name = "risks", access = "record" },
+    { name = "commitments", access = "read" },
+    { name = "learnings", access = "record" },
+    { name = "attempts", access = "record" },
+    { name = "answers", access = "read" },
+]
+
+prompt_files = ["prompts/programmer.md"]

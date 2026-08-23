@@ -153,6 +153,7 @@ async fn main() -> anyhow::Result<()> {
         run_supervisor: opencompany::runtime::RunSupervisor::default(),
         delivery: None,
         search: None,
+        tenant_search: None,
         workspace: None,
         repos: None,
         repo_bindings: Vec::new(),

@@ -5,7 +5,7 @@
 import type { AgentDetailDto, AgentToolsDto, EditAgentInput } from "@/api/types";
 
 /** The fields that describe an agent, in the order both forms show them. */
-export type AgentFieldKey = "name" | "role" | "description";
+export type AgentFieldKey = "name" | "role" | "description" | "instructions";
 
 export interface AgentFieldSpec {
   key: AgentFieldKey;
@@ -13,12 +13,18 @@ export interface AgentFieldSpec {
   placeholder: string;
   /** `prose` renders a textarea; `line` renders a single-line input. */
   kind: "line" | "prose";
+  /**
+   * How many rows a `prose` field's textarea shows. Instructions is the whole
+   * persona an agent runs on — longer than a one-line "what they do" — so it
+   * asks for more room. Ignored for a `line` field.
+   */
+  rows?: number;
 }
 
 /**
  * The single definition of an agent's authored fields.
  *
- * Shared deliberately by "Define a teammate" and the detail view's edit form: the
+ * Shared deliberately by "Add teammate" and the detail view's edit form: the
  * two collect the same three things, and before this they would have collected
  * them under two sets of labels and placeholders that drifted apart. The host
  * accepts exactly these keys in a `PATCH`, so the list is also the client half
@@ -33,6 +39,16 @@ export const AGENT_FIELDS: AgentFieldSpec[] = [
     placeholder: "e.g. Runs paid acquisition and reports on ROAS.",
     kind: "prose",
   },
+  {
+    key: "instructions",
+    label: "Instructions",
+    placeholder:
+      "e.g. Always confirm the budget before launching a campaign. Report ROAS weekly and flag anything under 2x.",
+    kind: "prose",
+    // The persona the agent runs on, appended verbatim to its system prompt —
+    // longer than the one-line "what they do", so it gets a taller box.
+    rows: 8,
+  },
 ];
 
 /** The three authored values, as a form holds them. */
@@ -40,7 +56,7 @@ export type AgentDraft = Record<AgentFieldKey, string>;
 
 /** A blank draft, for the create form and for a detail view that has not loaded. */
 export function emptyDraft(): AgentDraft {
-  return { name: "", role: "", description: "" };
+  return { name: "", role: "", description: "", instructions: "" };
 }
 
 /** The draft a detail response starts an edit from. */
@@ -51,6 +67,9 @@ export function draftFrom(detail: AgentDetailDto): AgentDraft {
     name: detail.name ?? "",
     role: detail.role,
     description: detail.description ?? "",
+    // The **effective** instructions — the override when one is set, else the
+    // blueprint seed — so an edit starts from what the agent actually runs on.
+    instructions: detail.instructions ?? "",
   };
 }
 
@@ -91,6 +110,11 @@ export function agentEdits(detail: AgentDetailDto, draft: AgentDraft): EditAgent
     changed = true;
     if (field.key === "description") {
       edits.description = next === "" ? null : next;
+    } else if (field.key === "instructions") {
+      // Same three-state as description: an emptied field is `null`, which on
+      // the host clears the override and resets the teammate to its blueprint —
+      // not `""`, which would try to store an empty persona.
+      edits.instructions = next === "" ? null : next;
     } else if (field.key === "name") {
       edits.name = next;
     } else {

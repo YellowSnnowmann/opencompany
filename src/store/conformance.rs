@@ -154,6 +154,7 @@ fn sample_agent_overrides() -> Vec<crate::ports::types::AgentOverride> {
         role: Some("Chief Vibes".to_string()),
         description: Some(String::new()),
         tools: Some(vec!["docs.*".to_string()]),
+        instructions: Some("Be exceedingly concise and decisive.".to_string()),
     }]
 }
 

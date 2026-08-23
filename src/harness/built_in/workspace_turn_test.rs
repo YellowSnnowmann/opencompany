@@ -319,6 +319,7 @@ async fn harness(
         // test exercises the #237 workspace path only, and no managed search
         // backend is the fail-closed default outside the runtime builder.
         search: None,
+        tenant_search: None,
         repos: None,
         repo_bindings: Vec::new(),
         checkouts: crate::harness::repo::CheckoutLedger::default(),

@@ -1,59 +1,28 @@
 import { lazy, Suspense } from "react";
-import {
-  Blocks,
-  ChartColumnBig,
-  CreditCard,
-  Globe,
-  Plug,
-  type LucideIcon,
-  Settings2,
-  Sparkles,
-  UserCog,
-} from "lucide-react";
 
 import type { OpenCompanyClient } from "@/api/client";
 import type { CompanyFeed } from "@/hooks/use-company";
 import { cn } from "@/lib/utils";
-import { BillingView } from "@/views/BillingView";
 import { ConnectionsView } from "@/views/ConnectionsView";
+import { DevicesView } from "@/views/DevicesView";
 import { HostingView } from "@/views/HostingView";
+import { SearchView } from "@/views/SearchView";
 import { McpServersView } from "@/views/McpServersView";
 import { PeopleView } from "@/views/PeopleView";
 import { SkillsView } from "@/views/SkillsView";
 import { SettingsView } from "@/views/SettingsView";
+import {
+  SETTINGS_PAGES,
+  resolveSettingsPage,
+  type SettingsPage,
+} from "@/views/settings-pages";
+
+// The table itself lives in `settings-pages.ts` so that prose pointing at a
+// sub-page can name one without importing this section and everything under it.
+export { SETTINGS_PAGES, type SettingsPage };
 
 // Recharts is heavy and only used here — load the usage dashboard on demand.
 const UsageView = lazy(() => import("@/views/UsageView").then((m) => ({ default: m.UsageView })));
-
-/** The sub-pages that live under Settings. The id is the hash's second segment. */
-export const SETTINGS_PAGES = [
-  { id: "general", label: "General", icon: Settings2, hint: "Connection, lifecycle, domain, mail" },
-  { id: "people", label: "People", icon: UserCog, hint: "Who can sign in, and as what" },
-  { id: "connections", label: "Connections", icon: Plug, hint: "Third-party accounts" },
-  { id: "mcp", label: "MCP Servers", icon: Blocks, hint: "Tool servers and their tools" },
-  // Sits beside Connections rather than inside it: an operator looking for
-  // "where do I put my Chargebee key" searches for billing, not for a
-  // third-party-accounts drawer.
-  { id: "billing", label: "Billing", icon: CreditCard, hint: "Invoicing through Chargebee" },
-  // Beside Billing for the same reason it sits beside Connections: an operator
-  // looking for "where do I put my Vercel token" searches for hosting.
-  { id: "hosting", label: "Hosting", icon: Globe, hint: "Where this company's sites go live" },
-  // "What this company knows how to do" read as capability the company performs
-  // — the implication issue #569 exists to remove, set here *before* the tab
-  // gets a chance to correct it. The siblings describe their content; so does
-  // this now.
-  { id: "skills", label: "Skills", icon: Sparkles, hint: "Playbooks your teammates read" },
-  { id: "usage", label: "Usage", icon: ChartColumnBig, hint: "What this company is spending" },
-] as const satisfies readonly { id: string; label: string; icon: LucideIcon; hint: string }[];
-
-export type SettingsPage = (typeof SETTINGS_PAGES)[number]["id"];
-
-const DEFAULT_PAGE: SettingsPage = "general";
-
-/** Whether a hash segment names a real sub-page. */
-function resolvePage(sub: string | null): SettingsPage {
-  return SETTINGS_PAGES.some((p) => p.id === sub) ? (sub as SettingsPage) : DEFAULT_PAGE;
-}
 
 interface Props {
   client: OpenCompanyClient;
@@ -75,13 +44,13 @@ interface Props {
  * survives a refresh exactly as a top-level view does.
  */
 export function SettingsSection({ client, company, feed, sub, onNavigate, onFlag }: Props) {
-  const page = resolvePage(sub);
+  const page = resolveSettingsPage(sub);
 
   return (
     <div className="flex min-h-0 flex-1">
       <nav
         aria-label="Settings"
-        className="hidden w-60 shrink-0 flex-col gap-0.5 overflow-y-auto border-r p-3 sm:flex"
+        className="hidden w-60 shrink-0 flex-col gap-0.5 overflow-y-auto border-r p-3 lg:flex"
       >
         <h2 className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">Settings</h2>
         {SETTINGS_PAGES.map((item) => (
@@ -104,10 +73,14 @@ export function SettingsSection({ client, company, feed, sub, onNavigate, onFlag
         ))}
       </nav>
 
-      {/* On a narrow screen the rail collapses to a scrolling row of chips, so
-          the sub-pages stay reachable without a second drawer. */}
+      {/* Below `lg` the rail collapses to a scrolling row of chips, so the
+          sub-pages stay reachable without a second drawer. The breakpoint is
+          `lg`, not `sm`: from 768–1023px the app sidebar is still on, and a
+          second `w-60` rail here would squeeze the settings pane below the
+          width its widest card (SMTP) needs, clipping it on both sides
+          (issue #1383). */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex gap-1 overflow-x-auto border-b p-2 sm:hidden">
+        <div className="flex gap-1 overflow-x-auto border-b p-2 lg:hidden">
           {SETTINGS_PAGES.map((item) => (
             <button
               key={item.id}
@@ -128,19 +101,22 @@ export function SettingsSection({ client, company, feed, sub, onNavigate, onFlag
           <SettingsView client={client} company={company} feed={feed} onFlag={onFlag} />
         )}
         {page === "people" && <PeopleView client={client} company={company} />}
+        {page === "devices" && <DevicesView client={client} company={company} />}
         {page === "connections" && <ConnectionsView client={client} company={company} />}
         {page === "mcp" && <McpServersView client={client} company={company} />}
-        {/* `key` remounts on a company switch, which is what keeps one
-            company's typed-but-unsaved credentials out of another's Save. See
-            the note above `load` in BillingView. */}
-        {page === "billing" && (
-          <BillingView key={company ?? "self"} client={client} company={company} />
-        )}
-        {/* Same `key` remount as Billing, and for the same reason: a hosting
-            token typed for one company must not survive a company switch into
-            another company's Save. */}
+        {/* Billing was here. It moved to Finance → Invoicing and Finance → Wallet
+            (docs/spec/runtime/finance-console.md): a credential form belongs
+            beside the data it unlocks, and "Billing" read as *what OpenCompany
+            charges me* — which is Usage, two rows down.
+            Same `key` remount as the providers in FinanceSection: it keeps one
+            company's typed-but-unsaved token out of another's Save. */}
         {page === "hosting" && (
           <HostingView key={company ?? "self"} client={client} company={company} />
+        )}
+        {/* Same remount rule, same reason: a search key typed for one company
+            must never ride into another company's Save. */}
+        {page === "search" && (
+          <SearchView key={company ?? "self"} client={client} company={company} />
         )}
         {page === "skills" && <SkillsView client={client} company={company} />}
         {page === "usage" && (

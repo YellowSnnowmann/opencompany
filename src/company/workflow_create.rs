@@ -270,10 +270,7 @@ pub(crate) async fn create_company_workflow(
     // gets from the read routes.
     let toml_src = render_workflow(&draft)?;
     if toml_src.len() > MAX_WORKFLOW_TOML_BYTES {
-        return Err(OpenCompanyError::InvalidRequest(format!(
-            "the rendered workflow is {} bytes, over the {MAX_WORKFLOW_TOML_BYTES}-byte limit.",
-            toml_src.len()
-        )));
+        return Err(over_cap_error(toml_src.len()));
     }
     let file = parse_workflow(&toml_src).map_err(|err| match err {
         // A structural validation failure of the rendered draft becomes a
@@ -559,22 +556,46 @@ pub(crate) fn workflow_spec_from_graph(file: WorkflowFile) -> WorkflowGraphSpec 
 /// taken by the time it is approved, and that is the roster-drift case apply
 /// surfaces by keeping the card In Review.
 ///
-/// Gated with the builder it serves: the only caller is
-/// `crate::harness::workflow_build`, so in the default build (no harness) this
-/// would be dead code.
-#[cfg(feature = "openhuman")]
+/// Ungated, and deliberately so. It used to be `#[cfg(feature = "openhuman")]`
+/// because its only caller was `crate::harness::workflow_build`. Issue #1074
+/// gave it a second one — `POST …/workflows/validate`, which is in the default
+/// build — and gating a shared validator behind a feature the caller does not
+/// have is precisely what let the create surfaces drift apart in issue #168
+/// (see the `create_company_workflow` re-export note in `super`). Every callee
+/// below is already ungated.
+///
+/// `source_dir` must be the SAME one the caller would hand
+/// [`create_company_workflow`]. It feeds exactly one rule — `workflow_id_exists`
+/// → [`seed_file_exists`] — and passing `None` where create passes a real
+/// directory makes this refuse a `sub_workflow` node naming a graph that lives
+/// only as `<source_dir>/workflows/<wid>.toml`, which create accepts. That is a
+/// different *verdict*, not a different sentence, and it is exactly the failure
+/// a pre-flight exists to prevent (review of #1074; hosted tenants have no
+/// source dir and never saw it).
+///
+/// `wired_channels` is the deployment's deliverable channel set (issue #1191):
+/// `None` means the caller cannot see the wiring, and the `channel`-target rule
+/// is skipped rather than guessed at — see [`validate_draft_against_record`].
 pub(crate) fn courtesy_validate_draft(
     draft: &RawWorkflow,
     record: &CompanyRecord,
+    source_dir: Option<&Path>,
     wired_channels: Option<&[String]>,
 ) -> Result<()> {
     validate_draft_shape(draft)?;
+    // Record cross-check BEFORE the render → parse round trip, matching
+    // `create_company_workflow`'s order (`validate_draft_against_record` at the
+    // top of its write section, `parse_workflow` after). It used to run after,
+    // which meant a draft violating both a record rule and a graph rule was
+    // refused here for the graph problem and there for the record one — the same
+    // verdict, a different sentence. Issue #1074 made that visible by putting a
+    // pre-flight route on this function: a pre-flight that names a different
+    // problem than the submit is worse than none.
+    //
+    validate_draft_against_record(draft, record, source_dir, wired_channels)?;
     let toml_src = render_workflow(draft)?;
     if toml_src.len() > MAX_WORKFLOW_TOML_BYTES {
-        return Err(OpenCompanyError::InvalidRequest(format!(
-            "the proposed workflow is {} bytes, over the {MAX_WORKFLOW_TOML_BYTES}-byte limit.",
-            toml_src.len()
-        )));
+        return Err(over_cap_error(toml_src.len()));
     }
     parse_workflow(&toml_src).map_err(|err| match err {
         // A structural validation failure of the rendered draft becomes a
@@ -588,11 +609,7 @@ pub(crate) fn courtesy_validate_draft(
         OpenCompanyError::DataParse { message, .. } => OpenCompanyError::InvalidRequest(message),
         other => other,
     })?;
-    // The courtesy pre-check has no source directory to hand; a sub_workflow's
-    // existence is still checked against the record's overlays + enabled ids +
-    // globals, only seed-file ids are out of reach here (the run-time cycle guard
-    // stays the backstop).
-    validate_draft_against_record(draft, record, None, wired_channels)?;
+
     Ok(())
 }
 
@@ -1335,6 +1352,21 @@ pub(crate) fn workflow_version(toml: &str) -> String {
 /// id-uniqueness 409, update/delete's "not editable from the console" 409, and
 /// the read routes' `editable` flag. Duplicating it is how the console ends up
 /// offering an Edit button for a graph the host will refuse.
+/// The over-the-byte-cap refusal, in one place.
+///
+/// Create and the `/workflows/validate` pre-flight both raise it, and they used
+/// to word it differently — "the rendered workflow is N bytes" vs "the proposed
+/// workflow is N bytes". Same status and same verdict, but a pre-flight that
+/// answers in different words than the submit is the drift #1074 is about, and
+/// the PR promoted the identical-body claim to a documented contract. One
+/// constructor is what makes the claim true by construction rather than by
+/// two authors agreeing (review of #1074).
+fn over_cap_error(len: usize) -> OpenCompanyError {
+    OpenCompanyError::InvalidRequest(format!(
+        "the rendered workflow is {len} bytes, over the {MAX_WORKFLOW_TOML_BYTES}-byte limit."
+    ))
+}
+
 pub(crate) fn seed_file_exists(source_dir: Option<&Path>, wid: &str) -> bool {
     source_dir.is_some_and(|dir| dir.join("workflows").join(format!("{wid}.toml")).is_file())
 }
@@ -1500,10 +1532,7 @@ pub(crate) async fn update_company_workflow(
     // breaks the read routes.
     let toml_src = render_workflow(&draft)?;
     if toml_src.len() > MAX_WORKFLOW_TOML_BYTES {
-        return Err(OpenCompanyError::InvalidRequest(format!(
-            "the rendered workflow is {} bytes, over the {MAX_WORKFLOW_TOML_BYTES}-byte limit.",
-            toml_src.len()
-        )));
+        return Err(over_cap_error(toml_src.len()));
     }
     let file = parse_workflow(&toml_src).map_err(|err| match err {
         // A structural validation failure of the rendered draft becomes a
@@ -4799,6 +4828,7 @@ to = "done"
         let err = courtesy_validate_draft(
             &draft_with_destination("wf", "WF", "channel", Some("engineering-desk")),
             &record,
+            None,
             Some(&["engineering".to_string()]),
         )
         .expect_err("the courtesy pass must refuse what apply would refuse");
@@ -4811,6 +4841,7 @@ to = "done"
         courtesy_validate_draft(
             &draft_with_destination("wf", "WF", "channel", Some("engineering")),
             &record,
+            None,
             Some(&["engineering".to_string()]),
         )
         .expect("a wired target passes the same pass");

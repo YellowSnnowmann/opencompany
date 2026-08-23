@@ -1,9 +1,19 @@
 import { useEffect, useState } from "react";
-import { Compass, Flag, Globe, Pause, Play, Power, Archive as ArchiveIcon } from "lucide-react";
+import {
+  Compass,
+  Flag,
+  Globe,
+  Pause,
+  Play,
+  Power,
+  TriangleAlert,
+  Archive as ArchiveIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import type { LifecycleAction, OpenCompanyClient } from "@/api/client";
 import { ApiError, type MemorySpec } from "@/api/types";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,6 +43,7 @@ import type { CompanyFeed } from "@/hooks/use-company";
 import { restartTour } from "@/tour/state";
 import { preloadTour } from "@/tour/TourController";
 import { useLocalScope } from "@/connections/ConnectionContext";
+import { lifecycleAffordances } from "@/lib/lifecycle-controls";
 
 interface Props {
   client: OpenCompanyClient;
@@ -118,8 +129,14 @@ export function SettingsView({ client, company, feed, onFlag }: Props) {
           </Card>
         )}
 
-        {/* Domain & email */}
-        <DomainSettings company={company} />
+        {/* Domain & email.
+
+            `key` is load-bearing, not cosmetic: this card holds a
+            typed-but-unsaved SMTP password in React state, and without a
+            remount a company switch would carry a credential typed for one
+            company into another company's Save. `SettingsSection` remounts
+            `BillingView`/`HostingView` for exactly this reason. */}
+        <DomainSettings key={company ?? "self"} client={client} company={company} />
 
         {/* Appearance.
 
@@ -207,9 +224,6 @@ function LifecycleControls({
    */
   const [pending, setPending] = useState<string | null>(null);
   const state = pending ?? feed.status.lifecycle;
-  const archived = state === "archived";
-  const running = state === "running";
-  const paused = state === "paused";
 
   async function run(action: LifecycleAction) {
     if (busy) return;
@@ -233,53 +247,95 @@ function LifecycleControls({
     }
   }
 
+  const platform = client.carriesPlatformBearer;
+  const { actions, explainPlatformOnly, explainPlatformSuspended, archived } =
+    lifecycleAffordances(state, platform);
+  const offers = (action: LifecycleAction) => actions.includes(action);
+
   return (
     <Card>
       <CardHeader>
+        {/* Four verbs, and the card used to name three of them. `Pause` and
+          `Suspend` in particular were indistinguishable to a reader — the
+          suspend dialog described what anyone would assume pause did. Only the
+          controls this console can actually reach are named here. */}
         <CardTitle className="text-base">Lifecycle</CardTitle>
-        <CardDescription>Pause, resume, or retire this company.</CardDescription>
+        <CardDescription>
+          Pause stops this company taking new work; resume starts it again.
+          {platform ? " Suspend and archive are the platform's own, heavier stops." : ""}
+        </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-wrap gap-2">
-        {running && (
-          <Button variant="outline" disabled={busy} onClick={() => void run("pause")}>
-            <Pause className="size-4" /> Pause
-          </Button>
+      <CardContent className="space-y-4">
+        {/* Said before the buttons, in the register Billing and Hosting use for
+          the same problem: a control that cannot work here explains itself in
+          the page rather than failing after the click. */}
+        {explainPlatformOnly && (
+          <Alert data-testid="lifecycle-platform-only">
+            <TriangleAlert className="size-4" />
+            <AlertDescription>
+              Suspending and archiving a company are the hosting platform&rsquo;s to do, not this
+              console&rsquo;s. They need a platform credential, which a person signed in here never
+              holds — so the controls are left out rather than shown failing. Pause is the
+              reversible stop that is yours.
+            </AlertDescription>
+          </Alert>
         )}
-        {(paused || state === "suspended") && !archived && (
-          <Button variant="outline" disabled={busy} onClick={() => void run("resume")}>
-            <Play className="size-4" /> Resume
-          </Button>
+        {explainPlatformSuspended && (
+          <Alert data-testid="lifecycle-platform-suspended">
+            <TriangleAlert className="size-4" />
+            <AlertDescription>
+              The platform suspended this company. Only the platform can lift a suspension — an
+              admin here cannot resume it, so there is no Resume button to offer.
+            </AlertDescription>
+          </Alert>
         )}
-        {!archived && (
-          <ConfirmAction
-            trigger={
-              <Button variant="outline" disabled={busy}>
-                <Power className="size-4" /> Suspend
-              </Button>
-            }
-            title="Suspend this company?"
-            description="It will stop handling work until you resume it. In-flight tasks are paused, not lost."
-            confirmLabel="Suspend"
-            onConfirm={() => void run("suspend")}
-          />
-        )}
-        {!archived && (
-          <ConfirmAction
-            trigger={
-              <Button variant="destructive" disabled={busy}>
-                <ArchiveIcon className="size-4" /> Archive
-              </Button>
-            }
-            title="Archive this company?"
-            description="Archiving retires the company. This is meant to be permanent — you won't be able to operate it afterward."
-            confirmLabel="Archive"
-            destructive
-            onConfirm={() => void run("archive")}
-          />
-        )}
-        {archived && (
-          <p className="text-sm text-muted-foreground">This company is archived.</p>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {offers("pause") && (
+            <Button variant="outline" disabled={busy} onClick={() => void run("pause")}>
+              <Pause className="size-4" /> Pause
+            </Button>
+          )}
+          {offers("resume") && (
+            <Button variant="outline" disabled={busy} onClick={() => void run("resume")}>
+              <Play className="size-4" /> Resume
+            </Button>
+          )}
+          {offers("suspend") && (
+            <ConfirmAction
+              trigger={
+                <Button variant="outline" disabled={busy}>
+                  <Power className="size-4" /> Suspend
+                </Button>
+              }
+              title="Suspend this company?"
+              // The old copy promised "until you resume it". The handler
+              // refuses exactly that: a suspension is a platform-forced pause,
+              // and neither an owner token nor the company's own admins may
+              // lift it. Saying so is the difference between a heavy stop and
+              // a trap.
+              description="It stops handling work, and only the platform can start it again — the company's own admins cannot. For a stop you can undo, use Pause."
+              confirmLabel="Suspend"
+              onConfirm={() => void run("suspend")}
+            />
+          )}
+          {offers("archive") && (
+            <ConfirmAction
+              trigger={
+                <Button variant="destructive" disabled={busy}>
+                  <ArchiveIcon className="size-4" /> Archive
+                </Button>
+              }
+              title="Archive this company?"
+              description="Archiving retires the company. This is meant to be permanent — you won't be able to operate it afterward."
+              confirmLabel="Archive"
+              destructive
+              onConfirm={() => void run("archive")}
+            />
+          )}
+          {archived && (
+            <p className="text-sm text-muted-foreground">This company is archived.</p>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

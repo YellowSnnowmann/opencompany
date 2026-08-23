@@ -45,7 +45,9 @@ use crate::error::OpenCompanyError;
 use crate::ports::inbox::InboxMeta;
 use crate::ports::now_millis;
 use crate::ports::store::company_write_lock;
-use crate::ports::types::{Actor, ActorKind, BudgetOverride, CompanyRecord, OverlayAgent};
+use crate::ports::types::{
+    Actor, ActorKind, AgentOverride, BudgetOverride, CompanyRecord, OverlayAgent,
+};
 use crate::server::error::ApiError;
 use crate::server::ops::language;
 use crate::server::ops::{DOMAIN_KEY, ScopedCompany, scoped};
@@ -193,6 +195,14 @@ struct AddMember {
     /// only restrict the new teammate below what the company already allows.
     #[serde(default)]
     tools: Vec<String>,
+    /// Optional persona instructions for the new teammate (issue #1530), so a
+    /// teammate can be born with an overridden persona rather than needing a
+    /// second PATCH. A plain `Option` — at creation there is no blueprint to
+    /// reset to, so `null`/omitted both mean "no override" and a blank string is
+    /// dropped. Takes no permission: it can only add persona text to a teammate
+    /// this same call is creating.
+    #[serde(default)]
+    instructions: Option<String>,
 }
 
 /// The set-budget body.
@@ -478,6 +488,23 @@ async fn add_member(
         // belongs to the record, not to each call site's reasoning about id
         // uniqueness.
         record.upsert_budget_override(entry);
+    }
+    // Issue #1530: a create-time persona override, so a teammate can be born with
+    // an overridden persona. Trimmed-empty is dropped — a blank string is "no
+    // override", never a stored empty persona. Through the upsert for the same
+    // invariant-belongs-to-the-record reason as the budget above.
+    if let Some(instructions) = body
+        .instructions
+        .as_deref()
+        .map(str::trim)
+        .map(crate::company::prompt::cap_persona_instructions)
+        .filter(|text| !text.is_empty())
+    {
+        record.upsert_agent_override(AgentOverride {
+            agent_id: agent.id.clone(),
+            instructions: Some(instructions),
+            ..Default::default()
+        });
     }
     company
         .runtime
@@ -1316,6 +1343,55 @@ mod tests {
             "the cap and the teammate landed in one save: {row}"
         );
         assert!(row["budgetSetBy"].is_string(), "{row}");
+    }
+
+    /// Issue #1530: a teammate can be born with a persona override — the
+    /// create-time path writes it in the same save as the teammate, and the
+    /// agent detail reads it back as the effective instructions. Takes no
+    /// permission: any member may add a teammate with instructions.
+    #[tokio::test]
+    async fn add_member_with_instructions_persists_the_override() {
+        use crate::ports::UserRole;
+        let home_dir = home();
+        let state = state_with_manifest(home_dir.path(), ROSTER).await;
+        let member =
+            crate::server::test_support::seed_session(&state, "acme", UserRole::Member).await;
+
+        let (status, created) = send(
+            &state,
+            "POST",
+            "/api/v1/company/team",
+            Some(json!({
+                "name": "Jamie",
+                "role": "Growth",
+                "instructions": "Be terse and data-first."
+            })),
+            Some(&member),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "a member may add with instructions: {created}"
+        );
+        let jamie = created["id"].as_str().unwrap().to_string();
+
+        // Read the detail back, so this is the stored override rather than the
+        // handler's own answer.
+        let (status, detail) = send(
+            &state,
+            "GET",
+            &format!("/api/v1/company/team/{jamie}"),
+            None,
+            Some(&admin_cookie()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{detail}");
+        assert_eq!(
+            detail["instructions"], "Be terse and data-first.",
+            "{detail}"
+        );
+        assert_eq!(detail["instructionsOverridden"], true, "{detail}");
     }
 
     /// An **overlay** teammate can be capped after the fact too — the case the

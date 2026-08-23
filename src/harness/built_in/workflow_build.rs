@@ -54,6 +54,7 @@
 //! tests it.
 
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::Duration;
 
@@ -537,9 +538,12 @@ pub async fn run_workflow_build_pass(
             return;
         }
     };
-    if let Err(err) =
-        courtesy_validate_draft(&draft, &evidence.record, Some(&evidence.wired_channels))
-    {
+    if let Err(err) = courtesy_validate_draft(
+        &draft,
+        &evidence.record,
+        evidence.source_dir.as_deref(),
+        Some(&evidence.wired_channels),
+    ) {
         settle_to_todo(
             &runtime,
             &task_id,
@@ -845,6 +849,9 @@ struct Evidence {
     existing_names: Vec<String>,
     /// Existing workflow ids, so the host mints a non-clashing id.
     existing_ids: HashSet<String>,
+    /// See [`CompanyEvidence::source_dir`] — folded through so the card path's
+    /// courtesy validation passes the same directory create would.
+    source_dir: Option<PathBuf>,
     /// Channel ids an `output` node's `channel` destination may name (issue
     /// #1191) — see [`CompanyEvidence::wired_channels`].
     wired_channels: Vec<String>,
@@ -886,6 +893,11 @@ struct CompanyEvidence {
     existing_names: Vec<String>,
     /// Existing workflow ids, so the host mints a non-clashing id.
     existing_ids: HashSet<String>,
+    /// The company source directory, carried WITH the record so every
+    /// `courtesy_validate_draft` caller reading this evidence passes the same
+    /// one create would. Withholding it silently narrows the `sub_workflow`
+    /// existence probe to non-seed graphs (review of #1074).
+    source_dir: Option<PathBuf>,
     /// Channel ids an `output` node's `channel` destination may name — this
     /// deployment's deliverable set (issue #1191).
     ///
@@ -952,6 +964,7 @@ async fn gather_company_evidence(runtime: &Arc<CompanyRuntime>) -> crate::Result
         roster,
         existing_names,
         existing_ids,
+        source_dir: runtime.source_dir().map(Path::to_path_buf),
         // The same accessor the console's destination picker and the write
         // routes read, so what the model is offered and what validation accepts
         // cannot drift.
@@ -977,6 +990,7 @@ async fn gather_evidence(
         roster: company.roster,
         existing_names: company.existing_names,
         existing_ids: company.existing_ids,
+        source_dir: company.source_dir,
         wired_channels: company.wired_channels,
         record: company.record,
     })

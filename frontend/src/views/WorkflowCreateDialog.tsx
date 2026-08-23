@@ -35,6 +35,7 @@ import {
   type WorkflowRevision,
   type WorkflowSummary,
   type PrefilledDraft,
+  validateWorkflow,
 } from "@/api/workflows";
 import { getInferenceStatus, type CognitionPath } from "@/api/inference";
 import {
@@ -130,6 +131,12 @@ export interface DraftNode {
    */
   repeatable?: boolean;
 }
+
+/** How long the graph must sit still before the host is asked about it (issue
+ * #1074). Long enough that dragging an edge or renaming a node does not spend a
+ * round trip per keystroke; short enough that the verdict is there before an
+ * author who finished editing reaches for Create. */
+const PREFLIGHT_DEBOUNCE_MS = 700;
 
 /** "No schedule" — the workflow runs only when something starts it. A sentinel
  * rather than `""` because a select option with an empty value is ambiguous. */
@@ -289,6 +296,211 @@ export function destinationCheckDeferred(
     return null;
   }
   return "still checking which channels this company can deliver to — try Save again in a moment.";
+}
+
+/** The host's standing answer about the graph on screen (issue #1074). */
+export type Preflight =
+  | { status: "idle" }
+  /** A request is in flight for `key`. */
+  | { status: "asking"; key: string }
+  /** The host would accept the graph `key` describes. */
+  | { status: "ok"; key: string }
+  /** The host would refuse it, in its own words. */
+  | { status: "refused"; key: string; message: string }
+  /** The ask itself failed (offline, host too old to know the route). Not a
+   * verdict on the graph, and never shown as one. */
+  | { status: "unavailable"; key: string };
+
+/**
+ * Whether a {@link Preflight} still describes the graph now on screen.
+ *
+ * The verdict is the host's answer about ONE body. The author keeps typing, so
+ * by the time it lands the question may have changed — and a stale "looks good"
+ * is exactly the false green #1048 was about, one layer up. Rendering is gated
+ * on this rather than on the request having finished.
+ */
+export function preflightIsCurrent(preflight: Preflight, key: string): boolean {
+  return preflight.status !== "idle" && preflight.key === key;
+}
+
+/** The draft the dialog holds, as {@link assembleGraph} reads it. */
+export interface GraphDraft {
+  id: string;
+  name: string;
+  description: string;
+  nodes: DraftNode[];
+  edges: DraftEdge[];
+}
+
+/** {@link assembleGraph}'s answer: the body to send, or the node whose config
+ * could not be serialized and why. */
+export type AssembledGraph =
+  | { ok: true; graph: WorkflowGraph }
+  | { ok: false; node: DraftNode; error: string };
+
+/**
+ * Builds the `WorkflowGraph` body from the draft rows — the exact body Create
+ * and Save post.
+ *
+ * Extracted from `submit()` so the host pre-flight (`POST …/workflows/validate`)
+ * can ask about **the same bytes** the submit will send. A second assembly
+ * written for the pre-flight would be a mirror, and a pre-flight that validates
+ * something other than what is submitted is worse than none — the whole subject
+ * of #1074.
+ *
+ * Pure: it reads the draft and returns a value. The caller decides what a
+ * serialization failure means (`submit()` shows it and stops; the pre-flight
+ * stays quiet, because the client checks have not run yet on a half-typed row).
+ */
+export function assembleGraph(draft: GraphDraft): AssembledGraph {
+  const outNodes: WorkflowNode[] = [];
+  for (const n of draft.nodes) {
+    // Config: a form kind (#541) rebuilds it from its per-field draft plus the
+    // preserved `extra` bag (so an edit keeps orchestrator keys it has no
+    // control for); a form-less kind passes its raw overlay straight back out —
+    // an edit must not delete what it cannot show. `undefined` is omitted from
+    // the JSON body.
+    let config: unknown = n.config;
+    if (hasConfigForm(n.kind)) {
+      const serialized = configFromDraft(n.kind, n.configDraft, n.configExtra);
+      if (!serialized.ok) return { ok: false, node: n, error: serialized.error };
+      config = serialized.config;
+    }
+    outNodes.push({
+      id: n.id.trim(),
+      kind: n.kind,
+      name: n.name.trim(),
+      summary: n.summary.trim() || undefined,
+      agent: n.kind === "agent" ? n.agent.trim() : undefined,
+      // The host rejects a schedule on any non-trigger node, so only the
+      // trigger's value is ever sent.
+      schedule: n.kind === "trigger" && n.schedule.trim() ? n.schedule.trim() : undefined,
+      // Only output nodes route a report, and `owner` resolves server-side so it
+      // must carry no target — the host rejects one.
+      destination:
+        n.kind === "output" && n.destinationKind
+          ? {
+              kind: n.destinationKind,
+              target:
+                n.destinationKind === "owner"
+                  ? undefined
+                  : n.destinationTarget.trim() || undefined,
+            }
+          : undefined,
+      config,
+      onError: n.onError,
+      retry: n.retry,
+      requiresApproval: n.requiresApproval,
+      // Round-trips a node the operator marked as never-repeatable (issue #850):
+      // a dropped `repeatable: false` is a repeat guard removed by an unrelated
+      // edit, the same hazard as a dropped `requiresApproval`.
+      repeatable: n.repeatable,
+    });
+  }
+  return {
+    ok: true,
+    graph: {
+      id: draft.id.trim(),
+      name: draft.name.trim(),
+      description: draft.description.trim() || undefined,
+      // Locally-built body; the conditional-write token is passed separately as
+      // `expectedVersion`, so this carries none (issue #1013 makes it explicit).
+      version: null,
+      nodes: outNodes,
+      edges: draft.edges.map(
+        (e): WorkflowEdge => ({
+          from: e.from.trim(),
+          to: e.to.trim(),
+          label: e.label.trim() || undefined,
+        }),
+      ),
+    },
+  };
+}
+
+/** An edge endpoint as {@link EdgeRow} needs it: the id it offers in the two
+ * pickers, plus the two fields the host's branch-label rule keys off. */
+export interface EdgeEndpoint {
+  id: string;
+  kind: string;
+  /** Carried verbatim off the node row (see {@link DraftNode.config}); the
+   * dialog has no control for it, so it can only be read, never assumed. */
+  onError?: string;
+}
+
+/** The branch labels the host accepts on an edge leaving a `condition` node.
+ * Protocol strings, not display text: the host matches on these values, so they
+ * are never translated. */
+const CONDITION_BRANCHES = ["yes", "no"] as const;
+
+/** What {@link EdgeRow} should render for one edge's label field. */
+export interface BranchChoice {
+  /** The options to offer, in order. */
+  options: string[];
+  /** The option to show as chosen; `""` when the row has no label yet. */
+  value: string;
+  /** Set when the host would refuse this row as it stands. The value is left
+   * alone — it is shown, not corrected. */
+  problem: string | null;
+}
+
+/**
+ * The label control for the edge leaving `source` — a fixed set of branches when
+ * that node is a `condition`, or `null` meaning "any label is legal here, keep
+ * the free-text input".
+ *
+ * # Why this is an affordance and not a validator
+ *
+ * The host refuses an edge out of a `condition` unless its label reads `yes` or
+ * `no` — or exactly `error`, and only when that node is also `on_error =
+ * "route"` (`src/company/workflow_create.rs`). Issue #1074 is about a dialog that
+ * could not pre-empt that rule without *mirroring* it, and a mirrored rule
+ * drifts. This does not mirror it: it offers only values the host accepts, so it
+ * can never invent a refusal the host would not make. It can only fail to offer
+ * something, and the host then says so in its own words. The host stays the
+ * authority — see `POST …/workflows/validate`, the other half of #1074.
+ *
+ * # Matching, exactly as the host matches
+ *
+ * `yes`/`no` are compared trimmed and lowercased, so a graph that stored `Yes`
+ * is represented by the `yes` option rather than reported as unrepresentable.
+ * `error` is compared **verbatim**, because the host compares it verbatim. A
+ * label neither rule accepts is returned as-is with a `problem`: an existing
+ * graph can legally carry one (`parse_workflow` is lenient on this rule since
+ * issue #682, so a pre-#661 graph still loads), and quietly rewriting an
+ * author's label to a legal one is a worse answer than showing it to them.
+ */
+export function conditionBranchChoice(
+  source: EdgeEndpoint | undefined,
+  label: string,
+): BranchChoice | null {
+  if (!source || source.kind !== "condition") return null;
+  const options: string[] =
+    source.onError === "route" ? [...CONDITION_BRANCHES, "error"] : [...CONDITION_BRANCHES];
+  // Verbatim, like the host: `Error` is not the recovery branch.
+  if (label === "error" && options.includes("error")) {
+    return { options, value: "error", problem: null };
+  }
+  const folded = label.trim().toLowerCase();
+  if (folded === "yes" || folded === "no") {
+    return { options, value: folded, problem: null };
+  }
+  if (!label.trim()) {
+    return {
+      options,
+      value: "",
+      problem: `pick a branch — an edge out of \`${source.id}\` must be labeled ${options
+        .map((o) => `\`${o}\``)
+        .join(" or ")}.`,
+    };
+  }
+  return {
+    options,
+    value: label,
+    problem: `\`${label}\` is not a branch of \`${source.id}\` — it must be labeled ${options
+      .map((o) => `\`${o}\``)
+      .join(" or ")}.`,
+  };
 }
 
 /** How a validation message names a node.
@@ -565,6 +777,9 @@ export function WorkflowCreateDialog({
    * graph's own id is dropped at render time — a sub-workflow can't call
    * itself. Degrades to a free-text id field when the host offers no list. */
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
+  /** The host's standing verdict on the graph as it is now (issue #1074). See
+   * {@link Preflight} and the effect below for when it is asked for. */
+  const [preflight, setPreflight] = useState<Preflight>({ status: "idle" });
   const [submitting, setSubmitting] = useState(false);
   /** The same "a write is in flight" fact as `submitting`, held where `submit()`
    * can read it SYNCHRONOUSLY (issue #1005). `submitting` is captured from the
@@ -903,6 +1118,72 @@ export function WorkflowCreateDialog({
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [dirty, onOpenChange]);
+
+  // The graph the pre-flight would ask about, and the key that identifies it.
+  // `null` when there is nothing worth asking: the client checks already have a
+  // complaint (no point spending a round trip to be told something the operator
+  // is about to fix), or the config serializer disagreed with the form.
+  const assembledForPreflight = open && !submitting && !validate() ? assembleGraph({
+    id,
+    name,
+    description,
+    nodes,
+    edges,
+  }) : null;
+  const preflightKey =
+    assembledForPreflight?.ok === true ? JSON.stringify(assembledForPreflight.graph) : null;
+
+  /**
+   * Asks the host whether Create would accept the graph on screen (issue #1074).
+   *
+   * This is the point of the validate route. Two of Create's rules — node
+   * reachability and the condition branch-label rule — cannot be pre-empted by
+   * this dialog without re-implementing them, and a client-side copy of a host
+   * rule drifts. So the dialog asks rather than mirrors, and it asks BEFORE the
+   * operator presses Create: pre-empting a refusal is the whole subject of the
+   * issue, and asking at submit time would cost a round trip to learn what the
+   * submit's own error already says.
+   *
+   * Debounced, and keyed on the serialized body. The key is what makes a verdict
+   * discardable: a response for a graph the author has already changed is not an
+   * answer about the graph on screen, and showing it would be the false green
+   * #1048 was about one layer up. `preflightIsCurrent` gates the render on the
+   * same key, so a superseded response cannot be displayed even if it lands.
+   *
+   * It never blocks Create. The host decides at submit, this only reports early —
+   * so a host that has never heard of the route (or an offline console) degrades
+   * to `unavailable` and the dialog behaves exactly as it did before.
+   */
+  useEffect(() => {
+    if (!preflightKey) {
+      setPreflight({ status: "idle" });
+      return;
+    }
+    let live = true;
+    const timer = setTimeout(() => {
+      setPreflight({ status: "asking", key: preflightKey });
+      validateWorkflow(client, company, JSON.parse(preflightKey) as WorkflowGraph)
+        .then(() => {
+          if (live) setPreflight({ status: "ok", key: preflightKey });
+        })
+        .catch((e: unknown) => {
+          if (!live) return;
+          // A 400 IS the answer — the host's own words, the same body Create
+          // would have sent. Anything else (offline, 404 on an older host, a
+          // 5xx) is a failure to ASK, which is not a verdict on the graph and
+          // must never be shown as one.
+          if (e instanceof ApiError && e.status === 400) {
+            setPreflight({ status: "refused", key: preflightKey, message: e.message });
+          } else {
+            setPreflight({ status: "unavailable", key: preflightKey });
+          }
+        });
+    }, PREFLIGHT_DEBOUNCE_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [preflightKey, client, company]);
 
   /**
    * Retires the submit-time banner because the draft it described is gone
@@ -1428,71 +1709,16 @@ export function WorkflowCreateDialog({
       // dialog's own `onOpenChange`. The operator was locked in the dialog, and
       // the only remaining exit, reloading the page, was the one that lost the
       // edit. Everything that can fail now clears `submitting` on the way out.
-      const outNodes: WorkflowNode[] = [];
-      for (const n of nodes) {
-        // Config: a form kind (#541) rebuilds it from its per-field draft
-        // plus the preserved `extra` bag (so an edit keeps orchestrator keys
-        // it has no control for); a form-less kind passes its raw overlay
-        // straight back out — an edit must not delete what it cannot show.
-        // `undefined` is omitted from the JSON body.
-        let config: unknown = n.config;
-        if (hasConfigForm(n.kind)) {
-          const serialized = configFromDraft(n.kind, n.configDraft, n.configExtra);
-          if (!serialized.ok) {
-            // `validate()` already passed, so this is the form and the
-            // serializer disagreeing — a defect, not something the author did.
-            // Say which node it was and leave the draft exactly as it is: the
-            // dialog stays open, closable, with the work still in it.
-            showError(`${nodeLabel(n)}: ${serialized.error}`);
-            return;
-          }
-          config = serialized.config;
-        }
-        outNodes.push({
-          id: n.id.trim(),
-          kind: n.kind,
-          name: n.name.trim(),
-          summary: n.summary.trim() || undefined,
-          agent: n.kind === "agent" ? n.agent.trim() : undefined,
-          // The host rejects a schedule on any non-trigger node, so only the
-          // trigger's value is ever sent.
-          schedule:
-            n.kind === "trigger" && n.schedule.trim() ? n.schedule.trim() : undefined,
-          // Only output nodes route a report, and `owner` resolves server-side
-          // so it must carry no target — the host rejects one.
-          destination:
-            n.kind === "output" && n.destinationKind
-              ? {
-                  kind: n.destinationKind,
-                  target:
-                    n.destinationKind === "owner"
-                      ? undefined
-                      : n.destinationTarget.trim() || undefined,
-                }
-              : undefined,
-          config,
-          onError: n.onError,
-          retry: n.retry,
-          requiresApproval: n.requiresApproval,
-          repeatable: n.repeatable,
-        });
+      const assembled = assembleGraph({ id, name, description, nodes, edges });
+      if (!assembled.ok) {
+        // `validate()` already passed, so this is the form and the serializer
+        // disagreeing — a defect, not something the author did. Say which node
+        // it was and leave the draft exactly as it is: the dialog stays open,
+        // closable, with the work still in it.
+        showError(`${nodeLabel(assembled.node)}: ${assembled.error}`);
+        return;
       }
-      const graph: WorkflowGraph = {
-        id: id.trim(),
-        name: name.trim(),
-        description: description.trim() || undefined,
-        // Locally-built body; the conditional-write token is passed separately as
-        // `expectedVersion`, so this carries none (issue #1013 makes it explicit).
-        version: null,
-        nodes: outNodes,
-        edges: edges.map(
-          (e): WorkflowEdge => ({
-            from: e.from.trim(),
-            to: e.to.trim(),
-            label: e.label.trim() || undefined,
-          }),
-        ),
-      };
+      const graph = assembled.graph;
       if (workflow) {
         // The id keys the saved graph, the schedule and the run history, so it
         // is the graph's own id that is sent, not the (read-only) field —
@@ -1892,7 +2118,13 @@ export function WorkflowCreateDialog({
                 <EdgeRow
                   key={e.key}
                   edge={e}
-                  nodeIds={nodes.map((n) => n.id.trim()).filter(Boolean)}
+                  nodes={nodes
+                    .map((n) => ({
+                      id: n.id.trim(),
+                      kind: n.kind,
+                      onError: n.onError,
+                    }))
+                    .filter((n) => n.id)}
                   onChange={(fields) => updateEdge(e.key, fields)}
                   onRemove={() => removeEdge(e.key)}
                 />
@@ -1905,6 +2137,41 @@ export function WorkflowCreateDialog({
             </div>
           </div>
         </fieldset>
+
+        {/* The host's early verdict (issue #1074). Rendered only while it still
+            describes the graph on screen, and only when the submit-time banner
+            is not already up — `error` is the answer to something the operator
+            just asked for, and it outranks an advisory. Deliberately NOT
+            `assertive` and it does not move focus: nobody asked for it, and an
+            author mid-edit must not be interrupted by it. `unavailable` and
+            `asking` render nothing at all: "we could not ask" is not a verdict
+            on the graph, and a spinner on every pause is noise. */}
+        {!error && preflightIsCurrent(preflight, preflightKey ?? "") && (
+          <>
+            {preflight.status === "refused" && (
+              <div role="status" aria-live="polite" data-testid="preflight-refused">
+                {/* `Alert` defaults to `role="alert"` (assertive). Nobody asked
+                    for this verdict, so it must not interrupt an edit. */}
+                <Alert variant="destructive" role="status">
+                  <AlertDescription>
+                    The host would refuse this graph: {preflight.message}
+                  </AlertDescription>
+                </Alert>
+              </div>
+            )}
+            {preflight.status === "ok" && (
+              <p
+                role="status"
+                aria-live="polite"
+                data-testid="preflight-ok"
+                className="text-xs text-muted-foreground"
+              >
+                Checked with the host: this graph would be accepted. A name or id
+                already taken is still only decided when you save.
+              </p>
+            )}
+          </>
+        )}
 
         {error && (
           // Wrapper carries the ref/focus target so it works regardless of
@@ -2452,15 +2719,27 @@ function relativeTime(millis: number): string {
 
 function EdgeRow({
   edge,
-  nodeIds,
+  nodes,
   onChange,
   onRemove,
 }: {
   edge: DraftEdge;
-  nodeIds: string[];
+  /** Every node the edge may point at. Rows rather than bare ids (issue #1074):
+   * the label control depends on the SOURCE node's `kind` and `onError`, and an
+   * id alone cannot answer either. */
+  nodes: EdgeEndpoint[];
   onChange: (fields: Partial<DraftEdge>) => void;
   onRemove: () => void;
 }) {
+  // Stable across renders, so `aria-describedby` keeps pointing at the same
+  // element as the operator edits the row.
+  const problemId = useId();
+  const source = nodes.find((n) => n.id === edge.from);
+  // `null` = not a condition, so any label is legal and the row keeps its
+  // free-text input. Recomputed from `from` on every render, so re-pointing an
+  // edge at (or away from) a condition swaps the control immediately — and
+  // never rewrites the label it finds there.
+  const branch = conditionBranchChoice(source, edge.label);
   return (
     <div className="grid grid-cols-[1fr_auto_1fr_1fr_auto] items-center gap-2 rounded-lg border p-2">
       <Select value={edge.from} onValueChange={(v) => onChange({ from: v ?? "" })}>
@@ -2468,9 +2747,9 @@ function EdgeRow({
           <SelectValue placeholder="from" />
         </SelectTrigger>
         <SelectContent>
-          {nodeIds.map((nid) => (
-            <SelectItem key={nid} value={nid}>
-              {nid}
+          {nodes.map((n) => (
+            <SelectItem key={n.id} value={n.id}>
+              {n.id}
             </SelectItem>
           ))}
         </SelectContent>
@@ -2481,19 +2760,56 @@ function EdgeRow({
           <SelectValue placeholder="to" />
         </SelectTrigger>
         <SelectContent>
-          {nodeIds.map((nid) => (
-            <SelectItem key={nid} value={nid}>
-              {nid}
+          {nodes.map((n) => (
+            <SelectItem key={n.id} value={n.id}>
+              {n.id}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      <Input
-        value={edge.label}
-        onChange={(e) => onChange({ label: e.target.value })}
-        placeholder="label (optional)"
-        aria-label="Edge label"
-      />
+      {branch ? (
+        <div className="space-y-1">
+          <Select value={branch.value} onValueChange={(v) => onChange({ label: v ?? "" })}>
+            <SelectTrigger
+              className="h-8"
+              aria-label="Edge label"
+              // The problem below is the only thing that says WHY this row is
+              // wrong, and a sighted author reads it off the red text under the
+              // control. Without these it is invisible to assistive tech.
+              aria-invalid={branch.problem ? true : undefined}
+              aria-describedby={branch.problem ? problemId : undefined}
+            >
+              <SelectValue placeholder="branch" />
+            </SelectTrigger>
+            <SelectContent>
+              {branch.options.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option}
+                </SelectItem>
+              ))}
+              {/* A saved graph can carry a label this rule does not accept, and
+                  a Select shows nothing for a value it has no item for. Carrying
+                  it as an item is what makes the operator SEE what is there
+                  instead of watching it vanish. */}
+              {branch.value && !branch.options.includes(branch.value) && (
+                <SelectItem value={branch.value}>{branch.value}</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+          {branch.problem && (
+            <p id={problemId} className="text-xs text-destructive">
+              {branch.problem}
+            </p>
+          )}
+        </div>
+      ) : (
+        <Input
+          value={edge.label}
+          onChange={(e) => onChange({ label: e.target.value })}
+          placeholder="label (optional)"
+          aria-label="Edge label"
+        />
+      )}
       <Button
         type="button"
         variant="ghost"

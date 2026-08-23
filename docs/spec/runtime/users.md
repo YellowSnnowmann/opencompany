@@ -161,7 +161,7 @@ addressing forms work: `/api/v1/companies/{id}/…` and `/api/v1/company/…`.
 
 | Route | Purpose |
 |---|---|
-| `GET …/auth/config` | The sign-in mode this company uses, so the console knows which screen to draw |
+| `GET …/auth/config` | The sign-in mode this company uses and the name it goes by, so the console knows which screen to draw and what to call it |
 | `POST …/auth/request` | Mail a magic link. Always `{"sent": true}` |
 | `POST …/auth/verify` | Redeem a link → session cookie |
 | `POST …/auth/login` | Email + password → session cookie |
@@ -360,6 +360,19 @@ revocation would stop being a lever.
 Routes: `GET/POST …/devices`, `POST …/devices/claim`, `DELETE …/devices/{id}`.
 Listing and revocation are scoped to the caller's own devices by querying
 `list_for_user`, so another user's id is simply not found.
+
+The console half is **Settings → Devices** (`#/settings/devices`,
+`frontend/src/views/DevicesView.tsx`): mint a code, see the machines paired to
+your account, revoke one. It calls `GET/POST …/devices` and `DELETE
+…/devices/{id}` and deliberately never touches `claim` — that redemption belongs
+to the machine being enrolled, so the session token reaches its keychain without
+passing through a webview.
+
+For one release these routes had no caller at all while the desktop's pairing
+prompt told people to go to "Settings → devices" (issue #1476). The prompt now
+reads its destination out of the sub-page table in
+`frontend/src/views/settings-pages.ts`, so a page id that is not a real page
+does not compile.
 
 Every claim failure — unknown, expired, already redeemed, suspended user,
 removed user — returns one indistinguishable response. The route is reachable

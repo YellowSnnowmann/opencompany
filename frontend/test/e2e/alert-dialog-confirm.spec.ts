@@ -23,11 +23,17 @@ import { expect, test, type Page, type Route } from "@playwright/test";
  * actionability checks on: an intercepting backdrop fails that click rather than
  * passing silently.
  *
- * Two of the three call sites on `main` are exercised, because the fix lives in
- * the shared primitive (`components/ui/alert-dialog.tsx`) and not at any one
- * call site: the task delete inside `TaskEditDialog`, and the lifecycle
- * `ConfirmAction` in `SettingsView` (the same shape as `TaskDetailView`'s
- * `ConfirmButton`, whose own confirm needs a live in-flight run to reach).
+ * The call site exercised is the task delete inside `TaskEditDialog`. It used to
+ * be joined by `SettingsView`'s lifecycle `ConfirmAction`, on the argument that
+ * the fix lives in the shared primitive (`components/ui/alert-dialog.tsx`) and
+ * not at any one caller — but that confirm guarded `Suspend`, and issue #1401
+ * removed it from a console signed in as a person: `suspend` is a
+ * `PlatformScope` route, so the dialog took a confirmation and then answered
+ * `401`. A spec cannot drive a button that is correctly no longer there, and
+ * `lifecycle-platform-scope.spec.ts` now covers why it is gone. The remaining
+ * confirms all need state this spec would have to build first — a live
+ * in-flight run (`TaskDetailView`), a declared list (`ManageListsView`) — so the
+ * primitive is proven once here rather than badly twice.
  *
  * Like the rest of `test/e2e`, this drives a *running* host and is not wired
  * into CI — the Playwright config declares no `webServer`. It is a reproduction
@@ -136,36 +142,4 @@ test("confirming a task delete dismisses the dialog before the request lands", a
     0,
     { timeout: 30_000 },
   );
-});
-
-test("confirming a lifecycle change dismisses the dialog from a second call site", async ({
-  page,
-}) => {
-  await page.goto("/#/settings");
-
-  const suspend = page.getByRole("button", { name: "Suspend", exact: true });
-  await expect(suspend).toBeVisible({ timeout: 30_000 });
-  await suspend.click();
-
-  // `SettingsView`'s shared `ConfirmAction` — same primitive, different caller.
-  await expect(dialog(page)).toContainText("Suspend this company?");
-
-  // Suspending for real ends the session, so the request is held and then
-  // failed: the console reports "couldn't suspend", the harness company stays
-  // running for the specs after this one, and the dialog's behaviour on confirm
-  // — the only thing under test — is unaffected either way.
-  const release = await holdNextRequest(page, /\/companies\/[^/]+\/suspend$/, "POST");
-
-  await dialog(page).getByRole("button", { name: "Suspend", exact: true }).click();
-
-  await expectDismissed(page);
-  await expectConsoleInteractive(page);
-
-  // Fail the held request, then confirm the company is still running — the
-  // specs after this one drive a live company.
-  release("abort");
-  await page.goto("/#/settings");
-  await expect(page.getByRole("button", { name: "Suspend", exact: true })).toBeVisible({
-    timeout: 30_000,
-  });
 });
