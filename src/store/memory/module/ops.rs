@@ -41,6 +41,25 @@ pub const MODULE_STORE_SUBDIR: &str = "memory-module";
 /// caller reads the one recorded outcome.
 static LOADED: tokio::sync::OnceCell<Result<(), String>> = tokio::sync::OnceCell::const_new();
 
+/// Resolve `.` and `..` lexically, without touching the filesystem — the data
+/// root need not exist yet, so `canonicalize` is unavailable. `..` at the
+/// root is a no-op; a leading `..` on a relative path is preserved because it
+/// is not resolvable here.
+fn normalized_lexically(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// The workspace root handed to the module for `data_dir`.
 ///
 /// # Errors
@@ -48,6 +67,13 @@ static LOADED: tokio::sync::OnceCell<Result<(), String>> = tokio::sync::OnceCell
 /// Refuses a `data_dir` whose module store would land inside the incumbent
 /// engine's `memory/` directory.
 pub fn module_workspace_dir(data_dir: &Path) -> Result<PathBuf, String> {
+    // The refusal is about where the workspace RESOLVES to, not the literal
+    // spelling: `data_dir=/volume/memory/child/..` has `..` as its final
+    // component, but the module store derived from it lands at
+    // `/volume/memory/memory-module` — inside the incumbent tree. A lexical
+    // normalization (no filesystem, so it works before the dir exists) makes
+    // the two spellings answer identically.
+    let data_dir = normalized_lexically(data_dir);
     // A data root that IS the incumbent engine's directory nests the module
     // store inside it: `data_dir=/volume/memory` puts the workspace at
     // `/volume/memory/memory-module`, inside the tree `UnifiedMemory` and
