@@ -356,6 +356,42 @@ mod test {
         );
     }
 
+    /// Memory is a desktop surface, so every engine the console offers must be
+    /// constructible by the host linked into the app. A disabled tile that
+    /// tells the operator to find a differently compiled build is not useful in
+    /// a packaged desktop application: there is no alternate binary to pick.
+    #[tokio::test]
+    async fn the_desktop_build_includes_every_memory_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = start(dir.path().to_path_buf()).await.expect("host starts");
+        let response = reqwest::get(format!("{}/api/v1/company/memory/engine", host.base_url()))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+
+        let body: serde_json::Value = response.json().await.unwrap();
+        let unavailable = body["options"]
+            .as_array()
+            .expect("the engine route returns its catalog")
+            .iter()
+            .filter(|option| option["available"] != true)
+            .map(|option| {
+                format!(
+                    "{}: {}",
+                    option["id"].as_str().unwrap_or("unknown"),
+                    option["unavailableReason"]
+                        .as_str()
+                        .unwrap_or("no reason reported")
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            unavailable.is_empty(),
+            "the packaged desktop must not offer disabled memory engines: {unavailable:?}"
+        );
+    }
+
     /// A `none`-mode desktop is the **default**, not a ceiling.
     ///
     /// The setup wizard offers all three modes on a loopback host, and an

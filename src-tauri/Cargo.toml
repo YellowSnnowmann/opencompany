@@ -47,12 +47,15 @@ path = "src/main.rs"
 # a desktop agent gets is exactly the minimal belt: built-in tools, MCP servers
 # and skills.
 #
+# The desktop includes every memory engine the console offers. A packaged app
+# has no alternate server binary an operator can switch to, so showing disabled
+# TinyCortex/TinyMemory tiles with "this build was compiled without ..." would
+# make the configuration surface a dead end. `tinycortex` provides the incumbent
+# embedded overlay, `tinymemory` provides the hosted/null driver seam, and
+# `tinymemory-embedded` provides its in-process namespace driver.
+#
 # Deliberately NOT here, and each for a reason rather than an oversight:
 #
-# * `tinycortex` / `tinymemory*` — the in-pod memory engines. They carry
-#   tinycortex, `tinyagents/sqlite` and a second bundled SQLite build into the
-#   bundle for a surface the desktop does not offer; the runtime keeps its
-#   fs-backed memory stores.
 # * `media`, `composio`, `search` and the rest of the managed backends — they
 #   need a platform credential the desktop has no way to hold, and each fails
 #   closed anyway.
@@ -60,7 +63,15 @@ path = "src/main.rs"
 #   and compiles without it; turning it on would additionally wire
 #   `RuntimeBuilder::with_acp_agents`, which is a separate decision from having
 #   a harness at all.
-opencompany = { path = "..", default-features = false, features = ["sqlite", "platform-jwt", "oauth", "mcp"] }
+opencompany = { path = "..", default-features = false, features = [
+    "sqlite",
+    "platform-jwt",
+    "oauth",
+    "mcp",
+    "tinycortex",
+    "tinymemory",
+    "tinymemory-embedded",
+] }
 
 tauri = { version = "2", features = [] }
 # The OS credential store, so a device session token never has to live in the

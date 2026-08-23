@@ -55,6 +55,7 @@ The desktop links the host with an explicit feature set, declared on the
 ```toml
 opencompany = { path = "..", default-features = false, features = [
   "sqlite", "platform-jwt", "oauth", "mcp",
+  "tinycortex", "tinymemory", "tinymemory-embedded",
 ] }
 ```
 
@@ -64,15 +65,19 @@ a company, serves the console — and cannot think. The visible symptom was the
 setup wizard's inference test answering *"This build cannot reach a model — the
 agent harness is not compiled in."* for every provider, however good the key.
 
-The belt a desktop agent gets is deliberately the minimal one. The host declares
+The belt a desktop agent gets is deliberately compact. The host declares
 `openhuman_core` with `default-features = false, features = ["skills", "mcp",
 "hosting"]`, so what a company can use is **built-in tools, MCP servers and
-skills** — no memory engine, no TokenJuice, no voice or inference stack out of
-the vendored runtime. Features left off, each on purpose:
+skills**. OpenCompany additionally compiles all three of its memory feature
+layers into the desktop: `tinycortex` for the embedded engine, `tinymemory` for
+hosted and null drivers, and `tinymemory-embedded` for the in-process namespace
+driver. The packaged app therefore never tells an operator to obtain a
+differently compiled build from its memory configuration screen.
+
+Features left off, each on purpose:
 
 | Off | Why |
 | --- | --- |
-| `tinycortex`, `tinymemory*` | In-pod memory engines. They carry tinycortex, `tinyagents/sqlite` and a second bundled SQLite into the bundle for a surface the desktop does not offer; the runtime keeps its fs-backed memory stores. |
 | `media`, `composio`, and the other managed backends | Each needs a platform credential the desktop has no way to hold, and each fails closed without one. |
 | `acp` | `src-tauri/src/acp/` is an ACP *client* and compiles without it (see below). Turning it on additionally wires `RuntimeBuilder::with_acp_agents`, which is a separate decision from having a harness. |
 | `mongodb` | A per-tenant cluster is a hosting concern. |

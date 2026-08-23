@@ -3617,7 +3617,13 @@ dependencies = [
  "swc_core",
  "thiserror 2.0.20",
  "tinyagents",
+ "tinycortex",
  "tinyflows",
+ "tinymemory",
+ "tinymemory-api",
+ "tinymemory-core",
+ "tinymemory-remote",
+ "tinymemory-tinycortex",
  "tokio",
  "tokio-util",
  "toml 1.1.4+spec-1.1.0",
@@ -6437,6 +6443,21 @@ dependencies = [
  "url",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "tinymemory-remote"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tinymemory-api",
+ "tokio",
 ]
 
 [[package]]
