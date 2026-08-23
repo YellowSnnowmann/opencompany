@@ -709,7 +709,16 @@ impl ContextStore for ProviderContextStore {
         Ok(entries
             .iter()
             .filter_map(|entry| {
-                let chunk: StoredChunk = decode(entry, &namespace)?;
+                let chunk: StoredChunk = match decode(entry, &namespace) {
+                    Some(chunk) => chunk,
+                    None => {
+                        eprintln!(
+                            "PR1550DEBUG search decode_failed key={} content={:?}",
+                            entry.key, entry.content
+                        );
+                        return None;
+                    }
+                };
                 Some(ChunkHit {
                     addr: ChunkAddr::new(content_address(&chunk.body)),
                     snippet: snippet(&chunk.body),
