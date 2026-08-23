@@ -337,7 +337,17 @@ impl Bound {
             .provider
             .recall(query, limit, &opts, None)
             .await
-            .map_err(store_error)?
+            .map_err(store_error)?;
+        eprintln!(
+            "PR1550DEBUG recall namespace={} query={} provider_returned={} entries_namespaces={:?}",
+            namespace.as_str(),
+            query,
+            hits.len(),
+            hits.iter()
+                .map(|e| e.namespace.clone().unwrap_or_default())
+                .collect::<Vec<_>>()
+        );
+        let hits = hits
             .into_iter()
             .filter(|entry| namespace.contains(entry.namespace.as_deref().unwrap_or_default()))
             .collect();
