@@ -329,7 +329,13 @@ fn browser_analytics_switch_fails_closed_on_unrecognised_values() {
     for value in [None, Some(""), Some("  "), Some("on"), Some("YES")] {
         assert!(browser_analytics_enabled_from_value(value), "{value:?}");
     }
-    for value in [Some("off"), Some("FALSE"), Some("0"), Some("no"), Some("of")] {
+    for value in [
+        Some("off"),
+        Some("FALSE"),
+        Some("0"),
+        Some("no"),
+        Some("of"),
+    ] {
         assert!(!browser_analytics_enabled_from_value(value), "{value:?}");
     }
 }
