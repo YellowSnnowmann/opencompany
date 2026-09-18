@@ -305,7 +305,7 @@ reach behind a value a model chose from free text — what D7's enum prevents.
 A company that boots with a correct roster, correct ledgers and an empty To-do
 column has agents with nothing to pick up and an operator with no idea where to
 start, so the first thing anybody does is invent the setup list — badly, and
-differently each time. So the board is seeded once, at first boot, from `globals/tasks.toml` (the setup
+differently each time. So the board is seeded once, at first boot, from `companies/_globals/tasks.toml` (the setup
 every company has: the brief, the first goals, the standing decisions, the top
 risks, the connections) plus that bundle's own `companies/<name>/tasks.toml`
 (the setup its vertical is defined by, winning on a shared id). Each card names

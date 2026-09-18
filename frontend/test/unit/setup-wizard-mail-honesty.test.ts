@@ -109,22 +109,28 @@ async function click(testId: string) {
 }
 
 /**
- * Answers the model step with "No model".
+ * Gets past step 0 onto step 1, and is a no-op once already there.
  *
- * The escape used to be a link under the step (`setup-skip-model`); it is the
- * provider picker's last option now, and the picker is a base-ui `Select`
- * whose popup portals onto `document.body` and does not exist until the
- * trigger opens it.
+ * The flow opens on the setup-way choice, and step 1 sits behind
+ * "Set it up yourself".
  */
-async function skipModel() {
-  await click("setup-provider-select");
-  const none = document.body.querySelector('[data-testid="setup-provider-none"]') as
-    | HTMLElement
-    | null;
-  expect(none, "no No-model option").toBeTruthy();
-  await act(async () => {
-    none!.click();
-  });
+async function chooseSelfManaged() {
+  if (!find("setup-way-self-managed")) return;
+  await click("setup-way-self-managed");
+  await next();
+}
+
+/**
+ * Gets past step 1 without connecting anything.
+ *
+ * The self-managed branch's step 1 is the real add-provider sequence now, and
+ * both of its connections are optional — so leaving it unanswered is the whole
+ * of skipping it, and Next is not gated. This presses the "set this up later"
+ * affordance rather than choosing a "No model" the step no longer offers.
+ */
+async function skipConnect() {
+  await chooseSelfManaged();
+  await click("setup-provider-later");
 }
 
 const next = async () =>
@@ -159,7 +165,7 @@ const settle = async () =>
 
 /** Walks the whole flow and presses the finish button. */
 async function finish() {
-  await skipModel();
+  await skipConnect();
   await next(); // -> business
   await fill("setup-field-industry", "E-commerce — homeware");
   await next(); // -> sign-in
@@ -174,7 +180,7 @@ async function finish() {
 describe("the sign-in step, on a host that cannot send mail", () => {
   it("says the link is handed over here when the host echoes the code", async () => {
     await show(clientWith(status({ mail: { wired: false, echoes_code: true } })));
-    await skipModel();
+    await skipConnect();
     await next();
     await fill("setup-field-industry", "Homeware");
     await next(); // -> sign-in
@@ -188,7 +194,7 @@ describe("the sign-in step, on a host that cannot send mail", () => {
 
   it("says a link would arrive nowhere on a routable host with no transport", async () => {
     await show(clientWith(status({ mail: { wired: false, echoes_code: false } })));
-    await skipModel();
+    await skipConnect();
     await next();
     await fill("setup-field-industry", "Homeware");
     await next(); // -> sign-in
@@ -204,7 +210,7 @@ describe("the sign-in step, on a host that cannot send mail", () => {
 
   it("says nothing when the host has a mail transport", async () => {
     await show(clientWith(status({ mail: { wired: true, echoes_code: false } })));
-    await skipModel();
+    await skipConnect();
     await next();
     await fill("setup-field-industry", "Homeware");
     await next(); // -> sign-in

@@ -26,7 +26,9 @@ import {
  */
 describe("the provider catalogue the console renders from", () => {
   it("ships the three categories at the sizes the plan names", () => {
-    expect(CLOUD_PROVIDERS).toHaveLength(26);
+    // 27 since the keys rework (issue #2306, slice 2a) added TinyHumans as an
+    // ordinary catalogue row.
+    expect(CLOUD_PROVIDERS).toHaveLength(27);
     expect(LOCAL_RUNTIMES).toHaveLength(3);
     expect(CLI_LOGINS).toHaveLength(2);
   });
@@ -36,6 +38,18 @@ describe("the provider catalogue the console renders from", () => {
     // it is the one people try first.
     const nonBearer = CLOUD_PROVIDERS.filter((p) => p.auth !== "bearer").map((p) => p.slug);
     expect(nonBearer).toEqual(["anthropic"]);
+  });
+
+  it("lists TinyHumans once, as a bearer row on the proxy (keys rework, slice 2a)", () => {
+    const tinyhumans = CLOUD_PROVIDERS.filter((p) => p.slug === "tinyhumans");
+    expect(tinyhumans).toHaveLength(1);
+    expect(tinyhumans[0]).toMatchObject({
+      label: "TinyHumans",
+      endpoint: "https://api.tinyhumans.ai/agent-integrations/openrouter",
+      auth: "bearer",
+      keyPlaceholder: "th-...",
+    });
+    expect(isReservedSlug("tinyhumans")).toBe(true);
   });
 
   it("looks a provider up by slug in each category", () => {

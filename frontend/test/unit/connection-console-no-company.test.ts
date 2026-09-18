@@ -138,4 +138,26 @@ describe("a configured host with no companies", () => {
     // Never the generic connection-error screen, which only offers a reload.
     expect(container.querySelector('[data-testid="connection-error"]')).toBeNull();
   });
+
+  /**
+   * The no-company screen's "New company" trigger is gated by
+   * `offersCompanyCreation`, not just `canCreateCompanies` (see
+   * `create-company-dialog.tsx`): a platform-scoped client is used
+   * deliberately here — the caller *could* create a company — so what is
+   * under test is that product scope (`COMPANY_SWITCHING_HIDDEN`, real and
+   * unmocked in this file) withholds the control regardless. The picker's
+   * own "New company" button is gated the same way, so there is no second
+   * trigger to re-point this at.
+   */
+  it("offers no way to create one while the product does not offer company creation", async () => {
+    const platformClient = {
+      ...client({ companies: [] }),
+      carriesPlatformBearer: true,
+    } as OpenCompanyClient;
+
+    await show(platformClient);
+
+    expect(container.querySelector('[data-testid="no-company"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="no-company-new"]')).toBeNull();
+  });
 });

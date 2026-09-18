@@ -72,8 +72,11 @@ tier = "reasoning"                      # cognition hint; never selects a model
 harness = "deep"                        # which [[harness]] runs this agent's
                                         # turns — see harnesses.md. Omitted
                                         # means the company's default harness.
+provider = "anthropic"                  # this agent's own {provider, model}
+model = "claude-sonnet-5"               # pair — see below. Omit both to
+                                        # follow the company default.
 tools = ["docs.*", "mcp:notion"]        # grant globs — see tools.md
-delegates_to = ["creative"]             # desks this agent may hand work to
+delegates_to = ["creative"]             # narrow hand-offs to these desks (omit = anywhere)
 budget_usd_daily = 5.0                  # per-agent daily cap
 
 prompt = """                            # appended to the generated persona
@@ -106,6 +109,33 @@ models — which is the point of naming more than one.
 Naming a harness the company does not declare is a validation error, reported
 against both the agent and the id. Naming none is not: every roster written
 before `[[harness]]` existed binds nobody, and all of them keep working.
+
+### `provider` and `model`: the agent pair
+
+On a `built_in` harness, `provider` and `model` together are this agent's own
+resolved endpoint (keys rework, issue #2306) — a slug in the company's
+`inference/providers` console list, and the model id that provider serves.
+Set together or not at all: `provider` alone or `model` alone is a validation
+error. Neither set means this agent follows the company default, resolved the
+same way a turn with no pin does.
+
+On an `acp` harness `model` keeps its older, unrelated meaning — the model
+hint forwarded to that coding CLI's own session (see `[harness.acp].model`
+in harnesses.md) — and `provider` is refused outright: an ACP agent brings
+its own credential, so naming a console provider is meaningless.
+
+The manifest cannot see the company's console-side provider list, so a
+`provider` slug is checked only for shape at load — never for existence. A
+typo (`provider = "antropic"`) loads clean and fails the agent's *first
+turn* instead, with a message naming the agent and the fix: `resolve`'s pin
+check refuses before falling back to the default. There is no fallback: a
+pinned agent whose provider is removed or switched off is not silently
+served by the company default.
+
+Resolution order for a `built_in` agent's own turns: this pair, then the
+harness's own `[harness.inference]` (see below), then the company default,
+then an actionable refusal.
+
 ### `context` write access
 
 A bare string in `context` is read-only — routed into the prompt, nothing
@@ -156,12 +186,49 @@ An agent's system prompt is assembled in this order, and the order is a decision
 1. the generated **persona** — who this teammate is, at which company;
 2. its inline **`prompt`**;
 3. its **`prompt_files`** bodies;
-4. tool briefs (workspace, ledgers, sandbox, publishing, skills catalogue);
-5. its routed **`context`** documents.
+4. its **team** — the roster, the desks, and who it may hand work to;
+5. tool briefs (workspace, ledgers, sandbox, publishing, skills catalogue,
+   and the hand-off brief);
+6. its routed **`context`** documents.
 
 Static material first, volatile last. The prompt prefix is what a provider cache
 reuses across turns, so a workspace note the operator edits between two turns
 must not invalidate the briefing behind it.
+
+### The team section
+
+Step 4 (`company::team_brief::team_section`) tells every agent who else is at
+the company: each other roster teammate by id, role and mandate (the
+orchestrator marked as such), each desk with its members and lead, the desks
+this agent sits on, and — only when its `delegates_to` narrows it — exactly
+which teammates it may hand work to, rendered from the same rule the tools
+enforce at call time so the prompt never names a target the tool would refuse.
+A roster of one gets no section.
+
+It exists because an agent that is not told it has colleagues does not use
+them. A non-orchestrator used to be told who *it* was and nothing else — no
+roster, and (unless it had opted in with `delegates_to`) no hand-off tool —
+so asked for something a teammate owned it declined, guessed, or said it could
+not contact a colleague sitting on the same desk. Every roster agent now
+carries `spawn_task`, `delegate_to_desk` and `delegate_to_teammate`, and the
+brief under them (`orchestrator::member_delegation_brief`) says when to hand
+a slice on and when to open a card. The orchestrator gets the same section
+ahead of its own brief, so it can delegate by id without a `query_company`
+call first.
+
+### The board is a tool call
+
+Nothing said in chat becomes a card on its own. A message typed into a desk
+or a DM used to be carded by construction — the REST handler opened one for
+anything that led with an action verb, and the runtime opened one for anything
+"substantial" said to a desk lead — so every message became a work item nobody
+had asked for and the answering agent had no say. Both paths are gone. A card
+exists because an agent called `spawn_task`, because a hand-off
+(`delegate_to_desk` / `delegate_to_teammate`) opened the card that tracks it,
+or because a person opened one from the console or pressed the composer's
+"Build me the workflow" control. The lexical triage (`company::task_intent`)
+still runs, but only to narrow the model's board tools on a question and to
+take the cheap chat-only path on a greeting.
 
 ### The sandbox brief
 

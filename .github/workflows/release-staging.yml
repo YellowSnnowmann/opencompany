@@ -59,6 +59,11 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+    # The XGITHUB_APP_* secrets live in this environment, never at repo level.
+    # It holds ONLY those two secrets and is branch-policied to `main` and
+    # `release`, so no other ref can claim it and no build job ever sees a
+    # token that can bypass the branch rulesets.
+    environment: Release-PR-Automation
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       tag: ${{ steps.resolve.outputs.tag }}
@@ -73,16 +78,35 @@ jobs:
 
       # `fetch-depth: 0`: the tag-exists check and the back-merge both need
       # real history, and a shallow clone makes `merge-base` lie.
+      # Least privilege: this job only pushes the version-bump commit and tag
+      # (and the back-merge to main) — contents: write covers that. It also
+      # needs workflows: write: the back-merge from `release` can carry
+      # changes under `.github/workflows/**`, and GitHub rejects a GitHub App
+      # push that touches a workflow file unless the token holds that
+      # permission explicitly. Branch-ruleset bypass (repository settings →
+      # Rules) comes from the App's identity in the ruleset bypass list, not
+      # from token scopes; a push made with GITHUB_TOKEN would be rejected by
+      # `Protect main` / `Protect release`.
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.XGITHUB_APP_ID }}
+          private-key: ${{ secrets.XGITHUB_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+
       - name: Checkout source branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
-          # This job PUSHES. `actions/checkout` stores GITHUB_TOKEN as an
+          # This job PUSHES. `actions/checkout` stores the App token as an
           # `http.extraheader` for this checkout only, which is what `git push`
           # below authenticates with — no token in a remote URL, nothing that
           # `set -x` could ever print. Every other checkout in this repo says
           # `false`; those jobs do not push.
+          token: ${{ steps.app-token.outputs.token }}
           persist-credentials: true
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -128,8 +152,9 @@ jobs:
             exit 1
           fi
 
-      # `[skip ci]` is belt-and-braces: a push made with GITHUB_TOKEN does not
-      # fire `push` workflows anyway. The commit changes version numbers only.
+      # `[skip ci]` does real work here: a push made as the App DOES fire `push`
+      # workflows (unlike one made with GITHUB_TOKEN), and the commit changes
+      # version numbers only, so there is nothing for `ci.yml` to learn.
       #
       # The files staged are the ones the bump script reports it wrote, so the
       # commit can never miss a file the registry gained. Branch and tag go in
@@ -205,6 +230,7 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
     with:
       build_ref: ${{ needs.prepare-build.outputs.build_ref }}
       tag: ${{ needs.prepare-build.outputs.tag }}
@@ -257,6 +283,7 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          file: deploy/Dockerfile
           push: false
           platforms: linux/amd64
           tags: opencompany-tenant:${{ needs.prepare-build.outputs.tag }}

@@ -35,20 +35,16 @@ on:
     # adding one is simply: is it `COPY`ed by the Dockerfile, or read by
     # something that is?
     paths:
-      - 'src/**'
-      - 'crates/opencompany-core/**' # the host's manifest: features and dependencies
+      - 'crates/opencompany-core/**' # the host crate: manifest, build.rs and sources
       - 'crates/opencompany-tui/**' # a workspace member the builder has to COPY
       - 'frontend/**'
       - 'companies/**'
-      - 'globals/**' # COPYed into the builder (Dockerfile) and embedded by build.rs
-      - 'skills/**' # COPYed into the runtime image (Dockerfile) as the shared library
-      - 'docker/**' # entrypoint.sh, which is COPYed and is the container's ENTRYPOINT
+      - 'deploy/Dockerfile'
+      - 'deploy/Dockerfile.dockerignore'
+      - 'deploy/entrypoint.sh' # COPYed in, and the container's ENTRYPOINT
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - 'build.rs' # embeds the bundles and the globals, and stamps the build commit
       - 'rust-toolchain.toml' # COPYed into the builder; it picks the compiler
-      - 'Dockerfile'
-      - '.dockerignore'
       - 'vendor/**'
       - '.github/workflows/deploy-staging.yml'
   workflow_dispatch:
@@ -156,12 +152,30 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
+      - name: Validate Sentry artifact-upload settings
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_URL: ${{ vars.SENTRY_URL }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT_REACT: ${{ vars.SENTRY_PROJECT_REACT }}
+          SENTRY_PROJECT_RUST: ${{ vars.SENTRY_PROJECT_RUST }}
+        run: |
+          missing=0
+          for var in SENTRY_AUTH_TOKEN SENTRY_URL SENTRY_ORG SENTRY_PROJECT_REACT SENTRY_PROJECT_RUST; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Required Sentry artifact-upload setting is missing: $var" >&2
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
       - name: Build and push image to ECR
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
-          # `.dockerignore` excludes `.git` and `GITHUB_SHA` does not cross
+          file: deploy/Dockerfile
+          # `deploy/Dockerfile.dockerignore` excludes `.git` and `GITHUB_SHA` does not cross
           # into a build context, so the build script has no way to work out
           # which revision it is compiling — every hosted tenant would report
           # `unknown` forever. `actions/checkout` checked out `github.sha`, so
@@ -218,6 +232,12 @@ jobs:
             VITE_BUILD_COMMIT=${{ github.sha }}
             VITE_SENTRY_ENVIRONMENT=${{ vars.OPENCOMPANY_SENTRY_ENVIRONMENT || 'hosted-tenant' }}
             VITE_SENTRY_TRACES_SAMPLE_RATE=${{ vars.OPENCOMPANY_SENTRY_TRACES_SAMPLE_RATE }}
+            SENTRY_URL=${{ vars.SENTRY_URL }}
+            SENTRY_ORG=${{ vars.SENTRY_ORG }}
+            SENTRY_PROJECT_REACT=${{ vars.SENTRY_PROJECT_REACT }}
+            SENTRY_PROJECT_RUST=${{ vars.SENTRY_PROJECT_RUST }}
+          secrets: |
+            sentry_auth_token=${{ secrets.SENTRY_AUTH_TOKEN }}
           push: true
           tags: |
             ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:staging-${{ github.sha }}
@@ -417,17 +437,56 @@ jobs:
           # A `rollout restart` therefore does NOT move a tenant to a new image:
           # it recreates the pod from the same spec. Refreshing means patching the
           # image on the StatefulSet itself.
-          if [ "${REFRESH_ALL}" = "true" ]; then
-            echo "Moving all tenants onto ${IMAGE} (requested)..."
+
+          # One enumeration, shared by the patch loop and the report below so
+          # the two can never disagree about the fleet. The fourth column says
+          # whether the StatefulSet actually runs a container named
+          # `opencompany`: a tenant namespace also holds manager-provisioned
+          # sidecars (cortexdb) that carry the same object label but run an
+          # image this pipeline neither builds nor pushes. Readiness applies to
+          # all of them; image identity applies only to the app.
+          enumerate_tenant_statefulsets() {
+            tenant_rows=$(kubectl get statefulset -A -l app=opencompany -o json | jq -r '
+              .items[]
+              | [ .metadata.namespace,
+                  .metadata.name,
+                  ((.spec.replicas // 0) | tostring),
+                  (if any(.spec.template.spec.containers[]?; .name == "opencompany")
+                   then "yes" else "no" end)
+                ] | @tsv')
+            # `grep -c` exits 1 on no match, which `pipefail` would turn into a
+            # failed deploy on an empty fleet.
+            app_statefulsets=$(awk -F'\t' '$4 == "yes"' <<< "${tenant_rows}" | wc -l | tr -d ' ')
+          }
+
+          enumerate_tenant_statefulsets
+
+          refresh_tenant_images() {
+            # `has_app` is a switch that turns checks OFF, so it must not be
+            # able to turn them all off quietly. If a container rename ever
+            # makes every row `no`, this patches nothing and the image check
+            # below asserts nothing, and the deploy is green on neither.
+            if [ -n "${tenant_rows}" ] && [ "${app_statefulsets}" = 0 ]; then
+              echo "ERROR: refresh_all_tenants=true but no tenant StatefulSet has a container named opencompany" >&2
+              echo "       nothing would be patched and the image check below would assert nothing" >&2
+              exit 1
+            fi
             # `kubectl set image` has no -A/--all-namespaces (only `get` does), so
             # enumerate first and patch each in its own namespace.
-            kubectl get statefulset -A -l app=opencompany \
-              -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' \
-            | while read -r ns name; do
-                [ -n "${ns}" ] || continue
-                echo "  ${ns}/${name} -> ${IMAGE}"
-                kubectl -n "${ns}" set image "statefulset/${name}" "opencompany=${IMAGE}"
-              done
+            while IFS=$'\t' read -r ns name _ has_app; do
+              [ -n "${ns}" ] || continue
+              if [ "${has_app}" != yes ]; then
+                echo "  ${ns}/${name} -> skipped (no opencompany container)"
+                continue
+              fi
+              echo "  ${ns}/${name} -> ${IMAGE}"
+              kubectl -n "${ns}" set image "statefulset/${name}" "opencompany=${IMAGE}"
+            done <<< "${tenant_rows}"
+          }
+
+          if [ "${REFRESH_ALL}" = "true" ]; then
+            echo "Moving all tenants onto ${IMAGE} (requested)..."
+            refresh_tenant_images
           else
             echo "Running tenants keep their current image; re-run with refresh_all_tenants=true to move them."
           fi
@@ -436,93 +495,100 @@ jobs:
           # StatefulSet template. An idle tenant deliberately has no pod, so it
           # is reported without asking rollout status to wait forever. A tenant
           # with replicas must either become ready or make this deploy fail.
-          echo "Tenant landed-state report (pod status, not StatefulSet spec):"
-          printf '%-24s %-24s %-8s %-90s %s\n' NS NAME STATE IMAGE DETAIL
-          tenant_failed=no
-          append_failure_detail() {
-            if [ -n "${failure_detail}" ]; then
-              failure_detail="${failure_detail}; "
-            fi
-            failure_detail="${failure_detail}$1"
+          report_tenant_landed_state() {
+            echo "Tenant landed-state report (pod status, not StatefulSet spec):"
+            printf '%-24s %-24s %-8s %-90s %s\n' NS NAME STATE IMAGE DETAIL
+            tenant_failed=no
+            append_failure_detail() {
+              if [ -n "${failure_detail}" ]; then
+                failure_detail="${failure_detail}; "
+              fi
+              failure_detail="${failure_detail}$1"
+            }
+            while IFS=$'\t' read -r ns name replicas has_app; do
+              [ -n "${ns}" ] || continue
+
+              if [ "${replicas}" = "0" ]; then
+                printf '%-24s %-24s %-8s %-90s %s\n' "${ns}" "${name}" idle - 'scaled to zero'
+                continue
+              fi
+
+              rollout_error=''
+              if ! rollout_output=$(kubectl -n "${ns}" rollout status "statefulset/${name}" --timeout=180s 2>&1); then
+                rollout_error=$(printf '%s' "${rollout_output}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')
+              fi
+
+              # Unselected on purpose. `app=opencompany` labels the StatefulSet
+              # OBJECT; Kubernetes does not copy it onto the pod template, and a
+              # manager-provisioned sidecar (cortexdb) carries it on the object
+              # while its pods do not. Attribution is the jq ownerReferences
+              # filter below, which is exact.
+              if ! pod_json=$(kubectl -n "${ns}" get pod -o json 2>&1); then
+                printf '%-24s %-24s %-8s %-90s %s\n' \
+                  "${ns}" "${name}" failed - "could not read pod status: ${pod_json}"
+                tenant_failed=yes
+                continue
+              fi
+
+              pod_status=$(printf '%s' "${pod_json}" | jq -r --arg statefulset "${name}" '
+                [.items[]
+                 | select(any(.metadata.ownerReferences[]?;
+                     .kind == "StatefulSet" and .name == $statefulset))]
+                | if length == 0 then
+                    "-\u001f-\u001f-\u001fno pod"
+                  else
+                    . as $pods
+                    | [
+                        ($pods | map(.metadata.name) | join(",")),
+                        ($pods | map(.status.phase // "Unknown") | unique | join(",")),
+                        ([ $pods[] | .status.containerStatuses[]?
+                           | select(.name == "opencompany") | .image ] | unique | join(",")),
+                        ([ $pods[] | (
+                             .status.containerStatuses[]?.state.waiting.reason,
+                             .status.containerStatuses[]?.state.terminated.reason,
+                             .status.initContainerStatuses[]?.state.waiting.reason,
+                             .status.initContainerStatuses[]?.state.terminated.reason
+                           ) ]
+                         | map(select(. != null and . != "")) | unique | join(","))
+                      ] | join("\u001f")
+                  end')
+              IFS=$'\037' read -r pod_name pod_phase pod_image pod_reason <<< "${pod_status}"
+
+              failure_detail=''
+              if [ -n "${rollout_error}" ]; then
+                append_failure_detail "rollout timed out or failed: ${rollout_error}"
+              fi
+              if [ "${pod_name}" = - ]; then
+                append_failure_detail 'no pod belongs to this StatefulSet'
+              else
+                if [ "${pod_phase}" != Running ]; then
+                  append_failure_detail "pod ${pod_name} phase ${pod_phase}"
+                fi
+                if [ -n "${pod_reason}" ]; then
+                  append_failure_detail "pod ${pod_name}: ${pod_reason}"
+                fi
+                if [ "${REFRESH_ALL}" = true ] && [ "${has_app}" = yes ] && [ "${pod_image}" != "${IMAGE}" ]; then
+                  append_failure_detail 'pod did not land on the requested image'
+                fi
+              fi
+
+              if [ -n "${failure_detail}" ]; then
+                printf '%-24s %-24s %-8s %-90s %s\n' \
+                  "${ns}" "${name}" failed "${pod_image:--}" "${failure_detail}"
+                tenant_failed=yes
+              else
+                printf '%-24s %-24s %-8s %-90s %s\n' \
+                  "${ns}" "${name}" ok "${pod_image:--}" "pod ${pod_name} is Running"
+              fi
+            done <<< "${tenant_rows}"
+
+            [ "${tenant_failed}" = no ] || {
+              echo 'ERROR: one or more non-idle tenants did not land successfully.' >&2
+              exit 1
+            }
           }
-          tenant_rows=$(kubectl get statefulset -A -l app=opencompany \
-            -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.replicas}{"\n"}{end}')
-          while IFS=$'\t' read -r ns name replicas; do
-            [ -n "${ns}" ] || continue
 
-            if [ "${replicas}" = "0" ]; then
-              printf '%-24s %-24s %-8s %-90s %s\n' "${ns}" "${name}" idle - 'scaled to zero'
-              continue
-            fi
-
-            rollout_error=''
-            if ! rollout_output=$(kubectl -n "${ns}" rollout status "statefulset/${name}" --timeout=180s 2>&1); then
-              rollout_error=$(printf '%s' "${rollout_output}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g')
-            fi
-
-            if ! pod_json=$(kubectl -n "${ns}" get pod -l app=opencompany -o json 2>&1); then
-              printf '%-24s %-24s %-8s %-90s %s\n' \
-                "${ns}" "${name}" failed - "could not read pod status: ${pod_json}"
-              tenant_failed=yes
-              continue
-            fi
-
-            pod_status=$(printf '%s' "${pod_json}" | jq -r --arg statefulset "${name}" '
-              [.items[]
-               | select(any(.metadata.ownerReferences[]?;
-                   .kind == "StatefulSet" and .name == $statefulset))]
-              | if length == 0 then
-                  "-\t-\t-\tno pod"
-                else
-                  . as $pods
-                  | [
-                      ($pods | map(.metadata.name) | join(",")),
-                      ($pods | map(.status.phase // "Unknown") | unique | join(",")),
-                      ([ $pods[] | .status.containerStatuses[]?
-                         | select(.name == "opencompany") | .image ] | unique | join(",")),
-                      ([ $pods[] | (
-                           .status.containerStatuses[]?.state.waiting.reason,
-                           .status.containerStatuses[]?.state.terminated.reason,
-                           .status.initContainerStatuses[]?.state.waiting.reason,
-                           .status.initContainerStatuses[]?.state.terminated.reason
-                         ) ]
-                       | map(select(. != null and . != "")) | unique | join(","))
-                    ] | @tsv
-                end')
-            IFS=$'\t' read -r pod_name pod_phase pod_image pod_reason <<< "${pod_status}"
-
-            failure_detail=''
-            if [ -n "${rollout_error}" ]; then
-              append_failure_detail "rollout timed out or failed: ${rollout_error}"
-            fi
-            if [ "${pod_name}" = - ]; then
-              append_failure_detail 'no pod belongs to this StatefulSet'
-            else
-              if [ "${pod_phase}" != Running ]; then
-                append_failure_detail "pod ${pod_name} phase ${pod_phase}"
-              fi
-              if [ -n "${pod_reason}" ]; then
-                append_failure_detail "pod ${pod_name}: ${pod_reason}"
-              fi
-              if [ "${REFRESH_ALL}" = true ] && [ "${pod_image}" != "${IMAGE}" ]; then
-                append_failure_detail 'pod did not land on the requested image'
-              fi
-            fi
-
-            if [ -n "${failure_detail}" ]; then
-              printf '%-24s %-24s %-8s %-90s %s\n' \
-                "${ns}" "${name}" failed "${pod_image:--}" "${failure_detail}"
-              tenant_failed=yes
-            else
-              printf '%-24s %-24s %-8s %-90s %s\n' \
-                "${ns}" "${name}" ok "${pod_image:--}" "pod ${pod_name} is Running"
-            fi
-          done <<< "${tenant_rows}"
-
-          [ "${tenant_failed}" = no ] || {
-            echo 'ERROR: one or more non-idle tenants did not land successfully.' >&2
-            exit 1
-          }
+          report_tenant_landed_state
 
           # Exactly one source, chosen by the same capability check that decided
           # where the value was written. Keying this on ConfigMap EXISTENCE

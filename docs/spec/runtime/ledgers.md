@@ -223,7 +223,7 @@ above:
 | source | authored in | when it lands |
 | --- | --- | --- |
 | built-in | `src/ledger/registry.rs`, in Rust | always; never stored, so a company's copy cannot drift from the code every prompt is written against |
-| the global baseline | `globals/ledgers/<slug>.toml` | seeded into the company's store at first boot |
+| the global baseline | `companies/_globals/ledgers/<slug>.toml` | seeded into the company's store at first boot |
 | the company's own bundle | `companies/<name>/ledgers/<slug>.toml` | seeded at first boot, replacing a baseline declaration of the same slug |
 | an agent, mid-run | `define_ledger` | whenever the company discovers it needs an axis |
 

@@ -1,14 +1,14 @@
 // The inference page's data: one read, one set of writes, one place they land.
 //
-// Both tabs render from this. Two hooks would be two reads of the same status,
-// and the first thing that goes wrong with two reads is that one of them is
-// stale — the Providers tab showing a provider the Routing tab has no target
-// for, or the reverse.
+// The LLM page renders from this. **No decisions here either.** This is
+// fetching, in-flight state, and where a response lands. Which provider a
+// category offers, what a probe class means, what removing one costs — all of
+// that is in `connect.ts`, `classify.ts` and `removal.ts`, as functions over
+// plain data.
 //
-// **No decisions here either.** This is fetching, in-flight state, and where a
-// response lands. Which provider a category offers, what a probe class means,
-// what a removal orphans — all of that is in `connect.ts`, `classify.ts` and
-// `routing.ts`, as functions over plain data.
+// Per-workload routing (`routes`, `mode`, `orphaned`, `saveRoutes`) is gone
+// (keys rework, issue #2306, phase 5b) — a company now has one default
+// `{provider, model}` and agents may pin their own. See `docs/key-reworks/`.
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -21,9 +21,7 @@ import {
   deleteProvider,
   editProvider,
   getInferenceStatus,
-  getRoutes,
   probeDraft,
-  putRoutes,
   restartInference,
   setDefaultProvider,
   setManagedEnabled,
@@ -39,8 +37,7 @@ import type {
   ProbeResult,
   ProviderMutation,
 } from "@/api/inference";
-import { WORKLOADS, WORKLOAD_TIER, inferRoutingMode, parseRef } from "./routing";
-import type { Provider, RoutingMap, RoutingMode } from "./types";
+import type { Provider } from "./types";
 
 /** What the page is doing. */
 export type InferenceLoad = "loading" | "ready" | "unavailable" | "error";
@@ -50,11 +47,6 @@ export interface InferenceState {
   load: InferenceLoad;
   status: InferenceStatus | null;
   providers: Provider[];
-  /** Tier → route string. */
-  routes: Record<string, string>;
-  mode: RoutingMode;
-  /** Routes naming a provider this company does not hold. */
-  orphaned: [string, string][];
   /** The slug currently mid-request, so one row's controls settle rather than the page. */
   busySlug: string | null;
 }
@@ -64,23 +56,33 @@ export interface InferenceActions {
   reload: () => Promise<void>;
   add: (input: AddProviderInput) => Promise<ProviderMutation>;
   edit: (slug: string, input: EditProviderInput) => Promise<ProviderMutation>;
-  remove: (slug: string) => Promise<ProviderMutation>;
-  setEnabled: (slug: string, enabled: boolean) => Promise<ProviderMutation>;
-  makeDefault: (slug: string) => Promise<ProviderMutation>;
+  /** `confirmInUse` resends after a `409 in_use` named what depends on this row. */
+  remove: (slug: string, confirmInUse?: boolean) => Promise<ProviderMutation>;
+  /** `confirmInUse` resends after a `409 in_use` — only turning a provider off can strand anything. */
+  setEnabled: (slug: string, enabled: boolean, confirmInUse?: boolean) => Promise<ProviderMutation>;
+  /** Sets the company default to `{provider, model}` — a model is always required (Q2). */
+  makeDefault: (slug: string, model: string) => Promise<ProviderMutation>;
+  /**
+   * @deprecated keys-rework #2306, decision X6: the console no longer calls
+   * `PUT …/inference/managed/key` to add or replace a key — every provider,
+   * TinyHumans included, goes through `add`/`edit` instead. Kept only for
+   * clearing a **pre-row** legacy credential (`ProviderList`'s deprecated
+   * "Remove key" on the legacy Managed row), which has no indexed row to
+   * `edit` yet. Removable once item 10 drops the fallback chains.
+   */
   saveManagedKey: (key: string) => Promise<ProviderMutation>;
   setManagedOn: (enabled: boolean) => Promise<ProviderMutation>;
   testManagedChain: () => Promise<ProbeResult>;
   /**
    * Ask an endpoint what it publishes, **before** anything is written.
    *
-   * The add dialog needs this to offer a model: an endpoint whose catalog
-   * resolves no tier name cannot serve a workload until one is named, and the
-   * only honest moment to ask is with that endpoint's own list in hand. Nothing
-   * is stored — the draft's key travels one way and is never written by this.
+   * The add dialog needs this to offer a model: a model is always required
+   * (D-model), and the only honest moment to ask is with that endpoint's own
+   * list in hand. Nothing is stored — the draft's key travels one way and is
+   * never written by this.
    */
   probeDraftEndpoint: (draft: { baseUrl: string; key?: string; kind?: string }) => Promise<ProbeResult>;
   test: (slug: string, model?: string) => Promise<ProbeResult>;
-  saveRoutes: (routes: Record<string, string>) => Promise<void>;
   restart: () => Promise<void>;
 }
 
@@ -90,7 +92,7 @@ export interface InferenceActions {
  * Every mutation re-reads the status from its own response rather than firing a
  * second GET: the host answers each write with the whole status precisely so
  * that the console never has to reconcile a partial update against what it
- * already had. A second read would also be a second chance to race.
+ * already had.
  */
 export function useInference(
   client: OpenCompanyClient,
@@ -98,50 +100,13 @@ export function useInference(
 ): InferenceState & InferenceActions {
   const [load, setLoad] = useState<InferenceLoad>("loading");
   const [status, setStatus] = useState<InferenceStatus | null>(null);
-  const [routes, setRoutes] = useState<Record<string, string>>({});
-  const [mode, setMode] = useState<RoutingMode>("managed");
-  const [orphaned, setOrphaned] = useState<[string, string][]>([]);
   const [busySlug, setBusySlug] = useState<string | null>(null);
-
 
   const reload = useCallback(async () => {
     try {
       const next = await getInferenceStatus(client, company);
       setStatus(next);
       setLoad("ready");
-      try {
-        const table = await getRoutes(client, company);
-        setRoutes(table.routes);
-        setMode(table.mode);
-        setOrphaned(table.orphaned);
-      } catch (err) {
-        // A member rather than an admin reads the status fine and is refused
-        // the routing table, which is an authority answer rather than a broken
-        // page. Leaving the state alone was the wrong answer twice over: the
-        // read-only Routing tab then showed every workload on its default and
-        // the mode as Managed, which is a claim about this company nobody
-        // made — and on a company switch it showed the *previous* company's
-        // routes, which is worse than showing none.
-        //
-        // The status carries the same table, so the honest fill is the one the
-        // caller already has. The mode is derived from it here rather than read
-        // off a second response, for the same reason the host derives it: a
-        // stored mode is a fifth thing that can disagree with the four routes.
-        if (!(err instanceof ApiError && err.status === 403)) throw err;
-        const readable = next.routes ?? {};
-        setRoutes(readable);
-        setMode(
-          inferRoutingMode(
-            Object.fromEntries(
-              WORKLOADS.map((w) => [w, parseRef(readable[WORKLOAD_TIER[w]] ?? "")]),
-            ) as RoutingMap,
-            next.managed?.configured === true,
-          ),
-        );
-        // Orphans are an admin's to clear, and this reader cannot. Saying
-        // nothing is right; carrying the last company's list is not.
-        setOrphaned([]);
-      }
     } catch (err) {
       // A host that does not serve this route at all is not an error worth a
       // banner — the page simply is not available on that build.
@@ -157,80 +122,62 @@ export function useInference(
   /**
    * Runs a provider write, parking the row it touches and landing the result.
    *
-   * **The outcome is a toast, and a failure is never silent.** These used to
-   * land as one line of grey prose under the card — including "Anthropic is
-   * disconnected and its key is cleared", which is the most destructive thing
-   * this page does — while the callers invoked them as bare `void`, so a
-   * rejection went nowhere at all. An action's result belongs beside the action
-   * in time, not folded into the page as though it were a standing fact about
-   * the company.
-   *
-   * The error is re-thrown as well as toasted: a form that is still open shows
-   * its own failure inline, where the field the operator has to correct is.
+   * **The outcome is a toast, and a failure is never silent.** The error is
+   * re-thrown as well as toasted: a form or confirm dialog that is still open
+   * shows its own failure inline, where the field the operator has to correct
+   * is — and, for a `409 in_use`, so the dialog can re-open with the refusal's
+   * own `usedBy` and message (keys rework, issue #2306's confirmation
+   * contract) rather than a generic toast being the only trace of it.
    */
   const write = useCallback(
-    async (slug: string | null, run: () => Promise<ProviderMutation>) => {
+    async (
+      slug: string | null,
+      run: () => Promise<ProviderMutation>,
+      /**
+       * Round-2 review, P2-1: some callers already show a failure inline in
+       * the dialog that is still open (the default-model step, for one) —
+       * `silentError` skips this hook's own toast for exactly those, so the
+       * same refusal is not said twice in two different places at once.
+       */
+      opts?: { silentError?: boolean },
+    ) => {
       setBusySlug(slug);
       try {
         const result = await run();
         setStatus(result.status);
         // The host's own sentence, which already names the provider it is about.
         toast.success(result.note);
-        // A delete or a disable can move routes, so the table is re-read rather
-        // than assumed unchanged. It is the one thing a provider write can
-        // change that the write's own response does not carry *in full* — the
-        // orphan list is only on the routing route.
-        try {
-          const table = await getRoutes(client, company);
-          setRoutes(table.routes);
-          setMode(table.mode);
-          setOrphaned(table.orphaned);
-        } catch {
-          // Refused (a member) or simply failed. Either way the write itself
-          // succeeded, and the status it answered with carries the persisted
-          // table — so the routing state follows the write rather than staying
-          // at its pre-write value. Leaving it alone showed routes to a
-          // provider the Providers tab had just removed, and the next edit
-          // would have been computed from that stale table.
-          const persisted = result.status.routes ?? {};
-          setRoutes(persisted);
-          setMode(
-            inferRoutingMode(
-              Object.fromEntries(
-                WORKLOADS.map((w) => [w, parseRef(persisted[WORKLOAD_TIER[w]] ?? "")]),
-              ) as RoutingMap,
-              result.status.managed?.configured === true,
-            ),
-          );
-          // Orphans are only known to the routing route, and we did not get it.
-          setOrphaned([]);
-        }
         return result;
       } catch (err) {
-        toast.error(err instanceof ApiError ? err.message : "That change could not be saved.");
+        // A `409 in_use` is not "something went wrong" — it is the host asking
+        // for confirmation, and the caller (a confirm dialog) shows its own
+        // message and `usedBy` rather than a duplicate toast.
+        const inUse = err instanceof ApiError && err.status === 409 && err.code === "in_use";
+        if (!inUse && !opts?.silentError) {
+          toast.error(err instanceof ApiError ? err.message : "That change could not be saved.");
+        }
         throw err;
       } finally {
         setBusySlug(null);
       }
     },
-    [client, company],
+    [],
   );
 
   return {
     load,
     status,
     providers: status?.providers ?? [],
-    routes,
-    mode,
-    orphaned,
     busySlug,
     reload,
     add: (input) => write(null, () => addProvider(client, company, input)),
     edit: (slug, input) => write(slug, () => editProvider(client, company, slug, input)),
-    remove: (slug) => write(slug, () => deleteProvider(client, company, slug)),
-    setEnabled: (slug, enabled) =>
-      write(slug, () => setProviderEnabled(client, company, slug, enabled)),
-    makeDefault: (slug) => write(slug, () => setDefaultProvider(client, company, slug)),
+    remove: (slug, confirmInUse) => write(slug, () => deleteProvider(client, company, slug, confirmInUse)),
+    setEnabled: (slug, enabled, confirmInUse) =>
+      write(slug, () => setProviderEnabled(client, company, slug, enabled, confirmInUse)),
+    // silentError: the dialog already shows its own failure inline (P2-1).
+    makeDefault: (slug, model) =>
+      write(slug, () => setDefaultProvider(client, company, slug, model), { silentError: true }),
     saveManagedKey: (key) => write(null, () => setManagedKey(client, company, key)),
     setManagedOn: (enabled) => write(null, () => setManagedEnabled(client, company, enabled)),
     probeDraftEndpoint: (draft) => probeDraft(client, company, draft),
@@ -258,13 +205,6 @@ export function useInference(
       } finally {
         setBusySlug(null);
       }
-    },
-    saveRoutes: async (next) => {
-      const table = await putRoutes(client, company, next);
-      setRoutes(table.routes);
-      setMode(table.mode);
-      setOrphaned(table.orphaned);
-      toast.success("Routing saved. It takes effect on the next turn.");
     },
     restart: async () => {
       const result = await restartInference(client, company);

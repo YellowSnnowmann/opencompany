@@ -76,9 +76,9 @@ const MODEL_SETTINGS_LEGACY = "#/settings/inference";
  * merely slow rather than actually stuck — a cold host still building its
  * roster index, a proxy hiccup — now times out at this bound too, and the
  * `catch` cannot tell "genuinely unreachable" apart from "would have
- * answered a moment later." Unlike `getActivation` (`useActivationGate.ts`),
- * `listTeam` has no error classifier to separate a terminal answer from a
- * transient one, so `readRoster` below gives a `ReadTimeoutError` — and only
+ * answered a moment later." `listTeam` has no error classifier to separate a
+ * terminal answer from a transient one, so `readRoster` below gives a
+ * `ReadTimeoutError` — and only
  * that error — a single retry before falling into the same "offer nothing"
  * catch. A real 404/500/network failure is still immediate, matching this
  * file's original, pre-timeout behavior for a host that plainly cannot serve

@@ -11,7 +11,6 @@ import { ApprovalRow } from "./ApprovalRow";
 import { ChatLiveReceipt, type ChatReceipt } from "./ChatLiveReceipt";
 import { EpisodeBlock } from "./EpisodeBlock";
 import { MessageRow } from "./MessageRow";
-import { StepTimeline } from "./StepTimeline";
 import { WorkingIndicator } from "./WorkingIndicator";
 import {
   channelIntroSentence,
@@ -70,6 +69,16 @@ interface Props {
    * `liveSteps`/`typing` rows below.
    */
   receipt?: ChatReceipt;
+  /**
+   * Who the host recorded as answering the open turn, as a roster id.
+   *
+   * Only the reload leg needs it. A console that sent the turn itself has a
+   * {@link receipt}, which names the teammate off the first live frame and
+   * supersedes the rows below; a console that reloaded has neither, and this is
+   * what lets its re-armed row say who rather than a bare "Working…".
+   * Resolved through {@link agentNames} here, never rendered raw.
+   */
+  turnAgentId?: string;
   /** Roster agent id → display name, so the receipt never shows a raw id. */
   agentNames?: Record<string, string>;
   onOpenThread: (messageId: string) => void;
@@ -193,6 +202,7 @@ export function MessageTimeline({
   liveSteps,
   liveStepsByMessage,
   receipt,
+  turnAgentId,
   agentNames,
   onOpenThread,
   onReact,
@@ -222,6 +232,10 @@ export function MessageTimeline({
   /** The inner column whose own height rule 2b's `ResizeObserver` watches. */
   const content = useRef<HTMLDivElement>(null);
   const liveStepCount = liveSteps?.length ?? 0;
+  // Resolved once, for both live rows below. Kept here rather than inside them
+  // so the receipt's "never a raw id" rule holds in one place: an id this map
+  // does not know yields no name, and the row says "Working…" as it always did.
+  const turnAgentName = turnAgentId ? agentNames?.[turnAgentId] : undefined;
   // Rows that arrived locally — a message sent before hydration landed — are
   // still worth showing while the rest of the history is in flight. It is only
   // the *claim of emptiness* that has to wait.
@@ -380,6 +394,7 @@ export function MessageTimeline({
     if (item.kind === "episode") {
       return (
         <EpisodeBlock
+          agentNames={agentNames}
           key={item.key}
           item={item}
           renderRow={renderRow}
@@ -511,9 +526,19 @@ export function MessageTimeline({
             queued={queued}
           />
         ) : liveStepCount > 0 && !queued ? (
-          <LiveTurnRow channel={channel} steps={liveSteps ?? []} />
+          <LiveTurnRow
+            channel={channel}
+            steps={liveSteps ?? []}
+            name={turnAgentName}
+          />
         ) : (
-          typing && <TypingRow channel={channel} queued={queued} />
+          typing && (
+            <TypingRow
+              channel={channel}
+              queued={queued}
+              name={turnAgentName}
+            />
+          )
         )}
       </div>
     </div>
@@ -803,7 +828,25 @@ function HistorySkeleton() {
  * voice that will answer, and the same {@link StepTimeline} the finished reply
  * renders — so the rows do not re-draw differently the instant the turn ends.
  */
-function LiveTurnRow({ channel, steps }: { channel: Channel; steps: TurnStep[] }) {
+function LiveTurnRow({
+  channel,
+  steps,
+  name,
+  label,
+}: {
+  channel: Channel;
+  steps: TurnStep[];
+  /**
+   * The answering teammate's display name, when the host recorded one.
+   *
+   * Ranks below a running step, which {@link WorkingIndicator} enforces: the
+   * step is both more specific and more current. This is what the line says in
+   * the gaps — before the first step, and between a settled step and the next.
+   */
+  name?: string;
+  /** A complete line, when a name cannot describe the work — see the prop. */
+  label?: string;
+}) {
   return (
     <div className="flex items-start gap-2.5 px-4 py-1">
       <TeammateAvatar
@@ -814,16 +857,26 @@ function LiveTurnRow({ channel, steps }: { channel: Channel; steps: TurnStep[] }
         className="size-9 shrink-0"
       />
       <div className="min-w-0 flex-1 space-y-1.5">
-        {/* The line names the step actually in flight (#787), above the
-            timeline that details every step. Same source, one phrasing. */}
-        <WorkingIndicator srLabel="Working…" steps={steps} />
-        <StepTimeline steps={steps} defaultOpen />
+        {/* Chat names the current activity; Raw turns owns the detailed calls. */}
+        <WorkingIndicator srLabel="Working…" steps={steps} name={name} label={label} />
       </div>
     </div>
   );
 }
 
-function TypingRow({ channel, queued }: { channel: Channel; queued?: boolean }) {
+function TypingRow({
+  channel,
+  queued,
+  name,
+  label,
+}: {
+  channel: Channel;
+  queued?: boolean;
+  /** The answering teammate's display name, when the host recorded one. */
+  name?: string;
+  /** A complete line, when a name cannot describe the work — see the prop. */
+  label?: string;
+}) {
   return (
     <div className="flex items-center gap-2.5 px-4 py-1">
       <TeammateAvatar
@@ -833,7 +886,7 @@ function TypingRow({ channel, queued }: { channel: Channel; queued?: boolean }) 
         company={channel.kind === "channel" && channel.id === "main"}
         className="size-9"
       />
-      <WorkingIndicator srLabel="Replying…" queued={queued} />
+      <WorkingIndicator srLabel="Replying…" queued={queued} name={name} label={label} />
     </div>
   );
 }

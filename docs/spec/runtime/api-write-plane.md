@@ -39,7 +39,7 @@ DELETE …/workspace/{nodeId}                  delete a node
 POST   …/workspace/sweep-empty-agent-folders?dry_run=  tidy `agents/` strays (#700)
 POST   …/workspace/merge-duplicate-folders?dry_run=    repair a raced tree (#759)
 POST   …/skills                             add a custom skill
-GET    …/skills/registry                     browse the shared skill library
+GET    …/skills/registry                     browse the skill registry (every bundle's skills)
 POST   …/skills/{slug}/install              install a registry/company skill
 POST   …/skills/{slug}/uninstall            uninstall a skill
 PUT    …/skills/{slug}                       enable / disable a skill
@@ -89,9 +89,8 @@ to the operator, and vice versa. They are REST twins of `Company.workspaceTree`
 every other console read, rather than ISO-8601 strings). The backlink scan is
 literally shared code (`company::workspace_links`), so the two surfaces cannot
 report different backlinks for the same note. The tree read carries metadata
-only — bodies are fetched per file, so a navigation read does not grow with the
-size of the workspace. Reading a folder id as a file is a `404`, never an empty
-note.
+only — bodies are fetched per file, so a navigation read does not grow with
+the workspace. Reading a folder id as a file is a `404`, never an empty note.
 
 `GET …/workspace/search?q=…` (#607) is the **third workspace read**: it answers
 which notes mention a phrase, so discovery costs one call rather than a listing
@@ -420,8 +419,8 @@ rationale and the three-answer "when does it take effect" table, is in
 
 ### Credential-bearing surfaces (feature-gated)
 
-These write secrets to the `SecretStore` and expose only non-secret status.
-The native OAuth compatibility routes below deliberately **do not** write a
+These write secrets to the `SecretStore` and expose only non-secret status. The
+native OAuth compatibility routes below deliberately **do not** write a
 credential: the old credential was unreachable by agents.
 
 ```text
@@ -429,6 +428,7 @@ GET    …/credential                         whether the company has its own ke
 PUT    …/credential                         set / rotate / clear the company's TinyHumans key  [admin]
 POST   …/credential/link/start              begin a PKCE key grant; answers the hub URL to navigate to  [admin]
 POST   …/credential/link/finish             redeem the returned code; stores the minted key  [admin]
+GET    /auth/key/callback                    the host's own return leg for a key grant (desktop); trust is the parked `state`
 GET    …/domain                             the stored domain + records + last verify result, or `null`
 PUT    …/domain                             set the custom domain  [admin]
 POST   …/domain/verify                       server-side DNS check
@@ -481,20 +481,20 @@ window on the legacy path alone, and closing it there would need a conditional
 write that `SecretStore` cannot express today.
 
 `…/credential` is the company's **one** TinyHumans key, presented by every
-surface wired to it (**Composio today**) — see
-[`credentials.md`](credentials.md) for the resolution order, the rotation
-guarantee, and which surfaces are deliberately outside it.
+surface wired to it — [`credentials.md`](credentials.md) has the resolution
+order, the rotation guarantee, and where a grant's return leg lands.
 
 ### Retired native OAuth callback
 
 `/api/v1/oauth/callback` stays reachable for a browser that began consent just
-before a deploy. It returns a non-caching `410 Gone` HTML page saying the authorization was not saved, why native OAuth cannot make agents able
-to use the provider, and to use Composio instead — ignoring the provider's
-`code` and `state` rather than exchanging or storing them.
+before a deploy. It returns a non-caching `410 Gone` HTML page saying the
+authorization was not saved, why native OAuth cannot make agents able to use
+the provider, and to use Composio instead — ignoring the provider's `code` and
+`state` rather than exchanging or storing them.
 
 `POST …/connections/{provider}/start` is likewise a `410 Gone` JSON response
-with stable code `native_oauth_retired`, an explanatory message, and
-`removalAfter: "2026-09-30"`. Both send `Deprecation: true` and a `Sunset: Wed,
-30 Sep 2026 00:00:00 GMT` header. #1023 removes the bridge after the cache
-window established by #979, keeping Disconnect and the read projection so
-tenants can release credentials written before #828.
+with stable code `native_oauth_retired`, a message, and `removalAfter:
+"2026-09-30"`. Both send `Deprecation: true` and a `Sunset: Wed, 30 Sep 2026
+00:00:00 GMT` header. #1023 removes the bridge after the cache window
+established by #979, keeping Disconnect and the read projection so tenants can
+release credentials written before #828.

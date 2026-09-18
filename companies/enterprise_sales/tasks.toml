@@ -1,7 +1,7 @@
 # The setup work this company starts with, on the board in To-do at first
 # boot.
 #
-# Vertical-specific: the baseline in `globals/tasks.toml` already covers the
+# Vertical-specific: the baseline in `companies/_globals/tasks.toml` already covers the
 # brief, the first goals, the standing decisions, the top risks and the
 # connections. What is here is the setup an enterprise sales team is defined
 # by — the flow it runs on, and the ledgers it keeps.

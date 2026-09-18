@@ -149,7 +149,7 @@ gated_tests_for() {
   feature="$1"
 
   # (a) and (b): scan every Rust source for the two inline shapes.
-  find src tests -name '*.rs' -type f 2>/dev/null | sort | while IFS= read -r file; do
+  find crates/opencompany-core/src crates/opencompany-core/tests -name '*.rs' -type f 2>/dev/null | sort | while IFS= read -r file; do
     awk -v feat="${feature}" -v file="${file}" '
       # (a) a test module or test-only helper gated on the feature
       index($0, "cfg(all(test, feature = \"" feat "\"))") {
@@ -169,7 +169,7 @@ gated_tests_for() {
   # (c) a whole module gated on the feature, with the tests inside it. Resolve
   # `mod y;` to y.rs or y/mod.rs relative to the declaring file, then look for
   # test attributes in that module's own source.
-  find src -name '*.rs' -type f 2>/dev/null | sort | while IFS= read -r file; do
+  find crates/opencompany-core/src -name '*.rs' -type f 2>/dev/null | sort | while IFS= read -r file; do
     dir=$(dirname "${file}")
     awk -v feat="${feature}" '
       index($0, "#[cfg(feature = \"" feat "\")]") { pending = NR; next }

@@ -461,6 +461,10 @@ function SearchStatusRow({ caps }: { caps: CapabilityStatusDto }) {
   // neither the managed-credential sentence nor the daily cap describes it —
   // both would be numbers about somebody else's bill.
   const ownProvider = Boolean(caps.searchProvider && caps.searchProvider !== "managed");
+  const managedDescription =
+    caps.searchCredentialSource === "company"
+      ? "Source discovery for research — opt-in, uses this company's managed Search credential, and bills that company account per search."
+      : "Source discovery for research — opt-in, runs on the managed platform credential, and billed per search.";
   return (
     <div className="flex items-center justify-between gap-3 border-t pt-4 text-sm">
       <div className="space-y-0.5">
@@ -468,7 +472,7 @@ function SearchStatusRow({ caps }: { caps: CapabilityStatusDto }) {
         <p className="text-xs text-muted-foreground">
           {ownProvider
             ? `Source discovery for research — running on this company's own ${caps.searchProvider} account, billed there rather than here, so the daily cap does not apply.`
-            : "Source discovery for research — opt-in, runs on the managed platform credential, and billed per search."}{" "}
+            : managedDescription}{" "}
           {ownProvider
             ? ""
             : typeof cap === "number"
@@ -494,7 +498,9 @@ export function searchStatus(caps: CapabilityStatusDto): { label: string; varian
   // badge a working search "Awaiting credential".
   if (caps.searchProvider && caps.searchProvider !== "managed")
     return { label: "Own provider", variant: "default" };
-  if (!caps.searchCredentialConfigured)
+  if (caps.searchCredentialConfigured === undefined)
+    return { label: "Couldn't check", variant: "outline" };
+  if (caps.searchCredentialConfigured === false)
     return { label: "Awaiting credential", variant: "destructive" };
   // A zero cap leaves the grant in place but spends nothing — say so rather
   // than reporting "Active" for a tool that will refuse every call.

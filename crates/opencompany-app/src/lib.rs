@@ -75,6 +75,15 @@ pub fn default_data_dir() -> PathBuf {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+
+    // The shell and every embedded host share the core's single process-wide
+    // client, scrubber, panic hook, release format, and tracing bridge.
+    let (crash_reporting, crash_guard) = opencompany::observability::init(
+        opencompany::app::deployment::Deployment::Desktop,
+        &opencompany::app::config::ProcessEnv,
+    );
     // The `tinyagents::observability` directive is the vendored durable-append
     // writer's reporting target, and it has to be named explicitly here for a
     // reason the host binary's filter does not share: this fallback carries no
@@ -86,14 +95,15 @@ pub fn run() {
     // `src/bin/opencompany.rs` for the full argument (issue #450). Latent while
     // this crate does not enable the `openhuman` feature; a landmine for
     // whoever does.
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "opencompany_desktop_lib=info,opencompany=info,tinyagents::observability=warn"
-                    .into()
-            }),
-        )
+    let log_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        "opencompany_desktop_lib=info,opencompany=info,tinyagents::observability=warn".into()
+    });
+    tracing_subscriber::registry()
+        .with(log_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(opencompany::observability::tracing_layer())
         .init();
+    tracing::info!("{}", crash_reporting.describe());
 
     let data_dir = default_data_dir();
 
@@ -107,7 +117,7 @@ pub fn run() {
     // server tasks belong to a runtime nothing else holds a handle to.
     let local = tauri::async_runtime::block_on(LocalHosts::load(data_dir.clone()));
 
-    tauri::Builder::default()
+    let result = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         // Replacing this application with a newer one. The endpoint and the
         // minisign public key the downloaded bundle is verified against live in
@@ -151,34 +161,14 @@ pub fn run() {
             commands::oc_app_update_download,
             commands::oc_app_update_install,
         ])
-        .run(tauri::generate_context!())
-        .expect("run the desktop shell");
+        .run(tauri::generate_context!());
+
+    if !crash_guard.flush(opencompany::observability::FLUSH_TIMEOUT) {
+        tracing::debug!("crash reporting: flush did not finish inside the shutdown budget");
+    }
+    result.expect("run the desktop shell");
 }
 
 #[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn desktop_defaults_to_dot_opencompany_under_home() {
-        const CHILD: &str = "OPENCOMPANY_DESKTOP_DATA_DIR_TEST_CHILD";
-        let home = PathBuf::from("/opencompany-test-home");
-
-        if std::env::var_os(CHILD).is_some() {
-            assert_eq!(default_data_dir(), home.join(".opencompany"));
-            return;
-        }
-
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .arg("--exact")
-            .arg("test::desktop_defaults_to_dot_opencompany_under_home")
-            .env(CHILD, "1")
-            .env("HOME", &home)
-            .env_remove("USERPROFILE")
-            .env_remove("OPENCOMPANY_DATA_DIR")
-            .status()
-            .unwrap();
-
-        assert!(status.success());
-    }
-}
+#[path = "lib_tests.rs"]
+mod tests;

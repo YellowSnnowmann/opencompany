@@ -1,6 +1,8 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
+import { awaitResolvedByHost } from "./approvals";
 import { LIVE_BRAIN, LIVE_BRAIN_REASON } from "./capabilities";
+import { clickClearOfToasts } from "./toasts";
 
 /**
  * The live half of #2028: four **real** parked blockers, four real clicks, four
@@ -240,31 +242,41 @@ test("every one of the four verdicts is reachable, and the host acts on the one 
     await expect(footer.getByRole("button", { name: /^Decline:/ })).toHaveCount(0);
   }
 
+  // Each verdict is settled the same way: click, then wait for the HOST to say
+  // it took the decision, and only then read the card. Asked in that order the
+  // last assertion is a render — one poll cycle of `useCompany` plus a paint —
+  // rather than a whole resolve, which is a drop, a journal entry, a grant and
+  // a follow-up turn observed through a five-second poll.
+
   // Retry.
-  await card(page, ids.retry).getByRole("button", { name: /^Retry/ }).click();
+  await clickClearOfToasts(card(page, ids.retry).getByRole("button", { name: /^Retry/ }));
+  await awaitResolvedByHost(request, ids.retry, "retry");
   await leaveQueue(page);
-  await expect(card(page, ids.retry)).toHaveCount(0, { timeout: 60_000 });
+  await expect(card(page, ids.retry)).toHaveCount(0, { timeout: 30_000 });
 
   // Amend — and the answer has to be typed before it can be sent at all.
   const amend = card(page, ids.amend);
-  await amend.getByRole("button", { name: /^Answer this question/ }).click();
+  await clickClearOfToasts(amend.getByRole("button", { name: /^Answer this question/ }));
   const send = amend.getByRole("button", { name: /^Send this answer/ });
   await expect(send, "a blank amend cannot be sent").toBeDisabled();
   await amend.getByRole("textbox", { name: /^Answer:/ }).fill(ANSWER);
   await expect(send).toBeEnabled();
-  await send.click();
+  await clickClearOfToasts(send);
+  await awaitResolvedByHost(request, ids.amend, "amend");
   await leaveQueue(page);
-  await expect(amend).toHaveCount(0, { timeout: 60_000 });
+  await expect(amend).toHaveCount(0, { timeout: 30_000 });
 
   // Skip.
-  await card(page, ids.skip).getByRole("button", { name: /^Skip this step/ }).click();
+  await clickClearOfToasts(card(page, ids.skip).getByRole("button", { name: /^Skip this step/ }));
+  await awaitResolvedByHost(request, ids.skip, "skip");
   await leaveQueue(page);
-  await expect(card(page, ids.skip)).toHaveCount(0, { timeout: 60_000 });
+  await expect(card(page, ids.skip)).toHaveCount(0, { timeout: 30_000 });
 
   // Cancel.
-  await card(page, ids.cancel).getByRole("button", { name: /^Cancel run/ }).click();
+  await clickClearOfToasts(card(page, ids.cancel).getByRole("button", { name: /^Cancel run/ }));
+  await awaitResolvedByHost(request, ids.cancel, "cancel");
   await leaveQueue(page);
-  await expect(card(page, ids.cancel)).toHaveCount(0, { timeout: 60_000 });
+  await expect(card(page, ids.cancel)).toHaveCount(0, { timeout: 30_000 });
 
   // The assertion that would have failed against the bug. Four clicks, four
   // different sentences: the host acted on the verdict the operator chose

@@ -24,16 +24,16 @@
 //     implies its own button performed the restart.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, ExternalLink, Loader2, Lock, RotateCw } from "lucide-react";
+import { AlertTriangle, ExternalLink, Loader2, Lock, RotateCw } from "lucide-react";
 
 import { requestCode } from "@/api/auth";
 import type { OpenCompanyClient } from "@/api/client";
+import type { AddProviderInput } from "@/api/inference";
 import { SETUP_HANDOFF_FRAGMENT } from "@/setup/state";
 import {
   changedFields,
   fieldsFor,
   getSetup,
-  INFERENCE_PROVIDERS,
   SETUP_INFERENCE_OPTIONS,
   proposeSetupRoster,
   testInference,
@@ -45,20 +45,13 @@ import {
 } from "@/api/setup";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { OnboardingShell } from "@/components/onboarding-shell";
-import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/page-header";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useOptionalHosts } from "@/connections/HostsContext";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { clampToSetupCompanyNameLimit } from "@/lib/company-name";
 import { TEAM_TONES, initials, toneFor } from "@/lib/team";
 import { fieldCopy, fieldPlaceholder } from "@/lib/setup-fields";
 import type { Step } from "@/components/ui/stepper";
@@ -69,6 +62,10 @@ import {
   type SetupDraft,
 } from "@/lib/company-setup";
 import { isDesktopRuntime } from "@/api/transport";
+import { probeEndpoint } from "@/inference/connect";
+import { TINYHUMANS_API_KEYS_URL } from "@/lib/links";
+import { SelfManagedConnectStep } from "./SelfManagedConnectStep";
+import type { ComposioDraft } from "./SelfManagedConnectStep";
 import { cn } from "@/lib/utils";
 import { HOST_SETTINGS_HIDDEN } from "@/product-scope";
 
@@ -102,7 +99,9 @@ import { HOST_SETTINGS_HIDDEN } from "@/product-scope";
  * questions about *them* are what earn the right to ask one of those.
  */
 const STEPS: readonly (Step & { fields: readonly string[] })[] = [
-  { id: "power", label: "Model", fields: ["tinyhumans_api_key"] },
+  { id: "setup-way", label: "Setup", fields: [] },
+  { id: "managed-login", label: "Connect", fields: ["tinyhumans_api_key"] },
+  { id: "self-managed-connect", label: "Connect", fields: ["tinyhumans_api_key"] },
   { id: "business", label: "Business", fields: [] },
   { id: "signin", label: "Sign-in", fields: ["auth_mode"] },
   { id: "account", label: "You", fields: [] },
@@ -110,58 +109,61 @@ const STEPS: readonly (Step & { fields: readonly string[] })[] = [
   { id: "review", label: "Review", fields: [] },
 ];
 
+/** How the operator wants this instance set up, as answered on step 0. */
+type SetupWay = "managed" | "self-managed";
+
+/** The step-1 screen each way leads to. */
+const STEP_ONE_FOR: Record<SetupWay, string> = {
+  managed: "managed-login",
+  "self-managed": "self-managed-connect",
+};
+
+/** The branch: step 0 and the two step-1 screens it chooses between. */
+const BRANCH_STEP_IDS: readonly string[] = ["setup-way", ...Object.values(STEP_ONE_FOR)];
+
 /**
- * Where each provider's own key is minted, for the operator who does not have
- * one yet.
+ * The route a TinyHumans account key serves — the managed branch's only one.
  *
- * A link out, not a grant: they sign in as themselves on their own dashboard,
- * create a key there, and paste it back. That works before this instance has
- * a company — which is the whole of when this wizard runs — where the
- * one-click PKCE grant cannot, because the host scopes a grant to a company
- * and there is not one yet.
- *
- * Absent for `openai_compatible` and `ollama`: neither has a dashboard this
- * product could name, and guessing one is worse than saying nothing.
+ * Not a provider the company declares. A key tested against this is stored as
+ * the company's own credential and fanned out from there, where every other
+ * route's key is written onto the manifest as that company's provider.
  */
-const PROVIDER_KEY_SOURCE: Record<string, { label: string; url: string }> = {
+const MANAGED_PROVIDER = "managed";
+
+/** Whether a step id is one of the two step-1 screens. */
+function isStepOne(id: string): boolean {
+  return id === STEP_ONE_FOR.managed || id === STEP_ONE_FOR["self-managed"];
+}
+
+/** How each setup way is described, in what the operator gets rather than in mechanism. */
+const SETUP_WAY_COPY: Record<SetupWay, { label: string; hint: string }> = {
   managed: {
-    label: "TinyHumans",
-    url: "https://tinyhumans.ai/dashboard?tab=api-keys",
+    label: "Managed with TinyHumans",
+    hint: "One key covers the model, the integrations and search. We look after the credentials.",
   },
-  openrouter: {
-    label: "OpenRouter",
-    url: "https://openrouter.ai/sign-in?redirect_url=https%3A%2F%2Fopenrouter.ai%2Fworkspaces%2Fdefault%2Fkeys",
+  "self-managed": {
+    label: "Set it up yourself",
+    hint: "Bring your own provider and your own integration keys. Nothing is brokered for you.",
   },
 };
 
 /**
- * "No model" — the same escape decision D3 has always offered, as a choice in
- * the picker rather than a link under it.
- *
- * Shaped like a provider so the step can treat it as one: it needs neither a
- * key nor an endpoint, which is what makes every field below the picker
- * disappear on its own. It is **not** a provider id the host knows, and never
- * reaches one: `tested` settles on `skipped` the moment it is chosen, and
- * every write of `provider` downstream is gated on `tested.kind === "ok"`.
+ * Where a TinyHumans key is minted by hand: the API-keys tab of the hub **this
+ * host is on**, as the host reports it (`inference.keys_url`). Not a constant:
+ * a host on staging sends its operator to staging, because a key minted on
+ * production would be refused by the platform every other surface of this
+ * host talks to. A host too old to report one falls back to the production
+ * link the console always carried; a host whose `api_url` follows no known
+ * convention reports `null`, and then there is no link to offer.
  */
-const NO_MODEL_OPTION = {
-  id: "none",
-  label: "No model",
-  hint: "You'll get a standard team for your industry, and can add a key later.",
-  needsUrl: false,
-  needsKey: false,
-} as const;
+function tinyhumansKeySource(
+  status: SetupStatus | null,
+): { label: string; url: string } | undefined {
+  const url =
+    status?.inference.keys_url === undefined ? TINYHUMANS_API_KEYS_URL : status.inference.keys_url;
+  return url ? { label: "TinyHumans", url } : undefined;
+}
 
-/**
- * The base-ui `Select` wants a plain id -> label map for its `items` prop, so
- * this is projected from {@link SETUP_INFERENCE_OPTIONS} the same way
- * `InferenceSection`'s `PROVIDER_LABEL_ITEMS` is — `items` is what the closed
- * trigger renders, and a filtered `SelectItem` list alone would leave a
- * hidden option's own name showing there.
- */
-const SETUP_PROVIDER_LABEL_ITEMS: Record<string, string> = Object.fromEntries(
-  [...SETUP_INFERENCE_OPTIONS, NO_MODEL_OPTION].map((option) => [option.id, option.label]),
-);
 
 /**
  * Advanced: the settings that already work, grouped by subject.
@@ -273,17 +275,6 @@ interface Props {
  *   offer — the caller passes the very condition its submit uses, so the two
  *   cannot answer differently.
  */
-/**
- * The provider the house's credential can ride.
- *
- * Mirrors `resolve_endpoint` (`src/company/inference.rs`): the injected
- * credential is inherited for the managed choice, and for this provider only
- * while no base URL overrides the endpoint. Everything else is sent without it,
- * so a step that hides the key field for one of those promises a credential the
- * host will not forward.
- */
-const HOUSE_CREDENTIAL_PROVIDER = "openrouter";
-
 export function shouldSeedTemplate(input: {
   hasCompany: boolean;
   source: "model" | "fallback" | "preset" | null;
@@ -338,14 +329,19 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
    * Where the operator is, held as a step **id** rather than an index.
    *
    * The list of steps can lose one behind their back — choosing "no sign-in"
-   * removes the address screen — and an index silently means a *different
-   * screen* the moment it does. Today's order happens to make that unreachable:
-   * the only step that disappears sits after the only screen that can remove it,
-   * so the position is always before the gap. An id does not rest on that
-   * argument, which is the point — the next person to reorder these will not
-   * think to restate it.
+   * removes the address screen, and a host that reaches its own model removes
+   * the model screen — and an index silently means a *different screen* the
+   * moment it does. An id survives both, which is the point: the next person to
+   * reorder these will not think to restate the argument.
    */
   const [stepId, setStepId] = useState<string>(STEPS[0].id);
+  /**
+   * The way picked on step 0, or `null` while it is unanswered.
+   *
+   * Only ever the operator's own answer. Where the question is not asked at
+   * all the way is resolved from the host instead — see `setupWay`.
+   */
+  const [chosenWay, setChosenWay] = useState<SetupWay | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -356,13 +352,11 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
   /** The shipped company template the operator explicitly chose. */
   const [template, setTemplate] = useState("");
   /**
-   * What to call the company, as typed on the review step.
+   * What to call the company, once the operator has typed one.
    *
-   * Nothing asked before this. The host derived a name from the *industry*
-   * answer and minted the company id from it, so "what kind of company are you
-   * setting up?" was silently also "what is it called?", permanently — there is
-   * no rename anywhere in the product. Seeded with a suggestion when the roster
-   * arrives, so the field arrives answered rather than as one more question.
+   * Asked with the other questions about the business, because the host mints
+   * the company id from it and there is no rename anywhere in the product — so
+   * it is the most permanent answer in the flow, and used to be collected last.
    */
   const [companyName, setCompanyName] = useState("");
   /**
@@ -388,32 +382,41 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
   /** Whether the operator has been shown a problem on the current step yet. */
   const [touched, setTouched] = useState(false);
   /**
-   * The model connection, as the first step leaves it.
+   * The route a tested credential belongs to.
    *
-   * `provider` and `baseUrl` start from what the host already holds, so a hosted
-   * operator — who has no key and cannot get one — arrives at a step that is
-   * already answered and only needs testing.
+   * Starts from what the host already holds, so a hosted operator — who has no
+   * key and cannot get one — arrives at a step that is already answered and
+   * only needs testing. Seeded from the host once its status arrives — see the
+   * fetch effect; not an initialiser, because `status` is null until then.
    */
-  // Seeded from the host once its status arrives — see the fetch effect. Not an
-  // initialiser, because `status` is null until then.
   const [provider, setProvider] = useState<string>(SETUP_INFERENCE_OPTIONS[0].id);
-  const [baseUrl, setBaseUrl] = useState<string>("");
   /**
    * The verdict on the credential, and the reason the step can gate on it.
    *
    * `"untested"` blocks Next; `"ok"` releases it; `"failed"` blocks with the
-   * reason shown. `"skipped"` releases it too — see the skip link. There is no
-   * state in which the operator cannot proceed at all: decision D3 says nobody
-   * gets stuck, and a credential they cannot obtain must not be the one thing
-   * that traps them.
+   * reason shown. `"hosted"` releases it as well, and says the model came with
+   * the host rather than from this operator. Only the managed branch gates on
+   * this at all — self-managed collects a provider draft instead, and both of
+   * its connections are optional. There is no state in which the operator
+   * cannot proceed at all: decision D3 says nobody gets stuck, and a credential
+   * they cannot obtain must not be the one thing that traps them.
    */
-  const [tested, setTested] = useState<
-    | { kind: "untested" }
-    | { kind: "testing" }
-    | { kind: "ok"; baseUrl: string; model?: string | null }
-    | { kind: "failed"; error: string }
-    | { kind: "skipped" }
-  >({ kind: "untested" });
+  const [tested, setTested] = useState<TestState>({ kind: "untested" });
+  /**
+   * The provider the self-managed branch connected, staged for the apply.
+   *
+   * Held apart from {@link tested} rather than folded into it. `tested` is one
+   * verdict slot read by the managed branch's gate *and* by `design`'s
+   * `modelless`, so a second meaning in it would make one branch's answer
+   * change the other's behaviour.
+   */
+  const [providerDraft, setProviderDraft] = useState<AddProviderInput | null>(null);
+  /**
+   * The Composio credential the self-managed branch collected, staged for the
+   * apply. Independent of {@link providerDraft}: either connection can be made
+   * without the other, and skipping one says nothing about the other.
+   */
+  const [composioDraft, setComposioDraft] = useState<ComposioDraft | null>(null);
   /**
    * The team, once the host has designed one — and `null` until then.
    *
@@ -424,6 +427,14 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
   const [roster, setRoster] = useState<SetupRoster | null>(null);
   const [designing, setDesigning] = useState(false);
   const [designError, setDesignError] = useState<string | null>(null);
+  /**
+   * Bumped whenever the setup way changes. A test verdict or a designed
+   * roster that resolves after the branch it was asked under has been left
+   * carries this number from the render that started it, so a stale one can
+   * be told apart from a current one even after the step that requested it
+   * has unmounted.
+   */
+  const setupWayGenerationRef = useRef(0);
   /** How many teammates have landed, once the apply is building them. */
   const [built, setBuilt] = useState<number | null>(null);
   /**
@@ -498,18 +509,6 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
         ) {
           setProvider(s.inference.provider);
         }
-        // Only for a provider that actually takes one. The host reports its own
-        // endpoint whatever the route, and dropping that into the form for a
-        // provider with no URL field left an invisible value that later read as
-        // a tenant override — which is precisely what withholds the injected
-        // credential (`resolve_endpoint`). Same rule the Inference card uses.
-        const seededProvider =
-          s.inference.provider &&
-          SETUP_INFERENCE_OPTIONS.some((option) => option.id === s.inference.provider)
-            ? s.inference.provider
-            : SETUP_INFERENCE_OPTIONS[0].id;
-        const seededSpec = INFERENCE_PROVIDERS.find((p) => p.id === seededProvider);
-        if (s.inference.base_url && seededSpec?.needsUrl) setBaseUrl(s.inference.base_url);
       })
       .catch((err: unknown) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err));
@@ -518,6 +517,46 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
       cancelled = true;
     };
   }, [client]);
+
+  /**
+   * Prove the house credential before the model step is taken away.
+   *
+   * `inference.ready` is built from the environment: a credential and a URL
+   * resolve, which is not the same fact as the endpoint answering. Hiding the
+   * step on that alone removes the only live connection check in first run, so
+   * an expired key or a URL that no longer resolves finishes setup looking
+   * healthy and surfaces several screens later as a curated team nobody chose.
+   *
+   * The same probe the Test button runs, sent once with no key so the host
+   * resolves its own injected credential (`resolve_endpoint`). A pass settles
+   * `hosted` and the step goes; a failure is a verdict on the model step, which
+   * stays and shows it.
+   */
+  useEffect(() => {
+    if (!status?.inference.ready) return;
+    let cancelled = false;
+    setTested({ kind: "testing" });
+    testInference(client, {
+      provider: status.inference.provider ?? SETUP_INFERENCE_OPTIONS[0].id,
+      key: null,
+      baseUrl: null,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setTested(
+          result.ok
+            ? { kind: "hosted" }
+            : { kind: "failed", error: result.error ?? "Could not reach the provider." },
+        );
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setTested({ kind: "failed", error: err instanceof Error ? err.message : String(err) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, status]);
 
   const set = useCallback((key: string, value: string) => {
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -597,12 +636,74 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
   // goes only when the operator typed one.
   const changed = useMemo(() => {
     const fields = status ? changedFields(status, values) : {};
-    // BYOK/local credentials belong to the new company's write-only inference
-    // store. Writing the same bytes into the host-wide TinyHumans key would
-    // both duplicate the secret and falsely report a process restart.
-    if (provider !== "managed") delete fields.tinyhumans_api_key;
+    // A key typed here is never a host-wide config write. A BYOK/local
+    // credential belongs to the new company's write-only inference store, and
+    // a TinyHumans one is that company's own account key — fanned out to
+    // Composio and the LLM row the moment it lands. `tinyhumans_api_key` is
+    // the instance's identity for companies that have none of their own, it
+    // is read once at boot, and writing the same bytes there would duplicate
+    // the secret and report a restart nobody needs.
+    delete fields.tinyhumans_api_key;
     return fields;
-  }, [status, values, provider]);
+  }, [status, values]);
+
+  /**
+   * Whether the managed way can actually be completed on this host.
+   *
+   * Two host-reported facts, both of which the managed branch dead-ends
+   * without: the TinyHumans route has to be on offer at all, and the host has
+   * to accept a key for it from this operator rather than owning that field
+   * from the environment. Null status counts as offered — the read has not
+   * landed, and a branch that appears once it does is better than one that
+   * vanishes under someone already reading it.
+   */
+  const managedWayOffered = useMemo(() => {
+    if (!status) return true;
+    if (!SETUP_INFERENCE_OPTIONS.some((option) => option.id === "managed")) return false;
+    const field = status.fields.find((f) => f.key === "tinyhumans_api_key");
+    return field === undefined || field.editable;
+  }, [status]);
+
+  /**
+   * Whether step 0 is a question worth asking.
+   *
+   * Not on a host with only one answer available, and not on a re-run: an
+   * instance that has already been configured is being edited, and the way it
+   * was set up is not back on the table.
+   */
+  const asksSetupWay = managedWayOffered && !status?.complete;
+
+  /**
+   * The way in force. Unasked resolves to self-managed, which is the branch
+   * that needs nothing brokered and so can never dead-end.
+   */
+  const setupWay: SetupWay | null = asksSetupWay ? chosenWay : "self-managed";
+
+  /**
+   * Answer step 0, clearing what the other branch had already collected.
+   *
+   * A key typed against one way would otherwise be presented to the other, and
+   * a roster designed under the old answer would ride through Review.
+   */
+  const chooseSetupWay = (way: SetupWay) => {
+    if (chosenWay !== null && chosenWay !== way) {
+      setupWayGenerationRef.current += 1;
+      set("tinyhumans_api_key", "");
+      setTested({ kind: "untested" });
+      // Cleared with the rest of the other branch's answers. A provider
+      // connected under Self-managed is that branch's answer to "what does this
+      // company run on", and carrying it into Managed would submit a BYOK row
+      // for an operator who has just said they want none.
+      setProviderDraft(null);
+      setComposioDraft(null);
+      setRoster(null);
+    }
+    // Managed is TinyHumans, so its step 1 has no provider to pick — and the
+    // probe it runs has to reach the managed endpoint rather than whichever
+    // route the host happened to seed.
+    if (way === "managed") setProvider(MANAGED_PROVIDER);
+    setChosenWay(way);
+  };
 
   /**
    * The steps this host actually shows. `STEPS` stays the source of order.
@@ -611,24 +712,39 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
    * is absent rather than optional — and an absent step gets no slot in the
    * progress bar either, or the bar counts a screen that will never arrive.
    *
+   * A host whose own model answered is the same shape of fact. Its operator has
+   * a credential injected by the control plane, no key of their own and no way
+   * to get one, so the model step is a question with one possible answer — and
+   * asking it demands a key from the one person who cannot supply one.
+   *
+   * Keyed on the verdict rather than on `inference.ready`, because those are
+   * different claims: readiness says a credential resolved from the
+   * environment, and only `hosted` says the endpoint replied. A host whose
+   * credential is expired or whose URL no longer resolves keeps the step, which
+   * is the one screen able to say so.
+   *
    * `status` is null until the first read lands, and that counts as "show it":
    * the mode it would be judged against has not been read yet, and a bar that
    * changes length under someone already looking at it is worse than one that
-   * starts at its longest.
+   * starts at its longest. The probe is the same — the step stays while it is
+   * in flight.
    */
   const visibleSteps = useMemo(
     () =>
       STEPS.filter(
         (s) =>
+          (!BRANCH_STEP_IDS.includes(s.id) || tested.kind !== "hosted") &&
+          (s.id !== "setup-way" || asksSetupWay) &&
+          (!isStepOne(s.id) || (setupWay !== null && STEP_ONE_FOR[setupWay] === s.id)) &&
           (s.id !== "account" || !status || requiresSignIn(status, values)) &&
           (s.id !== "advanced" || ADVANCED_GROUPS.length > 0),
       ),
-    [status, values],
+    [status, values, tested, asksSetupWay, setupWay],
   );
 
   // A position whose step is no longer shown falls back to the start. That is
-  // unreachable today for the reason given on `stepId`, and a defined screen
-  // beats a blank one if it ever stops being.
+  // how a hosted host leaves the model step: `stepId` begins there, and the
+  // probe that answers it removes the screen underneath.
   const step = Math.max(0, visibleSteps.findIndex((s) => s.id === stepId));
 
   const restartKeys = useMemo(() => {
@@ -662,6 +778,23 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
   const operatorConfiguredInference =
     !houseSuppliesInference || !!values.tinyhumans_api_key?.trim();
   /**
+   * Whether this company will finish setup with nothing to think with.
+   *
+   * What it decides is the **design brief**: `automate` and `teamHint` are read
+   * by a model and by nothing else, so with none the Business step does not ask
+   * for them and the design pass is told to return its curated team outright
+   * rather than reaching for a credential that is not there.
+   *
+   * Asked of all three ways a model can arrive — a proved TinyHumans key, a
+   * host that answers for itself, a staged provider — rather than of a single
+   * verdict. It used to be `tested.kind === "skipped"`, one option in a picker
+   * that no longer exists; keyed on that alone it would have silently stopped
+   * firing, and an operator who connected nothing would be asked to describe
+   * what to automate by a wizard that had already decided not to read it.
+   */
+  const modelless =
+    tested.kind !== "ok" && tested.kind !== "hosted" && providerDraft === null;
+  /**
    * Whether finishing will write inference onto this company.
    *
    * Read by both the submit payload and {@link shouldSeedTemplate}: the seed
@@ -669,7 +802,37 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
    * never written, so it has to be asking the same question the payload answers.
    */
   const writesInference =
-    tested.kind === "ok" && provider !== "managed" && operatorConfiguredInference;
+    tested.kind === "ok" && provider !== MANAGED_PROVIDER && operatorConfiguredInference;
+  /**
+   * Whether finishing will store this key as the new company's own TinyHumans
+   * credential, for the host to fan out.
+   *
+   * The other half of {@link writesInference}: every tested key goes to
+   * exactly one of the two, because a TinyHumans key is an account identity
+   * that fills the model, Composio and search slots at once, where every other
+   * route's key is a single provider's and belongs on the manifest. Asked as
+   * "which route passed the probe" rather than "which branch was chosen", so
+   * an operator who took the self-managed way and left the picker on
+   * TinyHumans still gets the account-key treatment their key actually needs.
+   */
+  const writesAccountKey =
+    tested.kind === "ok" &&
+    provider === MANAGED_PROVIDER &&
+    !!values.tinyhumans_api_key?.trim();
+
+  const chosenTemplateName =
+    status?.templates.find((candidate) => candidate.id === template)?.name ?? null;
+  /**
+   * The name this company is heading for.
+   *
+   * Derived rather than stored while it is still ours: a suggestion has to
+   * track the answers it was drawn from, and a cached one went stale the moment
+   * the operator went back and picked a different template. Once they type, the
+   * answer is theirs and the derivation stops.
+   */
+  const name = nameTouched
+    ? companyName
+    : suggestedCompanyName(draft.industry, chosenTemplateName);
 
   /**
    * Ask the host to design a team, on the way into Review.
@@ -681,26 +844,35 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
    * imperfect team.
    */
   const design = useCallback(async () => {
+    const generation = setupWayGenerationRef.current;
     setDesigning(true);
     setDesignError(null);
     try {
-      // A modelless run sends neither half of the design brief. The step no
-      // longer asks for them, and a draft left behind by an operator who
-      // answered and then went back to choose "No model" is not an answer to
-      // the question being asked now — it would still steer the curated pick,
-      // which scores both against the industry answer.
-      const modelless = tested.kind === "skipped";
       const proposed = await proposeSetupRoster(client, {
         industry: draft.industry,
         teamHint: modelless ? "" : draft.teamHint,
         automate: modelless ? "" : draft.automate,
         template: template || null,
-        inferenceKey: values.tinyhumans_api_key || null,
+        // The design brief's credential, from whichever branch collected one.
+        //
+        // The self-managed branch no longer settles `tested` at all — its
+        // provider is staged as a draft — so keying these on the verdict alone
+        // would have quietly stopped sending them: a designed roster for an
+        // operator with a working key, replaced by the curated team, with
+        // nothing on screen saying why.
+        inferenceKey: providerDraft?.key || values.tinyhumans_api_key || null,
         inferenceProvider:
-          tested.kind === "ok" && operatorConfiguredInference ? provider : null,
-        inferenceBaseUrl:
-          tested.kind === "ok" && operatorConfiguredInference ? tested.baseUrl : null,
-        inferenceModel: tested.kind === "ok" ? tested.model : null,
+          providerDraft?.kind ??
+          (tested.kind === "ok" && operatorConfiguredInference ? provider : null),
+        // The endpoint the draft's own probe reached, not the field it was
+        // typed into: a cloud provider never types one, and the catalogue is
+        // where its address comes from.
+        inferenceBaseUrl: providerDraft
+          ? probeEndpoint(providerDraft.kind, providerDraft.baseUrl)
+          : tested.kind === "ok" && operatorConfiguredInference
+            ? tested.baseUrl
+            : null,
+        inferenceModel: providerDraft?.model ?? (tested.kind === "ok" ? tested.model : null),
         forceCurated: modelless,
       });
       // The host is contracted never to answer with an empty roster, so a
@@ -709,29 +881,29 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
       if (!Array.isArray(proposed?.agents) || proposed.agents.length === 0) {
         throw new Error("The host answered without a team to review.");
       }
+      // A design asked under a setup way the operator has since left must not
+      // land on the one they switched to — see `setupWayGenerationRef`.
+      if (generation !== setupWayGenerationRef.current) return;
       setRoster(proposed);
       setRosterEdited(false);
-      // Suggested, never imposed: the field is editable and this only fills a
-      // blank one, so an operator who has already named their company does not
-      // watch it change under them when they go back and re-design.
-      // Re-suggested on every design, and only over a suggestion: a name the
-      // operator typed survives going back and changing their mind about the
-      // template, and a name they never typed does not.
-      if (!nameTouched) {
-        setCompanyName(
-          suggestedCompanyName(
-            draft.industry,
-            status?.templates.find((candidate) => candidate.id === template)?.name ?? null,
-          ),
-        );
-      }
     } catch (err: unknown) {
-      setDesignError(err instanceof Error ? err.message : String(err));
-      setRoster(null);
+      if (generation === setupWayGenerationRef.current) {
+        setDesignError(err instanceof Error ? err.message : String(err));
+        setRoster(null);
+      }
     } finally {
       setDesigning(false);
     }
-  }, [client, draft, template, nameTouched, status, provider, tested, values.tinyhumans_api_key]);
+  }, [
+    client,
+    draft,
+    template,
+    modelless,
+    provider,
+    providerDraft,
+    tested,
+    values.tinyhumans_api_key,
+  ]);
 
   const submit = useCallback(async () => {
     if (!status) return;
@@ -748,19 +920,36 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
         source: roster?.source ?? null,
         rosterEdited,
         template,
-        credentialTested: tested.kind === "ok",
-        writesInference,
+        // A staged provider is a proved credential that this submit will write,
+        // which is exactly what both of these ask. Answered at the call site
+        // rather than inside the function: the function's job is the rule, and
+        // "which of the two branches carried a credential" is this component's.
+        credentialTested: tested.kind === "ok" || providerDraft !== null,
+        writesInference: writesInference || providerDraft !== null,
       });
 
       const result = await submitSetup(client, {
         fields: changed,
-        name: companyName.trim() || null,
+        name: name.trim() || null,
         // Sent for either path. The designed company carries its own copy
         // below; a seeded template has no other way to learn it, and no shipped
         // template names an admin — so without this, choosing a template *and*
         // a sign-in finishes setup into a company the operator cannot
         // administer.
         admin_email: email.trim() || null,
+        // Deferred to here rather than sent from the step that collected it:
+        // the fan-out writes a company's slots, and the company is what this
+        // request creates. Carried past the template/designed fork because the
+        // key belongs to whichever company comes out of it.
+        tinyhumans_key: writesAccountKey ? (values.tinyhumans_api_key?.trim() ?? null) : null,
+        tinyhumans_model:
+          writesAccountKey && tested.kind === "ok" ? (tested.model ?? null) : null,
+        // Deferred to here for the same reason: the add writes a company's
+        // rows, and the company is what this request creates. Carried past the
+        // template/designed fork because the provider belongs to whichever
+        // company comes out of it.
+        provider_draft: providerDraft,
+        composio_draft: composioDraft,
         template: seedTemplate ? template : null,
         company:
           status.companies.length === 0 && roster && !seedTemplate
@@ -787,9 +976,9 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
       // company exists either way, and a rename that fails is a label, not a
       // company. Never a reason to show an error on a screen that just
       // succeeded.
-      if (result.seeded_company && companyName.trim() && onNameLocalHost) {
+      if (result.seeded_company && name.trim() && onNameLocalHost) {
         try {
-          await onNameLocalHost(companyName.trim());
+          await onNameLocalHost(name.trim());
         } catch (error: unknown) {
           console.warn("[setup] could not name the host after the company", error);
         }
@@ -807,10 +996,12 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
     roster,
     rosterEdited,
     template,
-    companyName,
+    name,
     draft,
     email,
     provider,
+    providerDraft,
+    composioDraft,
     tested,
     values.tinyhumans_api_key,
     onNameLocalHost,
@@ -863,6 +1054,30 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
               Built <strong>{applied.seeded_company}</strong> with{" "}
               {roster?.agents.length ?? 0}{" "}
               {roster?.agents.length === 1 ? "agent" : "agents"}.
+            </p>
+          )}
+          {/* The host's own words about what the key actually reached, verbatim.
+              The fan-out reports the slots it left alone — a model it was never
+              given, a surface that already had a key of its own — and those are
+              exactly the parts a cheerful "all set" would bury. */}
+          {applied.credential_note && (
+            <p className="text-sm text-muted-foreground" data-testid="setup-credential-note">
+              {applied.credential_note}
+            </p>
+          )}
+          {/* And the same for the provider the self-managed branch connected.
+              It carries the refusal too — the company is already built by the
+              time the add runs, so an endpoint that stopped answering between
+              the probe and the finish is said here rather than turned into a
+              failed setup. */}
+          {applied.provider_note && (
+            <p className="text-sm text-muted-foreground" data-testid="setup-provider-note">
+              {applied.provider_note}
+            </p>
+          )}
+          {applied.composio_note && (
+            <p className="text-sm text-muted-foreground" data-testid="setup-composio-note">
+              {applied.composio_note}
             </p>
           )}
           {/* The button below cannot restart the host — it only re-enters the
@@ -995,9 +1210,23 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
 
   /** Whether this step can be left, and why not when it cannot. */
   const problem = (): string | undefined => {
-    // The gate. Untested is not "probably fine": the whole reason this step
-    // moved to the front is that a bad credential is silent everywhere else.
-    if (current.id === "power" && tested.kind !== "ok" && tested.kind !== "skipped") {
+    if (current.id === "setup-way" && !chosenWay) {
+      return "Pick how you'd like to set this up.";
+    }
+    // The gate, and only on the managed branch. Untested is not "probably
+    // fine": the whole reason this step moved to the front is that a bad
+    // credential is silent everywhere else.
+    //
+    // Self-managed has no gate at all, because both of its connections are
+    // optional — it asks for a provider and, once slice 4b-ii lands, a Composio
+    // credential, either of which an operator may reasonably not have yet. A
+    // provider they *did* connect was proved by the dialog's own probe before
+    // it was staged, so there is no unproved credential here to hold anyone on.
+    if (
+      current.id === STEP_ONE_FOR.managed &&
+      tested.kind !== "ok" &&
+      tested.kind !== "hosted"
+    ) {
       return tested.kind === "failed"
         ? "That connection did not work. Fix it, or continue without a model."
         : "Test the connection first, or continue without a model.";
@@ -1012,6 +1241,9 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
       !draft.industry.trim()
     ) {
       return "Tell us a little about the company first.";
+    }
+    if (current.id === "business" && needsCompany && !name.trim()) {
+      return "Give your company a name.";
     }
     if (current.id === "account" && needsCompany) {
       // Checked here rather than left to the manifest validator on the last
@@ -1119,11 +1351,16 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
       }
     >
       <div className="space-y-6" data-testid="setup-wizard">
+        {current.id === "setup-way" && (
+          <SetupWayStep value={chosenWay} onChange={chooseSetupWay} />
+        )}
+
         {current.id === "business" && (
           <BusinessStep
             draft={draft}
             templates={status.templates}
             template={template}
+            name={name}
             onTemplate={(id) => {
               setTemplate(id);
               const selected = status.templates.find((candidate) => candidate.id === id);
@@ -1132,9 +1369,13 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
               }
               setRoster(null);
             }}
+            onName={(next) => {
+              setCompanyName(next);
+              setNameTouched(true);
+            }}
             onChange={setDraft}
             onEnter={advance}
-            modelless={tested.kind === "skipped"}
+            modelless={modelless}
           />
         )}
 
@@ -1155,41 +1396,51 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
           />
         )}
 
-        {current.id === "power" && (
-          <PowerStep
+        {current.id === STEP_ONE_FOR.managed && (
+          <ManagedLoginStep
             status={status}
             client={client}
-            provider={provider}
-            onProvider={(p) => {
-              setProvider(p);
-              // A changed provider invalidates the verdict. Carrying a green
-              // tick across a provider switch would be the worst kind of lie:
-              // one the operator watched us earn.
-              //
-              // "No model" is the exception, and settles rather than clears:
-              // it is an answer to the step, not a connection waiting to be
-              // proved, and there is nothing it could be tested against.
-              setTested(p === NO_MODEL_OPTION.id ? { kind: "skipped" } : { kind: "untested" });
-              setBaseUrl(p === status.inference.provider ? (status.inference.base_url ?? "") : "");
-              // And the roster with it. `advance` only designs when there is
-              // none, so a team designed under the old answer would otherwise
-              // survive into Review and be submitted — a model-authored roster
-              // under copy promising a standard one, for an operator who came
-              // back specifically to change this.
-              setRoster(null);
-            }}
-            baseUrl={baseUrl}
-            onBaseUrl={(v) => {
-              setBaseUrl(v);
-              setTested({ kind: "untested" });
-            }}
             value={values.tinyhumans_api_key ?? ""}
             onChange={(v) => {
               set("tinyhumans_api_key", v);
               setTested({ kind: "untested" });
             }}
             tested={tested}
-            onTested={setTested}
+            onTested={((generation) => (t: TestState) => {
+              // A verdict asked under a setup way the operator has since left
+              // must not land on the one they switched to — see
+              // `setupWayGenerationRef`. The dialog's own staleness rule cannot
+              // answer this one: it compares the answers the step was holding,
+              // and switching away unmounts the step with those answers intact.
+              if (generation === setupWayGenerationRef.current) setTested(t);
+            })(setupWayGenerationRef.current)}
+          />
+        )}
+
+        {current.id === STEP_ONE_FOR["self-managed"] && (
+          <SelfManagedConnectStep
+            client={client}
+            draft={providerDraft}
+            onDraft={((generation) => (next: AddProviderInput | null) => {
+              // A draft assembled under a setup way the operator has since left
+              // must not land on the one they switched to — see
+              // `setupWayGenerationRef`. Same rule the test verdict follows, and
+              // the same reason: the probe behind it is a network round trip.
+              if (generation !== setupWayGenerationRef.current) return;
+              setProviderDraft(next);
+              // And the roster with it. `advance` only designs when there is
+              // none, so a team designed before this provider answered would
+              // otherwise survive into Review as a curated one under copy
+              // promising a designed one.
+              setRoster(null);
+            })(setupWayGenerationRef.current)}
+            composio={composioDraft}
+            onComposio={((generation) => (next: ComposioDraft | null) => {
+              // Same rule as the provider draft — see `setupWayGenerationRef`.
+              // The roster is not cleared here: Composio is what the team can
+              // reach, not what designs it.
+              if (generation === setupWayGenerationRef.current) setComposioDraft(next);
+            })(setupWayGenerationRef.current)}
           />
         )}
 
@@ -1202,11 +1453,7 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
             designing={designing}
             designError={designError}
             roster={roster}
-            name={companyName}
-            onName={(next) => {
-              setCompanyName(next);
-              setNameTouched(true);
-            }}
+            name={name}
             onRoster={(next) => {
               setRoster(next);
               // Any edit takes the template path off the table — see
@@ -1217,6 +1464,7 @@ export function SetupWizard({ client, onDone, onCancel, expectsShellRemount }: P
             changed={changed}
             restartKeys={restartKeys}
             status={status}
+            hostModel={tested.kind === "hosted"}
             email={email}
             built={built}
           />
@@ -1495,20 +1743,136 @@ function AccountStep({
 }
 
 /**
- * The credential, framed as what it buys rather than as what it is.
+ * Step 0: which of the two setup paths this instance takes.
  *
- * Fifth, not first. By now the operator has described their business and can
- * see what the key is *for*; an API-key field on screen one is a wall in front
- * of a product nobody has seen yet. Skipping is a first-class answer, and the
- * copy says exactly what it costs.
+ * Asks nothing of the host — the answer decides which step-1 screen mounts
+ * next and nothing else.
  */
-function PowerStep({
+function SetupWayStep({
+  value,
+  onChange,
+}: {
+  value: SetupWay | null;
+  onChange: (way: SetupWay) => void;
+}) {
+  return (
+    <div>
+      <h2 className="text-base font-medium leading-snug" data-testid="setup-question">
+        How would you like to set this up?
+      </h2>
+      <p className="text-xs leading-snug text-muted-foreground">
+        You can change any of it later from Connections.
+      </p>
+
+      <div className="mt-2.5 space-y-2">
+        {(Object.keys(SETUP_WAY_COPY) as SetupWay[]).map((way) => {
+          const copy = SETUP_WAY_COPY[way];
+          const active = value === way;
+          return (
+            <button
+              key={way}
+              type="button"
+              onClick={() => onChange(way)}
+              data-testid={`setup-way-${way}`}
+              aria-pressed={active}
+              className={cn(
+                "w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted",
+                active && "border-primary bg-muted",
+              )}
+            >
+              <div className="text-sm font-medium">{copy.label}</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">{copy.hint}</div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** What a connection test was asked with — the answers its verdict is true of. */
+interface ProbeAnswers {
+  provider: string;
+  key: string;
+  baseUrl: string;
+}
+
+/**
+ * Run one connection test and settle the verdict — unless the answers moved
+ * under it.
+ *
+ * The staleness rule is why this is shared rather than written per step. Both
+ * step-1 screens leave their inputs live while a test is in flight, so an
+ * answer can arrive after the operator has changed the thing it was asked
+ * about, and a verdict is only ever true of the answers it was asked with. A
+ * late `ok` overwriting a settled `skipped` submits a passing tick for a
+ * credential nobody is using.
+ */
+async function runConnectionTest(
+  client: OpenCompanyClient,
+  asked: ProbeAnswers,
+  live: () => ProbeAnswers,
+  onTested: (t: TestState) => void,
+): Promise<void> {
+  const stale = () => {
+    const now = live();
+    return (
+      asked.provider !== now.provider || asked.key !== now.key || asked.baseUrl !== now.baseUrl
+    );
+  };
+
+  onTested({ kind: "testing" });
+  try {
+    const result = await testInference(client, {
+      provider: asked.provider,
+      key: asked.key || null,
+      baseUrl: asked.baseUrl || null,
+    });
+    if (stale()) return;
+    onTested(
+      result.ok
+        ? { kind: "ok", baseUrl: result.baseUrl, model: result.model }
+        : { kind: "failed", error: result.error ?? "Could not reach the provider." },
+    );
+  } catch (err: unknown) {
+    if (stale()) return;
+    onTested({
+      kind: "failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Managed step 1: the Account page's "Connect to TinyHumans" dialog, asked as
+ * a wizard step.
+ *
+ * Same ask, same link out, same one key. What it is *not* is the model step:
+ * there is no provider to pick, because taking the managed way already picked
+ * one, and there is no BYOK endpoint to name.
+ *
+ * ## Where the key goes
+ *
+ * Not into `config.toml`, and not through the wizard's own one-secret
+ * inference write. It is the **company's** TinyHumans account key, and the
+ * host fans it out from there the way `PUT …/credential` does for the Account
+ * page: the Composio copy, the LLM copy, the `tinyhumans` row with the model
+ * this step's probe reached, and the company default — each only where nothing
+ * of its own is already set.
+ *
+ * The write is deferred to the finish rather than made here, because the
+ * fan-out fills a company's slots and the company does not exist yet — the
+ * apply is what creates it. So this step collects and proves; the host reports
+ * back what the fan-out actually did, slot by slot, on the completion screen.
+ *
+ * No one-click grant button (`link/start`): that flow is company-scoped too,
+ * and adding an entry point for it is explicitly out of scope here. A link out
+ * to mint a key by hand is the whole of the alternative, exactly as the
+ * Account dialog offers it.
+ */
+function ManagedLoginStep({
   status,
   client,
-  provider,
-  onProvider,
-  baseUrl,
-  onBaseUrl,
   value,
   onChange,
   tested,
@@ -1516,346 +1880,110 @@ function PowerStep({
 }: {
   status: SetupStatus;
   client: OpenCompanyClient;
-  provider: string;
-  onProvider: (p: string) => void;
-  baseUrl: string;
-  onBaseUrl: (v: string) => void;
   value: string;
   onChange: (v: string) => void;
   tested: TestState;
   onTested: (t: TestState) => void;
 }) {
-  const field = status.fields.find((f) => f.key === "tinyhumans_api_key");
-  const locked = field !== undefined && !field.editable;
-  const noModel = provider === NO_MODEL_OPTION.id;
-  /** The provider's own key page, when it has one to send the operator to. */
-  const keySource = PROVIDER_KEY_SOURCE[provider];
-  const spec: { needsUrl: boolean; needsKey: boolean } = noModel
-    ? NO_MODEL_OPTION
-    : (INFERENCE_PROVIDERS.find((p) => p.id === provider) ?? INFERENCE_PROVIDERS[0]);
-  /** Whether the operator asked to supply their own key over the host's. */
-  const [override, setOverride] = useState(false);
-  // The house already holds one, and this operator may have no way to get their
-  // own. The key box is then optional rather than the point of the screen.
-  // The house already holds one, and this operator may have no way to get their
-  // own — so the key box is optional rather than the point of the screen.
-  //
-  // The second arm is what keeps that true for a hosted tenant once a route
-  // stops being offered here. Its control plane injects the credential and the
-  // host reports itself ready on a provider this step has no tile for; matching
-  // on the tile alone then went false, and first-run setup started demanding a
-  // key from the one operator who cannot obtain one. Readiness is the host's
-  // fact, not a property of which tile happens to be selected.
-  //
-  // Scoped to a selection the credential actually serves. `resolve_endpoint`
-  // inherits the injected credential for the managed choice, and for
-  // `openrouter` only while nothing overrides the endpoint — "the platform
-  // credential rides only the platform's own endpoint", since pairing it with
-  // an arbitrary one would leak it there. Ollama and a custom endpoint get no
-  // inheritance at all. Claiming it for those hid the key field, enabled Test
-  // with nothing in it, and sent an unauthenticated probe that could only fail.
-  const houseProviderHidden = !SETUP_INFERENCE_OPTIONS.some(
-    (option) => option.id === status.inference.provider,
-  );
-  const houseCredentialServes =
-    provider === HOUSE_CREDENTIAL_PROVIDER && !baseUrl.trim();
-  const onTheHouse =
-    status.inference.ready &&
-    (provider === status.inference.provider ||
-      (houseProviderHidden && houseCredentialServes));
-  // "Use my own" flips the gate: the host credential is only testable while
-  // that is the operator's actual choice. Once they opt to supply their own
-  // key, an empty box must not test anything — a test with no key probes the
-  // host credential and would report a pass for a key they never provided.
-  const canTest =
-    (!spec.needsKey || (onTheHouse && !override) || value.trim().length > 0) &&
-    (!spec.needsUrl || baseUrl.trim().length > 0);
-
-  /**
-   * The connection test, rendered beside the field it tests.
-   *
-   * One element, placed once: whichever input is the last one this provider
-   * asks for gets it on the same row, so the button sits with the value it
-   * acts on instead of below an empty gap. The host-key case has no input at
-   * all — {@link inlineTest} is false there and it falls to a row of its own.
-   */
-  const inlineTest = spec.needsKey ? !(onTheHouse && !override) : spec.needsUrl;
-
-  /**
-   * What is selected right now, readable from inside a call that started
-   * before it.
-   *
-   * A ref rather than the props themselves: `run` closes over the values from
-   * the render that created it, which are exactly the values it must not use
-   * to decide whether it is still current.
-   */
-  const providerRef = useRef({ provider, key: value.trim(), baseUrl: baseUrl.trim() });
-  providerRef.current = { provider, key: value.trim(), baseUrl: baseUrl.trim() };
+  const key = value.trim();
+  const keySource = tinyhumansKeySource(status);
+  // Read from inside a call that started before it — see `runConnectionTest`.
+  const live = useRef<ProbeAnswers>({ provider: MANAGED_PROVIDER, key, baseUrl: "" });
+  live.current = { provider: MANAGED_PROVIDER, key, baseUrl: "" };
 
   const run = async () => {
-    // This also protects the Enter shortcut on the inputs. A disabled button
-    // alone would still leave that route to a request the provider cannot
-    // answer usefully.
-    if (!canTest) return;
-
-    // What this call is a verdict *about*. The picker stays live while a test
-    // is in flight, so an answer can arrive after the operator has moved on —
-    // and a verdict is only ever true of the answers it was asked with. The
-    // worst of it: selecting "No model" mid-test, and having the settled
-    // `skipped` overwritten by an `ok` that would then be submitted as
-    // inference for the pseudo-provider `none`, which the host does not know.
-    const asked = { provider, key: value.trim(), baseUrl: baseUrl.trim() };
-    const stale = () =>
-      asked.provider !== providerRef.current.provider ||
-      asked.key !== providerRef.current.key ||
-      asked.baseUrl !== providerRef.current.baseUrl;
-
-    onTested({ kind: "testing" });
-    try {
-      const result = await testInference(client, {
-        provider: asked.provider,
-        key: asked.key || null,
-        baseUrl: asked.baseUrl || null,
-      });
-      if (stale()) return;
-      onTested(
-        result.ok
-          ? { kind: "ok", baseUrl: result.baseUrl, model: result.model }
-          : { kind: "failed", error: result.error ?? "Could not reach the provider." },
-      );
-    } catch (err: unknown) {
-      if (stale()) return;
-      onTested({
-        kind: "failed",
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    // Guards the Enter shortcut as well as the button: an empty box would
+    // probe the host's own credential and report a pass for a key this
+    // operator never gave.
+    if (!key) return;
+    await runConnectionTest(
+      client,
+      { provider: MANAGED_PROVIDER, key, baseUrl: "" },
+      () => live.current,
+      onTested,
+    );
   };
-
-  const testButton = (
-    <Button
-      type="button"
-      variant={tested.kind === "ok" ? "outline" : "default"}
-      disabled={tested.kind === "testing" || !canTest}
-      onClick={() => void run()}
-      data-testid="setup-test-connection"
-      className="shrink-0"
-    >
-      {tested.kind === "testing" ? (
-        <>
-          <Loader2 className="size-4 animate-spin" />
-          Testing…
-        </>
-      ) : tested.kind === "ok" ? (
-        "Test again"
-      ) : (
-        "Test connection"
-      )}
-    </Button>
-  );
 
   return (
     <div className="space-y-7">
       <div>
-        <Label className="text-base font-medium leading-snug" data-testid="setup-question">
-          What should your team think with?
+        <Label
+          htmlFor="setup-key"
+          className="text-base font-medium leading-snug"
+          data-testid="setup-question"
+        >
+          Connect to TinyHumans
         </Label>
-        <p className="text-xs leading-snug text-muted-foreground">
-          {onTheHouse
-            ? "This host already has a model. Test it and carry on — you don't need a key of your own."
-            : noModel
-              ? "Carrying on without one. Your team will be a standard one for your industry rather than designed from your answers."
-              : "Your agents need a model to work. We'll check it reaches before going any further."}
+        <p className="text-xs leading-snug text-muted-foreground" data-testid="setup-model-prompt">
+          Paste your account key. We&apos;ll check it reaches before going any further.
         </p>
 
-        {/* Each option carries its own sentence, inside the popup rather than
-            under the trigger: the description is what makes the choice legible
-            while it is being made, and it has nothing left to say once the
-            choice is committed. */}
-        <div className="mt-3">
-          <Select
-            value={provider}
-            onValueChange={(v) => {
-              if (v !== null) onProvider(v);
+        <div className="mt-2.5 flex items-center gap-2">
+          <Input
+            id="setup-key"
+            autoFocus
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={value}
+            placeholder="th-…"
+            data-testid="setup-field-key"
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void run();
             }}
-            items={SETUP_PROVIDER_LABEL_ITEMS}
+          />
+          <Button
+            type="button"
+            variant={tested.kind === "ok" ? "outline" : "default"}
+            disabled={tested.kind === "testing" || !key}
+            onClick={() => void run()}
+            data-testid="setup-test-connection"
+            className="shrink-0"
           >
-            <SelectTrigger id="setup-provider" className="w-full" data-testid="setup-provider-select">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {[...SETUP_INFERENCE_OPTIONS, NO_MODEL_OPTION].map((option) => (
-                <SelectItem
-                  key={option.id}
-                  value={option.id}
-                  data-testid={`setup-provider-${option.id}`}
-                  className="items-start py-2"
-                >
-                  <span className="flex flex-col gap-0.5">
-                    <span className="flex items-center gap-2 font-medium">
-                      {option.label}
-                      {status.inference.ready && option.id === status.inference.provider && (
-                        <Badge variant="secondary">Already set up</Badge>
-                      )}
-                    </span>
-                    {/* `whitespace-normal` because the item's own text wrapper
-                        is `whitespace-nowrap`, and `white-space` inherits. */}
-                    <span className="whitespace-normal text-xs leading-snug text-muted-foreground">
-                      {option.hint}
-                    </span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            {tested.kind === "testing" ? (
+              <>
+                <Loader2 className="size-4 animate-spin" />
+                Testing…
+              </>
+            ) : tested.kind === "ok" ? (
+              "Test again"
+            ) : (
+              "Test connection"
+            )}
+          </Button>
         </div>
+
+        {/* What one key actually buys, said before it is asked for rather than
+            discovered afterwards. Named in surfaces rather than in slots: the
+            operator has not seen the Connections pages yet. */}
+        <p className="mt-2 text-xs leading-snug text-muted-foreground" data-testid="setup-key-fills">
+          One key: your team&apos;s model, and the account it connects tools like Gmail and
+          Slack through. Anything you set up yourself later keeps its own key.
+        </p>
+
+        {/* A link out, not a grant. The key is minted on their own dashboard
+            and pasted back, which works with no company in existence — the
+            whole of when this step runs. The dashboard is the one belonging
+            to the hub this host is on, as the host reports it. */}
+        {keySource && (
+          <p className="mt-2 text-xs leading-snug text-muted-foreground">
+            Don&apos;t have one yet?{" "}
+            <a
+              href={keySource.url}
+              target="_blank"
+              rel="noreferrer"
+              data-testid="setup-key-get-link"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "ml-1")}
+            >
+              Get an API key
+              <ExternalLink className="size-3.5" />
+            </a>
+          </p>
+        )}
       </div>
 
-      {spec.needsUrl && (
-        <div>
-          <Label htmlFor="setup-base-url" className="text-base font-medium leading-snug">
-            Endpoint
-          </Label>
-          <p className="text-xs leading-snug text-muted-foreground">
-            Paste the local address as shown, for example <code>localhost:6969</code>. We&apos;ll
-            add <code>http://</code> and <code>/v1</code> when needed.
-          </p>
-          <div className="mt-2.5 flex items-center gap-2">
-            <Input
-              id="setup-base-url"
-              value={baseUrl}
-              placeholder={provider === "ollama" ? "http://127.0.0.1:11434/v1" : "https://…/v1"}
-              data-testid="setup-field-base-url"
-              onChange={(e) => onBaseUrl(e.target.value)}
-            />
-            {/* Only when this is the last field asked for: a provider that
-                also wants a key gets the button beside that instead. */}
-            {!spec.needsKey && inlineTest && testButton}
-          </div>
-        </div>
-      )}
-
-      {spec.needsKey && (
-        <div>
-          <Label htmlFor="setup-key" className="text-base font-medium leading-snug">
-            API key
-          </Label>
-
-          {/* Already configured is a **resolved state**, not an empty field.
-              This was an empty password box with "Using this host's key" as grey
-              placeholder text, and it read exactly like an unanswered question —
-              the one impression it must not give, because on a hosted tenant the
-              operator has no key to put there and nothing is wrong.
-
-              There is no value to pre-fill with, and that is deliberate: the host
-              never sends a credential to a browser, not even masked. `GET
-              /api/v1/setup` reports a secret's *presence*, never its bytes. So
-              the honest fix is to stop drawing an input at all and state the
-              fact, with a way out for someone who wants their own key. */}
-          {onTheHouse && !override ? (
-            <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border bg-muted/40 p-3">
-              <div className="flex items-center gap-2 text-sm">
-                <Check className="size-4 text-status-done-text" />
-                <span data-testid="setup-key-on-the-house">
-                  Using this host&apos;s key
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOverride(true)}
-                data-testid="setup-key-override"
-                className="shrink-0 text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-              >
-                Use my own
-              </button>
-            </div>
-          ) : (
-            <>
-              <p className="text-xs leading-snug text-muted-foreground">
-                {onTheHouse
-                  ? "This replaces the host's key for this company."
-                  : "Used to test the connection now, and saved when you finish."}
-              </p>
-
-              {locked && (
-                <div className="mt-2.5">
-                  <LayerLock />
-                </div>
-              )}
-
-              <div className="mt-2.5 flex items-center gap-2">
-                <Input
-                  id="setup-key"
-                  autoFocus
-                  type="password"
-                  value={value}
-                  disabled={locked}
-                  placeholder="sk-…"
-                  data-testid="setup-field-key"
-                  onChange={(e) => onChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void run();
-                  }}
-                />
-                {inlineTest && testButton}
-              </div>
-
-              {/* Where the key comes from, for the two providers that mint one
-                  on a page of their own. A link out rather than a grant: the
-                  operator signs in as themselves, creates the key on their own
-                  dashboard, and brings it back to the field above. */}
-              {keySource && !locked && (
-                <div className="mt-3 rounded-lg border bg-muted/40 p-3">
-                  <p className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
-                    or
-                  </p>
-                  <p className="mt-1 text-xs leading-snug text-muted-foreground">
-                    Sign in to {keySource.label} to create an API key, then paste it above.
-                  </p>
-                  <a
-                    href={keySource.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    data-testid="setup-key-signin"
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-2.5")}
-                  >
-                    Sign in with {keySource.label}
-                    <ExternalLink className="size-3.5" />
-                  </a>
-                </div>
-              )}
-
-              {onTheHouse && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOverride(false);
-                    onChange("");
-                  }}
-                  data-testid="setup-key-revert"
-                  className="mt-2 text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-                >
-                  Go back to using this host&apos;s key
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Nothing to reach, so nothing to test: "No model" answers the step by
-          being chosen, which is why it settles `tested` on `skipped` rather
-          than leaving a button whose only honest label would be "test what". */}
-      {!noModel && (
       <div className="space-y-2">
-        {/* Only where no input row could carry it — the host-key case, which
-            draws a settled chip rather than a field. */}
-        {!inlineTest && testButton}
-
-        {/* The verdict names the endpoint it reached. A tick earned against the
-            default endpoint, on a host where the operator meant to point
-            somewhere else, is worse than no tick — it is a wrong answer they
-            watched us produce. */}
         {tested.kind === "ok" && (
           <p className="text-sm leading-snug text-status-done-text" data-testid="setup-test-ok">
             Reached {tested.baseUrl}
@@ -1870,19 +1998,6 @@ function PowerStep({
           </Alert>
         )}
       </div>
-      )}
-
-      {/* Nobody gets stuck (decision D3). A hosted operator with no key must not
-          be trapped behind a credential they cannot obtain — and the curated
-          team exists precisely for this path. It is the picker's last option
-          now rather than a link under the step, so the escape sits with the
-          other answers to the same question instead of below them. */}
-      {noModel && (
-        <p className="text-sm leading-snug text-muted-foreground" data-testid="setup-skipped">
-          A model can be set later from Connections → Inference, and everything
-          else about this company works without one.
-        </p>
-      )}
     </div>
   );
 }
@@ -1893,7 +2008,7 @@ type TestState =
   | { kind: "testing" }
   | { kind: "ok"; baseUrl: string; model?: string | null }
   | { kind: "failed"; error: string }
-  | { kind: "skipped" };
+  | { kind: "hosted" };
 
 // ---------------------------------------------------------------------------
 // Review, and the team as reviewed
@@ -1915,26 +2030,31 @@ function ReviewStep({
   designError,
   roster,
   name,
-  onName,
   onRoster,
   onRetry,
   changed,
   restartKeys,
   status,
+  hostModel,
   email,
   built,
 }: {
   designing: boolean;
   designError: string | null;
   roster: SetupRoster | null;
-  /** What the company will be called. */
+  /** What the company will be called, as answered on the business step. */
   name: string;
-  onName: (name: string) => void;
   onRoster: (roster: SetupRoster) => void;
   onRetry: () => void;
   changed: Record<string, string | null>;
   restartKeys: string[];
   status: SetupStatus;
+  /**
+   * Whether the host answered for the model itself — reached, not merely
+   * resolved, and never asked about on screen. An operator who saw the model
+   * step and tested it there has already been told, and is not owed the line.
+   */
+  hostModel: boolean;
   email: string;
   /** Non-null once the apply is building, so the button reads as progress. */
   built: number | null;
@@ -1982,31 +2102,6 @@ function ReviewStep({
 
   return (
     <div className="space-y-4" data-testid="setup-review">
-      {/* The name, asked once, here.
-          Last screen before it is permanent: the host mints the company id from
-          this and never changes it, and nothing in the product renames a
-          company afterwards. It sits above the roster because it is the one
-          field on this screen that cannot be revisited later, while any
-          agent can be added, renamed or dropped from the console. */}
-      <div className="space-y-1.5">
-        <Label htmlFor="setup-company-name">What should we call it?</Label>
-        <Input
-          id="setup-company-name"
-          data-testid="setup-company-name"
-          value={name}
-          // The host clamps to this too (`MAX_COMPANY_NAME`), because the id is
-          // derived from the name and becomes a directory component. Bounded
-          // here as well so the operator sees the limit rather than meeting it
-          // as a truncation after the fact.
-          maxLength={60}
-          placeholder="Your company's name"
-          onChange={(e) => onName(e.target.value)}
-        />
-        <p className="text-xs leading-snug text-muted-foreground">
-          This names the company and its id. You can change it now; you can&apos;t later.
-        </p>
-      </div>
-
       <div>
         <h2 className="text-base font-medium leading-snug">Your team</h2>
         <p className="text-xs leading-snug text-muted-foreground">
@@ -2156,9 +2251,25 @@ function ReviewStep({
           Anything that leaves the company — sending, publishing, spending — waits
           for you until you say otherwise.
         </p>
+        {/* Said, because the alternative is an operator who was never asked for
+            a model wondering later where theirs came from. A skipped question
+            still owes its answer somewhere. */}
+        {hostModel && (
+          <p className="mt-1" data-testid="setup-host-model">
+            The model comes with this host, so there was no key to supply and none
+            is stored against your company.
+          </p>
+        )}
         {email.trim() && (
           <p className="mt-1">
             You&apos;ll sign in as <span className="font-medium text-foreground">{email.trim()}</span>.
+          </p>
+        )}
+        {name.trim() && (
+          <p className="mt-1" data-testid="setup-review-name">
+            The company will be called{" "}
+            <span className="font-medium text-foreground">{name.trim()}</span>, permanently —
+            go back to the business step to change it.
           </p>
         )}
       </div>
@@ -2271,7 +2382,9 @@ function BusinessStep({
   draft,
   templates,
   template,
+  name,
   onTemplate,
+  onName,
   onChange,
   onEnter,
   modelless,
@@ -2279,7 +2392,10 @@ function BusinessStep({
   draft: SetupDraft;
   templates: SetupStatus["templates"];
   template: string;
+  /** What the company will be called. */
+  name: string;
   onTemplate: (id: string) => void;
+  onName: (name: string) => void;
   onChange: (update: (d: SetupDraft) => SetupDraft) => void;
   onEnter: () => void;
   /**
@@ -2360,6 +2476,26 @@ function BusinessStep({
             }}
           />
         )}
+      </div>
+
+      <div>
+        <Label htmlFor="setup-company-name" className="text-base font-medium leading-snug">
+          What should we call it?
+        </Label>
+        <p className="text-xs leading-snug text-muted-foreground">
+          This names the company and its id. You can change it now; you can&apos;t later.
+        </p>
+        <Input
+          id="setup-company-name"
+          data-testid="setup-company-name"
+          value={name}
+          placeholder="Your company's name"
+          className="mt-2.5"
+          onChange={(e) => onName(clampToSetupCompanyNameLimit(e.target.value))}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onEnter();
+          }}
+        />
       </div>
 
       {/* Both questions exist to brief a model. Without one they are asked and

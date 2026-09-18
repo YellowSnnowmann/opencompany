@@ -4,6 +4,9 @@ import { ChevronDown, ChevronRight, Users } from "lucide-react";
 import { BlindRoundBand } from "@/components/hive/BlindRoundBand";
 import { StandingsRail } from "@/components/hive/StandingsRail";
 import { VerdictCard } from "@/components/hive/VerdictCard";
+
+import { referralWorkingLabel } from "./channels";
+import { useDeskCrossing } from "./referral-running";
 import { cn } from "@/lib/utils";
 import type { TimelineItem } from "@/views/room/model";
 
@@ -35,6 +38,7 @@ export function EpisodeBlock({
   renderRow,
   onSelectTopic,
   deskId,
+  agentNames,
 }: {
   item: Extract<TimelineItem, { kind: "episode" }>;
   renderRow: (row: TimelineItem) => ReactNode;
@@ -47,8 +51,14 @@ export function EpisodeBlock({
    * unable to support anything — so it is where the way to fix it belongs.
    */
   deskId?: string;
+  /** Display names, so a crossing can be described by who rather than by id. */
+  agentNames?: Record<string, string>;
 }) {
   const { episode } = item;
+  // What this desk is waiting on, when it is waiting on somebody rather than
+  // talking to itself.
+  const crossing = useDeskCrossing(deskId);
+  const nameOf = (id: string) => agentNames?.[id] ?? id;
   const [open, setOpen] = useState(true);
 
   // The rows that carried the blind opening round, by message id — the block
@@ -116,10 +126,27 @@ export function EpisodeBlock({
         {running ? (
           <span
             className="inline-flex items-center gap-1 rounded-full bg-status-running-soft px-1.5 py-0.5 text-3xs font-medium text-status-running-text"
-            title="This desk is still deliberating."
+            title={
+              crossing
+                ? "This desk is waiting on a question it put to someone else."
+                : "This desk is still deliberating."
+            }
           >
             <span className="size-1.5 animate-pulse rounded-full bg-status-running" />
-            deliberating
+            {/* **What the room is actually doing, when it is not its own turn.**
+
+                A referred turn runs outside the `turn_started`/`turn_settled`
+                bracket every other turn is announced by, so while a crossing
+                ran the header said "turn 3 of 12 · deliberating" and nothing
+                else — and with `pair_messages` raised that is several model
+                turns of apparent silence. The room is not deliberating then; it
+                is waiting on somebody.
+
+                A desk crossing names the DESK, never the seat the host resolved
+                it to: `@#returns` resolves to that desk's first eligible member
+                while the whole room answers, so naming the seat would credit one
+                member with a room's work. */}
+            {crossing ? referralWorkingLabel(crossing, nameOf) : "deliberating"}
           </span>
         ) : null}
         {deskId ? (

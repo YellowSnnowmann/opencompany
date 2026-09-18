@@ -85,20 +85,23 @@ It was once absent, on the reasoning that a control that does nothing is worse
 than no control; the answer to that was to make it do something rather than to
 leave managed as the one provider an operator cannot stop spending on.
 
-Switching it off writes `inference/managed/enabled` and changes three things:
+Switching it off writes `inference/managed/enabled` — the same
+`{enabled}` body and the same confirm dialog every other row's toggle uses now
+(keys rework, issue #2306, decision X3: every toggle confirms, both
+directions). It is **not** the credential: every step of the chain stays
+exactly where it was, and switching it back on restores the row unchanged —
+which is the distinction between this and Remove key, and the reason both
+exist.
 
-* a workload routed explicitly to `managed` **fails closed**, in the same words
-  a route to a switched-off provider gets;
-* an **unset** workload stops falling back to managed — which is the case that
-  matters more, since a company that has never opened the Routing tab has four
-  unset rows;
-* the Routing tab's **Managed mode** cannot be selected, because selecting it
-  writes `managed` into every tier and would take the company offline with a
-  save that reported success.
-
-It is **not** the credential. Every step of the chain stays exactly where it
-was, and switching it back on restores the row unchanged — which is the
-distinction between this and Remove key, and the reason both exist.
+**Superseded by the keys rework:** the paragraph this replaced described
+switching managed off against the per-workload Routing tab — an explicit
+route to `managed` failing closed, an unset workload no longer falling back to
+it, the Routing tab's own "Managed mode" becoming unselectable. Per-workload
+routing is gone (phase 5b; see `routing.md`'s own superseded notice). What
+switching managed off costs now is what any row's disable costs: the company
+default and any agent pinned to it are never cleared by it (decision X14) —
+they just stop resolving, and the page shows a banner until an admin chooses a
+new one.
 
 ### Setting it up is the ordinary add flow
 

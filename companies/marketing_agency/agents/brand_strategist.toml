@@ -13,7 +13,7 @@ ledgers = [
     { name = "tasks", access = "record" },
     { name = "goals", access = "read" },
     { name = "decisions", access = "read" },
-    # The global baseline (`globals/ledgers/`). Every teammate may raise a risk
+    # The global baseline (`companies/_globals/ledgers/`). Every teammate may raise a risk
     # and record what it learned — both are worthless if only the orchestrator
     # can write them, because the teammate that hit the thing is the one that
     # knows. `commitments` stays read-only: promising something outward is not a

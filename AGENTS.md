@@ -6,16 +6,18 @@ OpenCompany is a Rust 2024 Cargo workspace rooted at `Cargo.toml`, with one
 manifest per flavour under `crates/`:
 
 - `crates/opencompany-core`: the host — package `opencompany-core`, library
-  crate `opencompany`, binary `opencompany`. Its sources still live at the
-  repository root (`src/`, `tests/`, `benches/`, `examples/`, `build.rs`) and
-  the member manifest points at them; moving them under the crate is a
-  follow-up, deliberately deferred while many branches touch `src/`. Every
-  `src/...` path in this file and under `docs/` is that tree.
+  crate `opencompany`, binary `opencompany`. Its `src/`, `tests/`, `benches/`,
+  `examples/` and `build.rs` live beneath that manifest. Every `src/...` path
+  in this file and under `docs/` is short for `crates/opencompany-core/src/...`;
+  the data the crate embeds and reads (`companies/`,
+  `frontend/`, `vendor/`) stays at the repository root, `../..` from
+  `CARGO_MANIFEST_DIR`.
 - `crates/opencompany-app`: the Tauri desktop shell. Excluded from the
   workspace on purpose (its manifest says why); it has its own `Cargo.lock`.
 - `crates/opencompany-tui`: the terminal client, embedding the host.
 
-Rust source for the host lives under `src/`. Public module surfaces live in
+Rust source for the host lives under `crates/opencompany-core/src/`
+(`src/` below). Public module surfaces live in
 source module directories:
 
 - `src/app/`: runtime configuration and shared Axum state
@@ -24,7 +26,7 @@ source module directories:
   and the `derived/` folder they render into (`docs/spec/runtime/ledgers.md`)
 - `src/globals/`: the global baseline — the agents, workflows, skills and
   starting tool belt every company gets whichever vertical it started from,
-  authored in `globals/` and embedded at build time
+  authored in `companies/_globals/` and embedded at build time
   (`docs/spec/runtime/globals.md`)
 - `src/openhuman/`: launcher and integration seams for the vendored OpenHuman checkout
 - `src/tiny/`: optional TinyAgents crate feature/status surface
@@ -33,7 +35,7 @@ The command-line entrypoint lives in `src/bin/opencompany.rs`. Business types
 are data-only definitions under `companies/` (a `company.toml` manifest plus a
 `README.md` — not Cargo crates), loaded at runtime via `opencompany serve
 --company companies/<name>`. What every company has regardless of which of
-those it started from is authored beside them in `globals/`. The operator
+those it started from is authored beside them in `companies/_globals/`. The operator
 console is a Vite/React app under `frontend/`. Design notes and module specifications live in `docs/`, with
 `docs/spec/README.md` as the top-level architecture reference and
 `docs/modules/` holding per-surface design docs.
@@ -161,7 +163,7 @@ injects its environment. When developing hosted behavior, know the seams:
   `OPENHUMAN_WORKSPACE`, because the vendored runtime otherwise defaults its
   durable agent journal into `$HOME` — the read-only root filesystem in a tenant
   (issue #446). An unwritable journal root aborts boot; see
-  `docs/spec/runtime/storage.md`. `docker/entrypoint.sh`
+  `docs/spec/runtime/storage.md`. `deploy/entrypoint.sh`
   additionally forwards it as `--home "$OPENCOMPANY_DATA_DIR"`, which resolves
   identically (the flag outranks the variable). Locally it is the only knob that
   isolates two `serve` processes from each other — see

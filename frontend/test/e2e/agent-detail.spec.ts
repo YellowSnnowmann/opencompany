@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { disconnectSharedProviders } from "./shared-inference";
+
 /**
  * Proof for issue #264: an agent can be opened, read, and edited **from the
  * Console**, against the live host.
@@ -261,4 +263,104 @@ test("an agent defined in the console can be read back and edited", async ({ pag
       await expect(leftover).toHaveCount(0, { timeout: 30_000 });
     }
   }
+});
+
+/**
+ * Undoes the pin test below, after it — even when it timed out.
+ *
+ * The `e2e-pair` row points at an unreachable endpoint, and connecting it to
+ * the one company the whole run shares makes it that company's default (X1)
+ * — so, left behind, it is where every agent turn in every later spec file
+ * goes. That is what happened when this test timed out and its in-body
+ * `finally` never ran: Playwright abandons a timed-out test function,
+ * `finally` included, and thirty-odd unrelated specs failed with
+ * `inference request failed … 127.0.0.1:9`. A hook runs regardless.
+ *
+ * The pin is cleared first so the delete is not refused as in-use by it; a
+ * clear on an unpinned agent is a no-op. What the delete can and cannot put
+ * back — the row goes, the default it became does not — is in
+ * `disconnectSharedProviders`.
+ */
+test.afterEach(async ({ request }) => {
+  await request
+    .patch("/api/v1/company/team/researcher", { data: { provider: null, model: null } })
+    .catch(() => {});
+  await disconnectSharedProviders(request, ["e2e-pair"]);
+});
+
+test("an admin pins an agent to a provider and model, then clears it (keys rework, issue #2306, slice 3b)", async ({
+  page,
+}) => {
+  // A row this agent can pin to, created through the same API the LLM page
+  // itself calls (`POST …/inference/providers`, the model-required shape —
+  // 2c). Nothing calls the endpoint in this test beyond setup: `UNREACHABLE`
+  // means the draft probe and the row's own Test both fail, which is fine —
+  // pinning an agent to a provider does not require it to answer.
+  //
+  // Cleanup is the `afterEach` above, not a `finally` here — see it for why.
+  await page.request.post("/api/v1/company/inference/providers", {
+    data: {
+      kind: "custom",
+      label: "E2E Pair",
+      baseUrl: "http://127.0.0.1:9/v1",
+      key: "sk-not-a-real-key",
+      model: "e2e-model",
+    },
+  });
+
+  await page.goto("/#/company/agent/researcher");
+  await dismissOnboarding(page);
+  await expect(page.getByTestId("agent-name")).toHaveText("Researcher", { timeout: 30_000 });
+
+  await page.getByRole("tab", { name: "Model" }).click();
+  await page.getByTestId("agent-harness-edit").click();
+
+  // Unpinned: the company default line, not the ACP model picker — this
+  // agent is on the default (`built_in`) harness.
+  await expect(page.getByTestId("agent-provider-select")).toBeVisible();
+  await expect(page.getByTestId("agent-model-select")).toHaveCount(0);
+  await expect(page.getByTestId("agent-model-input")).toHaveCount(0);
+
+  // The option's accessible name carries the row's model too
+  // (`{label} · {model}`, `AgentDetailView.tsx`'s `pinnable.map`), so an exact
+  // match on the bare label alone never resolves — this hung the whole test
+  // on its 60s timeout waiting for an option that was on screen the entire
+  // time, just under a longer name.
+  await page.getByTestId("agent-provider-select").click();
+  await page.getByRole("option", { name: "E2E Pair · e2e-model", exact: true }).click();
+
+  // Prefilled from the row's own model (`e2e-model`), so an operator who
+  // only wants "this agent, this provider" need not retype it — still
+  // required to be a real, non-tier id (D-model, 2d) before Save unlocks.
+  const model = page.locator("#agent-model-field-input");
+  await expect(model).toHaveValue("e2e-model");
+  await model.fill("test-model-large");
+
+  await page.getByTestId("agent-harness-save").click();
+  await expect(page.getByTestId("agent-pair-badge")).toContainText("E2E Pair · test-model-large", {
+    timeout: 30_000,
+  });
+
+  // Host-backed, not local state.
+  await page.reload();
+  await dismissOnboarding(page);
+  await page.getByRole("tab", { name: "Model" }).click();
+  await expect(page.getByTestId("agent-pair-badge")).toContainText("E2E Pair · test-model-large", {
+    timeout: 30_000,
+  });
+
+  // Clear it: back to the company default, in one request (`provider` and
+  // `model` both `null`). Clearing an existing pin gates the save behind its
+  // own confirm dialog (round-2 review, P2-5, `saveHarnessAndModel`'s doc in
+  // `AgentDetailView.tsx`) — Save opens `agent-pair-clear-confirm` rather
+  // than persisting immediately, and only the dialog's own submit sends the
+  // request.
+  await page.getByTestId("agent-harness-edit").click();
+  await page.getByTestId("agent-pair-clear").click();
+  await page.getByTestId("agent-harness-save").click();
+  const clearConfirm = page.getByTestId("agent-pair-clear-confirm");
+  await expect(clearConfirm).toBeVisible();
+  await page.getByTestId("agent-pair-clear-confirm-submit").click();
+  await expect(page.getByTestId("agent-pair-default")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("agent-pair-badge")).toHaveCount(0);
 });

@@ -35,7 +35,6 @@ function status(over: Partial<InferenceStatus> = {}): InferenceStatus {
     slug: "managed",
     baseUrl: "https://openrouter.ai/api/v1",
     models: {},
-    defaultTierModels: {},
     source: "runtime",
     keyConfigured: true,
     cognition: "echo",
@@ -76,13 +75,10 @@ function stubClient(replies: InferenceStatus[], mutation?: InferenceStatus) {
       // read-only page would hide the very control these tests are about.
       path.endsWith("/auth/me")
         ? { user: { id: "u1", email: "admin@acme.test", role: "admin" }, role: "admin" }
-        : path.endsWith("/inference/routes")
-        ? { routes: {}, mode: "managed", orphaned: [] }
         : path.endsWith("/inference/models")
         ? {
             baseUrl: "https://openrouter.ai/api/v1",
             models: [],
-            tierDefaults: {},
             error:
               "Could not list models from https://openrouter.ai/api/v1: connection refused. " +
               "Enter model ids directly.",

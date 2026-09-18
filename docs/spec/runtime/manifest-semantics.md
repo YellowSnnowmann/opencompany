@@ -26,14 +26,21 @@ each page under the 500-line cap.
   "inherit" rather than "nothing" — and why, since #1804, an **explicit empty**
   agent `tools` list (`[]`) is a deliberate deny-all rather than an inherit.
 
-  **`delegates_to`** (issue #176) is the one per-agent key that is *not* a
-  narrowing of a company-wide list: it is an **opt-in**. Empty — the default,
-  and every manifest written before it existed — means the agent carries no
-  delegation tool at all, which is how a dispatched desk agent has always
-  behaved. Naming one or more desks wires exactly two tools onto it,
-  `spawn_task` and a `delegate_to_desk` narrowed to those desks, so a desk lead
-  can pull a specialist in for one slice instead of handing the whole request
-  back to the orchestrator.
+  **`delegates_to`** (issue #176) narrows where an agent may hand work, and
+  follows the same rule as `tools` and `ledgers`: **omitted or empty means
+  unrestricted**. Every roster agent carries the three hand-off tools —
+  `spawn_task`, `delegate_to_desk` and `delegate_to_teammate` — and is told in
+  its `## Your team` section who is on the roster and which desks they sit
+  on. With no list, `delegate_to_teammate` reaches everybody on the roster and
+  `delegate_to_desk` every desk. Naming one or more desks narrows both: the
+  desk tool to those desks, and the teammate tool to the agent's own desk-mates
+  plus the members of those desks.
+
+  It used to be an opt-in — empty meant *no* hand-off tool at all — so a
+  specialist with no line could not reach the colleague beside it and, being
+  unable to track anything either, had every message it received carded for it
+  by the runtime. Both halves of that are gone: reach is the default, and
+  tracking is a tool call (`spawn_task`) an agent makes on purpose.
 
   It takes **desk** ids or names (`[[group_chat]]` entries), never teammate
   ids — desks are the address space `delegate_to_desk` already resolves
@@ -54,8 +61,9 @@ each page under the 500-line cap.
   - **Depth** — `[tools].max_delegation_depth`, below.
   - **Cycles** — a hand-off to a desk already on the current chain (A→B→A), or
     to the desk the caller itself leads, is refused.
-  - **Allowlist** — a target outside `delegates_to` is refused, and the refusal
-    names the desks the member *can* reach so it can retry in the same turn.
+  - **Allowlist** — a target outside a non-empty `delegates_to` is refused, and
+    the refusal names the desks the member *can* reach so it can retry in the
+    same turn.
 
   Each refusal reaches both the model and the board: the run trail carries it
   verbatim, and a refused hand-off is recorded on the dispatched card's note,
@@ -224,10 +232,10 @@ each page under the 500-line cap.
     is **priced and opt-in**: granted only by an **explicit** `search` /
     `search.*` entry in `[tools].allow` (the `*` wildcard deliberately does
     **not** grant it, and unlike `media`/`composio` it is **not** in the default
-    grant list either), and it runs exclusively on the **platform
-    credential** — the same identity as keyless `openrouter`, resolved from the
-    environment, never a tenant key. The backend charges per request and reports
-    the amount, which is recorded as one `SearchCall` usage sample and rolls into
+    grant list either). Managed search uses the company's copied TinyHumans key
+    when present, then the deployment credential used by keyless `openrouter`.
+    The backend charges the identity presented per request and reports the
+    amount, which is recorded as one `SearchCall` usage sample and rolls into
     the window's cost.
     Three things differ from `media` on purpose:
     - **Individual searches do not park for approval.** Consent is the explicit
@@ -258,9 +266,8 @@ each page under the 500-line cap.
   has run out of chain leaves the remaining work tracked instead of doing it
   silently.
 
-  The bound only ever matters to an agent some manifest opted in with
-  `delegates_to`; a company that names nobody is unaffected by any value here.
-  It is deliberately low: the fan-out cap applies per level, so each extra
+  The bound matters to every agent, since every agent can hand work on. It is
+  deliberately low: the fan-out cap applies per level, so each extra
   level multiplies the turns one message can buy.
     The Usage view surfaces a `Web searches` KPI plus a search status row
     (active / paused at cap 0 / awaiting credential / not granted / not in this

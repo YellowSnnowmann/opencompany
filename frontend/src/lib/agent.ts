@@ -3,6 +3,8 @@
 // and the three derivations that are easy to get quietly wrong.
 
 import type { AgentDetailDto, AgentToolsDto, EditAgentInput, HarnessDto } from "@/api/types";
+import { SETTINGS_PATH, checkModelId, defaultBrokenCopy, providerState } from "@/inference/connect";
+import type { DefaultChoice, Provider } from "@/inference/types";
 
 /** The fields that describe an agent, in the order both forms show them. */
 export type AgentFieldKey = "name" | "role" | "description" | "instructions";
@@ -236,6 +238,150 @@ export function harnessEdit(current: string | undefined, draft: string): string 
   const before = current ?? "";
   if (draft === before) return undefined;
   return draft === "" ? null : draft;
+}
+
+// ---- the agent pair editor (keys rework, issue #2306, slice 3b) -------------
+//
+// An agent on a `built_in` harness may pin its own `{provider, model}` pair.
+// Resolution order: the pair, else the company default, else a "choose a
+// model" refusal (D-model). No tier name is ever involved (2d) — a pair is a
+// provider plus one real model id, exactly like the company default.
+
+/**
+ * The `PATCH` value for the provider half of an agent pair, or `undefined`
+ * when the draft did not change — the sibling of {@link modelEdit}/
+ * {@link harnessEdit}. A select's value, so no trim.
+ */
+export function providerEdit(current: string | undefined, draft: string): string | null | undefined {
+  const before = current ?? "";
+  if (draft === before) return undefined;
+  return draft === "" ? null : draft;
+}
+
+/**
+ * The `PATCH` body for a built-in pair, or `null` when neither half changed —
+ * `saveHarnessAndModel`'s own pair-building logic, extracted so it can be
+ * tested directly (round-2 review, P2-6). `provider` and `model` are always
+ * sent **together** when either changed, so the host validates the pair it
+ * is about to store rather than one half against the other; clearing the
+ * provider sends `null` for both, back to the company default.
+ */
+export function pairEdits(
+  agent: Pick<AgentDetailDto, "provider" | "model">,
+  providerDraft: string,
+  modelDraft: string,
+): { provider: string | null; model: string | null } | null {
+  const provider = providerEdit(agent.provider, providerDraft);
+  const model = modelEdit(agent.model, providerDraft === "" ? "" : modelDraft);
+  if (provider === undefined && model === undefined) return null;
+  return {
+    provider: providerDraft === "" ? null : providerDraft,
+    model: providerDraft === "" ? null : modelDraft.trim(),
+  };
+}
+
+/**
+ * Whether a built-in pair draft names a provider with no valid model chosen
+ * yet — the Save button's own gate, extracted for a direct test (round-2
+ * review, P2-6). Company default (`providerDraft === ""`) is always ready:
+ * there is no model field to fill in against it.
+ */
+export function pairMissingModel(providerDraft: string, modelDraft: string): boolean {
+  return providerDraft !== "" && checkModelId(modelDraft) !== null;
+}
+
+/**
+ * The one string an agent-facing sentence names it by: its own name, else
+ * its role — every manifest or global-baseline agent (most agents) is named
+ * by its role rather than a chosen name, per {@link AgentDetailDto.name}'s
+ * own doc ("Absent for a manifest teammate, which is named by its role").
+ *
+ * Round-2 review, KR-L2-02: `agentPairBrokenCopy` used to skip straight to a
+ * generic "This teammate" without trying `role` first, which is what
+ * `AgentDetailView.tsx`'s own `agent.name ?? agent.role` (its sibling call
+ * into {@link resolveAgentDefault}) already did correctly — this is the one
+ * helper both now share, so the two cannot drift apart on the same fallback
+ * again. "This teammate" survives only as the last resort for the
+ * pathological case of an agent with neither.
+ */
+export function agentDisplayName(agent: Pick<AgentDetailDto, "name" | "role">): string {
+  return agent.name ?? agent.role ?? "This teammate";
+}
+
+/** "Company default · <provider label> · <model>", or the not-chosen form. */
+export function companyDefaultLabel(
+  choice: DefaultChoice | null | undefined,
+  providers: readonly Pick<Provider, "slug" | "label">[],
+): string {
+  if (!choice?.provider || choice.model == null) return "Company default · none chosen";
+  const label = providers.find((p) => p.slug === choice.provider)?.label ?? choice.provider;
+  return `Company default · ${label} · ${choice.model}`;
+}
+
+/** "<provider label> · <model>" for an agent pinned to its own pair. */
+export function pairLabel(
+  provider: string,
+  model: string,
+  providers: readonly Pick<Provider, "slug" | "label">[],
+): string {
+  return `${providers.find((p) => p.slug === provider)?.label ?? provider} · ${model}`;
+}
+
+/**
+ * What an agent with **no pin of its own** actually resolves to — the three
+ * states {@link companyDefaultLabel} alone cannot distinguish, using the exact
+ * sentences decision X9 fixed (orchestrator, 2026-09-15).
+ */
+export type AgentDefaultResolution =
+  | { kind: "full"; label: string }
+  | { kind: "broken"; message: string }
+  | { kind: "none"; message: string };
+
+/**
+ * Resolves what an unpinned agent's fallback line should say: the company
+ * default when it is a full, healthy `{provider, model}`; X9's "broken"
+ * sentence when it names a provider that is gone or switched off (decision
+ * X14: disabling or deleting the default's provider never clears it — this is
+ * durable, not transient); X9's "nothing resolved" sentence otherwise (unset,
+ * or a bare-slug default with no model).
+ */
+export function resolveAgentDefault(
+  choice: DefaultChoice | null | undefined,
+  providers: readonly Pick<Provider, "slug" | "label" | "enabled" | "keyConfigured">[],
+  agentName: string,
+): AgentDefaultResolution {
+  const broken = defaultBrokenCopy(choice, providers);
+  if (broken) return { kind: "broken", message: broken };
+  if (choice?.provider && choice.model != null) {
+    return { kind: "full", label: companyDefaultLabel(choice, providers) };
+  }
+  return {
+    kind: "none",
+    message: `No model is chosen. Choose a provider and model for ${agentName}, or set the company default in ${SETTINGS_PATH}.`,
+  };
+}
+
+/**
+ * X9: an agent's own pair naming a provider this company no longer has, has
+ * switched off, or (present and enabled, but) holds no key, or `null` when
+ * the pair is fine — or unset, which is {@link resolveAgentDefault}'s
+ * business. Mirrors the host's `copy::pair_broken` (removed/turned off) and
+ * `copy::provider_has_no_key` (present, enabled, keyless) — the same three
+ * facts a turn attempt would fail closed on, said here before any turn runs.
+ */
+export function agentPairBrokenCopy(
+  agent: Pick<AgentDetailDto, "name" | "role" | "provider" | "model">,
+  providers: readonly Pick<Provider, "slug" | "label" | "enabled" | "keyConfigured">[],
+): string | null {
+  if (!agent.provider || !agent.model) return null;
+  const state = providerState(agent.provider, providers);
+  if (state === "ok") return null;
+  const label = providers.find((p) => p.slug === agent.provider)?.label ?? agent.provider;
+  const name = agentDisplayName(agent);
+  if (state === "noKey") {
+    return `${name} uses ${label}, which has no key. Add one in ${SETTINGS_PATH}, or choose another provider and model for ${name}.`;
+  }
+  return `${name} uses ${label}, which is ${state === "removed" ? "removed" : "turned off"}. Choose another provider and model for ${name}, or clear its model to use the company default.`;
 }
 
 /**

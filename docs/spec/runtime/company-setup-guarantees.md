@@ -61,7 +61,7 @@ empty inherits the company belt whole. Every teammate a first-run operator
 created therefore held shell, code, web, subagent, files, docs, **media** (real
 money) and **composio** (per-tenant credentials), for a company described in
 three sentences. The globals teammates sitting next to them already do the
-opposite, and `globals/agents/researcher.toml` says why: a request is intersected
+opposite, and `companies/_globals/agents/researcher.toml` says why: a request is intersected
 with `[tools].allow`, so naming one can only ever narrow.
 
 Each proposed agent now carries an `AgentFocus`, named for what the teammate
@@ -120,7 +120,7 @@ instructions, and the model authors none of them.**
 `persona_prompt` assembles — "You are Fulfillment, the Fulfillment Manager at Acme. Speak
 in the first person as this role." plus a mandate capped at 200 characters.
 Around 150 characters of instruction, sitting on the same roster as a globals
-teammate carrying 500–600 (`globals/agents/*.toml`). The mandate says what a
+teammate carrying 500–600 (`companies/_globals/agents/*.toml`). The mandate says what a
 teammate owns; nothing said how it works.
 
 `AgentFocus::instructions` supplies that, keyed on the same closed enum that

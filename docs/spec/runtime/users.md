@@ -178,7 +178,7 @@ current `OPENCOMPANY_TENANT_ID`, and one carrying a different tenant's prefix is
 refused — reads the password from stdin to
 keep it out of argv, and on the filesystem store holds the same data-root lock
 as `serve`, so it fails cleanly if a server is running on that root. See the
-[CLI reference](../../../gitbooks/developers/cli.md) for the full semantics.
+[CLI reference](../../gitbooks/developers/cli.md) for the full semantics.
 
 ## Routes
 

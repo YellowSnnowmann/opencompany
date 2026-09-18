@@ -4,9 +4,9 @@
 // has no such thing" and unmounted themselves, so a transient 500 or a dropped
 // session was indistinguishable from a feature the host genuinely does not have
 // — the operator concluded the feature was missing and went looking for a
-// rebuild. `CompanyCredentialCard` already draws the right distinction one
-// directory over; this is that rule, extracted so every section routes through
-// the same decision.
+// rebuild. The company-credential card (deleted in #2306) drew this
+// distinction first; this is that rule, extracted so every section routes
+// through the same decision.
 //
 // #1470 fixed that in one direction and left the other open: with only a 404
 // counted as "not served here", every *other* permanent refusal fell into the

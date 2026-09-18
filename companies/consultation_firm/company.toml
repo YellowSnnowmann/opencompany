@@ -14,7 +14,7 @@ human_role = "Executive workshops"
 # only read one the agent already has.
 #
 # Every entry below is load-bearing. `allow` REPLACES the default
-# (`globals/globals.toml`'s `default_allow`); it never extends it. `*` covers
+# (`companies/_globals/globals.toml`'s `default_allow`); it never extends it. `*` covers
 # files/docs/shell/code/web/subagent but deliberately excludes the rest, so
 # `workspace.*` and `workspace.write` (the latter is explicit because the host
 # recognizes only the exact write grant), `media`, `composio`,

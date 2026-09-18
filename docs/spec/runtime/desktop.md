@@ -113,7 +113,7 @@ the vendored runtime. Features left off, each on purpose:
 line above. The row that used to exclude them said the managed backends "need a
 platform credential the desktop has no way to hold", and that was never true of
 `composio`: `company::composio::resolve_credential` answers over three tiers and
-the platform identity is the *last* — the BYO `composio/token` override wins,
+the platform identity is the *last* — the BYO `composio/tinyhumans/key` override wins,
 then the company's own TinyHumans key. Tier one is exactly what a desktop
 operator can hold, and the Connections card already asks them for it. It also
 named a `search` feature, which does not exist; `search_in_build` derives from
@@ -400,9 +400,9 @@ passer-by could not have asked the host for themselves. Three surfaces apply it:
   before contacting it, so the row says what is wrong instead of blaming the
   network.
 
-The webview also runs under a CSP (`crates/opencompany-app/tauri.conf.json`) whose
-`connect-src` allows the IPC origin only. All host traffic goes through Rust and
-needs nothing else.
+The webview also runs under a CSP (`crates/opencompany-app/tauri.conf.json`).
+Tauri does not load or post to OpenPanel: the browser loader exits for Tauri,
+and OpenPanel is available only in an explicitly opted-in, non-Tauri browser.
 
 ## The embedded host
 

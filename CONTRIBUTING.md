@@ -5,7 +5,7 @@
 Questions, self-hosting trouble, and a run that misbehaved go to
 [Discussions](https://github.com/tinyhumansai/opencompany/discussions);
 reproducible behavior that should change goes to an issue.
-[SUPPORT.md](SUPPORT.md) has the full routing table, and
+[docs/SUPPORT.md](docs/SUPPORT.md) has the full routing table, and
 [docs/community/discussions.md](docs/community/discussions.md) explains how
 threads are triaged.
 
@@ -38,6 +38,6 @@ we deployed work for the operator", which no in-repo test can reach: a stale
 `index.html`, an unwired delivery channel and a missing credential are all
 failures of the deployment rather than of the code.
 
-That pass lives in [`qa/`](qa/README.md) — a console script (`qa/oc-qa.js`) and
-a checklist (`qa/MASTER-QA.md`). Roll the tenant to the commit under test
+That pass lives in [`scripts/qa/`](scripts/qa/README.md) — a console script (`scripts/qa/oc-qa.js`) and
+a checklist (`scripts/qa/MASTER-QA.md`). Roll the tenant to the commit under test
 first; a tenant on an older image reports bugs `main` has already fixed.

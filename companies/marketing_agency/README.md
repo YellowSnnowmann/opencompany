@@ -41,8 +41,11 @@ the operator console:
 
 Every company can define its own `workspace/` and `skills/`; this one ships a
 Brand / Campaigns / Playbooks workspace and SEO, landing-page, email, and
-brand-positioning skills. Shared, non-company skills live in the repo-level
-[`skills/`](../../skills/) library and can be installed into any company.
+brand-positioning skills. There is no separate skill library: the registry the
+console browses is the union of every bundle's `skills/` — the baseline's
+[`_globals/skills/`](../_globals/skills/) first, then each vertical, this one
+included — so any skill here can also be installed into any other company; see
+[Skills](../README.md#skills).
 
 ## Tool servers
 

@@ -178,7 +178,7 @@ jobs:
   # every job below.
   #
   # Before this, every pull request ran every lane. A pull request that edits
-  # only `gitbooks/` compiled the vendored openhuman tree three times; one that
+  # only `docs/gitbooks/` compiled the vendored openhuman tree three times; one that
   # edits only `frontend/` ran the ~33 minute `Rust (openhuman, tinymemory)`
   # feature matrix, whose twenty feature-scoped suites cannot be affected by a
   # `.tsx` file. The console still gets its Rust: `Console E2E` runs the host
@@ -188,10 +188,11 @@ jobs:
   #
   # The `rust` filter is deliberately wide. It lists `companies/**` because
   # `build.rs` embeds every bundle's `agents/` directory and declares a
-  # `rerun-if-changed` on it, and `skills/**` because `app::types` and
-  # `server::ops::write_test` read that directory from `CARGO_MANIFEST_DIR` at
-  # test time. Neither is a Rust file and both change what the Rust lanes
-  # assert; a filter that only knew about `src/**` would skip the lane that
+  # `rerun-if-changed` on it, and because `app::types` and
+  # `server::ops::write_test` read every bundle's `skills/` from
+  # `CARGO_MANIFEST_DIR` at test time. None of that is a Rust file and all of
+  # it changes what the Rust lanes assert; a filter that only knew about
+  # `src/**` would skip the lane that
   # catches the break. When in doubt a path belongs in the filter — the cost of
   # a false positive is one lane that need not have run, and the cost of a false
   # negative is a green pull request that broke `main`.
@@ -211,15 +212,17 @@ jobs:
       # combine unrelated Rust, console, and desktop changes, and only running
       # all three makes the required checks evidence for that combined state.
       #
-      # `workflow_dispatch` is forced the same way, for the same reason from
-      # the other side: `promote-main-to-release.yml` dispatches this run on a
-      # fresh snapshot of main, and the filter's fallback for an event with no
-      # PR is a diff against the default branch — which for a just-promoted
-      # `release` is empty, so every lane would skip and the promotion would
-      # be green on nothing.
-      rust: ${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 'true' || steps.filter.outputs.rust }}
-      frontend: ${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 'true' || steps.filter.outputs.frontend }}
-      desktop: ${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 'true' || steps.filter.outputs.desktop }}
+      # A `push` to `release` and `workflow_dispatch` are forced the same way,
+      # for the same reason from the other side: `promote-main-to-release.yml`
+      # pushes a fresh snapshot of main to `release` (as the `tiny-humans-bot`
+      # App, whose pushes fire `push` workflows), and the filter's fallback for
+      # an event with no PR is a diff against the default branch — which for a
+      # just-promoted `release` is empty, so every lane would skip and the
+      # promotion would be green on nothing. A dispatch is the manual way to
+      # get the same full run on any ref.
+      rust: ${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/release')) && 'true' || steps.filter.outputs.rust }}
+      frontend: ${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/release')) && 'true' || steps.filter.outputs.frontend }}
+      desktop: ${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/release')) && 'true' || steps.filter.outputs.desktop }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -229,7 +232,7 @@ jobs:
       # selective runs. A merge group intentionally has no such PR context, and
       # the outputs above already select every lane for it.
       - id: filter
-        if: github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch'
+        if: github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch' && !(github.event_name == 'push' && github.ref == 'refs/heads/release')
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
@@ -238,23 +241,16 @@ jobs:
               - 'scripts/ci/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
-              - 'build.rs'
               - 'rust-toolchain.toml'
               - '.cargo/**'
-              - 'src/**'
-              - 'tests/**'
-              - 'benches/**'
-              - 'examples/**'
-              # The member manifests (the host's declares its features and
-              # dependencies; the tui crate is a workspace member built by the
-              # bare cargo lines below).
+              # The host crate: manifest, build.rs, src/, tests/, benches/,
+              # examples/. The tui crate is a workspace member built by the
+              # bare cargo lines below.
               - 'crates/opencompany-core/**'
               - 'crates/opencompany-tui/**'
-              # build.rs embeds these and declares rerun-if-changed on them.
+              # build.rs embeds every bundle's agents/ and the global baseline
+              # at companies/_globals, and declares rerun-if-changed on them.
               - 'companies/**'
-              - 'globals/**'
-              # Read relative to CARGO_MANIFEST_DIR at test time.
-              - 'skills/**'
               - 'vendor/**'
               - '.gitmodules'
             frontend:
@@ -271,6 +267,11 @@ jobs:
               # Same reasoning for the release-notes generator and its test,
               # which also run in `Console`.
               - 'scripts/release/**'
+              # And for the staging deploy. No filter listed this file at all,
+              # so a PR editing it selected no lane and ran nothing — while the
+              # gate inside it is the one thing a failed deploy on main is
+              # reported by. `test-tenant-landed-gate.sh` runs in `Console`.
+              - '.github/workflows/deploy-staging.yml'
             desktop:
               - '.github/workflows/ci.yml'
               - 'crates/opencompany-app/**'
@@ -430,6 +431,23 @@ jobs:
           persist-credentials: false
 
       - run: ./scripts/ci/assert-md-line-cap.sh
+
+  # Same shape and same reasoning as `markdown-cap`, for Rust: a 750-line cap
+  # on every file under `crates/*/src`, and unit tests in a sibling
+  # `*_tests.rs` rather than an inline `#[cfg(test)] mod`. Toolchain-free — it
+  # is `wc` and `awk` over the tree — so it runs unconditionally, and a PR that
+  # grows a file past the cap fails in one legible line instead of never.
+  rust-source-layout:
+    name: Rust source layout
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # `tests` until the split PR lands; then `all`, which adds the line cap.
+      - run: ./scripts/ci/assert-rs-source-layout.sh tests
 
   rust:
     needs: changes
@@ -1077,7 +1095,7 @@ jobs:
         run: scripts/ci/init-vendored-submodules.sh
 
       # `--features openhuman` links system libraries the default build does not.
-      # Mirrors the builder stage of the repo `Dockerfile`: OpenSSL headers
+      # Mirrors the builder stage of `deploy/Dockerfile`: OpenSSL headers
       # (native-tls → openssl-sys, via `motosan-ai-oauth` → `hyper-tls` in the
       # vendored openhuman tree) and the X11 dev libs that openhuman's
       # unconditional `rdev`/`arboard` deps link against even in a headless
@@ -1713,6 +1731,13 @@ jobs:
       # the failure as one. See docs/design-system/README.md.
       - run: ./scripts/ci/assert-design-tokens.sh
 
+      # The wizard's provider dialogs come from `inference/`, never from
+      # `search-providers/`. Both directories ship files of those exact names
+      # and the wrong import type-checks, renders and builds — it is simply the
+      # wrong feature. Review alone has already been judged insufficient for
+      # this one; see the script.
+      - run: ./scripts/ci/assert-setup-inference-imports.sh
+
 
       # The release-notes generator, which is otherwise only ever exercised by a
       # `workflow_dispatch` release — the one moment nobody wants to discover a
@@ -1750,6 +1775,18 @@ jobs:
       # a second app added under `frontend/` would not have triggered that lane
       # at all.
       - run: ./scripts/ci/assert-single-tauri-app.sh
+
+      # The tenant landed-state gate in `deploy-staging.yml`, which decides
+      # whether a staging deploy passes or fails. It runs over ssh on the
+      # staging node, only on a push to main, so `main` is the first place a
+      # mistake in it can show — and because it lives inside a quoted heredoc,
+      # `actionlint` and `shellcheck` both read it as literal data. The script
+      # extracts its functions and drives them over kubectl fixtures.
+      #
+      # Rides `Console` for the reason the checks above do: bash and jq, no
+      # toolchain. The `frontend` path filter gains
+      # `.github/workflows/deploy-staging.yml` alongside this step.
+      - run: ./scripts/ci/test-tenant-landed-gate.sh
 
       # Issue #858. `pnpm-lock.yaml`, read by nothing until now.
       #
@@ -2333,3 +2370,54 @@ jobs:
       - name: Package (from crates/opencompany-app)
         working-directory: crates/opencompany-app
         run: ../../frontend/node_modules/.bin/tauri build --debug --no-bundle
+
+  # The one check the branch rulesets (repository settings → Rules) require. Every
+  # lane above is `if:`-gated on the changed areas, and a required status
+  # check that never reports blocks the PR forever — so the rulesets cannot
+  # name the lanes themselves. This job always runs (`if: always()`), waits on
+  # every gating lane, and fails unless each one either passed or was skipped
+  # by its own area filter. `cancelled` and `failure` both fail it.
+  #
+  # The advisory `Console (current Node, advisory)` lane is deliberately not
+  # listed: it is `continue-on-error` and exists to surface drift, not to
+  # block a merge.
+  #
+  # Keep the display name exactly `PR CI Gate`: it is what the rulesets'
+  # `required_status_checks` entry references, and a rename would silently
+  # block every PR until the ruleset is edited to match.
+  pr-ci-gate:
+    name: PR CI Gate
+    needs:
+      - changes
+      - actions-pinned
+      - markdown-cap
+      - rust-source-layout
+      - rust
+      - rust-mail
+      - rust-mongodb
+      - rust-gated
+      - rust-gated-binary
+      - console
+      - console-e2e
+      - console-e2e-live-brain
+      - console-e2e-first-run
+      - desktop
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # One expression, not one per lane: every `needs` entry above is listed
+      # here by the job graph itself, so adding a lane to `needs` is the whole
+      # change and there is no second list to fall out of step.
+      - name: Require every gating lane to pass or be skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          bad="$(jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key' <<<"$NEEDS")"
+          if [ -n "$bad" ]; then
+            echo "::error::Gating lane(s) did not pass: $(tr '\n' ' ' <<<"$bad")" >&2
+            exit 1
+          fi
+          echo "All gating lanes passed or were skipped by their area filter."

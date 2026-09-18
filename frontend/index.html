@@ -31,6 +31,16 @@
     <meta name="theme-color" content="#191919" />
 
     <!--
+      Product analytics for the browser operator console is opt-in through
+      `OPENCOMPANY_CONFIG.analytics`. Automatic URL and attribute collection
+      stays disabled; desktop builds remain silent. The host must also provide
+      `OPENCOMPANY_CONFIG.analyticsEndpoint`; this public client id is
+      intentionally safe to ship in the bundle. Keep credentials with write
+      authority in the host-only analytics transport.
+    -->
+    <script src="/openpanel-init.js" defer></script>
+
+    <!--
       Optional runtime configuration for deployments that serve the built assets
       as static files (no rebuild needed). Point it at any OpenCompany host:
 
@@ -38,7 +48,9 @@
         window.OPENCOMPANY_CONFIG = {
           baseUrl: "https://my-host.example.com",
           company: "acme-marketing",   // omit for single-company mode
-          operatorToken: "…"           // omit in dev mode
+          operatorToken: "…",           // omit in dev mode
+          analytics: true,
+          analyticsEndpoint: "https://collector.example/track"
         };
       </script>
     -->

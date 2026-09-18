@@ -11,7 +11,7 @@
 // shared `api/types.ts` is needed.
 
 import type { OpenCompanyClient } from "./client";
-import type { ProbeClass, Provider, ProviderHealth, RoutingMode } from "@/inference/types";
+import type { DefaultChoice, ProbeClass, Provider, ProviderHealth } from "@/inference/types";
 
 /**
  * Provider kinds the console offers.
@@ -64,28 +64,45 @@ export type UsageMetering = "perTurn" | "perCycle" | "none";
 
 /** The company's effective inference status. Never carries the credential. */
 export interface InferenceStatus {
-  /** Provider kind. */
+  /**
+   * Provider kind **as the operator selected it**, not as the host resolves it.
+   *
+   * `managed` is a legacy alias the host folds onto `openrouter` at resolution,
+   * and this field used to carry that resolved answer — which made the managed
+   * route unselectable from this card: `seedFromStatus` takes this value
+   * verbatim, so saving `managed` and reading back `openrouter` snapped the
+   * select (and the managed-only Connect button) straight back to OpenRouter.
+   * The host now reports the selection; `proxied` carries the resolution fact
+   * this field used to stand in for.
+   */
   provider: string;
+  /**
+   * Whether the *saved* config rides the platform's subscription proxy rather
+   * than a key this company supplied.
+   *
+   * Reported by the host rather than re-derived from `provider` +
+   * `keyConfigured`: that derivation only held while `provider` was the
+   * resolved kind, and would now read a managed company with its own OpenRouter
+   * key as riding a subscription it does not.
+   *
+   * Optional because a host predating this field answers without it, and this
+   * console talks to hosts it did not ship with. Absent means "ask the old
+   * way" — see `savedIsProxied` in `InferenceSection` — not "not proxied".
+   */
+  proxied?: boolean;
   /** Telemetry slug: `managed` | `openrouter` | `byok` | `ollama`. */
   slug: string;
   /** Resolved OpenAI-compatible base URL. */
   baseUrl: string;
-  /** Abstract-tier → concrete model id. */
-  models: Record<string, string>;
   /**
-   * The shipped tier → model defaults — **OpenRouter's vocabulary**, and
-   * nothing wider. The console's OpenRouter preset used to hard-code its own
-   * copy of these ids so the form had something to prefill before an operator
-   * typed an override; that duplicate could silently drift from what the host
-   * actually defaults to. This is read off the host on every status load, so
-   * the preset is never more than one request stale.
+   * Abstract-tier → concrete model id.
    *
-   * It is only that preset. These are OpenRouter catalog ids and mean nothing
-   * at another endpoint; what the *configured* endpoint wants is
-   * `InferenceModelCatalog.tierDefaults`, derived from that endpoint's own
-   * published catalog.
+   * @deprecated keys-rework #2306: a storage encoding only, kept for the
+   * legacy single-provider `PUT/DELETE …/inference` route this type still
+   * describes. No tier name is ever presented as a model (2d); read
+   * `InferenceStatus.defaultChoice` and `Provider.model` instead.
    */
-  defaultTierModels: Record<string, string>;
+  models: Record<string, string>;
   /** Provenance badge. */
   source: InferenceSource;
   /** Whether an outbound key is stored — never the key itself. */
@@ -194,8 +211,27 @@ export interface InferenceStatus {
    * Optional because an older host does not send it, and because the mode is
    * *not* here: it is derived from these four values, never stored, and a
    * second copy of it would be a fifth thing that can disagree with them.
+   *
+   * @deprecated keys-rework #2306: routing is removed (phase 5b). Kept only so
+   * an older host's response still parses; nothing reads it any more. Removable
+   * once every host on this field's other side has shipped past phase 5b.
    */
   routes?: Record<string, string>;
+  /**
+   * The stored company default, `{provider, model}` (keys rework, issue
+   * #2306). `null` when unset. A non-null `model: null` is a bare-slug default
+   * from before this rework — a provider chosen, no model — and drives the
+   * "Your default provider has no model. Choose one." banner. Optional because
+   * an older host does not send it.
+   */
+  defaultChoice?: DefaultChoice | null;
+  /**
+   * Routing rows the default did not absorb at boot (keys rework, phase 5a).
+   * Non-null while a stored (and now unread) routing table named something and
+   * the default is not a full `{provider, model}`. Drives the "Routing is
+   * going away" banner. Optional because an older host does not send it.
+   */
+  routesNotCarried?: { tier: string; route: string }[] | null;
 }
 
 /**
@@ -233,9 +269,40 @@ export interface ManagedState {
   enabled?: boolean;
   /** What was last learnt about reaching it, if anything. */
   health?: ProviderHealth;
+  /**
+   * Whether the console renders this separate legacy Managed row (keys rework,
+   * issue #2306). `false` once `providers` already lists a `tinyhumans` row —
+   * an added row, or entry zero on a managed config — because that row is then
+   * the one TinyHumans row this page ever shows (decision Q3: exactly one).
+   * Optional because an older host does not send it; absent reads as
+   * `configured`, which is today's behaviour.
+   */
+  legacyRow?: boolean;
+  /**
+   * Whether this legacy row's chain resolves with no model chosen — the same
+   * X5 state an ordinary row's `model`/`modelAmbiguous` pair expresses,
+   * mirrored here because the legacy chain has no row to carry those fields
+   * on. Sent as `legacy_row && configured` (round-2 review, P1-3): true for
+   * every state in which {@link showsLegacyManagedRow} in `ProviderList.tsx`
+   * renders this row at all, so "Key added — choose a model" is what it ever
+   * shows — never a connected look this chain cannot back with a model.
+   * Optional because an older host does not send it; absent reads as `false`,
+   * which is wrong for an older host's own not-yet-modelled rows but is the
+   * same "an older host doesn't know about this yet" gap every optional field
+   * here has.
+   */
+  needsModel?: boolean;
 }
 
-/** The set-provider body. `key` is write-only (never returned). */
+/**
+ * The set-provider body. `key` is write-only (never returned).
+ *
+ * @deprecated keys-rework #2306, decision X6: the console no longer calls the
+ * legacy single-provider `PUT …/inference` route this describes — every
+ * provider, including TinyHumans, goes through `addProvider`/`editProvider`
+ * instead. Kept because the route and the entry-zero row it describes are
+ * still real on the host (not touched by this rework).
+ */
 export interface SetInferenceInput {
   provider: InferenceProvider;
   baseUrl?: string;
@@ -258,21 +325,6 @@ export interface InferenceModel {
 }
 
 /**
- * How the configured endpoint spells a tier.
- *
- * - `tiers` — it publishes the tier names themselves (`chat-v1`, `agentic-v1`)
- *   and resolves them against its own registry, so a tier is what it wants.
- * - `concrete` — it publishes the ids `defaultTierModels` names, so a bare tier
- *   would be rejected and the shipped mapping is the right default.
- * - `unknown` — its catalog publishes neither, so there is no default anyone can
- *   supply and the operator has to name a model per tier.
- *
- * Absent (`undefined`) means the catalog could not be read at all, which is a
- * different thing from `unknown` and must not be shown as one.
- */
-export type TierVocabulary = "tiers" | "concrete" | "unknown";
-
-/**
  * The catalog of the endpoint **this company is configured against**.
  *
  * This route used to answer with a bare array that was always OpenRouter's
@@ -287,24 +339,6 @@ export interface InferenceModelCatalog {
   baseUrl: string;
   /** Every model that endpoint publishes, sorted. Empty when `error` is set. */
   models: InferenceModel[];
-  /**
-   * How this endpoint spells a tier.
-   *
-   * `null` when the catalog could not be read — which is a different fact from
-   * `"unknown"` ("the endpoint answered, and publishes neither vocabulary") and
-   * must not be shown as one. The host sends the field either way:
-   * `ModelCatalogDto::tier_vocabulary` is an `Option` with no
-   * `skip_serializing_if`, so the wire carries an explicit `null` rather than
-   * omitting the key (CodeRabbit review on #2045). Optional as well as nullable
-   * because a stub or an older host may omit it; both mean "no vocabulary".
-   */
-  tierVocabulary?: TierVocabulary | null;
-  /**
-   * The tier → model mapping this endpoint's vocabulary implies. Empty for
-   * `unknown` and for an unreadable catalog: prefilling ids the endpoint has
-   * already told us it does not publish is the defect this field replaces.
-   */
-  tierDefaults: Record<string, string>;
   /**
    * Why the catalog is empty, naming the endpoint — a 200 rather than a 5xx,
    * because an empty picker with no explanation reads as "this provider has no
@@ -338,7 +372,12 @@ export function listInferenceModels(
   return client.get<InferenceModelCatalog>(`${client.scopeFor(company)}/inference/models`);
 }
 
-/** Set (or replace) the runtime provider override, optionally rotating the key. */
+/**
+ * Set (or replace) the runtime provider override, optionally rotating the key.
+ *
+ * @deprecated keys-rework #2306, decision X6: not called by the console — see
+ * `SetInferenceInput`.
+ */
 export function setInference(
   client: OpenCompanyClient,
   company: string | null,
@@ -347,7 +386,12 @@ export function setInference(
   return client.put<InferenceMutation>(`${client.scopeFor(company)}/inference`, body);
 }
 
-/** Clear the runtime override, reverting to the manifest (or managed) config. */
+/**
+ * Clear the runtime override, reverting to the manifest (or managed) config.
+ *
+ * @deprecated keys-rework #2306, decision X6: not called by the console — see
+ * `SetInferenceInput`.
+ */
 export function revertInference(
   client: OpenCompanyClient,
   company: string | null,
@@ -416,14 +460,10 @@ export interface ProbeResult {
    */
   models?: string[];
   /**
-   * Whether this endpoint cannot serve a workload until a model is named.
-   *
-   * Decided from the published catalog, never from the kind: a self-hosted
-   * gateway publishing `agentic-v1` resolves tiers whoever runs it, and
-   * Anthropic, OpenAI, Groq, Ollama and LM Studio all publish neither the tier
-   * names nor the shipped ids and so all need one.
-   *
-   * Optional because an older host does not send it.
+   * @deprecated keys-rework #2306: every kind now asks for a model, always —
+   * there is no more bare-tier passthrough to fall back to (D-model, 2d), so
+   * the model step no longer branches on this. Kept only so an older host's
+   * response still parses; the console does not read it any more.
    */
   needsModel?: boolean;
 }
@@ -434,7 +474,11 @@ export interface ProviderMutation {
   note: string;
   /** The probe's verdict, when one ran. Absent when there was nothing to check. */
   probe?: ProbeResult;
-  /** Tiers this change moved or parked, so the console can say which rows changed. */
+  /**
+   * @deprecated keys-rework #2306: routing is removed (phase 5b); nothing
+   * moves or parks a tier any more. Kept only so an older host's response
+   * still parses.
+   */
   affectedTiers?: string[];
 }
 
@@ -449,14 +493,14 @@ export interface AddProviderInput {
   /** The outbound credential. */
   key?: string;
   /**
-   * The model id every workload routes to.
-   *
-   * Required by the host for an endpoint whose catalog resolves no tier name —
-   * otherwise the bare tier goes out as the model id and the vendor 404s it,
-   * which is the reported defect. The dialog asks for it with that endpoint's own
-   * catalogue in hand rather than letting the host refuse after a round trip.
+   * The one model this row serves (keys rework, issue #2306). **Required for
+   * every kind** — a provider is never shown as set without a model (D-model),
+   * and there is no bare-tier passthrough left to fall back to (2d: no tier
+   * name is ever sent as a model). The dialog asks for it with that endpoint's
+   * own catalogue in hand, right after the key or endpoint step succeeds,
+   * rather than letting the host refuse after a round trip.
    */
-  model?: string;
+  model: string;
   /**
    * Add despite a probe failure that would otherwise be destructive.
    *
@@ -471,18 +515,20 @@ export interface AddProviderInput {
 export interface EditProviderInput {
   label?: string;
   baseUrl?: string;
-  models?: Record<string, string>;
+  /**
+   * The one model id this row serves. Omit to leave it unchanged (keys rework,
+   * issue #2306). Replaces the old per-tier `models` map — the row still holds
+   * one id, sent once instead of copied across four tier keys.
+   */
+  model?: string;
   key?: string;
-}
-
-/** The routing table as the host holds it. */
-export interface RoutesResponse {
-  /** Tier → route string (`acme:gpt-5`, `managed`, `local:llava`). */
-  routes: Record<string, string>;
-  /** The mode these routes describe. **Inferred host-side, never stored.** */
-  mode: RoutingMode;
-  /** Routes naming a provider this company does not hold, as `[tier, slug]`. */
-  orphaned: [string, string][];
+  /**
+   * Resend after a `409 in_use` names what depends on this row, to proceed
+   * anyway (keys rework, issue #2306's confirmation contract). Only meaningful
+   * with `key: ""` (clearing the credential) — every other field here is
+   * additive and cannot make a row stop resolving.
+   */
+  confirmInUse?: boolean;
 }
 
 /** Connect a provider. */
@@ -510,16 +556,21 @@ export function editProvider(
 /**
  * Disconnect a provider.
  *
- * Clears its credential, removes the record and resets every route pointing at
- * it, as one operation. The response names the tiers that moved.
+ * Clears its credential and removes the record, as one operation.
+ *
+ * `confirmInUse` resends after a `409 in_use` named what depends on this row
+ * (keys rework, issue #2306's confirmation contract) — the company default, a
+ * pinned agent, or another surface sharing its credential. Sent as a query
+ * param because `DELETE` carries no body on this client.
  */
 export function deleteProvider(
   client: OpenCompanyClient,
   company: string | null,
   slug: string,
+  confirmInUse?: boolean,
 ): Promise<ProviderMutation> {
   return client.del<ProviderMutation>(
-    `${client.scopeFor(company)}/inference/providers/${encodeURIComponent(slug)}`,
+    `${client.scopeFor(company)}/inference/providers/${encodeURIComponent(slug)}${confirmInUse ? "?confirmInUse=true" : ""}`,
   );
 }
 
@@ -536,10 +587,16 @@ export function setProviderEnabled(
   company: string | null,
   slug: string,
   enabled: boolean,
+  /**
+   * Resend after a `409 in_use` (keys rework, issue #2306's confirmation
+   * contract): turning a provider off can strand the company default or a
+   * pinned agent, and the host names them before refusing.
+   */
+  confirmInUse?: boolean,
 ): Promise<ProviderMutation> {
   return client.post<ProviderMutation>(
     `${client.scopeFor(company)}/inference/providers/${encodeURIComponent(slug)}/enabled`,
-    { enabled },
+    { enabled, confirmInUse },
   );
 }
 
@@ -639,6 +696,12 @@ export function listProviderModels(
  * The other half of setting managed up is the hub link flow, which writes the
  * company **account** rather than a key. That lives on Connections → Account
  * and is deliberately not duplicated here.
+ *
+ * @deprecated keys-rework #2306, decision X6: the console no longer calls this
+ * to add or replace a key — TinyHumans is an ordinary catalogue row now
+ * (slice 2a), and every provider connects through `addProvider`/`editProvider`.
+ * Its one remaining caller clears a pre-row legacy credential with no row to
+ * `editProvider` against; see `use-inference.ts`'s `saveManagedKey`.
  */
 export function setManagedKey(
   client: OpenCompanyClient,
@@ -649,23 +712,26 @@ export function setManagedKey(
 }
 
 /**
- * Say which provider an **unset** workload goes through.
+ * Say which provider — and which model — unrouted work goes through.
  *
  * Explicit rather than positional. Without it the default is whatever sorts
  * first: add three providers, delete the first, and the company's unrouted spend
  * moves to a different account with nothing on screen having changed to say so.
  *
  * Setting one clears the previous one — not as a second call, but because the
- * host keeps the marker in a single slot holding a single slug.
+ * host keeps the marker in a single slot holding one `{provider, model}` value.
+ * A model is always required (keys rework, issue #2306, decision Q2): the host
+ * refuses a bare `{}` body.
  */
 export function setDefaultProvider(
   client: OpenCompanyClient,
   company: string | null,
   slug: string,
+  model: string,
 ): Promise<ProviderMutation> {
   return client.post<ProviderMutation>(
     `${client.scopeFor(company)}/inference/providers/${encodeURIComponent(slug)}/default`,
-    {},
+    { model },
   );
 }
 
@@ -696,28 +762,6 @@ export function testProvider(
   );
 }
 
-/** The routing table, its inferred mode, and any route naming a provider that is gone. */
-export function getRoutes(
-  client: OpenCompanyClient,
-  company: string | null,
-): Promise<RoutesResponse> {
-  return client.get<RoutesResponse>(`${client.scopeFor(company)}/inference/routes`);
-}
-
-/**
- * Replace the routing table.
- *
- * A whole-table write, because the modes are whole-table statements: "route
- * everything through one model" is not four independent edits, and applying it
- * as four would leave a visible state where two rows have moved and two have not.
- */
-export function putRoutes(
-  client: OpenCompanyClient,
-  company: string | null,
-  routes: Record<string, string>,
-): Promise<RoutesResponse> {
-  return client.put<RoutesResponse>(`${client.scopeFor(company)}/inference/routes`, { routes });
-}
 
 /** Live-probe the resolved provider (one `ping` turn). */
 export function testInference(

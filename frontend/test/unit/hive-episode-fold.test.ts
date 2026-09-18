@@ -479,3 +479,70 @@ describe("honesty about the fold", () => {
     expect(episodes[0].disagrees).toBe(true);
   });
 });
+
+describe("a transcript the host already tidied", () => {
+  /**
+   * The reload case, and the one that has never worked.
+   *
+   * `history_for_desk` rewrites the room's grammar into prose before it leaves
+   * the host — `!support #kettle ^16 …` becomes `…`, per `readable_moves` — and
+   * ships the authored body alongside it as `cueText`. The fold read `text`, so
+   * on reload it saw no moves, decided the desk had simply answered, and
+   * rendered no episode at all. Only a crossing to another desk ever saved it,
+   * because `HIVE_REFERRAL_AUTHOR` is matched on the channel rather than the
+   * body.
+   *
+   * Written against the tidied shape on purpose: a fixture carrying grammar in
+   * `text` passes whether or not `cueText` is read, and would have passed
+   * before this change.
+   */
+  function tidied(agentId: string, authored: string, prose: string): ChatMessage {
+    return {
+      id: `h${++seq}`,
+      from: "company",
+      channel: agentId,
+      text: prose,
+      cueText: authored,
+      at: seq * 1000,
+    };
+  }
+
+  it("still finds the room when only cueText carries the grammar", () => {
+    seq = 0;
+    const rows = [
+      op("we need to decide the remedy"),
+      tidied("exchanges", "!propose #kettle swap it for the steel one", "swap it for the steel one"),
+      tidied(
+        "refunds",
+        "!support #kettle ^2 the customer asked for the swap first",
+        "the customer asked for the swap first",
+      ),
+    ];
+
+    const episodes = foldEpisodes(rows, { members: 2 });
+
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0].turns.map((t) => t.move?.kind)).toEqual(["propose", "support"]);
+    expect(episodes[0].topics.map((t) => t.id)).toEqual(["kettle"]);
+    // The proposer backs its own option: the fold counts `Propose` and
+    // `Support` alike, which is why reusing a topic id is a vote-corrupting
+    // slip rather than a style one.
+    expect(episodes[0].topics[0].supporters).toEqual(["exchanges", "refunds"]);
+  });
+
+  it("falls back to text for a host that sends no cueText", () => {
+    // A console talking to an older host, and every row that carries no move —
+    // the two bodies are equal there, so nothing has to choose between them.
+    seq = 0;
+    const rows = [
+      op("we need to decide the remedy"),
+      turn("exchanges", "!propose #kettle swap it for the steel one"),
+      turn("refunds", "!support #kettle ^2 the customer asked for the swap first"),
+    ];
+
+    const episodes = foldEpisodes(rows, { members: 2 });
+
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0].turns.map((t) => t.move?.kind)).toEqual(["propose", "support"]);
+  });
+});

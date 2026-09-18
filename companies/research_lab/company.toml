@@ -25,7 +25,7 @@ human_role = "Set the question and accept the findings"
 # `search`, the librarian below has no way to discover a source and the
 # fetch/read split collapses into "read what the operator pasted".
 #
-# `allow` REPLACES the default (`globals/globals.toml`'s `default_allow`); it never extends
+# `allow` REPLACES the default (`companies/_globals/globals.toml`'s `default_allow`); it never extends
 # it. `*` covers files/docs/shell/code/web/subagent but deliberately excludes
 # the opt-in namespaces, so `search` is listed literally. `shell` and `code`
 # arrive with `*` and are load-bearing here: the analyst computes rather than

@@ -8,10 +8,19 @@ trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
 cat >"${TMP_DIR}/docker" <<'EOF'
 #!/bin/sh
+set -eu
 printf 'admin=%s\n' "$OPENCOMPANY_ADMIN_EMAIL"
+printf 'company=%s\n' "$OPENCOMPANY_COMPANY"
+case "$*" in
+    *"--file "*"/deploy/docker-compose.yml"*"--file "*"/deploy/docker-compose.dev.yml"*) ;;
+    *) echo "unexpected compose files: $*" >&2; exit 1 ;;
+esac
 printf 'args=%s\n' "$*"
 case "$*" in
     *"run --rm --no-deps -T opencompany"*) cat ;;
+    *" up --build --detach --wait opencompany"*) ;;
+    *" stop console opencompany"*) ;;
+    *) echo "unexpected compose command: $*" >&2; exit 1 ;;
 esac
 EOF
 chmod +x "${TMP_DIR}/docker"

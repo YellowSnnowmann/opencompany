@@ -1,12 +1,9 @@
 /**
- * Bounds an in-flight read that may never settle at all (PR #1875 review
- * finding — the three admin-check/activation/setup-roster threads on
- * `app-shell.tsx:957`, `useActivationGate.ts:155`, `gate-logic.ts:191`).
+ * Bounds an in-flight read that may never settle at all — the admin check
+ * (`app-shell.tsx`) and the setup roster read (`SetupController.tsx`).
  *
- * Every retry/stuck escape this file's callers already have (`isGateAdminStuck`,
- * `useActivationGate.stuck`, `shouldHoldShellPending`'s `setupChecked` guard)
- * is driven by the read's promise *settling* — a `catch` block counts
- * failures, or a `.then` clears them. None of that machinery ever runs for a
+ * Every retry this file's callers have is driven by the read's promise
+ * *settling* — a `catch` block retries, or a `.then` clears the wait. None of that machinery ever runs for a
  * request that neither resolves nor rejects: a stalled proxy, a backend that
  * accepted the connection and then never answered, or any other case where
  * the browser's own `fetch` simply never produces an event. `OpenCompanyClient`

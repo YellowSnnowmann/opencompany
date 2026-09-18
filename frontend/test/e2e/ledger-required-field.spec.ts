@@ -270,17 +270,6 @@ test("the open count agrees with the rows the screen actually shows", async ({
     expect((await recordRow("r2", "second")).ok()).toBeTruthy();
 
     await page.goto(`/#/company/work/${slug}`);
-    // A company that has not yet cleared the first-run activation funnel
-    // gates the whole shell behind it (`OnboardingGate`); dismiss the same
-    // way an operator would, if it is showing.
-    const gateSkip = page.getByTestId("gate-skip");
-    try {
-      await gateSkip.waitFor({ state: "visible", timeout: 5_000 });
-      await gateSkip.click();
-    } catch {
-      // Not showing — the company already cleared activation.
-    }
-
     const count = page.getByTestId("ledger-open-count");
     await expect(page.getByTestId("ledger-entry-r2")).toBeVisible({
       timeout: 15_000,

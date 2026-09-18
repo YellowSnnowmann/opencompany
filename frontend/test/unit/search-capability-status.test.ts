@@ -67,6 +67,13 @@ describe("searchStatus", () => {
     ).toEqual({ label: "Awaiting credential", variant: "destructive" });
   });
 
+  it("does not report a missing credential when the credential store was unreadable", () => {
+    expect(searchStatus(granted({ searchCredentialConfigured: undefined }))).toEqual({
+      label: "Couldn't check",
+      variant: "outline",
+    });
+  });
+
   it("keeps the managed rungs for a company that configured nothing", () => {
     expect(searchStatus(granted({ searchCredentialConfigured: false }))).toEqual({
       label: "Awaiting credential",

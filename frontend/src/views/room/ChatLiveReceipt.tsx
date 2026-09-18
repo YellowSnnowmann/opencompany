@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import type { TurnStep } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { TeammateAvatar } from "@/components/teammate-avatar";
-import { StepTimeline } from "./StepTimeline";
 import { runningStepLabel } from "./WorkingIndicator";
 import type { Channel } from "./model";
 
@@ -223,8 +222,6 @@ export function ChatLiveReceipt({
             No update for 30s… still waiting.
           </p>
         )}
-        {/* Kept below the line when steps exist; renders nothing otherwise. */}
-        <StepTimeline steps={steps} defaultOpen />
       </div>
     </div>
   );

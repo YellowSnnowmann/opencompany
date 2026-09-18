@@ -105,24 +105,55 @@ loopback, link-local, metadata addresses, and a redirect target.
 
 ```
   frontend/src/inference/
-    catalogue.ts        the mirror; data only
-    types.ts            Provider, ProviderRef, RoutingMap, ProbeClass
-    routing.ts          refSignature, scrub-on-remove, row + badge copy  PURE
-    classify.ts         probe-class -> copy                                PURE
-    connect.ts          what each category asks for; the row's menu        PURE
-    model-filter.ts     the picker's filter                                PURE
-    proxy-compat.ts     whether an override is sendable through the proxy  PURE
-    use-inference.ts    the one read, the writes, and where they land
-    ProvidersTab.tsx    the Providers tab
-    ProviderList.tsx    the connected rows
-    ProviderConnectDialog.tsx
+    catalogue.ts             the mirror; data only
+    types.ts                 Provider, DefaultChoice, ProbeClass
+    classify.ts              probe-class -> copy                                PURE
+    connect.ts               what each category asks for; the row's menu;
+                              the model-id/default/pair helpers (X1/X5/X9)       PURE
+    removal.ts                what removing/clearing/disabling a row costs,
+                              and the usedBy confirm sentence                    PURE
+    routes-not-carried.ts    the phase 5a bridge banner's copy                  PURE
+    managed-copy.ts          the legacy Managed row's own copy   @deprecated    PURE
+    model-filter.ts          the picker's filter                               PURE
+    proxy-compat.ts          whether an override is sendable through the proxy PURE
+    use-inference.ts         the one read, the writes, and where they land
+    ProvidersTab.tsx         the one page (no tabs — phase 5b)
+    ProviderList.tsx         the connected rows, plus the legacy Managed row
+    ProviderConnectDialog.tsx  add/edit, in one dialog: details, model, edit
+    DefaultModelDialog.tsx   "Set as default", with the X4 replace-confirm
+    RoutesNotCarriedBanner.tsx
     AddProviderDialog.tsx
     RemoveProviderDialog.tsx
     ModelField.tsx
     provider-icon.tsx
-    RoutingTab.tsx
-    WorkloadModelDialog.tsx
 ```
+
+### Removed from the console (keys rework, issue #2306, phase 5b)
+
+Per-workload routing is gone. What used to be here, for anyone who goes
+looking:
+
+- **`RoutingTab.tsx`** and **`WorkloadModelDialog.tsx`** — the per-tier
+  routing table and its "pick a model for this workload" dialog. There is one
+  page now (`ProvidersTab.tsx`); a company has one default `{provider, model}`
+  and agents may pin their own (`docs/modules/team/`).
+- **`routing.ts`** — `refSignature`, scrub-on-remove, and the routing row/badge
+  copy it fed. Removing or disabling a provider's row no longer scrubs or
+  reroutes anything it fed; the company default and any agent pin are never
+  cleared by it (decision X14) — see `removal.ts`'s own module doc.
+- **The injected "Managed" add-list entry.** TinyHumans is an ordinary
+  `CLOUD_PROVIDERS` row now (slice 2a); the console no longer synthesises a
+  separate list entry for it. The **legacy** Managed row (`ProviderList.tsx`'s
+  `showsLegacyManagedRow`) is a different, transitional thing — see its own
+  `@deprecated` doc — and is not this.
+- **The managed-key add/replace form.** Every provider, TinyHumans included,
+  connects through the one add-key → model → save flow now (decision X6); the
+  console no longer calls `PUT …/inference/managed/key` to add or replace a
+  credential — only to clear a **pre-row** legacy one, which has no indexed
+  row to edit yet.
+
+`docs/modules/inference/routing.md` and `routing-states.md` are superseded —
+see the note at the top of each.
 
 Same rule: `routing.ts` and `classify.ts` hold the decisions and are plain
 functions over plain data. A component should be readable as *layout plus

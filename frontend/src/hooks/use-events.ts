@@ -31,11 +31,19 @@ export type CompanyStreamEvent =
       agentId: string;
       text: string;
       /**
+       * The body as the model wrote it — see {@link AgentReplyEvent.cueText}.
+       * Declared here as well as on the callback payload because this arm
+       * rebuilds that payload field by field: a field the host sends and this
+       * shape omits is dropped at the dispatcher and reaches nothing.
+       */
+      cueText?: string;
+      /**
        * The board card this reply is about (issue #246/#185) — the card the
        * turn opened, or the dispatched card it ran for. Absent on an ordinary
        * chat reply.
        */
       taskId?: string;
+      outputs?: import("@/api/types").ChatOutput[];
       /**
        * The message this reply belongs under (issue #364) — its thread inside
        * the channel. Absent for a reply in the channel itself, and on a host
@@ -143,6 +151,50 @@ export type CompanyStreamEvent =
   //   orchestrator's relay bubble, so the host stopped projecting it rather
   //   than leave a second copy on the wire for a future reader to render.
   //   Nothing in this console read it.
+  // **A crossing landed; the thread it folds onto has changed.**
+  //
+  // A crossing renders as a collapsed `referralConversation` on the asking row,
+  // and only `chat/history` builds that — so a crossing was invisible until
+  // something re-read the thread. For a desk crossing that meant waiting for
+  // settle; for a pair DM it meant never, because the exchange is journaled in
+  // the pair's own `dm:<a>+<b>` conversation that no desk view subscribes to.
+  //
+  // Carries no crossing content by design: the host does not rebuild the fold
+  // on this path, it says which thread to ask about. See the frame's comment in
+  // `operator.rs`.
+  | {
+      type: "referral";
+      seq: number;
+      atMillis: number;
+      /** The desk whose transcript gains the fold — the desk that ASKED. */
+      chatId: string;
+      /** The row the crossing folds onto. */
+      sequence: number;
+      toDesk: string;
+      /**
+       * Who was asked, and who asked — so a console can say that a turn is
+       * running and whose.
+       *
+       * A referred turn runs outside the `turn_started`/`turn_settled` bracket
+       * every other turn is announced by, so this frame is the only notice the
+       * console gets that a model is working.
+       */
+      target: string;
+      asker: string;
+      /**
+       * Whether a PERSON was asked rather than a desk.
+       *
+       * It changes what is happening, not just who: a desk crossing is one
+       * side answering (the whole room, since #2332), while a person crossing
+       * is a two-way exchange both seats spend turns on. It also decides
+       * whether `target` may be shown at all — on a desk crossing the library
+       * resolves it to that desk's first eligible seat, so printing it would
+       * name an arbitrary member for a room's work.
+       */
+      direct: boolean;
+      /** A return is the leg that completes the exchange. */
+      returning: boolean;
+    }
   | {
       type: "desk_task_completed";
       seq: number;
@@ -698,6 +750,16 @@ export interface AgentReplyEvent {
   agentId: string;
   text: string;
   /**
+   * **The body as the model wrote it**, mirroring `MessageView.cueText` on the
+   * reload path — `text` before the host rewrote the room's grammar into
+   * operator-facing prose.
+   *
+   * Equal to {@link text} on every row carrying no move, and absent from a host
+   * that predates the field. The episode fold reads it because it counts
+   * `!propose`/`!support`/`^N`, which the operator-facing body no longer has.
+   */
+  cueText?: string;
+  /**
    * The **host-side** id of this message (issue #483) — the stream envelope's
    * `seq`. `chat/history` projects its own `id` from the same `StoredEvent`
    * sequence, so a live line stamped with this carries the identity a later
@@ -709,6 +771,8 @@ export interface AgentReplyEvent {
   seq: number;
   /** The board card this reply opened (issue #246), when it opened one. */
   taskId?: string;
+  /** Workspace nodes and artifacts produced by this reply's turn. */
+  outputs?: import("@/api/types").ChatOutput[];
   /**
    * The **host-side** id of the message this reply belongs under (issue #364).
    * Namespaced into a console id by the injector, which is what knows about the
@@ -780,6 +844,15 @@ interface Options {
    * arrives at all.
    */
   onRunEvent?: (event: CompanyStreamEvent) => void;
+  /**
+   * Called for each `referral` frame so the shell can re-read the thread the
+   * crossing folds onto.
+   *
+   * The frame is a signal, not a payload: `chat/history` is the only place the
+   * fold is built, and re-reading it is what makes a crossing appear live
+   * instead of at settle.
+   */
+  onReferral?: (event: Extract<CompanyStreamEvent, { type: "referral" }>) => void;
   /**
    * Called for each `desk_task_completed` frame (issue #377) so the shell can
    * post a card-linked system marker into the channel the card was raised in.
@@ -926,6 +999,7 @@ export function useEvents(
     onAgentReply,
     onTaskEvent,
     onRunEvent,
+    onReferral,
     onDispatchTerminal,
     isViewingTaskOrigin,
     onWorkspaceEvent,
@@ -950,6 +1024,10 @@ export function useEvents(
   useEffect(() => {
     onTaskEventRef.current = onTaskEvent;
   }, [onTaskEvent]);
+  const onReferralRef = useRef(onReferral);
+  useEffect(() => {
+    onReferralRef.current = onReferral;
+  }, [onReferral]);
   const onRunEventRef = useRef(onRunEvent);
   useEffect(() => {
     onRunEventRef.current = onRunEvent;
@@ -1082,6 +1160,7 @@ export function useEvents(
             onAgentReply: onAgentReplyRef.current,
             onTaskEvent: onTaskEventRef.current,
             onRunEvent: onRunEventRef.current,
+            onReferral: onReferralRef.current,
             onDispatchTerminal: onDispatchTerminalRef.current,
             isViewingTaskOrigin: isViewingTaskOriginRef.current,
             onWorkspaceEvent: onWorkspaceEventRef.current,
@@ -1138,6 +1217,7 @@ export function handleEvent(
     onAgentReply,
     onTaskEvent,
     onRunEvent,
+    onReferral,
     onDispatchTerminal,
     isViewingTaskOrigin,
     onWorkspaceEvent,
@@ -1225,6 +1305,9 @@ export function handleEvent(
     // The origin channel's inline marker remains the notification while it is
     // on screen. Away from that exact channel, #1758 adds one linked toast so a
     // background turn cannot finish silently while the operator works elsewhere.
+    case "referral":
+      onReferral?.(event);
+      break;
     case "desk_task_completed":
       onTaskEvent?.(event);
       onDispatchTerminal?.(event);
@@ -1254,6 +1337,11 @@ export function handleEvent(
         chatId: event.chatId,
         agentId: event.agentId,
         text: event.text,
+        // The room's own grammar, which the episode fold counts. `text` has
+        // been rewritten into operator-facing prose by the time it reaches
+        // here, so dropping this would leave a live deliberation undetectable
+        // — the fold would see no moves and render no episode at all.
+        cueText: event.cueText,
         // Issue #483: the host's own id for this message. Carried so the
         // injected line and its later rehydrated twin share an identity.
         seq: event.seq,
@@ -1261,6 +1349,7 @@ export function handleEvent(
         // not POST for, e.g. an inbound channel turn — carries its "card
         // opened" chip too, rather than only the locally-awaited copy.
         taskId: event.taskId,
+        outputs: event.outputs,
         // Issue #364: and lands in the same thread a reload would put it in,
         // rather than arriving in the channel and jumping on the next refresh.
         parentId: event.parentId,

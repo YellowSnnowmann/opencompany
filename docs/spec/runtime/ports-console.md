@@ -227,7 +227,7 @@ unchanged and need no migration.
 ### SkillStateStore
 
 Per-company installed-skill state overlay (`src/ports/skills_state.rs`) —
-enable/disable and provenance on top of the read-only `skills/` directory.
+enable/disable and provenance on top of the read-only bundle `skills/` directories.
 
 ```rust
 pub trait SkillStateStore: Send + Sync {

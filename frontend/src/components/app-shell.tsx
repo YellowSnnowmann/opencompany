@@ -40,24 +40,8 @@ import {
   setupHandoffHasScope,
 } from "@/setup/state";
 import { TourController } from "@/tour/TourController";
-import { OnboardingGate } from "@/onboarding/OnboardingGate";
-import { useActivationGate } from "@/onboarding/useActivationGate";
-import {
-  clearGateSkipped,
-  clearGateStepWaiver,
-  clearGateStepWaivers,
-  type GateStepId,
-  gateSkippedThisSession,
-  markGateSkipped,
-  markGateStepWaived,
-  waivedGateSteps,
-} from "@/onboarding/state";
-import {
-  resolveGateAdminCheckError,
-  shouldHoldShellPending,
-  shouldPollActivationForRole,
-  shouldShowOnboardingGate,
-} from "@/onboarding/gate-logic";
+import { shouldHoldShellPending } from "@/setup/hold-shell";
+import { resolveAdminCheckError } from "@/lib/admin-check";
 import { me as fetchMe } from "@/api/auth";
 import { useCompany } from "@/hooks/use-company";
 import { getRun, listRuns } from "@/api/runs";
@@ -115,6 +99,7 @@ import {
   type ChatMessage,
   dispatchMarkerPlacement,
   fromHistory,
+  reconcileTranscript,
   hostMessageId,
   liveFrameThreadKey,
   liveReplyIdentity,
@@ -151,11 +136,14 @@ import {
   deskFromDto,
   dmChannelId,
   dmThreadId,
+  type ReferralWorking,
+  runningCrossingRows,
   HISTORY_UNSTARTED,
   isOperatorChannelDto,
   type DecidedApproval,
   type HistoryStatus,
 } from "@/views/room/model";
+import { ReferralRunningProvider } from "@/views/room/referral-running";
 import { TeamView } from "@/views/TeamView";
 import { NotificationsView } from "@/views/NotificationsView";
 import { LedgersView, MANAGE_SEGMENT } from "@/views/LedgersView";
@@ -167,7 +155,6 @@ import { ConnectionsSection } from "@/views/connections/ConnectionsSection";
 import { SettingsSection } from "@/views/SettingsSection";
 import { useLocalScope } from "@/connections/ConnectionContext";
 import * as room from "@/room/store";
-import type { LocalScope } from "@/connections/types";
 import { forgetSession } from "@/connections/registry";
 import { offersCompanyCreation } from "@/components/create-company-dialog";
 
@@ -318,55 +305,28 @@ const WORKFLOW_EVENT_WINDOW = 300;
 const TURN_POLL_MS = 4000;
 
 /**
- * How long the onboarding gate's admin check (PR #1875 review finding) waits
- * before retrying a `fetchMe` failure that was not a definitive `401` — a
- * dropped connection or a proxy 5xx, not "this user is not an admin". A few
- * seconds is generous relative to how rarely this fires (a fresh mount's
- * first read, or a genuine network blip) and cheap relative to how bad the
- * alternative is: giving up and reading as non-admin would fail the blocking
- * gate open for an actual admin.
+ * How long the company's admin check waits before retrying a `fetchMe` failure
+ * that was not a definitive `401` — a dropped connection or a proxy 5xx, not
+ * "this user is not an admin". A few seconds is generous relative to how rarely
+ * this fires (a fresh mount's first read, or a genuine network blip) and cheap
+ * relative to the alternative: giving up and reading as non-admin leaves the
+ * autonomy control read-only for the rest of the mount.
  */
-const GATE_ADMIN_CHECK_RETRY_MS = 3000;
+const ADMIN_CHECK_RETRY_MS = 3000;
 
 /**
  * How long a single `fetchMe` call is allowed to sit with no response at all
- * before it is treated as a failure (PR #1875 review finding).
+ * before it is treated as a failure.
  *
- * `resolveGateAdminCheckError`/`GATE_ADMIN_CHECK_STUCK_AFTER_FAILURES` only
- * ever run once the call's promise *settles* — one way or the other. `fetchMe`
- * goes through `OpenCompanyClient`, and its request path has no timeout of
- * its own (`api/transport/browser.ts` calls bare `fetch`, no `AbortSignal`),
- * so a stalled proxy or a backend that accepts the connection and then never
- * answers leaves that promise pending forever: no rejection ever reaches the
- * `catch` below, `failures` never increments, and `isGateAdminStuck` never
- * flips even though the admin is exactly as wedged as the retry-forever case
- * three rounds of this file's history already closed. `withReadTimeout` turns
- * that silence into an ordinary rejection at this bound, which
- * `resolveGateAdminCheckError` already classifies as non-terminal — so the
- * existing failure counter below is what actually recovers, this only makes
- * sure it gets the chance to. Long enough that the legitimate "cold host"
- * case (the same class of cost `useActivationGate`'s poll interval doc calls
- * out) is never mistaken for a hang.
+ * `resolveAdminCheckError` only ever runs once the call's promise settles.
+ * `fetchMe` goes through `OpenCompanyClient`, whose request path has no timeout
+ * of its own (`api/transport/browser.ts` calls bare `fetch`, no `AbortSignal`),
+ * so a stalled proxy leaves that promise pending forever and the retry below
+ * never gets its chance. `withReadTimeout` turns that silence into an ordinary
+ * rejection, which `resolveAdminCheckError` classifies as non-terminal. Long
+ * enough that a legitimately cold host is never mistaken for a hang.
  */
-const GATE_ADMIN_CHECK_TIMEOUT_MS = 20000;
-
-/**
- * How many consecutive non-settled `fetchMe` failures before the admin check
- * reports itself stuck, mirroring `useActivationGate`'s `STUCK_AFTER_FAILURES`
- * (PR #1875 review finding).
- *
- * That hook's `stuck` only tracks its own `getActivation` reads — it has no
- * way to know the admin check is the one wedged. A durable non-401 `fetchMe`
- * failure (the same class of backend fault: a proxy 5xx, a downstream outage)
- * leaves `isGateAdmin` at `null` forever, which keeps `shouldHoldShellPending`
- * returning `true` (its own `input.isAdmin === null` branch) even while
- * activation itself is reading fine — so `activationGate.stuck` never flips
- * and the recovery affordance below never appears, wedging an admin who
- * cannot reach it behind a loader indistinguishable from the one the
- * activation-side fix already closed. Three failures matches
- * `STUCK_AFTER_FAILURES`'s own ~9s-at-`GATE_ADMIN_CHECK_RETRY_MS` reasoning.
- */
-const GATE_ADMIN_CHECK_STUCK_AFTER_FAILURES = 3;
+const ADMIN_CHECK_TIMEOUT_MS = 20000;
 
 /**
  * Operator-facing copy for a legacy `connect_error` query from the former
@@ -582,20 +542,16 @@ export function AppShell({
   // over it.
   const [setupOpen, setSetupOpen] = useState(true);
   /**
-   * Whether `SetupController`'s own roster read has landed (PR #1875 review
-   * finding, round 12).
+   * Whether `SetupController`'s own roster read has landed.
    *
-   * `setupOpen` starting `true` and a roster read that already landed with
-   * the company genuinely unstaffed are indistinguishable to anything that
-   * only reads `setupOpen` — `shouldHoldShellPending` needs to tell them
-   * apart (see its own doc). `SetupController`'s `onOpenChange` only ever
-   * fires once its internal `checked` is true, so its firing at all is
-   * itself the signal; `handleSetupOpenChange` below turns that into state
-   * the gate predicate can read. A separate flag rather than folding into
-   * `setupOpen` itself: `setupOpen` must stay a plain "is setup on screen or
-   * blocking" boolean for every other reader (`TourController`'s `hold`,
-   * `shouldShowOnboardingGate`), and conflating "resolved" into its value is
-   * exactly the bug this fixes.
+   * `setupOpen` starting `true` and a roster read that already landed with the
+   * company genuinely unstaffed are indistinguishable to anything that only
+   * reads `setupOpen` — `shouldHoldShellPending` needs to tell them apart (see
+   * its own doc). `SetupController`'s `onOpenChange` only ever fires once its
+   * internal `checked` is true, so its firing at all is itself the signal;
+   * `handleSetupOpenChange` below turns that into state. A separate flag rather
+   * than folding into `setupOpen` itself, which must stay a plain "is setup on
+   * screen or blocking" boolean for `TourController`'s `hold`.
    */
   const [setupChecked, setSetupChecked] = useState(false);
   const handleSetupOpenChange = useCallback((open: boolean) => {
@@ -985,124 +941,36 @@ export function AppShell({
   const feed = useCompany(client, company, initialStatus);
 
   /**
-   * The account-activation funnel (issue #1844): blocks the shell behind
-   * `OnboardingGate` until the company is named, has an integration and has
-   * run a workflow — see `useActivationGate` for the polling contract.
+   * Whether the signed-in user is this company's admin — `null` until the read
+   * lands, which the autonomy pill renders as read-only.
    *
-   * `gateSkippedThisSession` is read once, into state rather than a plain
-   * `const`, so clicking "skip for now" re-renders past the gate without a
-   * page reload — `sessionStorage` alone would need one.
+   * Mirrors the `admin = (await fetchMe(...)).role === "admin"` pattern every
+   * other admin-gated view uses, with one difference: a failed read is
+   * classified through `resolveAdminCheckError` rather than settling straight
+   * to `false`. This reader is asked once per mount instead of on every render,
+   * so a transient failure pinned as "not an admin" stays wrong until the
+   * operator reloads. Only a definitive `401` settles; anything else retries.
    */
-  const [gateSkipped, setGateSkipped] = useState(() => gateSkippedThisSession(scope));
-  useEffect(() => {
-    setGateSkipped(gateSkippedThisSession(scope));
-  }, [scope]);
-  const skipGate = useCallback(() => {
-    markGateSkipped(scope);
-    setGateSkipped(true);
-  }, [scope]);
-
-  /**
-   * Steps the founder has durably waived (bugs B-001/B-020) — held in state for
-   * the same reason `gateSkipped` is: waiving has to re-render past the gate
-   * without a reload, and `localStorage` alone would need one.
-   */
-  const [gateWaived, setGateWaived] = useState<GateStepId[]>(() => waivedGateSteps(scope));
-  useEffect(() => {
-    setGateWaived(waivedGateSteps(scope));
-  }, [scope]);
-  // The `storage`-event cross-tab listener lives further down, right after
-  // `activationGate` is declared — a REMOVAL it observes has to trigger a
-  // fresh activation read on THIS tab before it is safe to apply, so it
-  // needs `activationGate.refresh` in scope. See that effect's own doc.
-  const waiveGateStep = useCallback(
-    (step: GateStepId) => {
-      markGateStepWaived(scope, step);
-      setGateWaived(waivedGateSteps(scope));
-    },
-    [scope],
-  );
-
-  /**
-   * Leaves the gate for a console route (bug B-006).
-   *
-   * The session skip is what actually stands the gate down — the founder asked
-   * to be somewhere else, and a gate that re-renders over the page they asked
-   * for is the defect. It is deliberately the *session* marker rather than a
-   * durable waiver: following a link is not an answer to the step, so the gate
-   * is still owed on the next fresh tab.
-   *
-   * Order matters. The hash is set first so the router has the destination
-   * before this render swaps the gate out for the shell; setting it afterwards
-   * renders the shell on the old route for a frame and then moves it.
-   */
-  const leaveGateFor = useCallback(
-    (route: string) => {
-      window.location.hash = route;
-      markGateSkipped(scope);
-      setGateSkipped(true);
-    },
-    [scope],
-  );
-
-  /**
-   * Whether the signed-in user is this company's admin (PR #1875 review
-   * finding) — `null` until the read lands. Mirrors the `admin =
-   * (await fetchMe(...)).role === "admin"` pattern every other admin-gated
-   * view in this app already uses (`OAuthView`, `TeamView`, etc.), with two
-   * differences, both because this reader feeds a *blocking* gate rather
-   * than a read-only view:
-   *
-   * - The `null` "not yet known" state — see `shouldShowOnboardingGate`'s own
-   *   guard for why the gate must never flash open on it.
-   * - A failed read is classified through `resolveGateAdminCheckError`
-   *   instead of settling straight to `false`. Every other view's `catch {
-   *   admin = false }` is safe because the worst case is a control staying
-   *   disabled one round trip longer; here `false` is what suppresses the
-   *   gate, so a transient failure (a dropped connection, a proxy 5xx) would
-   *   read exactly like a real "not an admin" and fail the gate open for an
-   *   actual admin for the rest of that mount (PR #1875 review finding,
-   *   round 2). Only a definitive `401` settles to `false`; anything else
-   *   retries.
-   *
-   * Declared before `activationGate` (below) because that hook's `enabled`
-   * input now reads this state — PR #1875 review finding, round 5.
-   */
-  const [isGateAdmin, setIsGateAdmin] = useState<boolean | null>(null);
-  /**
-   * True once `GATE_ADMIN_CHECK_STUCK_AFTER_FAILURES` consecutive `fetchMe`
-   * failures have failed to settle — see that constant's own doc. Read
-   * alongside `activationGate.stuck` below so the recovery affordance covers
-   * either read wedging, not only the activation one.
-   */
-  const [isGateAdminStuck, setIsGateAdminStuck] = useState(false);
+  const [isCompanyAdmin, setIsCompanyAdmin] = useState<boolean | null>(null);
   useEffect(() => {
     let live = true;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let failures = 0;
-    setIsGateAdmin(null);
-    setIsGateAdminStuck(false);
+    setIsCompanyAdmin(null);
     const load = () => {
       void (async () => {
         try {
           const admin =
-            (await withReadTimeout(fetchMe(client, company), GATE_ADMIN_CHECK_TIMEOUT_MS)).role ===
+            (await withReadTimeout(fetchMe(client, company), ADMIN_CHECK_TIMEOUT_MS)).role ===
             "admin";
           if (!live) return;
-          setIsGateAdmin(admin);
-          failures = 0;
-          setIsGateAdminStuck(false);
+          setIsCompanyAdmin(admin);
         } catch (err) {
           if (!live) return;
-          const outcome = resolveGateAdminCheckError(err);
+          const outcome = resolveAdminCheckError(err);
           if (outcome.settled) {
-            setIsGateAdmin(outcome.isAdmin);
-            failures = 0;
-            setIsGateAdminStuck(false);
+            setIsCompanyAdmin(outcome.isAdmin);
           } else {
-            failures += 1;
-            if (failures >= GATE_ADMIN_CHECK_STUCK_AFTER_FAILURES) setIsGateAdminStuck(true);
-            retryTimer = setTimeout(load, GATE_ADMIN_CHECK_RETRY_MS);
+            retryTimer = setTimeout(load, ADMIN_CHECK_RETRY_MS);
           }
         }
       })();
@@ -1113,153 +981,6 @@ export function AppShell({
       if (retryTimer !== undefined) clearTimeout(retryTimer);
     };
   }, [client, company]);
-
-  // The poll below is passed `shouldPollActivationForRole(isGateAdmin)`, NOT
-  // a bare `true` (PR #1875 review finding, round 5) and NOT `!gateSkipped`
-  // (round 4): `GET {scope}/activation` is the only production caller of
-  // `compute_and_latch` on the host, so an admin who skips and then finishes
-  // the funnel anyway (connects an integration, runs a workflow from the
-  // ordinary shell) needs the poll to still be running to ever notice and
-  // persist it — see `shouldPollActivation` for that half. Round 5 also tried
-  // to stop this poll for a confirmed non-admin, on the premise that no
-  // funnel step is reachable by anyone but the admin; round 7 found that
-  // premise false (`POST {scope}/workflows/{wid}/run` is `ScopedCompany`, not
-  // admin-gated) and reverted it — see `shouldPollActivationForRole`'s own
-  // doc for why every role now polls alike. The poll still stops itself once
-  // the company is actually activated; nothing here needs to.
-  const activationGate = useActivationGate(client, company, shouldPollActivationForRole(isGateAdmin));
-
-  // CodeRabbit review, PR #2046: which scope `activationGate.status` actually
-  // describes, read during THIS effect before it is overwritten below.
-  //
-  // `useActivationGate` resets `status` to `null` for the new company only
-  // from its OWN effect, which runs in the same commit as this one but is not
-  // guaranteed to run first, and even when it does the reset does not take
-  // effect until the next render. So the very first commit after switching
-  // companies can still pair the FORMER company's `isActivated: true` with the
-  // NEW `scope` — and without this guard the branch below would read that
-  // combination and wipe the new company's just-loaded waiver before its own
-  // activation read has ever landed. Comparing against the scope this effect
-  // itself saw last time closes that one-render race; a bare
-  // `[activationGate.status?.isActivated, scope]` dependency list cannot, since
-  // both can appear to "agree" on exactly the commit where they do not.
-  const lastGateWaiverScopeRef = useRef<LocalScope | null>(null);
-  // PR #1875 review finding, round 4: a skip marker from before the funnel
-  // completed cannot matter once `isActivated` is true (`shouldShowOnboardingGate`
-  // already stops gating on it either way), but leaving it in `sessionStorage`
-  // is still a leak worth cleaning up — see `clearGateSkipped`'s own doc.
-  useEffect(() => {
-    const previous = lastGateWaiverScopeRef.current;
-    const scopeJustChanged =
-      previous === null || previous.connection !== scope.connection || previous.company !== scope.company;
-    lastGateWaiverScopeRef.current = scope;
-    if (scopeJustChanged) return;
-    const status = activationGate.status;
-    if (!status) return;
-    if (status.isActivated) {
-      clearGateSkipped(scope);
-      // Same housekeeping, one step down: a waiver cannot matter once the funnel
-      // has actually completed, and leaving one behind would let it speak for a
-      // later incomplete funnel the founder never answered (see
-      // `clearGateStepWaivers`).
-      clearGateStepWaivers(scope);
-      setGateWaived([]);
-      return;
-    }
-    // Codex review, PR #2046, round 3: the same housekeeping PER STEP, because
-    // waiting for the whole funnel leaves a window where a stale waiver does
-    // real harm. Waive `integration`; the integration then genuinely connects
-    // while some other step is still outstanding, so `isActivated` never
-    // latches and the branch above never runs; the connection is later revoked
-    // or expires. The waiver — an answer to a step that could not be finished —
-    // silently comes back into force against a step a credential now makes
-    // ordinarily completable, and this browser stops showing a gate the host
-    // still considers owed.
-    //
-    // `outstandingGateSteps`' own doc already claims this rule ("a stale
-    // waiver must never be able to mask a step going incomplete again later");
-    // ignoring the waiver while the step reads done was only half of it.
-    const done: Record<GateStepId, boolean> = {
-      name: status.nameConfirmed,
-      integration: status.integrationConnected,
-      workflow: status.workflowRunSucceeded,
-    };
-    for (const step of waivedGateSteps(scope)) {
-      if (done[step]) clearGateStepWaiver(scope, step);
-    }
-    // Codex review, PR #2046, round 4: and THIS is where a deferred cross-tab
-    // removal is finally applied.
-    //
-    // The `storage` listener below refuses to act on another tab's removal on
-    // that tab's word alone — it asks for a refresh and keeps what it has. Its
-    // round-2 reasoning still holds, but it assumed every removal meant "some
-    // tab saw `isActivated`", which is monotonic on the host and so always
-    // arrives here eventually. The per-step clearing above broke that
-    // assumption: a removal can now mean "some tab saw THIS STEP complete",
-    // and step completion is not monotonic — an integration can be revoked.
-    // So the deferral had no end condition any more. `gateWaived` kept a step
-    // whose `localStorage` key was already gone, and went on masking it for
-    // the life of the tab.
-    //
-    // Reading storage back here ends it. This line only runs when THIS tab's
-    // own `status` has just changed, which only happens on a read that
-    // actually succeeded — so an outage still defers indefinitely, which is
-    // the half of the round-2 protection that was always the real one. What
-    // it no longer does is defer forever against a first-hand answer.
-    setGateWaived((previous) => {
-      const stored = waivedGateSteps(scope);
-      const same =
-        previous.length === stored.length && stored.every((step, i) => previous[i] === step);
-      return same ? previous : stored;
-    });
-  }, [activationGate.status, scope]);
-
-  // Codex review, PR #2046: a waiver is durably scoped and meant to survive a
-  // FRESH tab (see `markGateStepWaived`'s own doc) — but a tab that was
-  // already open when a DIFFERENT tab wrote one never noticed, because
-  // `gateWaived` only re-read when `scope` itself changed. The `storage`
-  // event is the browser's own cross-tab signal for exactly this: it fires
-  // in every OTHER same-origin tab (never the one that wrote), so listening
-  // for it and re-reading closes the gap without polling.
-  //
-  // Codex review, round 2: an ADDITION and a REMOVAL are not safe to trust
-  // the same way. `clearGateStepWaivers` above fires from ANOTHER tab too,
-  // the moment THAT tab's own poll confirms `isActivated` — and every
-  // `removeItem` it makes is a deletion `storage` event here. Applying that
-  // removal immediately would drop this tab's waiver against a `status` this
-  // tab has not yet refreshed itself: `outstandingGateSteps` would count the
-  // step as outstanding again, and the gate would reopen until this tab's
-  // own poll independently catches up — or, through an outage, stay open
-  // for as long as that poll keeps failing. An addition has no such failure
-  // mode (it can only shorten `outstandingGateSteps`, never lengthen it), so
-  // only a removal needs the extra caution: ask `activationGate` to refresh
-  // right now instead of trusting the other tab's word, and let THIS tab's
-  // own cleanup effect above — gated on ITS OWN confirmed `isActivated` —
-  // be what actually drops the waiver once it lands.
-  useEffect(() => {
-    const onStorage = () => {
-      setGateWaived((previous) => {
-        const next = waivedGateSteps(scope);
-        const isRemoval = previous.some((step) => !next.includes(step));
-        if (isRemoval) {
-          void activationGate.refresh();
-          return previous;
-        }
-        return next;
-      });
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-    // `activationGate.refresh` (not the whole `activationGate` object) is the
-    // dependency: `useActivationGate` returns a fresh object literal every
-    // render, so depending on the object itself would tear down and re-add
-    // this listener on every AppShell render regardless of whether anything
-    // it actually reads (`scope`, `refresh`) changed — the same reason the
-    // cleanup effect above depends on `activationGate.status?.isActivated`
-    // rather than `activationGate.status`. `refresh` (`load`) is itself
-    // `useCallback`-memoized on `[client, company]`, so this is stable across
-    // ordinary renders.
-  }, [scope, activationGate.refresh]);
 
   const refreshTaskStatuses = useCallback(async () => {
     const read = ++taskStatusRead.current;
@@ -1956,11 +1677,13 @@ export function AppShell({
             return;
           }
           setTranscripts((t) => {
-            const known = new Set((t[channelId] ?? []).map((m) => m.id));
-            const fresh = hydrated.filter((m) => !known.has(m.id));
-            return fresh.length === 0
-              ? t
-              : { ...t, [channelId]: [...(t[channelId] ?? []), ...fresh] };
+            // Reconciled, not merely appended: a referral folds its exchange
+            // onto a row this transcript ALREADY holds, so an id filter drops
+            // exactly the update it exists to deliver. See
+            // `reconcileTranscript` for the whole reasoning.
+            const existing = t[channelId] ?? [];
+            const merged = reconcileTranscript(existing, hydrated);
+            return merged === existing ? t : { ...t, [channelId]: merged };
           });
         })
         .catch(() => {
@@ -2592,8 +2315,13 @@ export function AppShell({
             // the turn live keeps an agent-style bubble hydration never
             // corrects.
             makeMessage(from, event.text, {
+              // The grammar the fold counts, when the host sent it — see
+              // `ChatMessage.cueText`. Carried so a live turn folds into the
+              // episode panel exactly as the reloaded one does.
+              cueText: event.cueText,
               channel: event.agentId,
               taskId: event.taskId,
+              outputs: event.outputs,
               mentions: event.mentions,
               // Issue #483: same identity as the thread store above. This is
               // the store `hydrateThread` folds into, so this is where the
@@ -2685,8 +2413,37 @@ export function AppShell({
    * once it turns out to be the echo of a reply already rendered. Dedupe by
    * *what the POST turned out to be*, never by how long the frame waited.
    */
+  /**
+   * Who is answering a crossing right now, per asking desk (#2341 live report).
+   *
+   * A referred turn runs through `HiveReferralRunner::refer`, outside the
+   * `turn_started`/`turn_settled` bracket every other turn is announced by — so
+   * while a crossing ran, and `pair_messages` lets that be several model turns,
+   * the desk showed a generic working row naming nobody. The `referral` frame
+   * fires at exactly the right moment and now carries the teammate asked.
+   *
+   * Cleared when the desk speaks again, which is the precise end of the
+   * crossing: the asker's continuation is the next thing journaled on the desk
+   * after its question. A same-desk pair emits no return leg, so there is no
+   * closing frame to wait for and an indicator that waited for one would name
+   * the answerer for the rest of the episode.
+   */
+  const [referralWorking, setReferralWorking] = useState<Record<string, ReferralWorking>>({});
+
   const injectAgentReply = useCallback(
     (event: AgentReplyEvent) => {
+      // The desk speaking again is the end of any crossing it was waiting on.
+      // Rows from the pair's own `dm:<a>+<b>` conversation are not this desk
+      // and must not clear it — they are the crossing still running.
+      if (event.chatId) {
+        setReferralWorking((working) =>
+          working[event.chatId as string] === undefined
+            ? working
+            : Object.fromEntries(
+                Object.entries(working).filter(([chat]) => chat !== event.chatId),
+              ),
+        );
+      }
       if (pendingPostThreadsRef.current.capture(event)) return;
       renderAgentReply(event);
     },
@@ -3320,6 +3077,60 @@ export function AppShell({
     onAgentReply: injectAgentReply,
     onTaskEvent: useCallback(() => setTaskEventTick((n) => n + 1), []),
     onRunEvent: useCallback(() => setAttemptEventTick((n) => n + 1), []),
+    // **A crossing changes a thread this console is already showing.**
+    //
+    // The fold that renders a crossing — `referralConversation` on the asking
+    // row — is built by `chat/history` and by nothing else, so a crossing was
+    // invisible until something re-read the thread. A desk crossing waited for
+    // settle; a pair DM waited forever, because its rows live in the pair's own
+    // `dm:<a>+<b>` conversation that no desk view subscribes to.
+    //
+    // Re-reading rather than rendering the frame: the frame deliberately
+    // carries no crossing content, and `reReadSettledThread` is idempotent, so
+    // a second call for a thread already holding the fold adds nothing.
+    onReferral: useCallback(
+      (event: {
+        chatId: string;
+        sequence?: number;
+        target?: string;
+        asker?: string;
+        toDesk?: string;
+        direct?: boolean;
+        returning?: boolean;
+      }) => {
+        // A forward is a turn starting on the far side; a return is that turn
+        // already finished and carried home, so it announces nobody.
+        if (!event.returning) {
+          // **What is happening differs by kind, not just who is named.**
+          //
+          // A person crossing is a two-way exchange: `pair_messages` lets the
+          // pair alternate, so both seats spend turns and neither is merely
+          // answering. A desk crossing is the far DESK answering — as a whole
+          // room since #2332 — and its `target` is only the library's
+          // first-eligible seat, so naming that seat would credit one member
+          // with a room's work.
+          // Stored structurally and phrased by the view: a desk's display
+          // name and a teammate's live where the channels and roster do, not
+          // here.
+          const crossing: ReferralWorking | undefined =
+            event.direct && event.asker && event.target
+              ? {
+                  direct: true,
+                  asker: event.asker,
+                  target: event.target,
+                  row: event.sequence,
+                }
+              : !event.direct && event.toDesk
+                ? { direct: false, desk: event.toDesk, row: event.sequence }
+                : undefined;
+          if (crossing) {
+            setReferralWorking((working) => ({ ...working, [event.chatId]: crossing }));
+          }
+        }
+        reReadSettledThread(event.chatId);
+      },
+      [reReadSettledThread],
+    ),
     // Issue #377. Beside the board tick above, not instead of it: a settle both
     // moves a card between columns and needs saying in the conversation the
     // card came from.
@@ -3461,38 +3272,21 @@ export function AppShell({
     }, []),
   });
 
-  // PR #1875 review finding, round 13: `shouldHoldShellPending` holds on
-  // `!setupChecked` precisely because `SetupController`'s own `onOpenChange`
-  // is the *only* thing that ever sets it (see `setupChecked`'s own doc) —
-  // but the JSX that mounted `<SetupController>` lived below both of this
-  // function's early returns, reachable only once the ordinary shell itself
-  // was chosen. Every fresh mount starts `setupChecked === false`, so the
-  // very predicate this component exists to satisfy made `SetupController`
-  // unreachable: the hold fired, returned before that JSX, `SetupController`
-  // never mounted, `onOpenChange` never fired, and `setupChecked` stayed
-  // `false` forever — a permanent loader, not a brief hold, for every
-  // signed-in operator except a confirmed non-admin (`isAdmin === false`,
-  // the one path `shouldHoldShellPending` returns early on before ever
-  // reaching `setupChecked`) or one who had already skipped in this tab.
-  // Hoisted here and rendered in every branch below so its roster read can
-  // land regardless of which content this render currently picks. Radix's
-  // `Dialog` (via `SetupDialog`) portals its own content and renders nothing
-  // into normal flow while closed, so mounting it alongside `RouteLoading`
-  // or `OnboardingGate` costs nothing visually.
+  // Hoisted out of the render branches below and rendered in every one of them,
+  // at the same position in each.
   //
-  // Round 14: rendering it in every branch is not enough on its own — it has to
-  // sit at the *same* position in all three, or React reconciles it as a
-  // different node and unmounts it on the very transition it exists to survive.
-  // An unstaffed company's first roster result sets `setupChecked` and
-  // `setupOpen` together, which flips this render from a branch below to the
-  // ordinary shell; with the controller under a different root there, React
-  // would throw away the already-proven `unstaffed`/`open` state and issue a
-  // second `listTeam` — exposing the interactive shell while that read is in
-  // flight, and leaving the dialog shut for good if it hangs or fails. So all
-  // three outcomes root at the same `ConsoleProvider` with this as its first
-  // child. That provider is pure context and renders no DOM of its own, so
-  // wrapping the loader and the gate in it costs nothing and hands them the
-  // same ambient `(client, company)` the shell already has.
+  // `shouldHoldShellPending` holds the shell until `setupChecked` lands, and
+  // `SetupController`'s own `onOpenChange` is the only thing that ever sets it.
+  // Mounted only under the ordinary shell, the controller would never run its
+  // roster read, never fire `onOpenChange`, and the hold would be permanent.
+  // Position matters as much as presence: React reconciles by position, so a
+  // controller rooted differently per branch is a different node in each, and
+  // the transition out of the hold — driven by that very roster read — would
+  // unmount it, discard its proven `unstaffed`/`open` state and issue a second
+  // `listTeam`. So both outcomes root at the same `ConsoleProvider` with this as
+  // its first child; that provider renders no DOM of its own, and `SetupDialog`
+  // portals its content, so mounting it alongside `RouteLoading` costs nothing
+  // visually.
   const setupController = (
     <SetupController
       client={client}
@@ -3513,118 +3307,16 @@ export function AppShell({
     />
   );
 
-  // PR #1875 review finding, round 8 (widened round 10): hold the shell in a
-  // neutral pending state — never the ordinary interactive shell, never the
-  // gate itself — for as long as the first activation read is unresolved,
-  // whether it is still in flight or already failed once and is retrying.
-  // Without this, the gap below fell straight through to the full shell (its
-  // `shouldShowOnboardingGate` guard reads "not checked yet" identically for
-  // an unresolved read of any cause), leaving an operator clicking around a
-  // shell the funnel had not actually cleared for them to be in, until the
-  // read finally landed and abruptly yanked the gate over it — including on
-  // a merely slow first read (the host scans the journal for this company's
-  // funnel; see `shouldHoldShellPending`'s own doc), not only a proven
-  // outage. `RouteLoading` is the same neutral loader every code-split route
-  // fallback in this file already uses — see its own doc for why a bare
-  // "Loading…" line is not enough (`title` names the page for a screen reader
-  // that never sees a mounted heading otherwise).
-  if (
-    shouldHoldShellPending({
-      status: activationGate.status,
-      checked: activationGate.checked,
-      setupOpen,
-      setupChecked,
-      skippedThisSession: gateSkipped,
-      isAdmin: isGateAdmin,
-      retrying: activationGate.retrying,
-      waived: gateWaived,
-    })
-  ) {
-    // A durable read failure must not read as a hang. `stuck` means three
-    // consecutive non-terminal `getActivation` failures (see
-    // `STUCK_AFTER_FAILURES`) — a malformed event failing the host's
-    // whole-journal scan on every read, say. `checked` never settles, so the
-    // hold above is permanent, and the "skip for now" escape lives inside
-    // `OnboardingGate`, which this branch never mounts: the operator would be
-    // locked out of the whole console by a backend fault with no way forward
-    // (PR #1875 review finding). Offer the same escape here instead of a
-    // loader that never resolves. The polling continues underneath, so a
-    // recovered backend still settles the gate on its own.
-    //
-    // `isGateAdminStuck` covers the other read this hold depends on (PR #1875
-    // review finding): a durable non-401 `fetchMe` failure leaves `isGateAdmin`
-    // at `null` forever with activation reading fine the whole time, so
-    // `activationGate.stuck` alone never flips even though the hold above is
-    // just as permanent — see `GATE_ADMIN_CHECK_STUCK_AFTER_FAILURES`'s own
-    // doc.
-    if (activationGate.stuck || isGateAdminStuck) {
-      return (
-        <ConsoleProvider client={client} company={company}>
-          {setupController}
-          <div className="flex min-h-svh items-center justify-center p-6">
-            <div className="max-w-md space-y-3 text-center">
-              <h1 className="text-lg font-medium">We can’t check your setup right now</h1>
-              <p className="text-sm text-muted-foreground">
-                The console keeps failing to read this company’s setup status. It will keep
-                retrying, but you don’t have to wait.
-              </p>
-              <button
-                type="button"
-                onClick={skipGate}
-                className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                Continue to the console
-              </button>
-            </div>
-          </div>
-        </ConsoleProvider>
-      );
-    }
+  // Hold the shell in a neutral pending state rather than render the ordinary
+  // console over an unresolved setup read — see `shouldHoldShellPending`.
+  // `RouteLoading` is the same neutral loader every code-split route fallback in
+  // this file already uses; its `title` names the page for a screen reader that
+  // never sees a mounted heading otherwise.
+  if (shouldHoldShellPending({ setupChecked })) {
     return (
       <ConsoleProvider client={client} company={company}>
         {setupController}
         <RouteLoading title="Console" label="Loading…" />
-      </ConsoleProvider>
-    );
-  }
-
-  // Issue #1844: the blocking first-run gate. Held behind `!setupOpen` —
-  // `setupOpen` is already true for as long as `SetupController`'s dialog is
-  // open OR the company is unstaffed (see its own `onOpenChange`), the exact
-  // signal `TourController` holds on below for the same reason: staffing runs
-  // first, so an operator is never asked to run a workflow with nobody on the
-  // roster yet to have written it. `activationGate.status` gates on `checked`
-  // rather than rendering the instant `company` is known, so a fresh mount
-  // never flashes the gate open for the one round trip it takes to learn the
-  // company already cleared it.
-  if (
-    shouldShowOnboardingGate({
-      status: activationGate.status,
-      checked: activationGate.checked,
-      setupOpen,
-      skippedThisSession: gateSkipped,
-      isAdmin: isGateAdmin,
-      waived: gateWaived,
-    }) &&
-    // Narrows `status` for the render below — `shouldShowOnboardingGate`
-    // already guarantees this is non-null whenever it returns `true`, but
-    // that guarantee lives in a separate module TypeScript cannot see through.
-    activationGate.status
-  ) {
-    return (
-      <ConsoleProvider client={client} company={company}>
-        {setupController}
-        <OnboardingGate
-          client={client}
-          company={company}
-          status={activationGate.status}
-          currentName={feed.status.name}
-          waived={gateWaived}
-          onRefresh={activationGate.refresh}
-          onSkip={skipGate}
-          onLeave={leaveGateFor}
-          onWaiveStep={waiveGateStep}
-        />
       </ConsoleProvider>
     );
   }
@@ -3922,6 +3614,10 @@ export function AppShell({
               effect in `RoomView` writing state up here and re-render the whole
               console on every unread tick from every section, rather than only
               from Room. */}
+          <ReferralRunningProvider
+            rows={runningCrossingRows(referralWorking)}
+            byDesk={referralWorking}
+          >
           <RoomView
               client={client}
               company={company}
@@ -3938,7 +3634,7 @@ export function AppShell({
               // what the agents around you may do, not an admin setting — it
               // simply stops pretending to be a control. `null` while `fetchMe`
               // is in flight reads as read-only, which is the safe direction.
-              autonomy={<AutonomyPill status={autonomy} canManage={isGateAdmin} />}
+              autonomy={<AutonomyPill status={autonomy} canManage={isCompanyAdmin} />}
               // The chat segment, not the current view's — see `chatSub`.
               sub={view === "chat" ? sub : chatSub}
               routeOpen={view === "chat"}
@@ -3984,6 +3680,7 @@ export function AppShell({
               budgetProximity={budgetProximity}
               onDismissBudgetProximity={() => setBudgetProximity(null)}
             />
+          </ReferralRunningProvider>
           {view === "inbox" && <InboxView client={client} company={company} />}
           {/* All that is left of the Tasks page: the card detail. `sub` is a
               real id by the time this renders — `REWRITE_RETIRED` sent every

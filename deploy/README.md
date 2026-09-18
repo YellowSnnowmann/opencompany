@@ -7,13 +7,28 @@ runs is a single switch — `OPENCOMPANY_COMPANY`** — an example directory nam
 
 The same two images deploy everywhere below; only the wiring differs.
 
-## Local / any Docker host — Compose
+## Local / Docker or Podman — Compose
+
+Everything Docker lives in this directory: `Dockerfile` (built with the
+repository root as its context, so run it as `docker build -f deploy/Dockerfile .`
+— BuildKit reads `Dockerfile.dockerignore` beside it), `entrypoint.sh`,
+`docker-compose.yml`, the `docker-compose.dev.yml` hot-reload overlay and
+`.env.example`.
 
 ```sh
+cd deploy
 cp .env.example .env
 # set OPENCOMPANY_COMPANY to the module you want, then:
 docker compose up --build
 ```
+
+These commands also work when `docker` is Podman's Docker-compatible CLI and
+`podman-compose` is its Compose provider. `scripts/launch-demo.sh` uses this
+same portable invocation for the hot-reload stack.
+
+From the repository root, `docker compose -f deploy/docker-compose.yml up --build`
+is the same thing — Compose reads `.env` from the compose file's directory
+either way.
 
 - Console → http://localhost:5173 (proxies the API, so it's same-origin).
 - Host API → http://localhost:8080 (e.g. `/healthz`, `/api/v1/companies`).
@@ -30,16 +45,24 @@ Switch companies by editing `OPENCOMPANY_COMPANY` in `.env` and re-running
 `OPENCOMPANY_FEATURES="medulla tinyplace sqlite"`.
 
 To exercise the development Compose flow end to end, including both published
-ports and the console's proxy connection to the host, run:
+ports, first-admin initialization, and the console's proxy connection to the
+host, run:
 
 ```sh
 ./scripts/test-compose-e2e.sh
 ```
 
+The fast test for the first-admin helper uses a Docker stub and does not start
+containers:
+
+```sh
+./scripts/test-init-demo-admin.sh
+```
+
 For a selectable memory engine, add `tinymemory` (hosted engines —
 Supermemory, Mem0, Cognee — plus the `null` driver) and `tinymemory-embedded`
 (the durable in-pod `namespace` store) to `OPENCOMPANY_FEATURES`, then select
-one with the `OPENCOMPANY_MEMORY*` variables (`.env.example` has the block;
+one with the `OPENCOMPANY_MEMORY*` variables (`.env.example` here has the block;
 `docs/spec/runtime/memory-engine.md` has the full guide and the
 engine-switch runbook).
 
@@ -67,7 +90,7 @@ builder, so the nested `vendor/openhuman/vendor/tinyagents` patch resolves.
 Any Droplet with Docker installed runs the Compose file unchanged:
 
 ```sh
-git clone <your-fork> && cd opencompany
+git clone <your-fork> && cd opencompany/deploy
 cp .env.example .env && $EDITOR .env
 docker compose up -d --build
 ```
@@ -85,7 +108,7 @@ two-container task (host + console in one task; the console reaches the host on
 # build + push
 aws ecr create-repository --repository-name opencompany
 aws ecr create-repository --repository-name opencompany-console
-docker build -t <ecr>/opencompany:latest .
+docker build -f deploy/Dockerfile -t <ecr>/opencompany:latest .
 docker build -t <ecr>/opencompany-console:latest frontend
 docker push <ecr>/opencompany:latest && docker push <ecr>/opencompany-console:latest
 

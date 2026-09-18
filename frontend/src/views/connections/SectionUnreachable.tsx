@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
  * an expired session, a dropped connection — so the state is unknown, NOT empty.
  * Saying so keeps a transient failure from reading as "this host has no such
  * feature", which is what sent operators looking for a rebuild. Modelled on
- * `CompanyCredentialCard`'s error card.
+ * the error card of the company-credential card (deleted in #2306).
  */
 export function SectionUnreachable({ label }: { label: string }) {
   return (

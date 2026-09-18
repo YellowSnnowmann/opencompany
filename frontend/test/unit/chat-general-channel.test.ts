@@ -44,7 +44,9 @@ import {
  *    the surfaces that offer them.
  */
 
-function member(over: Partial<TeamMember> & Pick<TeamMember, "id" | "name">): TeamMember {
+function member(
+  over: Partial<TeamMember> & Pick<TeamMember, "id" | "name">,
+): TeamMember {
   return {
     role: "Engineer",
     description: "",
@@ -63,18 +65,40 @@ const ROSTER: TeamMember[] = [
 ];
 
 const DESKS: Desk[] = [
-  { id: "engineering", channel: "engineering", name: "Engineering", blurb: "", members: ["eng"] },
-  { id: "growth", channel: "growth", name: "Growth", blurb: "", members: ["ceo"] },
+  {
+    id: "engineering",
+    channel: "engineering",
+    name: "Engineering",
+    blurb: "",
+    members: ["eng"],
+  },
+  {
+    id: "growth",
+    channel: "growth",
+    name: "Growth",
+    blurb: "",
+    members: ["ceo"],
+  },
 ];
 
+// `showGeneral: true` throughout this file, because this file is ABOUT the
+// built-in channel: that a desk claiming the spelling replaces it, where it
+// sorts, what it is called. The default is off (#2368) and is asserted once, at
+// the bottom, which is the only fact the default carries.
 function channels(members: TeamMember[], desks: Desk[]) {
-  return buildChannels(members, desks, {}).find((s) => s.id === "channels")!.channels;
+  return buildChannels(members, desks, {}, true).find(
+    (s) => s.id === "channels",
+  )!.channels;
 }
 
 describe("the built-in #general channel", () => {
   it("is the first channel in a company that has real desks", () => {
     const rail = channels(ROSTER, DESKS);
-    expect(rail.map((c) => c.name)).toEqual([GENERAL_CHANNEL, "engineering", "growth"]);
+    expect(rail.map((c) => c.name)).toEqual([
+      GENERAL_CHANNEL,
+      "engineering",
+      "growth",
+    ]);
     expect(rail[0].kind).toBe("channel");
   });
 
@@ -94,7 +118,13 @@ describe("the built-in #general channel", () => {
     // host's `is_general_chat` treats `main` and `general` as one conversation
     // — while a send could pick either responder.
     const authored: Desk[] = [
-      { id: "general", channel: "general", name: "Ops lead", blurb: "The line", members: ["ceo"] },
+      {
+        id: "general",
+        channel: "general",
+        name: "Ops lead",
+        blurb: "The line",
+        members: ["ceo"],
+      },
       ...DESKS,
     ];
     const rail = channels(ROSTER, authored);
@@ -112,7 +142,13 @@ describe("the built-in #general channel", () => {
     // `responder_for` checks desks first. The UI both hid a real desk and
     // misstated the responder.
     const authored: Desk[] = [
-      { id: "main", channel: "general", name: "Front office", blurb: "The line", members: ["eng"] },
+      {
+        id: "main",
+        channel: "general",
+        name: "Front office",
+        blurb: "The line",
+        members: ["eng"],
+      },
       ...DESKS,
     ];
     const rail = channels(ROSTER, authored);
@@ -134,7 +170,13 @@ describe("the built-in #general channel", () => {
     // console's `main` to `General`, `resolve_desk_id("General")` then selects
     // `ops`, and `@everyone` on the line scopes to that desk's members.
     const namedGeneral: Desk[] = [
-      { id: "ops", channel: "general", name: "General", blurb: "The line", members: ["ceo"] },
+      {
+        id: "ops",
+        channel: "general",
+        name: "General",
+        blurb: "The line",
+        members: ["ceo"],
+      },
       ...DESKS,
     ];
     const rail = channels(ROSTER, namedGeneral);
@@ -154,8 +196,20 @@ describe("the built-in #general channel", () => {
     // The guard is the four spellings the host folds, not a fuzzy match: a
     // desk called `Generals` or `Main Street` claims nothing.
     const nearby: Desk[] = [
-      { id: "ops", channel: "generals", name: "Generals", blurb: "", members: ["ceo"] },
-      { id: "street", channel: "main-street", name: "Main Street", blurb: "", members: ["eng"] },
+      {
+        id: "ops",
+        channel: "generals",
+        name: "Generals",
+        blurb: "",
+        members: ["ceo"],
+      },
+      {
+        id: "street",
+        channel: "main-street",
+        name: "Main Street",
+        blurb: "",
+        members: ["eng"],
+      },
     ];
     const rail = channels(ROSTER, nearby);
     expect(rail.map((c) => c.id)).toEqual([MAIN_THREAD_ID, "ops", "street"]);
@@ -174,11 +228,21 @@ describe("the built-in #general channel", () => {
 
   it("holds the whole roster, derived — an agent added later is in it", () => {
     const before = channels(ROSTER, DESKS)[0];
-    expect(channelMembers(before, ROSTER)!.map((m) => m.id)).toEqual(["ceo", "eng"]);
+    expect(channelMembers(before, ROSTER)!.map((m) => m.id)).toEqual([
+      "ceo",
+      "eng",
+    ]);
 
-    const grown = [...ROSTER, member({ id: "designer", name: "Cass", role: "Designer" })];
+    const grown = [
+      ...ROSTER,
+      member({ id: "designer", name: "Cass", role: "Designer" }),
+    ];
     const after = channels(grown, DESKS)[0];
-    expect(channelMembers(after, grown)!.map((m) => m.id)).toEqual(["ceo", "eng", "designer"]);
+    expect(channelMembers(after, grown)!.map((m) => m.id)).toEqual([
+      "ceo",
+      "eng",
+      "designer",
+    ]);
 
     // Nothing about the desk list changed to make that true.
     expect(DESKS.map((d) => d.members)).toEqual([["eng"], ["ceo"]]);
@@ -214,6 +278,13 @@ describe("the built-in #general channel", () => {
     // and returns a `Channel`, never a `Desk`.
     expect(DESKS.some((d) => isGeneralChannel(d.id))).toBe(false);
   });
+  it("is offered by default alongside the declared desks", () => {
+    const built = buildChannels(ROSTER, DESKS, {})
+      .find((s) => s.id === "channels")!
+      .channels.map((c) => c.id);
+
+    expect(built).toEqual([MAIN_THREAD_ID, "engineering", "growth"]);
+  });
 });
 
 describe("resolving a host thread to the general channel", () => {
@@ -224,7 +295,9 @@ describe("resolving a host thread to the general channel", () => {
   });
 
   it("leaves a real desk thread alone", () => {
-    expect(channelIdForThread("engineering", DESKS, ROSTER)).toBe("engineering");
+    expect(channelIdForThread("engineering", DESKS, ROSTER)).toBe(
+      "engineering",
+    );
   });
 
   it("still resolves an agent DM", () => {
@@ -254,7 +327,13 @@ describe("resolving a host thread to the general channel", () => {
     expect(channelIdForThread("eng", DESKS, withMain)).toBe("dm:eng");
     // A desk still outranks both, exactly as it does on the host.
     const deskMain: Desk[] = [
-      { id: "main", channel: "front-office", name: "Front office", blurb: "", members: ["eng"] },
+      {
+        id: "main",
+        channel: "front-office",
+        name: "Front office",
+        blurb: "",
+        members: ["eng"],
+      },
     ];
     expect(channelIdForThread("main", deskMain, withMain)).toBe("main");
     // And with nobody claiming it, the fold is unchanged.
@@ -392,7 +471,13 @@ describe("resolving a host thread to the general channel", () => {
 
   it("lets a blueprint desk that authored a general id keep its own thread", () => {
     const authored: Desk[] = [
-      { id: "general", channel: "general", name: "General", blurb: "", members: ["ceo"] },
+      {
+        id: "general",
+        channel: "general",
+        name: "General",
+        blurb: "",
+        members: ["ceo"],
+      },
     ];
     expect(channelIdForThread("general", authored, ROSTER)).toBe("general");
   });
@@ -403,14 +488,26 @@ describe("resolving a host thread to the general channel", () => {
     // live frame, an unread badge or an approval link addressed to it would
     // land in a bucket the operator cannot open.
     const authored: Desk[] = [
-      { id: "general", channel: "ops-room", name: "Ops lead", blurb: "", members: ["ceo"] },
+      {
+        id: "general",
+        channel: "ops-room",
+        name: "Ops lead",
+        blurb: "",
+        members: ["ceo"],
+      },
     ];
     for (const spelling of ["", "main", "General", "general", "MAIN"]) {
       expect(channelIdForThread(spelling, authored, ROSTER)).toBe("general");
     }
     // And the same, the other way round, for a desk that authored `main`.
     const authoredMain: Desk[] = [
-      { id: "main", channel: "front-office", name: "Front office", blurb: "", members: ["eng"] },
+      {
+        id: "main",
+        channel: "front-office",
+        name: "Front office",
+        blurb: "",
+        members: ["eng"],
+      },
     ];
     for (const spelling of ["", "main", "General", "general"]) {
       expect(channelIdForThread(spelling, authoredMain, ROSTER)).toBe("main");
@@ -425,16 +522,26 @@ describe("deskClaimsGeneralChannel", () => {
   // name is exactly as real, and exactly as grandfathered, as one answering by
   // id.
   it("matches on the id or the display name", () => {
-    expect(deskClaimsGeneralChannel({ id: "general", name: "Ops lead" })).toBe(true);
-    expect(deskClaimsGeneralChannel({ id: "main", name: "Front office" })).toBe(true);
+    expect(deskClaimsGeneralChannel({ id: "general", name: "Ops lead" })).toBe(
+      true,
+    );
+    expect(deskClaimsGeneralChannel({ id: "main", name: "Front office" })).toBe(
+      true,
+    );
     expect(deskClaimsGeneralChannel({ id: "ops", name: "General" })).toBe(true);
     expect(deskClaimsGeneralChannel({ id: "ops", name: "MAIN" })).toBe(true);
   });
 
   it("matches nothing else", () => {
-    expect(deskClaimsGeneralChannel({ id: "engineering", name: "Engineering" })).toBe(false);
-    expect(deskClaimsGeneralChannel({ id: "ops", name: "Generals" })).toBe(false);
-    expect(deskClaimsGeneralChannel({ id: "street", name: "Main Street" })).toBe(false);
+    expect(
+      deskClaimsGeneralChannel({ id: "engineering", name: "Engineering" }),
+    ).toBe(false);
+    expect(deskClaimsGeneralChannel({ id: "ops", name: "Generals" })).toBe(
+      false,
+    );
+    expect(
+      deskClaimsGeneralChannel({ id: "street", name: "Main Street" }),
+    ).toBe(false);
   });
 });
 
@@ -462,7 +569,13 @@ describe("isGeneralChannel", () => {
    * padding is what let the two sides disagree in the first place.
    */
   it("does not trim, because the host does not", () => {
-    for (const padded of ["  main  ", " general", "General ", "\tmain", "main\n"]) {
+    for (const padded of [
+      "  main  ",
+      " general",
+      "General ",
+      "\tmain",
+      "main\n",
+    ]) {
       expect(isGeneralChannel(padded)).toBe(false);
     }
   });
@@ -485,7 +598,10 @@ describe("isGeneralChannel", () => {
  */
 describe("RoomView offers no desk affordance on the built-in channel", () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const chatView = readFileSync(resolve(here, "../../src/views/RoomView.tsx"), "utf8");
+  const chatView = readFileSync(
+    resolve(here, "../../src/views/RoomView.tsx"),
+    "utf8",
+  );
   // Collapsed so an assertion pins the wiring rather than the line wrapping
   // Prettier happens to choose for it.
   const source = chatView.replace(/\s+/g, " ");
@@ -502,7 +618,9 @@ describe("RoomView offers no desk affordance on the built-in channel", () => {
 
   it("does not badge anyone its lead", () => {
     // `memberIds[0]` is the roster's first row here, not a hierarchy.
-    expect(source).toContain("activeIsDesk && !active.leadless ? active.memberIds?.[0] : undefined }");
+    expect(source).toContain(
+      "activeIsDesk && !active.leadless ? active.memberIds?.[0] : undefined }",
+    );
   });
 
   it("does not offer the org-chart link that would open on a desk that does not exist", () => {
@@ -510,7 +628,9 @@ describe("RoomView offers no desk affordance on the built-in channel", () => {
   });
 
   it("no longer needs the id predicate at all", () => {
-    expect(source).toContain('import { defaultDesks, type Desk } from "@/lib/desks";');
+    expect(source).toContain(
+      'import { defaultDesks, type Desk } from "@/lib/desks";',
+    );
     expect(source).not.toContain("isGeneralChannel(active.id)");
   });
 });
@@ -530,10 +650,10 @@ describe("RoomView offers no desk affordance on the built-in channel", () => {
  */
 describe("the shell maps the main line to #general, not to the first desk", () => {
   const here2 = dirname(fileURLToPath(import.meta.url));
-  const shell = readFileSync(resolve(here2, "../../src/components/app-shell.tsx"), "utf8").replace(
-    /\s+/g,
-    " ",
-  );
+  const shell = readFileSync(
+    resolve(here2, "../../src/components/app-shell.tsx"),
+    "utf8",
+  ).replace(/\s+/g, " ");
 
   it("no longer parks the main line on the first desk", () => {
     expect(shell).not.toContain("map[MAIN_THREAD_ID] = desks[0].id");
@@ -573,7 +693,9 @@ describe("the shell maps the main line to #general, not to the first desk", () =
    */
   it("lands the unexpected-error fallback on #general too, not the first fallback desk", () => {
     expect(shell).toContain("setFirstDeskChannelId(MAIN_THREAD_ID);");
-    expect(shell).not.toContain("setFirstDeskChannelId(fallbackDesks[0]?.id ?? null);");
+    expect(shell).not.toContain(
+      "setFirstDeskChannelId(fallbackDesks[0]?.id ?? null);",
+    );
   });
 
   it("names #general as a rehydration target on the unexpected-error fallback too", () => {
@@ -610,7 +732,13 @@ describe("the shell maps the main line to #general, not to the first desk", () =
  * recovers the durable history.
  */
 describe("resolving a live frame's thread id against the shell's map", () => {
-  const MAP = { "": "main", main: "main", General: "main", general: "main", eng: "dm:eng" };
+  const MAP = {
+    "": "main",
+    main: "main",
+    General: "main",
+    general: "main",
+    eng: "dm:eng",
+  };
 
   it("matches exactly when it can", () => {
     expect(channelForThread(MAP, "eng")).toBe("dm:eng");
@@ -624,7 +752,12 @@ describe("resolving a live frame's thread id against the shell's map", () => {
   });
 
   it("follows the map to a grandfathered desk rather than assuming `main`", () => {
-    const owned = { "": "general", main: "general", General: "general", general: "general" };
+    const owned = {
+      "": "general",
+      main: "general",
+      General: "general",
+      general: "general",
+    };
     expect(channelForThread(owned, "MAIN")).toBe("general");
   });
 
@@ -660,10 +793,15 @@ describe("resolving a live frame's thread id against the shell's map", () => {
  */
 describe("the shell resolves every thread-to-channel lookup through channelForThread", () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const shell = readFileSync(resolve(here, "../../src/components/app-shell.tsx"), "utf8");
+  const shell = readFileSync(
+    resolve(here, "../../src/components/app-shell.tsx"),
+    "utf8",
+  );
 
   it("resolves a live reply's channel through the fold, not a bare index", () => {
-    expect(shell).toContain("channelForThread(chatChannelByThread, event.chatId)");
+    expect(shell).toContain(
+      "channelForThread(chatChannelByThread, event.chatId)",
+    );
     expect(shell).not.toContain("chatChannelByThread[event.chatId]");
   });
 
@@ -677,7 +815,9 @@ describe("the shell resolves every thread-to-channel lookup through channelForTh
     // It was two while `#/conversation` had its own view-report path; that
     // surface is retired, and the settled-thread re-read is the one that
     // remains.
-    const matches = shell.match(/channelForThread\(chatChannelByThreadRef\.current, threadId\)/g);
+    const matches = shell.match(
+      /channelForThread\(chatChannelByThreadRef\.current, threadId\)/g,
+    );
     expect(matches?.length ?? 0).toBe(1);
     expect(shell).not.toContain("chatChannelByThreadRef.current[threadId]");
   });
@@ -699,6 +839,8 @@ describe("the shell resolves every thread-to-channel lookup through channelForTh
     expect(shell).toContain(
       "...(operatorChannel ? { [operatorChannel.id]: operatorChannel.id } : {})",
     );
-    expect(shell).not.toContain("setChatChannelByThread(channelMap(chatDesks, roster));");
+    expect(shell).not.toContain(
+      "setChatChannelByThread(channelMap(chatDesks, roster));",
+    );
   });
 });

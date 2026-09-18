@@ -10,8 +10,9 @@
 #
 # Members:
 # - `crates/opencompany-core` — the host (library crate `opencompany`, binary
-#   `opencompany`). Its sources still live here at the root (`src/`, `tests/`,
-#   `benches/`, `examples/`, `build.rs`); the member manifest points at them.
+#   `opencompany`), with its `src/`, `tests/`, `benches/`, `examples/` and
+#   `build.rs` beneath it. The data it embeds (`companies/`) and `vendor/`
+#   stay here at the root.
 # - `crates/opencompany-tui` — the terminal client, embedding the host.
 #
 # Excluded:
@@ -25,7 +26,7 @@ members = ["crates/opencompany-core", "crates/opencompany-tui"]
 exclude = ["vendor", "worktrees", "crates/opencompany-app"]
 
 [workspace.package]
-version = "0.1.6"
+version = "0.2.4"
 edition = "2024"
 license = "GPL-3.0-only"
 repository = "https://github.com/tinyhumansai/opencompany"
@@ -106,3 +107,10 @@ tinychannels = { path = "vendor/openhuman/vendor/tinychannels" }
 # the vendored copy is `default-features = false` on reqwest.
 motosan-ai-oauth = { path = "vendor/openhuman/vendor/motosan-ai-oauth" }
 whisper-rs-sys = { git = "https://github.com/tinyhumansai/whisper-rs-sys.git", branch = "main" }
+
+# Keep line tables in release artifacts for Sentry symbolication. Cargo emits
+# packed platform companions (dSYM/DWP/PDB); shipped binaries stay stripped.
+[profile.release]
+debug = "line-tables-only"
+split-debuginfo = "packed"
+strip = "symbols"

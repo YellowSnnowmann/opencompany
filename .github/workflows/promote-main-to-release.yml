@@ -5,9 +5,13 @@
 #   promote-main-to-release  →  release-staging  →  release-production
 #
 # A maintainer dispatches this to take a snapshot of main. It pushes a merge
-# commit from main into `release` directly — no PR — and then dispatches `ci.yml`
-# against `release` so the snapshot gets a CI run (see "Run CI" below for why
-# that has to be explicit). Production releases are cut from `release` only;
+# commit from main into `release` directly — no PR. The push is made as the
+# `tiny-humans-bot` GitHub App, not with GITHUB_TOKEN: `release` is protected by
+# the `Protect release` ruleset (repository settings → Rules), which requires a pull
+# request for every push and lists the App — and only the App — as an actor
+# allowed to bypass that. A push made with GITHUB_TOKEN would be rejected. The
+# App's push also fires `push` workflows, so `ci.yml` runs on the promoted
+# `release` without an explicit dispatch. Production releases are cut from `release` only;
 # staging cuts may come from `main` or `release`. Fixes for anything found on
 # `release` are PRs opened against `release`; each cut merges `release` back
 # into main so nothing is lost.
@@ -23,9 +27,9 @@ name: Promote main to release
 on:
   workflow_dispatch: {}
 
+# The App token below is what pushes; GITHUB_TOKEN needs nothing beyond read.
 permissions:
-  contents: write
-  actions: write # to dispatch ci.yml on the promoted branch
+  contents: read
 
 concurrency:
   group: promote-main-to-release
@@ -36,6 +40,11 @@ jobs:
     name: Merge main into release
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The XGITHUB_APP_* secrets live in this environment, never at repo level.
+    # It holds ONLY those two secrets and is branch-policied to `main` and
+    # `release`, so no other ref can claim it and a compromised build step
+    # elsewhere never sees a token that can bypass the branch rulesets.
+    environment: Release-PR-Automation
     steps:
       - name: Guard dispatch ref
         if: github.ref != 'refs/heads/main'
@@ -43,16 +52,34 @@ jobs:
           echo "::error::Dispatch this workflow from main (got $GITHUB_REF). It merges main into release; the ref it runs from is main by definition." >&2
           exit 1
 
+      # Least privilege: this job only pushes the promotion merge commit to
+      # `release` — contents: write covers that. It also needs workflows:
+      # write: the merge commit can carry changes under `.github/workflows/**`
+      # that landed on `main` but not yet on `release`, and GitHub rejects a
+      # GitHub App push that touches a workflow file unless the token holds
+      # that permission explicitly — a contents-only token fails the push at
+      # that point, not at review time. Branch-ruleset bypass comes from the
+      # App's identity in the ruleset bypass list, not from token scopes.
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.XGITHUB_APP_ID }}
+          private-key: ${{ secrets.XGITHUB_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+
       - name: Checkout main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
-          # This job PUSHES. `actions/checkout` stores GITHUB_TOKEN as an
+          # This job PUSHES. `actions/checkout` stores the App token as an
           # `http.extraheader` for this checkout only, which is what `git push`
           # below authenticates with — no token in a remote URL, nothing that
           # `set -x` could ever print. Every other checkout in this repo says
           # `false`; those jobs do not push.
+          token: ${{ steps.app-token.outputs.token }}
           persist-credentials: true
 
       - name: Merge main into release and push
@@ -91,16 +118,7 @@ jobs:
           log "release advanced to $(git rev-parse HEAD)"
           echo "promoted=true" >> "$GITHUB_ENV"
 
-      # A push made with GITHUB_TOKEN does not fire `push` workflows — GitHub's
-      # guard against workflows triggering themselves forever. So the merge
-      # commit on `release` would otherwise sit there with no CI run, and the
-      # next production cut would be the first thing to compile it. Dispatch
-      # the run explicitly instead; `ci.yml` accepts `workflow_dispatch` for
-      # exactly this.
-      - name: Run CI on release
+      - name: Summarise
         if: env.promoted == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh workflow run ci.yml --ref release -R "$GITHUB_REPOSITORY"
-          echo "Dispatched ci.yml on release. Next: dispatch **Release Staging** or **Release Production** from the \`release\` branch." >> "$GITHUB_STEP_SUMMARY"
+          echo "Promoted main into release; the App push fires ci.yml on release by itself. Next: dispatch **Release Staging** or **Release Production** from the \`release\` branch." >> "$GITHUB_STEP_SUMMARY"

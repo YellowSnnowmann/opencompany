@@ -194,7 +194,7 @@ One consequence worth knowing:
   operator-visible warning naming both roots whenever they are not aligned.
   Prefer `OPENCOMPANY_DATA_DIR`, which moves the whole instance. A hosted tenant
   sets both to the same value
-  (`docker/entrypoint.sh` passes `--home "$OPENCOMPANY_DATA_DIR"`), so it never
+  (`deploy/entrypoint.sh` passes `--home "$OPENCOMPANY_DATA_DIR"`), so it never
   warns — nor does the local default, whose home and data root are now the same
   path. Passing `--home ~/.opencompany/companies` by hand recreates the legacy
   doubled shape below and does warn, correctly.

@@ -1,6 +1,6 @@
 // The avatar reference grammar, and the two rules it exists to keep.
 //
-// The grammar is mirrored in two places — `src/company/avatar.rs` validates it
+// The grammar is mirrored in two places — `crates/opencompany-core/src/company/avatar.rs` validates it
 // and `src/lib/avatar.ts` renders it — so the first test here reads the Rust
 // source and asserts the flavour lists match. A flavour one side accepts and the
 // other has no file for renders as a broken image on every surface at once, and
@@ -27,7 +27,7 @@ const repoRoot = resolve(here, "../../..");
 
 describe("the tiny flavours", () => {
   it("are the same list the host validates against", () => {
-    const rust = readFileSync(resolve(repoRoot, "src/company/avatar.rs"), "utf8");
+    const rust = readFileSync(resolve(repoRoot, "crates/opencompany-core/src/company/avatar.rs"), "utf8");
     const block = /pub const TINY_FLAVOURS: \[&str; \d+\] = \[([^\]]*)\]/s.exec(rust);
     expect(block, "TINY_FLAVOURS is no longer declared the way this test reads it").not.toBeNull();
     const hostFlavours = Array.from(block![1].matchAll(/"([a-z]+)"/g), (m) => m[1]);
@@ -47,7 +47,7 @@ describe("the upload ceiling", () => {
     // The picker prints this before anybody picks a file; the host is what
     // actually refuses. Two different figures would mean the copy promises a
     // size the upload then rejects.
-    const rust = readFileSync(resolve(repoRoot, "src/company/avatar.rs"), "utf8");
+    const rust = readFileSync(resolve(repoRoot, "crates/opencompany-core/src/company/avatar.rs"), "utf8");
     const bytes = /MAX_AVATAR_BYTES: usize = (\d+) \* 1024 \* 1024/.exec(rust);
     expect(bytes, "MAX_AVATAR_BYTES is no longer declared the way this test reads it").not.toBeNull();
     expect(Number(bytes![1])).toBe(MAX_AVATAR_MB);

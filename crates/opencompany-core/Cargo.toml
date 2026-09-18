@@ -4,16 +4,14 @@
 # resolves unchanged. `-p opencompany-core` and `opencompany-core/<feature>` name
 # the package; `opencompany::` names the crate. Deliberate.
 #
-# The sources still live at the repository root — `src/`, `tests/`, `benches/`,
-# `examples/` and `build.rs` — and every target below points at them with a
-# `../../` path. That is a transitional shape: many open pull requests touch
-# `src/`, and moving it would conflict with all of them at once. Moving the tree
-# under this directory is a follow-up; nothing else about the crate changes
-# when it happens. Until then `autobins`/`autotests`/`autobenches` are off
-# because Cargo only auto-discovers targets beneath the manifest, and
-# `scripts/ci/assert-integration-targets-run.sh` fails on any `tests/*.rs`
-# without a `[[test]]` entry here — the same silent-zero hazard issue #475
-# closed for the old layout.
+# The sources live beneath this manifest — `src/`, `tests/`, `benches/`,
+# `examples/` and `build.rs` — so `CARGO_MANIFEST_DIR` is their parent, and the
+# repository root (`companies/`, `frontend/`, `vendor/`,
+# the workspace `Cargo.lock`) is `../..` from it. Auto-discovery stays off all
+# the same: `scripts/ci/assert-integration-targets-run.sh` reads the `[[test]]`
+# entries here to decide which integration targets must run something, and a
+# `tests/*.rs` with no entry fails it. That is the silent-zero hazard issue
+# #475 closed, kept explicit rather than left to what Cargo happens to find.
 #
 # `[patch]` tables live in the workspace root `Cargo.toml`, where Cargo honours
 # them; they are ignored in a member manifest.
@@ -25,49 +23,53 @@ license.workspace = true
 repository.workspace = true
 description = "Company operating system scaffold built on OpenHuman and TinyHumans Rust modules."
 readme = "../../README.md"
-build = "../../build.rs"
+build = "build.rs"
 keywords = ["company", "agents", "openhuman", "tinyagents", "axum"]
 categories = ["web-programming", "asynchronous"]
 # Each example is a standalone workspace member crate, not a bare-file example
 # target of the host crate.
 autoexamples = false
-# The targets are not beneath this manifest (see the header), so nothing is
-# auto-discovered; every target is declared explicitly below.
+# Every target is declared explicitly below (see the header); nothing relies
+# on discovery.
 autobins = false
 autotests = false
 autobenches = false
 
 [lib]
 name = "opencompany"
-path = "../../src/lib.rs"
+path = "src/lib.rs"
 
 [[bin]]
 name = "opencompany"
-path = "../../src/bin/opencompany.rs"
+path = "src/bin/opencompany.rs"
 
 [[test]]
 name = "auth_matrix"
-path = "../../tests/auth_matrix.rs"
+path = "tests/auth_matrix.rs"
 
 [[test]]
 name = "desktop_e2e"
-path = "../../tests/desktop_e2e.rs"
+path = "tests/desktop_e2e.rs"
+
+[[test]]
+name = "desktop_serve_parity"
+path = "tests/desktop_serve_parity.rs"
 
 [[test]]
 name = "hivemind_e2e"
-path = "../../tests/hivemind_e2e.rs"
+path = "tests/hivemind_e2e.rs"
 
 [[test]]
 name = "offline_e2e"
-path = "../../tests/offline_e2e.rs"
+path = "tests/offline_e2e.rs"
 
 [[test]]
 name = "one_card_per_message"
-path = "../../tests/one_card_per_message.rs"
+path = "tests/one_card_per_message.rs"
 
 [[test]]
 name = "product_identity"
-path = "../../tests/product_identity.rs"
+path = "tests/product_identity.rs"
 
 # Live end-to-end smoke for issue #9: one company agent on the embedded
 # OpenHuman runtime, one turn against the hosted brain. Needs a credential, so
@@ -75,7 +77,7 @@ path = "../../tests/product_identity.rs"
 # the default `cargo build`/CI.
 [[example]]
 name = "live_company_turn"
-path = "../../examples/live_company_turn.rs"
+path = "examples/live_company_turn.rs"
 required-features = ["openhuman"]
 
 # Server-only end-to-end drive of team orchestration: a company template on the
@@ -84,13 +86,13 @@ required-features = ["openhuman"]
 # example anyone can run — but it is not built by the default `cargo build`.
 [[example]]
 name = "team_orchestration_e2e"
-path = "../../examples/team_orchestration_e2e.rs"
+path = "examples/team_orchestration_e2e.rs"
 required-features = ["openhuman", "mcp"]
 
 [dependencies]
 # Compiles agent-authored `Page.tsx` (issue: agent-authored dashboard pages)
 # into browser-runnable JS inside `pages_write` (`src/harness/pages_tools.rs`).
-# The runtime image's builder stage (see `Dockerfile`) has no Node — only the
+# The runtime image's builder stage (see `deploy/Dockerfile`) has no Node — only the
 # separate frontend Docker build stage does — so turning agent-written TSX into
 # something a browser can run has to happen as a Rust-native step, at request
 # time, inside this binary. `swc_core` is a pure-Rust TS/JSX compiler with no
@@ -220,7 +222,7 @@ tinyinference = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/tinyin
 # behind them (`openhuman::hosting`), which is what lets a company put its
 # workspace on a real hosting provider. Taken without OpenHuman's TinyBus
 # module: `tinyhosts` is linked as a library, so nothing here loads a cdylib.
-openhuman_core = { package = "openhuman", path = "../../vendor/openhuman", optional = true, default-features = false, features = ["skills", "mcp", "hosting"] }
+openhuman_core = { package = "openhuman", path = "../../vendor/openhuman/crates/openhuman-core", optional = true, default-features = false, features = ["skills", "mcp", "hosting"] }
 
 # Desks, rosters, mentions and shared session transcripts — the pure algebra
 # behind a group chat several teammates share (`vendor/tinyhivemind`). It is the
@@ -242,7 +244,7 @@ tinyhivemind-core = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-core
 # calls it yet. The adapter that implements the port lives in
 # `runtime::hivemind` behind the `hivemind` feature, and no turn is wired to it;
 # vendoring it enabled would claim a behavior change this build does not make.
-tinyhivemind = { path = "../../vendor/tinyhivemind/crates/tinyhivemind", optional = true }
+tinyhivemind = { path = "../../vendor/tinyhivemind/crates/tinyhivemind" }
 
 # The MCP client, extracted out of OpenHuman into its own crate. OpenHuman's
 # `oh::mcp::http_client` facade still re-exports the transport and the payload
@@ -608,7 +610,7 @@ tinyplace = ["dep:reqwest"]
 # The `tinyhivemind` session adapter (`runtime::hivemind`). Off by default and
 # wired to nothing: it compiles the port implementation and runs its tests, so
 # the projection can be adopted by a later change that is only about adoption.
-hivemind = ["dep:tinyhivemind"]
+hivemind = []
 # The Agent Client Protocol: the `/acp` endpoint's session/permission surface
 # and the `RunTurn` implementation over an ACP agent.
 #
@@ -776,7 +778,7 @@ criterion = { version = "0.8", default-features = false, features = [
 # nothing to gate on.
 [[bench]]
 name = "journal_append"
-path = "../../benches/journal_append.rs"
+path = "benches/journal_append.rs"
 harness = false
 
 # Issue #1890 G. Opt-in for the same reason as the bench above: it measures the
@@ -785,6 +787,5 @@ harness = false
 # gate on.
 [[bench]]
 name = "journal_read_before"
-path = "../../benches/journal_read_before.rs"
+path = "benches/journal_read_before.rs"
 harness = false
-

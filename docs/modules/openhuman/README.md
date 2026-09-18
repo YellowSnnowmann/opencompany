@@ -78,7 +78,7 @@ default model, most specific first:
 | Value | Source | Fallback |
 | --- | --- | --- |
 | key | `OPENCOMPANY_INFERENCE_KEY` | `TINYHUMANS_API_KEY` — **no key ⇒ echo brain** |
-| url | `OPENCOMPANY_INFERENCE_URL` | `https://api.tinyhumans.ai/openai/v1` |
+| url | `OPENCOMPANY_INFERENCE_URL` | `{TINYHUMANS_API_URL}/agent-integrations/openrouter` |
 | model | `OPENCOMPANY_INFERENCE_MODEL` | `chat-v1` |
 | window | `OPENCOMPANY_CONTEXT_WINDOW` | `240000` — context window advertised on the managed profile; `off`/`0` disables compression and trimming. Lower it for a smaller model — see [history protection](../runtime/providers.md#history-protection) |
 

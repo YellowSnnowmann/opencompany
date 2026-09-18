@@ -169,15 +169,38 @@ pub async fn start_with(
     );
     opencompany::product::install_into_embedded_core();
 
+    // The host-wide layers — the process environment, then this root's
+    // `config.toml` — resolved through the pass every host shares. What is
+    // spelled out below is only what this host owns: the loopback bind and the
+    // sign-in default.
+    let config_file = opencompany::app::config::ConfigFile::load(instance.home())?;
+
+    // Bound HERE, before the config exists, so the config can name the port the
+    // OS actually chose. It used to be bound after, with `bind` left reading
+    // the literal `127.0.0.1:0` it was asked for — and everything that derives
+    // an address from `config().bind` then said port `0`: a TinyHumans key
+    // grant sent the browser back to `http://127.0.0.1:0/…`, which Chrome
+    // refuses outright (`ERR_UNSAFE_PORT`), and an MCP OAuth redirect URI was
+    // registered the same way. `bind` is what `host_base_url()` reads, so it
+    // has to be the truth, not the request.
+    //
+    // `127.0.0.1:0`, never `0.0.0.0`: an embedded instance is this machine's,
+    // and a routable address would publish someone's company to their café.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|error| {
+            opencompany::error::OpenCompanyError::Config(format!(
+                "could not bind `127.0.0.1:0`: {error}"
+            ))
+        })?;
+    let address = listener.local_addr().map_err(|error| {
+        opencompany::error::OpenCompanyError::Config(format!(
+            "could not read the embedded host's bound address: {error}"
+        ))
+    })?;
+
     let config = AppConfig {
-        bind: "127.0.0.1:0".to_string(),
-        // The `[workspace]` section of the root's `config.toml`, resolved by
-        // `prepare_instance`. Not layout — these two are the knobs every
-        // company builder reads — but they come from the same file, and `serve`
-        // sets them from it. A desktop that skipped them ran with the
-        // compiled-in defaults and silently ignored the operator's config.
-        workspace_quota: instance.workspace().quota,
-        workspace_git_enabled: instance.workspace().git_enabled,
+        bind: address.to_string(),
         // No sign-in, for every company this host serves.
         //
         // A desktop install is one machine and one person: there is nobody to
@@ -212,15 +235,15 @@ pub async fn start_with(
         // it names a mode, because the setup wizard writes that key and an
         // operator who deliberately turned a sign-in on — to share their
         // instance with somebody — must not find it off again at the next
-        // launch. This host builds its config by hand rather than through
-        // `AppConfig::load`, so that layer reaches it only here.
+        // launch.
         auth_mode_override: Some(
             instance
                 .auth_mode()
                 .unwrap_or(opencompany::app::config::AuthMode::None),
         ),
-        ..AppConfig::default()
+        ..AppConfig::resolve_host(&opencompany::app::config::ProcessEnv, config_file.as_ref())?
     };
+    let api_url = config.api_url.clone();
     let state = AppState::new(config)
         .with_home(instance.home().to_path_buf())
         // Issue #1245: the desktop is the one place with an
@@ -236,7 +259,20 @@ pub async fn start_with(
         //
         // Wired before any company registers, matching `serve`, so the first
         // edit on a freshly booted host already has a rebuilder to reach for.
-        .with_rebuilder(std::sync::Arc::new(opencompany::desktop::DesktopRebuilder));
+        .with_rebuilder(std::sync::Arc::new(opencompany::desktop::DesktopRebuilder))
+        // Without this `hub_identity()` is `None`, and every surface that asks
+        // the hub whose token this is answers as though the host belonged to no
+        // ecosystem: the Account page reports the balance unknown, and
+        // `credential/link/start` refuses before it builds a URL. Unconditional
+        // rather than `#[cfg]`-guarded, for the same reason
+        // `install_into_embedded_core` above is: this crate's `opencompany`
+        // dependency enables `tinyhumans` outright, so a desktop build without
+        // the exchange is not a shape that exists — and if that dependency line
+        // ever loses the feature, this stops compiling rather than shipping a
+        // host that silently disowns its own account.
+        .with_hub_identity(std::sync::Arc::new(
+            opencompany::server::hub_identity::HttpHubIdentityExchange::new(api_url),
+        ));
     // Read before `state` moves into `bind`. Minting here rather than on the
     // first `/spec` also means the console can be told who this host is without
     // waiting to contact it — which is the whole point, since the address it
@@ -280,19 +316,10 @@ pub async fn start_with(
     // below is already stopped, rather than plumbing a second shutdown path
     // through a struct that otherwise has none.
     let sweeper = state.spawn_acp_session_sweeper(std::sync::Arc::new(tokio::sync::Notify::new()));
-    let (address, serving) = match opencompany::server::bind("127.0.0.1:0", state).await {
-        Ok(bound) => bound,
-        Err(error) => {
-            // The sweeper was already running (an infinite loop with no other
-            // shutdown path here), so a failed bind must abort it explicitly
-            // or it outlives this whole attempt — one more sweeper leaked per
-            // retry a caller makes after a busy-port failure.
-            sweeper.abort();
-            return Err(error);
-        }
-    };
+    // The listener was bound at the top of this function (see there for why),
+    // so nothing here can fail between starting the sweeper and serving.
     let server = tokio::spawn(async move {
-        if let Err(error) = serving.run().await {
+        if let Err(error) = opencompany::server::serve_on(listener, state).await {
             tracing::error!(%error, "the embedded host stopped");
         }
     });
@@ -315,266 +342,5 @@ pub async fn start_with(
 }
 
 #[cfg(test)]
-mod test {
-    use super::*;
-
-    /// Issue #632, end to end: a packaged install must be enterable with no
-    /// terminal, no mail server and no platform credential.
-    ///
-    /// It used to be enterable by *signing in*: the shell asked for a magic
-    /// link at a synthetic loopback mailbox, read the code back out of the
-    /// response, and redeemed it for a cookie. That is gone. The desktop runs
-    /// [`AuthMode::None`], where the person at the machine is the principal by
-    /// configuration — so the console's very first request is already
-    /// authenticated and there is no screen in front of it.
-    ///
-    /// The change is worth stating as more than a simplification: the shell had
-    /// no working session carrier for that cookie in the first place. The proxy
-    /// client holds no cookie store, `x-opencompany-session` is stripped as a
-    /// reserved header, and `needsCarriedSession()` is false on desktop — so the
-    /// session the magic link minted was discarded the moment it arrived, and
-    /// what actually let the console through was that every request came from
-    /// loopback anyway.
-    ///
-    /// Over HTTP rather than against the registry, because the point is the
-    /// request the console makes: the company has to exist *and* be reachable
-    /// through the sole-company alias the console addresses before it knows any
-    /// id, and the principal has to resolve with nothing presented. Asserting a
-    /// company was registered would prove neither.
-    ///
-    /// Seeded explicitly through [`start`], because a launched install no longer
-    /// seeds — it opens the wizard instead (`local::start_at`). What is under
-    /// test here is the host once it *has* a company, which is where a launched
-    /// install arrives the moment setup completes.
-    #[tokio::test]
-    async fn a_host_with_a_company_opens_with_no_sign_in() {
-        let dir = tempfile::tempdir().unwrap();
-        let host = start(dir.path().to_path_buf()).await.expect("host starts");
-        let base = host.base_url();
-        let http = reqwest::Client::new();
-
-        assert_eq!(
-            host.companies().len(),
-            1,
-            "the seeding entry point registers exactly one starter company"
-        );
-
-        // Where the console starts, and where it used to stop with a 401.
-        let listed = http
-            .get(format!("{base}/api/v1/companies"))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            listed.status(),
-            200,
-            "an unauthenticated loopback request is the owner's, by configuration"
-        );
-        let companies: serde_json::Value = listed.json().await.unwrap();
-        assert_eq!(
-            companies.as_array().map(Vec::len),
-            Some(1),
-            "and it sees the company: {companies}"
-        );
-
-        // Attributed to a real stored record rather than a principal invented
-        // per request — chat, task assignment and the audit trail all key off
-        // `UserRecord::id`. Asked through the sole-company alias, which is what
-        // the console addresses before it has discovered any id.
-        let me: serde_json::Value = http
-            .get(format!("{base}/api/v1/company/auth/me"))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert_eq!(me["email"], "local:owner", "{me}");
-        assert_eq!(
-            me["role"], "admin",
-            "the write plane has to work, and there is nobody to outrank: {me}"
-        );
-
-        // And no second way in survives beside it. A host that still answered
-        // `auth/request` would be one where the mode had not actually reached
-        // the company — the seeded manifest names no mode of its own.
-        let requested = http
-            .post(format!("{base}/api/v1/company/auth/request"))
-            .json(&serde_json::json!({ "email": "someone@example.com" }))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            requested.status(),
-            409,
-            "a magic link is refused by mode, not answered with a silent 202"
-        );
-    }
-
-    /// A `none`-mode desktop is the **default**, not a ceiling.
-    ///
-    /// The setup wizard offers all three modes on a loopback host, and an
-    /// operator who wants to share their instance with a colleague can pick
-    /// `email` — it writes `auth_mode` to the root's `config.toml` and applies
-    /// it live. But this host builds its `AppConfig` by hand rather than through
-    /// `AppConfig::load`, so a mode forced in the literal above would be a mode
-    /// the file can never win against: the choice would hold until quit and
-    /// silently revert on the next launch, which is precisely the "configuration
-    /// ignored" failure the setup surface exists to prevent.
-    ///
-    /// So the file is read and `none` is what it falls back to.
-    #[tokio::test]
-    async fn a_configured_sign_in_survives_a_relaunch() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("config.toml"), "auth_mode = \"email\"\n").unwrap();
-
-        let host = start(dir.path().to_path_buf()).await.expect("host starts");
-        let requested = reqwest::Client::new()
-            .post(format!("{}/api/v1/company/auth/request", host.base_url()))
-            .json(&serde_json::json!({ "email": "ada@example.com" }))
-            .send()
-            .await
-            .unwrap();
-
-        assert_ne!(
-            requested.status(),
-            409,
-            "409 is `auth_mode` refusing the route by mode — the file said email"
-        );
-    }
-
-    /// The starter company is seeded once, not per launch.
-    #[tokio::test]
-    async fn a_relaunch_reuses_the_company_the_root_already_holds() {
-        let dir = tempfile::tempdir().unwrap();
-        let first = start(dir.path().to_path_buf()).await.unwrap();
-        let seeded = first.companies().to_vec();
-        drop(first);
-
-        // `take_root` retries because the data root is released asynchronously;
-        // see the note in `stopping_a_host_frees_its_root_and_its_port`.
-        let relaunched = take_root(dir.path().to_path_buf()).await;
-        assert_eq!(relaunched.companies(), seeded.as_slice());
-    }
-
-    #[tokio::test]
-    async fn an_embedded_host_answers_on_loopback() {
-        let dir = tempfile::tempdir().unwrap();
-        let host = start(dir.path().to_path_buf()).await.expect("host starts");
-
-        assert!(host.address().ip().is_loopback(), "must never be routable");
-        assert_ne!(
-            host.address().port(),
-            0,
-            "the OS-chosen port must be reported"
-        );
-
-        let health = reqwest::get(format!("{}/healthz", host.base_url()))
-            .await
-            .expect("the reported address is reachable");
-        assert!(health.status().is_success());
-    }
-
-    #[tokio::test]
-    async fn the_embedded_host_holds_its_data_root() {
-        // The desktop being launched twice is ordinary rather than exceptional,
-        // and two hosts over one root overwrite each other's companies.
-        let dir = tempfile::tempdir().unwrap();
-        let _first = start(dir.path().to_path_buf())
-            .await
-            .expect("the first starts");
-
-        let second = start(dir.path().to_path_buf()).await;
-        assert!(
-            second.is_err(),
-            "a second host over one root must be refused"
-        );
-    }
-
-    #[tokio::test]
-    async fn two_embedded_hosts_over_different_roots_coexist() {
-        let a = tempfile::tempdir().unwrap();
-        let b = tempfile::tempdir().unwrap();
-        let first = start(a.path().to_path_buf()).await.unwrap();
-        let second = start(b.path().to_path_buf()).await.unwrap();
-        assert_ne!(first.address().port(), second.address().port());
-    }
-
-    #[tokio::test]
-    async fn stopping_a_host_frees_its_root_and_its_port() {
-        let dir = tempfile::tempdir().unwrap();
-        let host = start(dir.path().to_path_buf()).await.unwrap();
-        drop(host);
-
-        // Both resources come back: a desktop restarted after a clean quit must
-        // start, and it must not leak a listener per restart.
-        //
-        // Retried briefly, and the reason is worth recording rather than
-        // hiding behind a sleep. `flock` belongs to the *open file
-        // description*, and between `fork()` and `exec()` a concurrently
-        // spawned child shares every descriptor its parent had. So if anything
-        // else in this process spawns a subprocess in the same instant this
-        // host releases its root — and the suite does, constantly: `git` in the
-        // worktree tests, `python3` in the ACP ones — the lock survives until
-        // that child reaches `exec` and `O_CLOEXEC` closes it. Microseconds,
-        // and reproducible here about one run in five.
-        //
-        // Not worth engineering away: the production shape is a person quitting
-        // and relaunching seconds later, and a harness the desktop spawned
-        // always execs. Asserting instantaneous release would be asserting
-        // something stricter than the product needs, so this asserts what it
-        // does need — that the root comes back promptly.
-        let mut last = None;
-        for _ in 0..50 {
-            match start(dir.path().to_path_buf()).await {
-                Ok(host) => {
-                    assert_ne!(host.address().port(), 0);
-                    return;
-                }
-                Err(error) => last = Some(error),
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!("a released root must become takeable: {last:?}");
-    }
-
-    /// The property the console keys its connection list on (#615).
-    ///
-    /// The port deliberately changes on every launch, so a client that
-    /// recognises this host by address recognises a *new* host every run and
-    /// the dead ones pile up in its sidebar. The identity is what survives
-    /// exactly that restart, and this is the assertion the fix rests on.
-    ///
-    /// The complementary half — that the port does *not* survive — is left
-    /// unasserted on purpose: the OS is free to hand the same ephemeral port
-    /// back, so `assert_ne!` on it would be asserting a coincidence. Two
-    /// concurrent hosts differing is covered by
-    /// `two_embedded_hosts_over_different_roots_coexist`.
-    #[tokio::test]
-    async fn a_restarted_host_keeps_its_identity() {
-        let dir = tempfile::tempdir().unwrap();
-        let first = start(dir.path().to_path_buf()).await.unwrap();
-        let id = first.instance_id().to_string();
-        assert!(!id.is_empty(), "a host must report an identity");
-        drop(first);
-
-        let second = take_root(dir.path().to_path_buf()).await;
-        assert_eq!(second.instance_id(), id, "the same root is the same host");
-    }
-
-    /// Starts over `root`, retrying while a just-released `flock` clears.
-    ///
-    /// See `stopping_a_host_frees_its_root_and_its_port` for why the release is
-    /// not instantaneous.
-    async fn take_root(root: PathBuf) -> EmbeddedHost {
-        let mut last = None;
-        for _ in 0..50 {
-            match start(root.clone()).await {
-                Ok(host) => return host,
-                Err(error) => last = Some(error),
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!("a released root must become takeable: {last:?}");
-    }
-}
+#[path = "embedded_tests.rs"]
+mod tests;

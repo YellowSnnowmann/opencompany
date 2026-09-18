@@ -70,6 +70,11 @@ development mode. Pass a friendly site name (or any directory name under
 ./scripts/launch-demo.sh marketing down -v
 ```
 
+The launcher works with Docker Compose and with Podman's Docker-compatible CLI
+plus Compose provider (for example, the `podman-docker` and `podman-compose`
+packages). The rootless Podman warning that `/` is not a shared mount is
+informational for these repository bind mounts.
+
 The launcher bind-mounts the local checkout. Vite hot-updates frontend edits;
 `cargo-watch` rebuilds and restarts the backend when Rust source, Cargo files,
 or company definitions change. The first start builds the development images
@@ -84,6 +89,13 @@ a password, boots and stops the backend as needed, then writes the credential:
 ./scripts/launch-demo.sh marketing up
 ```
 
+The helper's Docker-free regression test checks the Compose files, selected
+company, and password command without starting containers:
+
+```sh
+./scripts/test-init-demo-admin.sh
+```
+
 If you run `down -v`, that account is deleted with the rest of the persistent
 demo data and must be initialized again.
 
@@ -92,9 +104,9 @@ company. Each company uses a separate Compose project and persistent data
 volume. `down` removes its containers and network but keeps that volume;
 `down -v` deletes the volume and its data too.
 
-For custom ports, credentials, or feature flags, copy `.env.example` to `.env`
+For custom ports, credentials, or feature flags, copy `deploy/.env.example` to `deploy/.env`
 before launching. For production-like images without source mounts or hot
-reload, run `OPENCOMPANY_COMPANY=marketing docker compose up --build` directly.
+reload, run `OPENCOMPANY_COMPANY=marketing docker compose -f deploy/docker-compose.yml up --build` directly.
 
 ## Feature flags
 
@@ -148,5 +160,5 @@ The same two images deploy anywhere Docker runs:
 | AWS Fargate | [`deploy/aws-ecs-task-definition.json`](../deploy/aws-ecs-task-definition.json) |
 | Any Docker host | [`deploy/README.md`](../deploy/README.md) |
 
-Checking a release against a deployed tenant is [`qa/`](../qa/README.md): a
+Checking a release against a deployed tenant is [`scripts/qa/`](../scripts/qa/README.md): a
 zero-dependency console script and the checklist that goes with it.

@@ -13,7 +13,7 @@ and each has a test pinning that.
 
 | Slot | Set by | Means |
 |---|---|---|
-| `composio/token` | `PUT {scope}/composio/token`, admin | a Composio credential this company pasted |
+| `composio/tinyhumans/key` | `PUT {scope}/composio/token`, admin | a Composio credential this company pasted |
 | `tinyhumans/key` | `PUT {scope}/credential` or the link flow, admin | **this company's TinyHumans account** — an identity |
 | `inference/key` | `PUT {scope}/inference`, the setup wizard, the link flow | whatever the declared provider wants — a vendor credential |
 | env | the deployer, once per process | `TINYHUMANS_TOKEN_FILE` (a path, rotated in place) or `TINYHUMANS_API_KEY` (a value) |
@@ -21,6 +21,43 @@ and each has a test pinning that.
 The manifest can only ever *name* a slot (`[inference].api_key_secret`), never
 hold a value, and validation rejects a value there that looks like a pasted
 credential.
+
+### The fifth place a credential can hide: the endpoint
+
+A URL can carry userinfo — `http://alice:hunter2@127.0.0.1:8597/v1` — and a
+`base_url` is none of the things that make the four slots above safe. It is
+stored as written, it is returned by `GET {scope}/inference`, which is
+`ScopedCompany` rather than admin, so every console reader receives it on every
+page load, and it is interpolated into operator-facing failure text. A password
+in an endpoint is therefore a password in all three at once.
+
+Two independent mechanisms, because they cover different populations:
+
+- **Refused wherever an endpoint is accepted.**
+  `catalogue::endpoint_has_credentials` gates `normalize_local_endpoint`, which
+  every stored endpoint passes through, and `validate_parts`, which is the
+  manifest and console-`PUT` half of the same rule. It is the same class of
+  rule as the `api_key_secret` check beside it: a credential belongs in the
+  write-only slot, not in a field that is read back. The draft probe refuses
+  one too, rather than putting a basic-auth credential on the wire.
+- **Redacted wherever an endpoint is said.** `catalogue::redact_endpoint`
+  replaces the userinfo with `***`. Refusal cannot reach a value stored before
+  the rule existed, or one arriving from a `company.toml` or
+  `OPENCOMPANY_INFERENCE_URL` this host does not own — so every DTO field,
+  operator-facing message and log line that names an endpoint goes through it.
+  The endpoint used to *make* the request does not, which is the whole
+  distinction between the two call sites.
+
+The subtle half is the failure text. `reqwest` already masks userinfo in its own
+`Display`, so an error that quotes the upstream string looks safe — and then a
+`format!` that adds our copy of the URL beside it puts the credential straight
+back. Three separate messages did exactly that.
+
+Strict manifest `validate()` runs only on a first boot with no persisted record
+(`src/runtime/builder.rs`), so the refusal cannot brick a company that is
+already running on such an endpoint. That company is covered by redaction
+instead, and its next edit of the endpoint is refused with a sentence saying
+where to put the credential.
 
 ## How resolution worked before this rework
 
@@ -38,7 +75,7 @@ a stale claim carrying its own evidence is one nobody re-checks.
 
 ```
 COMPOSIO                                  INFERENCE  (before)
-  composio/token                            inference/config + inference/key
+  composio/tinyhumans/key                   inference/config + inference/key
         │ absent                                  │ absent
         ▼                                         ▼
   company_key::resolve                      manifest [inference]
@@ -102,7 +139,7 @@ INFERENCE
   5. nothing → agents cannot think, and the banner says which
 
 COMPOSIO
-  1. composio/token                             ← a pasted Composio credential
+  1. composio/tinyhumans/key                    ← a pasted Composio credential
   2. tinyhumans/key                             ← this company's account
   3. the instance identity
   4. nothing → no app tools
@@ -194,6 +231,28 @@ between two providers. The paragraph can be deleted rather than reworded.
   and only the first is safe to make silently.
 - **One resolution seam per identity**, so a rotation reaches every surface in
   the same cycle rather than one at a time.
+
+## Where the TinyHumans row points, and what the save puts to work
+
+Two facts about `PUT {scope}/credential` that the key-reworks slices left implicit,
+both found by the umbrella repo's cross-repo e2e (`workflow-opencompany`,
+`scripts/e2e-tinyhumans-key.sh`, 2026-09-16):
+
+- **The `tinyhumans` row follows `api_url`.** The catalogue row's `endpoint` is the
+  production proxy and stays a static table, but the row the fan-out *stores* — and
+  the base the health probe reads — is `catalogue::tinyhumans_proxy_url(api_url)`
+  = `{TINYHUMANS_API_URL}/agent-integrations/openrouter`, the same platform every
+  other TinyHumans surface on the instance already follows (key-grant, Composio,
+  billing). The LLM page's add path (`plan_add`) does the same. With the default
+  `api_url` nothing changes; with a staging or local platform the key that platform
+  minted is probed where it is known instead of against production.
+- **A save that first configures inference rebuilds the company.** A company that
+  booted with no inference source runs the offline echo brain, and the brain is
+  chosen at build time (issue #290). When the fan-out fills the provider row or
+  the default and `restart_required` holds, `set_key` / `finish_link` run
+  `rebuild_company` and answer off the successor — as `PUT {scope}/inference`
+  already did. The Account page's "Restart now" toast remains for the case where
+  the rebuild itself fails.
 
 ## Known gaps this design does not address
 

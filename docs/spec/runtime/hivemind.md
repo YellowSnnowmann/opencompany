@@ -9,7 +9,7 @@ per-message pick, else the desk lead — that agent took one turn, and the
 interaction ended. That is still the whole story for a desk of one, a DM, the
 General line, and a workflow copilot thread. For a desk of two or more it is
 now the fallback rather than the rule: the message opens an **episode**, and
-the episode runs a bounded sequence of single turns until the room converges on
+the episode runs a bounded sequence of **rounds** until the room converges on
 an option, deadlocks between two, spends its turn budget, or finds it has
 nothing to say.
 
@@ -19,11 +19,22 @@ executor-neutral, and adds no port. `tinyhivemind_hive::step` is a fold over a
 transcript this host already holds; it never appends, never waits, and never
 calls back.
 
-## One message is still one turn at a time
+## One message is still a bounded number of turns
 
-An episode is not a fan-out. `step` authorizes exactly one speaker per call, so
-the number of turns an operator message can start is bounded by the desk's turn
-budget and by nothing else — the same bound a single-responder desk has at 1.
+An episode is not a fan-out. `step` authorizes a **round** — at most
+`round_width` speakers while the room is blind, at most `revealed_width` once it
+can see itself — so the number of turns an operator message can start is bounded
+by the desk's turn budget and by nothing else, the same bound a single-responder
+desk has at 1. A wider round spends that budget in fewer rounds; it does not
+raise it.
+
+A width bounds what the episode *authorizes*, not how this host runs it. The
+driver takes a round's turns in series and commits the round's `next_state` only
+once every one of them is durably appended — committing part-way through would
+charge a threshold nobody spent. Turns in one round cannot read each other:
+each is projected against the single transcript `step` decided on, and the
+pinboard is read under the same round bound so a round-mate's `!pin` cannot
+reach a peer's prompt either.
 
 What a room buys over one responder is not parallelism. It is:
 

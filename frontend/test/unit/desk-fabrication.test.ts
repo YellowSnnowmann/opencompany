@@ -58,11 +58,16 @@ describe("a company with no desks (empty /desks answer)", () => {
       },
     ];
 
-    expect(threadsFromDesks(desks).map((t) => t.id)).toEqual([MAIN_THREAD_ID, "engineering"]);
+    expect(threadsFromDesks(desks).map((t) => t.id)).toEqual([
+      MAIN_THREAD_ID,
+      "engineering",
+    ]);
   });
 
   it("builds a rail of #general and nothing beside it", () => {
-    const channels = buildChannels(NO_MEMBERS, []).flatMap((section) => section.channels);
+    const channels = buildChannels(NO_MEMBERS, [], {}, true).flatMap(
+      (section) => section.channels,
+    );
 
     expect(channels.map((c) => c.id)).toEqual([MAIN_THREAD_ID]);
   });
@@ -107,7 +112,9 @@ describe("no surface fabricates desks over an answered read", () => {
     const src = read("views/RoomView.tsx");
 
     expect(src).toContain("setDesks(dtos.map(deskFromDto));");
-    expect(src).not.toContain("dtos.length ? dtos.map(deskFromDto) : defaultDesks()");
+    expect(src).not.toContain(
+      "dtos.length ? dtos.map(deskFromDto) : defaultDesks()",
+    );
     // The 404 leg — a host with no `/desks` route at all — still stands in.
     expect(src).toContain("error.status === 404");
     expect(src).toContain("setDesks(defaultDesks());");
@@ -122,8 +129,12 @@ describe("no surface fabricates desks over an answered read", () => {
     // A per-item failure therefore cannot reach the whole-chain `.catch`
     // below, so the null check is what stands in for it — an answered-but-
     // empty array must still flow to `desks.map(deskFromDto)` untouched.
-    expect(src).toContain("const chatDesks = desks === null ? defaultDesks() : desks.map(deskFromDto);");
-    expect(src).not.toContain("desks.length ? desks.map(deskFromDto) : defaultDesks()");
+    expect(src).toContain(
+      "const chatDesks = desks === null ? defaultDesks() : desks.map(deskFromDto);",
+    );
+    expect(src).not.toContain(
+      "desks.length ? desks.map(deskFromDto) : defaultDesks()",
+    );
     // Its `.catch` leg is the one place the static set is still right: nothing
     // was answered there at all.
     expect(src).toContain("const fallbackDesks = defaultDesks();");
@@ -134,7 +145,9 @@ describe("no surface fabricates desks over an answered read", () => {
 
     // The import is the check, not a mention: the file still *explains* the
     // fabricated set in prose, and should.
-    expect(src).not.toMatch(/import \{[^}]*\bdefaultDesks\b[^}]*\} from "@\/lib\/desks"/);
+    expect(src).not.toMatch(
+      /import \{[^}]*\bdefaultDesks\b[^}]*\} from "@\/lib\/desks"/,
+    );
     expect(src).toContain(".catch(() => null)");
   });
 

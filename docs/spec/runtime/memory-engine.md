@@ -345,7 +345,7 @@ comes first.
    compatibility. On completion the command re-counts the **target's own**
    export as a receipt, so the evidence is the target's answer rather than
    the migration's own counters.
-2. **Set the variables** for the target engine (the `.env.example` block names
+2. **Set the variables** for the target engine (the `deploy/.env.example` block names
    all five). A hosted engine needs the build to carry the `tinymemory`
    feature; a feature-less build refuses at boot naming the missing feature.
 3. **Restart.** Selection is read once at boot; a running process never

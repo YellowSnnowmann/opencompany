@@ -9,17 +9,16 @@ manifest plus docs, and the operator console is a separate Vite app.
 ```text
 Cargo.toml                  Virtual workspace root: members, shared deps, [patch]
 crates/opencompany-core/    The host: package `opencompany-core`, library crate
-                            `opencompany`, binary `opencompany`. Only the manifest
-                            lives here for now — it points at the root `src/`,
+                            `opencompany`, binary `opencompany`, with its `src/`,
                             `tests/`, `benches/`, `examples/` and `build.rs`.
 crates/opencompany-app/     The Tauri desktop shell (its own workspace + lock)
 crates/opencompany-tui/     The terminal client: the host, embedded, in ratatui
 ```
 
-The host's sources stayed at the root when the workspace was introduced so
-that the many branches touching `src/` would not all conflict at once. Every
-`src/...` path below and in the rest of `docs/` is that root tree; moving it
-under `crates/opencompany-core/` is a follow-up that changes no crate name.
+Every `src/...` path below and in the rest of `docs/` is short for
+`crates/opencompany-core/src/...`. What the crate embeds and reads at build
+and test time — `companies/`, `frontend/`, `vendor/` —
+stays at the repository root, which is `../..` from `CARGO_MANIFEST_DIR`.
 
 ## Host source tree
 
@@ -49,9 +48,10 @@ src/paypal/             PayPal wallet and transaction visibility
 src/bin/opencompany.rs  CLI entrypoint
 companies/              22 business definitions (a company.toml + docs each)
 frontend/               Company-agnostic operator console (Vite + React)
+docs/gitbooks/          The published GitBook: overview, get started, developer guide
 docs/spec/              Architecture reference
 docs/modules/           Per-package design docs
-qa/                     Release checks against a deployed tenant
+scripts/qa/             Release checks against a deployed tenant
 vendor/openhuman/       OpenHuman git submodule
 vendor/openhuman/vendor/tinyagents/
                         TinyAgents inherited from OpenHuman
@@ -71,7 +71,7 @@ vendor/openhuman/vendor/tinyagents/
 | `server` | The Axum router |
 | `openhuman` | Launcher seams |
 | `tiny` | Vendored TinyAgents status |
-| `globals` | The global baseline every company starts from |
+| `companies/_globals` | The global baseline every company starts from |
 | `ledger` | Dynamic ledgers and the append-only fold |
 | `economy` | tiny.place identity, Agent Cards, SIWX auth, x402 payments |
 | `ingest` | Dropped files and links into memory |

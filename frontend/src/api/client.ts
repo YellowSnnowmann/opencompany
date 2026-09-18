@@ -12,6 +12,7 @@ import { defaultTransport, needsCarriedSession } from "./transport";
 import type { StreamHandlers, Transport, TransportResponse } from "./transport";
 import {
   type AgentDetailDto,
+  type AgentSessionMessageDto,
   ApiError,
   type BlockerVerdict,
   type BoardComment,
@@ -28,6 +29,7 @@ import {
   type PresenceListResponse,
   type ReadStateResponse,
   type ApiErrorBody,
+  type UsedBy,
   type WorkflowProblem,
   type AppSpec,
   type ApprovalSummary,
@@ -851,6 +853,33 @@ export class OpenCompanyClient {
     return this.request<ChatHistoryMessageDto[]>(
       "GET",
       `${this.scope(company)}/chat/history${qs}`,
+    );
+  }
+
+  /**
+   * Everything one agent said and heard, across every channel it can read.
+   *
+   * Not a merge of per-desk `chat/history` calls, and deliberately so: which
+   * channels an agent can read is decided host-side by the same function that
+   * decides the agent's own session, so asking for it here is what keeps the
+   * page from claiming a teammate saw something it did not.
+   *
+   * A host that predates the route answers 404; the caller treats that as "this
+   * host has no session view" rather than as an error, exactly as
+   * {@link readState} does.
+   */
+  agentSession(
+    agentId: string,
+    company?: string | null,
+    options?: { before?: string; limit?: number },
+  ): Promise<AgentSessionMessageDto[]> {
+    const query = new URLSearchParams();
+    if (options?.before) query.set("before", options.before);
+    if (options?.limit !== undefined) query.set("limit", String(options.limit));
+    const qs = query.size > 0 ? `?${query}` : "";
+    return this.request<AgentSessionMessageDto[]>(
+      "GET",
+      `${this.scope(company)}/agents/${encodeURIComponent(agentId)}/session${qs}`,
     );
   }
 
@@ -1716,13 +1745,52 @@ function parseJson(text: string): unknown {
  * prose. The strictness is the point: this predicate is the only thing standing
  * between a foreign response body and `ApiError.message`.
  */
-function errorEnvelope(text: string): ApiErrorBody | undefined {
+export function errorEnvelope(text: string): ApiErrorBody | undefined {
   const parsed = parseJson(text);
   if (typeof parsed !== "object" || parsed === null) return undefined;
-  const { error, code, problems } = parsed as Record<string, unknown>;
+  const { error, code, problems, usedBy } = parsed as Record<string, unknown>;
   if (typeof error !== "string" || typeof code !== "string") return undefined;
   const breakdown = workflowProblems(problems);
-  return breakdown ? { error, code, problems: breakdown } : { error, code };
+  const used = parseUsedBy(usedBy);
+  return {
+    error,
+    code,
+    ...(breakdown ? { problems: breakdown } : {}),
+    ...(used ? { usedBy: used } : {}),
+  };
+}
+
+/**
+ * The `usedBy` object off a `409 in_use` envelope (keys rework, issue #2306),
+ * or `undefined` when there is nothing readable there.
+ *
+ * Loose on purpose: this is an echo of a shape the console itself sent nothing
+ * to produce, so a field the host adds later should cost nothing here, and a
+ * malformed one should degrade to "say nothing" rather than to a thrown error
+ * in the middle of reading a refusal.
+ */
+export function parseUsedBy(value: unknown): UsedBy | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { default: isDefault, agents, surfaces } = value as Record<string, unknown>;
+  const out: UsedBy = {};
+  if (isDefault === true) out.default = true;
+  if (Array.isArray(agents)) {
+    const kept = agents.filter(
+      (a): a is { id: string; name: string } =>
+        typeof a === "object" &&
+        a !== null &&
+        typeof (a as Record<string, unknown>).id === "string" &&
+        typeof (a as Record<string, unknown>).name === "string",
+    );
+    if (kept.length) out.agents = kept;
+  }
+  if (Array.isArray(surfaces)) {
+    const kept = surfaces.filter(
+      (s): s is "llm" | "composio" | "search" => s === "llm" || s === "composio" || s === "search",
+    );
+    if (kept.length) out.surfaces = kept;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /**
@@ -1800,6 +1868,10 @@ function httpError(res: TransportResponse, text: string): ApiError {
   // named. Carried, not rendered here — what a surface does with it is the
   // surface's call.
   if (envelope?.problems) err.problems = envelope.problems;
+  // Keys rework (issue #2306): a `409 in_use` echoes what still depends on the
+  // thing this request tried to remove, clear, disable or switch, so a confirm
+  // dialog reopened by the refusal can show it without a second request.
+  if (envelope?.usedBy) err.usedBy = envelope.usedBy;
   // Not discarded, just not rendered. A proxy error page is the only clue to
   // which hop gave up, which is worth keeping for a bug report even though it
   // is worthless as prose.

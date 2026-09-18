@@ -1,0 +1,398 @@
+//! Steer: pause / cancel / redirect an in-flight board task or delegation from
+//! the operator chat (issue #111, Epic #26).
+//!
+//! An operator watching a company work a task can now reach in mid-flight and
+//! pause it, cancel it, or redirect it with a fresh instruction — without
+//! waiting for the turn to finish or killing the whole company.
+//!
+//! ## Why this module is always compiled and openhuman-free
+//!
+//! Every type here is plain data + a `std::sync::Mutex`; nothing reaches into
+//! `openhuman`. That keeps steering available to the **operator control plane**
+//! (the REST routes + the runtime) in the default build, and — crucially — it
+//! keeps the mechanism **structurally non-agent-injectable**: no agent tool
+//! anywhere consumes a [`SteerControl`] or an [`InflightRegistry`], so an agent
+//! can never steer (or cancel) another agent's work. Steering is honored only
+//! between tool-loop iterations by the openhuman-gated
+//! [`SteerStopHook`](crate::harness::steer::SteerStopHook), which polls the
+//! shared control this module hands out.
+//!
+//! ## Shape
+//!
+//! * [`SteerControl`] — a one-shot, cheaply-cloned handle shared between the
+//!   registry (operator side) and the stop hook (turn side). The hook polls
+//!   [`requested`](SteerControl::requested) between iterations; the disposition
+//!   site [`take`](SteerControl::take)s the pending action once the turn ends.
+//!   Backed by a **std** `Mutex` held only for the length of a set/get — never
+//!   across an `await`.
+//! * [`InflightRegistry`] — `CompanyId → key → slot`, the live set of steerable
+//!   runs. [`register`](InflightRegistry::register) returns a
+//!   [`RegistrationGuard`] whose `Drop` deregisters the entry on **every** exit
+//!   path (success, error, panic-unwind) — RAII so a crashed turn never leaves a
+//!   ghost row in the operator strip.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use crate::ports::types::CompanyId;
+
+/// The maximum instruction length an operator redirect carries, in **chars**
+/// (not bytes — any cut here is codepoint-safe).
+///
+/// **Single capping authority**: the steer route is the one place that decides
+/// an over-long redirect's fate, and it *refuses* one — `400`, naming the actual
+/// length and this limit — rather than quietly halving what the agent will act
+/// on. The operator is synchronously present and can shorten the text.
+/// [`cap_redirect`] remains as defense-in-depth for any path that reaches a turn
+/// without crossing that route, and when it does cut it says so. Route
+/// validates; helper marks.
+pub const MAX_REDIRECT_CHARS: usize = 2000;
+
+/// What an operator asked us to do to an in-flight run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SteerAction {
+    /// Stop the run and park the card in `paused`, preserving its partial work.
+    Pause,
+    /// Stop the run and drop its partial work, returning the card to `todo`.
+    Cancel,
+    /// Stop the current attempt and re-run it with an appended operator
+    /// instruction. Bounded per dispatch (see the harness disposition).
+    Redirect {
+        /// The operator's fresh instruction, verbatim. The route already
+        /// refused anything longer than [`MAX_REDIRECT_CHARS`], so what an
+        /// agent sees here is the whole of what the operator typed.
+        instruction: String,
+    },
+}
+
+impl SteerAction {
+    /// The stable lowercase wire word for this action (`pause` / `cancel` /
+    /// `redirect`), used in the audit event, the pending-action badge, and the
+    /// route body.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SteerAction::Pause => "pause",
+            SteerAction::Cancel => "cancel",
+            SteerAction::Redirect { .. } => "redirect",
+        }
+    }
+}
+
+/// A one-shot control handle shared between the operator-facing
+/// [`InflightRegistry`] and the turn-side stop hook.
+///
+/// The registry [`request`](Self::request)s an action; the hook polls
+/// [`requested`](Self::requested) between tool-loop iterations and stops the
+/// turn when one pends; the disposition site [`take`](Self::take)s it once after
+/// the turn ends. **Last request wins** — a second operator action before the
+/// turn yields overwrites the first. Cheap to [`Clone`] (a shared handle).
+#[derive(Clone, Default)]
+pub struct SteerControl {
+    inner: Arc<Mutex<Option<SteerAction>>>,
+}
+
+impl SteerControl {
+    /// A fresh control with no action pending.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Requests a steer. Last write wins (a fresh action overwrites a pending
+    /// one that the turn has not yet observed).
+    pub fn request(&self, action: SteerAction) {
+        *self.inner.lock().expect("steer control poisoned") = Some(action);
+    }
+
+    /// Whether an action is pending — the stop hook's fast-path poll.
+    pub fn requested(&self) -> bool {
+        self.inner.lock().expect("steer control poisoned").is_some()
+    }
+
+    /// Clones the pending action without clearing it.
+    pub fn pending(&self) -> Option<SteerAction> {
+        self.inner.lock().expect("steer control poisoned").clone()
+    }
+
+    /// Takes the pending action, clearing it. The disposition site's one-shot
+    /// read after a turn ends.
+    pub fn take(&self) -> Option<SteerAction> {
+        self.inner.lock().expect("steer control poisoned").take()
+    }
+}
+
+/// What kind of in-flight run an [`InflightEntry`] tracks. Drives which actions
+/// the registry accepts: a `Task` supports all three; a `Delegation` is
+/// **cancel-only** in v1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InflightKind {
+    /// A dispatched board task (`in_progress`), steerable in full.
+    Task,
+    /// A desk delegation from the orchestrator's turn, cancel-only in v1.
+    Delegation,
+}
+
+impl InflightKind {
+    /// The stable lowercase wire word (`task` / `delegation`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            InflightKind::Task => "task",
+            InflightKind::Delegation => "delegation",
+        }
+    }
+}
+
+/// One in-flight, steerable run surfaced to the operator's in-flight strip.
+#[derive(Clone, Debug)]
+pub struct InflightEntry {
+    /// The steer key — the identifier the `POST …/tasks/{key}/steer` route
+    /// addresses. For a board task it equals the task id; for a delegation it is
+    /// a synthetic run id.
+    pub key: String,
+    /// The board task id, when this run is a dispatched card. `None` for a
+    /// delegation (no card).
+    pub task_id: Option<String>,
+    /// Whether the run is a task or a delegation (gates the allowed actions).
+    pub kind: InflightKind,
+    /// A short human title for the strip (the card title, or the desk id).
+    pub title: String,
+    /// The roster agent running the turn.
+    pub agent_id: String,
+    /// When the run was registered (epoch millis), so the strip can show age.
+    pub started_at_millis: u64,
+    /// The last action requested against this run, as a wire word, so the strip
+    /// can show a "pausing…/cancelling…/redirecting…" badge. `None` until an
+    /// operator steers it.
+    pub pending_action: Option<String>,
+}
+
+/// The reason a [`steer`](InflightRegistry::steer) call did not apply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SteerError {
+    /// No run with that key is in flight for the company (the strip is stale, or
+    /// the turn already finished).
+    NotInFlight,
+    /// The action is not supported for this run's kind (pause / redirect on a
+    /// delegation, which is cancel-only in v1).
+    Unsupported,
+}
+
+/// A live registry slot: the strip entry plus the control the turn polls.
+struct Slot {
+    entry: InflightEntry,
+    control: SteerControl,
+}
+
+/// The live set of steerable runs, keyed `CompanyId → key → slot`.
+///
+/// Cheap to [`Clone`] (a shared handle) — the same underlying map is seen by the
+/// [`HarnessBrain`](crate::harness::HarnessBrain) that registers runs, the
+/// operator routes that steer them, and the runtime that lists them, because a
+/// single registry is threaded through both [`HarnessDeps`] and
+/// [`CompanyRuntime`] at build time.
+///
+/// [`HarnessDeps`]: crate::harness::HarnessDeps
+/// [`CompanyRuntime`]: crate::company::runtime::CompanyRuntime
+#[derive(Clone, Default)]
+pub struct InflightRegistry {
+    inner: Arc<Mutex<HashMap<CompanyId, HashMap<String, Slot>>>>,
+}
+
+impl InflightRegistry {
+    /// An empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether any run this registry tracks is in flight.
+    ///
+    /// The map is keyed by company, but the builder mints one registry per
+    /// company runtime, so in practice this answers for a single company;
+    /// `GET /healthz/busy` is what ORs the answer across every company in the
+    /// process.
+    ///
+    /// The manager consults this — through the workload's busy endpoint — before
+    /// scaling a tenant to zero. Its own notion of "idle" is inbound proxied
+    /// traffic and nothing else, so a company working through a long turn
+    /// generates none and is indistinguishable from one nobody has opened; the
+    /// tenant then gets parked mid-turn and the work is lost
+    /// (opencompany-microservice#22).
+    ///
+    /// This registry is the right thing to ask because it is already maintained
+    /// by the code that runs turns: [`register`](Self::register) hands back a
+    /// guard that removes the entry on **every** exit path, including panics and
+    /// early returns, so an entry cannot outlive the work it describes and leave
+    /// a tenant permanently un-parkable.
+    ///
+    /// Cheap and synchronous by design — one `std::sync::Mutex` acquisition and
+    /// no I/O. It is called once per idle tenant per reconcile scan, against a
+    /// short client timeout, so anything that could block would turn a slow
+    /// company into a stalled sweep.
+    pub fn any_inflight(&self) -> bool {
+        // Poison-tolerant, and it reports **busy** rather than panicking. A
+        // panic here reaches an axum handler with no `CatchPanicLayer`, so the
+        // connection resets, the manager reads that as "cannot tell", and its
+        // default is to park — losing the very work this exists to protect, at
+        // the one moment the registry is in an unknown state.
+        //
+        // Reporting busy on poison is bounded: the manager parks anyway once a
+        // tenant exceeds its idle timeout plus the busy extension, so a
+        // permanently poisoned registry delays a park rather than preventing
+        // one.
+        let Ok(runs) = self.inner.lock() else {
+            return true;
+        };
+        runs.values().any(|runs| !runs.is_empty())
+    }
+
+    /// Registers an in-flight run and returns its shared [`SteerControl`] plus a
+    /// [`RegistrationGuard`] that deregisters the entry on drop.
+    ///
+    /// The caller runs the turn with the returned control's hook installed, then
+    /// reads the control's pending action; when the guard drops (on **any** exit
+    /// path) the strip row disappears.
+    pub fn register(&self, company: &CompanyId, entry: InflightEntry) -> RegistrationGuard {
+        let control = SteerControl::new();
+        let key = entry.key.clone();
+        {
+            let mut guard = self.inner.lock().expect("inflight registry poisoned");
+            guard.entry(company.clone()).or_default().insert(
+                key.clone(),
+                Slot {
+                    entry,
+                    control: control.clone(),
+                },
+            );
+        }
+        RegistrationGuard {
+            registry: self.clone(),
+            company: company.clone(),
+            key,
+            control,
+        }
+    }
+
+    /// Removes a run's slot (called by [`RegistrationGuard`]'s `Drop`).
+    fn deregister(&self, company: &CompanyId, key: &str) {
+        let mut guard = self.inner.lock().expect("inflight registry poisoned");
+        if let Some(runs) = guard.get_mut(company) {
+            runs.remove(key);
+            if runs.is_empty() {
+                guard.remove(company);
+            }
+        }
+    }
+
+    /// The in-flight runs for a company, for the operator strip. Order is
+    /// unspecified (the console sorts).
+    pub fn list(&self, company: &CompanyId) -> Vec<InflightEntry> {
+        self.inner
+            .lock()
+            .expect("inflight registry poisoned")
+            .get(company)
+            .map(|runs| runs.values().map(|slot| slot.entry.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Applies an operator steer to an in-flight run.
+    ///
+    /// Errors:
+    /// * [`SteerError::NotInFlight`] — no run with `key` is in flight.
+    /// * [`SteerError::Unsupported`] — the action is not allowed for the run's
+    ///   kind (pause / redirect on a delegation).
+    ///
+    /// On success the run's [`SteerControl`] is set (the turn stops at its next
+    /// iteration boundary) and the strip's pending-action badge is updated.
+    pub fn steer(
+        &self,
+        company: &CompanyId,
+        key: &str,
+        action: SteerAction,
+    ) -> Result<(), SteerError> {
+        let mut guard = self.inner.lock().expect("inflight registry poisoned");
+        let slot = guard
+            .get_mut(company)
+            .and_then(|runs| runs.get_mut(key))
+            .ok_or(SteerError::NotInFlight)?;
+        if slot.entry.kind == InflightKind::Delegation && !matches!(action, SteerAction::Cancel) {
+            return Err(SteerError::Unsupported);
+        }
+        slot.entry.pending_action = Some(action.as_str().to_string());
+        slot.control.request(action);
+        Ok(())
+    }
+}
+
+/// An RAII guard that deregisters an in-flight run when dropped, and hands the
+/// caller the run's shared [`SteerControl`].
+///
+/// Dropping this — whether the turn returned a reply, errored, or unwound —
+/// removes the strip row, so the operator never sees a ghost run.
+pub struct RegistrationGuard {
+    registry: InflightRegistry,
+    company: CompanyId,
+    key: String,
+    control: SteerControl,
+}
+
+impl RegistrationGuard {
+    /// The shared control for this run: install its hook around the turn, then
+    /// [`take`](SteerControl::take) the pending action after the turn ends.
+    pub fn control(&self) -> &SteerControl {
+        &self.control
+    }
+}
+
+impl Drop for RegistrationGuard {
+    fn drop(&mut self) {
+        self.registry.deregister(&self.company, &self.key);
+    }
+}
+
+/// The suffix [`cap_redirect`] appends when it has to cut, naming how many
+/// characters went missing so a truncated redirect is never byte-indistinguishable
+/// from a complete one.
+fn truncation_marker(dropped: usize) -> String {
+    format!(" […{dropped} chars truncated]")
+}
+
+/// Codepoint-safe truncation of an operator redirect instruction to
+/// [`MAX_REDIRECT_CHARS`], **marking** whatever it drops.
+///
+/// This is defense-in-depth, not the enforcement point: the steer route refuses
+/// an over-long redirect outright (see [`MAX_REDIRECT_CHARS`]), so in the normal
+/// path this is the identity function. It exists for the paths that re-apply the
+/// bound without crossing the route — the harness caps the instruction again on
+/// every redirect dispatch — and there it must not cut silently, or a halved
+/// instruction reads to the agent (and to the audit trail) exactly like a
+/// complete one.
+///
+/// The result never exceeds [`MAX_REDIRECT_CHARS`] characters: the marker's own
+/// width is subtracted before the cut, so the cap this claims to honour is the
+/// cap it honours. Cutting counts characters, never bytes, so an instruction
+/// ending in an emoji or accented letter can't split a codepoint (or panic).
+pub fn cap_redirect(instruction: &str) -> String {
+    let total = instruction.chars().count();
+    if total <= MAX_REDIRECT_CHARS {
+        return instruction.to_string();
+    }
+    // The marker names the dropped count, and the dropped count depends on how
+    // much room the marker itself takes — so settle it by fixpoint. Each pass
+    // either agrees with the previous one (done) or shrinks `keep` by the digit
+    // the growing count needs, so this terminates in a pass or two.
+    let mut keep = MAX_REDIRECT_CHARS;
+    let marker = loop {
+        let marker = truncation_marker(total - keep);
+        let room = MAX_REDIRECT_CHARS.saturating_sub(marker.chars().count());
+        if room >= keep {
+            break marker;
+        }
+        keep = room;
+    };
+    let mut out: String = instruction.chars().take(keep).collect();
+    out.push_str(&marker);
+    out
+}
+
+#[cfg(test)]
+#[path = "steer_tests.rs"]
+mod tests;

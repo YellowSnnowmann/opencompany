@@ -108,22 +108,28 @@ async function click(testId: string) {
 }
 
 /**
- * Answers the model step with "No model".
+ * Gets past step 0 onto step 1, and is a no-op once already there.
  *
- * The escape used to be a link under the step (`setup-skip-model`); it is the
- * provider picker's last option now, and the picker is a base-ui `Select`
- * whose popup portals onto `document.body` and does not exist until the
- * trigger opens it.
+ * The flow opens on the setup-way choice, and step 1 sits behind
+ * "Set it up yourself".
  */
-async function skipModel() {
-  await click("setup-provider-select");
-  const none = document.body.querySelector('[data-testid="setup-provider-none"]') as
-    | HTMLElement
-    | null;
-  expect(none, "no No-model option").toBeTruthy();
-  await act(async () => {
-    none!.click();
-  });
+async function chooseSelfManaged() {
+  if (!find("setup-way-self-managed")) return;
+  await click("setup-way-self-managed");
+  await next();
+}
+
+/**
+ * Gets past step 1 without connecting anything.
+ *
+ * The self-managed branch's step 1 is the real add-provider sequence now, and
+ * both of its connections are optional — so leaving it unanswered is the whole
+ * of skipping it, and Next is not gated. This presses the "set this up later"
+ * affordance rather than choosing a "No model" the step no longer offers.
+ */
+async function skipConnect() {
+  await chooseSelfManaged();
+  await click("setup-provider-later");
 }
 
 function labelled(...wanted: string[]): HTMLButtonElement {
@@ -162,7 +168,7 @@ async function fill(testId: string, value: string) {
 
 /** model (skipped) -> business (answered) -> sign-in. */
 async function goToSignIn() {
-  await skipModel();
+  await skipConnect();
   await next();
   await fill("setup-field-industry", "E-commerce — homeware");
   await next();
@@ -191,7 +197,13 @@ describe("the sign-in a desktop install starts from", () => {
     // The consequence of the seeded answer, and the reason it is seeded: the
     // address step is gone from the bar before the operator has pressed
     // anything, rather than appearing and then being taken away.
-    expect(slots()).toEqual(["step-power", "step-business", "step-signin", "step-review"]);
+    expect(slots()).toEqual([
+      "step-setup-way",
+      "step-self-managed-connect",
+      "step-business",
+      "step-signin",
+      "step-review",
+    ]);
 
     await next();
     // Review, asserted first: both checks below are absences, and an absence on

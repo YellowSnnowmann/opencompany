@@ -41,35 +41,18 @@ function scoped(url: URL, suffix: string): boolean {
 }
 
 /**
- * Clears every first-run modal in the way, and waits until none is left.
+ * Clears the first-run welcome tour, and waits until it is gone.
  *
- * There are **two**, and both offer a button called "Skip for now": the
- * onboarding gate (`src/onboarding/OnboardingGate.tsx`), which gates the whole
- * shell until a company has cleared activation, and the welcome tour
- * (`src/tour/WelcomeDialog.tsx`). Which of them a company shows depends on how
- * it is staffed and wired, and a host can show both in turn.
- *
- * They are therefore dismissed by their own identities rather than by the name
- * they share. A helper that found "Skip for now" and clicked it hit the gate
- * mid-transition — Playwright reported "element is not stable", then "element
- * was detached from the DOM", which reads as a flaky click rather than as two
- * modals swapping places. Both overlays swallow pointer events, so the final
- * assertion is the one that matters: nothing is left to swallow the next click.
+ * Scoped to its own dialog rather than to the button's name: the overlay
+ * swallows pointer events, so the final assertion is the one that matters —
+ * nothing is left to swallow the next click.
  */
 export async function dismissTour(page: Page) {
-  const gate = page.getByTestId("gate-skip");
-  if (await visibleSoon(gate, 10_000)) {
-    await gate.click();
-    await expect(gate).toHaveCount(0);
-  }
-
-  // Scoped to its own dialog, so this can never be the gate's button under
-  // another name.
   const welcome = page
     .getByRole("dialog")
     .filter({ hasText: "Welcome to your company" });
   const tourSkip = welcome.getByRole("button", { name: "Skip for now" });
-  if (await visibleSoon(tourSkip, 5_000)) {
+  if (await visibleSoon(tourSkip, 10_000)) {
     await tourSkip.click();
     await expect(welcome).toHaveCount(0);
   }

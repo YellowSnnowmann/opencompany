@@ -75,7 +75,7 @@ the surviving vocabulary once rather than be kept quietly on the old one.
 
 The shipped templates get one notch looser, and a test holds them there
 (`no_shipped_template_ledger_declares_more_than_five_statuses`, over both
-`globals/ledgers/` and `companies/*/ledgers/`). A template ledger is a
+`companies/_globals/ledgers/` and `companies/*/ledgers/`). A template ledger is a
 *pipeline* far more often than a built-in is — a candidate, a deal, a filing
 genuinely moves through stages — and three would have forced each one to throw
 away either its pipeline or its outcomes.

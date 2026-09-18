@@ -330,6 +330,24 @@ export function foldStandings(turns: EpisodeTurn[], quorum: number): TopicStandi
  * or the desk's config, so a hive desk that answered in one ordinary turn renders
  * as an ordinary conversation, which is the truth about it.
  */
+/**
+ * The body to read a move out of: what the model wrote, not what the operator
+ * is shown.
+ *
+ * The two differ only on a desk that deliberates, where the host rewrites
+ * `!support #topic ^3` into prose before it reaches a chat bubble. The fold
+ * counts the grammar, so reading the operator-facing body would make the whole
+ * deliberation panel depend on the host not having tidied it — and on the
+ * reload path, where the host always tidies it, the panel would never appear at
+ * all.
+ *
+ * Falls back to `text` for a host that predates `cueText`, and for every row
+ * with no move, where the two are equal anyway.
+ */
+function bodyOf(m: ChatMessage): string {
+  return m.cueText ?? m.text;
+}
+
 export function foldEpisodes(
   messages: ChatMessage[],
   options: { quorum?: number; members?: number; turnBudget?: number } = {},
@@ -342,7 +360,7 @@ export function foldEpisodes(
     (m) =>
       m.channel === HIVE_REPORT_AUTHOR ||
       m.channel === HIVE_REFERRAL_AUTHOR ||
-      (m.from === "company" && moveOf(m.text) !== null),
+      (m.from === "company" && moveOf(bodyOf(m)) !== null),
   );
   if (!hasRoom) return [];
 
@@ -451,7 +469,7 @@ export function foldEpisodes(
 
     if (message.from !== "company") continue;
 
-    const move = moveOf(message.text);
+    const move = moveOf(bodyOf(message));
     const referral = message.channel === HIVE_REFERRAL_AUTHOR;
     if (!move && !referral) {
       // Ordinary prose from a teammate. Inside a room that has already

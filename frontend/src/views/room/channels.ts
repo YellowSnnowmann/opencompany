@@ -12,7 +12,7 @@
 // The chat workspace's data model: channels, direct messages, and the grouping
 // rules the timeline reads. Everything here is pure — the view owns the state.
 
-import type { DeskDto, OperatorChannelDto, } from "@/api/types";
+import type { DeskDto, OperatorChannelDto } from "@/api/types";
 import {
   generalAwareChannel,
   MAIN_THREAD_ID,
@@ -40,7 +40,11 @@ import type { Transcripts } from "./timeline";
  * whole company (issue #369).
  */
 export function deskFromDto(d: DeskDto): Desk {
-  const slug = d.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const slug = d.name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
   return {
     id: d.id,
     channel: slug || d.id,
@@ -164,6 +168,27 @@ function generalChannel(members: TeamMember[]): Channel {
   };
 }
 
+/**
+ * Whether the console offers the company-wide line as somewhere to type.
+ *
+ * **EXPERIMENT (#2368): the company-wide line is not a channel.**
+ *
+ * `#general` has no membership of its own — `desk_episode` declines it for
+ * exactly that reason, so it can never be a room and every message on it is
+ * answered by one responder off the fallback ladder. A conversation that cannot
+ * deliberate is not where a company of agents should be talked to; a desk is,
+ * and a desk the operator created has a membership that means something.
+ *
+ * Off here rather than removed from the host: `chat_id: None` still resolves to
+ * General, so nothing is stranded — an older company's rows stay readable, and
+ * the address a mention-free message lands on is unchanged. What goes away is
+ * the console offering it as somewhere to type.
+ *
+ * If the experiment holds, the carrier becomes a manifest key so a company that
+ * wants its main line keeps it.
+ */
+export const SHOW_GENERAL_CHANNEL = true;
+
 export function buildChannels(
   members: TeamMember[],
   // Defaults to no desks, not to the fabricated trio. The parameter exists so
@@ -172,6 +197,14 @@ export function buildChannels(
   // default used to carry into every such caller.
   desks: Desk[] = [],
   transcripts: Transcripts = {},
+  // The company-wide line, as a parameter rather than a constant (#2368).
+  //
+  // A hard-coded `false` made the experiment untestable in both directions:
+  // every test that exercised General's own behaviour — that a desk claiming
+  // the spelling replaces it, what its subtitle reads, that it sorts first —
+  // could only assert its absence, which is not the same fact. Carrying it here
+  // keeps those tests testing General and lets one test assert the default.
+  showGeneral: boolean = SHOW_GENERAL_CHANNEL,
 ): ChannelSection[] {
   // A desk that answers to a General spelling owns the company-wide line, and
   // the built-in channel steps aside for it rather than doubling it.
@@ -189,8 +222,22 @@ export function buildChannels(
   // "a desk claims it" is now a fact about the company rather than about which
   // fallback set the console happened to be holding.
   const claimed = desks.some(deskClaimsGeneralChannel);
+  // **EXPERIMENT (#2368): the company-wide line is not a channel.**
+  //
+  // `#general` has no membership of its own — `desk_episode` declines it for
+  // exactly that reason, so it can never be a room and every message on it is
+  // answered by one responder off the fallback ladder. A conversation that
+  // cannot deliberate is not where a company of agents should be talked to;
+  // a desk is, and a desk the operator created has a membership that means
+  // something.
+  //
+  // Hidden here rather than removed from the host: `chat_id: None` still
+  // resolves to General, so nothing is stranded — an older company's existing
+  // rows stay readable, and the address a mention-free message lands on is
+  // unchanged. What goes away is the console offering it as somewhere to type.
+  //
   const channels: Channel[] = [
-    ...(claimed ? [] : [generalChannel(members)]),
+    ...(claimed || !showGeneral ? [] : [generalChannel(members)]),
     ...desks.map((d) => ({
       id: d.id,
       name: d.channel,
@@ -201,7 +248,9 @@ export function buildChannels(
       // (issue #1835). An operator-written blurb still wins.
       purpose:
         d.blurb ||
-        (d.responder === "auto" ? "Best fit picks up anything you don't @-mention" : d.blurb),
+        (d.responder === "auto"
+          ? "Best fit picks up anything you don't @-mention"
+          : d.blurb),
       tone: d.tone,
       memberIds: d.members,
       leadless: d.responder === "auto" || undefined,
@@ -227,7 +276,8 @@ export function buildChannels(
   // stable order rather than roster order, which is the host's and can move
   // under a reader.
   const dms = directMessageChannels(members).sort((a, b) => {
-    const byRecency = latestMessageAt(transcripts[b.id]) - latestMessageAt(transcripts[a.id]);
+    const byRecency =
+      latestMessageAt(transcripts[b.id]) - latestMessageAt(transcripts[a.id]);
     return byRecency !== 0 ? byRecency : a.name.localeCompare(b.name);
   });
 
@@ -263,11 +313,16 @@ export function operatorChannelFrom(dto: OperatorChannelDto): Channel {
  * `purpose` to `.trim()`. Treated the same as a fetch failure by callers:
  * degrade to no pinned row rather than crash the view.
  */
-export function isOperatorChannelDto(value: unknown): value is OperatorChannelDto {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+export function isOperatorChannelDto(
+  value: unknown,
+): value is OperatorChannelDto {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return false;
   const dto = value as Partial<OperatorChannelDto>;
   return (
-    typeof dto.id === "string" && typeof dto.name === "string" && typeof dto.description === "string"
+    typeof dto.id === "string" &&
+    typeof dto.name === "string" &&
+    typeof dto.description === "string"
   );
 }
 
@@ -286,7 +341,11 @@ export function isOperatorChannelDto(value: unknown): value is OperatorChannelDt
  * dto : null` and this function is only ever called on the non-null branch.
  */
 export function operatorSection(dto: OperatorChannelDto): ChannelSection {
-  return { id: "operator", label: "Operator", channels: [operatorChannelFrom(dto)] };
+  return {
+    id: "operator",
+    label: "Operator",
+    channels: [operatorChannelFrom(dto)],
+  };
 }
 
 /** Every roster teammate as a DM target, including conversations not yet started. */
@@ -312,13 +371,20 @@ export function directMessageChannels(members: TeamMember[]): Channel[] {
 }
 
 /** A DM target addressed by `id`, whether or not it is in the rail yet. */
-export function directMessageForId(members: TeamMember[], id: string | null): Channel | null {
+export function directMessageForId(
+  members: TeamMember[],
+  id: string | null,
+): Channel | null {
   if (!id) return null;
-  return directMessageChannels(members).find((channel) => channel.id === id) ?? null;
+  return (
+    directMessageChannels(members).find((channel) => channel.id === id) ?? null
+  );
 }
 
 function latestMessageAt(messages: ChatMessage[] | undefined): number {
-  return messages?.reduce((latest, message) => Math.max(latest, message.at), 0) ?? 0;
+  return (
+    messages?.reduce((latest, message) => Math.max(latest, message.at), 0) ?? 0
+  );
 }
 
 /**
@@ -364,7 +430,10 @@ export function dmThreadId(member: TeamMember): string {
 }
 
 /** The teammate a thread addresses, whether it is bare or `dm:`-prefixed. */
-export function memberForThread(members: TeamMember[], threadId: string): TeamMember | null {
+export function memberForThread(
+  members: TeamMember[],
+  threadId: string,
+): TeamMember | null {
   return (
     members.find((m) => dmThreadId(m) === threadId) ??
     members.find((m) => dmChannelId(m) === threadId) ??
@@ -382,7 +451,10 @@ export function memberForThread(members: TeamMember[], threadId: string): TeamMe
  */
 export function legacyDmChannelId(member: TeamMember): string {
   const name = member.name.trim();
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
   return `dm:${slug ? `${slug}-` : ""}${nameHash(name)}`;
 }
 
@@ -393,7 +465,10 @@ export function legacyDmChannelId(member: TeamMember): string {
  * Resolves the current id first, then the pre-#364 name-derived form, so an old
  * link keeps working without the old id ever becoming addressable again.
  */
-export function resolveDmChannelId(id: string, members: TeamMember[]): string | null {
+export function resolveDmChannelId(
+  id: string,
+  members: TeamMember[],
+): string | null {
   if (!id.startsWith("dm:")) return null;
   const match = members.find(
     (m) => dmChannelId(m) === id || legacyDmChannelId(m) === id,
@@ -426,7 +501,8 @@ export function channelIdFromSegment(segment: string | null): string | null {
 
 function nameHash(name: string): string {
   let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  for (let i = 0; i < name.length; i++)
+    hash = (hash * 31 + name.charCodeAt(i)) | 0;
   return (hash >>> 0).toString(36);
 }
 
@@ -477,7 +553,9 @@ export function channelIdForThread(
   // `dm:<id>`, which the host does answer. The frames it emits carry that
   // prefixed key, so without this arm they resolved to no channel at all and
   // the reply never appeared — the DM was writable and unreadable at once.
-  const prefixed = threadId.startsWith("dm:") ? threadId.slice("dm:".length) : null;
+  const prefixed = threadId.startsWith("dm:")
+    ? threadId.slice("dm:".length)
+    : null;
   const dmMember = prefixed ? members.find((m) => m.id === prefixed) : null;
   return dmMember ? dmChannelId(dmMember) : null;
 }
@@ -529,7 +607,10 @@ export function channelForThread(
   return generalAwareChannel(map, threadId);
 }
 
-export function findChannel(sections: ChannelSection[], id: string | null): Channel | null {
+export function findChannel(
+  sections: ChannelSection[],
+  id: string | null,
+): Channel | null {
   if (!id) return null;
   for (const s of sections) {
     const hit = s.channels.find((c) => c.id === id);
@@ -565,7 +646,10 @@ export function firstChannel(sections: ChannelSection[]): Channel | null {
  * teammate removed since the desks were fetched) drops out rather than
  * rendering a placeholder for somebody who isn't there.
  */
-export function channelMembers(channel: Channel, roster: TeamMember[]): TeamMember[] | null {
+export function channelMembers(
+  channel: Channel,
+  roster: TeamMember[],
+): TeamMember[] | null {
   if (!channel.memberIds) return null;
   const byId = new Map(roster.map((m) => [m.id, m]));
   return channel.memberIds
@@ -628,7 +712,10 @@ export function channelSubtitle(channel: Channel): string | null {
  * claims that the channel has no history, and neither may be made before the
  * host has answered (issue #934).
  */
-export function channelIntroSentence(channel: Channel, loading: boolean): string {
+export function channelIntroSentence(
+  channel: Channel,
+  loading: boolean,
+): string {
   const subtitle = channelSubtitle(channel);
   if (loading) return subtitle ? sentence(subtitle) : "";
   if (channel.kind === "dm") {
@@ -671,9 +758,15 @@ function sentence(s: string): string {
  * `buildChannels` already sets it from `member.tone`, which was id-seeded from
  * the start.
  */
-export function dmFace(channel: Channel): { name: string; tone?: string; avatar?: string } | null {
+export function dmFace(
+  channel: Channel,
+): { name: string; tone?: string; avatar?: string } | null {
   if (channel.kind !== "dm" || !channel.member) return null;
-  return { name: channel.name, tone: channel.tone, avatar: channel.member.avatar };
+  return {
+    name: channel.name,
+    tone: channel.tone,
+    avatar: channel.member.avatar,
+  };
 }
 
 /**
@@ -707,3 +800,42 @@ export function offersDeliverableChoice(kind: ChannelKind): boolean {
 
 /* ---- senders ---- */
 
+/**
+ * A crossing currently running, as the timeline needs to describe it.
+ *
+ * The two kinds are different events, not two spellings of one. A crossing to
+ * a PERSON is a two-way exchange — `pair_messages` lets the pair alternate, so
+ * both seats spend turns and neither is merely answering. A crossing to a DESK
+ * is that desk answering, as a whole room since #2332, and the host's `target`
+ * for it is only the library's first-eligible seat: naming that seat would
+ * credit one member with the room's work, so the desk is named instead.
+ */
+export type ReferralWorking = { row?: number } & (
+  | { direct: true; asker: string; target: string }
+  | { direct: false; desk: string }
+);
+
+/**
+ * The transcript row ids whose crossing is still running.
+ *
+ * `h<seq>` is how `fromHistory` names a durable row, and the frame's
+ * `sequence` is the row a crossing folds onto — so the two meet here.
+ */
+export function runningCrossingRows(
+  working: Record<string, ReferralWorking>,
+): string[] {
+  return Object.values(working)
+    .map((crossing) => crossing.row)
+    .filter((row): row is number => row !== undefined)
+    .map((row) => `h${row}`);
+}
+
+/** How the timeline says a crossing is running, given the names it holds. */
+export function referralWorkingLabel(
+  crossing: ReferralWorking,
+  nameOf: (id: string) => string,
+): string {
+  return crossing.direct
+    ? `${nameOf(crossing.asker)} and ${nameOf(crossing.target)} are talking`
+    : `the ${nameOf(crossing.desk)} desk is answering`;
+}

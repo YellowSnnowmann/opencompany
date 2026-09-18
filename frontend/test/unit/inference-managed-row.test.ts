@@ -1,30 +1,37 @@
-// The managed row must not claim availability it does not have.
+// The legacy managed row must not claim availability it does not have.
 //
 // It used to carry a permanent `Always on` badge, ported from a design where the
 // same company runs the managed backend — there it is true. Here the managed
 // tier needs a credential and can resolve to nothing, and a row saying "always
 // on" while agents cannot think is exactly the dishonesty the five-state
 // cognition model exists to prevent.
+//
+// Keys rework (issue #2306, slice 2a): TinyHumans is an ordinary catalogue row
+// now, so most of what this file tested (`offersManaged`, the special add-list
+// entry) is gone with it — see `inference-catalogue.test.ts` and
+// `inference-connect.test.ts` for the ordinary-row behaviour that replaces it.
+// What remains here is the transitional legacy row (`showsLegacyManagedRow`)
+// and its copy, both @deprecated and both moved to `managed-copy.ts`.
 
 import { describe, expect, it } from "vitest";
 
-import { MANAGED_OPTION_SLUG, addOptions, offersManaged } from "@/inference/connect";
-import { NO_CREDENTIAL_RESOLVES, managedRow } from "@/inference/ProviderList";
 import {
-  MANAGED_NOT_SET_UP,
-  MANAGED_NOT_SET_UP_ELSEWHERE,
-  MANAGED_SWITCHED_OFF,
-  managedFallbackNote,
-} from "@/inference/routing";
+  NO_CREDENTIAL_RESOLVES,
+  legacyManagedShowsSwitch,
+  legacyManagedSubline,
+  managedRow,
+  showsLegacyManagedRow,
+} from "@/inference/ProviderList";
+import { MANAGED_NOT_SET_UP, MANAGED_SWITCHED_OFF, managedFallbackNote } from "@/inference/managed-copy";
 import type { ManagedState } from "@/api/inference";
 
 const managed = (source: ManagedState["source"]): ManagedState => ({
   source,
   configured: source !== "none",
-  baseUrl: "https://api.tinyhumans.ai/openai/v1",
+  baseUrl: "https://api.tinyhumans.ai/agent-integrations/openrouter",
 });
 
-describe("what the managed row says", () => {
+describe("what the legacy managed row says", () => {
   it("never claims permanent availability", () => {
     // The badge that used to say "Always on" is gone — the row carries a real
     // toggle now, like any other provider — and no sub-line may smuggle the
@@ -47,59 +54,64 @@ describe("what the managed row says", () => {
   });
 
   it("keeps that sentence reachable from the states that need it", () => {
-    // It could not render: the managed row is gated on `managed.configured`, the
-    // host derives that as `source.resolves()`, so `source === "none"` implies no
-    // row — and the one state that needed this sentence was the one state that
-    // could never show it. The two dead-end states say it now, through the same
-    // constant, so the row and the banner cannot drift apart.
     expect(managedRow("none")).toBe(NO_CREDENTIAL_RESOLVES);
   });
 });
 
-describe("where managed is offered", () => {
-  it("is listed when nothing resolves, like anything else not connected", () => {
-    const options = addOptions([], managed("none"));
-    expect(options.cloud[0]).toMatchObject({
-      value: MANAGED_OPTION_SLUG,
-      // The endpoint host, like every other cloud row.
-      detail: "api.tinyhumans.ai",
-    });
+describe("showsLegacyManagedRow (keys rework, decision Q3: exactly one TinyHumans row)", () => {
+  it("shows once the chain resolves and no row exists yet", () => {
+    expect(showsLegacyManagedRow(managed("company_account"))).toBe(true);
+    expect(showsLegacyManagedRow(managed("instance"))).toBe(true);
   });
 
-  it("is still listed while the SERVER is paying, and that is the trade-off", () => {
-    // On the plain "only what is not yet connected" rule this would disappear —
-    // it resolves, so it is connected. That would take with it the only route
-    // from *the server pays* to *we pay*, which is a decision an operator
-    // actively wants to make.
-    expect(offersManaged(managed("instance"))).toBe(true);
+  it("hides once a tinyhumans row exists — the host says so with legacyRow: false", () => {
+    expect(showsLegacyManagedRow({ ...managed("provider_key"), legacyRow: false })).toBe(false);
   });
 
-  it("is hidden once the company's own credential answers", () => {
-    // Steps 1-3 are the company's credential in one form or another, and there
-    // is nothing left to upgrade to.
-    expect(offersManaged(managed("provider_key"))).toBe(false);
-    expect(offersManaged(managed("company_account"))).toBe(false);
+  it("reads legacyRow absent as true, matching every host before this rework", () => {
+    expect(showsLegacyManagedRow(managed("provider_key"))).toBe(true);
   });
 
-  it("is not offered when the host did not say", () => {
-    // Offering a setup flow for a state nobody established would be a guess.
-    expect(offersManaged(undefined)).toBe(false);
+  it("never shows when nothing resolves", () => {
+    expect(showsLegacyManagedRow(managed("none"))).toBe(false);
+  });
+
+  it("never shows when the host did not say anything at all", () => {
+    expect(showsLegacyManagedRow(undefined)).toBe(false);
+  });
+});
+
+describe("legacyManagedSubline / legacyManagedShowsSwitch (round-2 review, P1-3, decision X5)", () => {
+  it("shows the X5 sub-line, never the connected-sounding one, once the host says needsModel", () => {
+    expect(legacyManagedSubline({ ...managed("company_account"), needsModel: true })).toBe(
+      "Key added — choose a model",
+    );
+    expect(legacyManagedSubline({ ...managed("instance"), needsModel: true })).toBe(
+      "Key added — choose a model",
+    );
+  });
+
+  it("falls back to the ordinary managedRow text once a model is chosen", () => {
+    expect(legacyManagedSubline({ ...managed("company_account"), needsModel: false })).toBe(
+      managedRow("company_account"),
+    );
+    expect(legacyManagedSubline(managed("instance"))).toBe(managedRow("instance"));
+  });
+
+  it("hides the live switch exactly when needsModel is true", () => {
+    expect(legacyManagedShowsSwitch({ needsModel: true })).toBe(false);
+    expect(legacyManagedShowsSwitch({ needsModel: false })).toBe(true);
+    expect(legacyManagedShowsSwitch({})).toBe(true);
   });
 });
 
 describe("the line that says managed is not set up", () => {
   it("carries no navigation on the page that holds the action", () => {
-    // The Providers tab has the button at the top of it. Telling an operator to
-    // go to the tab they are looking at is a sentence that has stopped reading
-    // its own surroundings.
+    // The Providers page has the button at the top of it. Telling an operator
+    // to go to the page they are looking at is a sentence that has stopped
+    // reading its own surroundings.
     expect(MANAGED_NOT_SET_UP).not.toContain("tab");
     expect(MANAGED_NOT_SET_UP).toContain("not a fallback");
-  });
-
-  it("says where to go from a page that does not", () => {
-    // On Routing the action is elsewhere, so naming it is the useful half.
-    expect(MANAGED_NOT_SET_UP_ELSEWHERE).toContain(MANAGED_NOT_SET_UP);
-    expect(MANAGED_NOT_SET_UP_ELSEWHERE).toContain("LLM Providers tab");
   });
 });
 

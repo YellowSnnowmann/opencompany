@@ -21,7 +21,6 @@ import { COPY } from "./catalogue";
 import { ProviderMark, hasMark } from "./provider-icon";
 import { CLI_LOGINS_REACHABLE, CLI_LOGINS_UNAVAILABLE, addOptions } from "./connect";
 import type { AddOption } from "./connect";
-import type { ManagedState } from "@/api/inference";
 import type { Provider } from "./types";
 
 /**
@@ -59,18 +58,15 @@ export function AddProviderDialog({
   open,
   onOpenChange,
   providers,
-  managed,
   onChoose,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   providers: readonly Provider[];
-  /** What the managed chain resolves to — it decides whether Managed is listed. */
-  managed?: ManagedState;
   /** The chosen option slug, or `custom`. */
   onChoose: (optionSlug: string) => void;
 }) {
-  const options = addOptions(providers, managed);
+  const options = addOptions(providers);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

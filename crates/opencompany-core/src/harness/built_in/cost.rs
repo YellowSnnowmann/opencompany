@@ -1,0 +1,163 @@
+//! Post-turn cost accounting: a turn's [`TurnUsage`] → ledger + usage meter.
+//!
+//! After each agent turn the harness maps the turn's token/cost totals
+//! ([`TurnUsage`]) and writes two things:
+//!
+//! 1. a [`LedgerEntry`] with kind `inference.spend` through
+//!    [`CompanyStore::append_ledger`] — this feeds the Finances surface;
+//! 2. a [`UsageSample`] through the [`UsageMeter`] seam — this feeds the Usage
+//!    surface (WS5).
+//!
+//! A **zero-usage turn writes nothing** — no ledger entry and no sample.
+//!
+//! ## Why a local [`TurnUsage`] (flagged openhuman seam)
+//!
+//! openhuman accumulates a turn's real cost in its own `TurnCost`, but both that
+//! type (`agent::cost` is `pub(crate)`) and the accessor for a completed turn's
+//! totals (`Agent::take_last_turn_usage_totals`, also `pub(crate)`) are
+//! crate-private — a host crate can neither name the type nor read the numbers.
+//! So this module carries its own [`TurnUsage`] mirror. When openhuman exposes a
+//! public accessor, [`HarnessPool::run`](crate::harness::HarnessPool::run) fills
+//! [`TurnUsage`] from it; the mapping below is unchanged.
+//!
+//! ## Usage port (WS3)
+//!
+//! The usage half writes through the canonical
+//! [`UsageMeter`](crate::ports::UsageMeter) port shipped by WS3, mapping the
+//! turn onto a [`UsageSample`](crate::ports::UsageSample); WS5 reads the meter
+//! back for the Usage/Finances surfaces. The ledger half writes through the
+//! real [`CompanyStore`] port.
+//!
+//! ## One mapping, two writers (issue #174)
+//!
+//! The sample/ledger shapes and the zero-usage guard live in
+//! [`metering::inference`](crate::metering::inference), which is compiled and
+//! tested by the default CI build; this module only converts [`TurnUsage`] into
+//! the crate-wide [`TokenUsage`] and delegates. That is what keeps the harness's
+//! per-turn metering and the runtime's per-cycle metering (every other cognition
+//! path) from drifting into two different definitions of "usage worth recording".
+
+use crate::metering::{ModelSlug, inference};
+use crate::ports::CompanyStore;
+use crate::ports::types::{CompanyId, LedgerEntry, TokenUsage};
+use crate::ports::usage::{UsageMeter, UsageSample};
+
+/// A turn's token/cost totals — a host-side mirror of openhuman's crate-private
+/// `TurnCost` (see module docs).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TurnUsage {
+    /// Input/prompt tokens consumed across the turn's model calls.
+    pub input_tokens: u64,
+    /// Output/completion tokens produced.
+    pub output_tokens: u64,
+    /// Input tokens served from the KV cache.
+    pub cached_input_tokens: u64,
+    /// Best-available USD cost for the turn (charged + estimated).
+    pub cost_usd: f64,
+}
+
+impl TurnUsage {
+    /// Whether this turn moved no tokens and cost nothing.
+    ///
+    /// Mirrors [`TokenUsage::is_zero`] rather than inventing a second rule of
+    /// what counts as usage, and exists for one caller: this is the shape
+    /// `read_turn_usage` reads back when openhuman published no totals at all
+    /// — which, since `run_single` sets them only after its own `?`, is exactly
+    /// what a hard-failed turn leaves behind. Telling that apart from a turn
+    /// that genuinely spent nothing is what lets the live tally observed on the
+    /// progress stream stand in for it.
+    pub fn is_zero(&self) -> bool {
+        self.to_token_usage().is_zero()
+    }
+
+    /// This turn as the crate-wide [`TokenUsage`] the metering seam maps from.
+    fn to_token_usage(self) -> TokenUsage {
+        TokenUsage {
+            input: self.input_tokens,
+            output: self.output_tokens,
+            cached_input: self.cached_input_tokens,
+            cost_usd: self.cost_usd,
+        }
+    }
+}
+
+/// Build the `inference.spend` [`LedgerEntry`] for a turn, or `None` when the
+/// turn cost nothing.
+///
+/// Gated on **cost**, not tokens: the `/openai/v1` passthrough reports tokens
+/// but bills backend-side and echoes no USD, so a token-bearing zero-cost turn
+/// must not post a meaningless `$0.00` spend line to Finances. Its tokens are
+/// still recorded through [`usage_sample_for`] on the Usage surface.
+pub fn ledger_entry_for(turn: &TurnUsage, agent_id: &str) -> Option<LedgerEntry> {
+    inference::inference_ledger_entry(&turn.to_token_usage(), agent_id)
+}
+
+/// Build the [`UsageSample`] for a turn, or `None` for a zero-usage turn — e.g.
+/// one served by the offline [`MockProvider`](super::provider::MockProvider),
+/// whose replies carry no usage.
+///
+/// `model` is the classified [`ModelSlug`] the turn resolved to, read live off
+/// the provider (issue #1749) — a vocabulary member, never the raw model name,
+/// which stays inside
+/// [`HarnessModel`](super::provider::HarnessModel). `None` when the provider
+/// cannot name one.
+///
+/// `run_id` attributes the sample to the task attempt the turn ran under, when
+/// it ran under one (issue #242). Stamped here rather than inside
+/// [`inference::inference_sample`] because that function is the *shared* mapping
+/// every cognition path uses and only the harness's per-turn path has a run to
+/// name — widening it would push a `None` onto four call sites that can never
+/// mean anything else.
+pub fn usage_sample_for(
+    turn: &TurnUsage,
+    agent_id: &str,
+    provider: &str,
+    model: Option<ModelSlug>,
+    run_id: Option<&str>,
+) -> Option<UsageSample> {
+    let mut sample =
+        inference::inference_sample(&turn.to_token_usage(), agent_id, provider, model)?;
+    sample.run_id = run_id.map(str::to_string);
+    Some(sample)
+}
+
+/// Record a completed turn's cost: append the ledger entry (always available)
+/// and, when a [`UsageMeter`] is wired, record the usage sample. A zero-usage
+/// turn is a no-op.
+#[allow(clippy::too_many_arguments)]
+pub async fn record_turn_cost(
+    turn: &TurnUsage,
+    agent_id: &str,
+    provider: &str,
+    model: Option<ModelSlug>,
+    company: &CompanyId,
+    store: &dyn CompanyStore,
+    meter: Option<&dyn UsageMeter>,
+    run_id: Option<&str>,
+) -> crate::Result<()> {
+    if let Some(entry) = ledger_entry_for(turn, agent_id) {
+        store.append_ledger(company, entry).await?;
+    }
+    if let (Some(meter), Some(sample)) = (
+        meter,
+        usage_sample_for(turn, agent_id, provider, model, run_id),
+    ) {
+        // The usage sample is telemetry, not the turn's record of itself: the
+        // ledger write above has already happened, so a meter failure must not
+        // fail a completed turn. Log it and let the turn stand.
+        if let Err(error) = meter.record(company, &sample).await {
+            tracing::warn!(
+                company = %company,
+                agent = %agent_id,
+                provider = %provider,
+                error = %error,
+                "[cost] failed to record the usage sample; the turn still stands"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "cost_tests.rs"]
+mod tests;

@@ -96,7 +96,7 @@ Two consequences worth knowing:
 `GET …/capabilities` is the panel an operator checks first when a tool looks
 missing, so a wrong answer there sends the whole debugging session the wrong
 way. It used to compute its Composio verdict from `composio::token_configured`,
-which reads exactly one secret slot — the BYO override `composio/token`.
+which reads exactly one secret slot — the BYO override `composio/tinyhumans/key`.
 
 The credential is resolved over **three** tiers, and the toolbelt gates on all
 three (`composio::resolve_credential`, the seam issue #586 established): the BYO

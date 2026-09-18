@@ -1,5 +1,13 @@
 # Manage Routing
 
+> **Superseded (keys rework, issue #2306, phase 5b).** Per-workload routing —
+> the Routing tab, its three modes, and the routes it wrote — is removed from
+> the console entirely. A company now has one default `{provider, model}`
+> (`docs/modules/inference/architecture.md`), and an agent may pin its own
+> pair (`docs/modules/team/`). Kept for history; nothing here describes
+> current behaviour, and no code in `frontend/src/inference/` implements it
+> any more (see architecture.md's "Removed from the console" list).
+
 Ported **verbatim** from openhuman at `5e543a76b` — the three modes, the nine
 workloads, the copy and the mechanics. Source:
 `app/src/components/settings/panels/ai/aiPanelTypes.ts` and the routing tab in

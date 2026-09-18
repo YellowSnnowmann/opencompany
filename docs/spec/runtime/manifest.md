@@ -33,12 +33,19 @@ description = "Write ads, pages, and campaign copy."
 # NEW optional per-agent keys:
 tier = "reasoning"                 # cognition tier hint (see glossary)
 tools = ["docs.*", "email.send"]   # tool grant globs
-delegates_to = ["research"]        # desks this agent may hand work to ("*" = all)
+delegates_to = ["research"]        # narrow hand-offs to these desks (omit = anywhere)
 budget_usd_daily = 5.0             # per-agent daily spend cap (UTC day)
 prompt = "Write for the reader."   # appended to the generated persona
 prompt_files = ["prompts/tone.md"] # checked-in briefing docs, under `agents/`
 context = ["brief.md"]             # live workspace docs routed into the prompt
 classes = ["evidence"]             # routing exclusions: evidence | judge | directive
+harness = "embedded"               # which [[harness]] below runs this agent
+provider = "openrouter"            # on a built_in harness: this agent's own
+model = "deepseek/deepseek-chat"   # {provider, model} pair — see agents.md.
+                                   # Together or not at all; omit both to
+                                   # follow the company default. Refused on
+                                   # an acp harness, where `model` instead
+                                   # forwards a hint to that CLI's own session.
 # A roster may instead live one file per teammate under `agents/<id>.toml`, with
 # these same keys and the filename as the id. The two forms are exclusive —
 # declaring both is a validation error. See runtime/agents.md.
@@ -118,6 +125,18 @@ hive = { enabled = true, turn_budget = 6, quorum = 2, blind_round = true,
                                    # names it, so a `commit` entry here is
                                    # accepted for documentation only and
                                    # restricts nothing. See runtime/hivemind.md
+
+[speech]                           # optional speech-tool override
+disabled = true                    # on by default; true opts this company out
+                                   # By default every agent's belt carries
+                                   # desk_post / desk_dm / desk_close /
+                                   # desk_read, and a turn's return text becomes
+                                   # private thinking. A turn that calls none of
+                                   # them still has its text journaled, so this
+                                   # can never silence anybody.
+                                   # Company-level, not per-desk: speech is a
+                                   # property of an agent's session, which spans
+                                   # every desk it sits on. See runtime/speech.md
 
 [group_chat.hive.referral]         # NEW: may this desk ask ANOTHER desk?
 enabled = true                     # off unless this says so; the whole block

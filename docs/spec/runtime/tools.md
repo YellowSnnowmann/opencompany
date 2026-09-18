@@ -55,7 +55,7 @@ tool the gate refuses is the exact failure this single-source rule prevents.
 ### Levels in detail
 
 **Company — `[tools].allow`.** The ceiling, and **the one place a capability is
-turned off for a whole company**. It defaults to `globals/globals.toml`'s
+turned off for a whole company**. It defaults to `companies/_globals/globals.toml`'s
 `default_allow`:
 
 ```toml

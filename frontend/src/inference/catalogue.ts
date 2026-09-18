@@ -50,7 +50,7 @@ export interface CloudProvider {
 }
 
 /**
- * The 26 hosted providers the add dialog offers.
+ * The 27 hosted providers the add dialog offers.
  *
  * The endpoints are presets rather than a pattern, and the paths are the reason:
  * `/openai/v1`, `/inference/v1`, `/v1beta/openai`, `/v1/openai`, `/v3/openai`,
@@ -232,6 +232,20 @@ export const CLOUD_PROVIDERS: readonly CloudProvider[] = [
     endpoint: "https://api-inference.modelscope.cn/v1",
     auth: "bearer",
     keyPlaceholder: "ms-...",
+  },
+  // TinyHumans (keys rework, issue #2306, slice 2a) is an ordinary catalogue
+  // row now: add the key, pick a model from its own list, save — the same flow
+  // as every other cloud provider. Its model list and chat both live on the
+  // OpenRouter-shaped proxy path; `MANAGED_OPTION_SLUG` in `./connect.ts` is
+  // this same slug, because it also doubles as the legacy Managed fallback
+  // chain's identity. Kept last so the console mirror and the Rust catalogue
+  // stay in the same order (`the_console_mirror_lists_the_same_cloud_providers`).
+  {
+    slug: "tinyhumans",
+    label: "TinyHumans",
+    endpoint: "https://api.tinyhumans.ai/agent-integrations/openrouter",
+    auth: "bearer",
+    keyPlaceholder: "th-...",
   },
 ];
 
@@ -446,13 +460,17 @@ export function isReservedSlug(slug: string): boolean {
 }
 
 /**
- * Slugs this product owns that are not catalogue rows.
+ * Slugs this product owns that are not **custom-addable** — a name a custom
+ * provider may never take, whether or not it is also a catalogue row.
  *
- * Managed is deliberately not a row — it is a chain, not a vendor — but it has a
- * slug, and that slug is an address: `provider/tinyhumans/key` is where its
- * credential lives, and `managed` is the word the route grammar uses. Mirrors
- * `catalogue::INTERNAL_SLUGS`, and the host refuses these regardless; this is
- * so the operator is told before a round trip rather than after one.
+ * `tinyhumans` is a catalogue row now (keys rework, issue #2306, slice 2a), and
+ * is listed here too so reservation does not depend on the table: it stays
+ * refused as a custom name even if the row above is ever edited. `managed` is
+ * the legacy fallback chain's own identity in the route grammar and owns no
+ * catalogue row of its own. `provider/tinyhumans/key` is the address both the
+ * row and the legacy chain's credential resolve to. Mirrors
+ * `catalogue::INTERNAL_SLUGS`; the host refuses these regardless, so this is
+ * only so the operator is told before a round trip rather than after one.
  */
 const INTERNAL_SLUGS: readonly string[] = ["tinyhumans", "managed"];
 

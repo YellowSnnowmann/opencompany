@@ -1,0 +1,19 @@
+# GitBook Site Git Sync configuration for the OpenCompany docs site.
+# Schema: https://api.gitbook.com/gitbook-docs.yaml
+#
+# The site's project directory is docs/gitbooks/. It holds one GitBook space:
+# SUMMARY.md at this level is the whole table of contents, and overview/,
+# get-started/ and developers/ are page groups inside it, not separate spaces.
+$schema: https://api.gitbook.com/gitbook-docs.yaml
+version: 1
+site:
+  title: OpenCompany
+  structure:
+    - type: space
+      key: space-opencompany
+      title: OpenCompany
+      path: docs
+      default: true
+      content:
+        directory: ./
+        language: en

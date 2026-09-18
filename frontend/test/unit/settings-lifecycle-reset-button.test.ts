@@ -10,6 +10,32 @@ import type { CompanyStatus } from "@/api/types";
 import { LifecycleControls } from "@/views/SettingsView";
 
 /**
+ * These exercise the create/reset flow itself, so they need the build where the
+ * product offers it.
+ *
+ * `canCreateCompanies` is `!COMPANY_SWITCHING_HIDDEN && carriesPlatformBearer`
+ * (b8a3e2e97), and `COMPANY_SWITCHING_HIDDEN` ships `true` — so in the shipped
+ * tree every trigger below is hidden and the dialog's own preflight never runs.
+ * Left unmocked, these files would assert against controls the product
+ * deliberately does not render, which is what broke them: they would be pinning
+ * the flag rather than the flow.
+ *
+ * The *hide* is not weakened by this. It has its own coverage, deliberately
+ * unmocked, in `product-scope-hidden-surfaces.test.ts` ("company creation is
+ * gone from every trigger, not just the switcher"), which is where a regression
+ * in the gate belongs. What is left here is the flow underneath it — including
+ * the #1894 pre-archive guard, whose whole job is to keep a reset from
+ * archiving a company before it knows the replacement has a usable admin. That
+ * logic is still in the tree and still worth failing a build over the day the
+ * flag flips back.
+ */
+vi.mock("@/product-scope", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/product-scope")>()),
+  COMPANY_SWITCHING_HIDDEN: false,
+}));
+
+
+/**
  * The Reset / Start clean button (#1807, SettingsView.tsx `LifecycleControls`)
  * had no render test of its own — tinysweeper flagged the gap (PR comment
  * 3879183959) against the repo's "every behavior change gets a focused test"
@@ -92,13 +118,25 @@ async function render(client: OpenCompanyClient, lifecycle: string, onReset?: ()
 }
 
 describe("the Reset / Start clean button's render gate", () => {
-  it("is left out while the product does not offer company creation", async () => {
-    // Reset archives this company and provisions a replacement through the same
-    // dialog "New company" opens — it is company creation wearing another
-    // label, so it answers the same presentation question the other four
-    // triggers do (`offersCompanyCreation`).
+  // "is left out while the product does not offer company creation" is
+  // covered in `settings-lifecycle-reset-button-product-scope.test.ts`, which
+  // imports the real, unmocked `product-scope` module — this file mocks
+  // `COMPANY_SWITCHING_HIDDEN` to `false` at module scope (see the top-of-file
+  // comment) so the flow tests below can reach the control at all, which makes
+  // "the product does not offer it" unrepresentable here.
+
+  it("renders when the product offers company creation, the session is platform-scoped, onReset is given, and the company is running", async () => {
+    // The one positive case in this file — every other case below only pins
+    // an *absence*, which a broken or permanently-removed button would pass
+    // just as well as a working one. Codex review on #2310: with the removed
+    // case above gone, this mocked file was left with no assertion that the
+    // control can render at all, so deleting or disabling it here would have
+    // passed every gate test in this file while the unmocked companion
+    // (`settings-lifecycle-reset-button-product-scope.test.ts`) only ever
+    // asserts absence under `COMPANY_SWITCHING_HIDDEN: true` — neither file
+    // would have caught it.
     await render(clientWith(true), "running", () => {});
-    expect(resetButton()).toBeUndefined();
+    expect(resetButton()).toBeDefined();
   });
 
   it("is left out when onReset is not given (mirrors the `offersCompanyCreation` gate upstream)", async () => {

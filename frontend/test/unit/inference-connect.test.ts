@@ -9,8 +9,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_PROVIDER_NAME_CHARS,
   addOptions,
+  checkProviderName,
   checkSlug,
+  clampToProviderNameLimit,
+  endpointHasCredentials,
   credentialAsk,
   customProviderReady,
   isConnected,
@@ -128,6 +132,63 @@ describe("the slug, which is derived and never typed", () => {
     expect(slugErrorCopy("empty")).toBe("Enter a provider name to generate a slug.");
     expect(slugErrorCopy("taken")).toContain("already has a provider");
     expect(slugErrorCopy("reserved")).toContain("built-in");
+    expect(slugErrorCopy("too-long")).toContain(String(MAX_PROVIDER_NAME_CHARS));
+  });
+
+  it("bounds the name, because the name becomes the address of a secret", () => {
+    // Mirrors `store::MAX_PROVIDER_NAME_CHARS`. The host holds the rule; this
+    // only spares the operator a round trip. An unbounded name produced an
+    // unbounded secret key, which 500ed a credential read and truncated a
+    // stored key on the way to failing the delete that truncated it.
+    const atLimit = "a".repeat(MAX_PROVIDER_NAME_CHARS);
+    const pastLimit = "a".repeat(MAX_PROVIDER_NAME_CHARS + 1);
+
+    expect(checkProviderName(atLimit)).toBeNull();
+    expect(checkProviderName(pastLimit)).toBe("too-long");
+    expect(checkProviderName("   ")).toBe("empty");
+
+    expect(checkSlug([], atLimit)).toBeNull();
+    expect(checkSlug([], pastLimit)).toBe("too-long");
+
+    expect(customProviderReady([], { label: atLimit, baseUrl: "https://a.example/v1" })).toBe(
+      true,
+    );
+    expect(customProviderReady([], { label: pastLimit, baseUrl: "https://a.example/v1" })).toBe(
+      false,
+    );
+  });
+
+  it("clamps a typed name in code points, the unit the host counts", () => {
+    // Codex review on #2281: the field's native `maxLength` counted UTF-16 code
+    // units, so a name of astral characters the host's `chars()` bound accepts
+    // could not be typed or pasted. U+1F600 is one code point, two code units.
+    const astral = "\u{1F600}".repeat(MAX_PROVIDER_NAME_CHARS);
+    expect(astral.length).toBe(MAX_PROVIDER_NAME_CHARS * 2);
+    expect(clampToProviderNameLimit(astral)).toBe(astral);
+    expect(checkProviderName(astral)).toBeNull();
+
+    const over = "\u{1F600}".repeat(MAX_PROVIDER_NAME_CHARS + 3);
+    const clamped = clampToProviderNameLimit(over);
+    expect(Array.from(clamped)).toHaveLength(MAX_PROVIDER_NAME_CHARS);
+    // Never a lone surrogate: cut between code points, not between code units.
+    expect(clamped).toBe(astral);
+
+    expect(clampToProviderNameLimit("Acme")).toBe("Acme");
+  });
+
+  it("clamps on the trimmed name, so surrounding spaces cost no characters", () => {
+    // Codex review on #2281: spaces around a paste are trimmed by the host and
+    // by `checkProviderName`, so they must not push the name's last characters
+    // out of a field that would otherwise accept it.
+    const name = "a".repeat(MAX_PROVIDER_NAME_CHARS);
+    const padded = `${" ".repeat(10)}${name}   `;
+    expect(clampToProviderNameLimit(padded)).toBe(padded);
+    expect(checkProviderName(padded)).toBeNull();
+
+    const over = `${" ".repeat(10)}${"a".repeat(MAX_PROVIDER_NAME_CHARS + 3)}`;
+    const clamped = clampToProviderNameLimit(over);
+    expect(clamped).toBe(`${" ".repeat(10)}${name}`);
+    expect(checkProviderName(clamped)).toBeNull();
   });
 });
 
@@ -146,6 +207,31 @@ describe("the endpoint an operator types", () => {
   it("refuses anything that is not http or https", () => {
     for (const bad of ["file:///etc/passwd", "ftp://acme.example/v1", "localhost:11434", "", "http://"]) {
       expect(normalizeEndpoint(bad)).toBeNull();
+    }
+  });
+
+  it("refuses one that carries a credential, because an endpoint is stored as written", () => {
+    // Mirrors `catalogue::endpoint_has_credentials`. A `baseUrl` is returned
+    // by a `ScopedCompany` route every console reader calls, so a password in
+    // one is a password on the wire for everybody.
+    for (const bad of [
+      "http://alice:hunter2@127.0.0.1:8597/v1",
+      "https://alice@api.acme.example/v1",
+      "http://alice:hun@ter2@127.0.0.1:8597/v1",
+    ]) {
+      expect(endpointHasCredentials(bad)).toBe(true);
+      expect(normalizeEndpoint(bad)).toBeNull();
+    }
+  });
+
+  it("does not mistake an @ in the path for a credential", () => {
+    for (const good of [
+      "https://api.acme.example/v1/@me",
+      "https://api.acme.example/v1?to=a@b",
+      "https://api.acme.example/v1#a@b",
+    ]) {
+      expect(endpointHasCredentials(good)).toBe(false);
+      expect(normalizeEndpoint(good)).toBe(good);
     }
   });
 });
@@ -197,7 +283,7 @@ describe("providerMenu", () => {
   const ids = (over = {}) => providerMenu(row(over)).map((a) => a.id);
 
   it("offers key actions on a provider that has a key to act on", () => {
-    expect(ids()).toEqual(["edit", "default", "replaceKey", "removeKey", "remove"]);
+    expect(ids()).toEqual(["edit", "setDefault", "replaceKey", "removeKey", "remove"]);
   });
 
   it("never offers key actions to a local runtime or a CLI login", () => {
@@ -224,9 +310,9 @@ describe("providerMenu", () => {
   });
 
   it("omits Set as default where it would change nothing", () => {
-    expect(ids({ isDefault: true })).not.toContain("default");
+    expect(ids({ isDefault: true })).not.toContain("setDefault");
     // Switched off, so it cannot be a routing target at all.
-    expect(ids({ enabled: false })).not.toContain("default");
+    expect(ids({ enabled: false })).not.toContain("setDefault");
   });
 
   it("marks exactly the two removals as destructive", () => {
@@ -248,7 +334,7 @@ describe("providerMenu", () => {
     // three live and every one of them was a round trip to a refusal. Setting it
     // as the default is not one of the three — that is a marker on the company,
     // not a write to the row.
-    expect(ids({ origin: "entryZero" })).toEqual(["default"]);
+    expect(ids({ origin: "entryZero" })).toEqual(["setDefault"]);
     expect(ids({ origin: "entryZero", isDefault: true })).toEqual([]);
     expect(ids({ origin: "entryZero", enabled: false })).toEqual([]);
   });
@@ -256,5 +342,68 @@ describe("providerMenu", () => {
   it("treats a row from an older host as an ordinary one", () => {
     // Absent `origin` reads as indexed, which is what every row was before.
     expect(ids()).toContain("remove");
+  });
+});
+
+describe("endpointHasCredentials", () => {
+  it("finds a credential behind a second scheme", () => {
+    // Mirrors the host's `a_second_scheme_does_not_hide_the_credential_behind_it`
+    // (Codex review on #2281): the first authority here is `HTTP:`, with no `@`.
+    expect(endpointHasCredentials("http://HTTP://alice:hunter2@127.0.0.1:8597/v1")).toBe(true);
+    expect(endpointHasCredentials("HTTP://alice:hunter2@127.0.0.1:8597/v1")).toBe(true);
+    expect(normalizeEndpoint("http://HTTP://alice:hunter2@127.0.0.1:8597/v1")).toBeNull();
+  });
+
+  it("finds a credential in every authority an HTTP client could read", () => {
+    // Mirrors the host's
+    // `a_credential_is_found_in_every_authority_an_http_client_could_read`
+    // (Codex and CodeRabbit review on #2281).
+    for (const bad of [
+      "http:/alice:hunter2@127.0.0.1:8597/v1",
+      "http:///alice:hunter2@127.0.0.1:8597/v1",
+      "http:\\\\alice:hunter2@127.0.0.1:8597/v1",
+      "HTTP:alice:hunter2@127.0.0.1:8597/v1",
+      "http://alice:one@outer/http://bob:two@inner/v1",
+    ]) {
+      expect(endpointHasCredentials(bad)).toBe(true);
+      expect(normalizeEndpoint(bad)).toBeNull();
+    }
+    // A path is still a path: a gateway proxying to another URL is storable.
+    const gateway = "https://gateway.example/proxy/http://upstream/@me";
+    expect(endpointHasCredentials(gateway)).toBe(false);
+    expect(normalizeEndpoint(gateway)).toBe(gateway);
+    for (const good of ["http://[::1]:11434/v1", "https://api.acme.example:8443/v1/@me"]) {
+      expect(endpointHasCredentials(good)).toBe(false);
+    }
+  });
+
+  it("does not read a scheme in a well-formed path as an authority", () => {
+    // Codex review on #2281: `http:user@example.com` here is path text.
+    const gateway = "https://gateway.example/proxy/http:user@example.com/v1";
+    expect(endpointHasCredentials(gateway)).toBe(false);
+    expect(normalizeEndpoint(gateway)).toBe(gateway);
+    expect(endpointHasCredentials("http://localhost:/v1/@me")).toBe(false);
+    // Host `http`, empty port, path `/v1@beta`: not a second scheme.
+    expect(endpointHasCredentials("http://http:/v1@beta")).toBe(false);
+    expect(normalizeEndpoint("http://http:/v1@beta")).toBe("http://http:/v1@beta");
+    expect(endpointHasCredentials("https://http://alice@api.acme.example/v1")).toBe(true);
+  });
+
+  it("sees through the tabs and line breaks a URL parser removes", () => {
+    // Codex review on #2281, mirroring the host's
+    // `tabs_and_line_breaks_do_not_hide_a_credential`.
+    for (const bad of [
+      "http:\t//alice:hunter2@127.0.0.1:8597/v1",
+      "http://ali\nce:hunter2@127.0.0.1:8597/v1",
+      "http://http:\t//alice:hunter2@127.0.0.1:8597/v1",
+    ]) {
+      expect(endpointHasCredentials(bad)).toBe(true);
+      expect(normalizeEndpoint(bad)).toBeNull();
+    }
+  });
+
+  it("still ignores an @ outside every authority", () => {
+    expect(endpointHasCredentials("HTTPS://api.acme.example/v1/@me")).toBe(false);
+    expect(endpointHasCredentials("https://api.acme.example/v1?to=a@b")).toBe(false);
   });
 });

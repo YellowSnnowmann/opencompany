@@ -1,7 +1,7 @@
 /**
  * The QA harness's judgements, pinned (issue #987).
  *
- * `qa/oc-qa.js` is pasted into a browser console, so nothing imports it and
+ * `scripts/qa/oc-qa.js` is pasted into a browser console, so nothing imports it and
  * nothing type-checks it. Two things about it are worth a gate anyway:
  *
  * 1. **It parses.** A syntax error is discovered by an operator mid-incident,
@@ -39,7 +39,7 @@ import type {
 } from "@/api/workflows";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SCRIPT = resolve(here, "../../../qa/oc-qa.js");
+const SCRIPT = resolve(here, "../../../scripts/qa/oc-qa.js");
 
 /** One reported check, as the script emits it. */
 interface Row {

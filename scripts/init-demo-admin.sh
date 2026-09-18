@@ -68,33 +68,51 @@ if [ -z "$company_id" ]; then
 fi
 
 compose() {
-    docker compose \
-        --project-directory "$REPO_ROOT" \
+    OPENCOMPANY_COMPANY="$company" docker compose \
+        --project-directory "${REPO_ROOT}/deploy" \
         --project-name "$project" \
-        --file "${REPO_ROOT}/docker-compose.yml" \
-        --file "${REPO_ROOT}/docker-compose.dev.yml" \
+        --file "${REPO_ROOT}/deploy/docker-compose.yml" \
+        --file "${REPO_ROOT}/deploy/docker-compose.dev.yml" \
         "$@"
 }
 
+password_file=$(mktemp)
+confirmation_file=$(mktemp)
+chmod 600 "$password_file" "$confirmation_file"
+tty_state=
+cleanup() {
+    if [ -n "$tty_state" ]; then
+        stty "$tty_state" 2>/dev/null || :
+    fi
+    rm -f "$password_file" "$confirmation_file"
+}
+trap cleanup 0 HUP INT TERM
+
 if [ -t 0 ]; then
     printf 'New password for %s: ' "$admin_email" >&2
+    tty_state=$(stty -g)
     stty -echo
 fi
 IFS= read -r password
+printf '%s\n' "$password" >"$password_file"
+unset password
 if [ -t 0 ]; then
-    stty echo
+    stty "$tty_state"
+    tty_state=
     printf '\nConfirm password: ' >&2
 fi
 IFS= read -r confirmation
+printf '%s\n' "$confirmation" >"$confirmation_file"
+unset confirmation
 if [ -t 0 ]; then
     printf '\n' >&2
 fi
 
-if [ -z "$password" ]; then
+if [ ! -s "$password_file" ] || [ "$(sed -n '1p' "$password_file")" = "" ]; then
     echo "opencompany: password cannot be empty" >&2
     exit 2
 fi
-if [ "$password" != "$confirmation" ]; then
+if ! cmp -s "$password_file" "$confirmation_file"; then
     echo "opencompany: passwords do not match" >&2
     exit 2
 fi
@@ -104,7 +122,7 @@ echo "opencompany: initializing '${company}' before creating its administrator"
 compose up --build --detach --wait opencompany
 compose stop console opencompany
 
-printf '%s\n' "$password" | compose run --rm --no-deps -T opencompany \
+cat "$password_file" | compose run --rm --no-deps -T opencompany \
     cargo run -p opencompany-core --bin opencompany -- \
     issue-password \
     --company "$company_id" \

@@ -159,7 +159,7 @@ were always there.
 (`frontend/src/views/workflows/run-health.ts`) is a lookup on `verdictOf`, which
 takes the host's word when there is one and falls back to the same ladder for a
 host predating this — the fallback is what keeps a run's meaning stable across
-hosts, not legacy tolerance for its own sake. `qa/oc-qa.js` reads it the same
+hosts, not legacy tolerance for its own sake. `scripts/qa/oc-qa.js` reads it the same
 way, and `frontend/test/unit/qa-harness.test.ts` pins the two together.
 
 The orchestrator's `run_workflow` tool summary

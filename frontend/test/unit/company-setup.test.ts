@@ -261,7 +261,7 @@ describe("the job checklist", () => {
    */
   const fixture = JSON.parse(
     readFileSync(
-      fileURLToPath(new URL("../../../tests/fixtures/setup-jobs.json", import.meta.url)),
+      fileURLToPath(new URL("../../../crates/opencompany-core/tests/fixtures/setup-jobs.json", import.meta.url)),
       "utf8",
     ),
   ) as {
@@ -297,7 +297,7 @@ describe("the admin address", () => {
    */
   const fixture = JSON.parse(
     readFileSync(
-      fileURLToPath(new URL("../../../tests/fixtures/setup-admin-email.json", import.meta.url)),
+      fileURLToPath(new URL("../../../crates/opencompany-core/tests/fixtures/setup-admin-email.json", import.meta.url)),
       "utf8",
     ),
   ) as { cases: { why: string; input: string; usable: boolean }[] };

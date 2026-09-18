@@ -30,9 +30,9 @@ describe("a threaded query's rows have somewhere to render", () => {
     expect(threadPanel).toContain("liveSteps={liveStepsByMessage?.[r.id]}");
   });
 
-  it("a panel line renders the live rows, not only the durable ones", () => {
-    expect(threadPanel).toContain("<StepTimeline steps={message.steps} />");
-    expect(threadPanel).toContain("<StepTimeline steps={[...liveSteps]} defaultOpen />");
+  it("a panel line names live activity without exposing raw calls in chat", () => {
+    expect(threadPanel).toContain('<WorkingIndicator srLabel="Working…" steps={liveSteps} />');
+    expect(threadPanel).not.toContain("<StepTimeline");
   });
 
   it("RoomView supplies it, so the panel is never handed an empty map", () => {

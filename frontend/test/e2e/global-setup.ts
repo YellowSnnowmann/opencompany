@@ -12,6 +12,7 @@ import {
   identityFailure,
   readHomeInstanceId,
 } from "./host-identity";
+import { LIVE_BRAIN, MOCK_BRAIN_BIND } from "./capabilities";
 
 const ADMIN_EMAIL = "harness-e2e@tinyhumans.ai";
 const REQUEST_PATH = "/api/v1/company/auth/request";
@@ -58,7 +59,8 @@ export default async function globalSetup(config: FullConfig) {
   // that case — writing no session, and leaving every spec to fail on a
   // storage-state file nobody had created. The env var still wins where it is
   // set: the config honours it first.
-  const storageState = config.projects[0]?.use.storageState as string | undefined;
+  const storageState = config.projects[0]?.use.storageState as
+    string | undefined;
   if (!storageState) return;
 
   const context = await request.newContext({ baseURL });
@@ -108,9 +110,196 @@ export default async function globalSetup(config: FullConfig) {
       );
     }
     await context.storageState({ path: storageState });
+    // Not gated on `MANAGED_HOST_HOME !== undefined` (this run bringing the
+    // host up itself): the caller-managed mode (`PW_BASE_URL` + `PW_LIVE_BRAIN=1`,
+    // `playwright.config.ts`'s documented "against a host you brought
+    // yourself, the flag still enables the four specs but the fixtures are
+    // yours to start too") is on the same shared, mutable `e2e_harness`
+    // company and hits the identical X1/X14 poisoning this guards against —
+    // a caller who started `mock-brain.mjs` on the documented default address
+    // is exactly who this is for. See `connectAnchorProvider`'s own doc
+    // comment for the mechanism.
+    if (LIVE_BRAIN) {
+      await connectAnchorProvider(context);
+    }
   } finally {
     await context.dispose();
   }
+}
+
+/** This bootstrap's own slug and model — read back by name, so both the
+ * duplicate-detection and the default-repair paths agree on what they are
+ * looking for with whatever `mock-brain.mjs` is listening on for THIS run. */
+const ANCHOR_SLUG = "e2e-anchor-default";
+const ANCHOR_MODEL = "e2e-anchor-model";
+/** The anchor's stored credential — a placeholder the mock brain never checks. */
+const ANCHOR_KEY = "pw-e2e-anchor";
+
+/**
+ * Connects one permanent, reachable provider before any spec runs, on the
+ * live-brain lane only, and makes sure it is (still) the company default.
+ *
+ * Decision D-first-default (X1, keys rework issue #2306,
+ * `server/ops/inference/providers.rs`): the *first* provider a company ever
+ * connects becomes its default automatically, with no opt-out on the write
+ * path — `POST …/inference/providers` claims an `Unset` default whatever
+ * `make_default` says. Decision D-never-clear-default (X14): deleting,
+ * disabling, or clearing the key of *that* provider later never rewrites the
+ * default marker — `resolve_for_turn` then fails every later turn closed,
+ * "The company default uses …, which is removed."
+ *
+ * `companies/e2e_harness` starts with an `Unset` default (no `[inference]`
+ * section), so whichever spec happens to run first and connects a provider
+ * claims it. On the live-brain lane that used to be
+ * `agent-detail.spec.ts`'s pin test, which points its own provider at the
+ * discard port and deletes it in an `afterEach` — after which every later
+ * spec in the run, and not just that file's, failed every real agent turn on
+ * the stale default. `frontend/test/e2e/shared-inference.ts` documents the
+ * dead end from the test side: there is no route today that clears or
+ * re-points an already-set default, only ones that refuse to.
+ *
+ * The fix here does not touch that Rust invariant — X14 has its own test
+ * (`a_delete_disable_or_key_clear_never_rewrites_the_stored_default_marker`)
+ * and stays exactly as strict. It wins the race instead: this runs before
+ * `webServer`'s first spec, so it is unconditionally the *first* provider
+ * this company ever connects, and it never disconnects — no spec's cleanup
+ * list names its slug. It points at `mock-brain.mjs`, already up by the time
+ * this runs (`playwright.config.ts`'s `webServer` array starts the fixtures
+ * ahead of the host), so it stays healthy for the rest of the run and every
+ * later spec's default-routed turn reaches a real, scripted answer instead of
+ * a closed door.
+ *
+ * Default-feature `Console E2E` (no `LIVE_BRAIN`) does not need this: without
+ * `--features openhuman` the harness that calls `resolve_for_turn` for a real
+ * turn is not compiled in, so a stale default there has no later spec to
+ * poison — confirmed by CI, where that lane's only failures were the
+ * provider-page specs themselves, never a downstream one.
+ *
+ * ## Three things a reused host (`reuseExistingServer`, a repeat local run
+ * against `target/e2e/data`) needs that a fresh one does not, all from
+ * Codex/CodeRabbit review on #2310
+ *
+ * 1. **The anchor might already be the default, but a stale one might not
+ *    be.** An earlier run's spec could have connected and later deleted a
+ *    throwaway provider *before* this bootstrap existed, or `X14` could have
+ *    left the default pointed at a row nothing here created. Reading the
+ *    status and explicitly `POST`ing `…/default` whether or not the anchor
+ *    row is new closes both: an already-current default is a no-op write,
+ *    and a stale one is repointed.
+ * 2. **A reused anchor row can carry a stale `baseUrl`.** `PW_MOCK_BRAIN_BIND`
+ *    can differ between two local runs (this file's own isolation story:
+ *    several `PW_*` port variables exist precisely so concurrent runs on one
+ *    box do not collide). A leftover row still named `ANCHOR_SLUG` but
+ *    pointed at a `mock-brain.mjs` from a *different* run's port would make
+ *    every turn in *this* run fail to connect. Compared and repaired via
+ *    `PUT` before trusting it.
+ * 3. **Read state, don't parse an error message for it.** The previous
+ *    version detected "already exists" from `add_provider`'s `400` body
+ *    text. That still works, but a `GET` first is the same idempotency check
+ *    without depending on error-message wording, and it is what supplies the
+ *    stored `baseUrl` finding (2) needs anyway.
+ */
+async function connectAnchorProvider(
+  context: APIRequestContext,
+): Promise<void> {
+  const anchorUrl = `http://${MOCK_BRAIN_BIND}/v1`;
+  const existing = await findAnchorProvider(context);
+  if (existing) {
+    if (existing.baseUrl !== anchorUrl) {
+      // The key goes with the move. A stale anchor from another run's
+      // `PW_MOCK_BRAIN_BIND` is almost always a different *origin* (another
+      // port), and `edit_provider` refuses to carry a stored credential across
+      // origins unless the request re-enters it — a blank key field means
+      // "unchanged", which is exactly what must not happen when the host
+      // changes. The anchor's key is this file's own placeholder, so resending
+      // it is free and turns a 400 into the repoint this branch exists for.
+      const edited = await context.put(
+        `/api/v1/company/inference/providers/${ANCHOR_SLUG}`,
+        {
+          data: { baseUrl: anchorUrl, key: ANCHOR_KEY },
+        },
+      );
+      if (!edited.ok()) {
+        throw await setupError(
+          "PUT",
+          `/api/v1/company/inference/providers/${ANCHOR_SLUG}`,
+          edited,
+          "the anchor exists from an earlier run but points at a stale mock-brain address, and " +
+            "repointing it failed",
+        );
+      }
+    }
+  } else {
+    const created = await context.post("/api/v1/company/inference/providers", {
+      data: {
+        kind: "custom",
+        label: "E2E Anchor Default",
+        baseUrl: anchorUrl,
+        key: ANCHOR_KEY,
+        model: ANCHOR_MODEL,
+      },
+    });
+    if (!created.ok()) {
+      throw await setupError(
+        "POST",
+        "/api/v1/company/inference/providers",
+        created,
+        "connecting the permanent anchor default failed",
+      );
+    }
+  }
+  // Whether the row above is new or was already there: make it the default
+  // unconditionally. `add_provider` only auto-selects a *new* row into an
+  // `Unset` default, so a reused host whose default was left pointed at
+  // something else (or at nothing, per X14) needs this explicit write
+  // regardless — a POST that finds it already the default is a no-op.
+  const defaulted = await context.post(
+    `/api/v1/company/inference/providers/${ANCHOR_SLUG}/default`,
+    { data: { model: ANCHOR_MODEL } },
+  );
+  if (!defaulted.ok()) {
+    throw await setupError(
+      "POST",
+      `/api/v1/company/inference/providers/${ANCHOR_SLUG}/default`,
+      defaulted,
+      "the anchor row exists and is reachable but could not be made the company default",
+    );
+  }
+}
+
+/** The one field `connectAnchorProvider` needs off each row `GET …/inference` reports. */
+async function findAnchorProvider(
+  context: APIRequestContext,
+): Promise<{ baseUrl: string } | undefined> {
+  const response = await context.get("/api/v1/company/inference");
+  if (!response.ok()) {
+    throw await setupError(
+      "GET",
+      "/api/v1/company/inference",
+      response,
+      "could not read this company's inference status to check for an existing anchor",
+    );
+  }
+  const status = (await response.json()) as {
+    providers?: { slug: string; baseUrl: string }[];
+  };
+  return status.providers?.find((p) => p.slug === ANCHOR_SLUG);
+}
+
+/** One consistently-shaped error for every `connectAnchorProvider` request that fails. */
+async function setupError(
+  method: string,
+  path: string,
+  response: APIResponse,
+  why: string,
+): Promise<Error> {
+  const body = await response.text().catch(() => "<body could not be read>");
+  return new Error(
+    `[e2e global-setup] ${method} ${path} → ${response.status()} ${response.statusText()}; ` +
+      `body: ${body || "<empty>"}\n` +
+      `${why}, so every later spec's agent turn would resolve through whatever the first ` +
+      "test-created provider leaves behind instead — see connectAnchorProvider's doc comment.",
+  );
 }
 
 /**
@@ -121,7 +310,10 @@ export default async function globalSetup(config: FullConfig) {
  * under the responder's own data root. Read in this order, a root of ours with
  * no file is proof the responder does not serve it. See `host-identity.ts`.
  */
-async function identifyServer(context: APIRequestContext, baseURL: string): Promise<void> {
+async function identifyServer(
+  context: APIRequestContext,
+  baseURL: string,
+): Promise<void> {
   const url = `${baseURL.replace(/\/$/, "")}${SPEC_PATH}`;
 
   let response: APIResponse;
@@ -145,7 +337,9 @@ async function identifyServer(context: APIRequestContext, baseURL: string): Prom
     body: await response.text().catch(() => "<body could not be read>"),
     expectedInstanceId: EXPECTED_INSTANCE_ID,
     home: MANAGED_HOST_HOME,
-    homeInstanceId: MANAGED_HOST_HOME ? readHomeInstanceId(MANAGED_HOST_HOME) : undefined,
+    homeInstanceId: MANAGED_HOST_HOME
+      ? readHomeInstanceId(MANAGED_HOST_HOME)
+      : undefined,
   });
 
   if (failure) throw new Error(`[e2e global-setup] ${failure}`);

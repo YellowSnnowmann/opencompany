@@ -152,7 +152,9 @@ async-graphql wrappers live in `server::graphql`, not here.
 
 The workspace store seeds a new company from its `companies/<name>/workspace/**`
 template on first use (`WorkspaceStore::is_empty` gates the seed); skills read
-the company's `skills/<id>/SKILL.md` plus the repo-level shared registry.
+the company's own `skills/<id>/SKILL.md` plus the registry, which is the union
+of every bundle's `skills/` (the baseline's `_globals/skills/` first) — see
+`company::load_catalog_skills` and `docs/spec/runtime/globals.md`.
 
 Boot also scaffolds the reserved system roots `agents/` and `artifacts/`
 (issues #551, #552), via

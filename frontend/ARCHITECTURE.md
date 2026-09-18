@@ -79,8 +79,9 @@ declarative, version-controlled data the endpoints should read:
 | `skills/<id>/SKILL.md` | ✅ parsed (WS1) | Skills (frontmatter `name`/`description` + body) |
 
 WS1 froze these on-disk formats and their parsers; every row above now feeds a
-read endpoint. Shared, non-company skills live in the repo-level `skills/`
-library (`skillRegistry`) and are installable into any company.
+read endpoint. The skill registry (`skillRegistry`) is every bundle's
+`skills/` under `companies/` — the baseline's included — and any of it is
+installable into any company.
 
 Secrets are never in the directory. OAuth tokens and SMTP credentials are held
 by the manager/host secret store and injected per tenant — never handed to the
@@ -195,7 +196,7 @@ it. Responses mirror the TypeScript models in `src/lib/*` and `src/api/types.ts`
 - Installed skills (enable/disable, uninstall) + an installable registry.
 - **Source:** ✅ real — `Company.skills` (GraphQL) reads `skills/<id>/SKILL.md`
   overlaid with `SkillStateStore` enable/provenance; `skillRegistry` (GraphQL)
-  is the shared repo `skills/` library. Writes: `POST …/skills/{slug}/install`
+  is the union of every bundle's `skills/` under `companies/`. Writes: `POST …/skills/{slug}/install`
   `|uninstall`, `PUT …/skills/{slug}` (enable/disable), `POST …/skills`
   (custom).
 

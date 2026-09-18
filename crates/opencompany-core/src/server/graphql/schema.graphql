@@ -1,0 +1,1630 @@
+type AgentRun {
+	"""
+	The attempt id.
+	"""
+	id: ID!
+	"""
+	The teammate that ran it.
+	"""
+	agentId: String!
+	"""
+	1-based attempt ordinal at its card.
+	"""
+	attempt: Int!
+	"""
+	`pending` | `running` | `waiting_approval` | `paused` | `succeeded` |
+	`failed` | `cancelled`.
+	"""
+	status: String!
+	"""
+	`active` | `parked` | `terminal` — read this rather than inferring a
+	phase from timestamps.
+	"""
+	phase: String!
+	"""
+	The card this attempted, when it attempted one.
+	"""
+	taskId: ID
+	"""
+	The conversation it belongs to, when one raised it.
+	"""
+	chatId: ID
+	"""
+	The workflow run whose node spawned it.
+	"""
+	workflowRunId: ID
+	"""
+	The graph node within that run.
+	"""
+	nodeId: ID
+	"""
+	When the row was opened.
+	"""
+	createdAtMillis: Float!
+	"""
+	When it began running.
+	"""
+	startedAtMillis: Float
+	"""
+	When it settled. `None` while it is still going.
+	"""
+	finishedAtMillis: Float
+	"""
+	Why it failed, when it did.
+	"""
+	error: String
+	"""
+	Token and cost totals. Provisional until the attempt settles — they are
+	written by the settle, not accumulated on the row.
+	"""
+	usage: RunUsage!
+	"""
+	The settled step count.
+	
+	**Null while the attempt is live**, deliberately: `step_count` is written
+	by the settle, so returning the stored `0` for a running attempt would be
+	a lie that a client cannot detect. A live reader counts `steps` instead,
+	and this being `null` is what tells it to.
+	"""
+	stepCount: Int
+	"""
+	The step trace, oldest first.
+	"""
+	steps: [RunStep!]!
+}
+
+"""
+Token totals for one teammate.
+"""
+type AgentTokens {
+	"""
+	The teammate display name.
+	"""
+	name: String!
+	"""
+	Total tokens attributed to them.
+	"""
+	tokens: Float!
+	"""
+	Source-currency USD attributed to the teammate, when visible.
+	"""
+	costUsd: Float
+}
+
+"""
+A parked approval awaiting the operator. Mirrors
+[`ApprovalSummary`](crate::runtime::types::ApprovalSummary).
+"""
+type Approval {
+	"""
+	The approval's id.
+	"""
+	id: ID!
+	"""
+	The parked effect's dotted kind.
+	"""
+	kind: String!
+	"""
+	The USD amount involved, if any.
+	"""
+	amountUsd: Float
+	"""
+	Epoch-millis the effect was parked. `Float` round-trips the full u64
+	range that would overflow GraphQL's `Int`.
+	"""
+	atMillis: Float!
+	"""
+	Epoch-millis this approval default-denies if nobody decides it
+	(issue #971). `Float` for the same reason as `atMillis`.
+	
+	Carried here rather than left to the REST summary alone so the two
+	projections of one approval cannot drift into disagreeing about when it
+	dies — which is the sort of divergence a reader discovers by acting on
+	the wrong one. Null against a host that does not report a deadline.
+	"""
+	expiresAtMillis: Float
+	"""
+	Whether `amountUsd` was withheld from this reader by their role (#618).
+	
+	Carried for the same reason it is on the REST summary: a `null` amount
+	otherwise means "this effect involves no money", and a Member looking at
+	a withheld payment would read it as a free action.
+	"""
+	contentsHidden: Boolean!
+	"""
+	The workflow run waiting on this approval, when one is (issue #880).
+	
+	Structural — a run id, nothing more — and it is what lets a reader join
+	a card on the Approvals page back to the run that opened it. Null for
+	every park with no workflow behind it (a chat turn, a scheduler tick, a
+	board task's attempt), which is the majority.
+	"""
+	workflowRunId: String
+	"""
+	Which workflow a parked `workflow.approve` gate is asking about
+	(issue #1418), when the effect is one.
+	
+	Carried for the same reason it is on the REST summary: it is the second
+	half of the run address, and it must survive role redaction or a Member
+	holding up a stalled workflow would see `workflow_run_id` and still have
+	nowhere to click.
+	"""
+	workflowId: String
+}
+
+"""
+Spend rolled up by category.
+"""
+type CategorySpend {
+	"""
+	The category label.
+	"""
+	category: String!
+	"""
+	The amount spent in it, USD.
+	"""
+	amount: Float!
+}
+
+type Chat {
+	"""
+	The desk id.
+	"""
+	id: ID!
+	"""
+	The desk name.
+	"""
+	name: String!
+	"""
+	An optional description.
+	"""
+	description: String
+	"""
+	The teammate ids on this desk.
+	"""
+	members: [ID!]!
+	"""
+	The desk's message history, most-recent last. `before` is an opaque
+	EventLog cursor (a stringified sequence position); only messages before
+	it are returned.
+	
+	Filtering + projection is shared with the REST `GET .../chat/history`
+	route via [`chat_history::history_for_desk`] (issue #65) so the two
+	surfaces can never disagree about a desk's transcript.
+	"""
+	history(first: Int! = 50, before: String): MessagePage!
+}
+
+type Company {
+	"""
+	The company id.
+	"""
+	id: ID!
+	"""
+	The display name from the company charter.
+	"""
+	name: String!
+	"""
+	Lifecycle state, e.g. `running`, `paused`, `archived`.
+	"""
+	lifecycle: String!
+	"""
+	The number of approvals currently awaiting the operator.
+	"""
+	pendingApprovals: Int!
+	"""
+	The approvals currently awaiting the operator for this company.
+	
+	Contents are role-gated exactly as on the REST list (issue #618), and
+	ownership is resolved exactly as there (#1891). This is the surface that
+	made the question worth asking: it maps the same projection, so either
+	applied only to the REST handlers would leave the whole boundary
+	reachable through one GraphQL field — the redaction as a contents hole,
+	and the raw park stamp as a client putting an approval on a card the
+	host does not consider its owner.
+	"""
+	approvals: [Approval!]!
+	"""
+	The company roster: manifest teammates plus operator-added overlays.
+	"""
+	team: [TeamMember!]!
+	"""
+	The company's desks (group chats).
+	"""
+	chats: [Chat!]!
+	"""
+	One desk by id, or null when unknown.
+	"""
+	chat(id: ID!): Chat
+	"""
+	The per-teammate inboxes.
+	"""
+	inboxes: [Inbox!]!
+	"""
+	The task board, optionally filtered to one column.
+	"""
+	tasks(column: String, first: Int! = 100, offset: Int! = 0): TaskPage!
+	"""
+	Attempts at work — a card dispatch, a chat turn, or a workflow node —
+	newest first, each with its step trace.
+	
+	`workflowRunId` is the join that had no answer before agent nodes minted
+	rows: a node's turn has neither a card nor a conversation, so nothing
+	could ask what a workflow run's agents did.
+	
+	The unredacted half of each step is **role-gated**: a member sees the
+	scrubbed trace, and only a principal who may read sensitive contents sees
+	the raw reasoning, arguments and output (`approval_visibility`).
+	"""
+	agentRuns(taskId: ID, workflowRunId: ID, limit: Int! = 50): [AgentRun!]!
+	"""
+	One attempt by id, with its step trace; null when absent.
+	
+	The unredacted half is role-gated exactly as on [`agent_runs`](Self::agent_runs).
+	"""
+	agentRun(id: ID!): AgentRun
+	"""
+	The company's installed skills.
+	"""
+	skills: [Skill!]!
+	"""
+	The workspace file tree.
+	"""
+	workspaceTree: [FsNode!]!
+	"""
+	One workspace file by id, with content and backlinks; null when absent.
+	"""
+	workspaceFile(id: ID!): WorkspaceFile
+	"""
+	Which workspace notes mention `query`, matched case-insensitively as a
+	substring of note names and note bodies (issue #607).
+	"""
+	workspaceSearch(query: String!, prefix: String, limit: Int): WorkspaceSearchResults!
+	"""
+	The company-brain memory facts.
+	"""
+	memory(query: String, kind: MemoryKind, first: Int! = 50, offset: Int! = 0): MemoryFactPage!
+	"""
+	The company's saved workflows, as one-line summaries — seed graphs and
+	runtime-authored ones alike. Each carries an `enabled` flag reporting
+	manifest membership; listing is not gated on it.
+	"""
+	workflows: [WorkflowSummary!]!
+	"""
+	One workflow graph by id; null when unavailable.
+	"""
+	workflow(id: ID!): Workflow
+	"""
+	Token/cost usage over a lookback window.
+	"""
+	usage(range: UsageRange! = D30): Usage!
+	"""
+	The finance surface: balance, budget vs spend, and the transaction journal.
+	"""
+	finances: Finances!
+	"""
+	The third-party connections and their live status.
+	"""
+	connections: [ConnectionState!]!
+	"""
+	Custom-domain status; null when no domain is configured.
+	"""
+	domain: DomainStatus
+	"""
+	SMTP status — host/port/username only, never the password.
+	"""
+	smtp: SmtpStatus!
+	"""
+	The approval policy in force (issue #1070).
+	
+	Answers from the same derivation `GET {scope}/policy` uses, so the two
+	read surfaces cannot report different tiers for one company. Read-only:
+	the write plane stays REST-and-admin-only (issue #562).
+	
+	This sits beside [`Self::approvals`] on purpose. That field says what is
+	parked; this one says whether anything ever parks, and an empty queue
+	means opposite things under `supervised` and `full`.
+	"""
+	policy: Policy!
+	"""
+	The source-template provenance recorded at launch: the stable template
+	id (directory slug) and, when known, its version. Null for a company
+	provisioned from a raw manifest body rather than a template.
+	"""
+	provenance: TemplateProvenance
+}
+
+"""
+One third-party connection's state: manifest intent plus live OAuth status.
+"""
+type ConnectionState {
+	"""
+	The provider id (e.g. `slack`, `gmail`, `github`).
+	"""
+	provider: String!
+	"""
+	Whether an OAuth token is stored for this provider.
+	"""
+	connected: Boolean!
+	"""
+	Which route a Connect for this provider would take on this host:
+	`attested` (the platform runs it — nothing to register here), `static`
+	(a token already stored for this company, or this host's own registered
+	provider application: the self-hosted hatch), or `none` (no Connect can
+	succeed here). A tier name, never a credential and never a path.
+	"""
+	credentialSource: String!
+	"""
+	The connected account label, when known.
+	"""
+	account: String
+	"""
+	The manifest's stated reason for wanting this connection.
+	"""
+	reason: String
+}
+
+"""
+The unredacted companion of one step. **Carries secrets by construction.**
+"""
+type DeepStepDetail {
+	"""
+	Model reasoning for a thinking step.
+	"""
+	reasoning: String
+	"""
+	The tool's arguments as the model emitted them, unredacted.
+	"""
+	arguments: String
+	"""
+	The tool's raw output, before it was reduced to a shape.
+	"""
+	output: String
+	"""
+	The harness's own contextual label.
+	"""
+	displayDetail: String
+	"""
+	Which pass of the tool loop this step belongs to.
+	"""
+	iteration: Int
+	"""
+	Whether the store clipped any field above to its cap.
+	"""
+	clipped: Boolean!
+}
+
+"""
+A generated DNS record for custom-domain verification. Mirrors
+[`DnsRecord`](crate::company::dns::DnsRecord).
+"""
+type DnsRecord {
+	"""
+	The record type (`CNAME` | `TXT`).
+	"""
+	type: String!
+	"""
+	The record name/host.
+	"""
+	name: String!
+	"""
+	The record value.
+	"""
+	value: String!
+	"""
+	The record TTL.
+	"""
+	ttl: String!
+}
+
+"""
+Custom-domain status. Mirrors [`DomainStatus`].
+"""
+type DomainStatus {
+	"""
+	The configured domain.
+	"""
+	domain: String!
+	"""
+	Whether the domain's records have been verified.
+	"""
+	verified: Boolean!
+	"""
+	The DNS records the operator must publish.
+	"""
+	records: [DnsRecord!]!
+}
+
+"""
+One email in a teammate inbox. Mirrors [`EmailRecord`].
+"""
+type EmailMessage {
+	"""
+	The message id.
+	"""
+	id: ID!
+	"""
+	The sender's display name (may be empty).
+	"""
+	fromName: String!
+	"""
+	The sender's email address.
+	"""
+	fromEmail: String!
+	"""
+	The subject line.
+	"""
+	subject: String!
+	"""
+	The plain-text body.
+	"""
+	body: String!
+	"""
+	When it arrived / was sent, epoch millis.
+	"""
+	atMillis: Float!
+	"""
+	Whether the message has been read.
+	"""
+	read: Boolean!
+	"""
+	True for a sent message, false for a received one.
+	"""
+	outbound: Boolean!
+}
+
+"""
+A single page of `T`: the requested slice plus the unpaginated total.
+"""
+type EmailPage {
+	"""
+	The items on this page.
+	"""
+	items: [EmailMessage!]!
+	"""
+	The total number of items across all pages (before offset/limit).
+	"""
+	total: Int!
+}
+
+type Finances {
+	"""
+	The current balance, USD.
+	"""
+	balanceUsd: Float!
+	"""
+	The monthly budget, USD; `null` when no cap is set.
+	"""
+	budgetUsd: Float
+	"""
+	Total spend this period, USD.
+	"""
+	spentUsd: Float!
+	"""
+	Total revenue this period, USD.
+	"""
+	revenueUsd: Float!
+	"""
+	Net (revenue − spend), USD.
+	"""
+	netUsd: Float!
+	"""
+	Spend rolled up by category.
+	"""
+	byCategory: [CategorySpend!]!
+	"""
+	A page of the transaction journal, most-recent first.
+	"""
+	transactions(first: Int! = 50, offset: Int! = 0): [Transaction!]!
+}
+
+"""
+One node (folder or file) in the workspace tree. Mirrors [`WorkspaceNode`].
+"""
+type FsNode {
+	"""
+	The node id (stable ULID).
+	"""
+	id: ID!
+	"""
+	The node name.
+	"""
+	name: String!
+	"""
+	`folder` or `file`.
+	"""
+	kind: String!
+	"""
+	The parent node id, or null at the root.
+	"""
+	parentId: ID
+	"""
+	When it was last updated, ISO-8601 UTC.
+	"""
+	updatedAt: String!
+	"""
+	Who created the node.
+	"""
+	createdBy: WorkspaceOrigin!
+	"""
+	Who last wrote the node's content (a rename or move does not change it).
+	"""
+	updatedBy: WorkspaceOrigin!
+	"""
+	The payload's media type — **set only on a binary node** (issue #553),
+	and null on a folder or a prose note.
+	
+	Its presence is the whole test for "this node holds bytes, not text", and
+	without it no GraphQL consumer could discover that binaries exist at all:
+	a payload's text `read` is an empty body by contract, so a 4 MB PNG and a
+	genuinely empty note were the same answer on this surface (issue #669).
+	The REST `FsNode` has carried these three since #553; this is the field
+	set catching up, not a new concept.
+	"""
+	mime: String
+	"""
+	The payload's length in bytes; null unless `mime` is set.
+	
+	`Float`, not `Int`, because the store's `size` is a `u64` and GraphQL's
+	`Int` is 32-bit — the same choice `usage` and `Approval.atMillis` made,
+	for the same reason. Today's 64 MiB per-write cap fits in an `Int`; the
+	cap is configurable and the field should not be the thing that stops it
+	being raised.
+	"""
+	size: Float
+	"""
+	The payload's sha256, the same digest the blob route serves as its
+	`ETag`; null unless `mime` is set.
+	
+	This is what makes "the bytes changed" observable to a consumer that
+	cannot see the bytes — a re-publish keeps the node id and changes this.
+	"""
+	sha256: String
+}
+
+type Inbox {
+	"""
+	The teammate local part / slug.
+	"""
+	key: ID!
+	"""
+	The inbox display name.
+	"""
+	name: String!
+	"""
+	The full address (`{key}@{domain}` when a domain is configured).
+	"""
+	address: String!
+	"""
+	The number of unread received messages.
+	"""
+	unread: Int!
+	"""
+	A page of this inbox's messages, oldest first.
+	"""
+	messages(first: Int! = 50, offset: Int! = 0): EmailPage!
+}
+
+"""
+A scalar that can represent any JSON value.
+"""
+scalar JSON
+
+"""
+One remembered fact. Mirrors [`FactRecord`].
+"""
+type MemoryFact {
+	"""
+	The fact id.
+	"""
+	id: ID!
+	"""
+	The fact's kind.
+	"""
+	kind: MemoryKind!
+	"""
+	A short title.
+	"""
+	title: String!
+	"""
+	The fact body.
+	"""
+	body: String!
+	"""
+	Which desk/teammate captured it.
+	"""
+	source: String!
+	"""
+	When it was last updated, ISO-8601 UTC.
+	"""
+	updatedAt: String!
+}
+
+"""
+A single page of `T`: the requested slice plus the unpaginated total.
+"""
+type MemoryFactPage {
+	"""
+	The items on this page.
+	"""
+	items: [MemoryFact!]!
+	"""
+	The total number of items across all pages (before offset/limit).
+	"""
+	total: Int!
+}
+
+"""
+The kind of a remembered fact, in the console's memory taxonomy.
+"""
+enum MemoryKind {
+	"""
+	A plain fact.
+	"""
+	FACT
+	"""
+	An operator preference.
+	"""
+	PREFERENCE
+	"""
+	A person the company knows.
+	"""
+	PERSON
+	"""
+	A project the company tracks.
+	"""
+	PROJECT
+	"""
+	A reference document or link.
+	"""
+	REFERENCE
+}
+
+"""
+One message in a desk history. Mirrors `frontend/src/lib/chat.ts`.
+"""
+type Message {
+	"""
+	The message id (its EventLog sequence position).
+	"""
+	id: ID!
+	"""
+	The channel the message came in on.
+	"""
+	channel: String!
+	"""
+	The author label.
+	"""
+	author: String!
+	"""
+	The message text.
+	"""
+	text: String!
+	"""
+	When it was journaled, epoch millis.
+	"""
+	atMillis: Float!
+	"""
+	Whether it is the operator's own message.
+	"""
+	mine: Boolean!
+	"""
+	The scrubbed processing steps behind a company reply, so a rehydrated
+	transcript renders the same timeline the REST route returns (issue #65
+	parity). Empty for operator messages and tool-less replies.
+	"""
+	steps: [MessageStep!]!
+	"""
+	The board card this reply is about (issue #246): the card the turn
+	opened, or the dispatched card it ran for (#185). Projected from the
+	same [`MessageView`] field the REST route reads, so the two surfaces
+	agree on which messages carry a card. Null on operator messages and on
+	every reply journaled before the field existed.
+	"""
+	taskId: ID
+	"""
+	The message this one replies to (issue #364) — a thread reply rather
+	than a new line in the channel. Null for a message posted straight into
+	the channel, which is every message journaled before threads were
+	persisted. Same [`MessageView`] field the REST route reads, so the two
+	surfaces cannot disagree about the shape of a thread.
+	"""
+	parentId: ID
+	"""
+	Who reacted to this message with what (issue #364), one row per person
+	per emoji. Empty when nobody has.
+	"""
+	reactions: [MessageReaction!]!
+	"""
+	Who this message names, in reading order. Empty when it names nobody.
+	Same [`MessageView`] field the REST route reads, so the two surfaces
+	cannot disagree about who was mentioned.
+	"""
+	mentions: [MessageMention!]!
+	"""
+	Files attached to this message (issue #1682), each a reference into the
+	company workspace with the store-computed name / mime / size. Empty on a
+	reply, a system pill, and every operator message journaled before the
+	field existed. Same [`MessageView`] field the REST route reads, so the
+	two surfaces carry the same rows (issue #65).
+	"""
+	attachments: [MessageAttachment!]!
+}
+
+"""
+One file attached to a history message (issue #1682). GraphQL mirror of the
+REST `attachments` array, so the two surfaces carry the same rows. Every
+field is store-authored metadata; the bytes are fetched separately through
+the hardened `GET …/workspace/blob/{nodeId}` route.
+"""
+type MessageAttachment {
+	"""
+	The workspace node id the payload is stored under.
+	"""
+	nodeId: ID!
+	"""
+	The stored file's display name.
+	"""
+	name: String!
+	"""
+	The stored payload's media type.
+	"""
+	mime: String!
+	"""
+	The stored payload's exact length in bytes.
+	"""
+	size: Float!
+}
+
+"""
+One mention on a history message. GraphQL mirror of the REST `mentions`
+array, so the two surfaces carry the same rows.
+"""
+type MessageMention {
+	"""
+	The literal span the author typed.
+	"""
+	text: String!
+	"""
+	Byte offset of `text` in the message body.
+	"""
+	offset: Int!
+	"""
+	Who was named, as a display label — never a raw user id.
+	"""
+	label: String!
+	"""
+	Whether the reading viewer is the one named (or was named by
+	`@everyone`).
+	"""
+	mine: Boolean!
+	"""
+	Whether this mention renders but pings nobody.
+	"""
+	quiet: Boolean!
+}
+
+"""
+A single page of `T`: the requested slice plus the unpaginated total.
+"""
+type MessagePage {
+	"""
+	The items on this page.
+	"""
+	items: [Message!]!
+	"""
+	The total number of items across all pages (before offset/limit).
+	"""
+	total: Int!
+}
+
+"""
+One person's reaction on a history message (issue #364). GraphQL mirror of
+the REST `reactions` array, so the two surfaces carry the same rows.
+"""
+type MessageReaction {
+	"""
+	The emoji.
+	"""
+	emoji: String!
+	"""
+	Who reacted, as a display label — never a raw user id.
+	"""
+	by: String!
+	"""
+	Whether the reading viewer is the one who reacted.
+	"""
+	mine: Boolean!
+}
+
+"""
+One scrubbed step in a reply's processing timeline. GraphQL mirror of the
+wire [`TurnStep`] (`kind`/`status` are its snake_case string forms), so the
+GraphQL `Message` type carries the same timeline as the REST projection.
+"""
+type MessageStep {
+	"""
+	The step kind (`tool_call` / `thinking` / `note`).
+	"""
+	kind: String!
+	"""
+	How the step ended (`ok` / `error` / `running`).
+	"""
+	status: String!
+	"""
+	A short, human label (never tool arguments or output).
+	"""
+	label: String!
+	"""
+	An optional scrubbed detail (e.g. `server · tool`, a failure cause).
+	"""
+	detail: String
+	"""
+	How long the step took in milliseconds, when known.
+	"""
+	elapsedMs: Float
+}
+
+"""
+The company's approval policy, as `GET {scope}/policy` reports it.
+"""
+type Policy {
+	"""
+	The tier **actually in force** — the console override where one sets it,
+	the committed manifest otherwise.
+	"""
+	mode: String!
+	"""
+	The always-ask list actually in force. The operator's real lever: it
+	wins over every tier, `full` included.
+	"""
+	alwaysApprove: [String!]!
+	"""
+	The spend cap actually in force — console override where one sets it,
+	the committed manifest otherwise. A higher cap is looser; `null` is the
+	strictest setting — no spend is auto-approved, so every spend parks.
+	"""
+	autoApproveUnderUsd: Float
+	"""
+	How long an undecided approval remains actionable, in hours.
+	"""
+	approvalTtlHours: Float!
+	"""
+	The manifest's tier, so a client can see what a reset would restore.
+	"""
+	manifestMode: String!
+	"""
+	The manifest's always-ask list, for the same reason.
+	"""
+	manifestAlwaysApprove: [String!]!
+	"""
+	The manifest's spend cap, for the same reason — what a reset would
+	restore (a higher cap is looser; `null` is the strictest setting — no
+	spend is auto-approved, so every spend parks).
+	"""
+	manifestAutoApproveUnderUsd: Float
+	"""
+	The manifest's approval deadline, for the same reason — what a reset
+	would restore.
+	"""
+	manifestApprovalTtlHours: Float
+	"""
+	Whether an operator override is in force.
+	
+	Distinct from comparing `mode` with `manifestMode`: an override that
+	happens to match the manifest is still an override, and is still what a
+	reset would remove.
+	"""
+	overridden: Boolean!
+	"""
+	Who set the override, if one is set.
+	"""
+	setBy: String
+	"""
+	When it was set (epoch millis), if one is set.
+	"""
+	setAtMillis: Float
+	"""
+	The selectable tiers with their operator-facing consequences.
+	"""
+	tiers: [PolicyTier!]!
+	"""
+	When a change bites.
+	"""
+	takesEffect: String!
+}
+
+"""
+One selectable tier and what choosing it means.
+"""
+type PolicyTier {
+	"""
+	The `[policy].mode` word.
+	"""
+	value: String!
+	"""
+	The operator-facing label.
+	"""
+	label: String!
+	"""
+	What choosing it means, in consequences rather than tier vocabulary.
+	"""
+	description: String!
+}
+
+"""
+Call totals for one provider.
+"""
+type ProviderCalls {
+	"""
+	The provider id.
+	"""
+	provider: String!
+	"""
+	Total calls to it.
+	"""
+	calls: Float!
+}
+
+type Query {
+	"""
+	Every company visible to the caller: all registered companies for the
+	operator / platform-scope principal, or just a tenant's own in platform
+	mode.
+	"""
+	companies: [Company!]!
+	"""
+	One company by id, or — when `id` is omitted in single-company mode — the
+	sole registered company. `null` when no such company is registered.
+	"""
+	company(id: ID): Company
+	"""
+	The skill registry (`companies/*/skills/*/SKILL.md`, the baseline's
+	included), installable into any company. Unscoped — the registry is the
+	same for every caller.
+	"""
+	skillRegistry: [RegistrySkill!]!
+}
+
+"""
+One skill in the shared repo-level registry, installable into any company.
+"""
+type RegistrySkill {
+	"""
+	The skill slug.
+	"""
+	id: ID!
+	"""
+	The display name.
+	"""
+	name: String!
+	"""
+	A one-line description.
+	"""
+	description: String!
+	"""
+	The skill category.
+	"""
+	category: String!
+	"""
+	The publisher of the registry skill.
+	"""
+	publisher: String!
+	"""
+	The library revision this entry ships, from frontmatter. `None` for a
+	skill authored before `version` existed.
+	"""
+	version: String
+}
+
+"""
+One step of an attempt's trace.
+"""
+type RunStep {
+	"""
+	The step's ordinal within its run.
+	"""
+	seq: Int!
+	"""
+	When it was recorded.
+	"""
+	atMillis: Float!
+	"""
+	`tool_call` | `thinking` | `note`.
+	"""
+	kind: String!
+	"""
+	`ok` | `error` | `running` | `awaiting_approval`.
+	"""
+	status: String!
+	"""
+	The display label — the tool's name, or "Thinking".
+	"""
+	label: String!
+	"""
+	Arguments, **through the host redactor**. Safe to render anywhere.
+	"""
+	detail: String
+	"""
+	A summary or shape of the result — never a remote body.
+	"""
+	result: String
+	"""
+	The typed failure class, when the step failed.
+	"""
+	failure: String
+	"""
+	Whether the harness truncated the result before we saw it.
+	"""
+	truncated: Boolean!
+	"""
+	Wall-clock duration.
+	"""
+	elapsedMs: Float
+	"""
+	The unredacted half. `None` when this host keeps no deep trace, and when
+	the step produced none.
+	"""
+	deep: DeepStepDetail
+}
+
+"""
+Token and cost totals for one attempt.
+"""
+type RunUsage {
+	"""
+	Input tokens.
+	"""
+	inputTokens: Float!
+	"""
+	Output tokens.
+	"""
+	outputTokens: Float!
+	"""
+	Input tokens served from the provider's cache.
+	"""
+	cachedInputTokens: Float!
+	"""
+	Cost in USD.
+	"""
+	costUsd: Float!
+}
+
+"""
+One skill installed in a company. Mirrors the console's `@/api/skills` types.
+"""
+type Skill {
+	"""
+	The skill slug.
+	"""
+	id: ID!
+	"""
+	The display name.
+	"""
+	name: String!
+	"""
+	A one-line description.
+	"""
+	description: String!
+	"""
+	The skill category (e.g. `Marketing`, `Ops`).
+	"""
+	category: String!
+	"""
+	Provenance: `company` | `registry` | `custom`.
+	"""
+	source: String!
+	"""
+	Whether the skill is enabled for the company.
+	"""
+	enabled: Boolean!
+	"""
+	The library revision this skill's document carries, when it has one.
+	"""
+	version: String
+}
+
+"""
+Non-secret SMTP status: host/port/username only — never the password.
+"""
+type SmtpStatus {
+	"""
+	The SMTP host (empty when unconfigured).
+	"""
+	host: String!
+	"""
+	The SMTP port (0 when unconfigured).
+	"""
+	port: Int!
+	"""
+	The SMTP username (empty when unconfigured).
+	"""
+	username: String!
+	"""
+	Whether SMTP is configured.
+	"""
+	configured: Boolean!
+}
+
+"""
+One card on the company's task board. Mirrors [`TaskRecord`].
+"""
+type Task {
+	"""
+	The task id.
+	"""
+	id: ID!
+	"""
+	The task title.
+	"""
+	title: String!
+	"""
+	An optional longer note.
+	"""
+	note: String
+	"""
+	The board column: `todo` | `planning` | `in_progress` | `paused` |
+	`in_review` | `done`.
+	"""
+	column: String!
+	"""
+	The priority: `low` | `medium` | `high`.
+	"""
+	priority: String!
+	"""
+	The assigned teammate id.
+	"""
+	assignee: String!
+}
+
+"""
+A single page of `T`: the requested slice plus the unpaginated total.
+"""
+type TaskPage {
+	"""
+	The items on this page.
+	"""
+	items: [Task!]!
+	"""
+	The total number of items across all pages (before offset/limit).
+	"""
+	total: Int!
+}
+
+"""
+One roster teammate. Mirrors `frontend/src/lib/team.ts`.
+"""
+type TeamMember {
+	"""
+	The teammate id.
+	"""
+	id: ID!
+	"""
+	The display name; null for a manifest teammate named only by role.
+	"""
+	name: String
+	"""
+	The job title / role.
+	"""
+	role: String!
+	"""
+	An optional description.
+	"""
+	description: String
+	"""
+	Whether this teammate has an enabled inbox.
+	"""
+	inboxEnabled: Boolean!
+	"""
+	This teammate's daily spend cap in force (issue #304), or null when it
+	has none. Null-vs-set is the capped/uncapped distinction — `0` would
+	mean "capped at nothing".
+	
+	Since #343 this is the **effective** cap: an operator override set from
+	the console when one is stored, the manifest value otherwise.
+	"""
+	budgetUsdDaily: Float
+	"""
+	What this teammate has spent since 00:00 UTC; non-null only alongside a
+	cap.
+	"""
+	spentTodayUsd: Float
+	"""
+	The user id of the admin who last set this teammate's cap from the
+	console (issue #343); null when no override is stored. Non-null even
+	when the override *removed* the cap, which is how "nobody capped this"
+	is told from "an admin uncapped this".
+	"""
+	budgetSetBy: String
+	"""
+	When that cap was set (epoch millis). `Float` round-trips the full u64
+	range that would overflow GraphQL's `Int`, matching `Approval.atMillis`.
+	"""
+	budgetSetAtMillis: Float
+	"""
+	The face this teammate wears, when somebody has chosen one — a
+	`tiny:<flavour>` mascot or a `blob:<nodeId>` upload
+	(`docs/spec/runtime/avatars.md`). Absent means **nobody has chosen**, and
+	the console draws the mascot it hashes from the id. Mirrors the REST
+	team DTO's `avatar`; both arms of the roster read answer the same way.
+	"""
+	avatar: String
+}
+
+"""
+The source-template provenance of a company: where its manifest was seeded
+from. Mirrors [`TemplateProvenance`](crate::ports::types::TemplateProvenance).
+"""
+type TemplateProvenance {
+	"""
+	The template's stable identifier — the source directory slug.
+	"""
+	sourceId: String!
+	"""
+	The template's version, when the source exposes one.
+	"""
+	version: String
+	"""
+	The source directory path the company was launched from, when recorded.
+	"""
+	path: String
+}
+
+"""
+One ledger transaction in the finance journal.
+"""
+type Transaction {
+	"""
+	The transaction id.
+	"""
+	id: ID!
+	"""
+	The transaction date, `YYYY-MM-DD`.
+	"""
+	date: String!
+	"""
+	A human description.
+	"""
+	description: String!
+	"""
+	The spend category.
+	"""
+	category: String!
+	"""
+	The amount, USD (a positive magnitude; see `direction`).
+	"""
+	amountUsd: Float!
+	"""
+	`in` for revenue, `out` for spend.
+	"""
+	direction: String!
+}
+
+"""
+The usage read surface for a company.
+"""
+type Usage {
+	"""
+	The daily token series.
+	"""
+	series: [UsagePoint!]!
+	"""
+	Tokens by teammate.
+	"""
+	byAgent: [AgentTokens!]!
+	"""
+	Calls by provider.
+	"""
+	byProvider: [ProviderCalls!]!
+	"""
+	Aggregate totals.
+	"""
+	totals: UsageTotals!
+	"""
+	Whether positive cost was withheld by the reader's role.
+	"""
+	costHidden: Boolean!
+}
+
+"""
+One day's token totals.
+"""
+type UsagePoint {
+	"""
+	The day, `YYYY-MM-DD`.
+	"""
+	date: String!
+	"""
+	Input tokens that day.
+	"""
+	inputTokens: Float!
+	"""
+	Output tokens that day.
+	"""
+	outputTokens: Float!
+}
+
+"""
+The usage lookback window.
+"""
+enum UsageRange {
+	"""
+	The last 7 days.
+	"""
+	D7
+	"""
+	The last 30 days (the default).
+	"""
+	D30
+	"""
+	The last 90 days.
+	"""
+	D90
+}
+
+"""
+Aggregate usage totals for the window.
+"""
+type UsageTotals {
+	"""
+	Total input tokens.
+	"""
+	inputTokens: Float!
+	"""
+	Total output tokens.
+	"""
+	outputTokens: Float!
+	"""
+	Total tokens (input + output).
+	"""
+	tokens: Float!
+	"""
+	Total inference cost, USD.
+	"""
+	costUsd: Float
+	"""
+	Total OAuth calls.
+	"""
+	oauthCalls: Float!
+	"""
+	Number of distinct connections used.
+	"""
+	connections: Int!
+	"""
+	Total metered web searches (issue #238). Their USD cost is already
+	inside `cost_usd`; this is the call count.
+	"""
+	searchCalls: Float!
+}
+
+"""
+A full workflow graph.
+"""
+type Workflow {
+	"""
+	The workflow id.
+	"""
+	id: ID!
+	"""
+	The workflow display name.
+	"""
+	name: String!
+	"""
+	The graph nodes.
+	"""
+	nodes: [WorkflowNode!]!
+	"""
+	The graph edges.
+	"""
+	edges: [WorkflowEdge!]!
+}
+
+"""
+One directed edge in a workflow graph.
+"""
+type WorkflowEdge {
+	"""
+	The source node id.
+	"""
+	from: ID!
+	"""
+	The target node id.
+	"""
+	to: ID!
+	"""
+	An optional edge label.
+	"""
+	label: String
+}
+
+"""
+One node in a workflow graph.
+"""
+type WorkflowNode {
+	"""
+	The node id.
+	"""
+	id: ID!
+	"""
+	The node kind (`trigger`, `agent`, `toolCall`, ...).
+	"""
+	kind: String!
+	"""
+	The node display name.
+	"""
+	name: String!
+	"""
+	An optional one-line summary.
+	"""
+	summary: String
+	"""
+	Free-form, kind-specific node config (P1), exposed as a JSON scalar so
+	`Company.workflow(id)` does not drop model data.
+	"""
+	config: JSON
+	"""
+	Per-node error policy: `stop` / `continue` / `route`.
+	"""
+	onError: String
+	"""
+	Per-node retry policy (attempts + backoff), as a JSON scalar. Keys are
+	camelCase (`maxAttempts` / `backoffMs`) to match the REST read shape;
+	see [`RetryGql`].
+	"""
+	retry: JSON
+	"""
+	Whether the node pauses awaiting operator approval before it runs.
+	"""
+	requiresApproval: Boolean
+	"""
+	Where an `output` node's report is routed once the run finishes (issue
+	#170), as a JSON scalar: `{"kind": "owner"|"email"|"channel",
+	"target"?: "…"}`. Exposed for the same reason `config` is — so
+	`Company.workflow(id)` does not drop model data. Both keys are single
+	words, so the model shape needs no camelCase mirror the way `retry` does.
+	"""
+	destination: JSON
+	"""
+	A node's declared deterministic postcondition (issue #1866), as a JSON
+	scalar for the same reason `destination` is — `require`/`field` are
+	single words, so no camelCase mirror is needed.
+	"""
+	postcondition: JSON
+	"""
+	Optional semantic sufficiency policy, exposed as JSON like postcondition.
+	"""
+	verify: JSON
+}
+
+"""
+A one-line workflow summary for the workflows list.
+"""
+type WorkflowSummary {
+	"""
+	The workflow id.
+	"""
+	id: ID!
+	"""
+	The workflow display name.
+	"""
+	name: String!
+	"""
+	Whether the workflow id appears in the company manifest's
+	`[workflows].enabled` list.
+	
+	This is manifest membership, **not** "does this workflow exist and can it
+	run". A runtime-authored workflow is listed here whether or not it is
+	manifest-enabled, and `Company.workflow(id)` / the run routes serve any
+	saved graph regardless of this flag — nothing consults it to decide
+	whether a workflow may run. Treat it as "declared by the blueprint".
+	"""
+	enabled: Boolean!
+}
+
+"""
+A single workspace file with its content and inbound `[[wikilink]]` backlinks.
+"""
+type WorkspaceFile {
+	"""
+	The file id.
+	"""
+	id: ID!
+	"""
+	The file name.
+	"""
+	name: String!
+	"""
+	The file content.
+	"""
+	content: String!
+	"""
+	When it was last updated, ISO-8601 UTC.
+	"""
+	updatedAt: String!
+	"""
+	Who created this file.
+	"""
+	createdBy: WorkspaceOrigin!
+	"""
+	Who last wrote the content above.
+	"""
+	updatedBy: WorkspaceOrigin!
+	"""
+	Other files whose content links to this one via `[[name]]`.
+	"""
+	backlinks: [FsNode!]!
+}
+
+"""
+Who authored a workspace node. Mirrors [`WorkspaceOrigin`] (issue #326).
+
+Flattened into `kind` + optional `agentId` rather than exposed as a GraphQL
+union: `agentId` is non-null exactly when `kind` is `agent`, and a union of
+two empty types plus one single-field type buys a client nothing but three
+inline fragments. The Rust type keeps the invariant; this is its projection.
+"""
+type WorkspaceOrigin {
+	"""
+	`seed`, `operator` or `agent`.
+	"""
+	kind: String!
+	"""
+	The agent's roster id — set only when `kind` is `agent`.
+	"""
+	agentId: String
+}
+
+"""
+One workspace search hit (issue #607).
+
+The node is nested rather than flattened: `FsNode` is already the projection
+every other workspace read hands back, and re-declaring its fields here would
+be a second copy to keep in step. What search adds is the two things only a
+search knows — where the node sits, and why it came back.
+"""
+type WorkspaceSearchHit {
+	"""
+	The matching node.
+	"""
+	node: FsNode!
+	"""
+	Its logical path, e.g. `standards/Engineering.md`.
+	"""
+	path: String!
+	"""
+	`name` or `content`.
+	"""
+	matched: String!
+	"""
+	Text around the first body match; null for a name match, a folder and a
+	binary node.
+	"""
+	excerpt: String
+}
+
+"""
+A page of workspace search hits, plus how many matched in total.
+"""
+type WorkspaceSearchResults {
+	"""
+	The hits: name matches first, then content matches, freshest first
+	within each group.
+	"""
+	hits: [WorkspaceSearchHit!]!
+	"""
+	Matches before the limit was applied.
+	"""
+	total: Int!
+}
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+schema {
+	query: Query
+}

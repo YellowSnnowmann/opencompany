@@ -233,13 +233,25 @@ const managesComposio = managesHost && COMPOSIO;
 /**
  * Where the host's Composio calls go, when this run is standing a fixture up.
  *
+ * `OPENCOMPANY_COMPOSIO_BACKEND_URL` — Composio's own per-surface backend-URL
+ * override — was removed in phase 6a (issue #2306): Composio now always
+ * follows the tenant's shared API base, `TINYHUMANS_API_URL`, the same way
+ * media and search already do. There is no per-surface replacement, so this
+ * repoints the WHOLE host's TinyHumans API base at the fixture — safe here
+ * only because `TINYHUMANS_API_URL` has no other production reader that this
+ * run's specs assert against (it also feeds `AppConfig.api_url`, i.e. the
+ * account page's "Manage keys" / "Top up" hub links, but no spec in this run
+ * reads those hrefs). Composio inference itself is unaffected: the live-brain
+ * lane points the harness at `mock-brain.mjs` / `live-brain-proxy.mjs` through
+ * `OPENCOMPANY_INFERENCE_URL`, a distinct variable `inferenceEnv` sets above.
+ *
  * The same `PW_HOST_PASSTHROUGH` caveat applies as above and is the reason the
  * two blocks are joined below rather than each setting the variable: `host.sh`
  * copies an allowlist into an empty environment, so a second assignment here
  * would quietly replace the first and the inference URL would never arrive.
  */
 const composioEnv: Record<string, string> = managesComposio
-  ? { OPENCOMPANY_COMPOSIO_BACKEND_URL: `http://${COMPOSIO_FIXTURE_BIND}` }
+  ? { TINYHUMANS_API_URL: `http://${COMPOSIO_FIXTURE_BIND}` }
   : {};
 
 /**

@@ -9,7 +9,7 @@ spec:
 
   services:
     - name: opencompany
-      dockerfile_path: Dockerfile
+      dockerfile_path: deploy/Dockerfile
       source_dir: /
       github:
         repo: tinyhumansai/opencompany

@@ -6,14 +6,15 @@ and how to turn it off.
 
 The short version, and the only four sentences most readers need:
 
-- A **desktop or self-hosted install sends nothing.** Not "sends nothing by
-  default" in the sense of a flag someone could flip in a config file — the
-  network client is behind a cargo feature the shipped default build does not
-  compile, so there is no code in that binary that could make the request.
-  Getting one out of that state takes a **recompile**: `--features analytics`
-  *and* an explicit `OPENCOMPANY_ANALYTICS=on`, both deliberate, and neither
-  reachable from anything a shipped binary reads at runtime. See
-  [Configuration](#configuration) for the six conditions in full.
+- The **host process** in a desktop or self-hosted install sends nothing. Not
+  "sends nothing by default" in the sense of a flag someone could flip in a
+  config file — the network client is behind a cargo feature the shipped
+  default build does not compile. Getting one out of that state takes a
+  **recompile**: `--features analytics` *and* an explicit
+  `OPENCOMPANY_ANALYTICS=on`, both deliberate. The shared console separately
+  uses OpenPanel's public browser client to record UI navigation; see the
+  [console note](#console-browser-events). See [Configuration](#configuration)
+  for the seven host-side conditions in full.
 - A **hosted tenant** — a container the OpenCompany platform provisioned and
   operates — reports **shape and outcome only**, under an **opaque id**.
 - Nothing an operator or an agent wrote ever leaves the process this way. Not
@@ -26,33 +27,21 @@ The short version, and the only four sentences most readers need:
 
 ## Why the default is silence
 
-This repository is GPL-3.0 and self-hostable. An open-source instance that
-phones home by default is a betrayal of that, whatever the payload contains.
+This repository is GPL-3.0 and self-hostable. An open-source instance that phones home by default is a betrayal of that, whatever the payload contains.
 
-It is also the posture the rest of the tree already takes. `tests/offline_e2e.rs`
-runs inside a network namespace with no routes and asserts that the jail holds;
-[offline.md](offline.md) says outright that a new cloud call on a shared path
-*should* turn that lane red, and that widening the namespace to make it pass is
-not an option. An analytics client firing at boot would do exactly that. The
-feature gate is what keeps both things true at once.
+It is also the posture the rest of the tree already takes. `tests/offline_e2e.rs` runs inside a network namespace with no routes and asserts that the jail holds; [offline.md](offline.md) says outright that a new cloud call on a shared path *should* turn that lane red, and that widening the namespace to make it pass is not an option. An analytics client firing at boot would do exactly that. The feature gate is what keeps both things true at once.
 
-And [`roadmap.md`](../roadmap.md)'s non-goal — "no private feedback backend" —
-still holds and is unchanged by this: **feedback** goes to public GitHub issues
-or stays local, and never rides this channel.
+And [`roadmap.md`](../roadmap.md)'s non-goal — "no private feedback backend" — still holds and is unchanged by this: **feedback** goes to public GitHub issues or stays local, and never rides this channel.
 
 ## Why the collector is OpenPanel
 
-The same argument, one layer out. Silence-by-default answered "does a
-self-hosted instance report?" but left the destination a SaaS vendor, so the
-one deployment that *did* report — the hosted platform — shipped its usage to a
-third party, and a self-hoster who opted in had no way to run the other end.
-That is a licence taken more seriously by its users than by its own product.
+The same argument, one layer out. Silence-by-default answered "does a self-hosted instance report?" but left the destination a SaaS vendor, so the one deployment that *did* report — the hosted platform — shipped its usage to a third party, and a self-hoster who opted in had no way to run the other end. That is a licence taken more seriously by its users than by its own product.
 
-OpenPanel is AGPL-3.0 and runs from a compose file. Collection now lands on
-infrastructure the platform operator runs, and a reader of this document can
-stand the whole stack up themselves. **Mixpanel is gone entirely** — not behind
-a flag, not as a fallback. There is one transport and it speaks to whatever
-`OPENCOMPANY_ANALYTICS_ENDPOINT` names.
+OpenPanel is AGPL-3.0 and runs from a compose file. Collection now lands on infrastructure the platform operator runs, and a reader of this document can stand the whole stack up themselves. **Mixpanel is gone entirely** — not behind a flag, not as a fallback. There is one transport and it speaks to whatever `OPENCOMPANY_ANALYTICS_ENDPOINT` names.
+
+## Console browser events
+
+The shared React console can load `https://openpanel.dev/op1.js` with public client id `afe8ec4e-0a6a-427a-aa22-49cbbf137d0a` only when its host explicitly opts in with `OPENCOMPANY_CONFIG.analytics: true` and supplies its collector as `OPENCOMPANY_CONFIG.analyticsEndpoint`. Desktop and default self-hosted builds remain silent, including when the opt-in has no endpoint. Automatic outgoing-link and attribute collection stay disabled; the React lifecycle records only allowlisted screen names and button control types. This public id is not the host transport's `OPENCOMPANY_ANALYTICS_CLIENT_ID` / secret pair; never put that secret in a browser bundle.
 
 ## What is collected
 

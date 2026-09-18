@@ -81,6 +81,7 @@ export type TurnStepFailure =
   | "missing_permission"
   | "missing_app"
   | "not_found"
+  | "unsupported"
   | "timeout"
   | "unavailable"
   | "failed";
@@ -130,6 +131,7 @@ export const STEP_FAILURE_LABEL: Record<TurnStepFailure, string> = {
   missing_permission: "Missing permission",
   missing_app: "App unavailable",
   not_found: "Not found",
+  unsupported: "Not supported",
   timeout: "Timed out",
   unavailable: "Service unavailable",
   failed: "Failed",
@@ -147,6 +149,18 @@ export const AWAITING_APPROVAL_LABEL = "Awaiting approval";
  */
 export function isFailedStep(status: TurnStepStatus | undefined): boolean {
   return status === "error";
+}
+
+/** One addressable object produced by a chat-started agent turn. */
+export interface ChatOutput {
+  kind: "workspace-node" | "artifact";
+  targetId: string;
+  /** Bounded, redacted label supplied by the host. */
+  title: string;
+  /** Required for artifact links; absent for workspace nodes. */
+  taskId?: string;
+  /** Exact artifact revision produced by the turn. */
+  version?: number;
 }
 
 /** One channel reply from a cycle. */
@@ -172,6 +186,8 @@ export interface OutboundMessage {
    * wrong. The bubble's `steps` timeline still shows every spawn.
    */
   taskId?: string;
+  /** Workspace nodes and artifacts produced by this reply's turn. */
+  outputs?: ChatOutput[];
   /**
    * Who this reply names, as the host resolved them (issue #1645).
    *
@@ -188,6 +204,27 @@ export interface OutboundMessage {
    * treats the bubble as un-threadable rather than inventing an id for it.
    */
   messageId?: string;
+  /**
+   * Whether {@link message} is the exact, user-facing sentence for a
+   * fail-closed turn (keys rework, issue #2306, round-2 review KR-L2-03) —
+   * a pinned provider switched off or removed, a broken company default, or
+   * no model chosen at all. Absent (or `false`) means `text` already carries
+   * whatever prose applies — the generic retry line, or a provider/network
+   * failure's own classified sentence — and the console renders that as
+   * always.
+   *
+   * Field names match `docs/key-reworks/in-use-guards.md` §5 — see
+   * `src/lib/turn-failure.ts`'s own module doc for the full explanation.
+   */
+  userFacing?: boolean;
+  /** One of the codes `src/lib/turn-failure.ts`'s `TURN_FAILURE_CODES` names, when {@link userFacing} is true. */
+  code?: string;
+  /** The X9 sentence itself, with display names — present only when {@link userFacing} is true. */
+  message?: string;
+  /** The agent this failure's pair names, when the code names one — never this reply's own author (see `channel`), which is a different question. */
+  pairAgentId?: string;
+  /** The provider slug the failure names, when there is one. */
+  providerSlug?: string;
 }
 
 /** Channel-specific reply addressing. Mirrors `ReplyTo` in `src/ports/types.rs`. */
@@ -395,7 +432,98 @@ export interface ReferralConversationDto {
   otherDeskName: string;
   /** Whether a person was asked rather than a desk — `@name` vs `#desk`. */
   direct: boolean;
+  /**
+   * Whether this desk was **asked** rather than doing the asking.
+   *
+   * Every other field is named from the asking desk's side, because that was
+   * the only desk a crossing used to be folded onto. Optional because a host
+   * predating it omits it, and `undefined` means the asking side — which is
+   * what every older row is.
+   */
+  inbound?: boolean;
   lines: ReferralLineDto[];
+}
+
+export interface AsideLineDto {
+  authorId: string;
+  text: string;
+}
+
+/** A private exchange between members of one desk, folded onto the move it rode
+ *  under. The operator reads it in full — collapsing is presentation, not
+ *  access control. */
+export interface AsideConversationDto {
+  /** Everyone in it — the author first, then who they addressed. */
+  members: string[];
+  lines: AsideLineDto[];
+}
+
+/**
+ * One line of an agent's session: a chat row plus where it was said.
+ *
+ * The session view is one continuous stream across every channel an agent can
+ * read, so a row that does not say which channel it came from is unreadable —
+ * two teammates answering in two desks would interleave with nothing to tell
+ * them apart. Everything else is a plain {@link ChatHistoryMessageDto}, which
+ * is what lets `fromHistory` map it and the room's own components render it,
+ * referral and aside collapses included.
+ */
+export interface AgentSessionMessageDto extends ChatHistoryMessageDto {
+  /** The channel as the rail names it — `#Brand`, `#general`, `dm`. */
+  sessionChannel: string;
+  /** The desk id behind that label, so a row can link to its conversation. */
+  sessionChannelId: string;
+  /**
+   * **What the agent was told to call this row's author.**
+   *
+   * Not {@link ChatHistoryMessageDto.author}, and not a substitute for it. That
+   * one is the display name a *person* reads, walking the ladder chosen name →
+   * a name derived from the login identity → `"someone"`. This one is what the
+   * runtime puts in the cue line the model is handed, and it is a **stable id**
+   * — the signed-in user's id, or `"operator"` for a machine credential.
+   *
+   * The two differ on purpose. An agent's byline becomes a per-line attribution
+   * prefix, so it has to be unique and unforgeable; a display name is neither,
+   * and a person who set theirs to a teammate's id could otherwise have their
+   * lines prefixed as if that teammate had said them. A person reading a
+   * transcript needs the opposite — a name, not a key.
+   *
+   * Only the raw view reads it, and only because it claims to show the string
+   * the model received. Optional: a host predating the field omits it, and the
+   * honest fallback there is the display name with no claim attached.
+   */
+  cueAuthor?: string;
+  /**
+   * **The text the model was actually handed for this row** — before the
+   * host's move-marker rewrite turned it into operator-facing prose (e.g.
+   * `!support #topic ^3` becoming a sentence).
+   *
+   * Same reasoning as {@link cueAuthor}, for the other half of the cue line:
+   * the raw view claims to show the string the model received, and
+   * {@link ChatHistoryMessageDto.text} has already been rewritten for a
+   * person to read. Equal to `text` on every row the rewrite did not touch.
+   * Optional for the same reason `cueAuthor` is — a host predating the field
+   * omits it, and the honest fallback is the rendered text with no claim
+   * attached.
+   */
+  cueText?: string;
+  /**
+   * **The openhuman session this agent's turns belong to** —
+   * `{company}:{agentId}`.
+   *
+   * Minted host-side by `openhuman_session_key` (`src/harness/session_key.rs`),
+   * the one function that names a session, and the same string stamped onto the
+   * live session's `event_context`. Never rebuilt here: a `${company}:${id}`
+   * in TypeScript would be a second spelling of a session's name, and a second
+   * spelling is one that can drift from the one the runtime actually answers to.
+   *
+   * Carried per row rather than in an envelope because the route answers a bare
+   * array and every caller indexes it; see the Rust DTO for the full reasoning.
+   * Every row of one response carries the same value. Optional: a host
+   * predating the field omits it, and the honest thing then is to show no
+   * session name rather than a guessed one.
+   */
+  openhumanSessionKey?: string;
 }
 
 export interface ReferredFromDto {
@@ -428,8 +556,20 @@ export interface ChatHistoryMessageDto {
   channel: string;
   author: string;
   text: string;
+  /**
+   * **The body as the model wrote it** — {@link text} before the host rewrote
+   * the room's grammar into operator-facing prose.
+   *
+   * Absent when the two are equal, which is every row carrying no move, and
+   * absent from a host predating the field. Read it wherever the *moves* are
+   * the point rather than the prose: the episode fold counts
+   * `!propose`/`!support`/`^N`, and reading {@link text} there is why a
+   * deliberation panel never survived a refresh.
+   */
+  cueText?: string;
   referredFrom?: ReferredFromDto;
   referralConversation?: ReferralConversationDto;
+  asideConversation?: AsideConversationDto;
   atMillis: number;
   mine: boolean;
   /**
@@ -461,6 +601,8 @@ export interface ChatHistoryMessageDto {
    * renders identically whichever surface hydrated the transcript.
    */
   taskId?: string;
+  /** Live output buttons to restore when this transcript is rehydrated. */
+  outputs?: ChatOutput[];
   /**
    * The message this one replies to (issue #364), by that message's own `id`.
    * Absent for a message posted straight into the channel — which is every
@@ -485,6 +627,21 @@ export interface ChatHistoryMessageDto {
    * on a host that predates the field.
    */
   mentions?: ChatMentionDto[];
+  /**
+   * Whether {@link message} is the exact, user-facing sentence for a
+   * fail-closed turn (keys rework, issue #2306, round-2 review KR-L2-03) —
+   * see {@link OutboundMessage.userFacing}'s doc; this is the same shape,
+   * rehydrated.
+   */
+  userFacing?: boolean;
+  /** One of the codes `src/lib/turn-failure.ts`'s `TURN_FAILURE_CODES` names, when {@link userFacing} is true. */
+  code?: string;
+  /** The X9 sentence itself, with display names — present only when {@link userFacing} is true. */
+  message?: string;
+  /** The agent this failure's pair names, when the code names one. */
+  pairAgentId?: string;
+  /** The provider slug the failure names, when there is one. */
+  providerSlug?: string;
 }
 
 /**
@@ -1385,13 +1542,27 @@ export interface AgentDetailDto {
    */
   harness?: string;
   /**
-   * This teammate's own model override, when it has one (issue #1245's
-   * per-agent follow-up). Meaningful only when the teammate runs on an ACP
-   * harness (an operator's own coding CLI) — the host does not tell this
-   * response which harness that is, so the console shows it as informational
-   * rather than validating it against one.
+   * This teammate's own model, in one of two unrelated meanings depending on
+   * the harness it is bound to:
+   *
+   * - on an **ACP** harness (an operator's own coding CLI), the model hint
+   *   forwarded to it (issue #1245's per-agent follow-up) — the host does not
+   *   tell this response which harness that is, so the console shows it as
+   *   informational rather than validating it against one;
+   * - on a **built-in** harness, the model half of this teammate's own
+   *   `{provider, model}` pair (keys rework, issue #2306, slice 3a), set only
+   *   together with {@link provider}. `undefined` means the teammate uses the
+   *   company default.
    */
   model?: string;
+  /**
+   * The provider half of this teammate's own `{provider, model}` pair (keys
+   * rework, issue #2306, slice 3a). Set only together with `model`, and only
+   * meaningful on a `built_in` harness — refused on `acp`, where `model` keeps
+   * its ACP meaning instead. `undefined` means the teammate uses the company
+   * default. Optional because an older host does not send it.
+   */
+  provider?: string;
   /**
    * Whether this teammate is the company's orchestrator. Resolved by the roster
    * rule (a tagged tier first, else the first declared agent), so it is NOT the
@@ -1486,15 +1657,25 @@ export interface EditAgentInput {
    */
   avatar?: string | null;
   /**
-   * The teammate's own model override (issue #1245's per-agent follow-up).
-   * Same double-option shape as `description`: absent leaves it alone, `null`
-   * clears it back to the harness's own default, and a string sets it.
+   * The teammate's own model — an ACP model hint (issue #1245), or the model
+   * half of its `{provider, model}` pair on a built-in harness (keys rework,
+   * issue #2306, slice 3a). Same double-option shape as `description`: absent
+   * leaves it alone, `null` clears it (back to the harness's own default on
+   * ACP; to the company default on built-in), and a string sets it.
    * Admin-only on the host, alongside `tools` — a member's `PATCH` carrying
    * this key gets a `403`.
    */
   model?: string | null;
   /** Which declared harness this teammate runs on. */
   harness?: string | null;
+  /**
+   * The provider half of the pair (keys rework, issue #2306, slice 3a). Same
+   * three states as `model`: absent leaves it, `null` clears it (company
+   * default), a slug sets it. Always sent together with `model` — the host
+   * refuses one without the other on a `built_in` harness, and refuses it
+   * outright on `acp`. Admin-only, like `model`.
+   */
+  provider?: string | null;
   /**
    * The teammate's own tool-grant globs, three-state since issue #1804 (like a
    * double-`Option` on the wire): `undefined` leaves the grant untouched,
@@ -1858,7 +2039,8 @@ export interface CapabilityStatusDto {
   composioInBuild?: boolean;
   /**
    * Whether a per-tenant Composio **BYO override** token is stored under
-   * `composio/token` — never the token itself.
+   * `composio/tinyhumans/key` (or its legacy address `composio/token`) —
+   * never the token itself.
    *
    * Narrow on purpose, and **not** "can this company reach Composio" (issue
    * #886). The BYO slot is the first of three credential tiers; on a hosted
@@ -1897,8 +2079,14 @@ export interface CapabilityStatusDto {
    * CI actually compiles and tests it.
    */
   searchInBuild?: boolean;
-  /** Whether a managed search credential is configured on this build (env-only). */
+  /**
+   * Whether managed search resolves from the company's key or deployment
+   * fallback. `undefined` means the host could not read the company credential
+   * store and had no deployment fallback from which to establish availability.
+   */
   searchCredentialConfigured?: boolean;
+  /** Which managed Search credential wins: company first, then deployment. */
+  searchCredentialSource?: "attested" | "company" | "static" | "none";
   /** The company's daily `web_search` call ceiling. */
   searchDailyCallCap?: number;
   /**
@@ -2128,16 +2316,41 @@ export interface WorkflowProblem {
 }
 
 /**
+ * Who or what still depends on a thing a mutation would remove, clear, disable
+ * or switch (keys rework, issue #2306).
+ *
+ * Carried two places: on a list/status DTO row for anything else's config can
+ * point at (an inference `Provider`, and its Composio and Search siblings), and
+ * echoed back verbatim on a `409 in_use` refusal (see {@link ApiErrorBody}) so
+ * a confirm dialog reopened by a stale write can still say what it is asking
+ * the operator to override, with no second request. Empty fields are omitted
+ * rather than sent as empty arrays, so "is anything set" is a check for any key
+ * being present at all.
+ */
+export interface UsedBy {
+  /** `true` only when this row backs the company's current default choice. */
+  default?: true;
+  /** The agents whose own pinned pair names this row. */
+  agents?: { id: string; name: string }[];
+  /** Which other surfaces this same credential also backs. */
+  surfaces?: ("llm" | "composio" | "search")[];
+}
+
+/**
  * Error envelope shape: `{ error, code }`, plus `problems` on a refusal that
  * has them.
- *
- * `problems` is additive and scoped to `workflow_invalid` on the host side, so
- * it is absent from every other error and must stay optional here.
  */
 export interface ApiErrorBody {
   error: string;
   code: string;
   problems?: WorkflowProblem[];
+  /**
+   * Present on a `409` refused with code `in_use` (keys rework, issue #2306):
+   * what the request tried to remove, clear, disable or switch is still relied
+   * on elsewhere, named here so a confirm dialog can show it and resend with
+   * `confirmInUse: true` without a round trip just to ask.
+   */
+  usedBy?: UsedBy;
 }
 
 /**
@@ -2219,6 +2432,13 @@ export class ApiError extends Error {
    * "no breakdown offered" from "a breakdown with nothing in it".
    */
   problems?: WorkflowProblem[];
+
+  /**
+   * The `usedBy` an `in_use` refusal echoed (keys rework, issue #2306) — see
+   * {@link ApiErrorBody.usedBy}. Absent for every other error, including a
+   * `409` with a different `code`.
+   */
+  usedBy?: UsedBy;
 
   constructor(
     public status: number,

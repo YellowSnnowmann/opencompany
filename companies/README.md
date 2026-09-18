@@ -17,8 +17,10 @@ Every folder follows the same shape:
 - `ledgers/<slug>.toml` — the axes this vertical keeps beyond the built-in
   `tasks`/`goals`/`decisions` and the baseline's own. Seeded into the company's
   store at first boot; see [`../docs/spec/runtime/ledgers.md`](../docs/spec/runtime/ledgers.md).
-- `skills/<slug>/SKILL.md` — the procedures this vertical runs, in the shape the
-  shared library at [`../skills/`](../skills/) uses.
+- `skills/<slug>/SKILL.md` — the procedures this vertical runs, installed in
+  it from the start. Every bundle's skills together are also the **skill
+  registry** the console lists (`GET …/skills/registry`), so any company can
+  install any other vertical's skill by slug; see [Skills](#skills) below.
 - `workflows/<id>.toml` — the graphs `[workflows].enabled` turns on.
 - `workspace/**` — the Obsidian-style notes the company starts with, seeded once.
 - `mcp.json` — the MCP tool servers this vertical's work needs, in the
@@ -29,8 +31,32 @@ Every folder follows the same shape:
   [`../docs/spec/runtime/tools.md`](../docs/spec/runtime/tools.md).
 - `tasks.toml` — the setup work this vertical starts with, seeded onto the
   board in To-do at first boot, on top of the baseline's own cards in
-  [`../globals/tasks.toml`](../globals/tasks.toml). Seeded cards never enter a
+  [`_globals/tasks.toml`](_globals/tasks.toml). Seeded cards never enter a
   column that dispatches a run.
+
+## Skills
+
+There is no separate skill library: a skill lives in the bundle it belongs to,
+and the registry the console browses is the union of every bundle's `skills/`
+— the baseline's [`_globals/skills/`](_globals/skills/) first, then each
+vertical in name order. Installing resolves the slug against that union
+server-side and stores the document verbatim, so the client cannot supply skill
+content, and a slug no bundle ships fails with `404`. A company's own bundle
+skills are already installed in it; the registry is how it borrows another
+vertical's.
+
+Each skill is a directory with a `SKILL.md` — YAML frontmatter (`name`,
+`description`, and an optional `category` and `version`) followed by the
+write-up (When to use / Steps / Output). `category` groups a skill in the
+console's Skills view. `version` records the revision a skill ships: installing
+snapshots the whole file into the company, `version` included, so an install is
+pinned to the revision it was made from. Bump it when you change a skill's
+procedure; the baseline's skills must carry one (a test enforces that).
+
+When two bundles ship the same slug (`bug-triage` in `product_team` and
+`software_company`, say), each company still gets its own, and the registry
+lists the first in that order. Give a skill a distinct slug if the two are
+meant to be installable side by side.
 
 Adding a business is a new folder, not a new crate. The behavior lives entirely
 in the host and the vendored runtimes; each definition just configures it.

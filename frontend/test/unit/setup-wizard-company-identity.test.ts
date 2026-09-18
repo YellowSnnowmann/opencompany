@@ -155,20 +155,27 @@ async function pickTemplate(id: string) {
   });
 }
 
-/** model -> business -> sign-in (none) -> review. */
-async function walkToReview(client: OpenCompanyClient, template: string | null) {
+/** How many company-name fields are on screen right now. */
+const nameFields = () =>
+  container.querySelectorAll('[data-testid="setup-company-name"]').length;
+
+/** Render, and walk as far as the business step without answering it. */
+async function walkToBusiness(client: OpenCompanyClient) {
   await act(async () => {
     root.render(createElement(SetupWizard, { client, onDone: () => {} }));
   });
-  // "No model" — the picker's last option, whose popup base-ui portals onto
-  // `document.body` and only mounts once the trigger opens it.
+  // Step 0 is the setup-way choice; the add-provider sequence sits behind "Set
+  // it up yourself", and connecting nothing is a first-class answer to it.
   await act(async () => {
-    (container.querySelector('[data-testid="setup-provider-select"]') as HTMLElement).click();
+    (container.querySelector('[data-testid="setup-way-self-managed"]') as HTMLElement).click();
   });
-  await act(async () => {
-    (document.body.querySelector('[data-testid="setup-provider-none"]') as HTMLElement).click();
-  });
+  await next(); // -> step 1, where connecting nothing is a first-class answer
   await next(); // -> business
+}
+
+/** business -> sign-in (none) -> review, with the business step answered. */
+async function walkToReview(client: OpenCompanyClient, template: string | null) {
+  await walkToBusiness(client);
   if (template) await pickTemplate(template);
   else await fill("setup-field-industry", "E-commerce — homeware online");
   await next(); // -> sign-in
@@ -180,27 +187,49 @@ async function walkToReview(client: OpenCompanyClient, template: string | null) 
 }
 
 describe("what a finished wizard says the company is", () => {
-  it("suggests the template's name, and sends it as the company's", async () => {
-    const applied: { body?: unknown } = {};
-    await walkToReview(clientWith(status(), "preset", applied), TEMPLATE.id);
-
-    const name = container.querySelector(
+  it("asks what to call it on the business step, not at the end", async () => {
+    await walkToBusiness(clientWith(status(), "preset", {}));
+    const field = container.querySelector(
       '[data-testid="setup-company-name"]',
     ) as HTMLInputElement;
-    expect(name, "the review step must ask what to call it").toBeTruthy();
-    expect(name.value).toBe(TEMPLATE.name);
+    expect(field, "the business step must ask what to call it").toBeTruthy();
+    expect(field.tagName).toBe("INPUT");
+  });
 
+  it("suggests the template's name there, and sends it as the company's", async () => {
+    const applied: { body?: unknown } = {};
+    await walkToBusiness(clientWith(status(), "preset", applied));
+    await pickTemplate(TEMPLATE.id);
+
+    const field = container.querySelector(
+      '[data-testid="setup-company-name"]',
+    ) as HTMLInputElement;
+    expect(field.value, "a name is offered before the operator is asked for one").toBe(
+      TEMPLATE.name,
+    );
+
+    await next(); // -> sign-in
+    await act(async () => {
+      (container.querySelector('[data-testid="auth-mode-none"]') as HTMLElement).click();
+    });
+    await next(); // -> review
     await act(async () => {
       button("Build my company").click();
     });
     expect((applied.body as { name?: string }).name).toBe(TEMPLATE.name);
   });
 
-  it("sends a name the operator typed over the suggestion", async () => {
+  it("sends a name typed on the business step, over the suggestion", async () => {
     const applied: { body?: unknown } = {};
-    await walkToReview(clientWith(status(), "preset", applied), TEMPLATE.id);
+    await walkToBusiness(clientWith(status(), "preset", applied));
+    await pickTemplate(TEMPLATE.id);
     await fill("setup-company-name", "Northwind Studio");
 
+    await next(); // -> sign-in
+    await act(async () => {
+      (container.querySelector('[data-testid="auth-mode-none"]') as HTMLElement).click();
+    });
+    await next(); // -> review
     await act(async () => {
       button("Build my company").click();
     });
@@ -208,6 +237,39 @@ describe("what a finished wizard says the company is", () => {
     expect(body.name).toBe("Northwind Studio");
     // Renaming is not designing: the template is still what gets seeded.
     expect(body.template).toBe(TEMPLATE.id);
+  });
+
+  it("never offers to rename the company on the review step", async () => {
+    const client = clientWith(status(), "preset", {});
+    await walkToBusiness(client);
+    await pickTemplate(TEMPLATE.id);
+    expect(nameFields(), "asked once, on the step that asks it").toBe(1);
+    await next(); // -> sign-in
+    expect(nameFields()).toBe(0);
+    await act(async () => {
+      (container.querySelector('[data-testid="auth-mode-none"]') as HTMLElement).click();
+    });
+    await next(); // -> review
+    expect(
+      nameFields(),
+      "D-name-once: the review step's own name field is deleted, not hidden",
+    ).toBe(0);
+  });
+
+  it("offers no name field on review even when nothing has named the company", async () => {
+    // A host that already serves a company never gates the business step on a
+    // name, so this is the one walk that reaches review with no name at all —
+    // and the one where a review field merely *hidden* behind "already named?"
+    // would come back.
+    await walkToBusiness(clientWith(status({ companies: ["acme"] }), "preset", {}));
+    await next(); // -> sign-in, nothing answered
+    await act(async () => {
+      (container.querySelector('[data-testid="auth-mode-none"]') as HTMLElement).click();
+    });
+    await next(); // -> review
+    expect(container.querySelector('[data-testid="setup-review"]')).toBeTruthy();
+    expect(nameFields(), "review never renders an editable company name").toBe(0);
+    expect(container.querySelector('[data-testid="setup-review-name"]')).toBeNull();
   });
 
   it("sends an untouched template roster back as the template itself", async () => {
@@ -240,67 +302,146 @@ describe("what a finished wizard says the company is", () => {
   });
 
   it("re-suggests the name when the template changes, unless it was typed", async () => {
-    const applied: { body?: unknown } = {};
-    const client = clientWith(
-      status({ templates: [TEMPLATE, OTHER_TEMPLATE] }),
-      "preset",
-      applied,
-    );
-    await walkToReview(client, TEMPLATE.id);
-    expect(
-      (container.querySelector('[data-testid="setup-company-name"]') as HTMLInputElement).value,
-    ).toBe(TEMPLATE.name);
+    const client = clientWith(status({ templates: [TEMPLATE, OTHER_TEMPLATE] }), "preset", {});
+    await walkToBusiness(client);
+    await pickTemplate(TEMPLATE.id);
+    const field = () =>
+      container.querySelector('[data-testid="setup-company-name"]') as HTMLInputElement;
+    expect(field().value).toBe(TEMPLATE.name);
 
-    // Back to Business, a different template, forward again.
-    for (let i = 0; i < 2; i += 1) {
-      // review -> sign-in -> business.
-      await act(async () => {
-        button("Back").click();
-      });
-    }
     await pickTemplate(OTHER_TEMPLATE.id);
-    // business -> sign-in -> review. The sign-in answer survives going back, so
-    // the address step stays absent.
-    await next();
-    await next();
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    const name = container.querySelector('[data-testid="setup-company-name"]') as HTMLInputElement;
     expect(
-      name.value,
+      field().value,
       "a suggestion nobody typed must not name the company they did pick",
     ).toBe(OTHER_TEMPLATE.name);
   });
 
   it("keeps a typed name across a change of template", async () => {
-    const applied: { body?: unknown } = {};
-    const client = clientWith(
-      status({ templates: [TEMPLATE, OTHER_TEMPLATE] }),
-      "preset",
-      applied,
-    );
-    await walkToReview(client, TEMPLATE.id);
+    const client = clientWith(status({ templates: [TEMPLATE, OTHER_TEMPLATE] }), "preset", {});
+    await walkToBusiness(client);
+    await pickTemplate(TEMPLATE.id);
+    await fill("setup-company-name", "Northwind Studio");
+    await pickTemplate(OTHER_TEMPLATE.id);
+
+    const field = container.querySelector(
+      '[data-testid="setup-company-name"]',
+    ) as HTMLInputElement;
+    expect(field.value, "a name the operator typed is theirs").toBe("Northwind Studio");
+  });
+
+  it("keeps a typed name across a change of setup way", async () => {
+    // Switching ways clears what belongs to a branch — the key, its verdict,
+    // the roster designed under it. The name is an answer about the company,
+    // the same under either way.
+    const client = clientWith(status(), "preset", {});
+    await walkToBusiness(client);
+    await pickTemplate(TEMPLATE.id);
     await fill("setup-company-name", "Northwind Studio");
 
     for (let i = 0; i < 2; i += 1) {
-      // review -> sign-in -> business.
       await act(async () => {
         button("Back").click();
       });
     }
-    await pickTemplate(OTHER_TEMPLATE.id);
-    // business -> sign-in -> review. The sign-in answer survives going back, so
-    // the address step stays absent.
-    await next();
-    await next();
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
+      (container.querySelector('[data-testid="setup-way-managed"]') as HTMLElement).click();
+    });
+    await act(async () => {
+      (container.querySelector('[data-testid="setup-way-self-managed"]') as HTMLElement).click();
+    });
+    await next(); // -> step 1, whose answers the switch cleared
+    await next(); // -> business
+
+    const field = container.querySelector(
+      '[data-testid="setup-company-name"]',
+    ) as HTMLInputElement;
+    expect(field.value, "the company is called what it is called under either way").toBe(
+      "Northwind Studio",
+    );
+  });
+
+  it("keeps a typed name across leaving the step and coming back", async () => {
+    await walkToBusiness(clientWith(status(), "preset", {}));
+    await pickTemplate(TEMPLATE.id);
+    await fill("setup-company-name", "Northwind Studio");
+    await next(); // -> sign-in
+    await act(async () => {
+      button("Back").click();
     });
 
-    const name = container.querySelector('[data-testid="setup-company-name"]') as HTMLInputElement;
-    expect(name.value, "a name the operator typed is theirs").toBe("Northwind Studio");
+    const field = container.querySelector(
+      '[data-testid="setup-company-name"]',
+    ) as HTMLInputElement;
+    expect(field.value).toBe("Northwind Studio");
+  });
+
+  it("will not leave the business step with the name cleared", async () => {
+    await walkToBusiness(clientWith(status(), "preset", {}));
+    await pickTemplate(TEMPLATE.id);
+    await fill("setup-company-name", "");
+    await next();
+
+    expect(
+      container.querySelector('[data-testid="setup-company-name"]'),
+      "a cleared name keeps the operator on the step that asks for it",
+    ).toBeTruthy();
+    expect(container.querySelector('[data-testid="setup-problem"]')?.textContent).toBe(
+      "Give your company a name.",
+    );
+  });
+
+  it("names the question they skipped when nothing on the step is answered", async () => {
+    // Ordering, not wording: with no template picked the name is empty too, and
+    // being told to name a company nobody has chosen the shape of is an answer
+    // to the wrong question.
+    await walkToBusiness(clientWith(status(), "preset", {}));
+    await next();
+    expect(container.querySelector('[data-testid="setup-problem"]')?.textContent).toBe(
+      "Choose the kind of company you want to start with.",
+    );
+  });
+
+  it("demands no name from a host that already serves a company", async () => {
+    await walkToBusiness(clientWith(status({ companies: ["acme"] }), "preset", {}));
+    await next();
+    expect(
+      container.querySelector('[data-testid="setup-problem"]'),
+      "the name is never used where no company is being minted",
+    ).toBeNull();
+    expect(container.querySelector('[data-testid="setup-company-name"]')).toBeNull();
+  });
+
+  it("states the name on review without offering to change it", async () => {
+    await walkToBusiness(clientWith(status(), "preset", {}));
+    await pickTemplate(TEMPLATE.id);
+    await fill("setup-company-name", "Northwind Studio");
+    await next(); // -> sign-in
+    await act(async () => {
+      (container.querySelector('[data-testid="auth-mode-none"]') as HTMLElement).click();
+    });
+    await next(); // -> review
+
+    const echo = container.querySelector('[data-testid="setup-review-name"]');
+    expect(echo, "review still says what the company will be called").toBeTruthy();
+    expect(echo?.textContent).toContain("Northwind Studio");
+    expect(echo?.querySelector("input"), "said, not asked").toBeNull();
+  });
+
+  it("clamps the name to the sixty code points the host keeps", async () => {
+    // Code points, not UTF-16 units: `maxLength` would cut an astral-script
+    // name at thirty, and the profile rename's own clamp would let 200 through
+    // for the host to truncate silently.
+    await walkToBusiness(clientWith(status(), "preset", {}));
+    await pickTemplate(TEMPLATE.id);
+    const field = () =>
+      container.querySelector('[data-testid="setup-company-name"]') as HTMLInputElement;
+
+    const sixty = "\u{1D49C}".repeat(60);
+    await fill("setup-company-name", sixty);
+    expect(field().value, "sixty astral code points are sixty characters").toBe(sixty);
+
+    await fill("setup-company-name", "\u{1D49C}".repeat(61));
+    expect(Array.from(field().value)).toHaveLength(60);
   });
 
   it("does not offer to edit a roster it is going to seed whole", async () => {

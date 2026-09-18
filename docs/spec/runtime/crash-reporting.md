@@ -24,7 +24,8 @@ The short version, and the only four sentences most readers need:
   tested in every build, not only in a reporting one.
 
 Two surfaces report independently and are configured independently: the Rust
-host (`OPENCOMPANY_SENTRY_DSN`) and the React console (`VITE_SENTRY_DSN`). They
+host and desktop shell (`OPENCOMPANY_SENTRY_DSN`) and the React console
+(`VITE_SENTRY_DSN`). They
 share a release-tag format so events from one build line up whether the operator
 files them under one Sentry project or two.
 
@@ -117,7 +118,7 @@ close to useless. `@sentry/vite-plugin` handles the upload and is wired in
 
 | Variable | Meaning |
 |---|---|
-| `SENTRY_AUTH_TOKEN` | The gate. Absent — every local checkout and every CI lane in this repository — and the plugin is not constructed at all. |
+| `SENTRY_AUTH_TOKEN` | The gate. Release and staging workflows provide it as a secret; local and ordinary CI builds omit it and construct no plugin. |
 | `SENTRY_URL` | The Sentry instance. **Required for a self-hosted Sentry**: without it the plugin defaults to sentry.io, where the upload lands somewhere the events never will. |
 | `SENTRY_ORG`, `SENTRY_PROJECT` | Where to file the release. |
 | `SENTRY_RELEASE` | Overrides the computed release tag, for a CI that already knows what it is shipping. |
@@ -140,12 +141,45 @@ Two behaviours to know before wiring this into a release pipeline:
   define. If those two ever diverge, Sentry never joins frames to maps and stack
   traces stay minified with no error anywhere to say why.
 
-The Rust host has no equivalent debug-file upload. Symbolicating a stripped
-release binary needs a `sentry-cli upload-dif` step over the Cargo target
-directory, which is a release-pipeline change rather than a code one; the
-vendored runtime's `scripts/upload_sentry_symbols.sh` is the reference if it is
-ever wanted. Until then, a host stack trace names functions and line numbers
-from the debug info the default `dev`/`release` profiles keep.
+Rust release profiles keep packed line tables while stripping shipped binaries.
+`scripts/upload-sentry-symbols.sh` uploads their dSYM/DWP/PDB companions from
+the hosted-image and desktop release pipelines, using the same organization
+token as the console source-map upload. Missing credentials or a failed upload
+fail the release rather than silently shipping unsymbolicated stack traces.
+
+### Who supplies each variable, per deployment
+
+Every variable above is read from *somewhere*, and "somewhere" differs per
+surface. The table is here because the failure this document keeps naming —
+silence that looks like health — is almost always a variable nobody owns rather
+than a variable set wrong (issue #2392).
+
+| Surface | Host DSN comes from | Console DSN comes from |
+|---|---|---|
+| Hosted tenant (staging) | the manager's per-tenant env | `deploy-staging.yml` build-args, baked by Vite into the image |
+| Hosted tenant (production, Firecracker) | `OCM_TENANT_ENV_OVERRIDES_FILE` on the fleet host — the manager's own template does **not** carry Sentry variables | the console bundle inside the tenant rootfs, so it is fixed when that rootfs is built |
+| Desktop | the shell's process env — **nothing supplies it today**, see the limitation below | `build-desktop.yml` build-args |
+| Self-hosted | the operator, by design | the operator's own console build |
+
+Two consequences worth stating rather than deriving.
+
+**A hosted tenant's console DSN is decided when its image is built, and cannot
+be changed afterwards.** Vite inlines it; an `OPENCOMPANY_SENTRY_DSN` set on a
+running tenant reaches the host and not the bundle. On Firecracker that means
+the tenant rootfs, not the tenant's env file — rolling a DSN onto the console
+half is a rootfs rebuild.
+
+**A host DSN, by contrast, takes effect at the next process start** — which on
+Firecracker means the next *cold* boot, because a parked tenant resumes from a
+snapshot and never re-reads its environment. Editing the overrides file changes
+nothing observable until the snapshot is discarded.
+
+`OPENCOMPANY_SENTRY_ENVIRONMENT` is one repository variable read by three
+workflows, and setting it defeats each one's fallback. Left unset, the hosted
+image tags `hosted-tenant`, the desktop build tags `desktop`, and the host
+agrees with each because both halves derive the same default from the
+deployment kind. Set to a single value, all three surfaces file under it and
+stop being separable in a filter. Prefer leaving it unset.
 
 ## What is collected
 
@@ -253,6 +287,7 @@ option. `frontend/src/lib/sentry.ts` re-adds it by hand for that reason.
 | Seam | File | Why there |
 |---|---|---|
 | `sentry::init` | `src/bin/opencompany.rs`, first statement of `async_main` | The panic hook is installed here, so anything that panics earlier panics unobserved — and a malformed data root or an unlockable home are exactly the early panics worth reporting. |
+| desktop `sentry::init` | `crates/opencompany-app/src/lib.rs`, before the subscriber and Tauri runtime | The shell and every embedded host share the core's client, scrubber, panic hook and tracing bridge. |
 | the `tracing` bridge | `observability::tracing_layer`, added to the subscriber | One seam for every `tracing::error!` in the tree, rather than a reporting call at each. |
 | scope identity | `observability::scope::identify`, from the `serve` arm after the port is bound | The instance id and the storage backend are not known until the companies are registered — the same reason `analytics::boot::install` runs there. |
 | flush | `src/bin/opencompany.rs`, after the bound host stops serving | The error that took the host down is queued at the moment it stops. Bounded at 2s (`observability::FLUSH_TIMEOUT`), sized like `analytics`'s: the collector is a third party, and a drain that overruns Kubernetes' 30s grace buys a `SIGKILL` in the middle of the shutdown those seconds protect. |
@@ -362,14 +397,24 @@ Named so they are countable rather than implied.
 - **No debug-file upload for the host.** A stripped release binary's stack
   traces stay unsymbolicated until a `sentry-cli upload-dif` step exists. See
   the note under [Source-map upload](#source-map-upload-ci-only).
-- **The desktop app reports nothing, from either half.** The console bundle
-  inside the shell is blocked by `crates/opencompany-app/tauri.conf.json`'s
-  `connect-src 'self' ipc:`, and widening that CSP is a security decision of its
-  own. The embedded *host* would report if the feature were compiled in, but
-  `DESKTOP_RELEASE_FEATURES` in `.github/workflows/build-desktop.yml`
-  does not include `crash-reporting`, so the released binary has no client
-  either. Adding it there is a distribution decision — it changes what ships to
-  end users rather than to operators — and is deliberately left open.
+- **The desktop shell's Rust half reports nothing, and cannot yet.** The
+  `crash-reporting` feature is compiled into `crates/opencompany-app` and
+  `run()` initialises the client, so everything is in place except the DSN —
+  which is read from the process env, and a double-clicked `.app` has none.
+  Nothing in `build-desktop.yml` supplies one, and nothing may simply be baked
+  in: the console's DSN is public by construction, but the host's names a
+  *server* project, and shipping it inside a downloadable bundle hands that
+  project's ingest to anyone who unzips the `.dmg`. Delivery therefore needs a
+  decision — its own desktop project, or a value fetched after sign-in — not
+  just a build-arg. Until it lands, a desktop crash is invisible: the console
+  half of the same app reports, so Sentry shows desktop traffic and the silence
+  looks like reliability. Tracked by issue #2392.
+- **Desktop reporting uses the project Sentry origin only.** The release
+  workflow supplies the console DSN and the shell uses its own
+  `OPENCOMPANY_SENTRY_DSN`; `crates/opencompany-app/tauri.conf.json` therefore
+  permits `https://sentry.tinyhumans.ai` in `connect-src`. It remains a narrow
+  allowlist: OpenPanel stays unavailable in Tauri and a different Sentry host
+  requires an explicit CSP review alongside the release configuration.
 - **Host cognition is not tagged per company.** A multi-company host reports one
   instance id for all of them. Which company an error belongs to is in the
   `tracing` fields on the event, not in a tag.
@@ -380,8 +425,21 @@ Named so they are countable rather than implied.
   surfaces that only at its own debug log level. So an install can be correctly
   configured, correctly scrubbed, transmitting well-formed envelopes, and still
   be reporting nothing, with every signal in this product saying it is healthy.
-  This was observed against a real project, not imagined. Check quota in Sentry
-  itself; nothing in the boot line or `sentry-test` will say.
+  This was observed against a real project, not imagined — and then again, at
+  scale: between 2026-09-15 and 2026-09-18 `sentry.tinyhumans.ai` recorded
+  **zero** accepted events org-wide, down from ~124k/day, while Relay kept
+  answering `200 {"id":…}` to every sender. Every service pointed at it reported
+  into a void for three days and every one of them looked healthy. Check quota
+  and accepted-outcome stats in Sentry itself; nothing in the boot line or
+  `sentry-test` will say.
+
+  The one place this *is* now caught is `release-production.yml`, which reads
+  the event back through `/api/0/organizations/{org}/eventids/{id}/` after
+  sending and fails the release if it was never stored. That is the only check
+  in this repository that distinguishes "the ingest answered" from "the event
+  exists", and it is why the gate is a readback rather than an exit code. Note
+  the id must be unhyphenated for that lookup; the SDK prints a hyphenated UUID
+  and the hyphenated form 404s forever.
 - **Nothing enforces that the two surfaces' versions stay in step.** Both tags
   are shaped `opencompany@<version>[+<commit>]`, but the host reads
   `Cargo.toml`'s version and the console reads `frontend/package.json`'s. They

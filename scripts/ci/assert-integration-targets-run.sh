@@ -61,17 +61,16 @@ if [ ! -s "${WORK}/targets" ]; then
   exit 0
 fi
 
-# The host's manifest lives in `crates/opencompany-core/` while its tests still
-# live in `tests/` at the root, so Cargo cannot auto-discover them and every one
-# is an explicit `[[test]]` entry (`autotests = false`). A file dropped into
-# `tests/` without an entry is therefore built by nothing and run by nothing —
+# The host crate declares every integration target explicitly (`autotests =
+# false` in `crates/opencompany-core/Cargo.toml`), so a file dropped into its
+# `tests/` without a `[[test]]` entry is built by nothing and run by nothing —
 # silently, which is exactly the failure this script exists to catch one level
 # down. Fail on the first such file rather than let it ride.
-for file in tests/*.rs; do
+for file in crates/opencompany-core/tests/*.rs; do
   [ -e "${file}" ] || continue
   stem="$(basename "${file}" .rs)"
   if ! grep -qx "${stem}" "${WORK}/targets"; then
-    echo "::error title=Integration test not declared::${file} has no [[test]] entry in crates/opencompany-core/Cargo.toml, so no lane builds or runs it. Add \`[[test]] name = \"${stem}\" path = \"../../${file}\"\`." >&2
+    echo "::error title=Integration test not declared::${file} has no [[test]] entry in crates/opencompany-core/Cargo.toml, so no lane builds or runs it. Add \`[[test]] name = \"${stem}\" path = \"tests/${stem}.rs\"\`." >&2
     exit 1
   fi
 done

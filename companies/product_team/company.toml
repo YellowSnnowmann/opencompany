@@ -18,7 +18,7 @@ human_role = "Prioritization calls and roadmap sign-off"
 # The full belt plus the metered `web_search` (#238), minus `media` and
 # `composio`.
 #
-# `allow` REPLACES the default (`globals/globals.toml`'s `default_allow`); it never extends
+# `allow` REPLACES the default (`companies/_globals/globals.toml`'s `default_allow`); it never extends
 # it, so every entry that should survive is restated literally. `*` covers
 # files/docs/shell/code/web/subagent — the belt this team reads and writes with.
 #

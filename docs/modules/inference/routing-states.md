@@ -1,5 +1,12 @@
 # Routing states: what each one renders
 
+> **Superseded (keys rework, issue #2306, phase 5b).** Per-workload routing is
+> removed from the console; see `routing.md`'s own notice. The five-state
+> honesty rule this file's states served now belongs to the company default
+> and each provider row directly — `ProviderList.tsx`'s `rowSubline`/"Needs a
+> model", and `connect.ts`'s `defaultBrokenCopy`/`providerState` — not to a
+> routing-tab-specific resolver. Kept for history.
+
 Companion to [`routing.md`](routing.md), which holds the mode inference, the row
 copy and the per-workload dialog. This file is the states side: what the
 resolver can answer, what each answer looks like on screen, and what the three

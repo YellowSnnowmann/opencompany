@@ -77,6 +77,10 @@ The same build works against any host/company. Resolution order (first wins):
 - **Multi-company (platform)** hosts: it lists companies and shows a picker;
   `?company=<id>` jumps straight in. Add `?token=` for platform/operator auth.
 
+## Product analytics
+
+The console loads OpenPanel's browser client only in an opted-in, non-Tauri browser, using the TinyHumans project's public client id. React additionally records every hash-routed screen view and native or ARIA button activation with only the route head and control type — never labels, query parameters, or dynamic path segments. Automatic outgoing-link and `data-op-*` attribute collection is disabled. Desktop/Tauri builds remain silent. The id is public by design; do not add a server credential to browser code. Host-side reporting remains separately configured through `OPENCOMPANY_ANALYTICS_*`; see [`docs/spec/runtime/analytics.md`](../docs/spec/runtime/analytics.md).
+
 ## Design system
 
 - **Tokens** live in [`src/index.css`](src/index.css), in three layers —

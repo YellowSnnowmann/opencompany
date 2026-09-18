@@ -14,6 +14,7 @@
 // `api/inference.ts`), so no change to `OpenCompanyClient` is needed.
 
 import type { OpenCompanyClient, RequestOptions } from "./client";
+import type { UsedBy } from "./types";
 
 /**
  * Where this company's Composio credential comes from.
@@ -27,7 +28,8 @@ import type { OpenCompanyClient, RequestOptions } from "./client";
  * - `static` — a Composio token this company pasted, or a static instance key.
  * - `none` — no credential can be obtained, so agents get no Composio tools.
  */
-export type ComposioCredentialSource = "attested" | "company" | "static" | "none";
+export type ComposioCredentialSource =
+  "attested" | "company" | "static" | "none";
 
 /**
  * Which host this company's Composio calls go to.
@@ -93,6 +95,25 @@ export interface ComposioStatus {
    */
   mode?: ComposioMode;
   /**
+   * What the **managed chain** resolves to, independently of the stored mode.
+   *
+   * Under `mode: "managed"` it equals {@link credentialSource}. Under
+   * `mode: "byok"` it says what managed *would* resolve to if the company went
+   * back — which is the only way the console can offer that route honestly
+   * rather than offering a switch into an outage.
+   *
+   * A **tier name**, never a credential and never a boolean about a secret
+   * slot. That distinction is issue #886: `composioTokenConfigured` answers
+   * only about the first of three tiers and is routinely `false` on a working
+   * hosted tenant, so anything driven off it paints a live connector red.
+   *
+   * Optional on the wire: a host predating this field omits it, and absent must
+   * read as "not said" rather than as `none` — see `composio/rows.ts`, which
+   * falls back to {@link credentialSource} only where the two are defined to
+   * agree.
+   */
+  managedCredentialSource?: ComposioCredentialSource;
+  /**
    * The endpoint the calls actually reach (non-secret) — the managed backend, or
    * Composio's own API host under `byok`.
    */
@@ -150,10 +171,100 @@ export interface ComposioStatus {
   catalogNotice: string | null;
 }
 
+/**
+ * What a failed credential check means.
+ *
+ * The host classifies; the console only renders. The raw upstream error is what
+ * the classifier reads and it must not reach the console at all — it can echo
+ * request headers or fragments of the key just written, and a console banner is
+ * the most screenshot-able surface there is. `composio/classify.ts` turns this
+ * value into a sentence.
+ *
+ * Only `auth` is destructive: the host rejects the write with a 4xx and stores
+ * nothing. Every other class **stores the key** and returns an {@link
+ * ComposioMutation.advisory} beside it, because a corporate proxy, a WAF, a
+ * rate limit and a slow upstream all fail a probe while the key is perfectly
+ * good — and the naive roll-back-on-any-failure flow destroys valid credentials.
+ */
+export type ComposioProbeClass =
+  "auth" | "endpoint" | "quota" | "timeout" | "unknown";
+
+/**
+ * One slot the account-key fan-out touched, and what happened to it (keys
+ * rework, issue #2306, slices 4a/4c) — `docs/key-reworks/phase-4a-account-key-fanout.md`
+ * §3.1. `outcome` is one of `filled | rotated | cleared | rolledBack | kept |
+ * skipped | failed | ok`; `detail` is present alongside `kept`/`skipped`
+ * (why), a plain `failed` (always `"store"`), or a health-slot `failed`
+ * (`auth` | `endpoint` | `quota` | `timeout` | `unknown`).
+ */
+export interface SlotReport {
+  slot: "composio" | "inference" | "provider" | "default" | "health";
+  outcome:
+    | "filled"
+    | "rotated"
+    | "cleared"
+    | "rolledBack"
+    | "kept"
+    | "skipped"
+    | "failed"
+    | "ok";
+  detail?: string;
+}
+
 /** A mutating response: the resulting status plus a plain-language note. */
 export interface ComposioMutation {
   status: ComposioStatus;
   note: string;
+  /**
+   * Operator-facing copy for a **non-destructive** probe failure. The key
+   * **was** stored; only reachability is in question.
+   *
+   * Optional, and absent on success and on every host predating the probe.
+   * Never rendered as an error — see {@link ComposioProbeClass}.
+   */
+  advisory?: string;
+  /** Which class of failure {@link advisory} is about. Absent when there was none. */
+  probeClass?: ComposioProbeClass;
+  /**
+   * Who depended on the credential this mutation just cleared or switched,
+   * echoed back on a **confirmed** in-use write (keys rework, issue #2306;
+   * `docs/key-reworks/in-use-guards.md` §3) — the shape computed before the
+   * write applied. Absent on every mutation that was not a guarded
+   * clear/switch, and on a guarded one that had nothing to warn about.
+   */
+  usedBy?: UsedBy;
+  /**
+   * What {@link copyAccountKeyToComposio} did to the Composio slot (keys
+   * rework, issue #2306, slice 4c) — always exactly one entry, `slot:
+   * "composio"`, when present. Absent (never an empty array) on every other
+   * mutation on this surface, which writes this company's own credential
+   * directly rather than copying the account key.
+   */
+  slots?: SlotReport[];
+}
+
+/**
+ * The `POST …/composio/api-key/test` verdict — the stored key, checked in place.
+ *
+ * A different shape from {@link ComposioMutation} on purpose, because it is a
+ * different act. That one reports on a write that happened and hangs an
+ * advisory off it; this one writes nothing at all, on any path — **including
+ * `auth`**. A Test that cleared a rejected key would be the worst control on
+ * the page: the operator pressed the one thing that promised to be safe.
+ *
+ * `probeClass` and `message` are **omitted** rather than nulled when `ok` is
+ * true, matching every other optional field the host sends. The copy comes from
+ * the host rather than from `composio/classify.ts`: the advisory copy there is
+ * framed for a write that landed ("Saved, but …") and saying that about a check
+ * which stored nothing is a statement about an event that did not happen.
+ */
+export interface ComposioApiKeyTest {
+  /** Whether Composio answered the check. */
+  ok: boolean;
+  /** Why it did not, when it did not. Absent when `ok`. */
+  probeClass?: ComposioProbeClass;
+  /** The host's verdict sentence for {@link probeClass}. Absent when `ok`. */
+  message?: string;
 }
 
 /** The `POST …/composio/authorize` response: the hosted connect URL to open. */
@@ -272,20 +383,32 @@ export function getComposioStatus(
   company: string | null,
   options?: RequestOptions,
 ): Promise<ComposioStatus> {
-  return client.get<ComposioStatus>(`${client.scopeFor(company)}/composio`, options);
+  return client.get<ComposioStatus>(
+    `${client.scopeFor(company)}/composio`,
+    options,
+  );
 }
 
 /**
  * Set / rotate / clear this company's own Composio token. A non-empty value
  * rotates it; an empty string clears it, reverting to the instance's identity
  * where there is one.
+ *
+ * A clear that would strand a connected integration is refused with a
+ * `409 in_use` `ApiError` carrying `usedBy` (in-use-guards.md §2) unless
+ * `confirmInUse` is `true`. Setting or rotating a non-empty token is never
+ * guarded, so `confirmInUse` matters only on an empty `token`.
  */
 export function setComposioToken(
   client: OpenCompanyClient,
   company: string | null,
   token: string,
+  confirmInUse = false,
 ): Promise<ComposioMutation> {
-  return client.put<ComposioMutation>(`${client.scopeFor(company)}/composio/token`, { token });
+  return client.put<ComposioMutation>(
+    `${client.scopeFor(company)}/composio/token`,
+    { token, confirmInUse },
+  );
 }
 
 /**
@@ -306,13 +429,65 @@ export function setComposioToken(
  * the *TinyHumans backend* recognises and leaves the route managed; this one
  * stores a key *Composio* recognises and changes the route. They authenticate
  * different hosts.
+ *
+ * A write that actually **switches route** (a first move to BYOK, or a clear
+ * that gives the managed route back) is refused with a `409 in_use` `ApiError`
+ * carrying `usedBy` (in-use-guards.md §2/§6) when a connection is pinned,
+ * unless `confirmInUse` is `true`. Rotating a key while staying on the same
+ * route is never guarded — see `src/server/ops/composio.rs::set_api_key`.
  */
 export function setComposioApiKey(
   client: OpenCompanyClient,
   company: string | null,
   apiKey: string,
+  /**
+   * Store the key without probing it first.
+   *
+   * Offered **only after a typed probe failure**, never as a standing option: a
+   * Composio account behind a corporate proxy fails the check while the key is
+   * fine, and without this the operator cannot get past a check that is wrong
+   * about them. Defaulted to `false` here rather than omitted-means-skip, so a
+   * caller that forgets the argument gets the verified path.
+   */
+  skipVerify = false,
+  confirmInUse = false,
 ): Promise<ComposioMutation> {
-  return client.put<ComposioMutation>(`${client.scopeFor(company)}/composio/api-key`, { apiKey });
+  return client.put<ComposioMutation>(
+    `${client.scopeFor(company)}/composio/api-key`,
+    {
+      apiKey,
+      skipVerify,
+      confirmInUse,
+    },
+  );
+}
+
+/**
+ * Check the Composio API key this company already has stored, and report the
+ * verdict. Changes nothing.
+ *
+ * **No arguments beyond the scope.** The key is read from the company's own
+ * store and the endpoint is a compile-time constant on the host, so there is
+ * nothing here that could point a credential at a caller-chosen address. A
+ * *draft* key is checked by {@link setComposioApiKey}, which has to be handed
+ * one anyway.
+ *
+ * Admin-only: it spends the company's credential against a third party, and the
+ * answer is about the company's standing with a vendor. A member gets a 403.
+ *
+ * Answers `409 not_configured` when there is nothing to check — the company is
+ * on the managed route, or it is on BYOK with a blank slot. That is a permanent
+ * state rather than a failed check, which is why the rows hide the control
+ * instead of offering one that can only fail.
+ */
+export function testComposioApiKey(
+  client: OpenCompanyClient,
+  company: string | null,
+): Promise<ComposioApiKeyTest> {
+  return client.post<ComposioApiKeyTest>(
+    `${client.scopeFor(company)}/composio/api-key/test`,
+    {},
+  );
 }
 
 /**
@@ -327,9 +502,12 @@ export function startComposioAuthorize(
   company: string | null,
   toolkit: string,
 ): Promise<ComposioAuthorize> {
-  return client.post<ComposioAuthorize>(`${client.scopeFor(company)}/composio/authorize`, {
-    toolkit,
-  });
+  return client.post<ComposioAuthorize>(
+    `${client.scopeFor(company)}/composio/authorize`,
+    {
+      toolkit,
+    },
+  );
 }
 
 /**
@@ -342,7 +520,9 @@ export function listComposioConnections(
   client: OpenCompanyClient,
   company: string | null,
 ): Promise<ComposioConnection[]> {
-  return client.get<ComposioConnection[]>(`${client.scopeFor(company)}/composio/connections`);
+  return client.get<ComposioConnection[]>(
+    `${client.scopeFor(company)}/composio/connections`,
+  );
 }
 
 /** What the host says it revoked, in its own words. */
@@ -414,5 +594,31 @@ export function clearComposioDefaultAccount(
 ): Promise<ComposioDefaultMutation> {
   return client.del<ComposioDefaultMutation>(
     `${client.scopeFor(company)}/composio/connections/${encodeURIComponent(connectionId)}/default`,
+  );
+}
+
+/**
+ * Copy this company's TinyHumans account key (set on the Account page) into
+ * `composio/tinyhumans/key` — the reuse banner's "Yes" (keys rework, issue
+ * #2306, slice 4c; `docs/key-reworks/phase-4c-reuse-banner.md`).
+ *
+ * **No arguments beyond the scope.** The key is read from this company's own
+ * store; there is nothing for a request body to name. A single-slot copy,
+ * never a route switch — it does not touch `composio/mode` or
+ * `composio/byok/key`, and it is **not** interchangeable with the full
+ * account-key fan-out (`PUT …/credential`), which rewrites the account key
+ * itself.
+ *
+ * Admin-only: a member gets a 403. Refused with `400 invalid_request` when
+ * there is no account key to reuse, or when the Composio slot already holds a
+ * different, non-empty key of its own — both before any write.
+ */
+export function copyAccountKeyToComposio(
+  client: OpenCompanyClient,
+  company: string | null,
+): Promise<ComposioMutation> {
+  return client.post<ComposioMutation>(
+    `${client.scopeFor(company)}/composio/tinyhumans/key/from-account`,
+    {},
   );
 }

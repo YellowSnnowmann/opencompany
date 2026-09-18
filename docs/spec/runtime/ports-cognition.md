@@ -284,7 +284,8 @@ first and added the names second; the reverse order would have published the
 host's filesystem layout into every agent turn.
 - **`failure` — why it stopped**, as a typed `TurnStepFailure`
   (`unauthorized` · `timeout` · `declined` · `blocked_by_policy` ·
-  `missing_permission` · `missing_app` · `unavailable` · `failed`), projected
+  `missing_permission` · `missing_app` · `not_found` · `unsupported` ·
+  `unavailable` · `failed`), projected
   from OpenHuman's `ToolFailureClass` in one exhaustive match. The console
   renders a known state; it never pattern-matches the prose in `result`.
 

@@ -103,6 +103,8 @@ on:
         required: false
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
         required: false
+      SENTRY_AUTH_TOKEN:
+        required: false
 
 permissions:
   contents: write
@@ -154,6 +156,23 @@ jobs:
           for var in APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
             if [ -z "${!var}" ]; then
               echo "::error::sign=true but required macOS signing secret is missing: $var" >&2
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+      - name: Validate Sentry artifact-upload settings
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_URL: ${{ vars.SENTRY_URL }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT_REACT: ${{ vars.SENTRY_PROJECT_REACT }}
+          SENTRY_PROJECT_RUST: ${{ vars.SENTRY_PROJECT_RUST }}
+        run: |
+          missing=0
+          for var in SENTRY_AUTH_TOKEN SENTRY_URL SENTRY_ORG SENTRY_PROJECT_REACT SENTRY_PROJECT_RUST; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Required Sentry artifact-upload setting is missing: $var" >&2
               missing=1
             fi
           done
@@ -265,11 +284,27 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Resolve release commit
+        id: release-commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       # BEFORE the Tauri build. `beforeBuildCommand` is empty in
       # tauri.conf.json, so nothing else compiles `frontend/dist` — the bundler
       # would package a stale or missing dist otherwise.
       - name: Build frontend
         working-directory: frontend
+        env:
+          VITE_SENTRY_DSN: ${{ vars.OPENCOMPANY_REACT_SENTRY_DSN }}
+          VITE_SENTRY_ENVIRONMENT: ${{ vars.OPENCOMPANY_SENTRY_ENVIRONMENT || 'desktop' }}
+          VITE_SENTRY_TRACES_SAMPLE_RATE: ${{ vars.OPENCOMPANY_SENTRY_TRACES_SAMPLE_RATE }}
+          VITE_BUILD_COMMIT: ${{ steps.release-commit.outputs.sha }}
+          # The frontend bundle is architecture-independent. Upload its maps
+          # once from arm64; the Intel leg builds identical assets and would
+          # otherwise race a duplicate artifact-bundle upload.
+          SENTRY_AUTH_TOKEN: ${{ matrix.target == 'aarch64-apple-darwin' && secrets.SENTRY_AUTH_TOKEN || '' }}
+          SENTRY_URL: ${{ vars.SENTRY_URL }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT_REACT }}
         run: npm run build
 
       # The Tauri CLI compiles the Rust shell and packages the .app + unsigned
@@ -283,10 +318,21 @@ jobs:
           # Keep in sync with bundle.macOS.minimumSystemVersion in
           # crates/opencompany-app/tauri.conf.json — the Wry system-WebView floor.
           MACOSX_DEPLOYMENT_TARGET: "12.0"
+          OPENCOMPANY_BUILD_COMMIT: ${{ steps.release-commit.outputs.sha }}
         run: |
           ../../frontend/node_modules/.bin/tauri build \
             --target ${{ matrix.target }} \
             -- --locked --features "$DESKTOP_RELEASE_FEATURES"
+
+      - name: Upload Rust debug symbols to Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_URL: ${{ vars.SENTRY_URL }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT_RUST }}
+          SENTRY_CLI: ${{ github.workspace }}/frontend/node_modules/.bin/sentry-cli
+          TARGET: ${{ matrix.target }}
+        run: scripts/upload-sentry-symbols.sh "crates/opencompany-app/target/${TARGET}/release"
 
       - name: Locate .app and .dmg bundles
         id: locate

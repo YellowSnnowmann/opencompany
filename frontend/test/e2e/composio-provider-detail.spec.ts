@@ -163,7 +163,9 @@ test.afterAll(async ({ playwright }, testInfo) => {
   });
   try {
     if (COMPOSIO_FIXTURE_URL) await request.post(`${COMPOSIO_FIXTURE_URL}/__reset`);
-    const cleared = await request.put("/api/v1/company/composio/token", { data: { token: "" } });
+    const cleared = await request.put("/api/v1/company/composio/token", {
+      data: { token: "", confirmInUse: true },
+    });
     // Asserted, not fired and forgotten. A silently-refused cleanup is what broke
     // the run above, and it broke it somewhere else — in a spec with no idea this
     // one exists. A failure here names the right file.

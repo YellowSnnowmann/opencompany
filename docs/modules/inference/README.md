@@ -19,6 +19,11 @@ spec for what ships today.
 | [`architecture.md`](architecture.md) | Module seams, and how each one is tested |
 | [`staging.md`](staging.md) | The order the work lands in, and what is shippable at each step |
 
+**Keys rework (2026-09-14, issue #2306).** Provider + one model everywhere, a
+company default `{provider, model}`, per-agent pairs, and routing removed are
+planned slice by slice in [`docs/key-reworks/`](../../key-reworks/README.md).
+Where this folder and that plan disagree about the target, the plan wins.
+
 ## The stance
 
 **The catalogue and the two surfaces are a verbatim port.** The provider list,

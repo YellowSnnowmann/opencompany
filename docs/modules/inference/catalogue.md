@@ -16,7 +16,7 @@ neither, and it is listed as a defect for that reason.
 
 ## Cloud providers
 
-26 user-addable entries. `auth` is the header style: `bearer` sends
+27 user-addable entries. `auth` is the header style: `bearer` sends
 `Authorization: Bearer <key>`; `anthropic` sends `x-api-key: <key>` plus
 `anthropic-version: 2023-06-01`.
 
@@ -48,19 +48,24 @@ neither, and it is listed as a defect for that reason.
 | 24 | `vercel-ai-gateway` | Vercel AI Gateway | bearer | — | `https://ai-gateway.vercel.sh/v1` |
 | 25 | `sumopod` | SumoPod | bearer | `sk-...` | `https://ai.sumopod.com/v1` |
 | 26 | `modelscope` | ModelScope | bearer | `ms-...` | `https://api-inference.modelscope.cn/v1` |
+| 27 | `tinyhumans` | TinyHumans | bearer | `th-...` | `https://api.tinyhumans.ai/agent-integrations/openrouter` |
 
-The 27th Rust entry is `openhuman` (`https://api.openhuman.ai/v1`, auth style
-`openhuman_jwt`) — their managed first-party backend, always present, never
-removable, not offered in the add list. **Our equivalent is the managed
-TinyHumans brain**, which is already modelled and must keep its own auth path;
-do not port `openhuman` as a row of this table.
+Row 27, **added in the keys rework (issue #2306, slice 2a)**, is an ordinary
+row like every other: it reads its paged model catalog and sends chat at
+`…/agent-integrations/openrouter{/models,/chat/completions}`, and its key
+lives at `provider/tinyhumans/key` like any other provider's. `openhuman`
+— openhuman's own first-party entry (`https://api.openhuman.ai/v1`, auth style
+`openhuman_jwt`) — is still **not** ported as a row: it is their managed
+backend concept, and TinyHumans-the-row above is our equivalent of a *vendor*,
+not of that backend.
 
-It **is** offered in the add dialog, though — as an entry the console injects
-into the Cloud list rather than as a row of `CLOUD_PROVIDERS`, because it is a
-resolution chain rather than a vendor account and has no preset endpoint of its
-own. It appears there only while its chain resolves to nothing or to the
-*instance's* identity; see [`connect-flow.md`](connect-flow.md) for why the
-second case is deliberate.
+TinyHumans is **also** offered as a *legacy* "Managed" entry the console
+injects into the Cloud list rather than as a row of `CLOUD_PROVIDERS` — that
+entry is a resolution chain (account key, then the instance identity) rather
+than a vendor account, and it renders only while a `tinyhumans` row does not
+already exist. See [`connect-flow.md`](connect-flow.md) and
+`docs/key-reworks/phase-2a-tinyhumans-on-proxy.md` for why the two never both
+render, and why the second case is deliberate.
 
 ### Endpoint paths are not uniform, and that is the point
 

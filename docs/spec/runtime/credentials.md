@@ -72,33 +72,39 @@ is the reason the exchange is server-side rather than done in the page: whatever
 redeems the code receives the key, and a `connections` key passing through a tab
 is a credential in a place nobody can account for.
 
-**Where the browser comes back to.** The callback is
-`{callback_origin}/?company=…&key=link&state=…`, resolved in this order
-(`server::ops::company_key::callback_origin`):
+**Where the browser comes back to.** The callback is the query
+`?company=…&key=link&state=…` appended to a base resolved in this order
+(`server::ops::company_key::callback_base`):
 
-1. **A stated `OPENCOMPANY_PUBLIC_URL`** always wins — the console's own origin,
-   because the console is what holds the session that may call `finish` and
-   what redeems the code.
-2. **A loopback `Origin` request header**, when nothing is stated — `http://` to
-   `localhost` or a loopback literal only, the same shape the hub's own gate
-   admits. This is what makes local development need no configuration at all:
-   the dev console on `http://localhost:5173` is sent back to itself, because
-   whatever pressed the button is where the answer should come back to. A
-   non-loopback origin is not trusted here even though a stolen code redeems
-   nothing without the verifier this host keeps.
-3. **`host_base_url()`** — `http://{bind}` — otherwise. This is the wrong
-   answer for local development in a way that only shows up at the end of the
-   flow: the host on `127.0.0.1:8080` serves no page unless
-   `OPENCOMPANY_CONSOLE_DIR` is set, so an operator signed in, approved, and
-   landed on a 404 holding a spent code, with nothing on that page able to say
-   what had gone wrong.
+1. **A stated `OPENCOMPANY_PUBLIC_URL`** always wins — `{public_url}/`, the
+   console's own origin, because the console is what holds the session that
+   may call `finish` and what redeems the code.
+2. **A loopback `Origin` request header**, when nothing is stated —
+   `{origin}/`, `http://` to `localhost` or a loopback literal only, the same
+   shape the hub's own gate admits. This is what makes local development need
+   no configuration at all: the dev console on `http://localhost:5173` is sent
+   back to itself, because whatever pressed the button is where the answer
+   should come back to. A non-loopback origin is not trusted here even though a
+   stolen code redeems nothing without the verifier this host keeps.
+3. **The host's own return route** otherwise —
+   `http://{bind}/auth/key/callback` (`server::hub_link_callback`). No stated
+   origin and no browser origin is the desktop: its console is a webview whose
+   requests reach the embedded host through the shell's Rust proxy, so there
+   is no `Origin`, and the host serves nothing at `/`. Sending the browser to
+   `http://{bind}/` there was a 404 holding a spent code — and
+   `http://127.0.0.1:0/` before the shell recorded the port it actually bound,
+   which Chrome refuses outright. On this route the host redeems the code
+   itself, through the same `redeem_link` the console's `finish` runs, and
+   shows the tab a page saying to go back to the app. The route is mounted
+   without console auth, like the MCP OAuth callback: the parked single-use
+   `state`, bound to one company and expiring with the link, is the whole of
+   its authority. The hub admits any `http` loopback URL, path included.
 
 A host that advertises a stated origin serving no console still answers the
 return leg with a 404 and the grant dies holding a spent code. In a hosted
 tenant the console is served from that origin already; locally, either rely on
-tier 2 automatically, set `OPENCOMPANY_CONSOLE_DIR` to a built `frontend/dist`
-so the host origin serves it, or point `OPENCOMPANY_PUBLIC_URL` at the dev
-server (`http://localhost:5173`).
+tier 2 automatically, or set `OPENCOMPANY_CONSOLE_DIR` to a built
+`frontend/dist` so the host origin serves it.
 
 **The key never reaches the browser.** The return leg carries `state` and a
 one-time `code`, and nothing else — the console posts both to its own host,
@@ -121,11 +127,20 @@ what it was before this existed.
 
 ### Which hub, and the two pages the console does not reimplement
 
-Everything above happens against whichever hub `TINYHUMANS_API_URL` names — the
-production one by default, `https://staging-api.tinyhumans.ai` for a console
-working against staging. Nothing else has to be set to move the flow: the
-authorize URL is built from that value (`server::hub_identity::key_grant_url`),
-and so is the callback, from `OPENCOMPANY_PUBLIC_URL`.
+Everything above happens against whichever hub `TINYHUMANS_API_URL` (or
+`config.toml`'s `api_url`) names — the production one by default,
+`https://staging-api.tinyhumans.ai` for a console working against staging.
+Nothing else has to be set to move the flow: the authorize URL is built from
+that value (`server::hub_identity::key_grant_url`), so is the callback, so is
+the managed inference endpoint every company on the host resolves
+(`docs/modules/inference/data-model.md`, "per process, at the floor"), and so
+are the console's own "Get an API key" links — the Account dialog's from
+`account.manageKeysUrl` on `GET …/credential`, the setup wizard's from
+`inference.keys_url` on `GET /api/v1/setup`. None of those is a production
+constant any more: a host on staging sends its operator to mint a key on
+staging, presents that key to staging, and offers the one-click grant (which
+needs a company to scope to, so the wizard cannot) ahead of the paste field
+wherever `hubLink` is true.
 
 Two things the grant deliberately cannot do are **revoke** the key it minted and
 **pay** for what that key spends. Both end an errand somewhere this console has
@@ -212,9 +227,9 @@ own surface can afford:
   "nothing configured" and cannot be guessed past.
 
 A surface may prepend its **own** escape hatch above that seam. Composio keeps
-its BYO `composio/token` for a company that insists on using its own Composio
-account, so its full order is `composio/token` → company key → instance
-identity → none. What no surface may do is resolve a *company* identity some
+its BYO `composio/tinyhumans/key` for a company that insists on using its own
+Composio account, so its full order is `composio/tinyhumans/key` → company key
+→ instance identity → none. What no surface may do is resolve a *company* identity some
 other way.
 
 That composed order is itself derived **once**, in
@@ -236,7 +251,7 @@ that one is not a tier at all.
 | | managed | byok |
 | --- | --- | --- |
 | Host | the OpenHuman backend's `/agent-integrations/composio/*` | `backend.composio.dev` |
-| Credential | the precedence chain above | this company's own Composio API key (`composio/api_key`) |
+| Credential | the precedence chain above | this company's own Composio API key (`composio/byok/key`) |
 | Who bills | the platform | whoever owns that Composio account |
 | Toolkit gate | the backend's server-enforced allowlist | the company's own Composio dashboard |
 
@@ -446,13 +461,11 @@ running.
   `hosted_endpoint_from_env`. Moving them onto this seam is issue #585; when it
   lands they inherit the rotation guarantee by construction, because the seam is
   already here.
-- **Media generation and managed `web_search`.** Deliberately environment-only:
-  those run on the *platform's* managed credential, never a company-controlled
-  one. Search additionally has a **company-controlled** surface beside it — a
-  BYO provider key in that company's own secret store, which replaces the
-  managed tool for that company and is billed to its own account. It is a
-  separate credential with separate rules, not a tier of this seam; see
-  [search.md](search.md).
+- **Media generation.** Deliberately environment-only: it runs on the
+  *platform's* managed credential, never a company-controlled one. Managed
+  `web_search` now reads the company's copied TinyHumans key first and the
+  environment credential second. A separate BYO search-provider key still
+  replaces the managed tool entirely; see [search.md](search.md).
 
 ## Known limits, recorded deliberately
 

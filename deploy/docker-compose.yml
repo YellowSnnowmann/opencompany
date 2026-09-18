@@ -1,0 +1,86 @@
+# OpenCompany — one command to run a company + its operator console.
+#
+# Run from this directory (`cd deploy`), so Compose reads `.env` from here:
+#
+#   cp .env.example .env       # then set OPENCOMPANY_COMPANY to the module you want
+#   docker compose up --build
+#
+# Or from the repository root:
+#
+#   docker compose -f deploy/docker-compose.yml up --build
+#
+# Build contexts and bind mounts are relative to the project directory — this
+# file's directory unless --project-directory says otherwise — hence the `..`.
+#
+# The switch is OPENCOMPANY_COMPANY: an example directory name
+# (venture_capital, marketing_agency, …) or an alias (fund,
+# marketing, software, studio, accelerator, law, signals, …).
+name: opencompany
+
+services:
+  opencompany:
+    build:
+      context: ..
+      # Named relative to the context. BuildKit then reads the ignore rules
+      # from `deploy/Dockerfile.dockerignore` rather than a root `.dockerignore`.
+      dockerfile: deploy/Dockerfile
+      args:
+        FEATURES: ${OPENCOMPANY_FEATURES:-}
+    image: opencompany:local
+    environment:
+      # Which module spins up.
+      OPENCOMPANY_COMPANY: ${OPENCOMPANY_COMPANY:-marketing_agency}
+      OPENCOMPANY_DISCOVERABLE: ${OPENCOMPANY_DISCOVERABLE:-false}
+      # Optional: cargo features to compile the host with (e.g. "medulla").
+      # Blank = the small default build; the dev overlay reads it so a key has
+      # a live brain to talk to.
+      OPENCOMPANY_FEATURES: ${OPENCOMPANY_FEATURES:-}
+      # Standing first-user grant for email auth. Blank grants nobody. The
+      # local init helper pairs this with `issue-password` when no mail
+      # transport exists.
+      OPENCOMPANY_ADMIN_EMAIL: ${OPENCOMPANY_ADMIN_EMAIL:-}
+      # Optional: unlocks live cognition. Blank = offline demo brain.
+      TINYHUMANS_API_KEY: ${TINYHUMANS_API_KEY:-}
+      # Crash reporting. Blank — the default — means no client is constructed.
+      # Needs `crash-reporting` in OPENCOMPANY_FEATURES above; without it the
+      # host says so at boot rather than pretending to report.
+      # See `docs/spec/runtime/crash-reporting.md`.
+      OPENCOMPANY_SENTRY_DSN: ${OPENCOMPANY_SENTRY_DSN:-}
+      OPENCOMPANY_SENTRY: ${OPENCOMPANY_SENTRY:-}
+      OPENCOMPANY_SENTRY_ENVIRONMENT: ${OPENCOMPANY_SENTRY_ENVIRONMENT:-}
+      OPENCOMPANY_SENTRY_TRACES_SAMPLE_RATE: ${OPENCOMPANY_SENTRY_TRACES_SAMPLE_RATE:-}
+    ports:
+      - "${OPENCOMPANY_PORT:-8080}:8080"
+    volumes:
+      - opencompany-data:/data
+    restart: unless-stopped
+
+  console:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      # Build-time, not run-time: Vite bakes these into the bundle, so setting
+      # them in `environment` below would have no effect at all. Changing one
+      # needs `docker compose build console`, not a restart.
+      args:
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-}
+        VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-}
+        VITE_SENTRY_TRACE_PROPAGATION_TARGETS: ${VITE_SENTRY_TRACE_PROPAGATION_TARGETS:-}
+        # Without this the console's release tag has no commit in it and two
+        # builds are indistinguishable in Sentry. Compose cannot read git, so
+        # set it in `.env` or pass it inline:
+        #   VITE_BUILD_COMMIT=$(git rev-parse HEAD) docker compose build console
+        VITE_BUILD_COMMIT: ${VITE_BUILD_COMMIT:-}
+    image: opencompany-console:local
+    environment:
+      OC_UPSTREAM: opencompany:8080
+    depends_on:
+      opencompany:
+        condition: service_healthy
+    ports:
+      - "${CONSOLE_PORT:-5173}:80"
+    restart: unless-stopped
+
+volumes:
+  opencompany-data:

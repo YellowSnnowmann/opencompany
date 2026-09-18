@@ -1,5 +1,11 @@
 // The shapes the inference surfaces pass around.
 //
+// Keys rework (issue #2306): a provider is a provider plus one chosen model —
+// no more per-tier map presented to the operator, and no tier name ever shown
+// as a model. `model` / `modelAmbiguous` / `DefaultChoice` are the wire fields
+// the shared naming contract (`docs/key-reworks/README.md`) fixes; do not
+// invent synonyms for them.
+//
 // Types only — no values, no behaviour. Kept apart from `routing.ts` and
 // `classify.ts` so those stay readable as *decisions*, which is the whole reason
 // they are separate from the components that render them.
@@ -9,6 +15,16 @@
 // carries `keyConfigured: boolean` and nothing else. Four independent mechanisms
 // keep credentials off the wire in this subsystem, and the easiest way to break
 // all four at once is to put one on a record for convenience.
+//
+// `baseUrl` is the field that made that sentence briefly untrue. A URL can carry
+// userinfo (`http://user:password@host/v1`), and this shape comes back from a
+// `ScopedCompany` route every console reader can call. The host now refuses such
+// an endpoint everywhere one can be set and redacts it everywhere one is said
+// (`catalogue::endpoint_has_credentials` / `redact_endpoint`), so what arrives
+// here is `http://***@host/v1` at worst — but a `baseUrl` is still a place a
+// credential can hide, which is why it is called out rather than trusted.
+
+import type { UsedBy } from "@/api/types";
 
 /** How a provider expects its credential presented. */
 export type AuthStyle = "bearer" | "anthropic" | "none";
@@ -34,8 +50,29 @@ export interface Provider {
   kind: string;
   /** Resolved OpenAI-compatible base URL. */
   baseUrl: string;
-  /** Abstract tier → concrete model id. */
+  /**
+   * Abstract tier → concrete model id.
+   *
+   * @deprecated keys-rework #2306: a storage encoding only — the same id is
+   * written under all four tier keys, never a per-tier selection. The console
+   * reads and writes {@link Provider.model} instead; removable once nothing
+   * renders this map directly.
+   */
   models: Record<string, string>;
+  /**
+   * This row's one model, collapsed from the stored tier map (`ModelOnRow` on
+   * the host, keys rework #2306). `null` when the row holds no model yet, or
+   * when it holds more than one distinct id (see {@link modelAmbiguous}) —
+   * never guessed. Optional because an older host does not send it.
+   */
+  model?: string | null;
+  /**
+   * Whether the row's stored tier map holds two or more distinct ids, so no
+   * single model can be shown. The console never picks one on the row's
+   * behalf; it shows "Needs a model" and asks. Optional because an older host
+   * does not send it, and absent reads as `false`.
+   */
+  modelAmbiguous?: boolean;
   /** Whether this is available for routing. Distinct from deleted. */
   enabled: boolean;
   /** Whether a credential is stored — **never the credential**. */
@@ -67,6 +104,28 @@ export interface Provider {
   origin?: "entryZero" | "indexed";
   /** The last thing the system learnt about reaching it, if anything. */
   health?: ProviderHealth;
+  /**
+   * What else depends on this row (keys rework, issue #2306): the company
+   * default, agents pinned to it, other surfaces sharing its credential.
+   * Absent means nothing does — the same as every field being omitted. Drives
+   * the in-use confirmation on remove / clear key / disable; see
+   * `docs/key-reworks/README.md`'s confirmation contract.
+   */
+  usedBy?: UsedBy;
+}
+
+/**
+ * The company's stored `{provider, model}` default, as the status reports it
+ * (keys rework, issue #2306; `store::DefaultChoice` on the host).
+ *
+ * `model: null` is a **bare-slug default from before this rework**: a provider
+ * is named and no model is, which resolves through the legacy source and shows
+ * the "choose one" banner. It is never rewritten by anything but an explicit
+ * set-default. `null` for the whole field means no default is stored at all.
+ */
+export interface DefaultChoice {
+  provider: string;
+  model: string | null;
 }
 
 /**
@@ -86,35 +145,3 @@ export interface ProviderHealth {
 
 /** What a failed check means. See `classify.ts` for the copy each one gets. */
 export type ProbeClass = "auth" | "model" | "quota" | "endpoint" | "timeout" | "unknown";
-
-/** A workload that owns a routing row. */
-export type Workload = "chat" | "reasoning" | "agentic" | "vision";
-
-/**
- * What one routing row points at.
- *
- * `managed` and `default` are different states on purpose: one is a choice, the
- * other is an absence. Collapsing them loses the ability to say "this row is
- * deliberately managed" as distinct from "this row was never set".
- */
-export type ProviderRef =
-  | { kind: "managed" }
-  | { kind: "default" }
-  | { kind: "cloud"; providerSlug: string; model?: string }
-  | { kind: "local"; model?: string }
-  | { kind: "claudeCode"; model?: string };
-
-/** Workload → what it routes through. A workload absent from the map is unset. */
-export type RoutingMap = Partial<Record<Workload, ProviderRef>>;
-
-/**
- * The routing modes. **Inferred host-side from the routes, never stored.**
- *
- * `unset` is not a mode an operator picks — it is the absence of one. The host
- * reports it when every row is managed-or-empty *and* the managed chain resolves
- * to nothing, which used to be reported as `managed`: the screen said Managed
- * while the turn went to whichever provider happened to be first enabled, and on
- * a company whose only provider had just been added that turn was the reported
- * `404 model: agentic-v1`.
- */
-export type RoutingMode = "managed" | "own" | "advanced" | "unset";

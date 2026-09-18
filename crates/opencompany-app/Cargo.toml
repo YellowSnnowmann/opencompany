@@ -20,7 +20,7 @@
 
 [package]
 name = "opencompany-app"
-version = "0.1.6"
+version = "0.2.4"
 edition = "2024"
 license = "GPL-3.0-only"
 description = "OpenCompany desktop shell: many hosts at once, and local ACP harnesses."
@@ -119,7 +119,7 @@ path = "src/main.rs"
 # no way to hold" was also wrong about `composio` specifically, which is worth
 # recording so it is not re-derived. `company::composio::resolve_credential` is
 # always compiled and answers over *three* tiers, the platform identity being
-# the LAST: the BYO `composio/token` override wins, else the company's own
+# the LAST: the BYO `composio/tinyhumans/key` override wins, else the company's own
 # TinyHumans key, else this instance's platform identity. Tier one is precisely
 # what a desktop operator can hold, and the Connections card already asks them
 # for it.
@@ -131,9 +131,21 @@ path = "src/main.rs"
 # tiles render disabled with "this build was compiled without the `tinymemory`
 # feature", an instruction no desktop user can follow. Only the in-pod engines
 # above are excluded.
+# `tinyhumans` is what makes this host able to ask the hub whose credential it
+# is holding. Without it `HttpHubIdentityExchange` and `HttpTinyHumansClient`
+# are not compiled, `hub_identity()` stays `None`, and the Account page reports
+# that this host is not part of a TinyHumans ecosystem while
+# `credential/link/start` refuses with the same sentence. It is `["dep:reqwest"]`
+# and nothing else, and `oauth` above already pulls reqwest, so it adds no
+# package and leaves `Cargo.lock` byte-identical — which is what lets a release
+# still build `--locked`.
+#
 # The package is `opencompany-core`; its library crate is still named
 # `opencompany`, which is why the code says `use opencompany::`.
-opencompany-core = { path = "../opencompany-core", default-features = false, features = ["sqlite", "platform-jwt", "oauth", "mcp", "tinymemory"] }
+# `crash-reporting` gives the shell and every embedded host the same optional,
+# operator-configured Sentry client as the server binary. It remains inert
+# without `OPENCOMPANY_SENTRY_DSN`.
+opencompany-core = { path = "../opencompany-core", default-features = false, features = ["sqlite", "platform-jwt", "oauth", "mcp", "tinymemory", "tinyhumans", "crash-reporting"] }
 
 tauri = { version = "2", features = [] }
 # The OS credential store, so a device session token never has to live in the
@@ -188,3 +200,10 @@ tinycortex = { path = "../../vendor/openhuman/vendor/tinymemory/vendor/tinycorte
 tinycortex-api = { path = "../../vendor/openhuman/vendor/tinymemory/vendor/tinycortex/api" }
 tinychannels = { path = "../../vendor/openhuman/vendor/tinychannels" }
 motosan-ai-oauth = { path = "../../vendor/openhuman/vendor/motosan-ai-oauth" }
+
+# This crate is its own Cargo world, so it needs the workspace's symbolication
+# policy explicitly.
+[profile.release]
+debug = "line-tables-only"
+split-debuginfo = "packed"
+strip = "symbols"

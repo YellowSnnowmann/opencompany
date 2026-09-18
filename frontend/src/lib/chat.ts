@@ -2,8 +2,10 @@ import type {
   AttachmentDto,
   ChatHistoryMessageDto,
   ChatMentionDto,
+  ChatOutput,
   TurnStep,
 } from "@/api/types";
+import { toTurnFailure, type TurnFailure } from "./turn-failure";
 
 /**
  * The company's main line, by thread id.
@@ -181,6 +183,20 @@ export interface ChatMessage {
   id: string;
   from: "you" | "company" | "system";
   text: string;
+  /**
+   * **The body as the model wrote it**, when the host sent one — `text` before
+   * `readable_moves` rewrote the room's grammar into operator-facing prose.
+   *
+   * Equal to {@link text} on every row that carries no move, which is every
+   * reply on every desk that does not deliberate, and absent from a host that
+   * predates the field.
+   *
+   * Read it wherever the *grammar* is the point rather than the prose: the
+   * episode fold counts `!propose`/`!support`/`^N`, and reading {@link text}
+   * there makes the deliberation panel depend on the host not having tidied
+   * the bubble.
+   */
+  cueText?: string;
   /** Wall-clock the line was added, for timestamps and grouping. */
   at: number;
   /**
@@ -227,6 +243,14 @@ export interface ChatMessage {
   /** The crossing this report brought home, rendered as one collapsed line. */
   referralConversation?: import("@/api/types").ReferralConversationDto;
   /**
+   * The private aside behind this line, rendered as one collapsed line.
+   *
+   * Carried the same way `referralConversation` is, and for the same reason:
+   * only the host knows an aside produced this message, so it rides the message
+   * rather than being inferred from the text here.
+   */
+  asideConversation?: import("@/api/types").AsideConversationDto;
+  /**
    * Who reacted to this line with what — one row per person per emoji, not a
    * count (issue #364).
    *
@@ -248,6 +272,8 @@ export interface ChatMessage {
    * chip linking to `#/tasks/<id>`.
    */
   taskId?: string;
+  /** Workspace nodes and artifacts produced by this reply's turn. */
+  outputs?: ChatOutput[];
   /**
    * Files attached to this line (issue #1682), each a reference into the
    * company workspace. Set on your own message from the composer's pending
@@ -288,6 +314,15 @@ export interface ChatMessage {
    * landed (see `ChatView`'s `send` on why a throw is ambiguous).
    */
   sendFailed?: string;
+  /**
+   * The exact, actionable reason a fail-closed turn could not run (keys
+   * rework, issue #2306, round-2 review KR-L2-03) - set only on a `company`
+   * reply the host marked `userFacing`, from either the live reply or a
+   * rehydrated history entry. See `src/lib/turn-failure.ts` for what this
+   * unlocks (the sentence rendered verbatim, plus an action button) and the
+   * note on this being coded against a contract B has not yet documented.
+   */
+  turnFailure?: TurnFailure;
 }
 
 /**
@@ -439,21 +474,33 @@ export function makeMessage(
     parentId?: string;
     steps?: TurnStep[];
     taskId?: string;
+    outputs?: ChatOutput[];
     messageId?: string;
     attachments?: AttachmentDto[];
     /** Mention spans the host resolved against this message, for chip rendering. */
     mentions?: Mention[];
+    /**
+     * The body as the model wrote it, when the frame carried one — see
+     * {@link ChatMessage.cueText}. Passed through untouched so a live row and
+     * the same row after a reload feed the episode fold identically.
+     */
+    cueText?: string;
+    /** The fail-closed reason (KR-L2-03), already narrowed by `toTurnFailure`. */
+    turnFailure?: TurnFailure;
   } = {},
 ): ChatMessage {
   return {
     id: opts.messageId ? hostMessageId(opts.messageId) : nextId(),
     from,
     text,
+    cueText: opts.cueText,
     at: opts.at ?? Date.now(),
     channel: opts.channel,
     parentId: opts.parentId,
     steps: opts.steps,
     taskId: opts.taskId,
+    turnFailure: opts.turnFailure,
+    outputs: opts.outputs?.length ? opts.outputs : undefined,
     // Issue #1682: an empty list is dropped to `undefined` so a line with no
     // attachment stays exactly the shape it was before the field existed.
     attachments: opts.attachments?.length ? opts.attachments : undefined,
@@ -553,6 +600,68 @@ export function dispatchMarkerPlacement(
 }
 
 /**
+ * Folds a freshly-read transcript into the rows a thread already holds.
+ *
+ * ## Why this is not "append the ids we have not seen"
+ *
+ * That is what it was, and it assumed a re-read can only ADD rows. A referral
+ * breaks the assumption: its exchange folds onto the row that *asked*, which is
+ * a durable row the transcript already has. The refreshed copy carried the
+ * fold, the id filter dropped it as already-known, and the crossing stayed
+ * invisible until the thread was rebuilt from scratch — which is why a live
+ * crossing appeared only after a reload (CodeRabbit, #2341).
+ *
+ * The durable copy wins on conflict. It is what the host projected, and this
+ * whole round trip exists precisely because the live frames are the
+ * approximation.
+ *
+ * Returns `existing` **by reference** when nothing changed, so a caller holding
+ * React state can skip the update rather than re-rendering the thread on every
+ * re-read that found no news.
+ *
+ * That comparison is by VALUE, and it has to be: `fromHistory` parses a fresh
+ * object for every row on every round trip, so comparing identity would report
+ * each one as changed and make the skip dead code.
+ */
+/**
+ * Whether two copies of one row carry the same content.
+ *
+ * By value, never by identity: `fromHistory` parses a fresh object for every
+ * row on every round trip, so `!==` is true for rows that are word-for-word
+ * identical and any caller using it to detect change would see change always.
+ */
+function sameMessage(one: ChatMessage, two: ChatMessage): boolean {
+  return JSON.stringify(one) === JSON.stringify(two);
+}
+
+export function reconcileTranscript(
+  existing: ChatMessage[],
+  hydrated: ChatMessage[],
+): ChatMessage[] {
+  const refreshed = new Map(hydrated.map((m) => [m.id, m]));
+  const known = new Set(existing.map((m) => m.id));
+  const fresh = hydrated.filter((m) => !known.has(m.id));
+  let changed = false;
+  const reconciled = existing.map((held) => {
+    const durable = refreshed.get(held.id);
+    if (!durable) {
+      // A live row for a turn still running is not in `chat/history` yet. It is
+      // this console's own, and a re-read must not delete it.
+      return held;
+    }
+    if (sameMessage(durable, held)) {
+      return held;
+    }
+    changed = true;
+    return durable;
+  });
+  if (fresh.length === 0 && !changed) {
+    return existing;
+  }
+  return [...reconciled, ...fresh];
+}
+
+/**
  * Maps a desk's persisted transcript (`GET .../chat/history`, issue #65) to
  * the console's chat lines, preserving `mine`/author/text and ordering — the
  * backend already returns messages oldest-first. `id`s are namespaced with an
@@ -572,6 +681,9 @@ export function fromHistory(entries: ChatHistoryMessageDto[]): ChatMessage[] {
       id: hostMessageId(entry.id),
       from,
       text: entry.text,
+      // Straight through, like `byPerson`: the host is the only layer that
+      // still has the pre-rewrite body, and the episode fold needs it.
+      cueText: entry.cueText,
       at: entry.atMillis,
       // Straight through, never derived: see the field's own note, and
       // `MessageView::by_person` for why the host is the only layer that knows.
@@ -584,6 +696,7 @@ export function fromHistory(entries: ChatHistoryMessageDto[]): ChatMessage[] {
       // caused this line, and nothing here may infer it.
       referredFrom: entry.referredFrom,
       referralConversation: entry.referralConversation,
+      asideConversation: entry.asideConversation,
       // Reactions come through whoever the host said reacted; nothing is
       // inferred here, `mine` included.
       reactions: entry.reactions?.length ? entry.reactions : undefined,
@@ -606,10 +719,19 @@ export function fromHistory(entries: ChatHistoryMessageDto[]): ChatMessage[] {
       // Only your own lines never have one — you did not open a card by
       // speaking.
       taskId: from === "you" ? undefined : entry.taskId,
+      // Keep the produced-file buttons on exactly the same durable path as the
+      // card chip above. A live-only field vanishes on the first thread switch
+      // or page reload and makes a valid output look broken.
+      outputs: from === "you" || !entry.outputs?.length ? undefined : entry.outputs,
       // Rehydrate the operator's attachments (issue #1682) so a bubble carries
       // the same chips on reload it showed live. Empty drops to `undefined`,
       // keeping the pre-#1682 line shape.
       attachments: entry.attachments?.length ? entry.attachments : undefined,
+      // Rehydrate the fail-closed reason (KR-L2-03) so a reload shows the
+      // same sentence and button the live reply did, rather than losing it
+      // back to generic text. Company-only, like `steps` above — a system or
+      // your-own line is never the host's turn-failure notice.
+      turnFailure: from === "company" ? toTurnFailure(entry) : undefined,
     };
   });
 }
@@ -781,7 +903,24 @@ export function mergeHistoryInOrder(
     durableEchoes.set(messageFingerprint(message), matches);
   }
 
-  const persisted = hydrated.map((m) => existingById.get(m.id) ?? m);
+  // **The durable copy wins when it differs, and only then.**
+  //
+  // Keeping the row already on screen preserves its object identity so React
+  // can bail out of re-rendering an unchanged transcript — but keeping it
+  // *unconditionally* discards every update the host made to a row this
+  // console already holds. A referral is exactly that: its exchange folds onto
+  // the asking row, so the poll fetched the finished four-message crossing and
+  // then threw it away in favour of the one-message version it had caught mid
+  // exchange. Only a full reload, which builds the transcript from nothing,
+  // ever showed the whole thing.
+  //
+  // Comparing by value keeps the bail-out for rows that really are unchanged,
+  // which is almost all of them on almost every tick.
+  const persisted = hydrated.map((m) => {
+    const held = existingById.get(m.id);
+    if (!held) return m;
+    return sameMessage(held, m) ? held : m;
+  });
   const consumedEchoes = new Set<ChatMessage>();
   const liveRows = existing.filter((m) => !historyIds.has(m.id));
   const liveDurable = liveRows.filter((m) => isHostMessageId(m.id));
