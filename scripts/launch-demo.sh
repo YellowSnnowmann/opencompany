@@ -79,6 +79,7 @@ echo "opencompany: ${action} '${company}' (Compose project: ${project})"
 cd "${REPO_ROOT}/deploy"
 
 if [ "$action" = "up" ]; then
+    ensure_demo_cache_volumes
     console_port=${CONSOLE_PORT:-}
     if [ -z "$console_port" ] && [ -f .env ]; then
         console_port=$(sed -n 's/^[[:space:]]*CONSOLE_PORT[[:space:]]*=[[:space:]]*//p' .env | tail -n 1)

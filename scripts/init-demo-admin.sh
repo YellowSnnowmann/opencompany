@@ -127,13 +127,7 @@ fi
 
 export OPENCOMPANY_ADMIN_EMAIL="$admin_email"
 echo "opencompany: initializing '${company}' before creating its administrator"
-for cache_volume in \
-    opencompany-cargo-registry \
-    opencompany-cargo-git \
-    opencompany-cargo-target \
-    opencompany-frontend-node-modules; do
-    docker volume inspect "$cache_volume" >/dev/null 2>&1 || docker volume create "$cache_volume" >/dev/null
-done
+ensure_demo_cache_volumes
 compose up --build --detach --wait --wait-timeout 120 opencompany
 compose stop console opencompany
 

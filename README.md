@@ -221,24 +221,20 @@ quickstart below uses `export` and `./scripts/launch-demo.sh`.
 git clone --recurse-submodules https://github.com/tinyhumansai/opencompany.git
 cd opencompany
 export TINYHUMANS_API_KEY="th-..."          # grab yours at tinyhumans.ai
-./scripts/launch-demo.sh marketing up
-```
-
-The first run takes a few minutes while it downloads and builds. When it
-settles, open **<http://localhost:5173>**. That's the console, where you watch
-your agents work and answer anything waiting on you.
-
-There is no bundled username or password. Initialize the first administrator
-once per fresh data volume, then start the demo and sign in with that email and
-password:
-
-```sh
 ./scripts/init-demo-admin.sh marketing you@example.com
 ./scripts/launch-demo.sh marketing up
 ```
 
-The initializer prompts for the password without putting it in shell history.
-Removing the data volume with `down -v` removes this account too.
+There is no bundled username or password. The initializer prompts for a
+password without putting it in shell history and creates `you@example.com` as
+the demo administrator. The first run takes a few minutes while it downloads
+and builds. When it settles, open **<http://localhost:5173>** and sign in with
+that email and password. That's the console, where you watch your agents work
+and answer anything waiting on you.
+
+Run the initializer once per demo data volume. Removing that volume with
+`./scripts/launch-demo.sh marketing down -v` removes the account too, so run
+the initializer again before the next launch.
 
 `./scripts/list-demos.sh` lists the other businesses you can launch in place of
 `marketing`, and `./scripts/launch-demo.sh marketing down` shuts it all down.
