@@ -9,7 +9,7 @@ services:
       - watch
       - --poll
       - --watch
-      - src
+      - crates/opencompany-core/src
       - --watch
       - companies
       - --watch
