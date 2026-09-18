@@ -18,6 +18,13 @@ docker compose up --build
 - Console → http://localhost:5173 (proxies the API, so it's same-origin).
 - Host API → http://localhost:8080 (e.g. `/healthz`, `/api/v1/companies`).
 
+There are no default credentials. Before the first local sign-in, initialize
+the administrator for the selected demo (the helper prompts for a password):
+
+```sh
+./scripts/init-demo-admin.sh marketing you@example.com
+```
+
 Switch companies by editing `OPENCOMPANY_COMPANY` in `.env` and re-running
 `docker compose up`. Compile optional features into the host with
 `OPENCOMPANY_FEATURES="medulla tinyplace sqlite"`.

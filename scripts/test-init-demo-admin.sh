@@ -1,0 +1,42 @@
+#!/bin/sh
+# Focused tests for first-admin Compose initialization without starting Docker.
+set -eu
+
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
+
+cat >"${TMP_DIR}/docker" <<'EOF'
+#!/bin/sh
+printf 'admin=%s\n' "$OPENCOMPANY_ADMIN_EMAIL"
+printf 'args=%s\n' "$*"
+case "$*" in
+    *"run --rm --no-deps -T opencompany"*) cat ;;
+esac
+EOF
+chmod +x "${TMP_DIR}/docker"
+
+output=$(printf 'correct horse\ncorrect horse\n' \
+    | PATH="${TMP_DIR}:$PATH" "${SCRIPT_DIR}/init-demo-admin.sh" \
+        marketing admin@example.com)
+printf '%s\n' "$output" | grep -F 'admin=admin@example.com' >/dev/null
+printf '%s\n' "$output" | grep -F 'up --build --detach --wait opencompany' >/dev/null
+printf '%s\n' "$output" | grep -F 'stop console opencompany' >/dev/null
+printf '%s\n' "$output" | grep -F -- '--company agentic-marketing-agency' >/dev/null
+printf '%s\n' "$output" | grep -F -- '--email admin@example.com' >/dev/null
+printf '%s\n' "$output" | grep -F -- '--no-change-required --home /data' >/dev/null
+printf '%s\n' "$output" | grep -F 'administrator initialized' >/dev/null
+
+if printf 'one\ntwo\n' | PATH="${TMP_DIR}:$PATH" \
+    "${SCRIPT_DIR}/init-demo-admin.sh" marketing admin@example.com >/dev/null 2>&1; then
+    echo "init-demo-admin test: mismatched passwords unexpectedly succeeded" >&2
+    exit 1
+fi
+
+if printf 'one\none\n' | PATH="${TMP_DIR}:$PATH" \
+    "${SCRIPT_DIR}/init-demo-admin.sh" marketing not-an-email >/dev/null 2>&1; then
+    echo "init-demo-admin test: invalid email unexpectedly succeeded" >&2
+    exit 1
+fi
+
+echo "init-demo-admin tests passed"
