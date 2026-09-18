@@ -227,6 +227,19 @@ export TINYHUMANS_API_KEY="th-..."          # grab yours at tinyhumans.ai
 The first run takes a few minutes while it downloads and builds. When it
 settles, open **<http://localhost:5173>**. That's the console, where you watch
 your agents work and answer anything waiting on you.
+
+There is no bundled username or password. Initialize the first administrator
+once per fresh data volume, then start the demo and sign in with that email and
+password:
+
+```sh
+./scripts/init-demo-admin.sh marketing you@example.com
+./scripts/launch-demo.sh marketing up
+```
+
+The initializer prompts for the password without putting it in shell history.
+Removing the data volume with `down -v` removes this account too.
+
 `./scripts/list-demos.sh` lists the other businesses you can launch in place of
 `marketing`, and `./scripts/launch-demo.sh marketing down` shuts it all down.
 

@@ -80,6 +80,25 @@ The launcher bind-mounts the local checkout. Vite hot-updates frontend edits;
 or company definitions change. The first start builds the development images
 and dependencies; later launches reuse named Cargo and `node_modules` caches.
 
+The demo does not ship a default username or password. Initialize an
+administrator once for each fresh data volume; the helper securely prompts for
+a password, boots and stops the backend as needed, then writes the credential:
+
+```sh
+./scripts/init-demo-admin.sh marketing you@example.com
+./scripts/launch-demo.sh marketing up
+```
+
+The helper's Docker-free regression test checks the Compose files, selected
+company, and password command without starting containers:
+
+```sh
+./scripts/test-init-demo-admin.sh
+```
+
+If you run `down -v`, that account is deleted with the rest of the persistent
+demo data and must be initialized again.
+
 Use `./scripts/list-demos.sh` to list friendly names and every available
 company. Each company uses a separate Compose project and persistent data
 volume. `down` removes its containers and network but keeps that volume;

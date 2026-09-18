@@ -33,9 +33,45 @@ either way.
 - Console → http://localhost:5173 (proxies the API, so it's same-origin).
 - Host API → http://localhost:8080 (e.g. `/healthz`, `/api/v1/companies`).
 
+There are no default credentials. Before the first local sign-in, initialize
+the administrator for the selected demo (the helper prompts for a password):
+
+```sh
+./scripts/init-demo-admin.sh marketing you@example.com
+```
+
 Switch companies by editing `OPENCOMPANY_COMPANY` in `.env` and re-running
 `docker compose up`. Compile optional features into the host with
 `OPENCOMPANY_FEATURES="medulla tinyplace sqlite"`.
+
+To exercise the development Compose flow end to end, including both published
+ports, first-admin initialization, and the console's proxy connection to the
+host, run:
+
+```sh
+./scripts/test-compose-e2e.sh
+```
+
+The fast test for the first-admin helper uses a Docker stub and does not start
+containers:
+
+```sh
+./scripts/test-init-demo-admin.sh
+```
+
+The development overlay keeps Cargo and frontend dependency caches in shared
+external volumes, while each Compose project retains its own `opencompany-data`
+volume. The administrator helper creates the cache volumes automatically when
+needed, so repeated demo runs do not rebuild dependencies or remove another
+project's caches.
+
+The Compose E2E test requires Docker (or a compatible Compose provider), `curl`,
+and a working local build environment. It creates a temporary project, asks
+Compose for free host ports (`E2E_API_PORT` and `E2E_CONSOLE_PORT` may override
+them), initializes `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD`, and removes the
+project-scoped containers and data volume on exit. Shared dependency caches are
+preserved. Run it with `./scripts/test-compose-e2e.sh`; on failure the script
+prints the Compose status and logs.
 
 For a selectable memory engine, add `tinymemory` (hosted engines —
 Supermemory, Mem0, Cognee — plus the `null` driver) and `tinymemory-embedded`
