@@ -268,18 +268,10 @@ fn browser_analytics_config_accepts_only_plain_collector_urls() {
     );
     assert!(public_browser_endpoint("http://127.0.0.1:3000/track").is_some());
     assert!(public_browser_endpoint("http://[::1]:3000/track").is_some());
-    assert!(public_browser_endpoint(
-        "http://collector.example/api/track"
-    ).is_none());
-    assert!(public_browser_endpoint(
-        "http://collector.internal/api/track"
-    ).is_none());
-    assert!(public_browser_endpoint(
-        "https://user:secret@collector.example/api/track"
-    ).is_none());
-    assert!(public_browser_endpoint(
-        "https://collector.example/api/track?token=secret"
-    ).is_none());
+    assert!(public_browser_endpoint("http://collector.example/api/track").is_none());
+    assert!(public_browser_endpoint("http://collector.internal/api/track").is_none());
+    assert!(public_browser_endpoint("https://user:secret@collector.example/api/track").is_none());
+    assert!(public_browser_endpoint("https://collector.example/api/track?token=secret").is_none());
     assert!(public_browser_endpoint("not a URL").is_none());
 }
 
