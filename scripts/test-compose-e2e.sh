@@ -9,11 +9,11 @@ REPO_ROOT=$(CDPATH='' cd -- "${SCRIPT_DIR}/.." && pwd)
 RUN_ID=${E2E_RUN_ID:-$(date +%s)-$$}
 RUN_ID=$(printf '%s' "$RUN_ID" | tr -cd 'a-zA-Z0-9_-')
 PROJECT="opencompany-compose-e2e-${RUN_ID}"
-PORT_SEED=$(printf '%s' "$RUN_ID" | cksum | awk '{print $1}')
-OPENCOMPANY_PORT=${E2E_API_PORT:-$((20000 + (PORT_SEED % 10000)))}
-CONSOLE_PORT=${E2E_CONSOLE_PORT:-$((30000 + (PORT_SEED % 10000)))}
+OPENCOMPANY_PORT=${E2E_API_PORT:-0}
+CONSOLE_PORT=${E2E_CONSOLE_PORT:-0}
 OPENCOMPANY_COMPANY=${E2E_COMPANY:-marketing_agency}
 OPENCOMPANY_ADMIN_EMAIL=${E2E_ADMIN_EMAIL:-e2e-admin@example.com}
+cookie_jar=
 export OPENCOMPANY_PORT CONSOLE_PORT OPENCOMPANY_COMPANY OPENCOMPANY_ADMIN_EMAIL
 
 compose() {
@@ -28,6 +28,7 @@ compose() {
 cleanup() {
     status=$?
     trap - 0 HUP INT TERM
+    rm -f "$cookie_jar"
     if [ "$status" -ne 0 ]; then
         compose ps >&2 || true
         compose logs --no-color >&2 || true
@@ -35,7 +36,7 @@ cleanup() {
     # Keep the named Cargo/npm caches: the normal launcher does the same, and
     # a second smoke run should not rebuild the world. `down -v` remains the
     # explicit way to remove them.
-    compose down --remove-orphans >/dev/null 2>&1 || true
+    compose down --volumes --remove-orphans >/dev/null 2>&1 || true
     exit "$status"
 }
 trap cleanup 0 HUP INT TERM
@@ -71,6 +72,8 @@ printf '%s\n%s\n' "${E2E_ADMIN_PASSWORD:-e2e-password}" \
         "${SCRIPT_DIR}/init-demo-admin.sh" "$OPENCOMPANY_COMPANY" "$OPENCOMPANY_ADMIN_EMAIL"
 compose up --build --detach
 
+OPENCOMPANY_PORT=$(compose port opencompany 8080 | sed 's/.*://')
+CONSOLE_PORT=$(compose port console 80 | sed 's/.*://')
 api_url="http://localhost:${OPENCOMPANY_PORT}"
 console_url="http://localhost:${CONSOLE_PORT}"
 wait_for_url "API" "${api_url}/healthz"
@@ -91,5 +94,35 @@ if ! curl --connect-timeout 2 --max-time 10 \
     echo "compose e2e: console did not serve the Vite application" >&2
     exit 1
 fi
+
+company_id=$(awk '
+    /^\[company\][[:space:]]*$/ { in_company = 1; next }
+    /^\[/ { in_company = 0 }
+    in_company && /^[[:space:]]*name[[:space:]]*=/ {
+        sub(/^[^=]*=[[:space:]]*"/, "")
+        sub(/"[[:space:]]*$/, "")
+        print
+        exit
+    }
+' "${REPO_ROOT}/companies/${OPENCOMPANY_COMPANY}/company.toml" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-$//')
+cookie_jar=$(mktemp)
+login_payload=$(printf '{"email":"%s","password":"%s"}' \
+    "$OPENCOMPANY_ADMIN_EMAIL" "${E2E_ADMIN_PASSWORD:-e2e-password}")
+curl --connect-timeout 2 --max-time 10 --fail --silent --show-error \
+    --cookie-jar "$cookie_jar" --cookie "$cookie_jar" \
+    -H 'content-type: application/json' \
+    -d "$login_payload" \
+    "${api_url}/api/v1/companies/${company_id}/auth/login" >/dev/null
+curl --connect-timeout 2 --max-time 10 --fail --silent --show-error \
+    --cookie "$cookie_jar" \
+    "${api_url}/api/v1/companies/${company_id}/auth/me" >/dev/null
+
+health_start_period=$(compose config | awk '/start_period:/ { print $2; exit }')
+case "$health_start_period" in
+    5m|6m|7m|8m|9m|10m|11m|12m|[1-9][0-9]m|[1-9]h|[1-9][0-9]h) ;;
+    *) echo "compose e2e: healthcheck start_period is less than 5m: ${health_start_period:-missing}" >&2; exit 1 ;;
+esac
 
 echo "compose e2e passed: API ${api_url}, console ${console_url}, proxy connected"

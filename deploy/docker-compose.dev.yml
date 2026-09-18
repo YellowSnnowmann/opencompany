@@ -57,6 +57,14 @@ services:
 
 volumes:
   cargo-registry:
+    name: opencompany-cargo-registry
+    external: true
   cargo-git:
+    name: opencompany-cargo-git
+    external: true
   cargo-target:
+    name: opencompany-cargo-target
+    external: true
   frontend-node-modules:
+    name: opencompany-frontend-node-modules
+    external: true

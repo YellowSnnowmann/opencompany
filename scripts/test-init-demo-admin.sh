@@ -13,7 +13,7 @@ set -eu
 printf 'admin=%s\n' "$OPENCOMPANY_ADMIN_EMAIL"
 printf 'company=%s\n' "$OPENCOMPANY_COMPANY"
 case "$*" in
-    *"--file "*"/deploy/docker-compose.yml"*"--file "*"/deploy/docker-compose.dev.yml"*) ;;
+    *"--file docker-compose.yml"*"--file docker-compose.dev.yml"*) ;;
     *) echo "unexpected compose files: $*" >&2; exit 1 ;;
 esac
 printf 'args=%s\n' "$*"
@@ -21,6 +21,8 @@ case "$*" in
     *"run --rm --no-deps -T opencompany"*) cat ;;
     *" up --build --detach --wait opencompany"*) ;;
     *" stop console opencompany"*) ;;
+    *" volume inspect "*) ;;
+    *" volume create "*) ;;
     *) echo "unexpected compose command: $*" >&2; exit 1 ;;
 esac
 EOF

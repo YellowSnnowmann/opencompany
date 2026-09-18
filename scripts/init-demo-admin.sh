@@ -24,6 +24,12 @@ fi
 
 requested_site=$1
 admin_email=$2
+case "$requested_site" in
+    '' | *[!a-zA-Z0-9_-]*)
+        echo "opencompany: invalid demo name '${requested_site}'" >&2
+        exit 2
+        ;;
+esac
 company=$(resolve_demo_company "$requested_site")
 company_dir="${REPO_ROOT}/companies/${company}"
 project=${OPENCOMPANY_PROJECT_NAME:-$(demo_project_name "$company")}
@@ -68,12 +74,14 @@ if [ -z "$company_id" ]; then
 fi
 
 compose() {
-    OPENCOMPANY_COMPANY="$company" docker compose \
-        --project-directory "${REPO_ROOT}/deploy" \
-        --project-name "$project" \
-        --file "${REPO_ROOT}/deploy/docker-compose.yml" \
-        --file "${REPO_ROOT}/deploy/docker-compose.dev.yml" \
-        "$@"
+    (
+        cd "${REPO_ROOT}/deploy"
+        OPENCOMPANY_COMPANY="$company" docker compose \
+            --project-name "$project" \
+            --file docker-compose.yml \
+            --file docker-compose.dev.yml \
+            "$@"
+    )
 }
 
 password_file=$(mktemp)
@@ -97,14 +105,14 @@ IFS= read -r password
 printf '%s\n' "$password" >"$password_file"
 unset password
 if [ -t 0 ]; then
-    stty "$tty_state"
-    tty_state=
     printf '\nConfirm password: ' >&2
 fi
 IFS= read -r confirmation
 printf '%s\n' "$confirmation" >"$confirmation_file"
 unset confirmation
 if [ -t 0 ]; then
+    stty "$tty_state"
+    tty_state=
     printf '\n' >&2
 fi
 
@@ -119,6 +127,13 @@ fi
 
 export OPENCOMPANY_ADMIN_EMAIL="$admin_email"
 echo "opencompany: initializing '${company}' before creating its administrator"
+for cache_volume in \
+    opencompany-cargo-registry \
+    opencompany-cargo-git \
+    opencompany-cargo-target \
+    opencompany-frontend-node-modules; do
+    docker volume inspect "$cache_volume" >/dev/null 2>&1 || docker volume create "$cache_volume" >/dev/null
+done
 compose up --build --detach --wait opencompany
 compose stop console opencompany
 
@@ -131,4 +146,8 @@ cat "$password_file" | compose run --rm --no-deps -T opencompany \
     --home /data
 
 echo "opencompany: administrator initialized; restart with:"
-echo "  ./scripts/launch-demo.sh ${requested_site} up"
+if [ -n "${OPENCOMPANY_PROJECT_NAME:-}" ]; then
+    echo "  OPENCOMPANY_PROJECT_NAME=${project} ./scripts/launch-demo.sh ${requested_site} up"
+else
+    echo "  ./scripts/launch-demo.sh ${requested_site} up"
+fi
