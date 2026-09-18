@@ -258,19 +258,53 @@ test("a running turn shows its tool rows in the channel", async ({ page }) => {
   });
 
   await openChannel(page, ENGINEERING.id);
+
   await streamIsWaiting;
   releaseFrames?.();
 
-  // The rows themselves, not a typing dot — and the finished one keeps the
-  // elapsed time the frame carried.
   await expect(page.getByText("workspace_list").first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("3 files").first()).toBeVisible();
   await expect(page.getByText("workspace_read").first()).toBeVisible();
   await expect(page.getByText("Replying…")).toHaveCount(0);
 
-  // Addressed, not broadcast: the other desk's channel shows none of it.
+  // The recorded rows are scoped to their channel, not broadcast to another.
   await openChannel(page, CONTENT.id);
   await expect(page.getByText("workspace_list")).toHaveCount(0);
+  await expect(page.getByText("workspace_read")).toHaveCount(0);
+});
+
+test("a settled turn keeps its raw tool rows out of the channel", async ({ page }) => {
+  // Raw tool calls belong only in Raw turns; the live-reply cases above prove
+  // SSE routing, while this fixture proves durable history is filtered.
+  await page.route("**/chat/history?*", (route) => {
+    const desk = new URL(route.request().url()).searchParams.get("desk");
+    if (desk !== ENGINEERING.id) return route.continue();
+    return route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([
+        {
+          id: "tool-turn-e2e",
+          channel: ENGINEERING.id,
+          author: "engineering",
+          text: "I checked the workspace.",
+          atMillis: Date.now(),
+          mine: false,
+          steps: [
+            { kind: "tool_call", status: "ok", label: "workspace_list", result: "3 files", elapsedMs: 120 },
+            { kind: "tool_call", status: "running", label: "workspace_read" },
+          ],
+        },
+      ]),
+    });
+  });
+  await openChannel(page, ENGINEERING.id);
+  await expect(page.getByText("I checked the workspace.")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("workspace_list")).toHaveCount(0);
+  await expect(page.getByText("workspace_read")).toHaveCount(0);
+  await openChannel(page, CONTENT.id);
+  await expect(page.getByText("workspace_list")).toHaveCount(0);
+  await expect(page.getByText("workspace_read")).toHaveCount(0);
 });
 
 /* -------------------------------------------------------------------------- *
