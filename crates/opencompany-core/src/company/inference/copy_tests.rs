@@ -152,3 +152,67 @@ fn classify_ignores_every_other_failure() {
         assert!(classify(detail).is_none(), "{detail}");
     }
 }
+
+// ---- the harness arm --------------------------------------------------
+
+/// The shape `HarnessRouter::engine_for` writes when a declared harness has
+/// no engine here. Spelled out rather than imported because `classify` is
+/// ungated and `harness` is not; `harness/router_tests.rs` drives the real
+/// router against the real classifier so the two spellings cannot drift.
+const ROUTER_NO_ENGINE: &str = "agent `researcher` is bound to harness `claude-code`, but it is \
+     an ACP harness and this build has no ACP transport wired.";
+
+#[test]
+fn a_harness_binding_failure_classifies_and_names_the_agent() {
+    let got = classify(ROUTER_NO_ENGINE).expect("the router sentence classifies");
+    assert_eq!(got.code, HARNESS_UNAVAILABLE_CODE);
+    assert_eq!(got.pair_agent_id.as_deref(), Some("researcher"));
+    assert_eq!(got.provider_slug, None);
+    assert!(
+        got.message.starts_with("agent `researcher`"),
+        "{}",
+        got.message
+    );
+    assert!(
+        got.message.contains("no ACP transport wired"),
+        "{}",
+        got.message
+    );
+    assert!(got.message.ends_with(HARNESS_RETRY_NOTE), "{}", got.message);
+}
+
+#[test]
+fn the_display_prefix_never_reaches_the_reader() {
+    let wrapped = format!("configuration error: {ROUTER_NO_ENGINE}");
+    let got = classify(&wrapped).expect("a wrapped sentence still classifies");
+    assert!(
+        !got.message.contains("configuration error"),
+        "the error-type prefix is a diagnostic: {}",
+        got.message
+    );
+    assert_eq!(got.message, classify(ROUTER_NO_ENGINE).unwrap().message);
+}
+
+#[test]
+fn reclassifying_the_stored_harness_sentence_changes_nothing() {
+    let once = classify(ROUTER_NO_ENGINE).unwrap();
+    let twice = classify(&once.message).unwrap();
+    assert_eq!(once, twice, "every read re-classifies the stored text");
+}
+
+#[test]
+fn a_harness_sentence_naming_no_agent_is_not_classified() {
+    assert!(classify("agent `` is bound to harness `deep`, but nothing.").is_none());
+    assert!(classify("bound to harness `deep`").is_none());
+}
+
+#[test]
+fn a_reason_tail_containing_uses_stays_a_harness_failure() {
+    let sentence = "agent `researcher` is bound to harness `runner`, but it uses \
+                    `transport = \"runner\"` and this build has no runner transport wired yet.";
+    let got = classify(sentence).expect("classifies");
+    assert_eq!(
+        got.code, HARNESS_UNAVAILABLE_CODE,
+        "a ` uses ` in the reason must not steal this into a pair arm"
+    );
+}
