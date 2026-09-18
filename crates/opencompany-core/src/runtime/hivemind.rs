@@ -741,11 +741,6 @@ impl tinyhivemind::referral::ReferralQueue for JournalReferralQueue {
                         // The chat path still runs a crossing on the target's
                         // desk; only an episode's crossing moves to the pair.
                         conversation: None,
-                        // The crossing's reply is journaled after this marker;
-                        // the history fold discovers that range by scanning
-                        // forward. Tool-sent DMs are the only path that knows
-                        // the range before appending the marker.
-                        rows: None,
                         from_desk: referral.from.desk_id.clone(),
                         from_desk_name: desk_label(&record, &referral.from.desk_id),
                         asker: referral.source_id.clone(),
