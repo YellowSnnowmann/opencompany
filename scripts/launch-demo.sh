@@ -63,7 +63,7 @@ if [ -n "$volume_flag" ] && { [ "$action" != "down" ] || [ "$volume_flag" != "-v
 fi
 
 if ! command -v docker >/dev/null 2>&1; then
-    echo "opencompany: docker is required" >&2
+    echo "opencompany: a Docker-compatible CLI (Docker or Podman) is required" >&2
     exit 127
 fi
 
@@ -73,10 +73,14 @@ dev_compose_file="${REPO_ROOT}/deploy/docker-compose.dev.yml"
 
 echo "opencompany: ${action} '${company}' (Compose project: ${project})"
 
+# Podman's external Compose provider does not support Docker Compose's
+# --project-directory option. Running from deploy/ establishes the same project
+# directory and .env lookup without passing a provider-specific global option.
+cd "${REPO_ROOT}/deploy"
+
 if [ "$action" = "up" ]; then
     # Intentionally attached: Ctrl-C stops the stack and returns to the shell.
     OPENCOMPANY_COMPANY="$company" docker compose \
-        --project-directory "${REPO_ROOT}/deploy" \
         --project-name "$project" \
         --file "$compose_file" \
         --file "$dev_compose_file" \
@@ -84,14 +88,12 @@ if [ "$action" = "up" ]; then
 else
     if [ "$volume_flag" = "-v" ]; then
         OPENCOMPANY_COMPANY="$company" docker compose \
-            --project-directory "${REPO_ROOT}/deploy" \
             --project-name "$project" \
             --file "$compose_file" \
             --file "$dev_compose_file" \
             down --remove-orphans --volumes
     else
         OPENCOMPANY_COMPANY="$company" docker compose \
-            --project-directory "${REPO_ROOT}/deploy" \
             --project-name "$project" \
             --file "$compose_file" \
             --file "$dev_compose_file" \
