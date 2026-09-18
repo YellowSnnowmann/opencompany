@@ -476,9 +476,11 @@ export default defineConfig({
           url: `${baseURL}/healthz`,
           // A host already listening on the default bind is almost always the
           // one you are developing against, so drive it rather than fight it
-          // for the port. In CI that would mean silently testing something
-          // unknown.
-          reuseExistingServer: !process.env.CI,
+          // for the port. The analytics run is the exception: its assertion
+          // depends on this process receiving analyticsEnv, so adopting an
+          // ordinary host would test the wrong configuration. In CI any reuse
+          // would mean silently testing something unknown.
+          reuseExistingServer: !process.env.CI && !ANALYTICS,
           // Covers a cold `npm run build` for the console bundle plus the
           // host's own boot, with room to spare.
           timeout: 180_000,
