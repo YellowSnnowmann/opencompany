@@ -189,51 +189,50 @@ test("a turn sent from the composer renders exactly one company bubble", async (
   await expect(reply(page, marker)).toHaveCount(1);
 });
 
-test("a running turn shows its tool rows in the channel", async ({ page }) => {
-  // The one test that writes its own stream. The frames below are the exact
-  // shape `src/turn_stream.rs` puts on the wire and `use-events.ts` types; the
-  // offline brain this suite runs against calls no tools, so there is no live
-  // turn to watch without inventing one. What is being proved is that a frame
-  // carrying a desk's thread id reaches *that channel's* timeline — which is
-  // what Chat never did.
-  const frames = [
-    { type: "tool_call", seq: 1, chatId: ENGINEERING.id, toolCallId: "t1", label: "workspace_list" },
-    {
-      type: "tool_result",
-      seq: 2,
-      chatId: ENGINEERING.id,
-      toolCallId: "t1",
-      label: "workspace_list",
-      // What came back. Carried onto the row since ACP turns started
-      // streaming: an ACP tool call has no arguments to derive a `detail`
-      // from and reports only this, so a dropped `result` left its finished
-      // rows saying nothing at all.
-      result: "3 files",
-      status: "ok",
-      elapsedMs: 120,
-    },
-    { type: "tool_call", seq: 3, chatId: ENGINEERING.id, toolCallId: "t2", label: "workspace_read" },
-  ];
-  await page.route("**/events", (route) =>
-    route.fulfill({
+test("a settled turn keeps its raw tool rows out of the channel", async ({ page }) => {
+  // The default host cannot execute tools. A finite intercepted EventSource is
+  // not a valid substitute for the long-lived browser stream, so exercise the
+  // server's durable chat-history contract here. Raw tool calls belong only in
+  // Raw turns; the live-reply cases above continue to prove SSE routing.
+  await page.route("**/chat/history?*", (route) => {
+    const desk = new URL(route.request().url()).searchParams.get("desk");
+    if (desk !== ENGINEERING.id) return route.continue();
+    return route.fulfill({
       status: 200,
-      headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
-      body: frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join(""),
-    }),
-  );
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([
+        {
+          id: "tool-turn-e2e",
+          channel: ENGINEERING.id,
+          author: "engineering",
+          text: "I checked the workspace.",
+          atMillis: Date.now(),
+          mine: false,
+          steps: [
+            {
+              kind: "tool_call",
+              status: "ok",
+              label: "workspace_list",
+              result: "3 files",
+              elapsedMs: 120,
+            },
+            { kind: "tool_call", status: "running", label: "workspace_read" },
+          ],
+        },
+      ]),
+    });
+  });
 
   await openChannel(page, ENGINEERING.id);
 
-  // The rows themselves, not a typing dot — and the finished one keeps the
-  // elapsed time the frame carried.
-  await expect(page.getByText("workspace_list").first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("3 files").first()).toBeVisible();
-  await expect(page.getByText("workspace_read").first()).toBeVisible();
-  await expect(page.getByText("Replying…")).toHaveCount(0);
+  await expect(page.getByText("I checked the workspace.")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("workspace_list")).toHaveCount(0);
+  await expect(page.getByText("workspace_read")).toHaveCount(0);
 
-  // Addressed, not broadcast: the other desk's channel shows none of it.
+  // The recorded rows are scoped to their channel, not broadcast to another.
   await openChannel(page, CONTENT.id);
   await expect(page.getByText("workspace_list")).toHaveCount(0);
+  await expect(page.getByText("workspace_read")).toHaveCount(0);
 });
 
 /* -------------------------------------------------------------------------- *

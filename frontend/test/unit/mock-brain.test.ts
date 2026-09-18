@@ -158,6 +158,65 @@ describe("the mock inference backend", () => {
     expect(reply.choices[0].finish_reason).toBe("tool_calls");
   });
 
+  it("does not revive a SPAWNONE quoted in prior work, but serves the current task", async () => {
+    const priorOnly = await chat([
+      {
+        role: "user",
+        content:
+          "## Relevant prior work\n- earlier SPAWNONE old-marker\n\n## Task\njust report status",
+      },
+    ]);
+    expect(priorOnly.choices[0].message.tool_calls).toBeUndefined();
+
+    const current = await chat([
+      {
+        role: "user",
+        content:
+          "## Relevant prior work\n- earlier SPAWNONE old-marker\n\n## Task\nplease track this SPAWNONE current-marker",
+      },
+    ]);
+    expect(current.choices[0].message.tool_calls?.[0]?.function?.name).toBe("spawn_task");
+  });
+
+  it("does not treat a reference-only channel briefing as the current task", async () => {
+    const reply = await chat([
+      {
+        role: "user",
+        content:
+          "quick status\n\n[Other conversations in this channel, for reference only — do NOT read or answer from them unless this message explicitly refers to one]:\n- build this SPAWNONE old-channel-marker",
+      },
+    ]);
+    expect(reply.choices[0].message.tool_calls).toBeUndefined();
+  });
+
+  it("does not treat an appended open-work briefing as the current task", async () => {
+    const reply = await chat([
+      {
+        role: "user",
+        content:
+          "quick status\n\n[Open work already handed to you: SPAWNONE old-open-work-marker]",
+      },
+    ]);
+    expect(reply.choices[0].message.tool_calls).toBeUndefined();
+  });
+
+  it("uses the current SPAWNONE directive and leaves matching text in the task alone", async () => {
+    const marker = `current-${Date.now()}`;
+    const reply = await chat([
+      {
+        role: "user",
+        content:
+          "## Relevant prior work\n- old request SPAWNONE old-marker\n\n## Task\n" +
+          `please explain the heading ## Task and track ${marker} SPAWNONE ${marker}`,
+      },
+    ]);
+
+    const call = reply.choices[0].message.tool_calls?.[0];
+    expect(call?.function?.name).toBe("spawn_task");
+    expect(JSON.parse(call.function.arguments).title).toContain(marker);
+    expect(JSON.parse(call.function.arguments).title).not.toContain("old-marker");
+  });
+
   it("emits the exact tool call a __MOCK_TOOL_CALL__ directive names", async () => {
     const directive = `__MOCK_TOOL_CALL__ ${JSON.stringify({
       name: "mcp_call_tool",

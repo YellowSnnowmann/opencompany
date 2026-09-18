@@ -384,6 +384,8 @@ fn each_failure_class_maps_to_its_own_operator_facing_kind() {
             TurnStepFailure::MissingPermission,
         ),
         (ToolFailureClass::MissingApp, TurnStepFailure::MissingApp),
+        (ToolFailureClass::NotFound, TurnStepFailure::NotFound),
+        (ToolFailureClass::Unsupported, TurnStepFailure::Unsupported),
         (
             ToolFailureClass::ServiceUnavailable,
             TurnStepFailure::Unavailable,

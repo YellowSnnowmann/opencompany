@@ -115,14 +115,19 @@ describe("OpenPanel console analytics", () => {
     expect(loader).toContain('window.op("init"');
   });
 
-  it("permits exactly the required OpenPanel origins in the desktop webview", () => {
+  it("keeps OpenPanel blocked while allowing the desktop crash reporter", () => {
     const csp = tauriManifest.app.security.csp;
     const scriptSources = cspSources(csp, "script-src");
     const connectSources = cspSources(csp, "connect-src");
     const openPanelOrigin = new URL("https://openpanel.dev");
 
     expect(scriptSources).toContain("'self'");
-    expect(connectSources).toEqual(["'self'", "ipc:", "http://ipc.localhost"]);
+    expect(connectSources).toEqual([
+      "'self'",
+      "ipc:",
+      "http://ipc.localhost",
+      "https://sentry.tinyhumans.ai",
+    ]);
     expect(scriptSources.some((source) => sourceAllowsOrigin(source, openPanelOrigin))).toBe(false);
     expect(connectSources.some((source) => sourceAllowsOrigin(source, openPanelOrigin))).toBe(false);
   });
