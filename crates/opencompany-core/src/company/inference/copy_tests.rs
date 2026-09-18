@@ -216,3 +216,37 @@ fn a_reason_tail_containing_uses_stays_a_harness_failure() {
         "a ` uses ` in the reason must not steal this into a pair arm"
     );
 }
+
+/// The router's other sentence shape — a warm-up failure rather than no
+/// engine at all — classifies the same way.
+#[test]
+fn a_warm_up_failure_sentence_classifies_too() {
+    let sentence = "agent `researcher` is bound to harness `claude-code`, whose last \
+                    warm-up failed: could not start `claude`: No such file or directory.";
+    let got = classify(sentence).expect("the warm-up-failure shape classifies");
+    assert_eq!(got.code, HARNESS_UNAVAILABLE_CODE);
+    assert_eq!(got.pair_agent_id.as_deref(), Some("researcher"));
+}
+
+/// tinysweeper (PR #2401): text that merely *quotes* the router's two
+/// markers — without the connective phrase that actually joins them in a
+/// real sentence — must not misclassify an unrelated failure as a harness
+/// binding problem. A turn that reached a model and failed for some other
+/// reason must never be told to go check a harness.
+#[test]
+fn a_lookalike_with_no_connective_is_not_classified() {
+    let lookalike = "the tool returned: agent `researcher` is bound to harness `runner` \
+                      in the example the user pasted, but the actual failure was a timeout.";
+    assert!(
+        classify(lookalike).is_none(),
+        "no `, but ` / `, whose last warm-up failed: ` right after the harness name — not a real router sentence"
+    );
+}
+
+#[test]
+fn a_lookalike_with_the_wrong_connective_is_not_classified() {
+    assert!(
+        classify("agent `researcher` is bound to harness `runner` and that is all it says.")
+            .is_none()
+    );
+}

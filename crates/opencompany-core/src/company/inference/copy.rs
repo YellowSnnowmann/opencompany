@@ -153,6 +153,20 @@ const HARNESS_BOUND_MARKER: &str = "` is bound to harness `";
 /// error: `) never reaches a person.
 const HARNESS_SENTENCE_OPENER: &str = "agent `";
 
+/// The two ways [`HarnessRouter::engine_for`]'s sentence continues right after
+/// the closing backtick on the harness name — the only two shapes a real
+/// router sentence takes. [`harness_binding`] requires the text to continue
+/// with one of these, not just carry [`HARNESS_BOUND_MARKER`] and
+/// [`HARNESS_SENTENCE_OPENER`] somewhere: those two substrings alone are
+/// loose enough that an unrelated diagnostic which happens to quote something
+/// shaped like `agent \`x\` is bound to harness \`y\`` — echoed tool output, a
+/// provider error, adversarial message content — would otherwise misclassify
+/// as a harness failure the turn never actually had (tinysweeper, PR #2401).
+///
+/// [`HarnessRouter::engine_for`]: crate::harness::router::HarnessRouter
+const HARNESS_WARMUP_TAIL: &str = "`, whose last warm-up failed: ";
+const HARNESS_NO_ENGINE_TAIL: &str = "`, but ";
+
 /// Appended to the harness sentence, which names the gap but not whether
 /// waiting helps.
 const HARNESS_RETRY_NOTE: &str = "Retrying will not help until that harness can run.";
@@ -232,6 +246,17 @@ fn harness_binding(detail: &str) -> Option<(String, String)> {
     let opener = detail[..bound].rfind(HARNESS_SENTENCE_OPENER)?;
     let agent_id = detail[opener + HARNESS_SENTENCE_OPENER.len()..bound].trim();
     if agent_id.is_empty() {
+        return None;
+    }
+    // The harness name follows immediately, closed by a backtick that must
+    // then continue with one of the router's two known connective phrases —
+    // see `HARNESS_WARMUP_TAIL`/`HARNESS_NO_ENGINE_TAIL`. Requiring the
+    // connective, not just the two markers above, is what a lookalike
+    // string cannot satisfy by coincidence.
+    let after_harness_name = &detail[bound + HARNESS_BOUND_MARKER.len()..];
+    let closing_backtick = after_harness_name.find('`')?;
+    let tail = &after_harness_name[closing_backtick..];
+    if !(tail.starts_with(HARNESS_WARMUP_TAIL) || tail.starts_with(HARNESS_NO_ENGINE_TAIL)) {
         return None;
     }
     Some((agent_id.to_string(), detail[opener..].trim().to_string()))
