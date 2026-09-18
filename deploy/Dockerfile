@@ -3,7 +3,7 @@
 # ── builder ────────────────────────────────────────────────────────────────
 # Compiles the `opencompany` host binary. `FEATURES` selects optional cargo
 # features (e.g. "medulla tinyplace sqlite"); empty = the small default build.
-FROM rust:1-slim-bookworm AS builder
+FROM docker.io/library/rust:1-slim-bookworm AS builder
 ARG FEATURES=""
 # The revision this image is built from, read by `build.rs` (see
 # `src/build_stamp.rs`). It has to be passed in here: `deploy/Dockerfile.dockerignore` excludes
@@ -96,7 +96,7 @@ RUN --mount=type=cache,target=/build/target \
 # `dist/pages-sdk/`, nested inside the same `dist/` the console itself builds
 # to, so the single `COPY --from=console /console/dist /app/console` below
 # already carries it into the runtime image with no second COPY needed.
-FROM node:22-slim AS console
+FROM docker.io/library/node:22-slim AS console
 WORKDIR /console
 
 # Console crash reporting (`docs/spec/runtime/crash-reporting.md`).
@@ -165,7 +165,7 @@ RUN npm run build:pages-sdk
 # ── local development ─────────────────────────────────────────────────────
 # Used by deploy/docker-compose.dev.yml. The repository is bind-mounted over
 # /workspace; cargo-watch rebuilds and restarts the host after local edits.
-FROM rust:1-slim-bookworm AS development
+FROM docker.io/library/rust:1-slim-bookworm AS development
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl pkg-config \
     && rm -rf /var/lib/apt/lists/* \
@@ -175,7 +175,7 @@ ENV OPENCOMPANY_BIND=0.0.0.0:8080 \
     OPENCOMPANY_DATA_DIR=/data
 
 # ── runtime ────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim AS runtime
+FROM docker.io/library/debian:bookworm-slim AS runtime
 # libssl3 + the X11 runtime shared libraries satisfy the dynamic linker for the
 # openssl-sys/native-tls and rdev/arboard links the `openhuman` feature pulls in
 # (the desktop-automation code paths never run in a headless tenant, but the .so
