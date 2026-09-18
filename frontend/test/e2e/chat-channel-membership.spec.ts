@@ -71,15 +71,26 @@ async function mockApi(page: Page, mode: () => DesksMode) {
   await page.addInitScript(() => {
     const real = Storage.prototype.getItem;
     Storage.prototype.getItem = function getItem(key: string) {
-      return key.startsWith("oc-tour:") ? '{"skipped":true}' : real.call(this, key);
+      return key.startsWith("oc-tour:")
+        ? '{"skipped":true}'
+        : real.call(this, key);
     };
   });
 
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const json = (body: unknown, status = 200) =>
-      route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-    const status = { id: COMPANY, name: "Acme", lifecycle: "running", pending_approvals: 0 };
+      route.fulfill({
+        status,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
+    const status = {
+      id: COMPANY,
+      name: "Acme",
+      lifecycle: "running",
+      pending_approvals: 0,
+    };
 
     if (path === "/api/v1/companies") return json([status]);
     if (path === `/api/v1/companies/${COMPANY}`) return json(status);
@@ -100,20 +111,32 @@ async function mockApi(page: Page, mode: () => DesksMode) {
 
     if (path.endsWith("/team")) return json(ROSTER);
     if (path.endsWith("/chat")) {
-      const body = route.request().postDataJSON() as { text: string; chat?: string; detach?: boolean };
+      const body = route.request().postDataJSON() as {
+        text: string;
+        chat?: string;
+        detach?: boolean;
+      };
       sentChats.push(body);
-      return json({ responses: [{ text: `echo: ${body.text}`, channel: body.chat }] });
+      return json({
+        responses: [{ text: `echo: ${body.text}`, channel: body.chat }],
+      });
     }
     if (path.endsWith("/events")) {
-      return route.fulfill({ status: 200, contentType: "text/event-stream", body: "" });
+      return route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: "",
+      });
     }
-    if (path.endsWith("/me")) return json({ id: "op", email: "op@example.com", role: "member" });
+    if (path.endsWith("/me"))
+      return json({ id: "op", email: "op@example.com", role: "member" });
     return json([]);
   });
 }
 
 /** The header's member toggle — its label ends in "members". */
-const membersToggle = (page: Page) => page.getByRole("button", { name: /agents$/i });
+const membersToggle = (page: Page) =>
+  page.getByRole("button", { name: /agents$/i });
 
 /** The member pane; the channel rail is the other `complementary` on screen. */
 const pane = (page: Page) => page.getByRole("complementary").last();
@@ -134,18 +157,28 @@ async function openPane(page: Page) {
 
 async function openChannel(page: Page, channelId: string) {
   await page.goto(`/#/chat/${channelId}`);
-  await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByPlaceholder(/^Message /)).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
-test("#369 each desk counts and lists its own members, not the company", async ({ page }) => {
+test("#369 each desk counts and lists its own members, not the company", async ({
+  page,
+}) => {
   await mockApi(page, () => "ok");
 
   await openChannel(page, "engineering");
   await expect(membersToggle(page)).toHaveText(/2/);
   await openPane(page);
-  await expect(pane(page)).toContainText("2 in this channel · 17 in the company");
-  await expect(pane(page).getByRole("heading", { name: "In this channel" })).toBeVisible();
-  await expect(pane(page).getByRole("heading", { name: "Everyone else" })).toBeVisible();
+  await expect(pane(page)).toContainText(
+    "2 in this channel · 17 in the company",
+  );
+  await expect(
+    pane(page).getByRole("heading", { name: "In this channel" }),
+  ).toBeVisible();
+  await expect(
+    pane(page).getByRole("heading", { name: "Everyone else" }),
+  ).toBeVisible();
 
   // The desk's own order survives: the lead is `members[0]`, not whoever the
   // roster happens to list first.
@@ -162,12 +195,16 @@ test("#369 each desk counts and lists its own members, not the company", async (
   await openChannel(page, "content");
   await expect(membersToggle(page)).toHaveText(/3/);
   await openPane(page);
-  await expect(pane(page)).toContainText("3 in this channel · 17 in the company");
+  await expect(pane(page)).toContainText(
+    "3 in this channel · 17 in the company",
+  );
   await expect(pane(page).locator("ul").first().locator("li")).toHaveCount(3);
   await expect(pane(page)).not.toContainText("Agent 99");
 });
 
-test("#369 a DM reads as two people, not as the whole company", async ({ page }) => {
+test("#369 a DM reads as two people, not as the whole company", async ({
+  page,
+}) => {
   await mockApi(page, () => "ok");
   await openChannel(page, "engineering");
   await openPane(page);
@@ -181,7 +218,9 @@ test("#369 a DM reads as two people, not as the whole company", async ({ page })
   await expect(pane(page).locator("ul").first().locator("li")).toHaveCount(1);
 });
 
-test("#369 a host with no desks surface still shows the whole roster", async ({ page }) => {
+test("#369 a host with no desks surface still shows the whole roster", async ({
+  page,
+}) => {
   await mockApi(page, () => "404");
   // `strategy`, not `general` (issue #1743): `#general` is no longer one of the
   // static fallback desks — it is derived from the roster and every teammate is
@@ -195,11 +234,15 @@ test("#369 a host with no desks surface still shows the whole roster", async ({ 
   await expect(membersToggle(page)).toHaveText(/17/);
   await openPane(page);
   await expect(pane(page)).toContainText("17 agents");
-  await expect(pane(page).getByRole("heading", { name: "In this channel" })).toHaveCount(0);
+  await expect(
+    pane(page).getByRole("heading", { name: "In this channel" }),
+  ).toHaveCount(0);
   await expect(pane(page).locator("ul").first().locator("li")).toHaveCount(17);
 });
 
-test("#1743 #general is everyone, even with no desks surface", async ({ page }) => {
+test("#1743 #general is everyone, even with no desks surface", async ({
+  page,
+}) => {
   // The other half of the case above, and the reason it had to move off
   // `general`. `#general` is not a desk and never comes from `/desks` — it is
   // built from the roster this render was handed — so its membership is known
@@ -209,25 +252,34 @@ test("#1743 #general is everyone, even with no desks surface", async ({ page }) 
 
   await expect(membersToggle(page)).toHaveText(/17/);
   await openPane(page);
-  await expect(pane(page)).toContainText("17 in this channel · 17 in the company");
-  await expect(pane(page).getByRole("heading", { name: "In this channel" })).toBeVisible();
+  await expect(pane(page)).toContainText(
+    "17 in this channel · 17 in the company",
+  );
+  await expect(
+    pane(page).getByRole("heading", { name: "In this channel" }),
+  ).toBeVisible();
   await expect(pane(page).locator("ul").first().locator("li")).toHaveCount(17);
 });
 
-test("#370 a deep link never flashes a channel the company doesn't have", async ({ page }) => {
+test("#370 a deep link never flashes a channel the company doesn't have", async ({
+  page,
+}) => {
   // Record every composer placeholder the page renders, in-page and on every
   // frame. An out-of-process poll misses a flash that lasts a single paint,
   // which is exactly the length of the one under test.
   await page.addInitScript(() => {
     (window as unknown as { __placeholders: string[] }).__placeholders = [];
     const tick = () => {
-      const seen = (window as unknown as { __placeholders: string[] }).__placeholders;
+      const seen = (window as unknown as { __placeholders: string[] })
+        .__placeholders;
       // The composer is the only `textarea[placeholder]` on the page; scoped
       // to that element type deliberately, since the sidebar's disabled
       // search `input` also carries a `placeholder` ("Search") and — sitting
       // earlier in the DOM now that it lives in the title row — would
       // otherwise win a bare `querySelector` before the composer ever paints.
-      const p = document.querySelector("textarea[placeholder]")?.getAttribute("placeholder");
+      const p = document
+        .querySelector("textarea[placeholder]")
+        ?.getAttribute("placeholder");
       if (p && seen[seen.length - 1] !== p) seen.push(p);
       requestAnimationFrame(tick);
     };
@@ -236,7 +288,9 @@ test("#370 a deep link never flashes a channel the company doesn't have", async 
   await mockApi(page, () => "slow");
 
   await page.goto("/#/chat/engineering");
-  await expect(page.getByPlaceholder("Message #engineering")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByPlaceholder("Message #engineering")).toBeVisible({
+    timeout: 30_000,
+  });
 
   const seen = await page.evaluate(
     () => (window as unknown as { __placeholders: string[] }).__placeholders,
@@ -245,14 +299,18 @@ test("#370 a deep link never flashes a channel the company doesn't have", async 
   expect(seen).toEqual(["Message #engineering"]);
 });
 
-test("#370 an unknown channel opens the first one and says so", async ({ page }) => {
+test("#370 an unknown channel opens the first one and says so", async ({
+  page,
+}) => {
   await mockApi(page, () => "ok");
   await openChannel(page, "does-not-exist");
 
   // Scoped to the notice rather than "the page's one status region": the
   // timeline raises a second one while a channel's history is still loading
   // (issue #934), and an unqualified `getByRole("status")` matches both.
-  const notice = page.getByRole("status").filter({ hasText: /isn't a channel here/ });
+  const notice = page
+    .getByRole("status")
+    .filter({ hasText: /isn't a channel here/ });
   await expect(notice).toContainText("#does-not-exist");
   // General remains directly addressable for legacy history, but is no longer
   // offered as the default destination (#2368). The notice names the first
@@ -264,16 +322,24 @@ test("#370 an unknown channel opens the first one and says so", async ({ page })
   expect(page.url()).toContain("#/chat/does-not-exist");
 
   // It is derived from the hash, so navigating clears it with no dismiss.
-  await page.getByRole("complementary").first().getByRole("button", { name: /content/i }).click();
+  await page
+    .getByRole("complementary")
+    .first()
+    .getByRole("button", { name: /content/i })
+    .click();
   await expect(notice).toHaveCount(0);
 });
 
-test("#370 a broken /desks is a retryable error, not invented channels", async ({ page }) => {
+test("#370 a broken /desks is a retryable error, not invented channels", async ({
+  page,
+}) => {
   let mode: DesksMode = "500";
   await mockApi(page, () => mode);
 
   await page.goto("/#/chat/engineering");
-  await expect(page.getByText("Couldn't load this company's channels")).toBeVisible({
+  await expect(
+    page.getByText("Couldn't load this company's channels"),
+  ).toBeVisible({
     timeout: 30_000,
   });
   // The old blanket catch pinned the fabricated desks here, so the view showed
@@ -282,16 +348,21 @@ test("#370 a broken /desks is a retryable error, not invented channels", async (
 
   mode = "ok";
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByPlaceholder("Message #engineering")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByPlaceholder("Message #engineering")).toBeVisible({
+    timeout: 30_000,
+  });
 });
 
 /** The way out to the org chart, added by #485. */
 const manageLink = (page: Page) =>
   pane(page).getByRole("button", { name: "Manage on the org chart" });
 
-const chart = (page: Page) => page.getByRole("tree", { name: "Company org chart" });
+const chart = (page: Page) =>
+  page.getByRole("tree", { name: "Company org chart" });
 
-test("#485 a desk channel links out to its own desk on the org chart", async ({ page }) => {
+test("#485 a desk channel links out to its own desk on the org chart", async ({
+  page,
+}) => {
   await mockApi(page, () => "ok");
   await openChannel(page, "engineering");
   await openPane(page);
@@ -327,11 +398,15 @@ test("#485 a DM has no desk to manage", async ({ page }) => {
 
   // A DM still gets the "In this channel" section — it has a membership of
   // exactly one — but it is not a desk, so the chart has nothing to open.
-  await expect(pane(page).getByRole("heading", { name: "In this channel" })).toBeVisible();
+  await expect(
+    pane(page).getByRole("heading", { name: "In this channel" }),
+  ).toBeVisible();
   await expect(manageLink(page)).toHaveCount(0);
 });
 
-test("#485 a fallback desk offers no link to a desk the host doesn't have", async ({ page }) => {
+test("#485 a fallback desk offers no link to a desk the host doesn't have", async ({
+  page,
+}) => {
   await mockApi(page, () => "404");
   // `strategy`, not `general`, for the same reason as the #369 case above:
   // since issue #1743 `#general` is derived from the roster rather than being
@@ -343,11 +418,15 @@ test("#485 a fallback desk offers no link to a desk the host doesn't have", asyn
   // name desks the org chart cannot draw. Linking to one would land on an empty
   // chart, so no link is offered — the same reasoning that makes this pane fall
   // back to the whole roster here.
-  await expect(pane(page).getByRole("heading", { name: "In this channel" })).toHaveCount(0);
+  await expect(
+    pane(page).getByRole("heading", { name: "In this channel" }),
+  ).toHaveCount(0);
   await expect(manageLink(page)).toHaveCount(0);
 });
 
-test("the send path and the thread id it addresses are undisturbed", async ({ page }) => {
+test("the send path and the thread id it addresses are undisturbed", async ({
+  page,
+}) => {
   sentChats.length = 0;
   await mockApi(page, () => "ok");
   await openChannel(page, "content");
@@ -360,5 +439,9 @@ test("the send path and the thread id it addresses are undisturbed", async ({ pa
   // send since issue #983 (the console always asks for the accept-and-poll
   // shape now), which is orthogonal to what this test guards — the identity
   // of `chat` — so it is asserted for rather than making the match partial.
-  expect(sentChats.at(-1)).toEqual({ text: "ping", chat: "content", detach: true });
+  expect(sentChats.at(-1)).toEqual({
+    text: "ping",
+    chat: "content",
+    detach: true,
+  });
 });

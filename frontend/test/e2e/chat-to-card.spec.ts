@@ -1,4 +1,9 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Page,
+} from "@playwright/test";
 
 import { LIVE_BRAIN, LIVE_BRAIN_REASON } from "./capabilities";
 
@@ -38,7 +43,9 @@ async function dismissWelcome(page: Page) {
   // is what makes this cost nothing where only the tour appears.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await skip.first().waitFor({ state: "visible", timeout: attempt === 0 ? 5_000 : 2_000 });
+      await skip
+        .first()
+        .waitFor({ state: "visible", timeout: attempt === 0 ? 5_000 : 2_000 });
     } catch {
       return;
     }
@@ -61,7 +68,9 @@ async function dismissWelcome(page: Page) {
 async function openThread(page: Page, channelId: string) {
   await page.goto(`/#/chat/${channelId}`);
   await dismissWelcome(page);
-  await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByPlaceholder(/^Message /)).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
 type Task = {
@@ -88,7 +97,10 @@ async function taskMatching(
       { timeout: 15_000 },
     )
     .toBe(true);
-  if (!found) throw new Error("Timed out waiting for the orchestrator to persist its card");
+  if (!found)
+    throw new Error(
+      "Timed out waiting for the orchestrator to persist its card",
+    );
   return found!;
 }
 
@@ -103,7 +115,9 @@ test("a card raised from a channel line links back to the channel", async ({
   const prompt = `build the launch checklist SPAWNONE ${marker}`;
   const beforePost = await request.get(`${API}/tasks`);
   expect(beforePost.ok(), await beforePost.text()).toBeTruthy();
-  const taskIdsBeforePost = new Set((await beforePost.json() as Task[]).map((task) => task.id));
+  const taskIdsBeforePost = new Set(
+    ((await beforePost.json()) as Task[]).map((task) => task.id),
+  );
   const posted = await request.post(`${API}/chat`, {
     data: { text: prompt, chat: "engineering" },
   });
@@ -112,8 +126,7 @@ test("a card raised from a channel line links back to the channel", async ({
   const card = await taskMatching(
     request,
     (task) =>
-      task.originChatId === "engineering" &&
-      !taskIdsBeforePost.has(task.id),
+      task.originChatId === "engineering" && !taskIdsBeforePost.has(task.id),
   );
 
   // The card is real and titled from the message. Its *stage* is deliberately
@@ -134,7 +147,9 @@ test("a card raised from a channel line links back to the channel", async ({
   // every card, which would make a heading match prove only that some detail
   // page rendered. The note is where the operator's own words are kept, so it
   // is what says *this* is the card that message opened.
-  await expect(page.getByText(card.title, { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(card.title, { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
   // …and it knows which conversation opened it.
@@ -193,7 +208,9 @@ test("a card raised inside a thread opens that thread on the jump back, not just
   expect(rootId).toBeTruthy();
   const beforeReply = await request.get(`${API}/tasks`);
   expect(beforeReply.ok(), await beforeReply.text()).toBeTruthy();
-  const taskIdsBeforeReply = new Set((await beforeReply.json() as Task[]).map((task) => task.id));
+  const taskIdsBeforeReply = new Set(
+    ((await beforeReply.json()) as Task[]).map((task) => task.id),
+  );
 
   // `SPAWNONE` asks the live fixture to call `spawn_task`, and `parent` makes
   // this a threaded reply rather than a second channel-level line.
@@ -205,9 +222,7 @@ test("a card raised inside a thread opens that thread on the jump back, not just
 
   const card = await taskMatching(
     request,
-    (task) =>
-      task.originChatId === channel &&
-      !taskIdsBeforeReply.has(task.id),
+    (task) => task.originChatId === channel && !taskIdsBeforeReply.has(task.id),
   );
 
   await page.goto(`/#/company/tasks/${card!.id}`);
@@ -225,7 +240,9 @@ test("a card raised inside a thread opens that thread on the jump back, not just
   // The root's own text is in the panel — proof the jump opened *that*
   // thread, since a channel-level landing (or the reply's own self-thread)
   // would show none of this or the wrong message.
-  await expect(thread.getByText(rootText, { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(thread.getByText(rootText, { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
 });
 
 test("a card the orchestrator opens is chipped in chat, and survives a reload", async ({
@@ -242,7 +259,9 @@ test("a card the orchestrator opens is chipped in chat, and survives a reload", 
   // `SPAWNONE` is the scripted backend's cue to call `spawn_task` once.
   const before = await request.get("/api/v1/company/tasks");
   expect(before.ok(), await before.text()).toBeTruthy();
-  const previousIds = new Set(((await before.json()) as Task[]).map((task) => task.id));
+  const previousIds = new Set(
+    ((await before.json()) as Task[]).map((task) => task.id),
+  );
   const prompt = `please track this SPAWNONE ${Date.now()}`;
   await page.getByPlaceholder(/^Message /).fill(prompt);
   await page.getByRole("button", { name: "Send", exact: true }).click();
@@ -259,7 +278,9 @@ test("a card the orchestrator opens is chipped in chat, and survives a reload", 
   // that only existed on the live POST response would vanish here.
   await page.reload();
   await openThread(page, "");
-  const rehydrated = page.locator(`a[href="${href}"]`, { hasText: "Card opened" });
+  const rehydrated = page.locator(`a[href="${href}"]`, {
+    hasText: "Card opened",
+  });
   await expect(rehydrated).toBeVisible({ timeout: 30_000 });
   await expect(rehydrated).toHaveAttribute("href", href);
 });
@@ -331,7 +352,8 @@ test("a dismissed card's chip goes away and does not come back on reload", async
       },
       {
         timeout: 30_000,
-        message: "the cancelled run must leave the in-flight list before the card can be deleted",
+        message:
+          "the cancelled run must leave the in-flight list before the card can be deleted",
       },
     )
     .toBe(false);
@@ -357,13 +379,17 @@ test("a dismissed card's chip goes away and does not come back on reload", async
   // hidden chip over a card that is still filling the board.
   await page.goto(href!);
   await dismissWelcome(page);
-  await expect(page.getByText(prompt).first()).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByText(prompt).first()).toHaveCount(0, {
+    timeout: 30_000,
+  });
 
   // …and still gone after a reload. This is the regression: the transcript is
   // rehydrated from the host here, not from the React state the click cleared.
   await openThread(page, "");
   await page.reload();
   await openThread(page, "");
-  await expect(page.getByText(prompt, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(prompt, { exact: true }).first()).toBeVisible({
+    timeout: 30_000,
+  });
   await expect(page.locator(`a[href="${href}"]`)).toHaveCount(0);
 });
