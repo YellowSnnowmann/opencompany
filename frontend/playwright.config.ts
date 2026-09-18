@@ -407,21 +407,21 @@ export default defineConfig({
   // against a different company, so it is checked *before* `LIVE_LLM` — both
   // flags are set for it, and the more specific lane wins.
   //
-  // Five now: the visual lane is the fifth, and it is selected the same way for
-  // a different reason — its host is an ordinary one, but a run that mixed
-  // pixel comparison in with the rest would attribute a page still settling to
+  // Six now: the analytics lane is a second pass over one spec with an opted-in
+  // host. The visual lane remains separate because a run that mixed pixel
+  // comparison in with the rest would attribute a page still settling to
   // whichever spec happened to be next.
   ...(ANALYTICS
     ? { testMatch: ANALYTICS_SPEC }
     : FIRST_RUN
-    ? { testMatch: FIRST_RUN_SPEC }
-    : EULER
-      ? { testMatch: EULER_SPEC }
-      : LIVE_LLM
-        ? { testMatch: LIVE_LLM_SPEC }
-        : VISUAL
-          ? { testMatch: VISUAL_SPEC }
-          : { testIgnore: [FIRST_RUN_SPEC, LIVE_LLM_SPEC, EULER_SPEC, VISUAL_SPEC] }),
+      ? { testMatch: FIRST_RUN_SPEC }
+      : EULER
+        ? { testMatch: EULER_SPEC }
+        : LIVE_LLM
+          ? { testMatch: LIVE_LLM_SPEC }
+          : VISUAL
+            ? { testMatch: VISUAL_SPEC }
+            : { testIgnore: [FIRST_RUN_SPEC, LIVE_LLM_SPEC, EULER_SPEC, VISUAL_SPEC] }),
   // UNCONDITIONAL, and it was not always (issue #1773). `global-setup.ts` runs
   // after every `webServer` above has resolved, which makes it the only hook
   // that sees the server Playwright *adopted* rather than the one it was
