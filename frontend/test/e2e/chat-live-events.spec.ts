@@ -63,6 +63,14 @@ function railRow(page: Page, channelName: string): Locator {
   return page.getByRole("complementary").first().getByRole("button", { name: channelName });
 }
 
+test("does not offer the built-in general channel by default", async ({ page }) => {
+  await openChannel(page, ENGINEERING.id);
+
+  // `#general` remains resolvable for legacy history, but the console no
+  // longer offers it as a channel to open or compose into.
+  await expect(railRow(page, "general")).toHaveCount(0);
+});
+
 /**
  * The three tests below find the reply to their own turn by the offline echo
  * brain's `You said: <text>` — which is exactly the right way to prove an SSE
