@@ -277,6 +277,11 @@ fn is_loopback_host(host: Option<&str>) -> bool {
     host.is_some_and(|host| {
         host.eq_ignore_ascii_case("localhost")
             || host
+                .strip_prefix('[')
+                .and_then(|host| host.strip_suffix(']'))
+                .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+                .is_some_and(|address| address.is_loopback())
+            || host
                 .parse::<std::net::IpAddr>()
                 .is_ok_and(|address| address.is_loopback())
     })
