@@ -62,13 +62,14 @@ export async function silenceTour(page: Page) {
 /**
  * Opens the company's main line — the channel the orchestrator answers on.
  *
- * Bare `#/chat` rather than a rail click: Room resolves an absent channel
- * segment through `generalChannelId`, so the address itself names the
- * company-wide line and no thread can be left unselected under a composer that
- * accepts a `fill` anyway.
+ * Use the explicit legacy deep link rather than bare `#/chat`: the #2368
+ * experiment makes a bare route open the first offered desk, whose lead is an
+ * ordinary teammate without the orchestrator-only lifecycle tools. General is
+ * hidden from the rail but remains resolvable by this address so old history
+ * and orchestration coverage can still reach the company-wide line.
  */
 export async function openMainLine(page: Page) {
-  await openChannel(page, "");
+  await openChannel(page, MAIN_LINE);
 }
 
 /** Opens one desk channel by id in the chat workspace, and waits for the view. */
