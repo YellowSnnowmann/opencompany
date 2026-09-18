@@ -118,6 +118,7 @@ fn router_with_console(state: AppState, console_dir: Option<PathBuf>) -> Router 
     let router = Router::new()
         .route("/healthz", get(healthz))
         .route("/healthz/busy", get(busy))
+        .route("/opencompany-config.js", get(console_config))
         .route("/spec", get(spec))
         .route("/tiny", get(tiny))
         .merge(crate::server::operator::router())
@@ -213,6 +214,67 @@ fn router_with_console(state: AppState, console_dir: Option<PathBuf>) -> Router 
             }
         },
     ))
+}
+
+/// Supplies the console's optional, public-only runtime configuration.
+///
+/// The console bundle is shared by every tenant, while an OpenPanel collector
+/// is deployment configuration.  Baking its URL into Vite therefore left the
+/// browser tracker permanently off in hosted containers: no one populated the
+/// `window.OPENCOMPANY_CONFIG` object that its loader requires.  Serve this
+/// small script from the host instead.  It intentionally exposes no client
+/// secret; browser collection uses OpenPanel's public client id.
+async fn console_config() -> Response {
+    use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderValue};
+
+    let endpoint = std::env::var("OPENCOMPANY_ANALYTICS_ENDPOINT").ok();
+    let body = render_console_config(endpoint.as_deref(), hosted_deployment());
+    let mut response = (
+        [(CONTENT_TYPE, "application/javascript; charset=utf-8")],
+        body,
+    )
+        .into_response();
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+fn render_console_config(endpoint: Option<&str>, hosted: bool) -> String {
+    match (
+        hosted,
+        endpoint.filter(|endpoint| is_public_browser_endpoint(endpoint)),
+    ) {
+        (true, Some(endpoint)) => format!(
+            "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{{}},{{analytics:true,analyticsEndpoint:{}}});\n",
+            serde_json::to_string(&endpoint).expect("endpoint serializes")
+        ),
+        _ => "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n".to_owned(),
+    }
+}
+
+/// Browser configuration must never turn a host-only credential URL into a
+/// public script.  OpenPanel credentials belong in headers, so a URL with
+/// userinfo, query parameters, or a fragment is neither needed nor safe here.
+fn is_public_browser_endpoint(endpoint: &str) -> bool {
+    let Ok(url) = url::Url::parse(endpoint) else {
+        return false;
+    };
+    matches!(url.scheme(), "https" | "http")
+        && url.host().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+}
+
+fn hosted_deployment() -> bool {
+    std::env::var("OPENCOMPANY_DEPLOYMENT")
+        .ok()
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("hosted-tenant"))
+        || std::env::var("OPENCOMPANY_TENANT_ID")
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
 }
 
 /// Serves the Axum application on the configured bind address.

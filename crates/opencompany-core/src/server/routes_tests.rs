@@ -256,6 +256,45 @@ fn reserved_path_matches_prefixes_and_subpaths_only() {
     assert!(!is_reserved_path("/some/spa/route"));
 }
 
+#[test]
+fn browser_analytics_config_accepts_only_plain_collector_urls() {
+    assert!(is_public_browser_endpoint(
+        "https://collector.example/api/track"
+    ));
+    assert!(is_public_browser_endpoint("http://localhost:3000/track"));
+    assert!(!is_public_browser_endpoint(
+        "https://user:secret@collector.example/api/track"
+    ));
+    assert!(!is_public_browser_endpoint(
+        "https://collector.example/api/track?token=secret"
+    ));
+    assert!(!is_public_browser_endpoint("not a URL"));
+}
+
+#[test]
+fn hosted_console_config_enables_openpanel_without_exposing_credentials() {
+    let script = render_console_config(Some("https://collector.example/api/track"), true);
+    assert!(script.contains("analytics:true"), "{script}");
+    assert!(
+        script.contains("https://collector.example/api/track"),
+        "{script}"
+    );
+
+    for endpoint in [
+        "https://user:secret@collector.example/api/track",
+        "https://collector.example/api/track?token=secret",
+    ] {
+        let script = render_console_config(Some(endpoint), true);
+        assert!(!script.contains("analytics:true"), "{script}");
+        assert!(!script.contains("secret"), "{script}");
+    }
+
+    assert!(
+        !render_console_config(Some("https://collector.example/api/track"), false)
+            .contains("analytics:true")
+    );
+}
+
 #[tokio::test]
 async fn root_404s_without_console_dir() {
     let app = router_with_console(AppState::new(AppConfig::default()), None);

@@ -104,6 +104,7 @@ describe("OpenPanel console analytics", () => {
   });
 
   it("loads the configured browser client only after explicit opt-in", () => {
+    expect(indexHtml).toContain('src="/opencompany-config.js"');
     expect(indexHtml).toContain('src="/openpanel-init.js"');
     expect(loader).toContain('src = "https://openpanel.dev/op1.js"');
     expect(loader).toContain("apiUrl: window.OPENCOMPANY_CONFIG.analyticsEndpoint");
