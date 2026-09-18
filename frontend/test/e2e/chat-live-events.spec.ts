@@ -68,6 +68,7 @@ test("does not offer the built-in general channel by default", async ({ page }) 
 
   // `#general` remains resolvable for legacy history, but the console no
   // longer offers it as a channel to open or compose into.
+  await expect(railRow(page, ENGINEERING.channel)).toBeVisible();
   await expect(railRow(page, "general")).toHaveCount(0);
 });
 
