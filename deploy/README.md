@@ -59,6 +59,12 @@ containers:
 ./scripts/test-init-demo-admin.sh
 ```
 
+The development overlay keeps Cargo and frontend dependency caches in shared
+external volumes, while each Compose project retains its own `opencompany-data`
+volume. The administrator helper creates the cache volumes automatically when
+needed, so repeated demo runs do not rebuild dependencies or remove another
+project's caches.
+
 For a selectable memory engine, add `tinymemory` (hosted engines —
 Supermemory, Mem0, Cognee — plus the `null` driver) and `tinymemory-embedded`
 (the durable in-pod `namespace` store) to `OPENCOMPANY_FEATURES`, then select
