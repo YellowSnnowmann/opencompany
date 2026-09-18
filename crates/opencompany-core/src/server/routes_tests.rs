@@ -344,6 +344,17 @@ fn browser_analytics_switch_fails_closed_on_unrecognised_values() {
 
 #[tokio::test]
 async fn console_config_route_returns_uncached_javascript() {
+    let env = crate::test_support::EnvVarGuard::capture(&[
+        "OPENCOMPANY_DEPLOYMENT",
+        "OPENCOMPANY_TENANT_ID",
+        "OPENCOMPANY_ANALYTICS",
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+    ]);
+    env.remove("OPENCOMPANY_DEPLOYMENT");
+    env.remove("OPENCOMPANY_TENANT_ID");
+    env.remove("OPENCOMPANY_ANALYTICS");
+    env.remove("OPENCOMPANY_ANALYTICS_ENDPOINT");
+
     let app = router_with_console(AppState::new(AppConfig::default()), None);
 
     let response = app
