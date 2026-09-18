@@ -226,6 +226,40 @@ fn a_warm_up_failure_sentence_classifies_too() {
     let got = classify(sentence).expect("the warm-up-failure shape classifies");
     assert_eq!(got.code, HARNESS_UNAVAILABLE_CODE);
     assert_eq!(got.pair_agent_id.as_deref(), Some("researcher"));
+    assert_eq!(
+        got.message,
+        "agent `researcher` is bound to harness `claude-code`, whose last warm-up failed. \
+         Retrying will not help until that harness can run."
+    );
+}
+
+/// The reason a lane's warm-up gives is `{err}` from that lane — a path, a
+/// command line, whatever the engine said — and it is cut before the sentence
+/// reaches a person.
+#[test]
+fn the_warm_up_reason_never_reaches_the_message() {
+    let sentence = "agent `researcher` is bound to harness `claude-code`, whose last \
+                    warm-up failed: could not start `/Users/someone/.secrets/claude`: \
+                    No such file or directory.";
+    let got = classify(sentence).expect("classifies");
+    assert!(
+        !got.message.contains("/Users/someone"),
+        "the reason must not survive into chat: {}",
+        got.message
+    );
+    assert!(got.message.contains("whose last warm-up failed."));
+}
+
+/// [`classify`] re-runs on its own stored output on every read, so the cut
+/// sentence must classify to itself rather than degrade to the generic notice
+/// or grow a second retry note.
+#[test]
+fn reclassifying_a_cut_warm_up_sentence_is_a_no_op() {
+    let raw = "agent `researcher` is bound to harness `claude-code`, whose last \
+               warm-up failed: could not start `claude`.";
+    let once = classify(raw).expect("classifies");
+    let twice = classify(&once.message).expect("its own output classifies again");
+    assert_eq!(once, twice);
 }
 
 /// tinysweeper (PR #2401): text that merely *quotes* the router's two

@@ -163,8 +163,11 @@ const HARNESS_SENTENCE_OPENER: &str = "agent `";
 /// provider error, adversarial message content — would otherwise misclassify
 /// as a harness failure the turn never actually had (tinysweeper, PR #2401).
 ///
+/// [`HARNESS_WARMUP_TAIL`] stops before its `: `, so it also matches the cut
+/// sentence [`harness_binding`] itself emits.
+///
 /// [`HarnessRouter::engine_for`]: crate::harness::router::HarnessRouter
-const HARNESS_WARMUP_TAIL: &str = "`, whose last warm-up failed: ";
+const HARNESS_WARMUP_TAIL: &str = "`, whose last warm-up failed";
 const HARNESS_NO_ENGINE_TAIL: &str = "`, but ";
 
 /// Appended to the harness sentence, which names the gap but not whether
@@ -238,8 +241,16 @@ pub fn with_agent_marker(sentence: String, agent_id: &str) -> String {
 /// [`with_agent_marker`] trailer: the router has only the raw id at the point
 /// it fails, and the id is already in the text it wrote.
 ///
+/// The warm-up shape is returned cut at `whose last warm-up failed`: the
+/// reason after it is `{err}` from a lane's own warm-up, free-form text that
+/// can carry a path, a command line or provider output, and chat is not where
+/// that belongs. The reason stays on the run record and in the logs. The
+/// no-engine shape keeps its tail, which is a fixed `unavailable` string the
+/// host wired itself, not a captured error.
+///
 /// Idempotent by construction, which [`classify`] depends on: its own output
-/// is a sentence of exactly this shape, and both `MessageView::project` and
+/// is a sentence of exactly this shape — the cut form included, which is why
+/// the tail is matched without its `: ` — and both `MessageView::project` and
 /// `chat_history` re-classify the stored text on every read.
 fn harness_binding(detail: &str) -> Option<(String, String)> {
     let bound = detail.find(HARNESS_BOUND_MARKER)?;
@@ -248,18 +259,21 @@ fn harness_binding(detail: &str) -> Option<(String, String)> {
     if agent_id.is_empty() {
         return None;
     }
-    // The harness name follows immediately, closed by a backtick that must
-    // then continue with one of the router's two known connective phrases —
-    // see `HARNESS_WARMUP_TAIL`/`HARNESS_NO_ENGINE_TAIL`. Requiring the
-    // connective, not just the two markers above, is what a lookalike
-    // string cannot satisfy by coincidence.
-    let after_harness_name = &detail[bound + HARNESS_BOUND_MARKER.len()..];
-    let closing_backtick = after_harness_name.find('`')?;
-    let tail = &after_harness_name[closing_backtick..];
-    if !(tail.starts_with(HARNESS_WARMUP_TAIL) || tail.starts_with(HARNESS_NO_ENGINE_TAIL)) {
-        return None;
+    let name_start = bound + HARNESS_BOUND_MARKER.len();
+    let tail_at = name_start + detail[name_start..].find('`')?;
+    let tail = &detail[tail_at..];
+
+    if let Some(rest) = tail.strip_prefix(HARNESS_WARMUP_TAIL) {
+        if !(rest.starts_with(": ") || rest.starts_with('.')) {
+            return None;
+        }
+        let named = detail[opener..tail_at + HARNESS_WARMUP_TAIL.len()].trim();
+        return Some((agent_id.to_string(), format!("{named}.")));
     }
-    Some((agent_id.to_string(), detail[opener..].trim().to_string()))
+    if tail.starts_with(HARNESS_NO_ENGINE_TAIL) {
+        return Some((agent_id.to_string(), detail[opener..].trim().to_string()));
+    }
+    None
 }
 
 pub fn classify(detail: &str) -> Option<ResolutionFailure> {

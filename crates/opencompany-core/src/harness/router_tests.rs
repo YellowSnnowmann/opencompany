@@ -561,8 +561,13 @@ async fn a_failed_warm_up_classifies_for_the_operator() {
     );
     assert_eq!(got.pair_agent_id.as_deref(), Some("researcher"));
     assert!(
-        got.message.contains("roster warm-up failed"),
-        "the warm-up reason must survive: {}",
+        !got.message.contains("roster warm-up failed"),
+        "the lane's own warm-up error must not reach chat: {}",
+        got.message
+    );
+    assert!(
+        got.message.contains("whose last warm-up failed."),
+        "the operator still learns which harness failed to warm up: {}",
         got.message
     );
 }
