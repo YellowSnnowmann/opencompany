@@ -10,6 +10,9 @@ trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 cat >"${TMP_DIR}/docker" <<'EOF'
 #!/bin/sh
 set -eu
+case "$*" in
+    volume\ inspect\ *|volume\ create\ *) exit 0 ;;
+esac
 printf 'admin=%s\n' "$OPENCOMPANY_ADMIN_EMAIL"
 printf 'company=%s\n' "$OPENCOMPANY_COMPANY"
 case "$*" in
@@ -21,8 +24,6 @@ case "$*" in
     *"run --rm --no-deps -T opencompany"*) cat ;;
     *" up --build --detach --wait opencompany"*) ;;
     *" stop console opencompany"*) ;;
-    *" volume inspect "*) ;;
-    *" volume create "*) ;;
     *) echo "unexpected compose command: $*" >&2; exit 1 ;;
 esac
 EOF
