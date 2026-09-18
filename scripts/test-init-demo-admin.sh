@@ -13,6 +13,12 @@ set -eu
 case "$*" in
     volume\ inspect\ *|volume\ create\ *) exit 0 ;;
 esac
+if [ "${FAIL_COMPOSE_STEP:-}" = up ]; then
+    case "$*" in *" up "*) exit 42 ;; esac
+fi
+if [ "${FAIL_COMPOSE_STEP:-}" = stop ]; then
+    case "$*" in *" stop "*) exit 43 ;; esac
+fi
 printf 'admin=%s\n' "$OPENCOMPANY_ADMIN_EMAIL"
 printf 'company=%s\n' "$OPENCOMPANY_COMPANY"
 case "$*" in
@@ -22,7 +28,7 @@ esac
 printf 'args=%s\n' "$*"
 case "$*" in
     *"run --rm --no-deps -T opencompany"*) cat ;;
-    *" up --build --detach --wait opencompany"*) ;;
+    *" up --build --detach --wait --wait-timeout 120 opencompany"*) ;;
     *" stop console opencompany"*) ;;
     *) echo "unexpected compose command: $*" >&2; exit 1 ;;
 esac
@@ -34,7 +40,7 @@ output=$(printf 'correct horse\ncorrect horse\n' \
         "${SCRIPT_DIR}/init-demo-admin.sh" \
         marketing admin@example.com)
 printf '%s\n' "$output" | grep -F 'admin=admin@example.com' >/dev/null
-printf '%s\n' "$output" | grep -F 'up --build --detach --wait opencompany' >/dev/null
+printf '%s\n' "$output" | grep -F 'up --build --detach --wait --wait-timeout 120 opencompany' >/dev/null
 printf '%s\n' "$output" | grep -F 'stop console opencompany' >/dev/null
 printf '%s\n' "$output" | grep -F -- '--company agentic-marketing-agency' >/dev/null
 printf '%s\n' "$output" | grep -F -- '--email admin@example.com' >/dev/null
@@ -52,6 +58,20 @@ if printf 'one\none\n' | PATH="${TMP_DIR}:$PATH" \
     OPENCOMPANY_PROJECT_NAME="$TEST_PROJECT" \
     "${SCRIPT_DIR}/init-demo-admin.sh" marketing not-an-email >/dev/null 2>&1; then
     echo "init-demo-admin test: invalid email unexpectedly succeeded" >&2
+    exit 1
+fi
+
+if printf 'one\none\n' | PATH="${TMP_DIR}:$PATH" FAIL_COMPOSE_STEP=up \
+    OPENCOMPANY_PROJECT_NAME="$TEST_PROJECT" \
+    "${SCRIPT_DIR}/init-demo-admin.sh" marketing admin@example.com >/dev/null 2>&1; then
+    echo "init-demo-admin test: Compose readiness failure unexpectedly succeeded" >&2
+    exit 1
+fi
+
+if printf 'one\none\n' | PATH="${TMP_DIR}:$PATH" FAIL_COMPOSE_STEP=stop \
+    OPENCOMPANY_PROJECT_NAME="$TEST_PROJECT" \
+    "${SCRIPT_DIR}/init-demo-admin.sh" marketing admin@example.com >/dev/null 2>&1; then
+    echo "init-demo-admin test: Compose stop failure unexpectedly succeeded" >&2
     exit 1
 fi
 

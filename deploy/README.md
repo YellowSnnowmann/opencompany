@@ -65,6 +65,14 @@ volume. The administrator helper creates the cache volumes automatically when
 needed, so repeated demo runs do not rebuild dependencies or remove another
 project's caches.
 
+The Compose E2E test requires Docker (or a compatible Compose provider), `curl`,
+and a working local build environment. It creates a temporary project, asks
+Compose for free host ports (`E2E_API_PORT` and `E2E_CONSOLE_PORT` may override
+them), initializes `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD`, and removes the
+project-scoped containers and data volume on exit. Shared dependency caches are
+preserved. Run it with `./scripts/test-compose-e2e.sh`; on failure the script
+prints the Compose status and logs.
+
 For a selectable memory engine, add `tinymemory` (hosted engines —
 Supermemory, Mem0, Cognee — plus the `null` driver) and `tinymemory-embedded`
 (the durable in-pod `namespace` store) to `OPENCOMPANY_FEATURES`, then select

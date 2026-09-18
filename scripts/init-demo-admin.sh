@@ -134,7 +134,7 @@ for cache_volume in \
     opencompany-frontend-node-modules; do
     docker volume inspect "$cache_volume" >/dev/null 2>&1 || docker volume create "$cache_volume" >/dev/null
 done
-compose up --build --detach --wait opencompany
+compose up --build --detach --wait --wait-timeout 120 opencompany
 compose stop console opencompany
 
 cat "$password_file" | compose run --rm --no-deps -T opencompany \
