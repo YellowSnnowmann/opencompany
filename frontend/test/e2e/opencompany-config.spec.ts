@@ -19,8 +19,8 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
     "application/javascript",
   );
   expect(configResponse.headers()["cache-control"]).toBe("no-store");
-  expect(await configResponse.text()).toMatch(
-    /^window\.OPENCOMPANY_CONFIG=/,
+  expect(await configResponse.text()).toBe(
+    "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n",
   );
 
   await page.goto("/");

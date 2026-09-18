@@ -353,10 +353,9 @@ async fn console_config_route_returns_uncached_javascript() {
             .unwrap(),
         "no-store"
     );
-    assert!(
-        body_text(response)
-            .await
-            .starts_with("window.OPENCOMPANY_CONFIG=")
+    assert_eq!(
+        body_text(response).await,
+        "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n"
     );
 }
 
