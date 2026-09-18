@@ -7,7 +7,7 @@ runs is a single switch — `OPENCOMPANY_COMPANY`** — an example directory nam
 
 The same two images deploy everywhere below; only the wiring differs.
 
-## Local / any Docker host — Compose
+## Local / Docker or Podman — Compose
 
 Everything Docker lives in this directory: `Dockerfile` (built with the
 repository root as its context, so run it as `docker build -f deploy/Dockerfile .`
@@ -21,6 +21,10 @@ cp .env.example .env
 # set OPENCOMPANY_COMPANY to the module you want, then:
 docker compose up --build
 ```
+
+These commands also work when `docker` is Podman's Docker-compatible CLI and
+`podman-compose` is its Compose provider. `scripts/launch-demo.sh` uses this
+same portable invocation for the hot-reload stack.
 
 From the repository root, `docker compose -f deploy/docker-compose.yml up --build`
 is the same thing — Compose reads `.env` from the compose file's directory
