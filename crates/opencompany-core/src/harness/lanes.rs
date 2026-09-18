@@ -117,10 +117,11 @@ fn resolve_acp_engine(
                 as Arc<dyn RunTurn>
         })
         .map_err(|error| {
-            // The reason travels into the router's sentence and from there into
-            // company chat, so it stays a fixed line; the adapter's own error can
+            // The reason reaches company chat and `warn` reaches Sentry
+            // breadcrumbs, so neither carries the adapter's own error: it can
             // name a resolved binary path or its argv.
-            tracing::warn!(acp_agent = %agent_id, %error, "ACP adapter could not be started");
+            tracing::warn!(acp_agent = %agent_id, "ACP adapter could not be started");
+            tracing::debug!(acp_agent = %agent_id, %error, "ACP adapter start-up error");
             format!("its `{agent_id}` adapter could not be started on this host")
         })
 }
