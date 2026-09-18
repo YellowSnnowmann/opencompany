@@ -244,7 +244,8 @@ test("a card the orchestrator opens is chipped in chat, and survives a reload", 
   const before = await request.get("/api/v1/company/tasks");
   expect(before.ok(), await before.text()).toBeTruthy();
   const previousIds = new Set(((await before.json()) as Task[]).map((task) => task.id));
-  const prompt = `please track this SPAWNONE ${Date.now()}`;
+  const marker = `${Date.now()}`;
+  const prompt = `please track this SPAWNONE ${marker}`;
   await page.getByPlaceholder(/^Message /).fill(prompt);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
@@ -252,7 +253,7 @@ test("a card the orchestrator opens is chipped in chat, and survives a reload", 
     request,
     (task) =>
       task.originChatId === "main" &&
-      task.note?.includes(prompt) === true &&
+      task.title.includes(marker) &&
       !previousIds.has(task.id),
   );
   const href = `#/company/tasks/${card.id}`;
