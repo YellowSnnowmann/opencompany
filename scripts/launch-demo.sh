@@ -74,6 +74,7 @@ dev_compose_file="${REPO_ROOT}/docker-compose.dev.yml"
 echo "opencompany: ${action} '${company}' (Compose project: ${project})"
 
 if [ "$action" = "up" ]; then
+    echo "Console: http://localhost:${CONSOLE_PORT:-5173}"
     # Intentionally attached: Ctrl-C stops the stack and returns to the shell.
     OPENCOMPANY_COMPANY="$company" docker compose \
         --project-directory "$REPO_ROOT" \

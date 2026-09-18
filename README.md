@@ -110,6 +110,12 @@ export OPENCOMPANY_FEATURES="medulla"       # compile in the hosted Medulla brai
 The first run takes a few minutes while it downloads and builds. When it
 settles, open **<http://localhost:5173>**. That's the console, where you watch
 your agents work and answer anything waiting on you.
+
+There is no bundled username or password. On a fresh data volume the console's
+first-run setup creates the operator access for that installation; do not look
+for default credentials in the repository. Removing the data volume with
+`./scripts/launch-demo.sh marketing down -v` also removes that setup.
+
 `./scripts/list-demos.sh` lists the other businesses you can launch in place of
 `marketing`, and `./scripts/launch-demo.sh marketing down` shuts it all down.
 

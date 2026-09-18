@@ -26,6 +26,7 @@ run_launcher() {
 
 up_output=$(run_launcher marketing up)
 printf '%s\n' "$up_output" | grep -F "company=marketing_agency" >/dev/null
+printf '%s\n' "$up_output" | grep -F "Console: http://localhost:5173" >/dev/null
 printf '%s\n' "$up_output" | grep -F -- "--project-name opencompany-marketing-agency" >/dev/null
 printf '%s\n' "$up_output" | grep -F -- "--file ${REPO_ROOT}/docker-compose.dev.yml" >/dev/null
 printf '%s\n' "$up_output" | grep -F "up --build" >/dev/null
@@ -34,11 +35,15 @@ if printf '%s\n' "$up_output" | grep -F -- " -d" >/dev/null; then
     exit 1
 fi
 
+custom_port_output=$(CONSOLE_PORT=4173 run_launcher marketing up)
+printf '%s\n' "$custom_port_output" | grep -F "Console: http://localhost:4173" >/dev/null
+
 compose_output=$(OPENCOMPANY_COMPANY=marketing_agency docker compose \
     --file "${REPO_ROOT}/docker-compose.yml" \
     --file "${REPO_ROOT}/docker-compose.dev.yml" \
     config)
 printf '%s\n' "$compose_output" | grep -F -- "- --poll" >/dev/null
+printf '%s\n' "$compose_output" | grep -F -- "start_period: 10m0s" >/dev/null
 if printf '%s\n' "$compose_output" | grep -A1 -F -- "- --poll" | grep -F -- '- "1"' >/dev/null; then
     echo "launch-demo test: cargo-watch --poll unexpectedly has a value" >&2
     exit 1

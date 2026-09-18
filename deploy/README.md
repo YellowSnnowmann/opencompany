@@ -22,6 +22,13 @@ Switch companies by editing `OPENCOMPANY_COMPANY` in `.env` and re-running
 `docker compose up`. Compile optional features into the host with
 `OPENCOMPANY_FEATURES="medulla tinyplace sqlite"`.
 
+To exercise the development Compose flow end to end, including both published
+ports and the console's proxy connection to the host, run:
+
+```sh
+./scripts/test-compose-e2e.sh
+```
+
 For a selectable memory engine, add `tinymemory` (hosted engines —
 Supermemory, Mem0, Cognee — plus the `null` driver) and `tinymemory-embedded`
 (the durable in-pod `namespace` store) to `OPENCOMPANY_FEATURES`, then select
