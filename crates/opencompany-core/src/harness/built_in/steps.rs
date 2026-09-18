@@ -1040,6 +1040,8 @@ fn failure_of(class: ToolFailureClass) -> TurnStepFailure {
         ToolFailureClass::BadCredentials => TurnStepFailure::Unauthorized,
         ToolFailureClass::MissingPermission => TurnStepFailure::MissingPermission,
         ToolFailureClass::MissingApp => TurnStepFailure::MissingApp,
+        ToolFailureClass::NotFound => TurnStepFailure::NotFound,
+        ToolFailureClass::Unsupported => TurnStepFailure::Unsupported,
         ToolFailureClass::Timeout => TurnStepFailure::Timeout,
         ToolFailureClass::ServiceUnavailable | ToolFailureClass::ModelConnection => {
             TurnStepFailure::Unavailable
