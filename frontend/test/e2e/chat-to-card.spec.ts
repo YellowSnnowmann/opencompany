@@ -67,6 +67,7 @@ async function openThread(page: Page, channelId: string) {
 type Task = {
   id: string;
   title: string;
+  note?: string;
   originChatId?: string;
   originParent?: number;
 };
@@ -237,7 +238,7 @@ test("a card the orchestrator opens is chipped in chat, and survives a reload", 
   // the skip is per-test rather than per-file.
   test.skip(!LIVE_BRAIN, LIVE_BRAIN_REASON);
 
-  await openThread(page, "");
+  await openThread(page, "general");
 
   // `SPAWNONE` is the scripted backend's cue to call `spawn_task` once.
   const before = await request.get("/api/v1/company/tasks");
@@ -247,7 +248,13 @@ test("a card the orchestrator opens is chipped in chat, and survives a reload", 
   await page.getByPlaceholder(/^Message /).fill(prompt);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
-  const card = await taskMatching(request, (task) => !previousIds.has(task.id));
+  const card = await taskMatching(
+    request,
+    (task) =>
+      task.originChatId === "main" &&
+      task.note?.includes(prompt) === true &&
+      !previousIds.has(task.id),
+  );
   const href = `#/company/tasks/${card.id}`;
 
   // Live: the reply bubble says a card was opened.
@@ -258,7 +265,7 @@ test("a card the orchestrator opens is chipped in chat, and survives a reload", 
   // After a reload the transcript is rehydrated from `chat/history`, so a chip
   // that only existed on the live POST response would vanish here.
   await page.reload();
-  await openThread(page, "");
+  await openThread(page, "general");
   const rehydrated = page.locator(`a[href="${href}"]`, { hasText: "Card opened" });
   await expect(rehydrated).toBeVisible({ timeout: 30_000 });
   await expect(rehydrated).toHaveAttribute("href", href);
