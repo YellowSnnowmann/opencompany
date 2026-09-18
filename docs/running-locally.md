@@ -70,6 +70,11 @@ development mode. Pass a friendly site name (or any directory name under
 ./scripts/launch-demo.sh marketing down -v
 ```
 
+The launcher works with Docker Compose and with Podman's Docker-compatible CLI
+plus Compose provider (for example, the `podman-docker` and `podman-compose`
+packages). The rootless Podman warning that `/` is not a shared mount is
+informational for these repository bind mounts.
+
 The launcher bind-mounts the local checkout. Vite hot-updates frontend edits;
 `cargo-watch` rebuilds and restarts the backend when Rust source, Cargo files,
 or company definitions change. The first start builds the development images
