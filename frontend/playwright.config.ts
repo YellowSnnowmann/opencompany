@@ -268,6 +268,9 @@ const analyticsEnv: Record<string, string> = managesHost && ANALYTICS
       OPENCOMPANY_DEPLOYMENT: "hosted-tenant",
       OPENCOMPANY_ANALYTICS: "on",
       OPENCOMPANY_ANALYTICS_ENDPOINT: "https://collector.example/api/track",
+      // Hosted tenants are provisioned with the platform API base and refuse
+      // to boot without one. This spec never calls it; keep the fixture inert.
+      TINYHUMANS_API_URL: "https://api.example.invalid",
     }
   : {};
 
