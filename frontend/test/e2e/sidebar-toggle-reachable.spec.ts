@@ -111,9 +111,7 @@ test.describe("sidebar toggle reachability", () => {
     ).toHaveCount(1);
   });
 
-  test("the mobile sheet closes after selecting a destination", async ({
-    page,
-  }) => {
+  test("the mobile sheet closes after selecting a destination", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/#/company");
     await dismissTour(page);
@@ -131,26 +129,19 @@ test.describe("sidebar toggle reachability", () => {
     // dismiss that only fired for the sidebar's own rows would miss it (which is
     // what `room-rail.tsx`'s `dismiss` exists for). Picking one still closes the
     // sheet behind it, which is the pattern under test.
-    await sheet
-      .getByRole("button", { name: "engineering", exact: true })
-      .click();
+    await sheet.getByRole("button", { name: "engineering", exact: true }).click();
     await expect(page).toHaveURL(/#\/chat\//);
     await expect(sheet).toBeHidden();
   });
 
-  test("Escape closes the mobile sheet after focus moves inside it", async ({
-    page,
-  }) => {
+  test("Escape closes the mobile sheet after focus moves inside it", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/#/company");
     await dismissTour(page);
 
     await page.getByRole("button", { name: "Toggle sidebar" }).click();
     const sheet = page.getByRole("dialog", { name: "Sidebar" });
-    const destination = sheet.getByRole("button", {
-      name: "Room",
-      exact: true,
-    });
+    const destination = sheet.getByRole("button", { name: "Room", exact: true });
     await destination.focus();
     await expect(destination).toBeFocused();
 
@@ -158,9 +149,7 @@ test.describe("sidebar toggle reachability", () => {
     await expect(sheet).toBeHidden();
   });
 
-  test("the mobile trigger does not overlap scrollable page content", async ({
-    page,
-  }) => {
+  test("the mobile trigger does not overlap scrollable page content", async ({ page }) => {
     // The issue's own repro viewport (iPhone 12-class).
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/#/settings/general");
@@ -184,16 +173,11 @@ test.describe("sidebar toggle reachability", () => {
     // No shared pixels in either axis: the trigger's row is reserved chrome,
     // not an overlay, so scrolled-to-the-end content and the trigger cannot
     // occupy the same screen space.
-    const overlapsX =
-      triggerBox!.x < flagBox!.x + flagBox!.width &&
-      flagBox!.x < triggerBox!.x + triggerBox!.width;
-    const overlapsY =
-      triggerBox!.y < flagBox!.y + flagBox!.height &&
-      flagBox!.y < triggerBox!.y + triggerBox!.height;
-    expect(
-      overlapsX && overlapsY,
-      "the trigger and the scrolled-to content must not overlap",
-    ).toBe(false);
+    const overlapsX = triggerBox!.x < flagBox!.x + flagBox!.width && flagBox!.x < triggerBox!.x + triggerBox!.width;
+    const overlapsY = triggerBox!.y < flagBox!.y + flagBox!.height && flagBox!.y < triggerBox!.y + triggerBox!.height;
+    expect(overlapsX && overlapsY, "the trigger and the scrolled-to content must not overlap").toBe(
+      false,
+    );
 
     // And the corner it used to cover hit-tests as the content now, not the
     // trigger — the concrete symptom from the issue's repro. Assert the hit
@@ -204,15 +188,11 @@ test.describe("sidebar toggle reachability", () => {
     const hit = await page.evaluate(
       ([x, y]) => {
         const el = document.elementFromPoint(x, y);
-        return el instanceof Element
-          ? (el.closest("button")?.textContent?.trim() ?? null)
-          : null;
+        return el instanceof Element ? (el.closest("button")?.textContent?.trim() ?? null) : null;
       },
       [flagCenterX, flagCenterY],
     );
-    expect(hit, "the flag button's own point hits the flag button").toBe(
-      "Flag something",
-    );
+    expect(hit, "the flag button's own point hits the flag button").toBe("Flag something");
 
     // Still reachable and still functional in its own right.
     await trigger.click();
@@ -227,10 +207,7 @@ test.describe("sidebar toggle reachability", () => {
     await dismissTour(page);
 
     const sidebar = page.locator("[data-slot=sidebar]");
-    const toggle = page.getByRole("button", {
-      name: "Collapse sidebar",
-      exact: true,
-    });
+    const toggle = page.getByRole("button", { name: "Collapse sidebar", exact: true });
 
     // Named and on screen. The name is the assertion as much as the position
     // is: this control is icon-only, so an `aria-label` lost in a refactor
@@ -251,9 +228,7 @@ test.describe("sidebar toggle reachability", () => {
       "…it belongs to the title bar's chrome",
     ).toHaveCount(1);
     await expect(
-      page
-        .locator("[data-slot=sidebar-content]")
-        .getByTestId("sidebar-collapse"),
+      page.locator("[data-slot=sidebar-content]").getByTestId("sidebar-collapse"),
       "…and never among the nav rows, which is what issue #1177 was",
     ).toHaveCount(0);
     await expect(page.getByTestId("sidebar-collapse")).toHaveCount(1);
@@ -299,10 +274,7 @@ test.describe("sidebar toggle reachability", () => {
     // It survives the state it just produced — the case most likely to be got
     // wrong, and the one the old placement got wrong by construction.
     await expect(sidebar).toHaveAttribute("data-state", "collapsed");
-    const expand = page.getByRole("button", {
-      name: "Expand sidebar",
-      exact: true,
-    });
+    const expand = page.getByRole("button", { name: "Expand sidebar", exact: true });
     await expect(expand).toBeVisible();
     await expect(expand).toBeInViewport();
 
@@ -311,9 +283,7 @@ test.describe("sidebar toggle reachability", () => {
     // way and reports a control positioned against a seam still in motion.
     await expect
       .poll(
-        async () =>
-          (await page.locator("[data-slot=sidebar-container]").boundingBox())
-            ?.width,
+        async () => (await page.locator("[data-slot=sidebar-container]").boundingBox())?.width,
         { message: "the collapsed column settles at the icon rail's width" },
       )
       .toBe(RAIL_WIDTH);
@@ -335,8 +305,6 @@ test.describe("sidebar toggle reachability", () => {
     await expect(expand).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(sidebar).toHaveAttribute("data-state", "expanded");
-    await expect(
-      page.getByRole("button", { name: "Collapse sidebar", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Collapse sidebar", exact: true })).toBeVisible();
   });
 });

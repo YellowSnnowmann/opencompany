@@ -15,12 +15,7 @@ import { toast } from "sonner";
 
 import { me as fetchMe } from "@/api/auth";
 import type { OpenCompanyClient } from "@/api/client";
-import {
-  deleteTask,
-  type InflightRun,
-  type MessageIntent,
-  type TaskStatus,
-} from "@/api/tasks";
+import { deleteTask, type InflightRun, type MessageIntent, type TaskStatus } from "@/api/tasks";
 import { turnStateKey } from "@/lib/live-reply";
 import { uploadChatAttachment } from "@/api/chat";
 import { deleteNode, fetchBlobUrl } from "@/api/workspace";
@@ -254,23 +249,14 @@ interface Props {
    * had to be discarded (silently losing the ambiguity note) or none did
    * (double-rendering the ones the response does carry).
    */
-  onSendEnd?: (
-    threadId: string,
-    gen?: number,
-    responseTexts?: readonly string[],
-  ) => void;
+  onSendEnd?: (threadId: string, gen?: number, responseTexts?: readonly string[]) => void;
   /**
    * The host accepted the turn and answered `202` instead of the reply
    * (issue #983). Distinct from `onSendEnd`, which says the turn is *over*:
    * this one says the POST is over and the turn is not, so the shell keeps the
    * working row up and stops suppressing the live reply frame.
    */
-  onSendDetached?: (
-    threadId: string,
-    turnId?: string,
-    gen?: number,
-    chatId?: string,
-  ) => void;
+  onSendDetached?: (threadId: string, turnId?: string, gen?: number, chatId?: string) => void;
   /**
    * The chat POST **threw** rather than answering (issue #1000).
    *
@@ -305,11 +291,7 @@ interface Props {
    * do not move when the host underneath a send changes. Comparing the client
    * instance catches the old host's late completion after reseat.
    */
-  scopeRef: RefObject<{
-    connection: string;
-    company: string | null;
-    client: OpenCompanyClient;
-  }>;
+  scopeRef: RefObject<{ connection: string; company: string | null; client: OpenCompanyClient }>;
   /**
    * Roster agent id → display name, captured by the shell's desks/roster read
    * (issue #1934). Lets the receipt name whoever picked the turn up rather than
@@ -619,9 +601,9 @@ export function RoomView({
   );
   /** Issue #1846: which teammate's budget-pause redeem is in flight, if any —
    * so only that notice's button shows a busy state. */
-  const [redeemingBudgetPauseAgent, setRedeemingBudgetPauseAgent] = useState<
-    string | null
-  >(null);
+  const [redeemingBudgetPauseAgent, setRedeemingBudgetPauseAgent] = useState<string | null>(
+    null,
+  );
   const [membersOpen, setMembersOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   // The rail's "+" (issue #1835) — chat's own door for creating a channel.
@@ -644,9 +626,7 @@ export function RoomView({
   // Section disclosure is shared by the desktop and sub-`lg` rail instances
   // (codex P2 review): each instance would otherwise keep its own fold state,
   // so dropping below `lg` reopened every section the operator had folded.
-  const [railOpenSections, setRailOpenSections] = useState<
-    Record<string, boolean>
-  >({});
+  const [railOpenSections, setRailOpenSections] = useState<Record<string, boolean>>({});
   const toggleRailSection = (id: string) =>
     setRailOpenSections((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
   /** Your own avatar reference, once `loadViewer` has resolved who you are. */
@@ -702,11 +682,7 @@ export function RoomView({
       try {
         const capabilities = await client.capabilityStatus(company);
         if (isCurrent()) {
-          setLoadedCognition({
-            client,
-            company,
-            state: capabilities.cognition ?? null,
-          });
+          setLoadedCognition({ client, company, state: capabilities.cognition ?? null });
         }
       } catch (e) {
         // An older host, or one that could not answer. Nothing is claimed
@@ -760,9 +736,7 @@ export function RoomView({
     // is already the contract `sidebar-toggle-reachable.spec.ts` pins it by.
     if (expanding) {
       window.requestAnimationFrame(() =>
-        document
-          .querySelector<HTMLElement>('[data-testid="sidebar-collapse"]')
-          ?.focus(),
+        document.querySelector<HTMLElement>('[data-testid="sidebar-collapse"]')?.focus(),
       );
     }
   }
@@ -849,6 +823,11 @@ export function RoomView({
     void loadViewer();
   }, [boot, loadViewer]);
 
+
+
+
+
+
   // Only the newest load may write. Two loads can be in flight at once — a
   // company switch, or a Retry over a request that is merely slow rather than
   // dead — and a stale answer landing last would replace the current company's
@@ -901,10 +880,7 @@ export function RoomView({
    *
    * What decides whether a reload may blank the list. See `loadDesks`.
    */
-  const desksLoadedFor = useRef<{
-    client: unknown;
-    company: string | null;
-  } | null>(null);
+  const desksLoadedFor = useRef<{ client: unknown; company: string | null } | null>(null);
 
   const loadDesks = useCallback(async () => {
     const run = ++desksRun.current;
@@ -922,8 +898,7 @@ export function RoomView({
     // back into Room. The list is re-rendered from the answer either way; what
     // is removed here is the empty frame in between.
     const scope = desksLoadedFor.current;
-    if (!scope || scope.client !== client || scope.company !== company)
-      setDesks(null);
+    if (!scope || scope.client !== client || scope.company !== company) setDesks(null);
     setDesksError(null);
     try {
       const dtos = await client.listDesks(company);
@@ -941,9 +916,7 @@ export function RoomView({
         return;
       }
       setDesksError(
-        error instanceof Error
-          ? error.message
-          : "Couldn't load this company's channels.",
+        error instanceof Error ? error.message : "Couldn't load this company's channels.",
       );
     }
   }, [client, company, roomVisits]);
@@ -982,19 +955,14 @@ export function RoomView({
   useEffect(() => {
     const run = ++operatorRun.current;
     setOperator(null);
-    void fetchWithOneRetry(() => client.getOperatorChannel(company)).then(
-      (dto) => {
-        if (run !== operatorRun.current) return;
-        if (isOperatorChannelDto(dto)) {
-          setOperator(dto);
-        } else if (dto !== null) {
-          console.debug(
-            "[RoomView] getOperatorChannel returned an unexpected shape",
-            dto,
-          );
-        }
-      },
-    );
+    void fetchWithOneRetry(() => client.getOperatorChannel(company)).then((dto) => {
+      if (run !== operatorRun.current) return;
+      if (isOperatorChannelDto(dto)) {
+        setOperator(dto);
+      } else if (dto !== null) {
+        console.debug("[RoomView] getOperatorChannel returned an unexpected shape", dto);
+      }
+    });
   }, [client, company, roomVisits]);
 
   /** One attempt per bare-hash entry; see the effect below `channel`, which
@@ -1099,10 +1067,7 @@ export function RoomView({
    * which renders no composer and would silently skip both stops.
    */
   const generalSub =
-    desks &&
-    decodedSub &&
-    isGeneralChannel(decodedSub) &&
-    !findChannel(sections, decodedSub)
+    desks && decodedSub && isGeneralChannel(decodedSub) && !findChannel(sections, decodedSub)
       ? generalChannelId(desks)
       : null;
   // The experiment hides the built-in General channel from the rail, not from
@@ -1110,10 +1075,7 @@ export function RoomView({
   // back to `sections` (and therefore without offering it as a destination).
   const legacyGeneral =
     desks && generalSub
-      ? findChannel(
-          buildChannels(members, desks, transcripts, true),
-          generalSub,
-        )
+      ? findChannel(buildChannels(members, desks, transcripts, true), generalSub)
       : null;
   /**
    * The channel the hash names, else the first one that exists.
@@ -1140,8 +1102,7 @@ export function RoomView({
    * there is no such control there — a toggle that has to pick one of four
    * agents for you is worse than no toggle.
    */
-  const rawAgentId =
-    channel?.kind === "dm" ? (channel.member?.id ?? null) : null;
+  const rawAgentId = channel?.kind === "dm" ? (channel.member?.id ?? null) : null;
   /**
    * Whether the transcript is showing raw turns instead of chat.
    *
@@ -1377,8 +1338,7 @@ export function RoomView({
   }, [inChannel, members]);
 
   const messages = useMemo(
-    () =>
-      channel ? (transcripts[channel.id] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES,
+    () => (channel ? (transcripts[channel.id] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES),
     [transcripts, channel?.id],
   );
   /**
@@ -1420,10 +1380,7 @@ export function RoomView({
   }, [messages]);
 
   /** All loaded message ids in this channel, for the mention-clearing gate. */
-  const loadedMessageIds = useMemo(
-    () => new Set(messages.map((m) => m.id)),
-    [messages],
-  );
+  const loadedMessageIds = useMemo(() => new Set(messages.map((m) => m.id)), [messages]);
 
   /**
    * The approvals raised in the channel on screen (#379).
@@ -1445,9 +1402,7 @@ export function RoomView({
   const channelApprovals = useMemo(() => {
     if (!desks || !channel || !approvals?.length) return [];
     const byThread = chatChannelByThread ?? {};
-    return approvals.filter(
-      (a) => a.thread && byThread[a.thread] === channel.id,
-    );
+    return approvals.filter((a) => a.thread && byThread[a.thread] === channel.id);
   }, [desks, channel, approvals, chatChannelByThread]);
 
   /**
@@ -1488,10 +1443,9 @@ export function RoomView({
     setEffectiveHive(null);
     // Lightweight room-test clients and older hosts do not expose this optional
     // grammar read. The fold retains its derived policy in that case.
-    if (!channel?.memberIds || typeof client.getDeskHive !== "function")
-      return () => {
-        live = false;
-      };
+    if (!channel?.memberIds || typeof client.getDeskHive !== "function") return () => {
+      live = false;
+    };
     client
       .getDeskHive(channel.id, company)
       .then((hive) => {
@@ -1592,9 +1546,7 @@ export function RoomView({
   // switch, so nothing else clears this map: `transcripts` resetting (in
   // `AppShell`) does not reach a `RoomView`-local `useState`.
   useEffect(() => {
-    setBudgetPauseMarkerByNotice((prev) =>
-      prev.size === 0 ? prev : new Map(),
-    );
+    setBudgetPauseMarkerByNotice((prev) => (prev.size === 0 ? prev : new Map()));
   }, [client, company]);
   useEffect(() => {
     let live = true;
@@ -1662,10 +1614,7 @@ export function RoomView({
    * stops the effect acting on the ones that are not about threads is
    * `threadResolvedFor` below.
    */
-  const [threadQuery, setThreadQuery] = useState<{
-    value: string | null;
-    nonce: number;
-  }>({
+  const [threadQuery, setThreadQuery] = useState<{ value: string | null; nonce: number }>({
     value: null,
     nonce: 0,
   });
@@ -1674,8 +1623,7 @@ export function RoomView({
       const [, query = ""] = window.location.hash.split("?");
       return new URLSearchParams(query).get("thread");
     };
-    const apply = () =>
-      setThreadQuery((prev) => ({ value: read(), nonce: prev.nonce + 1 }));
+    const apply = () => setThreadQuery((prev) => ({ value: read(), nonce: prev.nonce + 1 }));
     apply();
     window.addEventListener("hashchange", apply);
     return () => window.removeEventListener("hashchange", apply);
@@ -1743,15 +1691,10 @@ export function RoomView({
     if (!routeOpen || !channel?.id) return;
     const arrived = threadResolvedFor.current !== channel.id;
     threadResolvedFor.current = channel.id;
-    if (
-      threadQuery.value !== null &&
-      consumedThreadNonce.current !== threadQuery.nonce
-    ) {
+    if (threadQuery.value !== null && consumedThreadNonce.current !== threadQuery.nonce) {
       consumedThreadNonce.current = threadQuery.nonce;
       setOpenThreadId(threadQuery.value);
-      const [path, query = ""] = window.location.hash
-        .replace(/^#/, "")
-        .split("?");
+      const [path, query = ""] = window.location.hash.replace(/^#/, "").split("?");
       const params = new URLSearchParams(query);
       params.delete("thread");
       const qs = params.toString();
@@ -1773,10 +1716,7 @@ export function RoomView({
    * `MessageRow` puts in `data-message-id`. The bare host id the history route
    * answers with matches no row.
    */
-  const [messageQuery, setMessageQuery] = useState<{
-    value: string | null;
-    nonce: number;
-  }>({
+  const [messageQuery, setMessageQuery] = useState<{ value: string | null; nonce: number }>({
     value: null,
     nonce: 0,
   });
@@ -1785,8 +1725,7 @@ export function RoomView({
       const [, query = ""] = window.location.hash.split("?");
       return new URLSearchParams(query).get("m");
     };
-    const apply = () =>
-      setMessageQuery((prev) => ({ value: read(), nonce: prev.nonce + 1 }));
+    const apply = () => setMessageQuery((prev) => ({ value: read(), nonce: prev.nonce + 1 }));
     apply();
     window.addEventListener("hashchange", apply);
     return () => window.removeEventListener("hashchange", apply);
@@ -1803,9 +1742,7 @@ export function RoomView({
     // spin: a message that never appears is one the history did not carry.
     let attempts = 0;
     const find = () =>
-      document.querySelector<HTMLElement>(
-        `[data-message-id="${CSS.escape(wanted)}"]`,
-      );
+      document.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(wanted)}"]`);
     const timer = window.setInterval(() => {
       attempts += 1;
       const row = find();
@@ -1821,9 +1758,7 @@ export function RoomView({
       row.setAttribute("data-found", "true");
       window.setTimeout(() => row.removeAttribute("data-found"), 2600);
 
-      const [path, query = ""] = window.location.hash
-        .replace(/^#/, "")
-        .split("?");
+      const [path, query = ""] = window.location.hash.replace(/^#/, "").split("?");
       const params = new URLSearchParams(query);
       params.delete("m");
       const qs = params.toString();
@@ -2024,8 +1959,7 @@ export function RoomView({
   // and carries `memberIds` exactly like a desk does, so neither alone tells
   // them apart; asking the desk list is what keeps the lead badge and the
   // org-chart link off a channel the host does not list under `GET .../desks`.
-  const activeIsDesk =
-    active.kind === "channel" && (desks ?? []).some((d) => d.id === active.id);
+  const activeIsDesk = active.kind === "channel" && (desks ?? []).some((d) => d.id === active.id);
   // Issue #1757: the Operator channel is a read-only "what happened" feed. Its
   // composer is disabled and the host also refuses a send to it, so this is UX,
   // not the enforcement.
@@ -2044,15 +1978,11 @@ export function RoomView({
       : active.member
         ? dmThreadId(active.member)
         : undefined;
-  const liveSteps = activeThreadId
-    ? liveStepsByThread?.[activeThreadId]
-    : undefined;
+  const liveSteps = activeThreadId ? liveStepsByThread?.[activeThreadId] : undefined;
   // The live receipt for this channel's thread (issue #1934), resolved exactly
   // as `liveSteps` above — same host thread id, same open-thread exclusion at
   // the render site below.
-  const receipt = activeThreadId
-    ? receiptByThread?.[activeThreadId]
-    : undefined;
+  const receipt = activeThreadId ? receiptByThread?.[activeThreadId] : undefined;
   /**
    * The turn this channel is waiting on, if any (issue #983).
    *
@@ -2084,9 +2014,7 @@ export function RoomView({
     activeThreadId && openThreadId
       ? turnStateKey(activeThreadId, threadRootOf(openThreadId))
       : undefined;
-  const threadTurn = threadTurnKey
-    ? openTurns?.[threadTurnKey]?.[0]
-    : undefined;
+  const threadTurn = threadTurnKey ? openTurns?.[threadTurnKey]?.[0] : undefined;
   const openTurn = (() => {
     if (!activeThreadId) return undefined;
     const candidates = Object.entries(openTurns ?? {})
@@ -2118,8 +2046,7 @@ export function RoomView({
    * counts its own members; a channel with no membership of its own still
    * counts the company, which is all it can honestly claim.
    */
-  const headerCount =
-    active.kind === "dm" ? 2 : (inChannel?.length ?? members.length);
+  const headerCount = active.kind === "dm" ? 2 : (inChannel?.length ?? members.length);
   /**
    * The teammate on the other end of this DM exists only in the console (issue
    * #364) — a starter-roster row, or one added while the host had no team write
@@ -2134,15 +2061,11 @@ export function RoomView({
    * that is never coming.
    */
   const consoleOnlyMember =
-    active.kind === "dm" && !fromHost && active.member
-      ? active.member.name
-      : null;
+    active.kind === "dm" && !fromHost && active.member ? active.member.name : null;
 
   const append = (channelId: string, ...added: ChatMessage[]) =>
-    setTranscripts((t) => ({
-      ...t,
-      [channelId]: [...(t[channelId] ?? []), ...added],
-    }));
+    setTranscripts((t) => ({ ...t, [channelId]: [...(t[channelId] ?? []), ...added] }));
+
 
   /**
    * Send a failed line again (B-099).
@@ -2170,17 +2093,9 @@ export function RoomView({
     failedSends.current.delete(messageId);
     setTranscripts((t) => ({
       ...t,
-      [payload.target]: (t[payload.target] ?? []).filter(
-        (m) => m.id !== messageId,
-      ),
+      [payload.target]: (t[payload.target] ?? []).filter((m) => m.id !== messageId),
     }));
-    void send(
-      payload.text,
-      payload.intent,
-      payload.parentId,
-      payload.attachments,
-      payload.mentions,
-    );
+    void send(payload.text, payload.intent, payload.parentId, payload.attachments, payload.mentions);
   };
 
   /**
@@ -2450,9 +2365,7 @@ export function RoomView({
               return;
             }
             const hydrated = fromHistory(entries);
-            const byId = new Map(
-              hydrated.map((message) => [message.id, message]),
-            );
+            const byId = new Map(hydrated.map((message) => [message.id, message]));
             setTranscripts((transcripts) => ({
               ...transcripts,
               [target]: (transcripts[target] ?? []).map((message) => {
@@ -2498,8 +2411,7 @@ export function RoomView({
       // screen, left something that reads as sent and was not. `sendFailed` is
       // a field of the row, so no renderer can draw the bubble without it, and
       // the row can carry its own Retry.
-      const msg =
-        err instanceof ApiError ? err.message : "something went wrong";
+      const msg = err instanceof ApiError ? err.message : "something went wrong";
       setTranscripts((t) => ({
         ...t,
         [target]: markSendFailed(t[target] ?? [], local.id, msg),
@@ -2554,9 +2466,7 @@ export function RoomView({
     if (!seq) return;
     const before = transcripts[active.id] ?? [];
     const on = !before.some(
-      (m) =>
-        m.id === messageId &&
-        m.reactions?.some((r) => r.emoji === emoji && r.mine),
+      (m) => m.id === messageId && m.reactions?.some((r) => r.emoji === emoji && r.mine),
     );
     const apply = (rows: ChatMessage[]) =>
       rows.map((m) =>
@@ -2619,9 +2529,7 @@ export function RoomView({
         toast.success("That card was already gone — chip cleared.");
       } else {
         toast.error(
-          error instanceof Error && error.message
-            ? error.message
-            : "Couldn't dismiss that card.",
+          error instanceof Error && error.message ? error.message : "Couldn't dismiss that card.",
         );
       }
     } finally {
@@ -2647,23 +2555,12 @@ export function RoomView({
    * pick for the thread.
    */
   async function reviewCard(taskId: string, decision: "approve" | "revise") {
-    if (
-      activeThreadId === undefined ||
-      !canSubmitReview(reviewingCardIds, activeThreadId, taskId)
-    )
+    if (activeThreadId === undefined || !canSubmitReview(reviewingCardIds, activeThreadId, taskId))
       return;
     setReviewingCardIds((prev) => new Set(prev).add(taskId));
     try {
-      await client.reviewCard(
-        activeThreadId,
-        taskId,
-        decision,
-        undefined,
-        company,
-      );
-      toast.success(
-        decision === "approve" ? "Card approved." : "Sent for another pass.",
-      );
+      await client.reviewCard(activeThreadId, taskId, decision, undefined, company);
+      toast.success(decision === "approve" ? "Card approved." : "Sent for another pass.");
     } catch (error) {
       toast.error(
         error instanceof Error && error.message
@@ -2727,13 +2624,8 @@ export function RoomView({
       // Only falls through to a live GET when the render-time cache has
       // nothing yet for this notice — see `redeemBudgetPause`'s doc.
       const cached = budgetPauseMarkerByNotice.get(noticeMessageId);
-      const live =
-        cached == null ? await client.getBudgetPause(agentId, company) : null;
-      const expectedId = budgetPauseRedeemId(
-        noticeMessageId,
-        budgetPauseMarkerByNotice,
-        live?.id,
-      );
+      const live = cached == null ? await client.getBudgetPause(agentId, company) : null;
+      const expectedId = budgetPauseRedeemId(noticeMessageId, budgetPauseMarkerByNotice, live?.id);
       await client.redeemBudgetPause(agentId, company, expectedId);
       toast.success("Resending the stalled message.");
     } catch (error) {
@@ -2754,6 +2646,7 @@ export function RoomView({
       setRedeemingBudgetPauseAgent(null);
     }
   }
+
 
   /**
    * Persist a new teammate through the host (issue #360's Team-page add path),
@@ -2817,8 +2710,7 @@ export function RoomView({
     // the copilot that drafts it. Guarded on `created`, not on the flag alone:
     // the 404 fallback above adds a console-only row with no host id, and there
     // is no detail page for a teammate the host has never heard of.
-    if (fields.landOnProfile && created)
-      onOpenAgent?.(created.id, { edit: true });
+    if (fields.landOnProfile && created) onOpenAgent?.(created.id, { edit: true });
     return true;
   }
 
@@ -2847,11 +2739,7 @@ export function RoomView({
     // connection while the POST is in flight, every UI-visible effect of it —
     // refresh or toast — belongs to a scope nobody is looking at anymore, so
     // it is dropped rather than landing on whatever they switched to.
-    const scopeAtAdd = {
-      connection: scope.connection,
-      company: scope.company,
-      client,
-    };
+    const scopeAtAdd = { connection: scope.connection, company: scope.company, client };
     const stale = () => {
       const latestScope = scopeRef.current;
       return (
@@ -2876,9 +2764,7 @@ export function RoomView({
         void loadDesks();
         toast.error("Already on this channel.");
       } else {
-        toast.error(
-          error instanceof Error ? error.message : "Couldn't add agent.",
-        );
+        toast.error(error instanceof Error ? error.message : "Couldn't add agent.");
       }
     }
   }
@@ -2890,9 +2776,7 @@ export function RoomView({
    * staff a channel with, and an empty roster has nobody at all.
    */
   const onAddChannel =
-    fromHost && members.length > 0
-      ? () => setChannelCreateOpen(true)
-      : undefined;
+    fromHost && members.length > 0 ? () => setChannelCreateOpen(true) : undefined;
 
   function selectChannel(id: string) {
     onNavigate(id);
@@ -2907,9 +2791,7 @@ export function RoomView({
     roomRail.dismiss?.();
   }
 
-  const parent = openThreadId
-    ? messages.find((m) => m.id === openThreadId)
-    : undefined;
+  const parent = openThreadId ? messages.find((m) => m.id === openThreadId) : undefined;
   const threadReplies = parent ? repliesInThread(parent, messages) : [];
   // Asked of `buildTimeline`'s own rule rather than re-derived, for the reason
   // the mention map above gives: the panel's count and the channel's chip must
@@ -2925,12 +2807,7 @@ export function RoomView({
   // Approve control so it does not have to wait on the newest one settling.
   const threadReviewAnchors =
     parent !== undefined && taskStatusByTaskId !== undefined
-      ? reviewAnchorsForThread(
-          parent,
-          threadReplies,
-          messages,
-          taskStatusByTaskId,
-        )
+      ? reviewAnchorsForThread(parent, threadReplies, messages, taskStatusByTaskId)
       : [];
   const threadReviewAnchor = threadReviewAnchors[0];
   const threadReviewing = threadReviewAnchor !== undefined;
@@ -3011,11 +2888,8 @@ export function RoomView({
                   >
                     <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
                     <span className="min-w-0 truncate">
-                      <span className="font-medium text-foreground">
-                        #{unknownChannel}
-                      </span>{" "}
-                      isn&apos;t a channel here — showing {channelTitle(active)}{" "}
-                      instead.
+                      <span className="font-medium text-foreground">#{unknownChannel}</span> isn&apos;t a
+                      channel here — showing {channelTitle(active)} instead.
                     </span>
                   </p>
                 )}
@@ -3027,66 +2901,62 @@ export function RoomView({
                     agentName={channelTitle(channel)}
                   />
                 ) : (
-                  <MessageTimeline
-                    channel={channel}
-                    items={items}
-                    episodeTurn={episodeTurn}
-                    cognition={cognition}
-                    historyPending={historyPending}
-                    openThreadId={openThreadId}
-                    // An open turn keeps the row up after the POST has resolved, and
-                    // puts it back on a console that reloaded mid-turn (#983).
-                    // `!openThreadId` used to be here, blanking the channel's row for
-                    // every turn whenever any thread was open. `openTurn` now
-                    // excludes the open thread's own turn, so the row can stay for
-                    // the work that is genuinely the channel's.
-                    typing={sending || !!openTurn}
-                    queued={!!openTurn?.queued}
-                    liveSteps={openThreadId ? undefined : liveSteps}
-                    // NOT excluded when a thread is open: these rows render inside
-                    // their own message rather than as one strip for the channel, so
-                    // there is no ambiguity about which turn they describe — which is
-                    // the whole reason `liveSteps` above is withheld.
-                    liveStepsByMessage={liveStepsByMessage}
-                    // Thread-panel receipts are out of v1 (issue #1934): excluded here
-                    // the same way `liveSteps` is when a thread is open.
-                    receipt={openThreadId ? undefined : receipt}
-                    // Who the host expects to answer, for the leg that has no
-                    // receipt to read: a reload keeps the open-turn row and
-                    // nothing else, and the row is what carries this.
-                    turnAgentId={openTurn?.agentId}
-                    agentNames={agentNames}
-                    onOpenThread={setOpenThreadId}
-                    onReact={react}
-                    onDismissCard={(taskId) => void dismissCard(taskId)}
-                    dismissingCardId={dismissingCardId}
-                    onReviewCard={(taskId, decision) =>
-                      void reviewCard(taskId, decision)
-                    }
-                    reviewingCardIds={reviewingCardIds}
-                    resolveAttachmentUrl={resolveAttachmentUrl}
-                    taskStatusByTaskId={taskStatusByTaskId}
-                    onRetrySend={retrySend}
-                    onStartBrief={() =>
-                      setComposerPrefill((current) => ({
-                        text: FIRST_TEAM_BRIEF,
-                        revision: (current?.revision ?? 0) + 1,
-                      }))
-                    }
-                    onAddPeople={() => setMembersOpen(true)}
-                    now={now}
-                    askerNames={askerNames}
-                    decidingApprovals={decidingApprovals}
-                    failedApprovals={failedApprovals}
-                    onDecideApproval={onDecideApproval}
-                    onRedeemBudgetPause={(agentId, noticeMessageId) =>
-                      void redeemBudgetPause(agentId, noticeMessageId)
-                    }
-                    redeemingBudgetPauseAgent={redeemingBudgetPauseAgent}
-                    latestBudgetPauseMessageIdByAgent={
-                      budgetPauseMessageIdByAgent
-                    }
-                  />
+                <MessageTimeline
+                  channel={channel}
+                  items={items}
+                  episodeTurn={episodeTurn}
+                  cognition={cognition}
+                  historyPending={historyPending}
+                  openThreadId={openThreadId}
+                  // An open turn keeps the row up after the POST has resolved, and
+                  // puts it back on a console that reloaded mid-turn (#983).
+                  // `!openThreadId` used to be here, blanking the channel's row for
+                  // every turn whenever any thread was open. `openTurn` now
+                  // excludes the open thread's own turn, so the row can stay for
+                  // the work that is genuinely the channel's.
+                  typing={sending || !!openTurn}
+                  queued={!!openTurn?.queued}
+                  liveSteps={openThreadId ? undefined : liveSteps}
+                  // NOT excluded when a thread is open: these rows render inside
+                  // their own message rather than as one strip for the channel, so
+                  // there is no ambiguity about which turn they describe — which is
+                  // the whole reason `liveSteps` above is withheld.
+                  liveStepsByMessage={liveStepsByMessage}
+                  // Thread-panel receipts are out of v1 (issue #1934): excluded here
+                  // the same way `liveSteps` is when a thread is open.
+                  receipt={openThreadId ? undefined : receipt}
+                  // Who the host expects to answer, for the leg that has no
+                  // receipt to read: a reload keeps the open-turn row and
+                  // nothing else, and the row is what carries this.
+                  turnAgentId={openTurn?.agentId}
+                  agentNames={agentNames}
+                  onOpenThread={setOpenThreadId}
+                  onReact={react}
+                  onDismissCard={(taskId) => void dismissCard(taskId)}
+                  dismissingCardId={dismissingCardId}
+                  onReviewCard={(taskId, decision) => void reviewCard(taskId, decision)}
+                  reviewingCardIds={reviewingCardIds}
+                  resolveAttachmentUrl={resolveAttachmentUrl}
+                  taskStatusByTaskId={taskStatusByTaskId}
+                  onRetrySend={retrySend}
+                  onStartBrief={() =>
+                    setComposerPrefill((current) => ({
+                      text: FIRST_TEAM_BRIEF,
+                      revision: (current?.revision ?? 0) + 1,
+                    }))
+                  }
+                  onAddPeople={() => setMembersOpen(true)}
+                  now={now}
+                  askerNames={askerNames}
+                  decidingApprovals={decidingApprovals}
+                  failedApprovals={failedApprovals}
+                  onDecideApproval={onDecideApproval}
+                  onRedeemBudgetPause={(agentId, noticeMessageId) =>
+                    void redeemBudgetPause(agentId, noticeMessageId)
+                  }
+                  redeemingBudgetPauseAgent={redeemingBudgetPauseAgent}
+                  latestBudgetPauseMessageIdByAgent={budgetPauseMessageIdByAgent}
+                />
                 )}
                 {budgetProximity && (
                   <p
@@ -3094,9 +2964,7 @@ export function RoomView({
                     className="flex shrink-0 items-center gap-1.5 border-t border-status-blocked/30 bg-status-blocked-soft px-3 py-1.5 text-xs text-status-blocked-text"
                   >
                     <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
-                    <span className="min-w-0 flex-1">
-                      {budgetProximity.message}
-                    </span>
+                    <span className="min-w-0 flex-1">{budgetProximity.message}</span>
                     {onDismissBudgetProximity && (
                       <button
                         type="button"
@@ -3115,12 +2983,9 @@ export function RoomView({
                   >
                     <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
                     <span className="min-w-0">
-                      <span className="font-medium text-foreground">
-                        {consoleOnlyMember}
-                      </span>{" "}
-                      only exists in this console — the company has no such
-                      agent, so nobody answers here. The transcript is still
-                      saved and survives a reload.
+                      <span className="font-medium text-foreground">{consoleOnlyMember}</span> only
+                      exists in this console — the company has no such agent, so nobody answers
+                      here. The transcript is still saved and survives a reload.
                     </span>
                   </p>
                 )}
@@ -3131,13 +2996,9 @@ export function RoomView({
                   >
                     <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
                     <span className="min-w-0">
-                      The{" "}
-                      <span className="font-medium text-foreground">
-                        Operator
-                      </span>{" "}
-                      channel is a read-only feed of automation reports and
-                      notifications — a scannable “what happened” view. There is
-                      nothing to reply to here.
+                      The <span className="font-medium text-foreground">Operator</span> channel is a
+                      read-only feed of automation reports and notifications — a scannable “what
+                      happened” view. There is nothing to reply to here.
                     </span>
                   </p>
                 )}
@@ -3205,118 +3066,108 @@ export function RoomView({
                     immediately above the composer wherever the composer happens
                     to be, with no second number to keep in step. */}
                 <div className="relative shrink-0">
-                  {echoing && (
-                    <p
-                      role="status"
-                      data-testid="chat-cognition-banner"
-                      // Hovering over the composer, not stacked above it.
-                      //
-                      // It was a full-bleed strip in the flow — `border-t`, square
-                      // corners, edge to edge — which made it look like a
-                      // permanent part of the composer's chrome, so an operator
-                      // read it once as furniture and stopped seeing it. It is a
-                      // *condition*, and conditions in this console are cards that
-                      // sit on top of things.
-                      //
-                      // `bottom-full mb-2` lifts it clear of the composer's top
-                      // edge; `inset-x-3` insets it from both sides so it reads as
-                      // an object on the pane rather than another band across it.
-                      // It overlaps the last line of the transcript rather than
-                      // displacing it — which is the trade, and the right one: the
-                      // transcript can be scrolled, and this cannot be missed.
-                      //
-                      // `pointer-events-none` on the box with `pointer-events-auto`
-                      // back on the link inside it, so hovering the strip does not
-                      // steal a click meant for the message underneath while the
-                      // one thing here that IS clickable still works.
-                      className="pointer-events-none absolute inset-x-3 bottom-full z-10 mb-2 flex items-start gap-1.5 rounded-lg border border-chrome-border bg-popover px-3 py-2 text-xs text-muted-foreground shadow-md [&_a]:pointer-events-auto"
-                    >
-                      <TriangleAlert
-                        className="size-3.5 shrink-0"
-                        aria-hidden
-                      />
-                      <span className="min-w-0">
-                        {cognition === "unconfigured" && (
-                          <>
-                            <span className="font-medium text-foreground">
-                              Agents can&apos;t think yet.
-                            </span>{" "}
-                            This company has no model configured, so the replies
-                            in this conversation come from the offline echo
-                            brain rather than the agent they appear under.
-                            Choose a provider in{" "}
-                            <a
-                              className="font-medium text-foreground transition-opacity hover:opacity-80"
-                              href={connectionsHref("inference")}
-                            >
-                              Connections → API Keys → LLM
-                            </a>
-                            .
-                          </>
-                        )}
-                        {/* A provider is configured and resolves; the runtime just
+                {echoing && (
+                  <p
+                    role="status"
+                    data-testid="chat-cognition-banner"
+                    // Hovering over the composer, not stacked above it.
+                    //
+                    // It was a full-bleed strip in the flow — `border-t`, square
+                    // corners, edge to edge — which made it look like a
+                    // permanent part of the composer's chrome, so an operator
+                    // read it once as furniture and stopped seeing it. It is a
+                    // *condition*, and conditions in this console are cards that
+                    // sit on top of things.
+                    //
+                    // `bottom-full mb-2` lifts it clear of the composer's top
+                    // edge; `inset-x-3` insets it from both sides so it reads as
+                    // an object on the pane rather than another band across it.
+                    // It overlaps the last line of the transcript rather than
+                    // displacing it — which is the trade, and the right one: the
+                    // transcript can be scrolled, and this cannot be missed.
+                    //
+                    // `pointer-events-none` on the box with `pointer-events-auto`
+                    // back on the link inside it, so hovering the strip does not
+                    // steal a click meant for the message underneath while the
+                    // one thing here that IS clickable still works.
+                    className="pointer-events-none absolute inset-x-3 bottom-full z-10 mb-2 flex items-start gap-1.5 rounded-lg border border-chrome-border bg-popover px-3 py-2 text-xs text-muted-foreground shadow-md [&_a]:pointer-events-auto"
+                  >
+                    <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
+                    <span className="min-w-0">
+                      {cognition === "unconfigured" && (
+                        <>
+                          <span className="font-medium text-foreground">
+                            Agents can&apos;t think yet.
+                          </span>{" "}
+                          This company has no model configured, so the replies in this
+                          conversation come from the offline echo brain rather than the agent
+                          they appear under. Choose a provider in{" "}
+                          <a
+                            className="font-medium text-foreground transition-opacity hover:opacity-80"
+                            href={connectionsHref("inference")}
+                          >
+                            Connections → API Keys → LLM
+                          </a>
+                          .
+                        </>
+                      )}
+                      {/* A provider is configured and resolves; the runtime just
                           predates it. Saying "no model configured" here sends an
                           operator who did exactly the right thing back to redo it,
                           which is why this is its own state. The link goes to the
                           card that owns the restart — and stops there, because
                           whether a restart can be performed in place is that card's
                           fact to report (#1736), not a promise to make from here. */}
-                        {cognition === "restart-required" && (
-                          <>
-                            <span className="font-medium text-foreground">
-                              Agents can&apos;t think yet — the model isn&apos;t
-                              live.
-                            </span>{" "}
-                            A provider is configured, but this company&apos;s
-                            runtime was built before it was saved, so the
-                            replies in this conversation still come from the
-                            offline echo brain rather than the agent they appear
-                            under. Finish the switch in{" "}
-                            <a
-                              className="font-medium text-foreground transition-opacity hover:opacity-80"
-                              href={connectionsHref("inference")}
-                            >
-                              Connections → API Keys → LLM
-                            </a>
-                            .
-                          </>
-                        )}
-                        {cognition === "unavailable" && (
-                          <>
-                            <span className="font-medium text-foreground">
-                              This host cannot reach a model — no agent harness
-                              is available.
-                            </span>{" "}
-                            The replies in this conversation come from the
-                            offline echo brain rather than the agent they appear
-                            under. No setting changes that: it takes a host
-                            built and started with the harness.
-                          </>
-                        )}
-                        {/* The host is on the echo brain and cannot say why: it could
+                      {cognition === "restart-required" && (
+                        <>
+                          <span className="font-medium text-foreground">
+                            Agents can&apos;t think yet — the model isn&apos;t live.
+                          </span>{" "}
+                          A provider is configured, but this company&apos;s runtime was built before
+                          it was saved, so the replies in this conversation still come from the
+                          offline echo brain rather than the agent they appear under. Finish
+                          the switch in{" "}
+                          <a
+                            className="font-medium text-foreground transition-opacity hover:opacity-80"
+                            href={connectionsHref("inference")}
+                          >
+                            Connections → API Keys → LLM
+                          </a>
+                          .
+                        </>
+                      )}
+                      {cognition === "unavailable" && (
+                        <>
+                          <span className="font-medium text-foreground">
+                            This host cannot reach a model — no agent harness is available.
+                          </span>{" "}
+                          The replies in this conversation come from the offline echo brain
+                          rather than the agent they appear under. No setting changes that:
+                          it takes a host built and started with the harness.
+                        </>
+                      )}
+                      {/* The host is on the echo brain and cannot say why: it could
                           not read this company's inference configuration. Names no
                           remedy on purpose — an unreadable config is no evidence
                           that saving one would help, which is the same #266
                           doctrine that stops the automation-run route answering
                           `inference_required` in this state. A settings link here
                           would be the switch that does nothing, one more time. */}
-                        {cognition === "undetermined" && (
-                          <>
-                            <span className="font-medium text-foreground">
-                              Agents can&apos;t think, and this host can&apos;t
-                              say why.
-                            </span>{" "}
-                            Its inference configuration could not be read, so
-                            the replies in this conversation come from the
-                            offline echo brain rather than the agent they appear
-                            under. Until the host can read that configuration,
-                            saving a provider is not known to help.
-                          </>
-                        )}
-                      </span>
-                    </p>
-                  )}
-                  {/* No composer at all on a read-only channel, rather than a disabled
+                      {cognition === "undetermined" && (
+                        <>
+                          <span className="font-medium text-foreground">
+                            Agents can&apos;t think, and this host can&apos;t say why.
+                          </span>{" "}
+                          Its inference configuration could not be read, so the replies in this
+                          conversation come from the offline echo brain rather than the agent
+                          they appear under. Until the host can read that configuration, saving a
+                          provider is not known to help.
+                        </>
+                      )}
+                    </span>
+                  </p>
+                )}
+                {/* No composer at all on a read-only channel, rather than a disabled
                     one. A disabled control is still a claim that the action exists:
                     the strip above says "there is nothing to reply to here", and a
                     greyed-out reply box with a Send button and an "Enter to send"
@@ -3340,53 +3191,52 @@ export function RoomView({
                     DOM gets nothing — no textarea, no Send, no `data-tour` anchor —
                     while the draft survives. See that prop's doc for why a
                     `display:none` wrapper is not the same thing. */}
-                  {/* Above the composer, and outside the read-only branch: a channel
+                {/* Above the composer, and outside the read-only branch: a channel
                     nobody may post in is still a place the company's runs are
                     visible, and stopping one is not posting. */}
-                  {inflightRuns !== undefined &&
-                    onInflightSteered !== undefined && (
-                      <InflightRunBar
-                        client={client}
-                        company={company}
-                        runs={inflightRuns}
-                        onSteered={onInflightSteered}
-                      />
-                    )}
-                  <MessageComposer
-                    // Passed straight through from `AppShell` — see the prop's
-                    // note on `MessageComposer`. This view learns nothing about
-                    // policy; it only knows where the control goes.
-                    autonomy={autonomy}
-                    suppressed={readOnly}
-                    placeholder={`Message ${channelTitle(channel)}`}
-                    disabled={sending}
-                    prefill={composerPrefill ?? undefined}
-                    // Not voided (unlike the thread composer below): the composer
-                    // awaits this to know whether an attachment it carried actually
-                    // journaled, so it can clean up one that did not (codex review
-                    // finding on #1682) — see `deleteAttachment` and `send`'s doc.
-                    onSend={(text, intent, attachments, mentions) =>
-                      send(text, intent, undefined, attachments, mentions)
-                    }
-                    // Issue #1682: only the channel/DM composer attaches — the paperclip
-                    // is present exactly because this prop is.
-                    uploadAttachment={uploadAttachment}
-                    // Cleans up a staged upload that never got sent (codex review
-                    // finding on #1682) — see `deleteAttachment`.
-                    deleteAttachment={deleteAttachment}
-                    // Every keystroke asks; the hook throttles to one ping per
-                    // channel per few seconds and skips entirely while the event
-                    // stream is down.
-                    onTyping={() => onTyping?.(active.id)}
-                    // Channel *and* DM composers offer "just chatting" / "do it once" /
-                    // "build me the workflow" (issues #580, #845, #1152) — see
-                    // `offersDeliverableChoice`, which owns the rule and is unchanged:
-                    // the new position inherits the same channel+DM gating. Only the
-                    // thread and copilot composers below go without.
-                    deliverableChoice={offersDeliverableChoice(active.kind)}
-                    mentionables={mentionables}
-                    channelMemberIds={inChannel?.map((m) => m.id)}
+                {inflightRuns !== undefined && onInflightSteered !== undefined && (
+                  <InflightRunBar
+                    client={client}
+                    company={company}
+                    runs={inflightRuns}
+                    onSteered={onInflightSteered}
                   />
+                )}
+                <MessageComposer
+                  // Passed straight through from `AppShell` — see the prop's
+                  // note on `MessageComposer`. This view learns nothing about
+                  // policy; it only knows where the control goes.
+                  autonomy={autonomy}
+                  suppressed={readOnly}
+                  placeholder={`Message ${channelTitle(channel)}`}
+                  disabled={sending}
+                  prefill={composerPrefill ?? undefined}
+                  // Not voided (unlike the thread composer below): the composer
+                  // awaits this to know whether an attachment it carried actually
+                  // journaled, so it can clean up one that did not (codex review
+                  // finding on #1682) — see `deleteAttachment` and `send`'s doc.
+                  onSend={(text, intent, attachments, mentions) =>
+                    send(text, intent, undefined, attachments, mentions)
+                  }
+                  // Issue #1682: only the channel/DM composer attaches — the paperclip
+                  // is present exactly because this prop is.
+                  uploadAttachment={uploadAttachment}
+                  // Cleans up a staged upload that never got sent (codex review
+                  // finding on #1682) — see `deleteAttachment`.
+                  deleteAttachment={deleteAttachment}
+                  // Every keystroke asks; the hook throttles to one ping per
+                  // channel per few seconds and skips entirely while the event
+                  // stream is down.
+                  onTyping={() => onTyping?.(active.id)}
+                  // Channel *and* DM composers offer "just chatting" / "do it once" /
+                  // "build me the workflow" (issues #580, #845, #1152) — see
+                  // `offersDeliverableChoice`, which owns the rule and is unchanged:
+                  // the new position inherits the same channel+DM gating. Only the
+                  // thread and copilot composers below go without.
+                  deliverableChoice={offersDeliverableChoice(active.kind)}
+                  mentionables={mentionables}
+                  channelMemberIds={inChannel?.map((m) => m.id)}
+                />
                 </div>
               </div>
 
@@ -3407,9 +3257,7 @@ export function RoomView({
                   readOnly={readOnly}
                   reviewing={threadReviewing}
                   reviewTaskId={threadReviewAnchor?.taskId}
-                  onReviewCard={(taskId, decision) =>
-                    void reviewCard(taskId, decision)
-                  }
+                  onReviewCard={(taskId, decision) => void reviewCard(taskId, decision)}
                   reviewInFlight={
                     threadReviewAnchor !== undefined &&
                     reviewingCardIds.has(threadReviewAnchor.taskId)
@@ -3423,13 +3271,7 @@ export function RoomView({
                     // state or call `client.chat` for a channel the server's
                     // read-only guard will refuse anyway (issue #1757).
                     if (readOnly) return;
-                    void send(
-                      text,
-                      undefined,
-                      threadReviewAnchor?.anchorId ?? parent.id,
-                      undefined,
-                      mentions,
-                    );
+                    void send(text, undefined, threadReviewAnchor?.anchorId ?? parent.id, undefined, mentions);
                   }}
                   onClose={() => setOpenThreadId(null)}
                   typingNames={resolveTypingNames?.(active.id, parent.id) ?? []}
@@ -3444,9 +3286,7 @@ export function RoomView({
                     void redeemBudgetPause(agentId, noticeMessageId)
                   }
                   redeemingBudgetPauseAgent={redeemingBudgetPauseAgent}
-                  latestBudgetPauseMessageIdByAgent={
-                    budgetPauseMessageIdByAgent
-                  }
+                  latestBudgetPauseMessageIdByAgent={budgetPauseMessageIdByAgent}
                 />
               )}
 
@@ -3461,9 +3301,7 @@ export function RoomView({
                     // are the channel's membership in the host's order, not a
                     // hierarchy, so badging [0] would state a rank nothing
                     // confers — the host's own `desk_lead` is `None` for it.
-                    activeIsDesk && !active.leadless
-                      ? active.memberIds?.[0]
-                      : undefined
+                    activeIsDesk && !active.leadless ? active.memberIds?.[0] : undefined
                   }
                   loading={loadingTeam}
                   fromHost={fromHost}
@@ -3474,9 +3312,7 @@ export function RoomView({
                   // (absent, never disabled — the rule `onManageDesk` below
                   // already follows for the same reason).
                   onAddExisting={
-                    activeIsDesk
-                      ? (agentId) => void addExistingMember(agentId)
-                      : undefined
+                    activeIsDesk ? (agentId) => void addExistingMember(agentId) : undefined
                   }
                   onMessage={(m) => selectChannel(dmChannelId(m))}
                   /**
@@ -3532,9 +3368,7 @@ export function RoomView({
           // would keep fabricated rows in the rail — one of which could share
           // the new channel's very id — until a reload (codex on #1872).
           const desk = deskFromDto(dto);
-          setDesks((prev) =>
-            desksAreFallback.current ? [desk] : [...(prev ?? []), desk],
-          );
+          setDesks((prev) => (desksAreFallback.current ? [desk] : [...(prev ?? []), desk]));
           desksAreFallback.current = false;
           selectChannel(desk.id);
         }}
@@ -3701,8 +3535,8 @@ function RawTranscript({
       )}
       {load === "error" && (
         <p className="text-sm text-muted-foreground">
-          {agentName}&apos;s turns could not be read. They are still there —
-          this is a failed request, not an empty history.
+          {agentName}&apos;s turns could not be read. They are still there — this
+          is a failed request, not an empty history.
         </p>
       )}
       {load === "ready" && rows.length === 0 && (
