@@ -245,8 +245,9 @@ pub fn with_agent_marker(sentence: String, agent_id: &str) -> String {
 /// reason after it is `{err}` from a lane's own warm-up, free-form text that
 /// can carry a path, a command line or provider output, and chat is not where
 /// that belongs. The reason stays on the run record and in the logs. The
-/// no-engine shape keeps its tail, which is a fixed `unavailable` string the
-/// host wired itself, not a captured error.
+/// no-engine shape keeps its tail, which is an authored `unavailable` string,
+/// not a captured error — an invariant `harness/lanes.rs` holds by never
+/// interpolating a failure it caught into the reason it records.
 ///
 /// Idempotent by construction, which [`classify`] depends on: its own output
 /// is a sentence of exactly this shape — the cut form included, which is why

@@ -116,7 +116,13 @@ fn resolve_acp_engine(
             Arc::new(crate::harness::acp::run_turn::AcpRunTurn::new(agent).with_desks(desks))
                 as Arc<dyn RunTurn>
         })
-        .map_err(|error| format!("`{agent_id}` could not be started: {error}"))
+        .map_err(|error| {
+            // The reason travels into the router's sentence and from there into
+            // company chat, so it stays a fixed line; the adapter's own error can
+            // name a resolved binary path or its argv.
+            tracing::warn!(acp_agent = %agent_id, %error, "ACP adapter could not be started");
+            format!("its `{agent_id}` adapter could not be started on this host")
+        })
 }
 
 /// The `openhuman`-without-`acp` build: unconditionally unavailable, exactly
