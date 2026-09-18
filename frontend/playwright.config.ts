@@ -254,6 +254,14 @@ const composioEnv: Record<string, string> = managesComposio
   ? { TINYHUMANS_API_URL: `http://${COMPOSIO_FIXTURE_BIND}` }
   : {};
 
+/** Public browser analytics configuration exercised by the managed host. */
+const analyticsEnv: Record<string, string> = managesHost
+  ? {
+      OPENCOMPANY_DEPLOYMENT: "hosted-tenant",
+      OPENCOMPANY_ANALYTICS_ENDPOINT: "https://collector.example/api/track",
+    }
+  : {};
+
 /**
  * What a first-run run tells `test/e2e/host.sh` to serve.
  *
@@ -298,10 +306,15 @@ const eulerEnv: Record<string, string> =
       }
     : {};
 
-const passthrough = [...Object.keys(inferenceEnv), ...Object.keys(composioEnv)];
+const passthrough = [
+  ...Object.keys(inferenceEnv),
+  ...Object.keys(composioEnv),
+  ...Object.keys(analyticsEnv),
+];
 const hostEnv: Record<string, string> = {
   ...inferenceEnv,
   ...composioEnv,
+  ...analyticsEnv,
   ...firstRunEnv,
   ...eulerEnv,
   ...(passthrough.length > 0 ? { PW_HOST_PASSTHROUGH: passthrough.join(" ") } : {}),

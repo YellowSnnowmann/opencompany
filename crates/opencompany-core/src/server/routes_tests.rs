@@ -308,15 +308,15 @@ fn hosted_console_config_enables_openpanel_without_exposing_credentials() {
 }
 
 #[test]
-fn hosted_deployment_uses_tenant_id_only_without_an_explicit_mode() {
+fn hosted_deployment_accepts_either_hosted_signal() {
     assert!(hosted_deployment_from_values(Some("hosted-tenant"), None));
     assert!(hosted_deployment_from_values(None, Some("tenant-a")));
     assert!(hosted_deployment_from_values(Some("  "), Some("tenant-a")));
-    assert!(!hosted_deployment_from_values(
+    assert!(hosted_deployment_from_values(
         Some("self-hosted"),
         Some("tenant-a")
     ));
-    assert!(!hosted_deployment_from_values(
+    assert!(hosted_deployment_from_values(
         Some("other"),
         Some("tenant-a")
     ));
@@ -353,6 +353,58 @@ async fn console_config_route_returns_uncached_javascript() {
             .unwrap(),
         "no-store"
     );
+    assert_eq!(
+        body_text(response).await,
+        "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n"
+    );
+}
+
+#[tokio::test]
+async fn console_config_route_serves_only_safe_hosted_configuration() {
+    let env = crate::test_support::EnvVarGuard::capture(&[
+        "OPENCOMPANY_DEPLOYMENT",
+        "OPENCOMPANY_TENANT_ID",
+        "OPENCOMPANY_ANALYTICS",
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+    ]);
+    env.set("OPENCOMPANY_DEPLOYMENT", "hosted-tenant");
+    env.remove("OPENCOMPANY_TENANT_ID");
+    env.remove("OPENCOMPANY_ANALYTICS");
+    env.set(
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+        "https://collector.example/api/track",
+    );
+
+    let app = router_with_console(AppState::new(AppConfig::default()), None);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/opencompany-config.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        body_text(response).await,
+        "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},\
+{analytics:true,analyticsEndpoint:\"https://collector.example/api/track\"});\n"
+    );
+
+    env.set(
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+        "http://collector.example/api/track",
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/opencompany-config.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(
         body_text(response).await,
         "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n"

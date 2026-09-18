@@ -295,10 +295,10 @@ fn hosted_deployment() -> bool {
 }
 
 fn hosted_deployment_from_values(deployment: Option<&str>, tenant_id: Option<&str>) -> bool {
-    match deployment.map(str::trim).filter(|value| !value.is_empty()) {
-        Some(value) => value.eq_ignore_ascii_case("hosted-tenant"),
-        None => tenant_id.is_some_and(|value| !value.trim().is_empty()),
-    }
+    deployment
+        .map(str::trim)
+        .is_some_and(|value| value.eq_ignore_ascii_case("hosted-tenant"))
+        || tenant_id.is_some_and(|value| !value.trim().is_empty())
 }
 
 fn browser_analytics_enabled() -> bool {

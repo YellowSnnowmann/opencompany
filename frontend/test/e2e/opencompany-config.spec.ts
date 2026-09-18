@@ -20,7 +20,8 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
   );
   expect(configResponse.headers()["cache-control"]).toBe("no-store");
   expect(await configResponse.text()).toBe(
-    "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n",
+    'window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},' +
+      '{analytics:true,analyticsEndpoint:"https://collector.example/api/track"});\n',
   );
 
   await page.goto("/");
