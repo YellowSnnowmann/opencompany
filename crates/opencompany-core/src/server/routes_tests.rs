@@ -282,10 +282,10 @@ fn browser_analytics_config_accepts_only_plain_collector_urls() {
 #[test]
 fn hosted_console_config_enables_openpanel_without_exposing_credentials() {
     let script = render_console_config(Some("https://collector.example/api/track"), true, true);
-    assert!(script.contains("analytics:true"), "{script}");
-    assert!(
-        script.contains("https://collector.example/api/track"),
-        "{script}"
+    assert_eq!(
+        script,
+        "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},\
+{analytics:true,analyticsEndpoint:\"https://collector.example/api/track\"});\n"
     );
 
     for endpoint in [
