@@ -262,6 +262,14 @@ fn browser_analytics_config_accepts_only_plain_collector_urls() {
         "https://collector.example/api/track"
     ));
     assert!(is_public_browser_endpoint("http://localhost:3000/track"));
+    assert!(is_public_browser_endpoint("http://127.0.0.1:3000/track"));
+    assert!(is_public_browser_endpoint("http://[::1]:3000/track"));
+    assert!(!is_public_browser_endpoint(
+        "http://collector.example/api/track"
+    ));
+    assert!(!is_public_browser_endpoint(
+        "http://collector.internal/api/track"
+    ));
     assert!(!is_public_browser_endpoint(
         "https://user:secret@collector.example/api/track"
     ));
@@ -273,7 +281,7 @@ fn browser_analytics_config_accepts_only_plain_collector_urls() {
 
 #[test]
 fn hosted_console_config_enables_openpanel_without_exposing_credentials() {
-    let script = render_console_config(Some("https://collector.example/api/track"), true);
+    let script = render_console_config(Some("https://collector.example/api/track"), true, true);
     assert!(script.contains("analytics:true"), "{script}");
     assert!(
         script.contains("https://collector.example/api/track"),
@@ -284,14 +292,71 @@ fn hosted_console_config_enables_openpanel_without_exposing_credentials() {
         "https://user:secret@collector.example/api/track",
         "https://collector.example/api/track?token=secret",
     ] {
-        let script = render_console_config(Some(endpoint), true);
+        let script = render_console_config(Some(endpoint), true, true);
         assert!(!script.contains("analytics:true"), "{script}");
         assert!(!script.contains("secret"), "{script}");
     }
 
     assert!(
-        !render_console_config(Some("https://collector.example/api/track"), false)
+        !render_console_config(Some("https://collector.example/api/track"), false, true)
             .contains("analytics:true")
+    );
+    assert!(
+        !render_console_config(Some("https://collector.example/api/track"), true, false)
+            .contains("analytics:true")
+    );
+}
+
+#[test]
+fn hosted_deployment_uses_tenant_id_only_without_an_explicit_mode() {
+    assert!(hosted_deployment_from_values(Some("hosted-tenant"), None));
+    assert!(hosted_deployment_from_values(None, Some("tenant-a")));
+    assert!(hosted_deployment_from_values(Some("  "), Some("tenant-a")));
+    assert!(!hosted_deployment_from_values(
+        Some("self-hosted"),
+        Some("tenant-a")
+    ));
+    assert!(!hosted_deployment_from_values(
+        Some("other"),
+        Some("tenant-a")
+    ));
+    assert!(!hosted_deployment_from_values(None, Some("  ")));
+    assert!(!hosted_deployment_from_values(None, None));
+}
+
+#[tokio::test]
+async fn console_config_route_returns_uncached_javascript() {
+    let app = router_with_console(AppState::new(AppConfig::default()), None);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/opencompany-config.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .unwrap(),
+        "application/javascript; charset=utf-8"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::CACHE_CONTROL)
+            .unwrap(),
+        "no-store"
+    );
+    assert!(
+        body_text(response)
+            .await
+            .starts_with("window.OPENCOMPANY_CONFIG=")
     );
 }
 

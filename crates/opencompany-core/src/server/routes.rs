@@ -228,7 +228,11 @@ async fn console_config() -> Response {
     use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderValue};
 
     let endpoint = std::env::var("OPENCOMPANY_ANALYTICS_ENDPOINT").ok();
-    let body = render_console_config(endpoint.as_deref(), hosted_deployment());
+    let body = render_console_config(
+        endpoint.as_deref(),
+        hosted_deployment(),
+        browser_analytics_enabled(),
+    );
     let mut response = (
         [(CONTENT_TYPE, "application/javascript; charset=utf-8")],
         body,
@@ -240,9 +244,9 @@ async fn console_config() -> Response {
     response
 }
 
-fn render_console_config(endpoint: Option<&str>, hosted: bool) -> String {
+fn render_console_config(endpoint: Option<&str>, hosted: bool, analytics_enabled: bool) -> String {
     match (
-        hosted,
+        hosted && analytics_enabled,
         endpoint.filter(|endpoint| is_public_browser_endpoint(endpoint)),
     ) {
         (true, Some(endpoint)) => format!(
@@ -262,19 +266,40 @@ fn is_public_browser_endpoint(endpoint: &str) -> bool {
     };
     matches!(url.scheme(), "https" | "http")
         && url.host().is_some()
+        && (url.scheme() == "https" || is_loopback_host(url.host_str()))
         && url.username().is_empty()
         && url.password().is_none()
         && url.query().is_none()
         && url.fragment().is_none()
 }
 
+fn is_loopback_host(host: Option<&str>) -> bool {
+    host.is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|address| address.is_loopback())
+    })
+}
+
 fn hosted_deployment() -> bool {
-    std::env::var("OPENCOMPANY_DEPLOYMENT")
+    hosted_deployment_from_values(
+        std::env::var("OPENCOMPANY_DEPLOYMENT").ok().as_deref(),
+        std::env::var("OPENCOMPANY_TENANT_ID").ok().as_deref(),
+    )
+}
+
+fn hosted_deployment_from_values(deployment: Option<&str>, tenant_id: Option<&str>) -> bool {
+    match deployment.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => value.eq_ignore_ascii_case("hosted-tenant"),
+        None => tenant_id.is_some_and(|value| !value.trim().is_empty()),
+    }
+}
+
+fn browser_analytics_enabled() -> bool {
+    !std::env::var("OPENCOMPANY_ANALYTICS")
         .ok()
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case("hosted-tenant"))
-        || std::env::var("OPENCOMPANY_TENANT_ID")
-            .ok()
-            .is_some_and(|value| !value.trim().is_empty())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("off"))
 }
 
 /// Serves the Axum application on the configured bind address.
