@@ -116,6 +116,14 @@ const EULER_SPEC = /euler-live\.spec\.ts$/;
  */
 const VISUAL_SPEC = /visual\.spec\.ts$/;
 
+/**
+ * The runtime-config spec runs once with the ordinary silent host and once
+ * with a hosted, explicitly opted-in host. The second run selects only this
+ * spec so unrelated E2E coverage never inherits analytics configuration.
+ */
+const ANALYTICS_SPEC = /opencompany-config\.spec\.ts$/;
+const ANALYTICS = process.env.PW_ANALYTICS === "1";
+
 const providedBaseURL = process.env.PW_BASE_URL;
 
 /**
@@ -254,8 +262,8 @@ const composioEnv: Record<string, string> = managesComposio
   ? { TINYHUMANS_API_URL: `http://${COMPOSIO_FIXTURE_BIND}` }
   : {};
 
-/** Public browser analytics configuration exercised by the managed host. */
-const analyticsEnv: Record<string, string> = managesHost
+/** Public browser analytics configuration exercised by its dedicated run. */
+const analyticsEnv: Record<string, string> = managesHost && ANALYTICS
   ? {
       OPENCOMPANY_DEPLOYMENT: "hosted-tenant",
       OPENCOMPANY_ANALYTICS: "on",
@@ -403,7 +411,9 @@ export default defineConfig({
   // a different reason — its host is an ordinary one, but a run that mixed
   // pixel comparison in with the rest would attribute a page still settling to
   // whichever spec happened to be next.
-  ...(FIRST_RUN
+  ...(ANALYTICS
+    ? { testMatch: ANALYTICS_SPEC }
+    : FIRST_RUN
     ? { testMatch: FIRST_RUN_SPEC }
     : EULER
       ? { testMatch: EULER_SPEC }

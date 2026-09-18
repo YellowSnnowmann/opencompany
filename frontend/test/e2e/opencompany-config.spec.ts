@@ -20,10 +20,12 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
     "application/javascript",
   );
   expect(configResponse.headers()["cache-control"]).toBe("no-store");
-  expect(await configResponse.text()).toBe(
-    'window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},' +
-      '{analytics:true,analyticsEndpoint:"https://collector.example/"});\n',
-  );
+  const expectedConfig =
+    process.env.PW_ANALYTICS === "1"
+      ? 'window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},' +
+        '{analytics:true,analyticsEndpoint:"https://collector.example/"});\n'
+      : "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n";
+  expect(await configResponse.text()).toBe(expectedConfig);
 
   await page.goto("/");
   await expect(page).toHaveTitle("OpenCompany Console");
