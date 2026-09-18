@@ -70,6 +70,9 @@ export async function silenceTour(page: Page) {
  */
 export async function openMainLine(page: Page) {
   await openChannel(page, "general");
+  await expect(
+    page.getByRole("complementary").first().getByRole("button", { name: "general" }),
+  ).toHaveCount(0);
 }
 
 /** Opens one desk channel by id in the chat workspace, and waits for the view. */

@@ -72,6 +72,17 @@ test("does not offer the built-in general channel by default", async ({ page }) 
   await expect(railRow(page, "general")).toHaveCount(0);
 });
 
+test("resolves the hidden general channel from its legacy deep link", async ({ page }) => {
+  await openChannel(page, ENGINEERING.id);
+  await expect(railRow(page, "general")).toHaveCount(0);
+
+  await openChannel(page, "general");
+  await expect(page).toHaveURL(/#\/chat\/general(?:[/?]|$)/);
+  await expect(page.getByRole("main")).toBeVisible();
+  await expect(page.getByPlaceholder(/^Message /)).toBeVisible();
+  await expect(railRow(page, "general")).toHaveCount(0);
+});
+
 /**
  * The three tests below find the reply to their own turn by the offline echo
  * brain's `You said: <text>` — which is exactly the right way to prove an SSE

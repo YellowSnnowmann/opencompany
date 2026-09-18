@@ -271,6 +271,41 @@ test("a card the orchestrator opens is chipped in chat, and survives a reload", 
   await expect(rehydrated).toHaveAttribute("href", href);
 });
 
+test("a persisted chat card is rendered and rehydrated on the default lane", async ({ page }) => {
+  test.skip(LIVE_BRAIN, "the live-brain lane covers the real spawn_task flow above");
+
+  const taskId = `default-lane-card-${Date.now()}`;
+  const href = `#/company/tasks/${taskId}`;
+  await page.route("**/chat/history?*", async (route) => {
+    const desk = new URL(route.request().url()).searchParams.get("desk");
+    if (desk !== "main") return route.continue();
+    return route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([
+        {
+          id: "default-lane-card-message",
+          channel: "main",
+          author: "orchestrator",
+          text: "I opened a card for this request.",
+          atMillis: Date.now(),
+          mine: false,
+          taskId,
+        },
+      ]),
+    });
+  });
+
+  await openThread(page, "general");
+  const chip = page.locator(`a[href="${href}"]`, { hasText: "Card opened" });
+  await expect(chip).toBeVisible({ timeout: 30_000 });
+  await expect(chip).toHaveAttribute("href", href);
+
+  await page.reload();
+  await expect(chip).toBeVisible({ timeout: 30_000 });
+  await expect(chip).toHaveAttribute("href", href);
+});
+
 /**
  * **The dismissal, end to end, including the reload (issue #984).**
  *
