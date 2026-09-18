@@ -258,6 +258,7 @@ const composioEnv: Record<string, string> = managesComposio
 const analyticsEnv: Record<string, string> = managesHost
   ? {
       OPENCOMPANY_DEPLOYMENT: "hosted-tenant",
+      OPENCOMPANY_ANALYTICS: "on",
       OPENCOMPANY_ANALYTICS_ENDPOINT: "https://collector.example/api/track",
     }
   : {};

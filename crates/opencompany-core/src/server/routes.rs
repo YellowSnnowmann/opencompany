@@ -247,7 +247,7 @@ async fn console_config() -> Response {
 fn render_console_config(endpoint: Option<&str>, hosted: bool, analytics_enabled: bool) -> String {
     match (
         hosted && analytics_enabled,
-        endpoint.filter(|endpoint| is_public_browser_endpoint(endpoint)),
+        endpoint.and_then(public_browser_endpoint),
     ) {
         (true, Some(endpoint)) => format!(
             "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{{}},{{analytics:true,analyticsEndpoint:{}}});\n",
@@ -260,17 +260,26 @@ fn render_console_config(endpoint: Option<&str>, hosted: bool, analytics_enabled
 /// Browser configuration must never turn a host-only credential URL into a
 /// public script.  OpenPanel credentials belong in headers, so a URL with
 /// userinfo, query parameters, or a fragment is neither needed nor safe here.
-fn is_public_browser_endpoint(endpoint: &str) -> bool {
-    let Ok(url) = url::Url::parse(endpoint) else {
-        return false;
+fn public_browser_endpoint(endpoint: &str) -> Option<String> {
+    let Ok(mut url) = url::Url::parse(endpoint) else {
+        return None;
     };
-    matches!(url.scheme(), "https" | "http")
+    let safe = matches!(url.scheme(), "https" | "http")
         && url.host().is_some()
         && (url.scheme() == "https" || is_loopback_host(url.host_str()))
         && url.username().is_empty()
         && url.password().is_none()
         && url.query().is_none()
-        && url.fragment().is_none()
+        && url.fragment().is_none();
+    if !safe {
+        return None;
+    }
+
+    // The host transport accepts an exact ingestion URL, whose path may be a
+    // credential. The browser only needs the public collector origin, so never
+    // serialize that path into this unauthenticated response.
+    url.set_path("");
+    Some(url.into())
 }
 
 fn is_loopback_host(host: Option<&str>) -> bool {
@@ -306,15 +315,9 @@ fn browser_analytics_enabled() -> bool {
 }
 
 fn browser_analytics_enabled_from_value(value: Option<&str>) -> bool {
-    match value.map(str::trim).filter(|value| !value.is_empty()) {
-        None => true,
-        Some(value)
-            if ["on", "true", "1", "yes"].contains(&value.to_ascii_lowercase().as_str()) =>
-        {
-            true
-        }
-        Some(_) => false,
-    }
+    value
+        .map(str::trim)
+        .is_some_and(|value| value.eq_ignore_ascii_case("on"))
 }
 
 /// Serves the Axum application on the configured bind address.

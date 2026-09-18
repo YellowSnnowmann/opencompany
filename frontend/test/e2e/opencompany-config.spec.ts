@@ -4,6 +4,7 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
   page,
   request,
 }) => {
+  test.skip(Boolean(process.env.PW_BASE_URL), "requires the Playwright-managed host configuration");
   const [indexResponse, configResponse] = await Promise.all([
     request.get("/"),
     request.get("/opencompany-config.js"),
@@ -21,7 +22,7 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
   expect(configResponse.headers()["cache-control"]).toBe("no-store");
   expect(await configResponse.text()).toBe(
     'window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},' +
-      '{analytics:true,analyticsEndpoint:"https://collector.example/api/track"});\n',
+      '{analytics:true,analyticsEndpoint:"https://collector.example/"});\n',
   );
 
   await page.goto("/");

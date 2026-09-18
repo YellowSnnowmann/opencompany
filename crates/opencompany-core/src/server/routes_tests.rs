@@ -258,25 +258,29 @@ fn reserved_path_matches_prefixes_and_subpaths_only() {
 
 #[test]
 fn browser_analytics_config_accepts_only_plain_collector_urls() {
-    assert!(is_public_browser_endpoint(
-        "https://collector.example/api/track"
-    ));
-    assert!(is_public_browser_endpoint("http://localhost:3000/track"));
-    assert!(is_public_browser_endpoint("http://127.0.0.1:3000/track"));
-    assert!(is_public_browser_endpoint("http://[::1]:3000/track"));
-    assert!(!is_public_browser_endpoint(
+    assert_eq!(
+        public_browser_endpoint("https://collector.example/api/track").as_deref(),
+        Some("https://collector.example/")
+    );
+    assert_eq!(
+        public_browser_endpoint("http://localhost:3000/track").as_deref(),
+        Some("http://localhost:3000/")
+    );
+    assert!(public_browser_endpoint("http://127.0.0.1:3000/track").is_some());
+    assert!(public_browser_endpoint("http://[::1]:3000/track").is_some());
+    assert!(public_browser_endpoint(
         "http://collector.example/api/track"
-    ));
-    assert!(!is_public_browser_endpoint(
+    ).is_none());
+    assert!(public_browser_endpoint(
         "http://collector.internal/api/track"
-    ));
-    assert!(!is_public_browser_endpoint(
+    ).is_none());
+    assert!(public_browser_endpoint(
         "https://user:secret@collector.example/api/track"
-    ));
-    assert!(!is_public_browser_endpoint(
+    ).is_none());
+    assert!(public_browser_endpoint(
         "https://collector.example/api/track?token=secret"
-    ));
-    assert!(!is_public_browser_endpoint("not a URL"));
+    ).is_none());
+    assert!(public_browser_endpoint("not a URL").is_none());
 }
 
 #[test]
@@ -285,7 +289,7 @@ fn hosted_console_config_enables_openpanel_without_exposing_credentials() {
     assert_eq!(
         script,
         "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},\
-{analytics:true,analyticsEndpoint:\"https://collector.example/api/track\"});\n"
+{analytics:true,analyticsEndpoint:\"https://collector.example/\"});\n"
     );
 
     for endpoint in [
@@ -326,10 +330,16 @@ fn hosted_deployment_accepts_either_hosted_signal() {
 
 #[test]
 fn browser_analytics_switch_fails_closed_on_unrecognised_values() {
-    for value in [None, Some(""), Some("  "), Some("on"), Some("YES")] {
+    for value in [Some("on"), Some(" ON ")] {
         assert!(browser_analytics_enabled_from_value(value), "{value:?}");
     }
     for value in [
+        None,
+        Some(""),
+        Some("  "),
+        Some("YES"),
+        Some("true"),
+        Some("1"),
         Some("off"),
         Some("FALSE"),
         Some("0"),
@@ -385,7 +395,7 @@ async fn console_config_route_serves_only_safe_hosted_configuration() {
     ]);
     env.set("OPENCOMPANY_DEPLOYMENT", "hosted-tenant");
     env.remove("OPENCOMPANY_TENANT_ID");
-    env.remove("OPENCOMPANY_ANALYTICS");
+    env.set("OPENCOMPANY_ANALYTICS", "on");
     env.set(
         "OPENCOMPANY_ANALYTICS_ENDPOINT",
         "https://collector.example/api/track",
@@ -405,7 +415,7 @@ async fn console_config_route_serves_only_safe_hosted_configuration() {
     assert_eq!(
         body_text(response).await,
         "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},\
-{analytics:true,analyticsEndpoint:\"https://collector.example/api/track\"});\n"
+{analytics:true,analyticsEndpoint:\"https://collector.example/\"});\n"
     );
 
     env.set(
