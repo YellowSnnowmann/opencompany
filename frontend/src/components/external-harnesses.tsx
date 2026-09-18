@@ -66,9 +66,12 @@ export function ExternalHarnesses({ client, company }: Props) {
    * company had already populated its rows and hide a panel that was working.
    */
   const generation = useRef(0);
+  /** The company `declared` currently answers for, so a company switch can drop stale rows. */
+  const declaredFor = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     const run = ++generation.current;
+    if (declaredFor.current !== company) setDeclared(null);
     setFetching(true);
     try {
       // The company half is required; the machine half is the survey's, and
@@ -76,6 +79,7 @@ export function ExternalHarnesses({ client, company }: Props) {
       const next: HarnessDto[] = await client.listHarnesses(company);
       if (generation.current !== run) return;
       setDeclared(next);
+      declaredFor.current = company;
       setUnsupported(false);
       setFetching(false);
     } catch (error) {

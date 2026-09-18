@@ -120,6 +120,37 @@ describe("External harnesses panel", () => {
     expect(rows()).toHaveLength(1);
   });
 
+  it("does not keep showing the previous company's rows while the next company's fetch is in flight", async () => {
+    let resolveSecond: ((list: HarnessDto[]) => void) | null = null;
+    const listHarnesses = vi
+      .fn<() => Promise<HarnessDto[]>>()
+      .mockImplementationOnce(async () => [harness({ id: "claude" })])
+      .mockImplementationOnce(
+        () =>
+          new Promise<HarnessDto[]>((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const client = fakeClient(listHarnesses);
+
+    await show(client, "first");
+    expect(rows()).toHaveLength(1);
+
+    await show(client, "second");
+    expect(
+      rows(),
+      "a company switch must not go on rendering the previous company's rows while its own fetch is in flight",
+    ).toHaveLength(0);
+
+    await act(async () => {
+      resolveSecond?.([harness({ id: "codex" })]);
+      await Promise.resolve();
+    });
+    await act(async () => {});
+
+    expect(rows()).toHaveLength(1);
+  });
+
   it("holds Check again until the rows it is fetching are on screen", async () => {
     let settle: ((list: HarnessDto[]) => void) | null = null;
     const client = fakeClient(
