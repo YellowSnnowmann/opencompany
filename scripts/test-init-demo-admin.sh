@@ -4,6 +4,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 TMP_DIR=$(mktemp -d)
+TEST_PROJECT="opencompany-init-demo-test-$$"
 trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
 cat >"${TMP_DIR}/docker" <<'EOF'
@@ -26,7 +27,8 @@ EOF
 chmod +x "${TMP_DIR}/docker"
 
 output=$(printf 'correct horse\ncorrect horse\n' \
-    | PATH="${TMP_DIR}:$PATH" "${SCRIPT_DIR}/init-demo-admin.sh" \
+    | PATH="${TMP_DIR}:$PATH" OPENCOMPANY_PROJECT_NAME="$TEST_PROJECT" \
+        "${SCRIPT_DIR}/init-demo-admin.sh" \
         marketing admin@example.com)
 printf '%s\n' "$output" | grep -F 'admin=admin@example.com' >/dev/null
 printf '%s\n' "$output" | grep -F 'up --build --detach --wait opencompany' >/dev/null
@@ -37,12 +39,14 @@ printf '%s\n' "$output" | grep -F -- '--no-change-required --home /data' >/dev/n
 printf '%s\n' "$output" | grep -F 'administrator initialized' >/dev/null
 
 if printf 'one\ntwo\n' | PATH="${TMP_DIR}:$PATH" \
+    OPENCOMPANY_PROJECT_NAME="$TEST_PROJECT" \
     "${SCRIPT_DIR}/init-demo-admin.sh" marketing admin@example.com >/dev/null 2>&1; then
     echo "init-demo-admin test: mismatched passwords unexpectedly succeeded" >&2
     exit 1
 fi
 
 if printf 'one\none\n' | PATH="${TMP_DIR}:$PATH" \
+    OPENCOMPANY_PROJECT_NAME="$TEST_PROJECT" \
     "${SCRIPT_DIR}/init-demo-admin.sh" marketing not-an-email >/dev/null 2>&1; then
     echo "init-demo-admin test: invalid email unexpectedly succeeded" >&2
     exit 1
