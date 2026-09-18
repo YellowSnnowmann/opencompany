@@ -187,7 +187,7 @@ function generalChannel(members: TeamMember[]): Channel {
  * If the experiment holds, the carrier becomes a manifest key so a company that
  * wants its main line keeps it.
  */
-export const SHOW_GENERAL_CHANNEL = true;
+export const SHOW_GENERAL_CHANNEL = false;
 
 export function buildChannels(
   members: TeamMember[],
