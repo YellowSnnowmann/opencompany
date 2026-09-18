@@ -230,6 +230,7 @@ test("a card raised inside a thread opens that thread on the jump back, not just
 
 test("a card the orchestrator opens is chipped in chat, and survives a reload", async ({
   page,
+  request,
 }) => {
   // Only THIS test needs the scripted backend — the one above it drives the
   // console's own "Add to board" action and passes against a default host, so
@@ -239,23 +240,28 @@ test("a card the orchestrator opens is chipped in chat, and survives a reload", 
   await openThread(page, "");
 
   // `SPAWNONE` is the scripted backend's cue to call `spawn_task` once.
+  const before = await request.get("/api/v1/company/tasks");
+  expect(before.ok(), await before.text()).toBeTruthy();
+  const previousIds = new Set(((await before.json()) as Task[]).map((task) => task.id));
   const prompt = `please track this SPAWNONE ${Date.now()}`;
   await page.getByPlaceholder(/^Message /).fill(prompt);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
+  const card = await taskMatching(request, (task) => !previousIds.has(task.id));
+  const href = `#/company/tasks/${card.id}`;
+
   // Live: the reply bubble says a card was opened.
-  const chip = page.getByRole("link", { name: /Card opened/ }).last();
+  const chip = page.locator(`a[href="${href}"]`, { hasText: "Card opened" });
   await expect(chip).toBeVisible({ timeout: 60_000 });
-  const href = await chip.getAttribute("href");
-  expect(href).toMatch(/^#\/company\/tasks\/.+/);
+  await expect(chip).toHaveAttribute("href", href);
 
   // After a reload the transcript is rehydrated from `chat/history`, so a chip
   // that only existed on the live POST response would vanish here.
   await page.reload();
   await openThread(page, "");
-  const rehydrated = page.getByRole("link", { name: /Card opened/ }).last();
+  const rehydrated = page.locator(`a[href="${href}"]`, { hasText: "Card opened" });
   await expect(rehydrated).toBeVisible({ timeout: 30_000 });
-  expect(await rehydrated.getAttribute("href")).toBe(href);
+  await expect(rehydrated).toHaveAttribute("href", href);
 });
 
 /**

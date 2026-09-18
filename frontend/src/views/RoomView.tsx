@@ -1070,6 +1070,13 @@ export function RoomView({
     desks && decodedSub && isGeneralChannel(decodedSub) && !findChannel(sections, decodedSub)
       ? generalChannelId(desks)
       : null;
+  // The experiment hides the built-in General channel from the rail, not from
+  // history. Keep an explicit legacy deep link readable without adding the row
+  // back to `sections` (and therefore without offering it as a destination).
+  const legacyGeneral =
+    desks && generalSub
+      ? findChannel(buildChannels(members, desks, transcripts, true), generalSub)
+      : null;
   /**
    * The channel the hash names, else the first one that exists.
    *
@@ -1082,6 +1089,7 @@ export function RoomView({
    */
   const channel = desks
     ? (findChannel(sections, generalSub ?? resolvedSub ?? decodedSub) ??
+      legacyGeneral ??
       directMessageForId(members, generalSub ?? resolvedSub ?? decodedSub) ??
       firstChannel(sections))
     : null;
