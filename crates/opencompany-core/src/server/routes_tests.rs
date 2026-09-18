@@ -324,6 +324,16 @@ fn hosted_deployment_accepts_either_hosted_signal() {
     assert!(!hosted_deployment_from_values(None, None));
 }
 
+#[test]
+fn browser_analytics_switch_fails_closed_on_unrecognised_values() {
+    for value in [None, Some(""), Some("  "), Some("on"), Some("YES")] {
+        assert!(browser_analytics_enabled_from_value(value), "{value:?}");
+    }
+    for value in [Some("off"), Some("FALSE"), Some("0"), Some("no"), Some("of")] {
+        assert!(!browser_analytics_enabled_from_value(value), "{value:?}");
+    }
+}
+
 #[tokio::test]
 async fn console_config_route_returns_uncached_javascript() {
     let app = router_with_console(AppState::new(AppConfig::default()), None);

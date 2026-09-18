@@ -302,9 +302,19 @@ fn hosted_deployment_from_values(deployment: Option<&str>, tenant_id: Option<&st
 }
 
 fn browser_analytics_enabled() -> bool {
-    !std::env::var("OPENCOMPANY_ANALYTICS")
-        .ok()
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case("off"))
+    browser_analytics_enabled_from_value(
+        std::env::var("OPENCOMPANY_ANALYTICS").ok().as_deref(),
+    )
+}
+
+fn browser_analytics_enabled_from_value(value: Option<&str>) -> bool {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        None => true,
+        Some(value) if ["on", "true", "1", "yes"].contains(&value.to_ascii_lowercase().as_str()) => {
+            true
+        }
+        Some(_) => false,
+    }
 }
 
 /// Serves the Axum application on the configured bind address.
