@@ -33,12 +33,18 @@ either way.
 - Console → http://localhost:5173 (proxies the API, so it's same-origin).
 - Host API → http://localhost:8080 (e.g. `/healthz`, `/api/v1/companies`).
 
-There are no default credentials. Before the first local sign-in, initialize
-the administrator for the selected demo (the helper prompts for a password):
+There are no default credentials. From the repository root, create a demo user
+with administrator access, start the same demo, then open
+<http://localhost:5173> and sign in with the email and prompted password:
 
 ```sh
 ./scripts/init-demo-admin.sh marketing you@example.com
+./scripts/launch-demo.sh marketing up
 ```
+
+Run the initializer once per fresh data volume. A plain `down` preserves the
+login; `./scripts/launch-demo.sh marketing down -v` deletes it with the rest of
+that demo's data.
 
 Switch companies by editing `OPENCOMPANY_COMPANY` in `.env` and re-running
 `docker compose up`. Compile optional features into the host with
@@ -61,9 +67,9 @@ containers:
 
 The development overlay keeps Cargo and frontend dependency caches in shared
 external volumes, while each Compose project retains its own `opencompany-data`
-volume. The administrator helper creates the cache volumes automatically when
-needed, so repeated demo runs do not rebuild dependencies or remove another
-project's caches.
+volume. The demo launcher and administrator helper create the cache volumes
+automatically when needed, so repeated demo runs do not rebuild dependencies or
+remove another project's caches.
 
 The Compose E2E test requires Docker (or a compatible Compose provider), `curl`,
 and a working local build environment. It creates a temporary project, asks

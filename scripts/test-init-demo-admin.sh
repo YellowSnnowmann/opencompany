@@ -4,6 +4,8 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 TMP_DIR=$(mktemp -d)
+DOCKER_LOG="${TMP_DIR}/docker.log"
+export DOCKER_LOG
 TEST_PROJECT="opencompany-init-demo-test-$$"
 trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
@@ -11,7 +13,8 @@ cat >"${TMP_DIR}/docker" <<'EOF'
 #!/bin/sh
 set -eu
 case "$*" in
-    volume\ inspect\ *|volume\ create\ *) exit 0 ;;
+    volume\ inspect\ *) exit 1 ;;
+    volume\ create\ *) printf '%s\n' "$*" >>"$DOCKER_LOG"; exit 0 ;;
 esac
 if [ "${FAIL_COMPOSE_STEP:-}" = up ]; then
     case "$*" in *" up "*) exit 42 ;; esac
@@ -40,6 +43,13 @@ output=$(printf 'correct horse\ncorrect horse\n' \
         "${SCRIPT_DIR}/init-demo-admin.sh" \
         marketing admin@example.com)
 printf '%s\n' "$output" | grep -F 'admin=admin@example.com' >/dev/null
+for cache_volume in \
+    opencompany-cargo-registry \
+    opencompany-cargo-git \
+    opencompany-cargo-target \
+    opencompany-frontend-node-modules; do
+    grep -F "volume create ${cache_volume}" "$DOCKER_LOG" >/dev/null
+done
 printf '%s\n' "$output" | grep -F 'up --build --detach --wait --wait-timeout 120 opencompany' >/dev/null
 printf '%s\n' "$output" | grep -F 'stop console opencompany' >/dev/null
 printf '%s\n' "$output" | grep -F -- '--company agentic-marketing-agency' >/dev/null
