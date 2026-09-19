@@ -165,12 +165,18 @@ const managesHost = MANAGED_HOST_HOME !== undefined;
 const repoRoot = resolve(here, "..");
 const derivedPort =
   8100 +
-  (parseInt(createHash("sha256").update(repoRoot).digest("hex").slice(0, 8), 16) %
+  (parseInt(
+    createHash("sha256").update(repoRoot).digest("hex").slice(0, 8),
+    16,
+  ) %
     8800);
 const derivedAnalyticsPort =
   16900 +
   (parseInt(
-    createHash("sha256").update(`${repoRoot}:analytics`).digest("hex").slice(0, 8),
+    createHash("sha256")
+      .update(`${repoRoot}:analytics`)
+      .digest("hex")
+      .slice(0, 8),
     16,
   ) %
     8800);
@@ -274,16 +280,17 @@ const composioEnv: Record<string, string> = managesComposio
   : {};
 
 /** Public browser analytics configuration exercised by its dedicated run. */
-const analyticsEnv: Record<string, string> = managesHost && ANALYTICS
-  ? {
-      OPENCOMPANY_DEPLOYMENT: "hosted-tenant",
-      OPENCOMPANY_ANALYTICS: "on",
-      OPENCOMPANY_ANALYTICS_ENDPOINT: "https://collector.example/api/track",
-      // Hosted tenants are provisioned with the platform API base and refuse
-      // to boot without one. This spec never calls it; keep the fixture inert.
-      TINYHUMANS_API_URL: "https://api.example.invalid",
-    }
-  : {};
+const analyticsEnv: Record<string, string> =
+  managesHost && ANALYTICS
+    ? {
+        OPENCOMPANY_DEPLOYMENT: "hosted-tenant",
+        OPENCOMPANY_ANALYTICS: "on",
+        OPENCOMPANY_ANALYTICS_ENDPOINT: "https://collector.example/api/track",
+        // Hosted tenants are provisioned with the platform API base and refuse
+        // to boot without one. This spec never calls it; keep the fixture inert.
+        TINYHUMANS_API_URL: "https://api.example.invalid",
+      }
+    : {};
 
 /** Host-script inputs that isolate the opted-in run from the ordinary lane. */
 const analyticsHostEnv: Record<string, string> =
@@ -347,7 +354,9 @@ const hostEnv: Record<string, string> = {
   ...analyticsHostEnv,
   ...firstRunEnv,
   ...eulerEnv,
-  ...(passthrough.length > 0 ? { PW_HOST_PASSTHROUGH: passthrough.join(" ") } : {}),
+  ...(passthrough.length > 0
+    ? { PW_HOST_PASSTHROUGH: passthrough.join(" ") }
+    : {}),
 };
 
 /**
@@ -385,23 +394,23 @@ const fixtureServers = [
       ]
     : []),
   ...(managesFixtures
-  ? [
-      {
-        command: `node ./test/e2e/mock-brain.mjs --bind ${MOCK_BRAIN_BIND}`,
-        url: `http://${MOCK_BRAIN_BIND}/healthz`,
-        reuseExistingServer: !process.env.CI,
-        timeout: 30_000,
-        stdout: "pipe" as const,
-        stderr: "pipe" as const,
-      },
-      {
-        command: `node ./test/e2e/mcp-server.mjs --bind ${MCP_FIXTURE_BIND}`,
-        url: `http://${MCP_FIXTURE_BIND}/healthz`,
-        reuseExistingServer: !process.env.CI,
-        timeout: 30_000,
-        stdout: "pipe" as const,
-        stderr: "pipe" as const,
-      },
+    ? [
+        {
+          command: `node ./test/e2e/mock-brain.mjs --bind ${MOCK_BRAIN_BIND}`,
+          url: `http://${MOCK_BRAIN_BIND}/healthz`,
+          reuseExistingServer: !process.env.CI,
+          timeout: 30_000,
+          stdout: "pipe" as const,
+          stderr: "pipe" as const,
+        },
+        {
+          command: `node ./test/e2e/mcp-server.mjs --bind ${MCP_FIXTURE_BIND}`,
+          url: `http://${MCP_FIXTURE_BIND}/healthz`,
+          reuseExistingServer: !process.env.CI,
+          timeout: 30_000,
+          stdout: "pipe" as const,
+          stderr: "pipe" as const,
+        },
       ]
     : []),
 ];
@@ -442,7 +451,14 @@ export default defineConfig({
           ? { testMatch: LIVE_LLM_SPEC }
           : VISUAL
             ? { testMatch: VISUAL_SPEC }
-            : { testIgnore: [FIRST_RUN_SPEC, LIVE_LLM_SPEC, EULER_SPEC, VISUAL_SPEC] }),
+            : {
+                testIgnore: [
+                  FIRST_RUN_SPEC,
+                  LIVE_LLM_SPEC,
+                  EULER_SPEC,
+                  VISUAL_SPEC,
+                ],
+              }),
   // UNCONDITIONAL, and it was not always (issue #1773). `global-setup.ts` runs
   // after every `webServer` above has resolved, which makes it the only hook
   // that sees the server Playwright *adopted* rather than the one it was
@@ -483,7 +499,11 @@ export default defineConfig({
     // (`KnowledgeGraph.tsx` has a `prefers-reduced-motion` block) so this is the
     // lever it was built to respond to.
     ...(VISUAL
-      ? { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1, reducedMotion: "reduce" as const }
+      ? {
+          viewport: { width: 1280, height: 720 },
+          deviceScaleFactor: 1,
+          reducedMotion: "reduce" as const,
+        }
       : {}),
   },
   webServer: managesHost
