@@ -1979,6 +1979,7 @@ export function RoomView({
         ? dmThreadId(active.member)
         : undefined;
   const liveSteps = activeThreadId ? liveStepsByThread?.[activeThreadId] : undefined;
+  console.log("ROOM_LIVE", { activeThreadId, keys: Object.keys(liveStepsByThread ?? {}), liveSteps });
   // The live receipt for this channel's thread (issue #1934), resolved exactly
   // as `liveSteps` above — same host thread id, same open-thread exclusion at
   // the render site below.
