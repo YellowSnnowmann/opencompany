@@ -255,32 +255,15 @@ test("a running turn shows its tool rows in the channel", async ({ page }) => {
       label: "workspace_read",
     },
   ];
-  let releaseFrames: (() => void) | undefined;
-  const framesReleased = new Promise<void>((resolve) => {
-    releaseFrames = resolve;
-  });
-  let streamRequested: (() => void) | undefined;
-  const streamIsWaiting = new Promise<void>((resolve) => {
-    streamRequested = resolve;
-  });
-  await page.route("**/events**", async (route) => {
-    // `EventSource` attaches `onmessage` immediately after construction. A
-    // mock that closes the stream in that tiny window can lose every frame,
-    // unlike the host's long-lived stream. Hold this fixture until the channel
-    // is mounted so it tests routing and rendering rather than that race.
-    streamRequested?.();
-    await framesReleased;
-    await route.fulfill({
+  await page.route("**/events**", (route) =>
+    route.fulfill({
       status: 200,
       headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
       body: frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join(""),
-    });
-  });
+    }),
+  );
 
   await openChannel(page, ENGINEERING.id);
-
-  await streamIsWaiting;
-  releaseFrames?.();
 
   await expect(page.getByText("workspace_list").first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("3 files").first()).toBeVisible();
