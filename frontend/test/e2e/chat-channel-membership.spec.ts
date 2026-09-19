@@ -254,12 +254,10 @@ test("#370 an unknown channel opens the first one and says so", async ({ page })
   // (issue #934), and an unqualified `getByRole("status")` matches both.
   const notice = page.getByRole("status").filter({ hasText: /isn't a channel here/ });
   await expect(notice).toContainText("#does-not-exist");
-  // `#general` rather than `#engineering` since issue #1743: the built-in
-  // company-wide channel is prepended to every company's list, so "the first
-  // one" is now `#general` in every company rather than whichever desk the
-  // host happened to return first. The property under test is unchanged — the
-  // notice names the channel you actually landed in.
-  await expect(notice).toContainText("#general");
+  // General remains directly addressable for legacy history, but is no longer
+  // offered as the default destination (#2368). The notice names the first
+  // offered desk the operator actually landed in.
+  await expect(notice).toContainText("#engineering");
   // The hash is left alone deliberately — rewriting it needs replace-semantics
   // the shell does not thread through yet, and a push would fight the back
   // button. The notice is what closes the gap between URL and content.
