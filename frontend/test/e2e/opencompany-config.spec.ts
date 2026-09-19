@@ -4,7 +4,15 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
   page,
   request,
 }) => {
-  test.skip(Boolean(process.env.PW_BASE_URL), "requires the Playwright-managed host configuration");
+  test.skip(
+    Boolean(process.env.PW_BASE_URL),
+    "requires the Playwright-managed host configuration",
+  );
+  let openPanelLoaderRequested = false;
+  await page.route("https://openpanel.dev/op1.js", async (route) => {
+    openPanelLoaderRequested = true;
+    await route.fulfill({ contentType: "application/javascript", body: "" });
+  });
   const [indexResponse, configResponse] = await Promise.all([
     request.get("/"),
     request.get("/opencompany-config.js"),
@@ -29,4 +37,17 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
 
   await page.goto("/");
   await expect(page).toHaveTitle("OpenCompany Console");
+  if (process.env.PW_ANALYTICS === "1") {
+    await expect.poll(() => openPanelLoaderRequested).toBe(true);
+    await expect.poll(() => page.evaluate(() => window.op?.q)).toContainEqual([
+      "init",
+      expect.objectContaining({
+        apiUrl: "https://collector.example/",
+        clientId: "afe8ec4e-0a6a-427a-aa22-49cbbf137d0a",
+      }),
+    ]);
+  } else {
+    expect(openPanelLoaderRequested).toBe(false);
+    expect(await page.evaluate(() => window.op)).toBeUndefined();
+  }
 });
