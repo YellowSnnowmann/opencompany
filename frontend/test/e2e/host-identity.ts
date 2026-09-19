@@ -85,6 +85,8 @@ import { fileURLToPath } from "node:url";
 
 import { EULER, FIRST_RUN } from "./capabilities";
 
+const ANALYTICS = process.env.PW_ANALYTICS === "1";
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../../..");
 
@@ -110,7 +112,9 @@ const INSTANCE_ID_FILE = "instance-id";
  */
 export const MANAGED_HOST_HOME: string | undefined = process.env.PW_BASE_URL
   ? undefined
-  : FIRST_RUN
+  : ANALYTICS
+    ? join(repoRoot, "target/e2e/analytics-data")
+    : FIRST_RUN
     ? join(repoRoot, "target/e2e/first-run-data")
     : EULER
       ? join(repoRoot, "target/e2e/euler-data")

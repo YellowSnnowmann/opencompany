@@ -167,8 +167,17 @@ const derivedPort =
   8100 +
   (parseInt(createHash("sha256").update(repoRoot).digest("hex").slice(0, 8), 16) %
     8800);
+const derivedAnalyticsPort =
+  16900 +
+  (parseInt(
+    createHash("sha256").update(`${repoRoot}:analytics`).digest("hex").slice(0, 8),
+    16,
+  ) %
+    8800);
 
-const managedBind = process.env.PW_HOST_BIND || `127.0.0.1:${derivedPort}`;
+const managedBind = ANALYTICS
+  ? process.env.PW_ANALYTICS_HOST_BIND || `127.0.0.1:${derivedAnalyticsPort}`
+  : process.env.PW_HOST_BIND || `127.0.0.1:${derivedPort}`;
 
 const baseURL = providedBaseURL || `http://${managedBind}`;
 
@@ -191,7 +200,9 @@ const storageState =
           ? "../target/e2e/first-run-storage-state.json"
           : EULER
             ? "../target/e2e/euler-storage-state.json"
-            : "../target/e2e/storage-state.json",
+            : ANALYTICS
+              ? "../target/e2e/analytics-storage-state.json"
+              : "../target/e2e/storage-state.json",
       )
     : undefined);
 
@@ -274,6 +285,12 @@ const analyticsEnv: Record<string, string> = managesHost && ANALYTICS
     }
   : {};
 
+/** Host-script inputs that isolate the opted-in run from the ordinary lane. */
+const analyticsHostEnv: Record<string, string> =
+  MANAGED_HOST_HOME !== undefined && ANALYTICS
+    ? { PW_HOST_DATA_DIR: MANAGED_HOST_HOME }
+    : {};
+
 /**
  * What a first-run run tells `test/e2e/host.sh` to serve.
  *
@@ -327,6 +344,7 @@ const hostEnv: Record<string, string> = {
   ...inferenceEnv,
   ...composioEnv,
   ...analyticsEnv,
+  ...analyticsHostEnv,
   ...firstRunEnv,
   ...eulerEnv,
   ...(passthrough.length > 0 ? { PW_HOST_PASSTHROUGH: passthrough.join(" ") } : {}),
