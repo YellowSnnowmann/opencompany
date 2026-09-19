@@ -1989,7 +1989,7 @@ jobs:
       # data root under `target/e2e/`, and signing in against the harness
       # company. So this is the whole command.
       - name: Run the end-to-end suite
-        run: npm run e2e
+        run: npm run e2e && npm run e2e:analytics
         working-directory: frontend
 
       # A failed browser run is close to undiagnosable from a log alone. The

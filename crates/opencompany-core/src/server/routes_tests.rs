@@ -256,6 +256,190 @@ fn reserved_path_matches_prefixes_and_subpaths_only() {
     assert!(!is_reserved_path("/some/spa/route"));
 }
 
+#[test]
+fn browser_analytics_config_accepts_only_plain_collector_urls() {
+    assert_eq!(
+        public_browser_endpoint("https://collector.example/api/track").as_deref(),
+        Some("https://collector.example/")
+    );
+    assert_eq!(
+        public_browser_endpoint("http://localhost:3000/track").as_deref(),
+        Some("http://localhost:3000/")
+    );
+    assert!(public_browser_endpoint("http://127.0.0.1:3000/track").is_some());
+    assert!(public_browser_endpoint("http://[::1]:3000/track").is_some());
+    assert!(public_browser_endpoint("http://collector.example/api/track").is_none());
+    assert!(public_browser_endpoint("http://collector.internal/api/track").is_none());
+    assert!(public_browser_endpoint("https://user:secret@collector.example/api/track").is_none());
+    assert!(public_browser_endpoint("https://collector.example/api/track?token=secret").is_none());
+    assert!(public_browser_endpoint("not a URL").is_none());
+}
+
+#[test]
+fn hosted_console_config_enables_openpanel_without_exposing_credentials() {
+    let script = render_console_config(Some("https://collector.example/api/track"), true, true);
+    assert_eq!(
+        script,
+        "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},\
+{analytics:true,analyticsEndpoint:\"https://collector.example/\"});\n"
+    );
+
+    for endpoint in [
+        "https://user:secret@collector.example/api/track",
+        "https://collector.example/api/track?token=secret",
+    ] {
+        let script = render_console_config(Some(endpoint), true, true);
+        assert!(!script.contains("analytics:true"), "{script}");
+        assert!(!script.contains("secret"), "{script}");
+    }
+
+    assert!(
+        !render_console_config(Some("https://collector.example/api/track"), false, true)
+            .contains("analytics:true")
+    );
+    assert!(
+        !render_console_config(Some("https://collector.example/api/track"), true, false)
+            .contains("analytics:true")
+    );
+}
+
+#[test]
+fn hosted_deployment_accepts_either_hosted_signal() {
+    assert!(hosted_deployment_from_values(Some("hosted-tenant"), None));
+    assert!(hosted_deployment_from_values(None, Some("tenant-a")));
+    assert!(hosted_deployment_from_values(Some("  "), Some("tenant-a")));
+    assert!(hosted_deployment_from_values(
+        Some("self-hosted"),
+        Some("tenant-a")
+    ));
+    assert!(hosted_deployment_from_values(
+        Some("other"),
+        Some("tenant-a")
+    ));
+    assert!(!hosted_deployment_from_values(None, Some("  ")));
+    assert!(!hosted_deployment_from_values(None, None));
+}
+
+#[test]
+fn browser_analytics_switch_fails_closed_on_unrecognised_values() {
+    for value in [Some("on"), Some(" ON ")] {
+        assert!(browser_analytics_enabled_from_value(value), "{value:?}");
+    }
+    for value in [
+        None,
+        Some(""),
+        Some("  "),
+        Some("YES"),
+        Some("true"),
+        Some("1"),
+        Some("off"),
+        Some("FALSE"),
+        Some("0"),
+        Some("no"),
+        Some("of"),
+    ] {
+        assert!(!browser_analytics_enabled_from_value(value), "{value:?}");
+    }
+}
+
+#[tokio::test]
+async fn console_config_route_returns_uncached_javascript() {
+    let env = crate::test_support::EnvVarGuard::capture(&[
+        "OPENCOMPANY_DEPLOYMENT",
+        "OPENCOMPANY_TENANT_ID",
+        "OPENCOMPANY_ANALYTICS",
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+    ]);
+    env.remove("OPENCOMPANY_DEPLOYMENT");
+    env.remove("OPENCOMPANY_TENANT_ID");
+    env.remove("OPENCOMPANY_ANALYTICS");
+    env.remove("OPENCOMPANY_ANALYTICS_ENDPOINT");
+
+    let app = router_with_console(AppState::new(AppConfig::default()), None);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/opencompany-config.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .unwrap(),
+        "application/javascript; charset=utf-8"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::CACHE_CONTROL)
+            .unwrap(),
+        "no-store"
+    );
+    assert_eq!(
+        body_text(response).await,
+        "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n"
+    );
+}
+
+#[tokio::test]
+async fn console_config_route_serves_only_safe_hosted_configuration() {
+    let env = crate::test_support::EnvVarGuard::capture(&[
+        "OPENCOMPANY_DEPLOYMENT",
+        "OPENCOMPANY_TENANT_ID",
+        "OPENCOMPANY_ANALYTICS",
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+    ]);
+    env.set("OPENCOMPANY_DEPLOYMENT", "hosted-tenant");
+    env.remove("OPENCOMPANY_TENANT_ID");
+    env.set("OPENCOMPANY_ANALYTICS", "on");
+    env.set(
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+        "https://collector.example/api/track",
+    );
+
+    let app = router_with_console(AppState::new(AppConfig::default()), None);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/opencompany-config.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        body_text(response).await,
+        "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},\
+{analytics:true,analyticsEndpoint:\"https://collector.example/\"});\n"
+    );
+
+    env.set(
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+        "http://collector.example/api/track",
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/opencompany-config.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        body_text(response).await,
+        "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n"
+    );
+}
+
 #[tokio::test]
 async fn root_404s_without_console_dir() {
     let app = router_with_console(AppState::new(AppConfig::default()), None);
