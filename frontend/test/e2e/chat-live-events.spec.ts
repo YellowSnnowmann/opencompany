@@ -281,6 +281,7 @@ test("a running turn shows its tool rows in the channel", async ({ page }) => {
   const channelOpened = openChannel(page, ENGINEERING.id);
   await streamIsWaiting;
   await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: 30_000 });
+  await expect(railRow(page, ENGINEERING.channel)).toBeVisible({ timeout: 30_000 });
   releaseFrames?.();
   await channelOpened;
 
