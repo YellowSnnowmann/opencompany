@@ -2903,10 +2903,8 @@ export function AppShell({
         : undefined;
     const setRows = messageKey ? setLiveStepsByMessage : setLiveStepsByThread;
     const rowKey = messageKey ?? threadId;
-    console.log("TURN_EVENT", { frameThreadId, threadId, rowKey, scope: room.currentScope() });
     setRows((prev) => {
       const rows = foldLiveFrame(prev[rowKey] ?? [], event);
-      console.log("TURN_ROWS", { before: prev, rows });
       // `null` is "this frame belongs to rows we do not hold" — keep the
       // previous object so React skips the re-render.
       if (!rows) return prev;
@@ -2924,7 +2922,7 @@ export function AppShell({
       const agentId = existing.agentId ?? (frameAgentId || undefined);
       return { ...prev, [threadId]: { ...existing, lastFrameAt: Date.now(), agentId } };
     });
-  }, [setLiveStepsByMessage, setLiveStepsByThread, setReceiptByThread]);
+  }, []);
 
   const markDeciding = useCallback((id: string, verdict: Verdict | null) => {
     setDecidingApprovals((prev) => {

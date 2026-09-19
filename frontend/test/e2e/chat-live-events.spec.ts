@@ -209,8 +209,7 @@ test("a turn sent from the composer renders exactly one company bubble", async (
   await expect(reply(page, marker)).toHaveCount(1);
 });
 
-test("a running turn shows its tool rows in the channel", async ({ page }) => {
-  page.on("console", (message) => console.log("BROWSER", message.text()));
+test("a running turn shows its current tool in the channel", async ({ page }) => {
   // This spec supplies an SSE stream itself. The default Console E2E lane is
   // the appropriate host for that isolated rendering contract; the live-brain
   // lane owns the real-agent coverage and its long-lived stream cannot be
@@ -286,15 +285,17 @@ test("a running turn shows its tool rows in the channel", async ({ page }) => {
   releaseFrames?.();
   await channelOpened;
 
-  await expect(page.getByText("workspace_list").first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("3 files").first()).toBeVisible();
-  await expect(page.getByText("workspace_read").first()).toBeVisible();
+  // Chat names only the current activity; completed tool details live in Raw
+  // turns. The result frame settles workspace_list, leaving workspace_read as
+  // the newest running step and therefore the activity label.
+  await expect(workingRow(page)).toContainText("workspace_read", { timeout: 30_000 });
+  await expect(page.getByText("workspace_list")).toHaveCount(0);
+  await expect(page.getByText("3 files")).toHaveCount(0);
   await expect(page.getByText("Replying…")).toHaveCount(0);
 
   // The recorded rows are scoped to their channel, not broadcast to another.
   await openChannel(page, CONTENT.id);
-  await expect(page.getByText("workspace_list")).toHaveCount(0);
-  await expect(page.getByText("workspace_read")).toHaveCount(0);
+  await expect(workingRow(page)).toHaveCount(0);
 });
 
 test("a settled turn keeps its raw tool rows out of the channel", async ({ page }) => {
