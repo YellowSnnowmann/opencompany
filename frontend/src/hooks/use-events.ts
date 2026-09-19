@@ -1149,7 +1149,6 @@ export function useEvents(
           void recover();
         },
         onMessage: (data) => {
-          console.log("EVENT_DATA", data);
           let event: CompanyStreamEvent;
           try {
             event = JSON.parse(data) as CompanyStreamEvent;

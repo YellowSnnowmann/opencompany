@@ -559,7 +559,7 @@ export function AppShell({
   const handleSetupOpenChange = useCallback((open: boolean) => {
     setSetupChecked(true);
     setSetupOpen(open);
-  }, []);
+  }, [setLiveStepsByMessage, setLiveStepsByThread, setReceiptByThread]);
   /** Set by the Team page's prompt to reopen setup after a skip. */
   const [setupForced, setSetupForced] = useState(false);
   // `#/setup` is an intentional, manual recovery path. It is a route rather
