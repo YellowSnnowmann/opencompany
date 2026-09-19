@@ -52,8 +52,10 @@ describe("Playwright analytics lane", () => {
   test("selects the config spec on an isolated opted-in host", async () => {
     const config = await loadConfig(true);
     const host = hostServer(config);
+    const ordinaryBaseURL = (await loadConfig(false)).use?.baseURL;
 
     expect(config.use?.baseURL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(config.use?.baseURL).not.toBe(ordinaryBaseURL);
     expect(config.use?.storageState).toMatch(
       /target\/e2e\/analytics-storage-state\.json$/,
     );
