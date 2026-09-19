@@ -30,7 +30,7 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
   expect(configResponse.headers()["cache-control"]).toBe("no-store");
   const expectedConfig =
     process.env.PW_ANALYTICS === "1"
-      ? 'window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},' +
+      ? "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{}," +
         '{analytics:true,analyticsEndpoint:"https://collector.example/"});\n'
       : "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n";
   expect(await configResponse.text()).toBe(expectedConfig);
@@ -42,8 +42,7 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
     await expect
       .poll(() =>
         page.evaluate(
-          () =>
-            (window as unknown as { op?: { q?: unknown[] } }).op?.q,
+          () => (window as unknown as { op?: { q?: unknown[] } }).op?.q,
         ),
       )
       .toContainEqual([
@@ -56,9 +55,7 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
   } else {
     expect(openPanelLoaderRequested).toBe(false);
     expect(
-      await page.evaluate(
-        () => (window as unknown as { op?: unknown }).op,
-      ),
+      await page.evaluate(() => (window as unknown as { op?: unknown }).op),
     ).toBeUndefined();
   }
 });
