@@ -39,15 +39,26 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
   await expect(page).toHaveTitle("OpenCompany Console");
   if (process.env.PW_ANALYTICS === "1") {
     await expect.poll(() => openPanelLoaderRequested).toBe(true);
-    await expect.poll(() => page.evaluate(() => window.op?.q)).toContainEqual([
-      "init",
-      expect.objectContaining({
-        apiUrl: "https://collector.example/",
-        clientId: "afe8ec4e-0a6a-427a-aa22-49cbbf137d0a",
-      }),
-    ]);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as unknown as { op?: { q?: unknown[] } }).op?.q,
+        ),
+      )
+      .toContainEqual([
+        "init",
+        expect.objectContaining({
+          apiUrl: "https://collector.example/",
+          clientId: "afe8ec4e-0a6a-427a-aa22-49cbbf137d0a",
+        }),
+      ]);
   } else {
     expect(openPanelLoaderRequested).toBe(false);
-    expect(await page.evaluate(() => window.op)).toBeUndefined();
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { op?: unknown }).op,
+      ),
+    ).toBeUndefined();
   }
 });
