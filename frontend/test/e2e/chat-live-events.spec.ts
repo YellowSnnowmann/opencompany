@@ -255,15 +255,34 @@ test("a running turn shows its tool rows in the channel", async ({ page }) => {
       label: "workspace_read",
     },
   ];
-  await page.route("**/events**", (route) =>
-    route.fulfill({
+  let releaseFrames: (() => void) | undefined;
+  const framesReleased = new Promise<void>((resolve) => {
+    releaseFrames = resolve;
+  });
+  let streamRequested: (() => void) | undefined;
+  const streamIsWaiting = new Promise<void>((resolve) => {
+    streamRequested = resolve;
+  });
+  await page.route("**/events**", async (route) => {
+    streamRequested?.();
+    await framesReleased;
+    await route.fulfill({
       status: 200,
       headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
       body: frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join(""),
-    }),
-  );
+    });
+  });
 
-  await openChannel(page, ENGINEERING.id);
+  // Do not await the navigation before releasing the intercepted EventSource:
+  // Playwright includes the routed stream in the navigation's pending work.
+  // Waiting for `openChannel` first therefore deadlocks the fixture, while
+  // fulfilling immediately can deliver the frames before the channel map is
+  // mounted. The visible composer is the exact readiness boundary we need.
+  const channelOpened = openChannel(page, ENGINEERING.id);
+  await streamIsWaiting;
+  await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: 30_000 });
+  releaseFrames?.();
+  await channelOpened;
 
   await expect(page.getByText("workspace_list").first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("3 files").first()).toBeVisible();
