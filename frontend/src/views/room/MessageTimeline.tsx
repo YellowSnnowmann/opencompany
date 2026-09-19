@@ -232,6 +232,7 @@ export function MessageTimeline({
   /** The inner column whose own height rule 2b's `ResizeObserver` watches. */
   const content = useRef<HTMLDivElement>(null);
   const liveStepCount = liveSteps?.length ?? 0;
+  console.log("TIMELINE_LIVE", { liveStepCount, queued, typing, openThreadId, liveSteps });
   // Resolved once, for both live rows below. Kept here rather than inside them
   // so the receipt's "never a raw id" rule holds in one place: an id this map
   // does not know yields no name, and the row says "Working…" as it always did.
