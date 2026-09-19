@@ -210,6 +210,7 @@ test("a turn sent from the composer renders exactly one company bubble", async (
 });
 
 test("a running turn shows its tool rows in the channel", async ({ page }) => {
+  page.on("console", (message) => console.log("BROWSER", message.text()));
   // This spec supplies an SSE stream itself. The default Console E2E lane is
   // the appropriate host for that isolated rendering contract; the live-brain
   // lane owns the real-agent coverage and its long-lived stream cannot be
