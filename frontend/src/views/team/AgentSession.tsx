@@ -318,6 +318,9 @@ function SessionRow({ line, agentId }: { line: SessionLine; agentId: string }) {
         {message.referralConversation && (
           <ReferralConversation crossing={message.referralConversation} rowId={message.id} />
         )}
+        {message.episode && (
+          <UtteranceChip episode={message.episode} audience={message.audience} />
+        )}
       </div>
     </li>
   );
