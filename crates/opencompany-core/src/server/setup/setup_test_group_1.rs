@@ -136,10 +136,10 @@ async fn the_desktop_host_reports_none_as_the_default_sign_in() {
         "a plain loopback serve names no default: {plain}"
     );
 
-    let desktop = AppState::new(AppConfig {
+    let desktop = crate::AppState::new(crate::AppConfig {
         bind: "127.0.0.1:8080".to_string(),
         auth_mode_override: Some(crate::app::config::AuthMode::None),
-        ..AppConfig::default()
+        ..crate::AppConfig::default()
     })
     .with_home(home_dir.path().to_path_buf());
     let (_, dto) = get_setup(desktop).await;
