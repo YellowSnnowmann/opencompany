@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { LIVE_BRAIN } from "./capabilities";
-import { bubbles, openChannel, workingRow } from "./chat-helpers";
+import { openChannel, workingRow } from "./chat-helpers";
 
 /**
  * Where the live pair sits, and what it says, while a turn is still running.
@@ -9,12 +9,17 @@ import { bubbles, openChannel, workingRow } from "./chat-helpers";
  * Three claims no unit test can make, because all three are about **rendered
  * order and rendered state** rather than about a pure function:
  *
- * 1. the live row is the LAST thing in the transcript, beneath every message
- *    journaled while the turn ran;
- * 2. it names whoever is working *now*, following the floor as it changes
+ * 1. it names whoever is working *now*, following the floor as it changes
  *    hands;
- * 3. a call parked on a sign-off reads as parked *while it waits*, not once
+ * 2. a call parked on a sign-off reads as parked *while it waits*, not once
  *    the reply lands.
+ *
+ * The ordering claim — that the row sits beneath every line journaled while
+ * the turn ran — lives in `chat-concurrent-episodes.spec.ts` instead, and has
+ * to. A turn with no `messageSeq` keys its rows by thread, and for such a turn
+ * an `agent_reply` is the end signal: the bucket retires, correctly, and the
+ * row goes with it. Only a query-keyed turn journals lines *while it continues*
+ * — which is every hive episode, and why the claim belongs with them.
  *
  * Like `chat-live-events.spec.ts`'s synthetic fixture — whose pattern this
  * borrows wholesale — these write their own SSE stream. The offline brain this
@@ -27,8 +32,17 @@ import { bubbles, openChannel, workingRow } from "./chat-helpers";
  * the Playwright config declares no `webServer`.
  */
 
-/** The harness manifest's engineering desk. Its id is its channel id. */
-const ENGINEERING = { id: "engineering", channel: "engineering-desk" };
+/**
+ * The desk these run against. Its id is its channel id.
+ *
+ * Defaults to the harness manifest's engineering desk, like every sibling
+ * spec. Overridable because these mock the whole event stream — the only thing
+ * they need from the host is a desk that exists, so pinning one company's
+ * manifest would make them unrunnable against any other host for no reason the
+ * tests themselves care about.
+ */
+const DESK_ID = process.env.PW_CHAT_DESK ?? "engineering";
+const ENGINEERING = { id: DESK_ID, channel: `${DESK_ID}-desk` };
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -57,15 +71,22 @@ async function openWithFrames(page: import("@playwright/test").Page, frames: unk
   const streamIsWaiting = new Promise<void>((resolve) => {
     streamRequested = resolve;
   });
-  await page.route("**/events**", async (route) => {
+  // The API's SSE route only. A bare `**/events**` also matches the dev
+  // server's own unbundled modules — `src/hooks/use-events.ts` among them —
+  // and holding those until the frames release means the console never boots,
+  // which presents as a page stuck on "Waking this company…".
+  await page.route(
+    (url) => url.pathname.startsWith("/api/") && url.pathname.endsWith("/events"),
+    async (route) => {
     streamRequested?.();
     await framesReleased;
     await route.fulfill({
       status: 200,
       headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
       body: frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join(""),
-    });
-  });
+      });
+    },
+  );
 
   const channelOpened = openChannel(page, ENGINEERING.id);
   await streamIsWaiting;
@@ -73,51 +94,6 @@ async function openWithFrames(page: import("@playwright/test").Page, frames: unk
   releaseFrames?.();
   await channelOpened;
 }
-
-test("the live row stays below a message journaled while the turn runs", async ({ page }) => {
-  test.skip(LIVE_BRAIN, "the default Console E2E lane covers the synthetic SSE rendering fixture");
-  // The ordering claim, and the reason the pair is pinned to the foot. A turn
-  // that journals lines as it works — a deliberating desk posts one per seat —
-  // used to leave the pulsing row several messages up, claiming work had
-  // finished before every line beneath it.
-  const atMillis = Date.now();
-  await openWithFrames(page, [
-    {
-      type: "tool_call",
-      seq: 1,
-      atMillis,
-      chatId: ENGINEERING.id,
-      agentId: "a-ada",
-      toolCallId: "t1",
-      label: "workspace_read",
-    },
-    // A line lands in the transcript WHILE that call is still running, which is
-    // what a seat speaking mid-episode looks like from the console's side.
-    {
-      type: "agent_reply",
-      seq: 2,
-      atMillis: atMillis + 1,
-      chatId: ENGINEERING.id,
-      agentId: "a-ada",
-      text: "Checking the roster now.",
-    },
-  ]);
-
-  const live = workingRow(page);
-  await expect(live).toBeVisible({ timeout: 30_000 });
-
-  const lastBubble = bubbles(page).last();
-  await expect(lastBubble).toContainText("Checking the roster now.");
-
-  // Document order is the assertion: the live row must follow the message, not
-  // precede it. `compareDocumentPosition` returns DOCUMENT_POSITION_FOLLOWING
-  // (4) when the argument comes after the node it is called on.
-  const liveFollowsMessage = await lastBubble.evaluate(
-    (node, liveEl) => Boolean(node.compareDocumentPosition(liveEl as Node) & 4),
-    await live.elementHandle(),
-  );
-  expect(liveFollowsMessage).toBe(true);
-});
 
 test("the live row names the agent working now, not the one who started", async ({ page }) => {
   test.skip(LIVE_BRAIN, "the default Console E2E lane covers the synthetic SSE rendering fixture");

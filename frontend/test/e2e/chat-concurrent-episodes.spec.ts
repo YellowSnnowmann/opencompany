@@ -37,8 +37,17 @@ import { openChannel, workingRow } from "./chat-helpers";
  * the Playwright config declares no `webServer`.
  */
 
-/** The harness manifest's engineering desk. Its id is its channel id. */
-const ENGINEERING = { id: "engineering", channel: "engineering-desk" };
+/**
+ * The desk these run against. Its id is its channel id.
+ *
+ * Defaults to the harness manifest's engineering desk, like every sibling
+ * spec. Overridable because these mock `chat/history` and the whole event
+ * stream — the only thing they need from the host is a desk that exists, so
+ * pinning one company's manifest would make them unrunnable against any other
+ * host for no reason the tests themselves care about.
+ */
+const DESK_ID = process.env.PW_CHAT_DESK ?? "engineering";
+const ENGINEERING = { id: DESK_ID, channel: `${DESK_ID}-desk` };
 
 /**
  * The two operator messages the rooms were convened on, by journal sequence.
@@ -59,10 +68,17 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-/** One operator question, as `chat/history` returns it. */
+/**
+ * One operator question, as `chat/history` returns it.
+ *
+ * The id is the **bare host sequence**, not the console's `h`-prefixed form:
+ * `fromHistory` namespaces it on the way in (`hostMessageId(entry.id)`), so a
+ * fixture that pre-namespaces produces `hh101` and its frames — keyed off
+ * `messageSeq` through the same function — never find their message.
+ */
 function question(seq: number, text: string, atMillis: number) {
   return {
-    id: `h${seq}`,
+    id: String(seq),
     channel: ENGINEERING.id,
     author: "operator",
     text,
@@ -133,15 +149,22 @@ async function openWithEpisodes(page: Page, history: unknown[], frames: unknown[
   const streamIsWaiting = new Promise<void>((resolve) => {
     streamRequested = resolve;
   });
-  await page.route("**/events**", async (route) => {
+  // The API's SSE route only. A bare `**/events**` also matches the dev
+  // server's own unbundled modules — `src/hooks/use-events.ts` among them —
+  // and holding those until the frames release means the console never boots,
+  // which presents as a page stuck on "Waking this company…".
+  await page.route(
+    (url) => url.pathname.startsWith("/api/") && url.pathname.endsWith("/events"),
+    async (route) => {
     streamRequested?.();
     await framesReleased;
     await route.fulfill({
       status: 200,
       headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
       body: frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join(""),
-    });
-  });
+      });
+    },
+  );
 
   const channelOpened = openChannel(page, ENGINEERING.id);
   await streamIsWaiting;
