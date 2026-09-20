@@ -258,7 +258,11 @@ pub(crate) async fn harness(
     Arc<dyn WorkspaceStore>,
 ) {
     let store: Arc<dyn WorkspaceStore> = Arc::new(FsOps::new(dir));
-    let id = CompanyId::new("acme");
+    // A fresh id per fixture: every turn test in this binary runs on the one
+    // process-wide OpenHuman runtime, and an agent's thread transcript is
+    // keyed by `(company, agent)` — two fixtures naming `acme`/`ceo` would
+    // resume each other's transcript, system prompt included.
+    let id = CompanyId::new(format!("acme-{}", uuid::Uuid::new_v4().simple()));
     store
         .create(&id, &folder("f-std", "standards"), None)
         .await
