@@ -3760,32 +3760,42 @@ pub struct OverlayDeskOrder {
     pub ordered: Vec<String>,
 }
 
-/// The operator's runtime replacement for a desk's `hive` block — the console's
-/// "install a move grammar" write.
+/// The operator's runtime replacement for a desk's `[group_chat.routing]`
+/// block — the console's "install a routing block" write
+/// (`PUT {scope}/desks/{id}/routing`).
 ///
 /// A **sibling collection rather than a field on [`OverlayDesk`]**, and that is
 /// the whole design. `OverlayDesk` covers only console-*created* desks, so
-/// hanging the grammar off it would leave the interesting case — installing a
-/// table on a desk the manifest declared, without rewriting `company.toml` —
-/// needing a second mechanism. This mirrors [`AgentOverride`] instead, which is
-/// the layer that already exists for "the operator edited a manifest-declared
-/// thing".
+/// hanging the block off it would leave the interesting case — pacing a desk
+/// the manifest declared, without rewriting `company.toml` — needing a second
+/// mechanism. This mirrors [`AgentOverride`] instead, which is the layer that
+/// already exists for "the operator edited a manifest-declared thing".
 ///
-/// **Wholesale replacement, not a field-wise patch**, unlike `AgentOverride`. A
-/// `moves` table is a single artefact: merging one seat into a stored table is
-/// how a desk ends up running a grammar nobody authored. It also makes "clear
-/// `quorum` back to the derived default" expressible, which a merge cannot do —
-/// every field is an `Option` whose `None` already means something.
+/// **Wholesale replacement, not a field-wise patch**, unlike `AgentOverride`:
+/// merging one key into a stored block is how a desk ends up paced by numbers
+/// nobody authored, and "clear `round_width` back to the default" is only
+/// expressible when the whole block is replaced.
 ///
 /// Reset is therefore a `retain`, and nothing else: drop the row and
 /// [`CompanyRecord::effective_desk_hive`] falls through to the manifest.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The type and field names predate the routing block (they carried the
+/// trace-grammar `hive` block until plan `hive-desks`, Phase 4) and are kept
+/// because every persisted overlay blob and ~150 record fixtures spell them;
+/// the persisted key stays `desk_hive` for the same reason. An old blob's
+/// grammar keys are unknown to [`RoutingConfig`] and are dropped on read.
+///
+/// [`RoutingConfig`]: crate::hive::routing::RoutingConfig
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeskHiveOverride {
-    /// The desk (group-chat) id this grammar is installed on.
+    /// The desk (group-chat) id this block is installed on.
     pub desk_id: String,
     /// The block as authored, in the manifest's own shape.
-    pub hive: crate::hivemind::HiveConfig,
+    pub hive: crate::hive::routing::RoutingConfig,
 }
+
+/// The routing-block override, under the name the routes use.
+pub type DeskRoutingOverride = DeskHiveOverride;
 
 /// How a desk's unmentioned messages find their answerer (issue #1835).
 ///
@@ -3851,26 +3861,24 @@ pub struct OverlayDesk {
     /// no such field.
     #[serde(default, skip_serializing_if = "ResponderMode::is_lead")]
     pub responder: ResponderMode,
-    /// How this desk deliberates and whether it may refer across desks — the
-    /// overlay analogue of `[[group_chat]].hive`.
+    /// How this desk paces its episodes and whether it may refer across desks
+    /// — the overlay analogue of `[[group_chat]].routing`, persisted under the
+    /// key `routing`.
     ///
-    /// Without it a console-created desk could not answer either question. The
-    /// hive config was read from the manifest only, and the responder mode from
-    /// the overlay only, so the two surfaces each carried half the settings and
-    /// a desk could never hold both: an overlay desk deliberated because the
-    /// default says so and could not opt out, and could never opt IN to
-    /// referral, because there was no `[[group_chat]]` entry to hang the block
-    /// on. A company whose desks are all operator-created — which is every
-    /// company that builds its desks in the console — therefore had cross-desk
-    /// referral permanently unavailable.
+    /// Without it a console-created desk could not answer either question:
+    /// there is no `[[group_chat]]` entry to hang the block on, so a company
+    /// whose desks are all operator-created would have cross-desk referral
+    /// permanently unavailable.
     ///
     /// Defaulted and skipped when empty, so every record written before this
-    /// field existed deserializes and re-serializes unchanged.
+    /// field existed deserializes and re-serializes unchanged. The field name
+    /// predates the routing block; see [`DeskHiveOverride`] for why it stays.
     #[serde(
         default,
-        skip_serializing_if = "crate::hivemind::HiveConfig::is_default"
+        rename = "routing",
+        skip_serializing_if = "crate::hive::routing::RoutingConfig::is_default"
     )]
-    pub hive: crate::hivemind::HiveConfig,
+    pub hive: crate::hive::routing::RoutingConfig,
 }
 
 /// A workflow graph body authored at runtime (the console's create dialog or
@@ -5671,21 +5679,30 @@ impl CompanyRecord {
     /// The one way a write path should add to [`Self::overlay_agent_edits`], for
     /// the reason [`Self::upsert_budget_override`] gives: a second row for one
     /// teammate is not a harmless duplicate, it is a silently unreachable edit.
-    /// The `hive` block in force on `desk_id`.
+    /// The `[group_chat.routing]` block in force on `desk_id`.
     ///
-    /// The operator's installed grammar if there is one, else the manifest's
-    /// `[[group_chat]].hive`, else the default. **The one place this precedence
-    /// lives** — `desk_episode`, `desk_federation` and the console read through
-    /// here, so a desk cannot deliberate under one table while the console shows
-    /// another.
+    /// The operator's installed block if there is one, else the console-desk's
+    /// own, else the manifest's `[[group_chat]].routing`, else the default.
+    /// **The one place this precedence lives** — the driver and the console
+    /// read through [`crate::hive::routing::effective_routing`], which is a
+    /// thin wrapper over this, so a desk cannot run under one block while the
+    /// console shows another.
     #[must_use]
-    pub fn effective_desk_hive(&self, desk_id: &str) -> crate::hivemind::HiveConfig {
+    pub fn effective_desk_hive(&self, desk_id: &str) -> crate::hive::routing::RoutingConfig {
         if let Some(installed) = self
             .overlay_desk_hive
             .iter()
             .find(|held| held.desk_id == desk_id)
         {
             return installed.hive.clone();
+        }
+        if let Some(desk) = self
+            .overlay_desks
+            .iter()
+            .find(|desk| desk.id == desk_id)
+            .filter(|desk| !desk.hive.is_default())
+        {
+            return desk.hive.clone();
         }
         self.manifest
             .group_chats
@@ -5695,7 +5712,7 @@ impl CompanyRecord {
             .unwrap_or_default()
     }
 
-    /// Whether an operator-installed grammar is what `effective_desk_hive`
+    /// Whether an operator-installed block is what `effective_desk_hive`
     /// returned, as opposed to the manifest's own block or the default.
     ///
     /// The console needs the difference to offer "restore the manifest's
@@ -5707,7 +5724,7 @@ impl CompanyRecord {
             .any(|held| held.desk_id == desk_id)
     }
 
-    /// Install or replace a desk's move grammar.
+    /// Install or replace a desk's routing block.
     ///
     /// Wholesale, for the reason [`DeskHiveOverride`] gives. One row per desk,
     /// so a second install replaces the first rather than stacking behind it.
@@ -5717,7 +5734,7 @@ impl CompanyRecord {
         self.overlay_desk_hive.push(entry);
     }
 
-    /// Drop a desk's installed grammar, restoring whatever the manifest says.
+    /// Drop a desk's installed routing block, restoring whatever the manifest says.
     ///
     /// Returns whether anything was installed to drop, so a route can answer
     /// "there was nothing to reset" without a second read.
