@@ -50,7 +50,6 @@ async fn the_budget_brake_arms_only_when_a_daily_cap_is_declared() {
 /// new one, so this measures the ceiling rather than the size of the script.
 #[tokio::test]
 async fn a_turn_past_the_old_ten_iteration_ceiling_now_finishes() {
-    let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).with_test_writer().try_init();
     let reads = INHERITED_CAP + 2;
     let (model_url, script) = spawn_script(read_then_answer(reads, "Spec published."), 12).await;
 

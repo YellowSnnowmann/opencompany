@@ -788,7 +788,7 @@ async fn the_opening_round_is_blind_and_every_later_line_is_attributed() {
         "a blind round plus at least one open turn"
     );
 
-    let blind: Vec<&Ask> = openers.iter().filter(|ask| ask.blind()).collect();
+    let blind: Vec<&HiveAsk> = openers.iter().filter(|ask| ask.blind()).collect();
     assert_eq!(
         blind.len(),
         3,
@@ -838,7 +838,7 @@ async fn the_opening_round_is_blind_and_every_later_line_is_attributed() {
 
     // Later turns see the room, attributed by id, with the sequence that makes
     // the line citable.
-    let seeing: Vec<&Ask> = openers.iter().filter(|ask| !ask.blind()).collect();
+    let seeing: Vec<&HiveAsk> = openers.iter().filter(|ask| !ask.blind()).collect();
     assert!(
         !seeing.is_empty(),
         "the blind round is not the whole episode"
@@ -1230,8 +1230,7 @@ const SHORT: &str = "{ enabled = true, turn_budget = 3, quorum = 2, blind_round 
 
 /// Every tool result the endpoint was shown for the episode answering `task`.
 fn tool_results_for(script: &Script, task: &str) -> Vec<String> {
-    script
-        .hive_asks()
+    hive_asks(script)
         .into_iter()
         .filter(|ask| ask.task() == task)
         .flat_map(|ask| ask.tool_outputs)
