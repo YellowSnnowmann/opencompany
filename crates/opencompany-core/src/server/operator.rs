@@ -1552,6 +1552,8 @@ fn project_event_for_viewer(
             task_id,
             parent,
             mentions,
+            audience,
+            episode,
             ..
         } => {
             // See this fn's doc: an owner-fallback report is admin-only, live
@@ -1632,6 +1634,16 @@ fn project_event_for_viewer(
                         .map(ChatMentionDto::from)
                         .collect::<Vec<_>>()
                 );
+            }
+            // Plan hive-desks, Phase 4: the same `episode` and `audience` the
+            // reload projects, so a live row and its rehydrated twin fold into
+            // the same round. Omitted outside an episode, so the legacy frame
+            // is unchanged for every other reply.
+            if let Some(episode) = episode {
+                o["episode"] = episode_json(episode);
+            }
+            if !audience.is_empty() {
+                o["audience"] = json!(audience);
             }
             o
         }
@@ -1748,6 +1760,8 @@ fn project_event_for_viewer(
             asker,
             conversation,
             returning,
+            episode_id,
+            to_episode_id,
             ..
         } => {
             let mut o = envelope("referral");
@@ -1779,6 +1793,15 @@ fn project_event_for_viewer(
             // is: a return is the one that completes the exchange, so a console
             // that only wants to re-read once can wait for it.
             o["returning"] = json!(returning);
+            // The episode on the asking desk that raised the crossing, and
+            // the one opened on the far desk to answer it (plan hive-desks,
+            // Phase 6). Omitted on a pair DM and on older markers.
+            if let Some(episode_id) = episode_id {
+                o["episodeId"] = json!(episode_id);
+            }
+            if let Some(to_episode_id) = to_episode_id {
+                o["toEpisodeId"] = json!(to_episode_id);
+            }
             o
         }
         CompanyEvent::DeskTaskCompleted {
@@ -1970,10 +1993,141 @@ fn project_event_for_viewer(
             o["removed"] = json!(removed);
             o
         }
-        CompanyEvent::DeskHiveConfigured { desk_id, reset, .. } => {
-            let mut o = envelope("desk_hive_configured");
+        CompanyEvent::DeskRoutingConfigured { desk_id, reset, .. } => {
+            let mut o = envelope("desk_routing_configured");
             o["deskId"] = json!(desk_id);
             o["reset"] = json!(reset);
+            o
+        }
+        // Plan hive-desks, Phase 4: the episode record, projected one frame
+        // per journal row so a console draws the round band live and rebuilds
+        // the same shape from `chat/history`'s `episode` field on reload.
+        // Every frame carries `chatId` (the desk) and `episodeId`.
+        CompanyEvent::EpisodeOpened {
+            chat_id,
+            episode_id,
+            opened_by_seq,
+            parent,
+            participants,
+            plan,
+            ..
+        } => {
+            let mut o = envelope("episode_opened");
+            o["chatId"] = json!(chat_id);
+            o["episodeId"] = json!(episode_id);
+            o["openedBySeq"] = json!(opened_by_seq);
+            if let Some(parent) = parent {
+                o["parentId"] = json!(parent.value().to_string());
+            }
+            o["participants"] = json!(participants);
+            o["plan"] = json!(plan);
+            o
+        }
+        CompanyEvent::RoundStarted {
+            chat_id,
+            episode_id,
+            revision,
+            agent_ids,
+        } => {
+            let mut o = envelope("round_started");
+            o["chatId"] = json!(chat_id);
+            o["episodeId"] = json!(episode_id);
+            o["revision"] = json!(revision);
+            o["agentIds"] = json!(agent_ids);
+            o
+        }
+        CompanyEvent::RoundCommitted {
+            chat_id,
+            episode_id,
+            revision,
+            utterances,
+            actions,
+        } => {
+            let mut o = envelope("round_committed");
+            o["chatId"] = json!(chat_id);
+            o["episodeId"] = json!(episode_id);
+            o["revision"] = json!(revision);
+            o["utterances"] = json!(
+                utterances
+                    .iter()
+                    .map(|utterance| {
+                        let mut u = json!({
+                            "agentId": utterance.agent_id,
+                            "sequence": utterance.sequence,
+                            "kind": utterance.kind,
+                        });
+                        if let Some(message_seq) = utterance.message_seq {
+                            u["messageSeq"] = json!(message_seq);
+                        }
+                        if !utterance.to.is_empty() {
+                            u["to"] = json!(utterance.to);
+                        }
+                        u
+                    })
+                    .collect::<Vec<_>>()
+            );
+            o["actions"] = json!(actions);
+            o
+        }
+        CompanyEvent::BroadcastRouted {
+            chat_id,
+            episode_id,
+            revision,
+            agent_id,
+            message_seq,
+            plan,
+            probabilities,
+            router,
+        } => {
+            let mut o = envelope("broadcast_routed");
+            o["chatId"] = json!(chat_id);
+            o["episodeId"] = json!(episode_id);
+            o["revision"] = json!(revision);
+            o["agentId"] = json!(agent_id);
+            o["messageSeq"] = json!(message_seq);
+            o["plan"] = json!(plan);
+            if let Some(probabilities) = probabilities {
+                o["probabilities"] = json!(probabilities);
+            }
+            o["router"] = json!(router);
+            o
+        }
+        CompanyEvent::DmDelivered {
+            chat_id,
+            episode_id,
+            from,
+            to,
+            message_seq,
+        } => {
+            let mut o = envelope("dm_delivered");
+            o["chatId"] = json!(chat_id);
+            o["episodeId"] = json!(episode_id);
+            o["from"] = json!(from);
+            o["to"] = json!(to);
+            o["messageSeq"] = json!(message_seq);
+            o
+        }
+        CompanyEvent::EpisodeCompleted {
+            chat_id,
+            episode_id,
+            revision,
+            completed_by,
+            rounds,
+            reason,
+            summary_seq,
+        } => {
+            let mut o = envelope("episode_completed");
+            o["chatId"] = json!(chat_id);
+            o["episodeId"] = json!(episode_id);
+            o["revision"] = json!(revision);
+            if let Some(completed_by) = completed_by {
+                o["completedBy"] = json!(completed_by);
+            }
+            o["rounds"] = json!(rounds);
+            o["reason"] = json!(reason);
+            if let Some(summary_seq) = summary_seq {
+                o["summarySeq"] = json!(summary_seq);
+            }
             o
         }
         // Issue #276: a workflow armed or paused, so a console holding the
@@ -2184,6 +2338,9 @@ fn project_event_for_viewer(
             turn_id,
             chat_id,
             parent,
+            agent_id,
+            episode_id,
+            round_revision,
             ..
         } => {
             let mut o = envelope("turn_started");
@@ -2195,6 +2352,17 @@ fn project_event_for_viewer(
             if let Some(parent) = parent {
                 o["parentId"] = json!(parent.value().to_string());
             }
+            // The seat and the round, on a hive seat turn (plan hive-desks,
+            // Phase 4); omitted on the chat route's own bracket.
+            if let Some(agent_id) = agent_id {
+                o["agentId"] = json!(agent_id);
+            }
+            if let Some(episode_id) = episode_id {
+                o["episodeId"] = json!(episode_id);
+            }
+            if let Some(round_revision) = round_revision {
+                o["roundRevision"] = json!(round_revision);
+            }
             o
         }
         // The closing bracket. Structural for a sharper reason than its
@@ -2202,20 +2370,60 @@ fn project_event_for_viewer(
         // that can name internals, and this stream is the one place it must
         // not be forwarded to. A console learns *that* the turn is over here
         // and reads *why* from the run row, which is tenant-scoped.
-        CompanyEvent::TurnFailed { turn_id, .. } => {
+        CompanyEvent::TurnFailed {
+            turn_id,
+            agent_id,
+            chat_id,
+            episode_id,
+            round_revision,
+            outcome,
+            ..
+        } => {
             let mut o = envelope("turn_settled");
             o["turnId"] = json!(turn_id);
-            o["outcome"] = json!("failed");
+            o["outcome"] = json!(
+                outcome
+                    .unwrap_or(crate::ports::types::TurnOutcome::Failed)
+                    .as_str()
+            );
+            if let Some(agent_id) = agent_id {
+                o["agentId"] = json!(agent_id);
+            }
+            if let Some(chat_id) = chat_id {
+                o["chatId"] = json!(chat_id);
+            }
+            if let Some(episode_id) = episode_id {
+                o["episodeId"] = json!(episode_id);
+            }
+            if let Some(round_revision) = round_revision {
+                o["roundRevision"] = json!(round_revision);
+            }
             o
         }
         // The same bracket on success (plan hive-desks, Phase 2): `agentId`
         // is what lets a console draw one seat's lane in a hive round.
-        CompanyEvent::TurnSettled { turn_id, agent_id } => {
+        CompanyEvent::TurnSettled {
+            turn_id,
+            agent_id,
+            chat_id,
+            episode_id,
+            round_revision,
+            outcome,
+        } => {
             let mut o = envelope("turn_settled");
             o["turnId"] = json!(turn_id);
-            o["outcome"] = json!("committed");
+            o["outcome"] = json!(outcome.as_str());
             if let Some(agent_id) = agent_id {
                 o["agentId"] = json!(agent_id);
+            }
+            if let Some(chat_id) = chat_id {
+                o["chatId"] = json!(chat_id);
+            }
+            if let Some(episode_id) = episode_id {
+                o["episodeId"] = json!(episode_id);
+            }
+            if let Some(round_revision) = round_revision {
+                o["roundRevision"] = json!(round_revision);
             }
             o
         }
