@@ -501,154 +501,12 @@ async fn journal_structural(scope: &ScopedCompany, event: CompanyEvent) {
     }
 }
 
-/// One desk's move grammar, as the console renders and edits it.
-///
-/// Two shapes in one payload, and the split is the point:
-///
-/// - `declared` is the block **as authored** — every field an `Option` whose
-///   `None` means "not said". It is what a `PUT` round-trips.
-/// - `effective` is what the runtime will actually use, with every default
-///   resolved against the current membership.
-///
-/// One number could not carry both. `turn_budget = 9` on a three-seat desk is
-/// either an operator's decision or the derived `3 x members`, and the two
-/// behave differently the moment somebody joins — so a console showing a single
-/// figure cannot say whether adding a seat will change it.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DeskHiveDto {
-    desk_id: String,
-    /// `"overlay"` when an operator installed this, `"manifest"` when the
-    /// blueprint declares it, `"default"` when neither does.
-    source: &'static str,
-    /// Whether an episode would actually open right now.
-    ///
-    /// A one-member desk with `enabled = true` is still `false`: the flag says
-    /// what the operator wants, not what the desk is able to do, and a console
-    /// that showed "deliberates" for a desk of one would be describing a room
-    /// that cannot exist.
-    deliberates: bool,
-    /// The block as authored. Snake_case, deliberately: this field **is** the
-    /// manifest block, the console's editor edits it directly, and a camelCase
-    /// twin would be a second shape to keep in step with the TOML.
-    declared: crate::hivemind::HiveConfig,
-    effective: EffectiveHiveDto,
-    /// Every move a table may name, and the three no table can take away.
-    move_kinds: &'static [&'static str],
-    ungated_kinds: &'static [&'static str],
-    seats: Vec<HiveSeatDto>,
-    /// How many seats may deposit a distinct supporter, and whether that clears
-    /// the effective quorum.
-    ///
-    /// `!propose` counts here, because in the fold a proposal is already its own
-    /// author's support. When `reaches_quorum` is false the desk answers with a
-    /// single responder however much the room agrees — `desk_episode` declines —
-    /// and the console has to be able to say so.
-    eligible_supporters: u32,
-    reaches_quorum: bool,
-}
-
-/// What the runtime will use, with every default resolved.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct EffectiveHiveDto {
-    turn_budget: u32,
-    quorum: u32,
-    blind_round: bool,
-    dominance_cap: u32,
-    repetition_cap: u32,
-    require_grounded: bool,
-    require_evidential: bool,
-    refutation_cap: Option<u32>,
-}
-
-/// One seat, and the moves it may open a line with.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct HiveSeatDto {
-    agent_id: String,
-    label: String,
-    role: String,
-    /// Already in `MOVE_KINDS` order and already unioned with the ungated three,
-    /// so the console renders this verbatim rather than re-deriving it.
-    moves: Vec<&'static str>,
-    /// Whether the table governs this seat at all.
-    ///
-    /// Invisible from `moves` alone — "named with every kind" and "not named"
-    /// produce the same list, and only one of them is a decision somebody made.
-    governed: bool,
-}
-
-/// Build the payload for one desk.
-fn desk_hive_dto(record: &crate::ports::CompanyRecord, desk_id: &str) -> DeskHiveDto {
-    let config = record.effective_desk_hive(desk_id);
-    let members: Vec<String> = record
-        .effective_desk_members(desk_id)
-        .into_iter()
-        .filter(|id| record.is_roster_agent(id))
-        .collect();
-    let policy = crate::hivemind::HivePolicy::from_config(&config, members.len()).episode;
-    let eligible = members
-        .iter()
-        .filter(|id| config.may(id, "support") || config.may(id, "propose"))
-        .count();
-    let seats = members
-        .iter()
-        .map(|id| {
-            let agent = record.effective_agents().into_iter().find(|a| &a.id == id);
-            HiveSeatDto {
-                agent_id: id.clone(),
-                label: agent
-                    .as_ref()
-                    .and_then(|a| a.name.clone())
-                    .unwrap_or_else(|| id.clone()),
-                role: agent.map(|a| a.role.clone()).unwrap_or_default(),
-                moves: config.moves_for(id),
-                governed: config.moves.get(id).is_some_and(|kinds| !kinds.is_empty()),
-            }
-        })
-        .collect();
-    let source = if record.desk_hive_is_installed(desk_id) {
-        "overlay"
-    } else if record
-        .manifest
-        .group_chats
-        .iter()
-        .any(|group| group.id == desk_id)
-    {
-        "manifest"
-    } else {
-        "default"
-    };
-    DeskHiveDto {
-        desk_id: desk_id.to_string(),
-        source,
-        deliberates: config.deliberates(members.len()),
-        effective: EffectiveHiveDto {
-            turn_budget: policy.turn_budget,
-            quorum: policy.quorum.threshold,
-            blind_round: policy.blind_round,
-            dominance_cap: policy.dominance_cap,
-            repetition_cap: policy.repetition_cap,
-            require_grounded: policy.quorum.require_grounded,
-            require_evidential: policy.quorum.require_evidential,
-            refutation_cap: policy.quorum.refutation_cap,
-        },
-        declared: config,
-        move_kinds: crate::hivemind::MOVE_KINDS,
-        ungated_kinds: crate::hivemind::UNGATED_KINDS,
-        eligible_supporters: u32::try_from(eligible).unwrap_or(u32::MAX),
-        reaches_quorum: u32::try_from(eligible)
-            .is_ok_and(|eligible| eligible >= policy.quorum.threshold),
-        seats,
-    }
-}
-
-/// `GET {scope}/desks/{desk_id}/hive` — the move grammar in force on a desk.
-async fn desk_hive(
+/// `GET {scope}/desks/{desk_id}/routing` — the routing block in force on a
+/// desk, the resolved numbers, and the seats the router may pick.
+async fn desk_routing(
     scope: ScopedCompany,
     Path(DeskPath { desk_id }): Path<DeskPath>,
-) -> Result<Json<DeskHiveDto>, ApiError> {
+) -> Result<Json<crate::hive::routing::DeskRoutingDto>, ApiError> {
     let record = scope
         .runtime
         .store()
@@ -660,31 +518,31 @@ async fn desk_hive(
             "desk {desk_id}"
         ))));
     }
-    Ok(Json(desk_hive_dto(&record, &desk_id)))
+    Ok(Json(crate::hive::routing::desk_routing_dto(
+        &record,
+        &desk_id,
+        crate::hive::routing::host_router(),
+    )))
 }
 
-/// `PUT {scope}/desks/{desk_id}/hive` — install or replace a desk's move
-/// grammar, without rewriting the version-controlled `[[group_chat]]` block.
+/// `PUT {scope}/desks/{desk_id}/routing` — install or replace a desk's
+/// routing block, without rewriting the version-controlled `[[group_chat]]`
+/// block.
 ///
-/// The body is a bare `HiveConfig` — the manifest block verbatim. Unknown fields
-/// are ignored rather than refused, so a newer console against an older server
-/// degrades instead of 400-ing.
+/// The body is a bare `RoutingConfig` — the manifest block verbatim. Unknown
+/// fields are ignored rather than refused, so a newer console against an
+/// older server degrades instead of 400-ing. The same checks the manifest
+/// loader applies (`RoutingConfig::problems`) apply here, so the runtime
+/// cannot accept a block `company.toml` would refuse.
 ///
-/// **Validated against the desk's *effective* roster**, not its declared one, so
-/// overlay additions and Team-API retirements are what the table is judged by.
-/// That can legitimately refuse a config the manifest would have accepted — a
-/// table valid when `company.toml` was written stops being valid once a seat
-/// retires — which is why the message names the desk.
-///
-/// An episode already running is unaffected: `EpisodeDriver` holds its
-/// `HiveDesk` as a snapshot for the episode's life, so a room cannot have its
-/// quorum moved underneath it mid-argument. The change takes effect on the next
-/// message that opens one.
-async fn set_desk_hive(
+/// An episode already running is unaffected: the driver froze its policy when
+/// it opened, so a room cannot have its round width moved underneath it
+/// mid-round. The change takes effect on the next message that opens one.
+async fn set_desk_routing(
     scope: ScopedCompany,
     Path(DeskPath { desk_id }): Path<DeskPath>,
-    Json(body): Json<crate::hivemind::HiveConfig>,
-) -> Result<Json<DeskHiveDto>, ApiError> {
+    Json(body): Json<crate::hive::routing::RoutingConfig>,
+) -> Result<Json<crate::hive::routing::DeskRoutingDto>, ApiError> {
     let _guard = scope.runtime.serial.lock().await;
     // The same load-modify-save serialization every desk write takes; see
     // `add_desk_member` for why `serial` alone is not enough.
@@ -706,28 +564,20 @@ async fn set_desk_hive(
             "desk {desk_id}"
         ))));
     }
-    let members: Vec<String> = record
-        .effective_desk_members(&desk_id)
-        .into_iter()
-        .filter(|id| record.is_roster_agent(id))
-        .collect();
-    // The manifest's own checks, on the manifest's own words — one
-    // implementation, so the runtime cannot accept what a `company.toml` with
-    // the same block would be refused for.
-    let problems = crate::company::hive_problems(&format!("desk `{desk_id}`"), &members, &body);
+    let problems = body.problems(&format!("desk `{desk_id}`"));
     if !problems.is_empty() {
         return Err(ApiError(OpenCompanyError::InvalidRequest(
             problems.join(" "),
         )));
     }
-    record.upsert_desk_hive(crate::ports::types::DeskHiveOverride {
+    record.upsert_desk_hive(crate::ports::types::DeskRoutingOverride {
         desk_id: desk_id.clone(),
         hive: body,
     });
     scope.runtime.store().save(&record).await?;
     journal_structural(
         &scope,
-        CompanyEvent::DeskHiveConfigured {
+        CompanyEvent::DeskRoutingConfigured {
             desk_id: desk_id.clone(),
             reset: false,
             by: scope.actor.clone(),
@@ -736,18 +586,22 @@ async fn set_desk_hive(
     .await;
     // The derived result of what was just installed, so the console renders the
     // effective numbers without a second round trip.
-    Ok(Json(desk_hive_dto(&record, &desk_id)))
+    Ok(Json(crate::hive::routing::desk_routing_dto(
+        &record,
+        &desk_id,
+        crate::hive::routing::host_router(),
+    )))
 }
 
-/// `DELETE {scope}/desks/{desk_id}/hive` — drop the installed grammar and fall
-/// back to whatever the manifest declares.
+/// `DELETE {scope}/desks/{desk_id}/routing` — drop the installed block and
+/// fall back to whatever the manifest declares.
 ///
 /// Because the override is a sibling collection rather than a merged field,
 /// "restore the blueprint's version" is a `retain` and nothing else.
-async fn reset_desk_hive(
+async fn reset_desk_routing(
     scope: ScopedCompany,
     Path(DeskPath { desk_id }): Path<DeskPath>,
-) -> Result<Json<DeskHiveDto>, ApiError> {
+) -> Result<Json<crate::hive::routing::DeskRoutingDto>, ApiError> {
     let _guard = scope.runtime.serial.lock().await;
     let write_lock = company_write_lock(scope.id());
     let _write_guard = write_lock.lock().await;
@@ -762,13 +616,11 @@ async fn reset_desk_hive(
             "desk {desk_id}"
         ))));
     }
-    // A reset with nothing installed is not an error: the caller asked for the
-    // manifest's grammar and the manifest's grammar is what they now have.
     if record.clear_desk_hive(&desk_id) {
         scope.runtime.store().save(&record).await?;
         journal_structural(
             &scope,
-            CompanyEvent::DeskHiveConfigured {
+            CompanyEvent::DeskRoutingConfigured {
                 desk_id: desk_id.clone(),
                 reset: true,
                 by: scope.actor.clone(),
@@ -776,7 +628,11 @@ async fn reset_desk_hive(
         )
         .await;
     }
-    Ok(Json(desk_hive_dto(&record, &desk_id)))
+    Ok(Json(crate::hive::routing::desk_routing_dto(
+        &record,
+        &desk_id,
+        crate::hive::routing::host_router(),
+    )))
 }
 
 /// `PUT {scope}/desks/{desk_id}/order` — set the operator's explicit member
