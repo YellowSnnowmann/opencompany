@@ -4008,126 +4008,74 @@ tokio::task_local! {
     /// TinyHiveMind dispatch depth of the current conversational turn.
     static TURN_MESSAGE_HOP: u32;
 
-    /// Whether the current turn has already SAID something through a speech
-    /// tool (`desk_post` / `desk_dm` / `desk_close`).
+    /// The hive seat the current turn runs as, when it is one (plan
+    /// hive-desks, Phase 4).
     ///
-    /// A task-local for the same reason `TURN_CONVERSATION` is one: the tool
-    /// that sets it and the code that reads it are on opposite sides of the
-    /// model loop, and neither is constructed per turn.
-    ///
-    /// This is what keeps the return-text fallback from double-posting. With
-    /// `[speech] enabled`, an agent's line reaches the journal through the
-    /// tool; its return text is then private thinking and must not be
-    /// journaled a second time. But an agent that calls NO speech tool must
-    /// still be heard — going silent because a model forgot a tool call is not
-    /// an acceptable failure mode — so the fallback is gated on this flag
-    /// rather than on the manifest knob alone.
-    static TURN_SPEECH: std::sync::Arc<TurnSpeech>;
+    /// Set by the production [`SeatRunner`](crate::hive::driver::SeatRunner)
+    /// around the pool's turn and read by `CompanyAgent::run_with_steer` after
+    /// it takes the agent's turn lock: the episode coordinates go onto the
+    /// in-flight registration the MCP server attributes speech to, the
+    /// timeout is counted from that lock, and the seat's one utterance comes
+    /// back through [`SeatTurnScope::outbox`]. A task-local for the reason
+    /// `TURN_CONVERSATION` is one: the runner and the pool are on opposite
+    /// sides of the `RunTurn` seam, and neither is constructed per turn.
+    static SEAT_TURN: std::sync::Arc<SeatTurnScope>;
 }
 
-/// What one turn said through the speech tools.
-///
-/// One shared record rather than two task-locals: nesting a fourth
-/// `task_local!` scope around the turn future pushed type inference past its
-/// recursion limit, and two flags that are always set and read together were
-/// never two facts anyway.
-#[derive(Debug, Default)]
-pub struct TurnSpeech {
-    /// Whether the turn said anything at all through a speech tool — including
-    /// a `desk_dm`, which journals itself and so leaves no utterance here.
-    spoke: std::sync::atomic::AtomicBool,
-    /// What it asked to say to its whole channel, in call order.
-    ///
-    /// `desk_post` and `desk_close` do **not** append. The crate's own rule is
-    /// that *"a tool call is a request to speak — the host appends, the host
-    /// decides"*, and the host that appends is the reply path that has always
-    /// appended: it carries the folded steps, the live SSE frame, the resolved
-    /// mentions and the board-card correlation, none of which a tool holds.
-    ///
-    /// `desk_dm` is the exception and journals directly, because a narrowed
-    /// audience is not something a turn's single reply can express.
-    utterances: std::sync::Mutex<Vec<String>>,
+/// The hive coordinates and the return channel of one seat turn.
+#[derive(Debug)]
+pub struct SeatTurnScope {
+    /// The episode and round the turn runs for.
+    pub hive: crate::hive::tools::HiveTurn,
+    /// How long the turn may run once it holds its lock.
+    pub timeout: std::time::Duration,
+    /// What the seat said through the MCP server — filled by the pool when
+    /// the turn returns.
+    pub outbox: std::sync::Mutex<Vec<tinyhivemind::speech::Utterance>>,
+    /// Whether the turn ran past its timeout.
+    pub timed_out: std::sync::atomic::AtomicBool,
 }
 
-impl TurnSpeech {
-    /// Whether this turn was heard.
-    pub fn spoke(&self) -> bool {
-        self.spoke.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    /// The channel-visible lines, in call order.
-    pub fn utterances(&self) -> Vec<String> {
-        // tinysweeper: a poisoned lock (another task panicked while holding
-        // it) means the vector may be incomplete or inconsistent, but that is
-        // not a reason to answer "said nothing" — this turn may well have
-        // spoken before the panic, and silently discarding that is worse than
-        // surfacing a possibly-incomplete list with the corruption logged so
-        // it is detectable.
-        match self.utterances.lock() {
-            Ok(lines) => lines.clone(),
-            Err(poisoned) => {
-                tracing::error!(
-                    "[delegation] turn-speech mutex poisoned; returning a possibly incomplete utterance list"
-                );
-                poisoned.into_inner().clone()
-            }
+impl SeatTurnScope {
+    /// A scope for one seat turn.
+    #[must_use]
+    pub fn new(hive: crate::hive::tools::HiveTurn, timeout: std::time::Duration) -> Self {
+        Self {
+            hive,
+            timeout,
+            outbox: std::sync::Mutex::new(Vec::new()),
+            timed_out: std::sync::atomic::AtomicBool::new(false),
         }
     }
+
+    /// The utterances the turn made, drained.
+    #[must_use]
+    pub fn take_outbox(&self) -> Vec<tinyhivemind::speech::Utterance> {
+        self.outbox
+            .lock()
+            .map(|mut held| std::mem::take(&mut *held))
+            .unwrap_or_default()
+    }
+
+    /// Whether the turn ran past its timeout.
+    #[must_use]
+    pub fn timed_out(&self) -> bool {
+        self.timed_out.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
-/// A fresh, silent record for one turn.
-///
-/// Shared rather than task-local-owned because the two readers are on opposite
-/// sides of the scope: the tools write it *inside* the turn, and the reply path
-/// reads it *after* the turn has returned and the task-local is gone.
-pub fn new_turn_speech() -> std::sync::Arc<TurnSpeech> {
-    std::sync::Arc::new(TurnSpeech::default())
-}
-
-/// Runs `fut` with `speech` as this turn's speech record.
-pub(crate) async fn with_turn_speech<F: std::future::Future>(
-    speech: std::sync::Arc<TurnSpeech>,
+/// Runs `fut` as the seat turn `scope` describes.
+pub async fn with_seat_turn<F: std::future::Future>(
+    scope: std::sync::Arc<SeatTurnScope>,
     fut: F,
 ) -> F::Output {
-    TURN_SPEECH.scope(speech, fut).await
+    SEAT_TURN.scope(scope, fut).await
 }
 
-/// Records that this turn has said something through a speech tool.
-pub fn mark_turn_spoke() {
-    let _ = TURN_SPEECH.try_with(|speech| {
-        speech
-            .spoke
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-    });
-}
-
-/// Records one channel-visible utterance for this turn.
-///
-/// Returns whether it was collected: `false` outside a tracked turn, or when
-/// the turn's speech mutex is poisoned, which tells the caller to fall back to
-/// appending it itself. tinysweeper: the poisoned branch used to fall through
-/// silently with no signal that anything was wrong; it now logs, so the
-/// corruption is detectable rather than reading as an ordinary "no active
-/// scope" — the caller's existing direct-append fallback still runs either
-/// way, so the text itself is not lost.
-pub fn collect_utterance(text: String) -> bool {
-    TURN_SPEECH
-        .try_with(|speech| match speech.utterances.lock() {
-            Ok(mut lines) => {
-                lines.push(text);
-                speech
-                    .spoke
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
-                true
-            }
-            Err(_) => {
-                tracing::error!(
-                    "[delegation] turn-speech mutex poisoned; falling back to a direct append"
-                );
-                false
-            }
-        })
-        .unwrap_or(false)
+/// The seat turn the current task runs as, if it is one.
+#[must_use]
+pub fn seat_turn() -> Option<std::sync::Arc<SeatTurnScope>> {
+    SEAT_TURN.try_with(Clone::clone).ok()
 }
 
 /// Run `fut` with the current turn's channel set (issue #1890 F).
@@ -4153,43 +4101,6 @@ pub(crate) fn turn_message_hop() -> u32 {
 /// conversation has no threads it is entitled to read.
 pub(crate) fn turn_conversation() -> Option<String> {
     TURN_CONVERSATION.try_with(Clone::clone).ok().flatten()
-}
-
-tokio::task_local! {
-    /// The engine a tool may run ONE bounded peer turn on, for the length of
-    /// this turn (#2368).
-    ///
-    /// `desk_dm` starts an exchange it has no way to finish. It queues the
-    /// recipient's turn and returns `"Left for @peer."` — a success for work
-    /// that has not happened — so the asking turn ends on a receipt, the answer
-    /// lands in the pair thread after that turn closed, and nothing wakes the
-    /// asker to read it. In a live run the reply sat unread at seq 49 until an
-    /// operator message a turn later happened to sweep it up. The asker is not
-    /// at fault: it was told its request succeeded.
-    ///
-    /// A task-local for the reason [`TURN_CONVERSATION`] is one — the belt is
-    /// built once per agent, and the engine is not known at that point — and
-    /// set brain-side, where [`RunTurn`] already exists, exactly as
-    /// [`CHAT_ONLY_TURN`] is. Rides an existing scope rather than nesting a new
-    /// one around the turn future: a fourth `task_local!` there already pushed
-    /// type inference past its recursion limit (see [`TurnSpeech`]).
-    ///
-    /// Absent — a test, a non-harness caller, a turn with no engine — means the
-    /// tool keeps the queue path, which is the behaviour this replaces rather
-    /// than a degraded one: the message is still durable, still journaled, and
-    /// still read on the recipient's next turn.
-    static TURN_PEER_RUNNER: Option<Arc<dyn RunTurn>>;
-}
-
-/// Run `fut` with the bounded peer-turn engine available to this turn's tools.
-pub async fn with_peer_runner<F: Future>(runner: Option<Arc<dyn RunTurn>>, fut: F) -> F::Output {
-    TURN_PEER_RUNNER.scope(runner, fut).await
-}
-
-/// The engine a tool may run one bounded peer turn on, if this turn has one.
-#[must_use]
-pub fn peer_runner() -> Option<Arc<dyn RunTurn>> {
-    TURN_PEER_RUNNER.try_with(Clone::clone).ok().flatten()
 }
 
 /// Run `fut` with the [`CHAT_ONLY_TURN`] hint set to `chat_only`.

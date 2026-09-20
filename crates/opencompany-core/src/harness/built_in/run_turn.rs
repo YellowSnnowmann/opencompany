@@ -78,10 +78,7 @@ impl RunTurn for HarnessRunTurn {
         // is correct (a peer may need to ask someone as well) and is why
         // `desk_dm` checks the hop against `max_delegation_depth` before it
         // runs anyone.
-        crate::runtime::delegation::with_peer_runner(
-            Some(self.peer_lane()),
-            self.pool.run(company, agent_id, message, &self.deps, chat),
-        )
+        self.pool.run(company, agent_id, message, &self.deps, chat),
         .await
     }
 
@@ -94,12 +91,9 @@ impl RunTurn for HarnessRunTurn {
         chat: ChatTarget<'_>,
         run_sink: Option<Arc<RunTraceSink>>,
     ) -> Result<TurnOutcome> {
-        crate::runtime::delegation::with_peer_runner(
-            Some(self.peer_lane()),
-            self.pool.run_steered(
-                company, agent_id, message, &self.deps, control, chat, run_sink,
-            ),
-        )
+        self.pool.run_steered(
+            company, agent_id, message, &self.deps, control, chat, run_sink,
+        ),
         .await
     }
 
@@ -112,12 +106,9 @@ impl RunTurn for HarnessRunTurn {
         chat: ChatTarget<'_>,
         run_sink: Option<Arc<RunTraceSink>>,
     ) -> Result<TurnOutcome> {
-        crate::runtime::delegation::with_peer_runner(
-            Some(self.peer_lane()),
-            self.pool.run_steered_background(
-                company, agent_id, message, &self.deps, control, chat, run_sink,
-            ),
-        )
+        self.pool.run_steered_background(
+            company, agent_id, message, &self.deps, control, chat, run_sink,
+        ),
         .await
     }
 
@@ -128,11 +119,8 @@ impl RunTurn for HarnessRunTurn {
         message: &str,
         run_sink: Option<Arc<RunTraceSink>>,
     ) -> Result<TurnOutcome> {
-        crate::runtime::delegation::with_peer_runner(
-            Some(self.peer_lane()),
-            self.pool
-                .run_background(company, agent_id, message, &self.deps, run_sink),
-        )
+        self.pool
+            .run_background(company, agent_id, message, &self.deps, run_sink),
         .await
     }
 
@@ -145,18 +133,15 @@ impl RunTurn for HarnessRunTurn {
         workflow_run_id: &str,
         node_id: &str,
     ) -> Result<TurnOutcome> {
-        crate::runtime::delegation::with_peer_runner(
-            Some(self.peer_lane()),
-            self.pool.run_background_workflow(
-                company,
-                agent_id,
-                message,
-                &self.deps,
-                run_sink,
-                workflow_run_id,
-                node_id,
-            ),
-        )
+        self.pool.run_background_workflow(
+            company,
+            agent_id,
+            message,
+            &self.deps,
+            run_sink,
+            workflow_run_id,
+            node_id,
+        ),
         .await
     }
 
