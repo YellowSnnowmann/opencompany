@@ -1184,11 +1184,13 @@ async fn apply_inner(
     // where no password was given, which keeps the older link hand-off working.
     if let (Some(id), Some(email), Some(password)) =
         (seeded.as_deref(), admin_email.as_deref(), admin_password)
-        && let Some(runtime) = state.registry().get(&crate::ports::types::CompanyId::new(id))
+        && let Some(runtime) = state
+            .registry()
+            .get(&crate::ports::types::CompanyId::new(id))
         && runtime.auth_mode().uses_email()
     {
-        let standing = crate::server::users::routes::bootstrap_admins(state.config(), &runtime)
-            .await?;
+        let standing =
+            crate::server::users::routes::bootstrap_admins(state.config(), &runtime).await?;
         match crate::server::users::bootstrap::claim_first_admin(
             runtime.users(),
             runtime.id(),

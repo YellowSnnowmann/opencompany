@@ -490,7 +490,11 @@ async fn a_seed_with_a_password_creates_a_usable_admin() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK, "the password signs them in");
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "the password signs them in"
+    );
     let me = body_json(response).await;
     assert_eq!(me["role"], "admin");
     assert_eq!(me["mustChangePassword"], false);

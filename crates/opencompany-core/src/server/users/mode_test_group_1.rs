@@ -246,7 +246,6 @@ async fn a_wallet_company_refuses_every_email_route() {
         // itself rather than telling somebody their address was wrong.
         assert_eq!(body["mode"], "wallet", "{uri}");
     }
-
 }
 
 /// An email company has no wallet door.

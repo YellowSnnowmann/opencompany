@@ -57,10 +57,16 @@ async fn the_first_visitor_claims_the_admin_account_and_is_signed_in() {
     assert_eq!(response.status(), StatusCode::OK);
     let cookie = session_cookie(&response);
     let body = body_json(response).await;
-    assert_eq!(body["email"], "ada@example.com", "normalized like every login");
+    assert_eq!(
+        body["email"], "ada@example.com",
+        "normalized like every login"
+    );
     assert_eq!(body["role"], "admin");
     assert_eq!(body["hasPassword"], true);
-    assert_eq!(body["mustChangePassword"], false, "they chose it themselves");
+    assert_eq!(
+        body["mustChangePassword"], false,
+        "they chose it themselves"
+    );
 
     // The session is real: the admin routes answer it.
     let response = app
@@ -121,11 +127,7 @@ async fn a_plain_username_is_an_acceptable_login() {
     let dir = home();
     let state = fresh_routable_host(dir.path()).await;
     let app = router(state);
-    let response = app
-        .clone()
-        .oneshot(claim("admin", PASSWORD))
-        .await
-        .unwrap();
+    let response = app.clone().oneshot(claim("admin", PASSWORD)).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let response = app
         .oneshot(post(
