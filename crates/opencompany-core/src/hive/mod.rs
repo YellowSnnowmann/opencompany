@@ -42,3 +42,13 @@ pub mod referral;
 pub mod session_log;
 #[cfg(test)]
 pub(crate) mod test_support;
+/// One `OpenHumanHive` per desk over the company's live agents (Phase 4).
+#[cfg(feature = "openhuman")]
+pub mod graph;
+/// The episode host: routing, the round loop, checkpoints, referral (Phase 4).
+#[cfg(feature = "openhuman")]
+pub mod driver;
+/// One round of seat turns, run at once and folded to one utterance each
+/// (Phase 4).
+#[cfg(feature = "openhuman")]
+pub mod round;
