@@ -234,9 +234,8 @@ use crate::ports::brain::{Brain, CycleHost};
 use crate::ports::runs::{RunOutcome, RunStatus};
 use crate::ports::tasks::{COLUMN_IN_REVIEW, TaskOutput, TaskOutputArtifact, TaskOutputSource};
 use crate::ports::types::{
-    CompanyEvent, CompanyRecord, CompressedTrace, CycleRequest, CycleResult, Effect,
-    EffectGroup, OutboundMessage, TokenUsage, TurnStep,
-    TurnStepKind, TurnStepStatus, Verdict,
+    CompanyEvent, CompanyRecord, CompressedTrace, CycleRequest, CycleResult, Effect, EffectGroup,
+    OutboundMessage, TokenUsage, TurnStep, TurnStepKind, TurnStepStatus, Verdict,
 };
 use crate::ports::{Cognition, TaskOrigin, TaskRecord, UsageMetering, generate_id, now_millis};
 
@@ -3433,7 +3432,6 @@ impl HarnessBrain {
             .map(|card| card.id)
             .next_back()
     }
-
 }
 
 fn tinyhivemind_mention(
@@ -3455,7 +3453,6 @@ fn tinyhivemind_mention(
         quiet: mention.quiet,
     }
 }
-
 
 /// The turn instruction for a dispatched card: its title, plus its note when it
 /// carries one, framed as a work item to act on.
@@ -3799,10 +3796,7 @@ impl HarnessBrain {
                                 }),
                             );
                             let trigger = crate::hive::dispatch::trigger_for(
-                                event_seq,
-                                &composed,
-                                *parent,
-                                mentions,
+                                event_seq, &composed, *parent, mentions,
                             );
                             crate::hive::dispatch::spawn_episode(dispatcher, desk_id, trigger);
                             room_answered = true;

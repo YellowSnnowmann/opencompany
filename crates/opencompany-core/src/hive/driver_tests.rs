@@ -180,7 +180,10 @@ fn trigger(seq: EventSeq, text: &str) -> Trigger {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_two_seat_desk_completes_in_two_rounds_with_both_seats_running_at_once() {
     let script = Script::new(&[
-        ("engineer", vec![post("Plan: two sprints."), complete("Plan stands.")]),
+        (
+            "engineer",
+            vec![post("Plan: two sprints."), complete("Plan stands.")],
+        ),
         ("ceo", vec![post("Budget is fine."), complete("Approved.")]),
     ]);
     let (host, log) = dispatcher(script.clone()).await;
@@ -307,7 +310,10 @@ async fn a_dm_narrows_its_row_and_a_broadcast_without_jev_falls_back_to_the_othe
     ]);
     let (host, log) = dispatcher(script).await;
     let seq = log
-        .append(&MemoryLog::company(), operator_message("engineering", "Go.", None))
+        .append(
+            &MemoryLog::company(),
+            operator_message("engineering", "Go.", None),
+        )
         .await
         .unwrap();
     let report = host
@@ -365,7 +371,10 @@ async fn a_seat_that_never_speaks_is_retried_then_completed_on_its_behalf() {
     ]);
     let (host, log) = dispatcher(script.clone()).await;
     let seq = log
-        .append(&MemoryLog::company(), operator_message("engineering", "Go.", None))
+        .append(
+            &MemoryLog::company(),
+            operator_message("engineering", "Go.", None),
+        )
         .await
         .unwrap();
     let report = host
@@ -397,7 +406,12 @@ async fn a_seat_that_never_speaks_is_retried_then_completed_on_its_behalf() {
         .collect();
     assert_eq!(
         settled,
-        vec!["no_utterance", "no_utterance", "no_utterance", "no_utterance"]
+        vec![
+            "no_utterance",
+            "no_utterance",
+            "no_utterance",
+            "no_utterance"
+        ]
     );
 }
 
@@ -417,7 +431,10 @@ async fn a_failed_or_timed_out_seat_is_settled_as_such_and_the_room_still_closes
     ]);
     let (host, log) = dispatcher(script).await;
     let seq = log
-        .append(&MemoryLog::company(), operator_message("engineering", "Go.", None))
+        .append(
+            &MemoryLog::company(),
+            operator_message("engineering", "Go.", None),
+        )
         .await
         .unwrap();
     let report = host
@@ -444,11 +461,13 @@ async fn a_failed_or_timed_out_seat_is_settled_as_such_and_the_room_still_closes
             ("ceo".to_string(), "timed_out")
         ]
     );
-    assert!(
-        log.rows()
-            .iter()
-            .any(|stored| matches!(&stored.event, CompanyEvent::EpisodeCompleted { reason: EpisodeReason::Failed, .. }))
-    );
+    assert!(log.rows().iter().any(|stored| matches!(
+        &stored.event,
+        CompanyEvent::EpisodeCompleted {
+            reason: EpisodeReason::Failed,
+            ..
+        }
+    )));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -488,18 +507,29 @@ async fn a_follow_up_in_the_thread_joins_the_open_episode_and_a_resume_replays_a
         .await
         .unwrap();
     assert_eq!(episodes.len(), 2);
-    assert!(episodes.iter().all(|e| e.parent_id.as_deref() == Some(&seq.value().to_string())));
+    assert!(
+        episodes
+            .iter()
+            .all(|e| e.parent_id.as_deref() == Some(&seq.value().to_string()))
+    );
 
     // Resume from the checkpoint: every committed row replays as a no-op
     // and the driver state comes back at the same revision.
     let desk = host.hive("engineering").unwrap();
     let routing = crate::hive::routing::desk_routing(&host.record, "engineering");
-    let persisted = crate::hive::episode_store::latest_state(log.as_ref(), &company, &first.episode_id)
+    let persisted =
+        crate::hive::episode_store::latest_state(log.as_ref(), &company, &first.episode_id)
+            .await
+            .unwrap()
+            .expect("checkpoint");
+    let resumed = host
+        .resume_from(&desk, persisted.clone(), &routing)
         .await
-        .unwrap()
-        .expect("checkpoint");
-    let resumed = host.resume_from(&desk, persisted.clone(), &routing).await.unwrap();
-    assert_eq!(resumed.state.revision(), persisted.state["revision"].as_u64().unwrap());
+        .unwrap();
+    assert_eq!(
+        resumed.state.revision(),
+        persisted.state["revision"].as_u64().unwrap()
+    );
     assert!(matches!(
         tinyhivemind_hive::completion_status(resumed.state.episode()),
         tinyhivemind_hive::CompletionStep::Complete { .. }
@@ -523,7 +553,10 @@ async fn a_desk_mention_refers_the_question_and_the_answer_comes_home() {
     let (host, log) = dispatcher(script.clone()).await;
     let company = MemoryLog::company();
     let seq = log
-        .append(&company, operator_message("engineering", "Build login.", None))
+        .append(
+            &company,
+            operator_message("engineering", "Build login.", None),
+        )
         .await
         .unwrap();
     let report = host
@@ -534,7 +567,13 @@ async fn a_desk_mention_refers_the_question_and_the_answer_comes_home() {
     // The far desk's episode and the answer run on their own tasks.
     for _ in 0..200 {
         let done = log.rows().iter().any(|stored| {
-            matches!(&stored.event, CompanyEvent::ReferralEnqueued { returning: true, .. })
+            matches!(
+                &stored.event,
+                CompanyEvent::ReferralEnqueued {
+                    returning: true,
+                    ..
+                }
+            )
         });
         if done {
             break;
@@ -553,7 +592,13 @@ async fn a_desk_mention_refers_the_question_and_the_answer_comes_home() {
                 episode_id,
                 hop,
                 ..
-            } => Some((from_desk.clone(), to_desk.clone(), asker.clone(), episode_id.clone(), *hop)),
+            } => Some((
+                from_desk.clone(),
+                to_desk.clone(),
+                asker.clone(),
+                episode_id.clone(),
+                *hop,
+            )),
             _ => None,
         })
         .expect("the forward marker");
@@ -564,14 +609,25 @@ async fn a_desk_mention_refers_the_question_and_the_answer_comes_home() {
     assert_eq!(forward.4, 1);
     let content = log.replies("content");
     assert_eq!(content[0].0, crate::hive::referral::HIVE_REFERRAL_AUTHOR);
-    assert!(content[0].1.contains("asks: @#content can you draft the copy?"));
-    assert!(content.iter().any(|(agent, text)| agent == "writer" && text.contains("Sign in.")));
+    assert!(
+        content[0]
+            .1
+            .contains("asks: @#content can you draft the copy?")
+    );
+    assert!(
+        content
+            .iter()
+            .any(|(agent, text)| agent == "writer" && text.contains("Sign in."))
+    );
     let home = log
         .replies("engineering")
         .into_iter()
         .find(|(agent, _)| agent == crate::hive::referral::HIVE_REFERRAL_AUTHOR)
         .expect("the answer came home");
-    assert!(home.1.contains("@writer on #Content desk answered: Here is the copy: Sign in."));
+    assert!(
+        home.1
+            .contains("@writer on #Content desk answered: Here is the copy: Sign in.")
+    );
     let episodes = list_episodes(log.as_ref(), &company, None, None, 10)
         .await
         .unwrap();

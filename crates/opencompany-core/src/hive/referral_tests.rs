@@ -54,7 +54,10 @@ fn a_desk_mention_crosses_and_a_local_one_does_not() {
         "@#content can you draft the copy for the login page?",
         0,
     );
-    assert!(!mentions_of("@#content please").is_empty(), "desk mention resolves");
+    assert!(
+        !mentions_of("@#content please").is_empty(),
+        "desk mention resolves"
+    );
     let referral = decide(policy, &crossing, &roster, &desks.set()).expect("crosses");
     assert_eq!(referral.to.desk_id, "content");
     assert_eq!(referral.target_id, "writer");
@@ -63,7 +66,11 @@ fn a_desk_mention_crosses_and_a_local_one_does_not() {
     let desk_referral = DeskReferral::from_referral(&referral, &record, "ep-1", None, true);
     assert_eq!(desk_referral.from_desk_name, "Engineering desk");
     assert_eq!(desk_referral.asker_label, "engineer");
-    assert!(desk_referral.seed_text().starts_with("@engineer on #Engineering desk asks: "));
+    assert!(
+        desk_referral
+            .seed_text()
+            .starts_with("@engineer on #Engineering desk asks: ")
+    );
     assert_eq!(
         asked_message(&desk_referral.seed_text()),
         "@#content can you draft the copy for the login page?"
@@ -138,30 +145,51 @@ async fn the_journal_queue_enqueues_once_per_trigger() {
     else {
         panic!("a forward marker");
     };
-    assert_eq!((from_desk.as_str(), to_desk.as_str()), ("engineering", "content"));
+    assert_eq!(
+        (from_desk.as_str(), to_desk.as_str()),
+        ("engineering", "content")
+    );
     assert_eq!((target.as_str(), asker.as_str()), ("writer", "engineer"));
     assert_eq!(episode_id.as_deref(), Some("ep-1"));
     assert_eq!(to_episode_id.as_deref(), Some("ep-2"));
     assert_eq!((hop, returning, trigger_sequence), (1, false, 7));
 
     let origin = desk_referral.return_address(forward).unwrap();
-    let back = return_event(&record, &origin, "content", "writer", EventSeq::new(20), "ep-2");
+    let back = return_event(
+        &record,
+        &origin,
+        "content",
+        "writer",
+        EventSeq::new(20),
+        "ep-2",
+    );
     let CompanyEvent::ReferralEnqueued {
-        returning, answers, to_desk, target, episode_id, ..
+        returning,
+        answers,
+        to_desk,
+        target,
+        episode_id,
+        ..
     } = back
     else {
         panic!("a return marker");
     };
     assert!(returning);
     assert_eq!(answers, Some(forward.value()));
-    assert_eq!((to_desk.as_str(), target.as_str()), ("engineering", "engineer"));
+    assert_eq!(
+        (to_desk.as_str(), target.as_str()),
+        ("engineering", "engineer")
+    );
     assert_eq!(episode_id.as_deref(), Some("ep-1"));
 }
 
 #[test]
 fn answer_rows_attribute_and_unattribute_symmetrically() {
     let note = returned_note("writer", "Content desk", "  Use the short form.  ");
-    assert_eq!(note, "@writer on #Content desk answered: Use the short form.");
+    assert_eq!(
+        note,
+        "@writer on #Content desk answered: Use the short form."
+    );
     assert_eq!(
         unattributed("writer", "Content desk", &note),
         "Use the short form."

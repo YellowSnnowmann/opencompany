@@ -23,20 +23,21 @@ use async_trait::async_trait;
 use tinyhivemind::speech::Utterance;
 use tinyhivemind::{Sequence, SharingState};
 use tinyhivemind_embed::{Router, RoutingPlan};
-use tinyhivemind_hive::{CompletionEpisodeState, CompletionStep, apply_assignment, completion_status};
+use tinyhivemind_hive::{
+    CompletionEpisodeState, CompletionStep, apply_assignment, completion_status,
+};
 use tinyhivemind_openhuman::{BroadcastRouting, CompletionDriver, DriverState, HostAction};
 
 use crate::error::{OpenCompanyError, Result};
 use crate::hive::episode_store::{self, PersistedEpisode};
 use crate::hive::graph::DeskHive;
 use crate::hive::referral::{DeskReferral, ReturnAddress};
-use crate::hive::routing::{EffectiveRouting, RoutingPlanDto, router_of};
 use crate::hive::round::{self, RoundOutcome, SeatAssignment};
+use crate::hive::routing::{EffectiveRouting, RoutingPlanDto, router_of};
 use crate::hive::tools::HiveTurn;
 use crate::ports::events::EventLog;
 use crate::ports::types::{
-    ChatOutput, CompanyEvent, CompanyId, CompanyRecord, EpisodeReason, EventSeq, Mention,
-    TurnStep,
+    ChatOutput, CompanyEvent, CompanyId, CompanyRecord, EpisodeReason, EventSeq, Mention, TurnStep,
 };
 
 /// The referral half of the host: deciding a crossing, opening the far
@@ -197,7 +198,10 @@ impl HiveDispatcher {
         )
         .await?
         {
-            Some(open) => self.resume(&desk, open.episode_id, thread_root, &trigger).await?,
+            Some(open) => {
+                self.resume(&desk, open.episode_id, thread_root, &trigger)
+                    .await?
+            }
             None => self.open(&desk, thread_root, &trigger).await?,
         };
         let report = self.drive(&mut run).await?;
@@ -209,7 +213,12 @@ impl HiveDispatcher {
 
     /// Opens a new episode: routes the message, journals the opening, starts
     /// the driver.
-    async fn open(&self, desk: &Arc<DeskHive>, thread_root: EventSeq, trigger: &Trigger) -> Result<EpisodeRun> {
+    async fn open(
+        &self,
+        desk: &Arc<DeskHive>,
+        thread_root: EventSeq,
+        trigger: &Trigger,
+    ) -> Result<EpisodeRun> {
         let routing = crate::hive::routing::desk_routing(&self.record, &desk.desk_id);
         let policy = routing.policy();
         let explicit = explicit_seat(desk, &trigger.mentions);
@@ -329,13 +338,14 @@ impl HiveDispatcher {
         trigger: &Trigger,
     ) -> Result<EpisodeRun> {
         let routing = crate::hive::routing::desk_routing(&self.record, &desk.desk_id);
-        let persisted = episode_store::latest_state(self.events.as_ref(), &self.record.id, &episode_id)
-            .await?
-            .ok_or_else(|| {
-                OpenCompanyError::Harness(format!(
-                    "episode `{episode_id}` is open but has no checkpoint"
-                ))
-            })?;
+        let persisted =
+            episode_store::latest_state(self.events.as_ref(), &self.record.id, &episode_id)
+                .await?
+                .ok_or_else(|| {
+                    OpenCompanyError::Harness(format!(
+                        "episode `{episode_id}` is open but has no checkpoint"
+                    ))
+                })?;
         let mut run = self.resume_from(desk, persisted, &routing).await?;
         let seat = explicit_seat(desk, &trigger.mentions)
             .or_else(|| {
@@ -536,16 +546,13 @@ impl HiveDispatcher {
     ) -> Result<()> {
         // Actions come back in commit order, one per broadcast or dm, so the
         // n-th action pairs with the n-th routed utterance of the round.
-        let mut routed = outcome
-            .records
-            .iter()
-            .filter(|record| {
-                matches!(
-                    record.kind,
-                    crate::ports::types::UtteranceKind::Broadcast
-                        | crate::ports::types::UtteranceKind::Dm
-                )
-            });
+        let mut routed = outcome.records.iter().filter(|record| {
+            matches!(
+                record.kind,
+                crate::ports::types::UtteranceKind::Broadcast
+                    | crate::ports::types::UtteranceKind::Dm
+            )
+        });
         for action in actions {
             let Some(record) = routed.next() else { break };
             let message_seq = record.message_seq.unwrap_or(record.sequence);
@@ -723,9 +730,14 @@ impl EpisodeReason {
 /// Process-wide because the dispatcher is built per message: two messages
 /// on one thread must find the same lock. The map only grows by one entry
 /// per thread that ever ran an episode; each entry is two words.
-fn episode_lock(company: &CompanyId, desk_id: &str, thread_root: EventSeq) -> Arc<tokio::sync::Mutex<()>> {
-    static LOCKS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
-        std::sync::OnceLock::new();
+pub(crate) fn episode_lock(
+    company: &CompanyId,
+    desk_id: &str,
+    thread_root: EventSeq,
+) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: std::sync::OnceLock<
+        std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    > = std::sync::OnceLock::new();
     let key = format!("{company}:{desk_id}:{}", thread_root.value());
     let mut locks = LOCKS
         .get_or_init(|| std::sync::Mutex::new(HashMap::new()))

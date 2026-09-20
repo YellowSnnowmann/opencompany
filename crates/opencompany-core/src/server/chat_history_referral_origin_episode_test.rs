@@ -141,8 +141,7 @@ async fn a_suppressed_report_does_not_shorten_the_page() {
         "a page of four is four teammate turns, not three and a hole: {page:?}"
     );
     assert!(
-        page.iter()
-            .all(|m| m.channel != "hive-report"),
+        page.iter().all(|m| m.channel != "hive-report"),
         "and none of them is the room's bookkeeping: {page:?}"
     );
 }
@@ -163,10 +162,7 @@ async fn legacy_report_and_failure_rows_stay_out_of_the_room() {
             "hive-failure",
             "qa_engineer was asked and could not answer.",
         ),
-        (
-            "hive-report",
-            "The desk settled after 2 turns.",
-        ),
+        ("hive-report", "The desk settled after 2 turns."),
     ] {
         runtime
             .events()

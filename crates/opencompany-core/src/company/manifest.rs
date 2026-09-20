@@ -1533,4 +1533,3 @@ fn legacy_hive_block(text: &str) -> Option<String> {
         stale.join("`, `")
     ))
 }
-

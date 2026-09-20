@@ -402,7 +402,9 @@ impl McpHost {
                 {
                     Ok(runtime) => runtime,
                     Err(error) => {
-                        tracing::error!("[hive::mcp] MCP listener runtime failed to build: {error}");
+                        tracing::error!(
+                            "[hive::mcp] MCP listener runtime failed to build: {error}"
+                        );
                         return;
                     }
                 };

@@ -343,7 +343,10 @@ async fn desk_routing_reports_resolved_numbers_for_an_undeclared_block() {
     );
     assert_eq!(body["effective"]["referral"]["enabled"], false);
     assert!(
-        matches!(body["effective"]["router"].as_str(), Some("jev" | "fallback")),
+        matches!(
+            body["effective"]["router"].as_str(),
+            Some("jev" | "fallback")
+        ),
         "{body}"
     );
     // Nothing was declared, so the authored block is empty — which is
@@ -570,7 +573,10 @@ async fn desk_lifecycle_is_journaled() {
     assert!(kinds.contains(&"DeskDeleted"), "kinds: {kinds:?}");
     assert!(kinds.contains(&"TeammateAdded"), "kinds: {kinds:?}");
     assert_eq!(
-        kinds.iter().filter(|k| **k == "DeskRoutingConfigured").count(),
+        kinds
+            .iter()
+            .filter(|k| **k == "DeskRoutingConfigured")
+            .count(),
         2,
         "one row for install and one for reset: {kinds:?}"
     );

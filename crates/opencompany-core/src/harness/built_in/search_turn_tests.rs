@@ -394,7 +394,12 @@ fn advertised_tools(script: &Script) -> Vec<String> {
             .filter_map(|body| body.get("messages").and_then(Value::as_array).cloned())
             .flatten()
             .filter(|message| message.get("role").and_then(Value::as_str) == Some("system"))
-            .filter_map(|message| message.get("content").and_then(Value::as_str).map(str::to_string))
+            .filter_map(|message| {
+                message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
             .flat_map(|prompt| crate::harness::build::tools_named_in_mcp_brief(&prompt)),
     );
     names.sort();

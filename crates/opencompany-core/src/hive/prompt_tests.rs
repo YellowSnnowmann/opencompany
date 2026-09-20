@@ -22,11 +22,7 @@ fn message(seq: u64, author: SessionAuthor, text: &str) -> SessionMessage {
 
 #[test]
 fn the_sentinel_is_line_one_and_names_desk_episode_and_round() {
-    let delta = [message(
-        4,
-        SessionAuthor::Operator,
-        "Ship the login page.",
-    )];
+    let delta = [message(4, SessionAuthor::Operator, "Ship the login page.")];
     let prompt = SeatPrompt {
         desk_id: "engineering",
         desk_name: "Engineering desk",
@@ -148,7 +144,13 @@ async fn the_sharing_walk_hands_a_window_first_and_only_the_delta_afterwards() {
     .unwrap();
     log.append(
         &company,
-        agent_reply_in("engineering", "ceo", "psst engineer", vec!["engineer".into()], None),
+        agent_reply_in(
+            "engineering",
+            "ceo",
+            "psst engineer",
+            vec!["engineer".into()],
+            None,
+        ),
     )
     .await
     .unwrap();
@@ -181,7 +183,12 @@ async fn the_sharing_walk_hands_a_window_first_and_only_the_delta_afterwards() {
     let texts: Vec<Option<&str>> = window.iter().map(SessionMessage::readable).collect();
     assert_eq!(
         texts,
-        vec![Some("Plan it."), Some("On it."), None, Some("psst engineer")]
+        vec![
+            Some("Plan it."),
+            Some("On it."),
+            None,
+            Some("psst engineer")
+        ]
     );
     assert_eq!(state.watermark, before);
 

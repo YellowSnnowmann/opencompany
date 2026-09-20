@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use tinyhivemind::{SESSION_WINDOW, Sequence, SessionAuthor, SessionLog, SessionQuery, project_session};
+use tinyhivemind::{
+    SESSION_WINDOW, Sequence, SessionAuthor, SessionLog, SessionQuery, project_session,
+};
 
 use super::*;
 use crate::hive::referral::HIVE_REFERRAL_AUTHOR;
@@ -28,7 +30,10 @@ async fn the_log_adapter_attributes_and_pages_desk_rows() {
     // Addressed by display name, in the wrong case: the adapter canonicalises
     // it, so the row still lands in the room it was meant for.
     let trigger = log
-        .append(&company, operator_message("ENGINEERING", "Decide the rollout.", None))
+        .append(
+            &company,
+            operator_message("ENGINEERING", "Decide the rollout.", None),
+        )
         .await
         .unwrap();
     log.append(&company, agent_reply("eng", "planner", "Stage it."))
@@ -36,7 +41,11 @@ async fn the_log_adapter_attributes_and_pages_desk_rows() {
         .unwrap();
     log.append(
         &company,
-        agent_reply("eng", HIVE_REFERRAL_AUTHOR, "@writer on #Content answered: yes"),
+        agent_reply(
+            "eng",
+            HIVE_REFERRAL_AUTHOR,
+            "@writer on #Content answered: yes",
+        ),
     )
     .await
     .unwrap();

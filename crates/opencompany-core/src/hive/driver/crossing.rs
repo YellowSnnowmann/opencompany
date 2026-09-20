@@ -19,7 +19,12 @@ use crate::ports::types::CompanyEvent;
 
 impl HiveDispatcher {
     /// Decides and dispatches the crossings a round's utterances raise.
-    async fn refer(&self, run: &EpisodeRun, outcome: &RoundOutcome, routing: &EffectiveRouting) -> Result<()> {
+    async fn refer(
+        &self,
+        run: &EpisodeRun,
+        outcome: &RoundOutcome,
+        routing: &EffectiveRouting,
+    ) -> Result<()> {
         let policy = routing.referral_policy();
         if !policy.enabled {
             return Ok(());
@@ -28,7 +33,8 @@ impl HiveDispatcher {
         let snapshots = crate::runtime::delegation_tools::tinyhivemind_desks(&self.record);
         let desks = snapshots.set();
         let roster = tinyhivemind_core::roster::Roster::new(&members, &[], &[]);
-        let queue = crate::hive::referral::JournalReferralQueue::new(self.events.as_ref(), &self.record.id);
+        let queue =
+            crate::hive::referral::JournalReferralQueue::new(self.events.as_ref(), &self.record.id);
         for record in &outcome.records {
             let Some(text) = outcome.texts.get(&record.agent_id) else {
                 continue;
@@ -129,7 +135,12 @@ impl HiveDispatcher {
 
     /// Carries a completed referral's answer home and reopens the seat that
     /// asked.
-    async fn deliver_answer(&self, run: &EpisodeRun, origin: &ReturnAddress, report: &EpisodeReport) -> Result<()> {
+    async fn deliver_answer(
+        &self,
+        run: &EpisodeRun,
+        origin: &ReturnAddress,
+        report: &EpisodeReport,
+    ) -> Result<()> {
         let answered_by = report
             .completed_by
             .clone()
@@ -199,7 +210,6 @@ impl HiveDispatcher {
         spawn_drive(self.clone_for_task(), home);
         Ok(())
     }
-
 }
 
 /// Drives a desk message on its own task. Type-erased so the referral chain
@@ -239,4 +249,3 @@ pub(crate) fn spawn_drive(dispatcher: Arc<HiveDispatcher>, mut home: EpisodeRun)
         });
     tokio::spawn(task);
 }
-

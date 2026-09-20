@@ -258,11 +258,12 @@ pub(crate) async fn harness(
     Arc<dyn WorkspaceStore>,
 ) {
     let store: Arc<dyn WorkspaceStore> = Arc::new(FsOps::new(dir));
-    // A fresh id per fixture: every turn test in this binary runs on the one
+    // A fresh id per test: every turn test in this binary runs on the one
     // process-wide OpenHuman runtime, and an agent's thread transcript is
     // keyed by `(company, agent)` — two fixtures naming `acme`/`ceo` would
-    // resume each other's transcript, system prompt included.
-    let id = CompanyId::new(format!("acme-{}", uuid::Uuid::new_v4().simple()));
+    // resume each other's transcript, system prompt included. Per test rather
+    // than per call so the supervised suite's second record agrees with it.
+    let id = crate::test_support::per_test_company_id("acme");
     store
         .create(&id, &folder("f-std", "standards"), None)
         .await
@@ -397,7 +398,12 @@ pub(crate) fn advertised_tools(script: &Script) -> Vec<String> {
             .filter_map(|body| body.get("messages").and_then(Value::as_array).cloned())
             .flatten()
             .filter(|message| message.get("role").and_then(Value::as_str) == Some("system"))
-            .filter_map(|message| message.get("content").and_then(Value::as_str).map(str::to_string))
+            .filter_map(|message| {
+                message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
             .flat_map(|prompt| crate::harness::build::tools_named_in_mcp_brief(&prompt)),
     );
     names.sort();

@@ -172,9 +172,7 @@ pub fn fold_episodes(events: &[StoredEvent]) -> Vec<EpisodeSummary> {
                 ..
             } => {
                 if let Some(summary) = index.get(episode_id).map(|at| &mut episodes[*at]) {
-                    summary.revision = summary
-                        .revision
-                        .max(revision + utterances.len() as u64);
+                    summary.revision = summary.revision.max(revision + utterances.len() as u64);
                 }
             }
             CompanyEvent::EpisodeCompleted {
@@ -405,14 +403,12 @@ pub async fn replies_after(
                 text,
                 episode: Some(episode),
                 ..
-            } if episode.id == episode_id && episode.revision >= revision => {
-                Some(CommittedReply {
-                    seq: stored.seq,
-                    agent_id,
-                    text,
-                    episode,
-                })
-            }
+            } if episode.id == episode_id && episode.revision >= revision => Some(CommittedReply {
+                seq: stored.seq,
+                agent_id,
+                text,
+                episode,
+            }),
             _ => None,
         })
         .collect())

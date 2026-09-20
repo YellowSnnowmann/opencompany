@@ -64,7 +64,9 @@ impl SeatRunner for HarnessSeatRunner {
             )));
         }
         if let Some(reason) = &turn.abnormal_stop {
-            return Err(SeatFailure::Failed(format!("did not complete its turn: {reason}")));
+            return Err(SeatFailure::Failed(format!(
+                "did not complete its turn: {reason}"
+            )));
         }
         Ok(SeatOutcome {
             reply: turn.reply,

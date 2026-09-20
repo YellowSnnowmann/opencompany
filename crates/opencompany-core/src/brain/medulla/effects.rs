@@ -612,7 +612,10 @@ pub(crate) fn wire_event(seq: u64, event: &CompanyEvent) -> WireEvent {
             "episode.broadcast_routed",
         ),
         CompanyEvent::DmDelivered {
-            episode_id, from, to, ..
+            episode_id,
+            from,
+            to,
+            ..
         } => (
             Role::System,
             "hive".to_string(),

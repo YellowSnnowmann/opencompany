@@ -411,7 +411,6 @@ fn persona_omits_absent_or_blank_description() {
     assert!(persona.trim_end().ends_with("role."), "{persona}");
 }
 
-
 /// The brief's native set is read off the wired belt: an explicit `search`
 /// grant with a credential wires `web_search`, so `search` shows up in the
 /// belt's native capabilities — and a bare `*` (which never wires the metered

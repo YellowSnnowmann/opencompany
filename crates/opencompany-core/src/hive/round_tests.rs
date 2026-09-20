@@ -18,7 +18,14 @@ fn a_spoken_turn_commits_and_a_silent_one_retries_then_salvages() {
     );
     assert!(matches!(
         spoke,
-        Fold::Done(Settled { utterance: Utterance::Post { .. }, forced: None, .. }, TurnOutcome::Committed)
+        Fold::Done(
+            Settled {
+                utterance: Utterance::Post { .. },
+                forced: None,
+                ..
+            },
+            TurnOutcome::Committed
+        )
     ));
     let silent = fold_seat(
         "ceo",
@@ -42,7 +49,10 @@ fn a_spoken_turn_commits_and_a_silent_one_retries_then_salvages() {
     match last {
         Fold::Done(settled, TurnOutcome::NoUtterance) => {
             assert_eq!(settled.utterance.message(), "here it is");
-            assert!(matches!(settled.utterance, Utterance::CompleteEpisode { .. }));
+            assert!(matches!(
+                settled.utterance,
+                Utterance::CompleteEpisode { .. }
+            ));
             assert_eq!(settled.forced, Some(EpisodeReason::Failed));
         }
         other => panic!("{}", matches!(other, Fold::Retry)),
@@ -95,7 +105,13 @@ fn a_failed_or_timed_out_seat_is_completed_on_its_behalf() {
     let timed_out = fold_seat("ceo", 1, Err(SeatFailure::TimedOut), prompt::DESK_KINDS);
     assert!(matches!(
         timed_out,
-        Fold::Failed(Settled { forced: Some(EpisodeReason::Timeout), .. }, SeatFailure::TimedOut)
+        Fold::Failed(
+            Settled {
+                forced: Some(EpisodeReason::Timeout),
+                ..
+            },
+            SeatFailure::TimedOut
+        )
     ));
     let failed = fold_seat(
         "ceo",
@@ -105,7 +121,13 @@ fn a_failed_or_timed_out_seat_is_completed_on_its_behalf() {
     );
     assert!(matches!(
         failed,
-        Fold::Failed(Settled { forced: Some(EpisodeReason::Failed), .. }, SeatFailure::Failed(_))
+        Fold::Failed(
+            Settled {
+                forced: Some(EpisodeReason::Failed),
+                ..
+            },
+            SeatFailure::Failed(_)
+        )
     ));
     let episode = ReplyEpisode {
         id: "e".into(),

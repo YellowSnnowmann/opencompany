@@ -1536,7 +1536,9 @@ impl CompanyAgent {
         let _in_flight = match in_flight.begin(registration) {
             Ok(ticket) => Some(ticket),
             Err(_) => {
-                in_flight.with(&self.runtime_id, |turn| turn.executor = Some(job_tx.clone()));
+                in_flight.with(&self.runtime_id, |turn| {
+                    turn.executor = Some(job_tx.clone())
+                });
                 None
             }
         };
@@ -1604,58 +1606,56 @@ impl CompanyAgent {
         };
 
         let turn_body = oh::agent::stop_hooks::with_stop_hooks(
-                hooks,
-                Box::pin(async {
-                    let mut usages: Vec<TurnUsage> = Vec::new();
-                    let started = std::time::Instant::now();
-                    let first = send(pump.sender()).await.map(|outcome| outcome.reply);
-                    let first_elapsed = started.elapsed();
-                    usages.push(self.tapped_usage());
-                    let reply: crate::Result<String> = match self
-                        .classify_turn(self.unmask(first), first_elapsed)
-                    {
-                        AttemptOutcome::Reply(reply) => Ok(reply),
-                        AttemptOutcome::Hard(err) => Err(err),
-                        AttemptOutcome::BudgetPaused { summary } => {
-                            let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
-                            if let Ok(mut slot) = budget_pause_summary.lock() {
-                                *slot = Some(redacted.clone());
-                            }
-                            Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
+            hooks,
+            Box::pin(async {
+                let mut usages: Vec<TurnUsage> = Vec::new();
+                let started = std::time::Instant::now();
+                let first = send(pump.sender()).await.map(|outcome| outcome.reply);
+                let first_elapsed = started.elapsed();
+                usages.push(self.tapped_usage());
+                let reply: crate::Result<String> = match self
+                    .classify_turn(self.unmask(first), first_elapsed)
+                {
+                    AttemptOutcome::Reply(reply) => Ok(reply),
+                    AttemptOutcome::Hard(err) => Err(err),
+                    AttemptOutcome::BudgetPaused { summary } => {
+                        let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+                        if let Ok(mut slot) = budget_pause_summary.lock() {
+                            *slot = Some(redacted.clone());
                         }
-                        AttemptOutcome::Empty => {
-                            let spend_halted = spend_brake.as_ref().is_some_and(|(_, halted)| {
-                                halted.load(std::sync::atomic::Ordering::SeqCst)
-                            });
-                            if steer.map(|c| c.requested()).unwrap_or(false) || spend_halted {
-                                Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
-                            } else {
-                                let retry_started = std::time::Instant::now();
-                                let second = send(pump.sender()).await.map(|outcome| outcome.reply);
-                                let second_elapsed = retry_started.elapsed();
-                                usages.push(self.tapped_usage());
-                                match self.classify_turn(self.unmask(second), second_elapsed) {
-                                    AttemptOutcome::Reply(reply) => Ok(reply),
-                                    AttemptOutcome::Empty => Ok(crate::harness::mcp_probe::scrub(
-                                        GRACEFUL_EMPTY_REPLY,
-                                        &[],
-                                    )),
-                                    AttemptOutcome::BudgetPaused { summary } => {
-                                        let redacted =
-                                            crate::harness::mcp_probe::redact(&summary, &[]);
-                                        if let Ok(mut slot) = budget_pause_summary.lock() {
-                                            *slot = Some(redacted.clone());
-                                        }
-                                        Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
-                                    }
-                                    AttemptOutcome::Hard(err) => Err(err),
+                        Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
+                    }
+                    AttemptOutcome::Empty => {
+                        let spend_halted = spend_brake.as_ref().is_some_and(|(_, halted)| {
+                            halted.load(std::sync::atomic::Ordering::SeqCst)
+                        });
+                        if steer.map(|c| c.requested()).unwrap_or(false) || spend_halted {
+                            Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
+                        } else {
+                            let retry_started = std::time::Instant::now();
+                            let second = send(pump.sender()).await.map(|outcome| outcome.reply);
+                            let second_elapsed = retry_started.elapsed();
+                            usages.push(self.tapped_usage());
+                            match self.classify_turn(self.unmask(second), second_elapsed) {
+                                AttemptOutcome::Reply(reply) => Ok(reply),
+                                AttemptOutcome::Empty => {
+                                    Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
                                 }
+                                AttemptOutcome::BudgetPaused { summary } => {
+                                    let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+                                    if let Ok(mut slot) = budget_pause_summary.lock() {
+                                        *slot = Some(redacted.clone());
+                                    }
+                                    Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
+                                }
+                                AttemptOutcome::Hard(err) => Err(err),
                             }
                         }
-                    };
-                    (reply, usages)
-                }),
-            );
+                    }
+                };
+                (reply, usages)
+            }),
+        );
         let (reply, mut usages): (crate::Result<String>, Vec<TurnUsage>) = tokio::select! {
             biased;
             outcome = turn_body => outcome,

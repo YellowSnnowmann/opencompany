@@ -447,7 +447,10 @@ fn a_routing_block_parses_and_its_zero_keys_are_refused() {
     assert_eq!(desk.hive.round_width, Some(2));
     assert_eq!(desk.hive.max_rounds, Some(4));
     assert_eq!(
-        desk.hive.referral.as_ref().and_then(|referral| referral.max_hops),
+        desk.hive
+            .referral
+            .as_ref()
+            .and_then(|referral| referral.max_hops),
         Some(1)
     );
     // Round-trips under the `routing` key, never `hive`.

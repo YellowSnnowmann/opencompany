@@ -20,8 +20,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tinyhivemind::referral::{
-    Referral, ReferralDecision, ReferralInput, ReferralKind, ReferralPolicy, ReferralQueue,
-    ReferralFuture,
+    Referral, ReferralDecision, ReferralFuture, ReferralInput, ReferralKind, ReferralPolicy,
+    ReferralQueue,
 };
 use tinyhivemind::{EnqueueOutcome, EnqueueRefusal};
 use tinyhivemind_core::desk::DeskSet;

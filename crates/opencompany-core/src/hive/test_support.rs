@@ -50,7 +50,10 @@ impl MemoryLog {
 
     /// The `kind` of every journaled event, in order.
     pub(crate) fn kinds(&self) -> Vec<&'static str> {
-        self.rows().iter().map(|stored| stored.event.kind()).collect()
+        self.rows()
+            .iter()
+            .map(|stored| stored.event.kind())
+            .collect()
     }
 }
 

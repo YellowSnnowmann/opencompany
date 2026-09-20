@@ -46,7 +46,11 @@ async fn a_shared_seat_is_the_same_agent_in_both_hives_and_a_desk_of_one_gets_no
     assert_eq!(engineering.desk_name, "Engineering desk");
     let shared_here = engineering.hive.bound_agent("ceo").expect("ceo bound");
     let shared_there = content.hive.bound_agent("ceo").expect("ceo bound");
-    assert_eq!(shared_here.id(), shared_there.id(), "one runtime agent, two hives");
+    assert_eq!(
+        shared_here.id(),
+        shared_there.id(),
+        "one runtime agent, two hives"
+    );
     let candidate = engineering
         .hive
         .graph()
@@ -58,9 +62,7 @@ async fn a_shared_seat_is_the_same_agent_in_both_hives_and_a_desk_of_one_gets_no
     assert!(candidate.available);
 
     // An unbound member leaves the desk with one seat: no hive.
-    let (hives, errors) = desk_hives(&record, 8, &|id| {
-        (id != "ceo").then(|| agents[id].clone())
-    });
+    let (hives, errors) = desk_hives(&record, 8, &|id| (id != "ceo").then(|| agents[id].clone()));
     assert!(errors.is_empty(), "{errors:?}");
     assert!(hives.is_empty(), "{:?}", hives.keys().collect::<Vec<_>>());
 }

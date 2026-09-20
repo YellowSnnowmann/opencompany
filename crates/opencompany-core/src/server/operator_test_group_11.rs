@@ -446,7 +446,10 @@ fn projects_the_agents_own_body_beside_the_operators() {
         value["text"], "!support #kettle ^16 the swap is the customer's first preference",
         "and nothing is rewritten for the operator since the move grammar retired: {value}"
     );
-    assert!(value.get("episode").is_none(), "outside an episode: {value}");
+    assert!(
+        value.get("episode").is_none(),
+        "outside an episode: {value}"
+    );
     assert!(value.get("audience").is_none(), "desk-visible: {value}");
 }
 
@@ -756,7 +759,10 @@ fn projects_the_seat_and_round_on_a_hive_turn_bracket() {
     .expect("turn_settled");
     assert_eq!(timed_out["outcome"], "timed_out");
     assert_eq!(timed_out["agentId"], "engineer");
-    assert!(timed_out.get("error").is_none(), "the reason stays off the wire: {timed_out}");
+    assert!(
+        timed_out.get("error").is_none(),
+        "the reason stays off the wire: {timed_out}"
+    );
 }
 
 /// The episode frames project one to one with their journal rows, camelCase,
@@ -784,7 +790,10 @@ fn projects_the_episode_frames() {
     assert_eq!(opened["episodeId"], "ep-1");
     assert_eq!(opened["openedBySeq"], 4);
     assert_eq!(opened["parentId"], "2");
-    assert_eq!(opened["participants"], serde_json::json!(["engineer", "ceo"]));
+    assert_eq!(
+        opened["participants"],
+        serde_json::json!(["engineer", "ceo"])
+    );
     assert_eq!(opened["plan"]["invitedIds"], serde_json::json!(["ceo"]));
 
     let round = super::project_event(&stored(CompanyEvent::RoundStarted {
@@ -825,7 +834,10 @@ fn projects_the_episode_frames() {
     assert_eq!(committed["utterances"][0]["messageSeq"], 7);
     assert_eq!(committed["utterances"][0]["kind"], "broadcast");
     assert!(committed["utterances"][0].get("to").is_none());
-    assert_eq!(committed["utterances"][1]["to"], serde_json::json!(["engineer"]));
+    assert_eq!(
+        committed["utterances"][1]["to"],
+        serde_json::json!(["engineer"])
+    );
     assert_eq!(committed["actions"][0]["kind"], "run_agents");
 
     let routed = super::project_event(&stored(CompanyEvent::BroadcastRouted {

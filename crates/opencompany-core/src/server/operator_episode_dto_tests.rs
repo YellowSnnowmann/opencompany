@@ -72,7 +72,10 @@ fn a_history_row_carries_episode_and_audience_only_when_set() {
     assert_eq!(wire["episode"]["kind"], "dm");
     assert_eq!(wire["audience"], serde_json::json!(["engineer"]));
     assert!(wire.get("asideConversation").is_none());
-    assert!(wire.get("cueText").is_none(), "text and cueText are equal: {wire}");
+    assert!(
+        wire.get("cueText").is_none(),
+        "text and cueText are equal: {wire}"
+    );
 
     let plain = crate::server::chat_history::MessageView::for_test("8", "ceo", "hi", Vec::new());
     let wire = serde_json::to_value(super::ChatHistoryMessageDto::from(plain)).unwrap();

@@ -21,13 +21,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::future::join_all;
+use tinyhivemind::Sequence;
 use tinyhivemind::aside::Viewer;
 use tinyhivemind::speech::{Utterance, fence};
-use tinyhivemind::Sequence;
 use tinyhivemind_openhuman::{CommittedUtterance, PendingRound};
 
 use crate::error::Result;
-use crate::hive::driver::{EpisodeRun, HiveDispatcher, SeatFailure, SeatOutcome, SeatTurn, Trigger};
+use crate::hive::driver::{
+    EpisodeRun, HiveDispatcher, SeatFailure, SeatOutcome, SeatTurn, Trigger,
+};
 use crate::hive::prompt::{self, SeatPrompt};
 use crate::hive::session_log::EventLogSessionLog;
 use crate::hive::tools::HiveTurn;
@@ -72,7 +74,10 @@ impl SeatAssignment {
     #[must_use]
     pub fn broadcast(author: &str, seq: u64, message: &str) -> Self {
         Self {
-            text: format!("@{author} handed you this by broadcast (^{seq}):\n{}", message.trim()),
+            text: format!(
+                "@{author} handed you this by broadcast (^{seq}):\n{}",
+                message.trim()
+            ),
         }
     }
 
@@ -261,7 +266,15 @@ pub(crate) async fn run_round(
         for (agent_id, turn_id, attempt, outcome) in outcomes {
             match fold_seat(&agent_id, attempt, outcome, allowed) {
                 Fold::Retry => {
-                    settle(host, run, &turn_id, &agent_id, revision, TurnOutcome::NoUtterance).await?;
+                    settle(
+                        host,
+                        run,
+                        &turn_id,
+                        &agent_id,
+                        revision,
+                        TurnOutcome::NoUtterance,
+                    )
+                    .await?;
                     remaining.push((agent_id, attempt + 1));
                 }
                 Fold::Done(done, outcome) => {
@@ -406,7 +419,9 @@ fn fold_seat(
         }
         Err(failure) => {
             let (message, reason) = match &failure {
-                SeatFailure::TimedOut => ("(no action: the turn timed out)", EpisodeReason::Timeout),
+                SeatFailure::TimedOut => {
+                    ("(no action: the turn timed out)", EpisodeReason::Timeout)
+                }
                 SeatFailure::Failed(_) => ("(no action: the turn failed)", EpisodeReason::Failed),
             };
             Fold::Failed(
@@ -472,7 +487,10 @@ async fn fail(
     failure: &SeatFailure,
 ) -> Result<()> {
     let (error, outcome) = match failure {
-        SeatFailure::TimedOut => ("the seat turn ran past its timeout".to_string(), TurnOutcome::TimedOut),
+        SeatFailure::TimedOut => (
+            "the seat turn ran past its timeout".to_string(),
+            TurnOutcome::TimedOut,
+        ),
         SeatFailure::Failed(error) => (error.clone(), TurnOutcome::Failed),
     };
     tracing::warn!(

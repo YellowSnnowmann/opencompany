@@ -137,16 +137,15 @@ pub fn spawn_episode(
     desk_id: String,
     trigger: Trigger,
 ) -> tokio::task::JoinHandle<Option<EpisodeReport>> {
-    let task: std::pin::Pin<
-        Box<dyn std::future::Future<Output = Option<EpisodeReport>> + Send>,
-    > = Box::pin(async move {
-        match dispatcher.run_desk_message(&desk_id, trigger).await {
-            Ok(report) => Some(report),
-            Err(error) => {
-                tracing::warn!(desk = %desk_id, %error, "[hive] the episode failed");
-                None
+    let task: std::pin::Pin<Box<dyn std::future::Future<Output = Option<EpisodeReport>> + Send>> =
+        Box::pin(async move {
+            match dispatcher.run_desk_message(&desk_id, trigger).await {
+                Ok(report) => Some(report),
+                Err(error) => {
+                    tracing::warn!(desk = %desk_id, %error, "[hive] the episode failed");
+                    None
+                }
             }
-        }
-    });
+        });
     tokio::spawn(task)
 }

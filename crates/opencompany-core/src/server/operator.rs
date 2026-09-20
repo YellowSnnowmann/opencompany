@@ -693,10 +693,17 @@ async fn list_episodes(
                 .load(scope.id())
                 .await?
                 .ok_or_else(|| OpenCompanyError::CompanyNotFound(scope.id().to_string()))?;
-            Some(record.resolve_desk_id(key).unwrap_or_else(|| key.to_string()))
+            Some(
+                record
+                    .resolve_desk_id(key)
+                    .unwrap_or_else(|| key.to_string()),
+            )
         }
     };
-    let limit = query.limit.unwrap_or(EPISODES_DEFAULT_LIMIT).clamp(1, EPISODES_MAX_LIMIT);
+    let limit = query
+        .limit
+        .unwrap_or(EPISODES_DEFAULT_LIMIT)
+        .clamp(1, EPISODES_MAX_LIMIT);
     let episodes = crate::hive::episode_store::list_episodes(
         scope.runtime.events().as_ref(),
         scope.id(),

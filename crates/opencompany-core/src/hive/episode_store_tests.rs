@@ -102,7 +102,13 @@ async fn episodes_fold_newest_first_with_their_status_and_revision() {
         .unwrap();
     assert_eq!(engineering.len(), 1);
     assert_eq!(engineering[0].chat_id, "engineering");
-    assert_eq!(list_episodes(&log, &company, None, None, 1).await.unwrap().len(), 1);
+    assert_eq!(
+        list_episodes(&log, &company, None, None, 1)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 
     let value = serde_json::to_value(&all[0]).unwrap();
     assert_eq!(value["chatId"], "content");
@@ -189,7 +195,12 @@ async fn the_checkpoint_round_trips_and_later_replies_replay() {
             forward_seq: 3,
         }),
     };
-    assert!(latest_state(&log, &company, "ep-1").await.unwrap().is_none());
+    assert!(
+        latest_state(&log, &company, "ep-1")
+            .await
+            .unwrap()
+            .is_none()
+    );
     save_state(&log, &company, &persisted).await.unwrap();
     let older = PersistedEpisode {
         revision: 0,
@@ -221,7 +232,13 @@ async fn the_checkpoint_round_trips_and_later_replies_replay() {
     };
     log.append(
         &company,
-        agent_reply_in("engineering", "engineer", "r0", Vec::new(), Some(in_episode(0))),
+        agent_reply_in(
+            "engineering",
+            "engineer",
+            "r0",
+            Vec::new(),
+            Some(in_episode(0)),
+        ),
     )
     .await
     .unwrap();
