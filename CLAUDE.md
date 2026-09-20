@@ -28,7 +28,8 @@ source module directories:
   starting tool belt every company gets whichever vertical it started from,
   authored in `companies/_globals/` and embedded at build time
   (`docs/spec/runtime/globals.md`)
-- `src/openhuman/`: launcher and integration seams for the vendored OpenHuman checkout
+- `src/harness/`: the execution engines — the embedded OpenHuman runtime and one agent per teammate (feature `openhuman`)
+- `src/hive/`: hive desks — one `OpenHumanHive` per `[[group_chat]]`, speech over the `opencompany` MCP server, Jev routing, referral (`docs/spec/runtime/hive.md`)
 - `src/tiny/`: optional TinyAgents crate feature/status surface
 
 The command-line entrypoint lives in `src/bin/opencompany.rs`. Business types
