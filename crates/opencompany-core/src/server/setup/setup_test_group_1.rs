@@ -284,6 +284,7 @@ async fn a_write_to_an_env_owned_field_is_refused() {
             company: None,
             name: None,
             admin_email: None,
+            admin_password: None,
             tinyhumans_key: None,
             tinyhumans_model: None,
             provider_draft: None,
