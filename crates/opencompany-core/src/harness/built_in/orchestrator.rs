@@ -372,17 +372,6 @@ pub enum Delegation {
         /// The instruction handed to that teammate.
         instruction: String,
     },
-    /// Deliver a committed chat message into one teammate's DM session and run
-    /// exactly one bounded reply turn. Unlike a work hand-off, this opens no
-    /// task card: conversation is not work merely because another agent speaks.
-    ConversationDispatch {
-        source: String,
-        target: String,
-        message: String,
-        chat_id: String,
-        trigger_sequence: u64,
-        child_hop: u32,
-    },
     /// Set (or change) who owns an existing board card (issue #186 part b).
     AssignTask {
         /// The card's id.
@@ -424,9 +413,7 @@ impl Delegation {
     pub fn answers(&self) -> bool {
         matches!(
             self,
-            Self::DelegateToDesk { .. }
-                | Self::DelegateToTeammate { .. }
-                | Self::ConversationDispatch { .. }
+            Self::DelegateToDesk { .. } | Self::DelegateToTeammate { .. }
         )
     }
 
@@ -865,9 +852,9 @@ impl DelegationQueue {
             // something false about what it may do next.
             DrainClaim::Board if !delegation.writes_board_only() => {
                 return Staged::NoDrain(match delegation {
-                    Delegation::DelegateToDesk { .. }
-                    | Delegation::DelegateToTeammate { .. }
-                    | Delegation::ConversationDispatch { .. } => NoDrainReason::WorkflowHandOff,
+                    Delegation::DelegateToDesk { .. } | Delegation::DelegateToTeammate { .. } => {
+                        NoDrainReason::WorkflowHandOff
+                    }
                     _ => NoDrainReason::WorkflowLifecycle,
                 });
             }

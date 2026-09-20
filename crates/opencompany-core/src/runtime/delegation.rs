@@ -3278,47 +3278,6 @@ impl<'a> DelegationRunner<'a> {
                 ))
                 .await
             }
-            Delegation::ConversationDispatch {
-                source,
-                target,
-                message,
-                chat_id,
-                trigger_sequence,
-                child_hop,
-            } => {
-                let prompt = format!("@{source} sent you this direct message:\n\n{message}");
-                let outcome = with_turn_message_hop(
-                    child_hop,
-                    self.run_turn.run(
-                        self.company,
-                        &target,
-                        &prompt,
-                        ChatTarget::channel(Some(&chat_id))
-                            .answering(Some(EventSeq::new(trigger_sequence))),
-                    ),
-                )
-                .await?;
-                let bubbles = vec![OutboundMessage {
-                    message_id: None,
-                    task_id: None,
-                    outputs: Vec::new(),
-                    channel: chat_id,
-                    agent: Some(target),
-                    text: outcome.reply,
-                    steps: outcome.steps,
-                    reply_to: None,
-                    mentions: Vec::new(),
-                }];
-                tracing::debug!(
-                    company = %self.company,
-                    hop = child_hop,
-                    "[tinyhivemind] completed a bounded agent-to-agent DM turn"
-                );
-                Ok(DelegationOutcome {
-                    bubbles,
-                    ..DelegationOutcome::default()
-                })
-            }
             // ── Issue #186 part b: orchestrator lifecycle authority ─────────
             //
             // Both write through the same `TaskStore` path the console uses, so
