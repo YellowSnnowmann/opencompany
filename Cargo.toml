@@ -69,6 +69,21 @@ tinymemory-api = { path = "vendor/openhuman/vendor/tinymemory/crates/tinymemory-
 [patch."https://github.com/tinyhumansai/tinyinference"]
 tinyinference = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference" }
 
+# `tinyhivemind-openhuman` (vendored at `vendor/tinyhivemind`) binds
+# `openhuman_embed::Agent` handles, and names `openhuman-embed` by git URL on
+# purpose (its workspace manifest explains why: a `[patch]` can redirect a git
+# source onto a path, but never a path source). This entry redirects that git
+# source onto OUR vendored checkout, so the `Agent` a hive binding holds is the
+# same type this crate builds on the one process-wide `Runtime`, and OpenHuman's
+# process-scoped state (keyring, event bus, `RUNTIME_LIVE`) exists once. Only
+# the root package of that git source needs an entry: once patched to a path,
+# its `path = "../openhuman-core"` edge resolves inside `vendor/openhuman`. The
+# `rev` tinyhivemind pins and the `vendor/openhuman` gitlink must agree, or the
+# lockfile records two OpenHuman trees; CI's "no duplicated OpenHuman-family
+# crates" step is the tripwire.
+[patch."https://github.com/tinyhumansai/openhuman"]
+openhuman-embed = { path = "vendor/openhuman/crates/openhuman-embed" }
+
 [patch.crates-io]
 # No `tinyagents` entry: the crate no longer exists as a package (the workspace
 # split), and nothing in the graph asks crates.io for it any more — openhuman
