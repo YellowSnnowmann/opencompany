@@ -1311,10 +1311,11 @@ impl CompanyAgent {
     /// whatever chat it is on: OpenHuman owns the thread, and which
     /// conversation a line belongs to is what the turn text says (the cue
     /// below; the attributed desk delta in Phase 4). An **isolated** turn — a
-    /// dispatched card or a workflow node, which has a run sink and no chat —
-    /// runs on a fresh session of its own, so it neither drags the chat
-    /// transcript in nor leaves its working notes there; that is what the
-    /// previous builder's clear-and-suppress-autoload did.
+    /// dispatched card, a workflow node, a background task: anything that
+    /// names no chat, or that brings its own context — runs on a fresh
+    /// session of its own, so it neither drags the chat transcript in nor
+    /// leaves its working notes there; that is what the previous builder's
+    /// clear-and-suppress-autoload did.
     pub async fn run_with_steer(
         &self,
         message: &str,
@@ -1334,9 +1335,11 @@ impl CompanyAgent {
                 crate::turn_stream::LiveRoute::Workflow { .. } => None,
             })
             .or_else(|| chat.chat_id.map(str::to_string));
-        let has_run_sink = run_sink.is_some();
-        let isolated = Self::isolates_background_history(turn_chat_id.as_deref(), has_run_sink)
-            || !chat.history_seed;
+        // Isolated: a turn that names no conversation at all (a dispatched
+        // card, a workflow node, a background task), or one that brings its
+        // own context (`history_seed == false`). Everything else is a line
+        // in this agent's one conversation session.
+        let isolated = turn_chat_id.is_none() || !chat.history_seed;
         let session_id = if isolated {
             format!("{}:run:{}", self.session_key, uuid::Uuid::new_v4().simple())
         } else {
@@ -1542,9 +1545,6 @@ impl CompanyAgent {
             })
     }
 
-    fn isolates_background_history(turn_chat_id: Option<&str>, has_run_sink: bool) -> bool {
-        turn_chat_id.is_none() && has_run_sink
-    }
 
     /// This turn's in-turn spend ceiling, in USD — the value that
     /// [`BudgetStopHook`](oh::agent::stop_hooks::BudgetStopHook) halts the turn

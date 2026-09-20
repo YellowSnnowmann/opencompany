@@ -133,15 +133,19 @@ async fn a_greeting_after_a_task_runs_no_tools_and_leaks_no_prior_context() {
         .cloned()
         .expect("the greeting produced a model request");
 
-    // 3) The greeting turn was offered NO tools (suppress_tools).
-    let greeting_tools = greeting_req
-        .get("tools")
-        .and_then(|t| t.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
-    assert_eq!(
-        greeting_tools, 0,
-        "a chat-only turn must be sent an empty tool schema"
+    // 3) The greeting turn CALLED no tools. Since plan hive-desks Phase 2 the
+    // turn runs on the embedded OpenHuman runtime, whose tool scope is fixed
+    // per agent at build time — there is no per-turn `suppress_tools`, so the
+    // schema still rides the request; what the chat-only fast path keeps is
+    // that a greeting never enters the tool loop, and `chat_only_guard`
+    // scrubs any markup the advertised schema provokes (#2094).
+    // TODO(hive-desks follow-up): restore the empty schema if `openhuman_embed::Turn`
+    // grows a per-turn tool scope.
+    let _ = &greeting_req;
+    assert!(
+        outcome.steps.is_empty(),
+        "a chat-only greeting must not run a tool step: {:?}",
+        outcome.steps
     );
 
     // 4) NOTHING from task A leaked into the greeting's context — no replayed
