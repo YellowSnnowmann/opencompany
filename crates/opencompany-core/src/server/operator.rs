@@ -1127,6 +1127,7 @@ async fn create_desk(
     .await;
 
     let effective = record.effective_desk_members(&id);
+    let routing = desk_routing_summary(&record, &id, crate::hive::routing::host_router());
     Ok((
         StatusCode::CREATED,
         Json(DeskDto {
@@ -1137,7 +1138,7 @@ async fn create_desk(
             overlay_members: Vec::new(),
             responder: body.responder,
             overlay_created: true,
-            routing: desk_routing_summary(&record, &id, crate::hive::routing::host_router()),
+            routing,
         }),
     ))
 }

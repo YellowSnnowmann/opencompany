@@ -2570,6 +2570,15 @@ fn summarize_event(event: &CompanyEvent) -> String {
                 "desk routing configured".into()
             }
         }
+        // Plan hive-desks: the episode ledger. Structural only — ids and
+        // counts, never an utterance — for the same reason every arm here is.
+        CompanyEvent::EpisodeOpened { .. } => "episode opened".into(),
+        CompanyEvent::RoundStarted { .. } => "episode round started".into(),
+        CompanyEvent::RoundCommitted { .. } => "episode round committed".into(),
+        CompanyEvent::BroadcastRouted { .. } => "episode broadcast routed".into(),
+        CompanyEvent::DmDelivered { .. } => "episode dm delivered".into(),
+        CompanyEvent::EpisodeCompleted { .. } => "episode completed".into(),
+        CompanyEvent::EpisodeStateSaved { .. } => "episode state saved".into(),
         // Issue #276. This one-liner is folded into the orchestrator's
         // recent-activity context, so it is read by a model — and the arms
         // around it drop free text and actor ids for that reason. Name and id
