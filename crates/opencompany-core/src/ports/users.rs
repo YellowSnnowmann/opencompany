@@ -395,11 +395,12 @@ impl LoginIdentity {
     /// Mail paths must ask for an address through this rather than reading
     /// [`UserRecord::email`] directly: the column is an identity key, and a
     /// `wallet:7xKX…` handed to an SMTP transport is a bug that only shows up in
-    /// a bounce log.
+    /// a bounce log. An email identity with no `@` is a plain username — a
+    /// login on a host with no mail — and has no mailbox either.
     pub fn mailbox(&self) -> Option<&str> {
         match self {
-            Self::Email(address) => Some(address),
-            Self::Wallet(_) | Self::Local => None,
+            Self::Email(address) if address.contains('@') => Some(address),
+            Self::Email(_) | Self::Wallet(_) | Self::Local => None,
         }
     }
 
