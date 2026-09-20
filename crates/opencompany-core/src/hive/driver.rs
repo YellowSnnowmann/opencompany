@@ -154,6 +154,9 @@ pub(crate) struct EpisodeRun {
     pub(crate) rounds: u32,
     pub(crate) forced: Option<EpisodeReason>,
     pub(crate) last_completion: Option<(String, String)>,
+    /// Revisions committed before the last reassignment restarted the
+    /// driver state, so journaled round numbers keep climbing.
+    pub(crate) revision_base: u64,
 }
 
 impl HiveDispatcher {
@@ -201,12 +204,7 @@ impl HiveDispatcher {
     async fn open(&self, desk: &Arc<DeskHive>, thread_root: EventSeq, trigger: &Trigger) -> Result<EpisodeRun> {
         let routing = crate::hive::routing::desk_routing(&self.record, &desk.desk_id);
         let policy = routing.policy();
-        let explicit = trigger
-            .mentions
-            .iter()
-            .map(|mention| mention.target.as_str())
-            .find(|target| desk.hive.binding(target).is_some())
-            .map(str::to_string);
+        let explicit = explicit_seat(desk, &trigger.mentions);
         let lead = desk.lead().ok_or_else(|| {
             OpenCompanyError::Harness(format!("desk `{}` has no seats", desk.desk_id))
         })?;
@@ -287,6 +285,7 @@ impl HiveDispatcher {
             rounds: 0,
             forced: None,
             last_completion: None,
+            revision_base: 0,
         })
     }
 
@@ -309,12 +308,7 @@ impl HiveDispatcher {
                 ))
             })?;
         let mut run = self.resume_from(desk, persisted, &routing).await?;
-        let seat = trigger
-            .mentions
-            .iter()
-            .map(|mention| mention.target.as_str())
-            .find(|target| desk.hive.binding(target).is_some())
-            .map(str::to_string)
+        let seat = explicit_seat(desk, &trigger.mentions)
             .or_else(|| {
                 run.state
                     .episode()
@@ -381,6 +375,7 @@ impl HiveDispatcher {
                 ),
             }
         }
+        let state_revision = state.revision();
         Ok(EpisodeRun {
             episode_id: persisted.episode_id,
             desk: Arc::clone(desk),
@@ -393,6 +388,7 @@ impl HiveDispatcher {
             rounds: 0,
             forced: None,
             last_completion: None,
+            revision_base: persisted.revision.saturating_sub(state_revision),
         })
     }
 
@@ -437,7 +433,7 @@ impl HiveDispatcher {
                 .await
                 .map_err(|error| OpenCompanyError::Harness(error.to_string()))?;
             drop(pending);
-            let revision_before = run.state.revision();
+            let revision_before = run.revision();
             run.state = transition.state;
             run.rounds += 1;
             if let Some(reason) = outcome.forced {
@@ -564,7 +560,7 @@ impl HiveDispatcher {
                 episode_id: run.episode_id.clone(),
                 desk: run.desk.desk_id.clone(),
                 thread_root: Some(run.thread_root),
-                revision: run.state.revision(),
+                revision: run.revision(),
                 state: serde_json::to_value(&run.state)?,
                 sharing: run.sharing.clone(),
                 hop: run.hop,
@@ -597,7 +593,7 @@ impl HiveDispatcher {
                 CompanyEvent::EpisodeCompleted {
                     chat_id: run.desk.desk_id.clone(),
                     episode_id: run.episode_id.clone(),
-                    revision: run.state.revision(),
+                    revision: run.revision(),
                     completed_by: completed_by.clone(),
                     rounds: run.rounds,
                     reason,
@@ -836,14 +832,24 @@ impl HiveDispatcher {
 }
 
 impl EpisodeRun {
-    /// Reopens a seat with new work at `at`, rebuilding the driver state
-    /// through the library's own fold so the receipts stay consistent.
+    /// The journaled revision: the driver's, plus what earlier driver states
+    /// of this episode committed before a reassignment restarted it.
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision_base + self.state.revision()
+    }
+
+    /// Reopens a seat with new work at `at`.
+    ///
+    /// The driver state is opaque and the library reopens a seat only
+    /// through a routed broadcast, so a host-side reassignment — a follow-up
+    /// message in the thread, an answer coming home — is a fresh start from
+    /// the reopened episode. The receipts it drops are rows older than `at`,
+    /// which could never be replayed into it anyway; the revision carries on
+    /// through [`revision_base`](Self::revision_base).
     fn reassign(&mut self, seat: &str, at: EventSeq, routing: &EffectiveRouting) -> Result<()> {
         let episode = apply_assignment(self.state.episode(), [seat], Sequence(at.value()))
             .map_err(|error| OpenCompanyError::Harness(error.to_string()))?;
-        // The driver state is opaque; a reassignment is a fresh start from
-        // the reopened episode, which drops the receipts — a row older than
-        // `at` can never be replayed into it anyway.
+        self.revision_base = self.revision();
         self.state = CompletionDriver::new(&self.desk.hive, routing.round_width)
             .and_then(|driver| driver.start(episode))
             .map_err(|error| OpenCompanyError::Harness(error.to_string()))?;
@@ -867,6 +873,18 @@ impl EpisodeReason {
 #[must_use]
 pub fn plan_seats(plan: &RoutingPlan) -> Vec<String> {
     RoutingPlanDto::from(plan).agent_ids()
+}
+
+/// The first mentioned teammate that sits on this desk, in reading order —
+/// the explicit responder a route bypasses the router for.
+fn explicit_seat(desk: &DeskHive, mentions: &[Mention]) -> Option<String> {
+    let mut ordered: Vec<&Mention> = mentions.iter().collect();
+    ordered.sort_by_key(|mention| mention.offset);
+    ordered
+        .into_iter()
+        .filter_map(|mention| mention.target.agent_id())
+        .find(|id| desk.hive.binding(id).is_some())
+        .map(str::to_string)
 }
 
 #[cfg(test)]
