@@ -132,6 +132,7 @@ async fn the_asker_is_handed_the_exchange_it_just_had_and_nothing_older() {
                 parent: None,
                 mentions: Vec::new(),
                 mention_depth: 0,
+                episode: None,
             },
         )
         .await
@@ -209,6 +210,7 @@ async fn a_seat_reads_the_private_lines_it_is_part_of() {
                 parent: None,
                 mentions: Vec::new(),
                 mention_depth: 0,
+                episode: None,
             },
         )
         .await

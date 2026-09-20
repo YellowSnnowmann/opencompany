@@ -93,6 +93,7 @@ async fn the_log_adapter_attributes_and_pages_desk_rows() {
             parent: None,
             mentions: Vec::new(),
             mention_depth: 0,
+            episode: None,
         },
     )
     .await
@@ -110,6 +111,7 @@ async fn the_log_adapter_attributes_and_pages_desk_rows() {
             parent: None,
             mentions: Vec::new(),
             mention_depth: 0,
+            episode: None,
         },
     )
     .await

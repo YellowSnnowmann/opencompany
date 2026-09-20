@@ -572,6 +572,7 @@ impl SpeechContext {
             mentions: Vec::new(),
             mention_depth: 0,
             audience,
+            episode: None,
         };
         self.events
             .append(&self.company, event)

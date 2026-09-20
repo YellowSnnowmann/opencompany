@@ -268,6 +268,7 @@ fn a_reply_with_no_mentions_serializes_as_it_did_before_the_fields() {
         parent: None,
         mentions: Vec::new(),
         mention_depth: 0,
+        episode: None,
     };
     let json = serde_json::to_string(&event).expect("serialize");
     assert_eq!(
@@ -572,6 +573,7 @@ fn agent_reply_steps_are_additive_and_omitted_when_empty() {
         agent_id: "ceo".to_string(),
         text: "hi".to_string(),
         steps: Vec::new(),
+        episode: None,
     };
     let json = serde_json::to_value(&tool_less).unwrap();
     assert!(json.get("steps").is_none());

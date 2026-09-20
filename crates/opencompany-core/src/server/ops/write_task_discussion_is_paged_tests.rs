@@ -283,6 +283,7 @@ async fn task_export_serves_a_readable_document_and_alters_nothing() {
             steps: Vec::new(),
             task_id: Some("t-1".into()),
             outputs: Vec::new(),
+            episode: None,
         },
     ] {
         runtime.events().append(&company, event).await.unwrap();

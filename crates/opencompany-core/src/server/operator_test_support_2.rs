@@ -130,6 +130,7 @@ pub(super) async fn session_rows(uri: &str) -> Vec<serde_json::Value> {
                 agent_id: "ceo".to_string(),
                 text: "one turn, from one session".to_string(),
                 steps: Vec::new(),
+                episode: None,
             },
         )
         .await

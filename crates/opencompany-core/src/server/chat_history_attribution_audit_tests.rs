@@ -22,6 +22,7 @@ fn reply(seq: u64, agent_id: &str) -> StoredEvent {
             task_id: None,
             outputs: Vec::new(),
             parent: None,
+            episode: None,
         },
     )
 }

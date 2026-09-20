@@ -89,6 +89,7 @@ fn reply(seq: u64, chat: &str, parent: u64, text: &str) -> StoredEvent {
             parent: Some(EventSeq::new(parent)),
             mentions: Vec::new(),
             mention_depth: 0,
+            episode: None,
         },
         at_millis: seq,
     }

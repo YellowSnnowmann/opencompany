@@ -92,6 +92,7 @@ fn brand_reply(agent_id: &str, text: &str, audience: Vec<String>) -> CompanyEven
         mentions: Vec::new(),
         mention_depth: 0,
         audience,
+        episode: None,
     }
 }
 
@@ -114,6 +115,7 @@ async fn desk_read_returns_this_channels_recent_messages_in_order() {
                 mentions: Vec::new(),
                 mention_depth: 0,
                 audience: Vec::new(),
+                episode: None,
             },
         )
         .await
@@ -209,6 +211,7 @@ async fn desk_read_reports_truncation_when_the_scan_budget_is_exhausted() {
                     mentions: Vec::new(),
                     mention_depth: 0,
                     audience: Vec::new(),
+                    episode: None,
                 },
             )
             .await

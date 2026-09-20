@@ -118,6 +118,7 @@ pub(super) fn agent_reply(chat_id: &str) -> CompanyEvent {
         agent_id: "ceo".to_string(),
         text: "hi".to_string(),
         steps: Vec::new(),
+        episode: None,
     }
 }
 

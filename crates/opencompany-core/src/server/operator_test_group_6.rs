@@ -36,6 +36,7 @@ async fn chat_history_route_reunifies_general_and_main_transcripts() {
                 agent_id: "ceo".to_string(),
                 text: "reply under General".to_string(),
                 steps: Vec::new(),
+                episode: None,
             },
         )
         .await
@@ -55,6 +56,7 @@ async fn chat_history_route_reunifies_general_and_main_transcripts() {
                 agent_id: "ceo".to_string(),
                 text: "reply under main".to_string(),
                 steps: Vec::new(),
+                episode: None,
             },
         )
         .await
@@ -282,6 +284,7 @@ async fn chat_history_route_rehydrates_outputs_and_drops_deleted_targets() {
                 agent_id: "ceo".to_string(),
                 text: "I wrote both files.".to_string(),
                 steps: Vec::new(),
+                episode: None,
             },
         )
         .await
@@ -403,6 +406,7 @@ async fn chat_history_route_rehydrates_the_card_a_reply_opened() {
                     agent_id: "ceo".to_string(),
                     text: text.to_string(),
                     steps: Vec::new(),
+                    episode: None,
                 },
             )
             .await
@@ -500,6 +504,7 @@ async fn chat_history_route_honors_before_and_limit() {
                         agent_id: "ceo".to_string(),
                         text: text.to_string(),
                         steps: Vec::new(),
+                        episode: None,
                     },
                 )
                 .await
@@ -553,6 +558,7 @@ async fn chat_history_cursor_keeps_later_reactions_on_displayed_messages() {
                 agent_id: "ceo".to_string(),
                 text: "kept".to_string(),
                 steps: Vec::new(),
+                episode: None,
             },
         )
         .await

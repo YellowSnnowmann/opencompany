@@ -427,6 +427,7 @@ async fn a_rooms_answer_leaves_its_asides_behind() {
             mentions: Vec::new(),
             mention_depth: 0,
             audience,
+            episode: None,
         }
     };
     let first = events

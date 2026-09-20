@@ -50,6 +50,7 @@ async fn an_episodes_turns_render_but_its_closing_row_does_not() {
                     mentions: Vec::new(),
                     mention_depth: 0,
                     audience: Vec::new(),
+                    episode: None,
                 },
             )
             .await
@@ -115,6 +116,7 @@ async fn a_suppressed_report_does_not_shorten_the_page() {
                     mentions: Vec::new(),
                     mention_depth: 0,
                     audience: Vec::new(),
+                    episode: None,
                 },
             )
             .await
@@ -180,6 +182,7 @@ async fn a_failed_turn_is_still_reported_to_the_room() {
                     mentions: Vec::new(),
                     mention_depth: 0,
                     audience: Vec::new(),
+                    episode: None,
                 },
             )
             .await
@@ -307,6 +310,7 @@ async fn the_asker_brings_the_answer_home_and_the_other_desk_stays_out_of_the_ro
         mentions: Vec::new(),
         mention_depth: 0,
         audience: Vec::new(),
+        episode: None,
     });
     for event in events {
         runtime.events().append(&id, event).await.expect("journal");

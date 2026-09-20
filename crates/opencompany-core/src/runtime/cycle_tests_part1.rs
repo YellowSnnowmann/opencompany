@@ -44,6 +44,9 @@ fn single_agent_picks_one_addressee_and_falls_back_otherwise() {
                 chat_id: "frits".to_string(),
                 parent: None,
                 by: None,
+                agent_id: None,
+                episode_id: None,
+                round_revision: None,
             },
         )]),
         None

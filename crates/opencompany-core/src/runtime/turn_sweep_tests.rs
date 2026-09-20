@@ -19,6 +19,9 @@ async fn started(events: &Arc<dyn EventLog>, company: &CompanyId, turn_id: &str)
                 chat_id: "general".to_string(),
                 parent: None,
                 by: None,
+                agent_id: None,
+                episode_id: None,
+                round_revision: None,
             },
         )
         .await
@@ -71,6 +74,11 @@ async fn a_settled_turn_is_never_swept_twice() {
             CompanyEvent::TurnFailed {
                 turn_id: "turn-ok".to_string(),
                 error: "the brain refused".to_string(),
+                agent_id: None,
+                chat_id: None,
+                episode_id: None,
+                round_revision: None,
+                outcome: None,
             },
         )
         .await

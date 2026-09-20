@@ -348,6 +348,9 @@ fn a_crossing_names_the_thread_whose_fold_changed() {
         target: "product_designer".into(),
         returning: false,
         rows: None,
+        episode_id: None,
+        to_episode_id: None,
+        hop: 0,
     }))
     .expect("a crossing is projected at all");
 
@@ -396,6 +399,9 @@ fn a_returning_crossing_names_the_desk_that_asked() {
         target: "software_engineer".into(),
         returning: true,
         rows: None,
+        episode_id: None,
+        to_episode_id: None,
+        hop: 0,
     }))
     .expect("a return is projected at all");
 
@@ -421,6 +427,7 @@ fn projects_the_agents_own_body_beside_the_operators() {
         agent_id: "refunds".into(),
         text: "!support #kettle ^16 the swap is the customer's first preference".into(),
         steps: Vec::new(),
+        episode: None,
     });
     let value = super::project_event_for_viewer(
         &stored,
@@ -455,6 +462,7 @@ fn a_reply_with_no_move_carries_the_same_body_twice() {
         agent_id: "ceo".into(),
         text: "here is the summary you asked for".into(),
         steps: Vec::new(),
+        episode: None,
     });
     let value = super::project_event_for_viewer(
         &stored,
@@ -494,6 +502,7 @@ fn projects_agent_reply_with_viewer_mention_metadata() {
         agent_id: "ceo".into(),
         text: "@Ada @everyone".into(),
         steps: Vec::new(),
+        episode: None,
     });
     let authors = std::collections::HashMap::from([(String::from("u-1"), String::from("Ada"))]);
     let value =
@@ -525,6 +534,7 @@ fn drops_owner_fallback_report_from_a_non_admin_viewer() {
         agent_id: crate::runtime::OWNER_FALLBACK_REPORT_AUTHOR.to_string(),
         text: "no admin has a mailbox".into(),
         steps: Vec::new(),
+        episode: None,
     });
 
     let non_admin = super::project_event_for_viewer(
@@ -575,6 +585,7 @@ fn projects_agent_reply_with_its_thread_parent() {
         agent_id: "ceo".into(),
         text: "in the thread".into(),
         steps: Vec::new(),
+        episode: None,
     }))
     .expect("agent_reply is an attention signal");
     assert_eq!(v["parentId"], "4");
@@ -599,6 +610,9 @@ fn projects_turn_started_with_structural_keys_only() {
             kind: ActorKind::User,
             id: "u-1".into(),
         }),
+        agent_id: None,
+        episode_id: None,
+        round_revision: None,
     }))
     .expect("an accepted turn is an attention signal");
     assert_eq!(v["type"], "turn_started");
@@ -619,6 +633,9 @@ fn projects_turn_started_with_structural_keys_only() {
         chat_id: "General".into(),
         parent: None,
         by: None,
+        agent_id: None,
+        episode_id: None,
+        round_revision: None,
     }))
     .expect("an accepted turn is an attention signal");
     assert!(v.get("parentId").is_none(), "unexpected parentId: {v}");
@@ -633,6 +650,11 @@ fn projects_turn_settled_without_the_failure_reason() {
     let v = super::project_event(&stored(CompanyEvent::TurnFailed {
         turn_id: "turn-1".into(),
         error: "connection to db-primary.internal refused".into(),
+        agent_id: None,
+        chat_id: None,
+        episode_id: None,
+        round_revision: None,
+        outcome: None,
     }))
     .expect("a settled turn is an attention signal");
     assert_eq!(v["type"], "turn_settled");

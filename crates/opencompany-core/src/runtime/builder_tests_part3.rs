@@ -319,6 +319,9 @@ async fn boot_reclaims_a_chat_turn_stranded_by_a_previous_host() {
                 chat_id: "general".to_string(),
                 parent: None,
                 by: None,
+                agent_id: None,
+                episode_id: None,
+                round_revision: None,
             },
         )
         .await
@@ -405,6 +408,9 @@ async fn a_rebuild_sweeps_no_live_chat_turn() {
                 chat_id: "general".to_string(),
                 parent: None,
                 by: None,
+                agent_id: None,
+                episode_id: None,
+                round_revision: None,
             },
         )
         .await
