@@ -92,9 +92,10 @@ use oh::security::{
     AuditLogger, AutonomyLevel, SecurityPolicy, get_or_create_workspace_audit_logger,
 };
 use oh::tools::{
-    ApplyPatchTool, CurlTool, GitOperationsTool, HttpRequestTool, ImageInfoTool, Tool,
-    WebFetchTool, WorkspaceStateTool,
+    ApplyPatchTool, CurlTool, GitOperationsTool, HttpRequestTool, ImageInfoTool, WebFetchTool,
+    WorkspaceStateTool,
 };
+use tinytools::Tool;
 
 use crate::harness::policy::PolicyMode;
 

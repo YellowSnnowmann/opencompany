@@ -94,9 +94,8 @@ use oh::memory::Memory;
 use oh::security::SecurityPolicy;
 #[cfg(feature = "mcp")]
 use oh::tools::McpListToolsTool;
-use oh::tools::{
-    EditFileTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ListFilesTool, Tool,
-};
+use oh::tools::{EditFileTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ListFilesTool};
+use tinytools::Tool;
 
 use crate::company::Agent as ManifestAgent;
 use crate::company::inference::store as inference_store;

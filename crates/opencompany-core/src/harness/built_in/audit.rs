@@ -50,9 +50,9 @@ use async_trait::async_trait;
 use openhuman_core as oh;
 
 use oh::security::{AuditEvent, AuditEventType};
-use oh::tools::{
-    PermissionLevel, ShellTool, Tool, ToolCallOptions, ToolCategory, ToolResult, ToolScope,
-    ToolSpec,
+use oh::tools::ShellTool;
+use tinytools::{
+    PermissionLevel, Tool, ToolCallOptions, ToolCategory, ToolResult, ToolScope, ToolSpec,
 };
 // Not re-exported from `oh::tools` (upstream's `pub use traits::{…}` list omits
 // it), so it is named through the module it lives in.
