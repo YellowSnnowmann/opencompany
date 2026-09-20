@@ -42,7 +42,6 @@ use crate::ports::types::{
 /// The referral half of the host: deciding a crossing, opening the far
 /// desk's episode, and carrying the answer home.
 mod crossing;
-pub(crate) use crossing::{spawn_desk_message, spawn_drive};
 
 /// One seat turn as the driver asks for it.
 #[derive(Clone, Debug)]

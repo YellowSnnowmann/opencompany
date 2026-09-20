@@ -205,7 +205,11 @@ impl HiveDispatcher {
 /// Drives a desk message on its own task. Type-erased so the referral chain
 /// — an episode that opens an episode that answers back into an episode —
 /// is not one infinitely recursive future type.
-fn spawn_desk_message(dispatcher: Arc<HiveDispatcher>, desk_id: String, trigger: Trigger) {
+pub(crate) fn spawn_desk_message(
+    dispatcher: Arc<HiveDispatcher>,
+    desk_id: String,
+    trigger: Trigger,
+) {
     let task: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
         Box::pin(async move {
             if let Err(error) = dispatcher.run_desk_message(&desk_id, trigger).await {
@@ -217,7 +221,7 @@ fn spawn_desk_message(dispatcher: Arc<HiveDispatcher>, desk_id: String, trigger:
 
 /// Drives a reopened episode on its own task, carrying its answer home when
 /// it has one. Type-erased for the reason [`spawn_desk_message`] is.
-fn spawn_drive(dispatcher: Arc<HiveDispatcher>, mut home: EpisodeRun) {
+pub(crate) fn spawn_drive(dispatcher: Arc<HiveDispatcher>, mut home: EpisodeRun) {
     let task: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
         Box::pin(async move {
             let lock = episode_lock(&dispatcher.record.id, &home.desk.desk_id, home.thread_root);
