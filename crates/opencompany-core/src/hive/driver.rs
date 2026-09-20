@@ -31,7 +31,7 @@ use tinyhivemind_openhuman::{BroadcastRouting, CompletionDriver, DriverState, Ho
 use crate::error::{OpenCompanyError, Result};
 use crate::hive::episode_store::{self, PersistedEpisode};
 use crate::hive::graph::DeskHive;
-use crate::hive::referral::{DeskReferral, ReturnAddress};
+use crate::hive::referral::ReturnAddress;
 use crate::hive::round::{self, RoundOutcome, SeatAssignment};
 use crate::hive::routing::{EffectiveRouting, RoutingPlanDto, router_of};
 use crate::hive::tools::HiveTurn;

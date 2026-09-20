@@ -7,7 +7,6 @@
 
 use std::sync::Arc;
 
-use tinyhivemind_openhuman::CompletionDriver;
 
 use super::{EpisodeReport, EpisodeRun, HiveDispatcher, Trigger, episode_lock};
 use crate::error::Result;
@@ -19,7 +18,7 @@ use crate::ports::types::CompanyEvent;
 
 impl HiveDispatcher {
     /// Decides and dispatches the crossings a round's utterances raise.
-    async fn refer(
+    pub(super) async fn refer(
         &self,
         run: &EpisodeRun,
         outcome: &RoundOutcome,
@@ -89,7 +88,7 @@ impl HiveDispatcher {
     /// row under [`HIVE_REFERRAL_AUTHOR`](crate::hive::referral::HIVE_REFERRAL_AUTHOR),
     /// journals the forward marker, and drives it as its own task so the
     /// asking desk's rounds are not held on it.
-    async fn dispatch_referral(&self, crossing: DeskReferral) -> Result<()> {
+    pub(super) async fn dispatch_referral(&self, crossing: DeskReferral) -> Result<()> {
         if !self.runs_episodes(&crossing.to_desk) {
             tracing::info!(
                 to_desk = %crossing.to_desk,
@@ -135,7 +134,7 @@ impl HiveDispatcher {
 
     /// Carries a completed referral's answer home and reopens the seat that
     /// asked.
-    async fn deliver_answer(
+    pub(super) async fn deliver_answer(
         &self,
         run: &EpisodeRun,
         origin: &ReturnAddress,
