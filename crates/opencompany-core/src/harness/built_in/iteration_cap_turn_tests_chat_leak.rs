@@ -143,9 +143,9 @@ async fn a_greeting_after_a_task_runs_no_tools_and_leaks_no_prior_context() {
     // grows a per-turn tool scope.
     let _ = &greeting_req;
     assert!(
-        outcome.steps.is_empty(),
+        outcome_b.steps.is_empty(),
         "a chat-only greeting must not run a tool step: {:?}",
-        outcome.steps
+        outcome_b.steps
     );
 
     // 4) NOTHING from task A leaked into the greeting's context — no replayed
