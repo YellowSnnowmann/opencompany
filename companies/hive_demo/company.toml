@@ -23,6 +23,13 @@ name = "Hive Demo Co"
 output = "Decisions and short drafts, reached by desks answering together"
 human_role = "Asking the desks questions and answering explicit approval requests"
 
+[users]
+# Standing admin invite: this address may redeem a magic link and administer
+# the company. It is the identity `frontend/test/e2e/desk-episode-live.spec.ts`
+# and `scripts/measure-coordination.mjs` sign in as — the same one
+# `companies/e2e_harness` grants, so the two share a bootstrap.
+admins = ["harness-e2e@tinyhumans.ai"]
+
 [policy]
 # Policy-generated HITL is disabled. `readonly` remains a hard brake on
 # mutations; other modes do not create approval prompts. Agents ask explicitly
