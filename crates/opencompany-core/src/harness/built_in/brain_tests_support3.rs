@@ -307,15 +307,20 @@ pub(super) async fn spawn_model_script(turns: Vec<ScriptTurn>) -> String {
                     ScriptTurn::Say(text) => {
                         serde_json::json!({ "role": "assistant", "content": text })
                     }
-                    ScriptTurn::Call { tool, args } => serde_json::json!({
-                        "role": "assistant",
-                        "content": null,
-                        "tool_calls": [{
-                            "id": format!("call-{tool}"),
-                            "type": "function",
-                            "function": { "name": tool, "arguments": args.to_string() }
-                        }]
-                    }),
+                    ScriptTurn::Call { tool, args } => {
+                        // Plan hive-desks Phase 3: a company tool is reached
+                        // through `mcp_call_tool` on the `opencompany` server.
+                        let (name, args) = crate::hive::tools::via_opencompany_mcp(tool, args);
+                        serde_json::json!({
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "id": format!("call-{tool}"),
+                                "type": "function",
+                                "function": { "name": name, "arguments": args.to_string() }
+                            }]
+                        })
+                    }
                 };
                 Json(serde_json::json!({
                     "choices": [{ "index": 0, "message": message }],
