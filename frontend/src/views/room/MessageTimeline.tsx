@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Bot, CircleDot, Hash, Lock, Send, UserPlus } from "lucide-react";
 
 import type { ApprovalSummary, CognitionState, DecideApproval, TurnStep, Verdict } from "@/api/types";
@@ -55,9 +55,17 @@ interface Props {
    * per-turn half of `liveSteps` above, which is the per-thread strip.
    *
    * Both exist because a frame only knows which query it belongs to when the
-   * host stamps `messageSeq` on it. One that does renders under its own
-   * message; one that does not (a relay, a dispatched card, an older host)
-   * falls back to the strip.
+   * host stamps `messageSeq` on it. One that does files under its query; one
+   * that does not (a relay, a dispatched card, an older host) falls back to
+   * the thread. They are filled exclusively — never both.
+   *
+   * The query decides which **bucket** the rows land in, never where they
+   * render: the live pair is pinned to the foot of the pane either way. A
+   * "happening now" row placed back at the asking message claims the work
+   * finished before every line beneath it, which is false the moment anything
+   * is journaled in between — a hive episode posts a seat's line per turn, so
+   * by convergence the pulsing row sits several messages up while everything
+   * below it has already happened.
    */
   liveStepsByMessage?: Record<string, TurnStep[]>;
   /**
@@ -231,7 +239,37 @@ export function MessageTimeline({
   const scroller = useRef<HTMLDivElement>(null);
   /** The inner column whose own height rule 2b's `ResizeObserver` watches. */
   const content = useRef<HTMLDivElement>(null);
-  const liveStepCount = liveSteps?.length ?? 0;
+  /**
+   * The open turn's rows, whichever bucket the host's stamping filed them in.
+   *
+   * `liveStepsByMessage` and `liveStepsByThread` are filled **exclusively** — a
+   * frame carrying `messageSeq` files under its query, one without files under
+   * the thread (`AppShell.onTurnEvent`, whose own comment is "never both") — so
+   * one turn's rows live in exactly one of them and reading the union cannot
+   * double-count.
+   *
+   * Only half of it was reaching the live rows. `ChatLiveReceipt` reads these
+   * to reach its third state, "On step <label>"; given the thread half alone, a
+   * turn the host stamped left its bucket empty, so the receipt sat on "Picked
+   * up by <name>" for the whole turn while the steps surfaced somewhere else
+   * entirely.
+   *
+   * Newest first: a channel can hold rows for more than one query, and the open
+   * turn is the most recent that has any. Walking `items` rather than the map's
+   * own key order because only the timeline knows which question came last.
+   */
+  const openTurnSteps = useMemo(() => {
+    if (liveSteps?.length) return liveSteps;
+    if (!liveStepsByMessage) return undefined;
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const item = items[i];
+      if (item.kind !== "message") continue;
+      const rows = liveStepsByMessage[item.entry.message.id];
+      if (rows?.length) return rows;
+    }
+    return undefined;
+  }, [liveSteps, liveStepsByMessage, items]);
+  const liveStepCount = openTurnSteps?.length ?? 0;
   // Resolved once, for both live rows below. Kept here rather than inside them
   // so the receipt's "never a raw id" rule holds in one place: an id this map
   // does not know yields no name, and the row says "Working…" as it always did.
@@ -411,11 +449,6 @@ export function MessageTimeline({
           {item.entry.dayLabel && <DayDivider label={item.entry.dayLabel} />}
           <MessageRow
             entry={item.entry}
-            // The turn this message asked for, while it runs. Keyed by the
-            // message's own id, so two questions in one channel each get their
-            // own timeline instead of sharing the foot-of-channel strip (and
-            // clearing each other's rows).
-            liveSteps={liveStepsByMessage?.[item.entry.message.id]}
             threadOpen={item.entry.message.id === openThreadId}
             onOpenThread={onOpenThread}
             onReact={onReact}
@@ -522,13 +555,13 @@ export function MessageTimeline({
             channel={channel}
             receipt={receipt}
             agentNames={agentNames}
-            steps={liveSteps ?? []}
+            steps={openTurnSteps ?? []}
             queued={queued}
           />
         ) : liveStepCount > 0 && !queued ? (
           <LiveTurnRow
             channel={channel}
-            steps={liveSteps ?? []}
+            steps={openTurnSteps ?? []}
             name={turnAgentName}
           />
         ) : (
