@@ -33,8 +33,10 @@ export function createLedger() {
     planKinds: {},
     /** @type {Record<string, number>} */
     routers: {},
-    /** @type {Record<string, number>} */
+    /** @type {Record<string, number>} from `round_committed`. */
     utteranceKinds: {},
+    /** @type {Record<string, number>} from `agent_reply.episode`, the durable twin. */
+    replyKinds: {},
     /** Referrals that crossed desks, keyed by the asking episode + target desk. */
     referrals: [],
     frames: 0,
@@ -149,10 +151,11 @@ export function foldFrame(ledger, frame) {
       break;
     }
     case "agent_reply": {
-      // The durable twin of `round_committed`'s kinds, for a host that
-      // projects the episode onto the reply but not the commit.
-      if (frame.episode?.kind && !ledger.utteranceKinds[frame.episode.kind]) {
-        ledger.utteranceKinds[frame.episode.kind] = 0;
+      // The durable twin of `round_committed`'s kinds: one reply per
+      // utterance, so a host that projects the episode onto the reply but
+      // not the commit still yields a histogram.
+      if (frame.episode?.kind) {
+        ledger.replyKinds[frame.episode.kind] = (ledger.replyKinds[frame.episode.kind] ?? 0) + 1;
       }
       break;
     }
@@ -235,7 +238,7 @@ export function summarize(ledger, { now = Date.now() } = {}) {
     referralPairs: ledger.referrals.map((r) => `${r.from}→${r.to}`),
     planKinds: ledger.planKinds,
     routers: ledger.routers,
-    utteranceKinds: ledger.utteranceKinds,
+    utteranceKinds: Object.keys(ledger.utteranceKinds).length > 0 ? ledger.utteranceKinds : ledger.replyKinds,
     distinctPairs: [...pairs].sort(),
     timeToCompleteMillis: timeToComplete,
     reasons: Object.fromEntries(completed.map((episode) => [episode.id, episode.reason ?? "complete_episode"])),

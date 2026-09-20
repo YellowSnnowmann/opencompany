@@ -28,7 +28,16 @@
 
 pub mod acp;
 pub mod built_in;
+/// A small in-process tool loop over a `ChatModel`, for host-side passes whose
+/// tools' side effect is the result (the workflow copilot). See [`host_loop`].
+pub mod host_loop;
 pub mod lanes;
+/// The loopback OpenAI-compatible endpoint the embedded runtime reaches this
+/// crate's own inference models through. See [`model_bridge`].
+pub mod model_bridge;
+/// The one process-wide OpenHuman runtime every company agent is created on.
+/// See [`openhuman_runtime`].
+pub mod openhuman_runtime;
 pub mod router;
 /// The name an agent's openhuman session answers to — `{company}:{agent_id}`,
 /// stamped onto the session at build time and quoted by the speech tools when

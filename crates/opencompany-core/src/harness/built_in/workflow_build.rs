@@ -2087,11 +2087,8 @@ async fn run_copilot(
     let accepted: tools::AcceptedCell = Arc::new(StdMutex::new(None));
     let diag: tools::DiagCell = Arc::new(StdMutex::new(Vec::new()));
 
-    // A UNIQUE PER-TURN workspace so the vendored turn's session-transcript
-    // persistence cannot bleed into the next turn's fresh, empty-history agent
-    // (issue #1042). Each create/fix is an independent turn; a fresh dir is always
-    // empty, so the turn's resume scan finds nothing to replay — statelessness by
-    // construction. The dir is reclaimed after the turn (below).
+    // Stateless by construction (issue #1042): the host loop starts from the
+    // persona and the evidence prompt alone, with no transcript to resume.
     let copilot = agent::build_copilot_agent(deps, ctx, accepted.clone(), diag.clone());
 
     // A synchronous request (or a dead run's fix) mints no attempt row, but its
