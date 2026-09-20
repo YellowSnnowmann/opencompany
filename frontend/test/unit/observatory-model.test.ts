@@ -42,6 +42,8 @@ function run(over: Partial<ObservatoryRun> = {}): ObservatoryRun {
     chatId: null,
     workflowRunId: "wr-1",
     nodeId: "solve",
+    episodeId: null,
+    roundRevision: null,
     createdAtMillis: 900,
     startedAtMillis: 1000,
     finishedAtMillis: 2000,
