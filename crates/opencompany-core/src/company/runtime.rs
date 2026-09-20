@@ -7064,6 +7064,7 @@ impl CompanyRuntime {
                     // notice is that everyone reading the channel — including
                     // whoever the ping failed to reach — can see it.
                     audience: Vec::new(),
+                    episode: None,
                 },
             )
             .await
