@@ -40,8 +40,6 @@ use crate::harness::provider::{HostedProviderConfig, TenantProvider};
 use crate::harness::router::HarnessRouter;
 #[cfg(feature = "openhuman")]
 use crate::harness::{HarnessBrain, HarnessDeps};
-use crate::openhuman::rpc::OpenHumanRpc;
-use crate::openhuman::{OpenHumanChannelAdapter, OpenHumanToolProvider};
 use crate::policy::ManifestApprovalGate;
 #[cfg(feature = "openhuman")]
 use crate::ports::WorkflowRunner;
@@ -583,7 +581,6 @@ pub struct RuntimeBuilder {
     tinyplace_api_url: Option<String>,
     host_base_url: Option<String>,
     approvals: Option<Arc<ManifestApprovalGate>>,
-    openhuman: Option<Arc<dyn OpenHumanRpc>>,
     secrets: Option<Arc<dyn SecretStore>>,
     inbox: Option<Arc<dyn InboxStore>>,
     mail: Option<CompanyMail>,
@@ -758,7 +755,6 @@ impl RuntimeBuilder {
             tinyplace_api_url: None,
             host_base_url: None,
             approvals: None,
-            openhuman: None,
             secrets: None,
             inbox: None,
             mail: None,
@@ -1361,17 +1357,6 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Attaches an OpenHuman JSON-RPC transport.
-    ///
-    /// When present and healthy at [`build`](Self::build) time, an
-    /// `openhuman`-provider manifest routes tools (and `openhuman` channels)
-    /// through it; otherwise the runtime degrades to built-in tools and the
-    /// operator channel with a boot warning.
-    pub fn with_openhuman_rpc(mut self, rpc: Arc<dyn OpenHumanRpc>) -> Self {
-        self.openhuman = Some(rpc);
-        self
-    }
-
     /// WS4: attaches the embedded openhuman harness pool. When present, the
     /// runtime exposes it through [`CompanyRuntime::harness`] so the chat layer
     /// (WS3) can route desk turns through it; without it the runtime keeps its
@@ -1886,7 +1871,6 @@ impl RuntimeBuilder {
         };
         // Effective grants narrow the company allow-list by per-agent tools.
         let grants = effective_grants(&self.manifest);
-        let openhuman = self.openhuman;
 
         // Feedback family: the item store, secret store (for the scrubber), and
         // filing configuration. The consent mode is also the built-in feedback
@@ -2096,39 +2080,15 @@ impl RuntimeBuilder {
             }),
         };
 
-        // Probe OpenHuman once; an unreachable daemon degrades, never fails.
-        let openhuman_healthy = match &openhuman {
-            Some(rpc) => rpc.health().await.unwrap_or(false),
-            None => false,
-        };
-
-        // Tools: route through OpenHuman only when the manifest asks for it and
-        // the daemon is reachable; otherwise use the grant-enforcing built-in.
+        // Tools: the grant-enforcing built-in provider unless the caller
+        // supplied one. A manifest naming `tools.provider = "openhuman"` gets
+        // the same answer: the embedded harness (`--features openhuman`) serves
+        // an agent's tools in-process over the `opencompany` MCP server, and
+        // the out-of-process JSON-RPC daemon it used to name is gone
+        // (`docs/modules/openhuman/README.md`).
         let tools: Arc<dyn ToolProvider> = match self.tools {
             Some(tools) => tools,
-            None => {
-                let builtin: Arc<dyn ToolProvider> =
-                    Arc::new(StubToolProvider::new(grants.clone()));
-                if self.manifest.tools.provider == "openhuman" {
-                    match &openhuman {
-                        Some(rpc) if openhuman_healthy => Arc::new(OpenHumanToolProvider::new(
-                            rpc.clone(),
-                            grants.clone(),
-                            builtin,
-                        )),
-                        Some(_) => {
-                            tracing::warn!(
-                                company = %id,
-                                "openhuman tool provider requested but unreachable; using built-in tools"
-                            );
-                            builtin
-                        }
-                        None => builtin,
-                    }
-                } else {
-                    builtin
-                }
-            }
+            None => Arc::new(StubToolProvider::new(grants.clone())),
         };
 
         // Wrap with the built-in `feedback` tool so the brain can always
@@ -2141,35 +2101,27 @@ impl RuntimeBuilder {
             consent,
         ));
 
-        // Channels: always the operator surface, plus any `openhuman` channel
-        // the manifest enables when the daemon is reachable.
+        // Channels: always the operator surface. A manifest channel with
+        // `provider = "openhuman"` is declared-only: the JSON-RPC daemon that
+        // served it is gone, so it is skipped with a boot warning rather than
+        // silently taken as the operator channel.
         let mut channels = match self.channels {
             Some(channels) => channels,
             None => {
-                let mut channels: Vec<Arc<dyn ChannelAdapter>> =
-                    vec![Arc::new(OperatorChannel::new())];
-                if let Some(rpc) = &openhuman {
-                    for (name, config) in &self.manifest.channels {
-                        if name == OPERATOR_CHANNEL
-                            || config.enabled == Some(false)
-                            || config.provider.as_deref() != Some("openhuman")
-                        {
-                            continue;
-                        }
-                        if openhuman_healthy {
-                            channels.push(Arc::new(OpenHumanChannelAdapter::new(
-                                name.clone(),
-                                rpc.clone(),
-                            )));
-                        } else {
-                            tracing::warn!(
-                                company = %id,
-                                channel = %name,
-                                "openhuman channel requested but unreachable; skipping"
-                            );
-                        }
+                for (name, config) in &self.manifest.channels {
+                    if name != OPERATOR_CHANNEL
+                        && config.enabled != Some(false)
+                        && config.provider.as_deref() == Some("openhuman")
+                    {
+                        tracing::warn!(
+                            company = %id,
+                            channel = %name,
+                            "openhuman channel provider is no longer served; skipping"
+                        );
                     }
                 }
+                let channels: Vec<Arc<dyn ChannelAdapter>> =
+                    vec![Arc::new(OperatorChannel::new())];
                 channels
             }
         };
