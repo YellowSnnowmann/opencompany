@@ -278,12 +278,21 @@ describe("the built-in #general channel", () => {
     // and returns a `Channel`, never a `Desk`.
     expect(DESKS.some((d) => isGeneralChannel(d.id))).toBe(false);
   });
-  it("is offered by default alongside the declared desks", () => {
+  /**
+   * The default is OFF (#2368).
+   *
+   * Every other test in this file passes `showGeneral: true`, because they are
+   * about what the built-in channel does when it exists. This is the one that
+   * is about the default, and it has to exist separately: a flag asserted only
+   * by the absence of assertions is a flag nobody notices flipping back.
+   */
+  it("is not offered by default — a conversation that cannot deliberate is not a channel", () => {
     const built = buildChannels(ROSTER, DESKS, {})
       .find((s) => s.id === "channels")!
       .channels.map((c) => c.id);
 
-    expect(built).toEqual([MAIN_THREAD_ID, "engineering", "growth"]);
+    expect(built).not.toContain(MAIN_THREAD_ID);
+    expect(built).toEqual(["engineering", "growth"]);
   });
 });
 
@@ -648,7 +657,7 @@ describe("RoomView offers no desk affordance on the built-in channel", () => {
  * The map is module-private to `app-shell.tsx`, so this pins the wiring the
  * same way the `RoomView` block above does.
  */
-describe("the shell maps the main line to #general, not to the first desk", () => {
+describe("the shell keeps main-line history while defaulting to an offered desk", () => {
   const here2 = dirname(fileURLToPath(import.meta.url));
   const shell = readFileSync(
     resolve(here2, "../../src/components/app-shell.tsx"),
@@ -667,9 +676,9 @@ describe("the shell maps the main line to #general, not to the first desk", () =
     );
   });
 
-  it("lands an unaddressed system line in #general rather than the first desk", () => {
+  it("lands an unaddressed system line in the first offered channel", () => {
     expect(shell).toContain(
-      "setFirstDeskChannelId(channelIdForThread(MAIN_THREAD_ID, chatDesks, roster));",
+      "setFirstDeskChannelId(firstChannel(buildChannels(roster, chatDesks))?.id ?? null);",
     );
   });
 
@@ -691,10 +700,9 @@ describe("the shell maps the main line to #general, not to the first desk", () =
    * `threadIds` (via `defaultThreads()`) with no channel to rehydrate
    * through (issue #1781 review, Codex P2/medium).
    */
-  it("lands the unexpected-error fallback on #general too, not the first fallback desk", () => {
-    expect(shell).toContain("setFirstDeskChannelId(MAIN_THREAD_ID);");
-    expect(shell).not.toContain(
-      "setFirstDeskChannelId(fallbackDesks[0]?.id ?? null);",
+  it("uses the first offered fallback channel after an unexpected error", () => {
+    expect(shell).toContain(
+      "setFirstDeskChannelId(firstChannel(buildChannels([], fallbackDesks))?.id ?? null);",
     );
   });
 

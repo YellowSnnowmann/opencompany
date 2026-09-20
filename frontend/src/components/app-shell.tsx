@@ -131,6 +131,7 @@ import { readLastChannel } from "@/lib/last-channel";
 import { RoomView } from "@/views/RoomView";
 import { shouldClearReceipt } from "@/views/room/ChatLiveReceipt";
 import {
+  buildChannels,
   channelForThread,
   channelIdForThread,
   deskFromDto,
@@ -139,6 +140,7 @@ import {
   type ReferralWorking,
   runningCrossingRows,
   HISTORY_UNSTARTED,
+  firstChannel,
   isOperatorChannelDto,
   type DecidedApproval,
   type HistoryStatus,
@@ -1357,14 +1359,12 @@ export function AppShell({
           ...channelMap(chatDesks, roster),
           ...(operatorChannel ? { [operatorChannel.id]: operatorChannel.id } : {}),
         });
-        // The channel `RoomView` lands on when the hash names none, which since
-        // issue #1743 is the built-in `#general` rather than the first desk —
-        // the two must agree, or a line with nowhere else to go lands in a
-        // channel the operator is not looking at. Resolved rather than
-        // hard-coded, for the reason `generalChannelId` gives: a grandfathered
-        // blueprint desk owns the line in its own company, and `main` is then
-        // not a channel at all.
-        setFirstDeskChannelId(channelIdForThread(MAIN_THREAD_ID, chatDesks, roster));
+        // Keep unaddressed system lines in the same offered channel a bare
+        // Room route opens. The built-in General line remains addressable for
+        // legacy history, but the #2368 experiment no longer offers it in the
+        // rail, so resolving MAIN_THREAD_ID here would file a decision in a
+        // hidden transcript.
+        setFirstDeskChannelId(firstChannel(buildChannels(roster, chatDesks))?.id ?? null);
         // Fold the Operator feed's id into the same rehydration pass, keyed on
         // its own id both as channel and thread (its channel id *is* its
         // thread id — `chat/history?desk=<id>` reads it through the ordinary
@@ -1433,13 +1433,7 @@ export function AppShell({
         // than carry the previous company's map into a receipt here (#1934).
         setAgentNames({});
         setChatChannelByThread(channelMap(fallbackDesks, []));
-        // `MAIN_THREAD_ID`, not `fallbackDesks[0]?.id`: `defaultDesks()` no
-        // longer carries a fabricated `main` row (issue #1743), so the first
-        // fallback desk is just whichever one sorts first — landing the
-        // console on an arbitrary desk on an unexpected error instead of the
-        // company-wide line every other path opens on (issue #1781 review,
-        // Codex P2/medium).
-        setFirstDeskChannelId(MAIN_THREAD_ID);
+        setFirstDeskChannelId(firstChannel(buildChannels([], fallbackDesks))?.id ?? null);
         const threadIds = defaultThreads().map((t) => t.id);
         const channels = [
           // `#general` is not a desk here either — same reason the success

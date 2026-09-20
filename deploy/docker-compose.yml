@@ -35,6 +35,10 @@ services:
       # Blank = the small default build; the dev overlay reads it so a key has
       # a live brain to talk to.
       OPENCOMPANY_FEATURES: ${OPENCOMPANY_FEATURES:-}
+      # Standing first-user grant for email auth. Blank grants nobody. The
+      # local init helper pairs this with `issue-password` when no mail
+      # transport exists.
+      OPENCOMPANY_ADMIN_EMAIL: ${OPENCOMPANY_ADMIN_EMAIL:-}
       # Optional: unlocks live cognition. Blank = offline demo brain.
       TINYHUMANS_API_KEY: ${TINYHUMANS_API_KEY:-}
       # Crash reporting. Blank — the default — means no client is constructed.
