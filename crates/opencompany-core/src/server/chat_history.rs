@@ -1831,6 +1831,7 @@ async fn attach_referral_origins(
             returning,
             answers,
             conversation,
+            ..
         } = &stored.event
         else {
             continue;
