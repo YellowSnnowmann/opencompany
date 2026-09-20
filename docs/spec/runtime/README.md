@@ -199,8 +199,8 @@ internals (TinyCortex or any store), or the agent economy (tiny.place).
 
 ## Crate layout (target)
 
-Today's modules (`src/app`, `src/server`, `src/openhuman`, `src/tiny` — see
-[docs/modules/](../../modules/)) remain; the spec adds:
+Today's modules (`src/app`, `src/server`, `src/harness`, `src/hive`, `src/tiny`
+— see [docs/modules/](../../modules/)) remain; the spec adds:
 
 ```text
 src/ports/      one file per port trait (brain, store, events, memory,
