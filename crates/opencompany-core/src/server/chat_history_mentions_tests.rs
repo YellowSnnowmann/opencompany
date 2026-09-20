@@ -1,6 +1,22 @@
-use super::tests_moves::agent_reply;
 use super::tests_reactions::{at, labels};
 use super::*;
+
+/// A desk-visible reply by the CEO on `chat_id`.
+fn agent_reply(chat_id: &str) -> CompanyEvent {
+    CompanyEvent::AgentReply {
+        audience: Vec::new(),
+        mentions: Vec::new(),
+        mention_depth: 0,
+        parent: None,
+        task_id: None,
+        outputs: Vec::new(),
+        chat_id: chat_id.to_string(),
+        agent_id: "ceo".to_string(),
+        text: "hi".to_string(),
+        steps: Vec::new(),
+        episode: None,
+    }
+}
 
 fn mention(target: MentionTarget, text: &str, offset: usize) -> Mention {
     Mention {
