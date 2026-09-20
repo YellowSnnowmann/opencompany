@@ -92,6 +92,46 @@ impl RuntimeBoot {
             None => Workspace::Ephemeral,
         }
     }
+
+    /// Resolves an unset workspace to a fresh temp root that lives for the
+    /// process, and points `OPENHUMAN_WORKSPACE` at it when nothing else has.
+    ///
+    /// Why not `Workspace::Ephemeral` alone: the vendored turn runner re-reads
+    /// OpenHuman's on-disk config through its own resolver (`config::load`),
+    /// which consults `OPENHUMAN_WORKSPACE` and otherwise the operator's
+    /// `~/.openhuman/active_user.toml` — so an "ephemeral" runtime in a test
+    /// binary on a developer box was running its turns against the
+    /// operator's real user config and session store. `serve` exports the
+    /// variable at boot (`app::journal::prepare`); this is the same export for
+    /// a process that never ran `serve`. Exported before the runtime builds,
+    /// so every read the build itself makes lands on the same root.
+    fn resolved(self) -> Self {
+        if self.workspace_dir.is_some() {
+            return self;
+        }
+        if let Some(existing) = std::env::var_os(crate::app::journal::OPENHUMAN_WORKSPACE_ENV)
+            .filter(|path| !path.is_empty())
+        {
+            return Self {
+                workspace_dir: Some(PathBuf::from(existing)),
+                ..self
+            };
+        }
+        let root = tempfile::Builder::new()
+            .prefix("opencompany-openhuman-")
+            .tempdir()
+            .map(tempfile::TempDir::keep)
+            .unwrap_or_else(|_| std::env::temp_dir().join("opencompany-openhuman"));
+        // SAFETY: this runs once per process, on the boot of the single
+        // OpenHuman runtime, before any turn exists to read the variable; the
+        // same contract `app::journal::prepare` documents for the `serve`
+        // export. The variable is only ever SET here, never changed.
+        unsafe { std::env::set_var(crate::app::journal::OPENHUMAN_WORKSPACE_ENV, &root) };
+        Self {
+            workspace_dir: Some(root),
+            ..self
+        }
+    }
 }
 
 static GLOBAL: OnceCell<Arc<Runtime>> = OnceCell::const_new();
@@ -173,6 +213,7 @@ pub fn existing() -> Option<Arc<Runtime>> {
 }
 
 async fn build(boot: RuntimeBoot) -> crate::Result<Arc<Runtime>> {
+    let boot = boot.resolved();
     let mut builder = Runtime::builder().workspace(boot.workspace());
     if let Some(key) = boot.api_key.as_deref() {
         builder = builder.api_key(key);
