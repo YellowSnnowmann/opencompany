@@ -4020,15 +4020,6 @@ pub(crate) async fn with_turn_conversation<F: std::future::Future>(
     TURN_CONVERSATION.scope(chat_id, fut).await
 }
 
-/// The channel the current turn is answering in, or `None` outside one — a
-/// dispatched card, a workflow node, or any path that never set it.
-///
-/// `None` is a refusal for `read_thread` rather than a wildcard: a turn with no
-/// conversation has no threads it is entitled to read.
-pub(crate) fn turn_conversation() -> Option<String> {
-    TURN_CONVERSATION.try_with(Clone::clone).ok().flatten()
-}
-
 /// Run `fut` with the [`CHAT_ONLY_TURN`] hint set to `chat_only`.
 pub(crate) async fn with_chat_only_hint<F: std::future::Future>(
     chat_only: bool,

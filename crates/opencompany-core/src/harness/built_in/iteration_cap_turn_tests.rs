@@ -56,7 +56,7 @@ use crate::harness::policy::{ApprovalPolicy, ApprovalRequestQueue};
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{CompanyAgent, HarnessDeps};
 use crate::ports::types::CompanyId;
-use crate::runtime::delegation::{ChatTarget, with_chat_only_hint};
+use crate::runtime::delegation::ChatTarget;
 use crate::store::{FsCompanyStore, FsContextStore};
 
 /// The vendored `AgentConfig::default().max_tool_iterations` this crate used to

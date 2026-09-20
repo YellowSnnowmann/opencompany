@@ -1,22 +1,6 @@
 use super::tests_core2::*;
 use super::*;
 
-struct ConcurrentConversationTurns {
-    barrier: tokio::sync::Barrier,
-    active: std::sync::atomic::AtomicUsize,
-    max_active: std::sync::atomic::AtomicUsize,
-}
-
-impl ConcurrentConversationTurns {
-    fn new() -> Self {
-        Self {
-            barrier: tokio::sync::Barrier::new(2),
-            active: std::sync::atomic::AtomicUsize::new(0),
-            max_active: std::sync::atomic::AtomicUsize::new(0),
-        }
-    }
-}
-
 #[async_trait]
 impl RunTurn for ConcurrentConversationTurns {
     async fn run(
