@@ -231,12 +231,11 @@ use crate::harness::run_trace::RunTraceSink;
 use crate::ports::artifacts::{ArtifactAuthor, ArtifactRecord};
 use crate::ports::blockers::{BlockerPayload, BlockerStep};
 use crate::ports::brain::{Brain, CycleHost};
-use crate::ports::context::ContextStore;
 use crate::ports::runs::{RunOutcome, RunStatus};
 use crate::ports::tasks::{COLUMN_IN_REVIEW, TaskOutput, TaskOutputArtifact, TaskOutputSource};
 use crate::ports::types::{
-    CompanyEvent, CompanyId, CompanyRecord, CompressedTrace, ContextChunk, CycleRequest,
-    CycleResult, Effect, EffectGroup, EventSeq, OutboundMessage, TokenUsage, TurnStep,
+    CompanyEvent, CompanyRecord, CompressedTrace, CycleRequest, CycleResult, Effect,
+    EffectGroup, OutboundMessage, TokenUsage, TurnStep,
     TurnStepKind, TurnStepStatus, Verdict,
 };
 use crate::ports::{Cognition, TaskOrigin, TaskRecord, UsageMetering, generate_id, now_millis};
@@ -2956,6 +2955,70 @@ impl HarnessBrain {
         self.responder.clone()
     }
 
+    /// The company's hives, built over the pool's live agents for this
+    /// message (plan hive-desks, Phase 4).
+    ///
+    /// Per message rather than cached: a hive is a validation and a handful
+    /// of `Arc` clones, and a roster or desk change is then in force on the
+    /// next message with nothing to invalidate.
+    async fn desk_hives(
+        &self,
+        record: &CompanyRecord,
+    ) -> std::collections::HashMap<String, Arc<crate::hive::graph::DeskHive>> {
+        let mut agents: std::collections::HashMap<String, openhuman_embed::Agent> =
+            std::collections::HashMap::new();
+        for agent in record.effective_agents() {
+            if let Some(live) = self.pool.agent(&record.id, &agent.id).await {
+                agents.insert(agent.id.clone(), live.runtime_agent().clone());
+            }
+        }
+        crate::hive::dispatch::hives_for(record, &|id| agents.get(id).cloned())
+    }
+
+    /// The first active teammate the message named, in reading order —
+    /// `tinyhivemind_core::mention::direct_responder` over the live roster.
+    fn mentioned_responder(&self, mentions: &[crate::ports::types::Mention]) -> Option<String> {
+        if mentions.is_empty() {
+            return None;
+        }
+        let record = self.record();
+        let members = crate::runtime::delegation_tools::tinyhivemind_roster(&record);
+        let retired = record.overlay_retired_agents.clone();
+        let roster = tinyhivemind_core::roster::Roster::new(&members, &[], &retired);
+        let mentions: Vec<tinyhivemind_core::mention::Mention> =
+            mentions.iter().map(tinyhivemind_mention).collect();
+        tinyhivemind_core::mention::direct_responder(&mentions, &roster).map(str::to_string)
+    }
+
+    /// Everyone else the message named, expanded against the addressed desk
+    /// — `tinyhivemind_core::mention::mentioned_members` over the live
+    /// roster and desks, excluding `responder`.
+    fn mentioned_members(
+        &self,
+        addressed_desk: &str,
+        mentions: &[crate::ports::types::Mention],
+        responder: Option<&str>,
+    ) -> Vec<String> {
+        if mentions.is_empty() {
+            return Vec::new();
+        }
+        let record = self.record();
+        let members = crate::runtime::delegation_tools::tinyhivemind_roster(&record);
+        let retired = record.overlay_retired_agents.clone();
+        let roster = tinyhivemind_core::roster::Roster::new(&members, &[], &retired);
+        let snapshots = crate::runtime::delegation_tools::tinyhivemind_desks(&record);
+        let desks = snapshots.set();
+        let mentions: Vec<tinyhivemind_core::mention::Mention> =
+            mentions.iter().map(tinyhivemind_mention).collect();
+        tinyhivemind_core::mention::mentioned_members(
+            &mentions,
+            Some(addressed_desk),
+            responder,
+            &roster,
+            &desks,
+        )
+    }
+
     /// The desk key `@everyone` expands against for a message addressed to
     /// `chat`. Folds the General-desk spellings [`is_general_chat`] admits
     /// (`None`, `""`, `"main"`, `"General"`) to [`DEFAULT_DESK`], so a
@@ -4512,540 +4575,6 @@ impl HarnessBrain {
             ledger_deltas: Vec::new(),
             token_usage: TokenUsage::default(),
         })
-    }
-}
-
-/// A hive episode's turn seam, wired to the harness.
-///
-/// The whole of what an episode needs from this host: an agent id and a prompt
-/// in, one reply out. Everything that makes the answering teammate a teammate —
-/// its tools, its memory retrieve/inject/store loop, its approval gate — comes
-/// from `RunTurn::run` being the ordinary turn path, unchanged. A deliberating
-/// turn differs from a single-responder turn in the prompt it is handed and in
-/// nothing else.
-///
-/// The chat target is the desk the episode is deliberating on, so the live
-/// turn-stream frames carry it and the console routes them to that thread
-/// exactly as it does for a normal desk turn.
-struct HiveDeskRunner<'a> {
-    run_turn: Arc<dyn RunTurn>,
-    company: CompanyId,
-    chat_id: Option<String>,
-    thread_root: Option<EventSeq>,
-    /// The triggering operator message's own sequence — the same `trigger`
-    /// the episode itself was started with. Carried onto every `ChatTarget`
-    /// this runner builds (`.answering(...)`) so `TurnStreamCtx::message_seq`
-    /// is populated for a hive turn exactly as it is for an ordinary one;
-    /// without it, live tool frames from a desk started inside a thread carry
-    /// no message identity and the frontend files them under the desk-level
-    /// thread instead of the active `desk#root`/message bucket.
-    trigger_seq: Option<EventSeq>,
-    /// The brain and host this runner's episode is running under, so a
-    /// gated tool call a member's turn hits can be parked for the operator
-    /// **between turns**, not only once the whole episode has finished.
-    ///
-    /// Without this, `request_approval` — the tool `speak`/`refer` reach
-    /// through `self.run_turn.run(...)` — enqueues onto
-    /// `self.deps.approval_requests` and the turn completes normally with a
-    /// "blocked, requires approval" refusal folded into the reply text
-    /// (openhuman resolves `RequireApproval` inline; nothing downstream
-    /// blocks on it). The episode loop therefore keeps running further
-    /// turns without ever surfacing the pending request, and the *cycle's*
-    /// `park_approval_requests` call only runs once
-    /// [`driver.run(trigger)`](crate::hivemind::EpisodeDriver::run) has
-    /// already returned — by then the room may have converged, deadlocked
-    /// or exhausted its budget without the approval it was waiting on ever
-    /// reaching `scripts/hive-euler.py`'s concurrent approval pump.
-    ///
-    /// Draining after every turn this runner completes closes that gap; the
-    /// cycle-level call after `driver.run` stays in place as a safety net
-    /// for anything queued by non-hive-turn work in the same cycle.
-    brain: &'a HarnessBrain,
-    host: &'a dyn CycleHost,
-}
-
-/// Drains and parks whatever a single hive turn just queued onto
-/// `self.deps.approval_requests`, logging rather than propagating a failure:
-/// there is no single "reply" a hive turn returns an operator-visible notice
-/// on the way [`HarnessBrain::park_approval_requests`] does for an ordinary
-/// cycle, and a parking failure must not fail the turn that already computed
-/// a real answer.
-async fn park_hive_turn_approvals(brain: &HarnessBrain, host: &dyn CycleHost, agent_id: &str) {
-    match brain.park_approval_requests(host).await {
-        Ok(None) => {}
-        Ok(Some(notice)) => tracing::warn!(
-            agent = %agent_id,
-            %notice,
-            "[hive] not every approval request from this turn could be parked for the operator"
-        ),
-        Err(err) => tracing::warn!(
-            agent = %agent_id,
-            error = %err,
-            "[hive] failed to park approval requests queued during a member's turn"
-        ),
-    }
-}
-
-/// Turns a terminal outcome (`outcome.budget_paused` / `outcome.halted_for_spend`
-/// / `outcome.abnormal_stop`) into the hard error a hive turn must surface, or
-/// `None` when the turn actually answered.
-///
-/// Without this, `outcome.reply` on any of the three is host-authored
-/// pause/halt/refusal copy, not the agent's answer — folding it as `Ok(reply)`
-/// lets `EpisodeDriver` journal that copy as a genuine `CompanyEvent::AgentReply`
-/// under the member's own identity, and the episode never counts the turn as
-/// failed (`EpisodeOutcome::failed_turns`), so an operator reading the
-/// transcript cannot tell a real answer from a budget wall or a pre-dispatch
-/// refusal the room hit.
-fn terminal_budget_error(
-    agent_id: &str,
-    outcome: &crate::harness::TurnOutcome,
-) -> Option<crate::OpenCompanyError> {
-    if let Some(pause) = &outcome.budget_paused {
-        return Some(crate::OpenCompanyError::Harness(format!(
-            "{agent_id} paused for lack of inference budget mid-deliberation: {}",
-            pause.summary
-        )));
-    }
-    if let Some(halt) = &outcome.halted_for_spend {
-        return Some(crate::OpenCompanyError::Harness(format!(
-            "{agent_id} halted for spend mid-deliberation: spent ${:.2} against a cap of ${:.2}",
-            halt.spent_usd, halt.cap_usd
-        )));
-    }
-    if let Some(reason) = &outcome.abnormal_stop {
-        return Some(crate::OpenCompanyError::Harness(format!(
-            "{agent_id} did not complete its turn: {reason}"
-        )));
-    }
-    None
-}
-
-#[async_trait]
-impl crate::hivemind::HiveTurnRunner for HiveDeskRunner<'_> {
-    async fn speak(&self, agent_id: &str, prompt: &str) -> Result<String> {
-        let outcome = self
-            .run_turn
-            .run(
-                &self.company,
-                agent_id,
-                prompt,
-                // `deliberating`, not `in_thread`: the episode prompt already
-                // carries this desk's transcript, attributed and filtered to
-                // what this turn is allowed to see. Seeding the desk's recent
-                // history on top would hand the same lines back unattributed
-                // and in the assistant role — a peer's opening position
-                // reaching a *blind* turn, and every peer line reading as
-                // something this member had itself said.
-                //
-                // `.answering(self.trigger_seq)`: this turn is still, at
-                // bottom, this desk's response to the operator message that
-                // opened the episode. Without it, `TurnStreamCtx::message_seq`
-                // is `None` for every hive turn, and a desk started inside a
-                // thread has its live tool frames fall back to the
-                // desk-level thread bucket instead of the active
-                // `desk#root`/message one.
-                ChatTarget::deliberating(self.chat_id.as_deref(), self.thread_root)
-                    .answering(self.trigger_seq),
-            )
-            .await?;
-        park_hive_turn_approvals(self.brain, self.host, agent_id).await;
-        if let Some(error) = terminal_budget_error(agent_id, &outcome) {
-            return Err(error);
-        }
-        Ok(outcome.reply)
-    }
-}
-
-impl HiveDeskRunner<'_> {
-    /// An unconverged referred room's own turns, attributed and in order, as
-    /// the answer to carry home.
-    ///
-    /// The members' lines rather than the closing report, for the reason
-    /// [`deliberate`](crate::hivemind::HiveReferralRunner::deliberate) gives:
-    /// a report only speaks for the desk once the desk has agreed on
-    /// something.
-    ///
-    /// Each line is rendered through the same rewrite a person reading that
-    /// desk gets. A room's move grammar — `!propose #topic ^N` — is addressed
-    /// to the fold *of that desk*, and carrying it into another desk's
-    /// transcript would hand the asking room markers naming topics and
-    /// sequences that do not exist there.
-    ///
-    /// **The one agent-facing path that rewrites.** Everywhere else — the
-    /// episode prompt, `elsewhere_for`, `referral_prompt`, `chat_seed` — reads
-    /// the stored body, because that is how a seat cites `^16` against a row it
-    /// can identify (see `readable_moves`). The exception earns itself on that
-    /// same rule: this text *crosses desks*, so the rows its markers name are
-    /// rows the reader cannot identify. What the asking room cites instead is
-    /// the relayed line's own sequence on its own desk, which is what it does
-    /// in practice.
-    ///
-    /// `None` when the room took no turn at all, which is a desk that did not
-    /// answer rather than a desk that answered nothing.
-    async fn turns_of(
-        &self,
-        events: &Arc<dyn crate::ports::events::EventLog>,
-        company: &crate::ports::types::CompanyId,
-        outcome: &crate::hivemind::EpisodeOutcome,
-        desk_id: &str,
-        // The question this room was convened on. Every turn of a referred
-        // episode is parented to it, which is what separates them from whatever
-        // else that desk was doing at the time.
-        root: EventSeq,
-    ) -> Option<String> {
-        let (first, last) = (outcome.first_seq?, outcome.last_seq?);
-        let span = last.value().saturating_sub(first.value()).saturating_add(1);
-        let page = events
-            .read_from(company, first, usize::try_from(span).unwrap_or(usize::MAX))
-            .await
-            .ok()?;
-        let said: Vec<String> = page
-            .iter()
-            .filter(|stored| stored.seq <= last)
-            .filter_map(|stored| match &stored.event {
-                CompanyEvent::AgentReply {
-                    chat_id,
-                    agent_id,
-                    text,
-                    audience,
-                    parent,
-                    ..
-                } if chat_id == desk_id
-                    // **This room's turns, not the desk's other traffic.**
-                    //
-                    // A desk that was asked keeps working while the referred
-                    // room runs — its own episode, an ordinary reply — and all
-                    // of it lands on the same desk inside the same sequence
-                    // span. Carried home, somebody else's words would arrive as
-                    // this desk's answer and steer the asking room. The history
-                    // projection scopes the same rows by this parent; this is
-                    // the second builder and needed it too (Codex, #2332).
-                    && *parent == Some(root)
-                    && !crate::hivemind::is_hive_author(agent_id)
-                    // **An aside is not a turn, and never leaves the desk.**
-                    //
-                    // `!aside @peer` is journaled as an ordinary `AgentReply`
-                    // with the pair in `audience`, so it sits in this span like
-                    // any other row and can even be the last one. Carried home
-                    // it would publish a private exchange to a desk that was
-                    // never in it — across a desk boundary, where nobody there
-                    // can even see that it happened. Only desk-visible turns
-                    // answer a crossing (CodeRabbit, #2332).
-                    && audience.is_empty() =>
-                {
-                    Some(format!(
-                        "{agent_id}: {}",
-                        crate::server::chat_history::readable_moves(text.clone()).trim()
-                    ))
-                }
-                _ => None,
-            })
-            .collect();
-        (!said.is_empty()).then(|| said.join("\n"))
-    }
-}
-
-#[async_trait]
-impl crate::hivemind::HiveReferralRunner for HiveDeskRunner<'_> {
-    async fn refer(&self, desk_id: &str, agent_id: &str, prompt: &str) -> Result<String> {
-        let outcome = self
-            .run_turn
-            .run(
-                &self.company,
-                agent_id,
-                prompt,
-                // The *far* desk's channel, and never this episode's thread: a
-                // thread root is a sequence in the conversation that owns it, so
-                // carrying the asking desk's root across would parent the answer
-                // to a message that does not exist over there.
-                //
-                // `deliberating` for the same reason the episode's own turns
-                // are, and for one more: the referred teammate is not in this
-                // room, so seeding it with the far desk's recent history would
-                // put lines it has never read into its own assistant role while
-                // it answers a question from somewhere else entirely.
-                ChatTarget::deliberating(Some(desk_id), None),
-            )
-            .await?;
-        park_hive_turn_approvals(self.brain, self.host, agent_id).await;
-        if let Some(error) = terminal_budget_error(agent_id, &outcome) {
-            return Err(error);
-        }
-        Ok(outcome.reply)
-    }
-
-    async fn deliberate(&self, desk_id: &str, asker: &str, prompt: &str) -> Result<Option<String>> {
-        let record = self.brain.record();
-        // Whether that desk can hold a room at all: it needs a `[hive]` block,
-        // enough members, and a quorum still reachable with its *effective*
-        // roster. `None` for any of those, and the seat answers — the one thing
-        // this must not do is refuse a crossing a company is entitled to make.
-        let Some(desk) = crate::hivemind::desk_episode(&record, Some(desk_id)) else {
-            return Ok(None);
-        };
-        let Some(events) = self.brain.deps.events.clone() else {
-            // The same guard the desk's own episode path carries: a room reads
-            // its turns back out of the journal to fold the next step, so one
-            // with nowhere to append could not deliberate at all.
-            return Ok(None);
-        };
-        // **The question, written onto the desk being asked.**
-        //
-        // A single-seat crossing deliberately leaves nothing here — see
-        // `referral::forward` — and for a single seat that is right: the seat
-        // is handed the question in its prompt and its answer is the only row
-        // the desk needs. A room cannot work that way. It decides what to say
-        // next by folding this desk's transcript, so a question that is not in
-        // the transcript is a question no seat after the first can read; and
-        // every turn has to hang off something, or a second crossing into this
-        // desk in the same cycle shares the channel-level projection with this
-        // one and folds its turns as its own votes.
-        //
-        // So it is journaled, and its sequence is both the thread root and the
-        // episode's watermark: the room folds what was said after it was asked
-        // and merely reads what came before.
-        //
-        // As an `OperatorMessage` by the asking agent, which is not a new shape
-        // — it is exactly what a chat-path crossing already lands on the desk
-        // it goes to, and `attach_referral_origins` matches it as such ("it IS
-        // that agent speaking there"). A reserved `hive-question` author would
-        // have been the obvious alternative and is the wrong one twice over:
-        // both projections would render it as a *teammate* nobody can spell,
-        // which is the precise defect `HIVE_REPORT_AUTHOR` is dropped to avoid,
-        // and the room folds an operator message as the request it is answering
-        // — which is what this row is — where an agent line folds as a turn.
-        let root = events
-            .append(
-                &record.id,
-                CompanyEvent::OperatorMessage {
-                    text: prompt.to_string(),
-                    by: Some(crate::ports::types::Actor {
-                        kind: crate::ports::types::ActorKind::Agent,
-                        id: asker.to_string(),
-                    }),
-                    chat: Some(desk.id.clone()),
-                    parent: None,
-                    deliverable: None,
-                    mentions: Vec::new(),
-                    attachments: Vec::new(),
-                },
-            )
-            .await?;
-        // Kept before `EpisodeDriver::new` takes the desk by value.
-        let far_desk = desk.id.clone();
-        let runner = HiveDeskRunner {
-            run_turn: Arc::clone(&self.run_turn),
-            company: record.id.clone(),
-            // This desk and this thread — never the asking episode's, whose
-            // thread root is a sequence in a conversation that is not this one.
-            chat_id: Some(desk.id.clone()),
-            thread_root: Some(root),
-            trigger_seq: Some(root),
-            brain: self.brain,
-            host: self.host,
-        };
-        let memory = Arc::new(HiveDeskMemory {
-            context: Arc::clone(&self.brain.deps.context),
-            company: record.id.clone(),
-            desk_id: desk.id.clone(),
-        });
-        // **No `with_federation`, and that omission is the recursion bound.**
-        //
-        // `max_hops` bounds a chain of referrals *within* one episode's ledger.
-        // A referred episode is a NEW episode with a fresh ledger starting at
-        // hop 0, so a far desk allowed to refer onward could convene a third
-        // desk, which could convene a fourth, and nothing in the hop budget
-        // would ever see it. A crossing is therefore one room deep: this desk
-        // answers with what it knows, or says it does not know.
-        let outcome = crate::hivemind::EpisodeDriver::new(
-            record.id.clone(),
-            desk,
-            Arc::clone(&events),
-            &runner,
-            prompt.to_string(),
-        )
-        .in_thread(Some(root))
-        .with_memory(memory)
-        .with_context_desks(crate::hivemind::company_desks(&record))
-        .run(root)
-        .await?;
-        // **What to carry home depends on how the room ended.**
-        //
-        // A room that CONVERGED speaks for the desk in its closing report: the
-        // report names the proposal that carried and who grounded it, which is
-        // the one sentence no single seat is entitled to say.
-        //
-        // A room that did not converge does not. Its report is bookkeeping —
-        // "Nobody on the desk had anything to add, so the room did not open" —
-        // and relaying that as the desk's answer is worse than saying nothing,
-        // because the asking room is told the desk had no view while the view
-        // sits one row away in the transcript. A live crossing did exactly
-        // that: both seats said plainly that refunds is their remit, the room
-        // ended `idle` because neither line carried a move, and the answer that
-        // came home said nobody had anything to add.
-        //
-        // So an unconverged room carries its members' own turns instead,
-        // attributed, in the order they were said.
-        let conclusion = match &outcome.ending {
-            crate::hivemind::EpisodeEnding::Converged { .. } => {
-                if let Some(report_seq) = outcome.report_seq {
-                    let page = events.read_from(&record.id, report_seq, 1).await?;
-                    page.into_iter().find_map(|stored| match stored.event {
-                        CompanyEvent::AgentReply { text, .. } if stored.seq == report_seq => {
-                            Some(text)
-                        }
-                        _ => None,
-                    })
-                } else {
-                    tracing::warn!(
-                        company = %record.id,
-                        desk = %desk_id,
-                        turns = outcome.turns,
-                        "[hive] a referred desk converged but wrote no closing report"
-                    );
-                    // NOT `Ok(None)`: that means "this desk cannot hold a
-                    // room", and `forward` acts on it by running one more model
-                    // turn. The room has already run and spent its turns here —
-                    // only the append of its closing row failed — so falling
-                    // back would bill the room AND a seat, and credit the answer
-                    // to `@<seat>` instead of the desk. Carry what the room
-                    // said, exactly as the unconverged arm does (CodeRabbit,
-                    // #2332).
-                    self.turns_of(&events, &record.id, &outcome, &far_desk, root)
-                        .await
-                }
-            }
-            _ => {
-                self.turns_of(&events, &record.id, &outcome, &far_desk, root)
-                    .await
-            }
-        };
-        tracing::info!(
-            company = %record.id,
-            desk = %desk_id,
-            ending = %outcome.ending.label(),
-            turns = outcome.turns,
-            failed_turns = outcome.failed_turns,
-            answered = conclusion.is_some(),
-            "[hive] a referred desk answered as a room"
-        );
-        // **An empty room that RAN is a failure, not an absent room.**
-        //
-        // `Ok(None)` means "this desk cannot hold a room" and `forward` acts on
-        // it by running a single seat instead. Past this point the room has been
-        // stood up and has spent its budget — a one-turn desk whose only turn
-        // failed comes back as a non-error `Exhausted` with no rows at all — so
-        // returning `None` here would bill the room AND a seat, and credit the
-        // answer to a seat that never spoke. An `Err` is what a crossing that
-        // got nothing back already means, and `unanswered` now names the desk
-        // rather than a seat for exactly this case (Codex, #2332).
-        match conclusion {
-            Some(answer) => Ok(Some(answer)),
-            None => Err(crate::OpenCompanyError::Harness(format!(
-                "the {desk_id} desk deliberated and produced no answer to carry back \
-                 (ending {}, {} turn(s), {} of them failed)",
-                outcome.ending.label(),
-                outcome.turns,
-                outcome.failed_turns,
-            ))),
-        }
-    }
-}
-
-/// A deliberating desk's own memory, over the company's real context store.
-///
-/// Namespaced by desk — every note is labelled `hive/<desk id>/<slug>` — beside
-/// the way an agent's private memories are labelled `agent-memory/<agent id>/…`
-/// (`memory_tools.rs`). One desk's deliberations are therefore listable on their
-/// own, never collide with another desk's, and are not mixed into a teammate's
-/// private memories.
-///
-/// Both halves go through [`ContextStore`], which is the overlay seam: with
-/// `OPENCOMPANY_MEMORY=remote` this is CortexDB, exactly as it is for the
-/// per-turn retrieve→inject→store loop and the `memory_recall` tool.
-struct HiveDeskMemory {
-    context: Arc<dyn ContextStore>,
-    company: CompanyId,
-    desk_id: String,
-}
-
-/// How many search hits to ask for before narrowing them to this desk.
-///
-/// [`ContextStore::search`] ranks company-wide and returns no label, so the
-/// desk scope is applied by intersecting its hits with the addresses actually
-/// stored under this desk's prefix. Over-fetching is what makes that
-/// intersection likely to be non-empty on a company whose memory is mostly
-/// task outcomes and agent notes.
-const HIVE_SEARCH_FANOUT: usize = 8;
-
-#[async_trait]
-impl crate::hivemind::HiveMemory for HiveDeskMemory {
-    async fn recall(
-        &self,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<crate::hivemind::HiveMemoryHit>> {
-        let prefix = crate::hivemind::desk_prefix(&self.desk_id);
-        let mine = self.context.list(&self.company, &prefix).await?;
-        if mine.is_empty() {
-            return Ok(Vec::new());
-        }
-        // Relevance first: the store's own ranking, narrowed to this desk.
-        let hits = self
-            .context
-            .search(
-                &self.company,
-                query,
-                limit.saturating_mul(HIVE_SEARCH_FANOUT),
-            )
-            .await?;
-        let mut addrs: Vec<crate::ports::types::ChunkAddr> = hits
-            .into_iter()
-            .filter(|hit| mine.iter().any(|meta| meta.addr == hit.addr))
-            .map(|hit| hit.addr)
-            .take(limit)
-            .collect();
-        // Recency as the fallback, not as a supplement: a search that matched
-        // nothing on this desk means the ranking has no opinion here, and the
-        // most recent thing the desk concluded is a better answer than nothing.
-        // Mixing the two would let a stale note outrank a relevant one.
-        if addrs.is_empty() {
-            let mut recent = mine.clone();
-            recent.sort_by_key(|meta| std::cmp::Reverse(meta.stored_at_millis));
-            addrs = recent
-                .into_iter()
-                .map(|meta| meta.addr)
-                .take(limit)
-                .collect();
-        }
-        let bodies = self.context.peek_many(&self.company, &addrs).await?;
-        Ok(bodies
-            .into_iter()
-            .flatten()
-            .map(|snippet| crate::hivemind::HiveMemoryHit { snippet })
-            .collect())
-    }
-
-    async fn remember(&self, note: crate::hivemind::HiveMemoryNote) -> Result<()> {
-        // Redacted on the way in, at the note's single construction point, for
-        // the same reason `memory_loop::outcome_chunk` redacts: a deliberation
-        // line can quote a tool's captured output, and this path bypasses
-        // `OcMemory::store` entirely.
-        let title = super::memory::redact_secrets(&note.title);
-        self.context
-            .put(
-                &self.company,
-                ContextChunk {
-                    label: crate::hivemind::note_label(&note.desk_id, &title),
-                    // Title on the first line, so the body is self-describing
-                    // wherever it surfaces — a recall snippet, the Brain view,
-                    // the next episode's "The desk remembers:" block.
-                    body: format!("{title}\n\n{}", super::memory::redact_secrets(&note.body)),
-                },
-            )
-            .await?;
-        Ok(())
     }
 }
 

@@ -4005,8 +4005,6 @@ tokio::task_local! {
     /// back door the leak #1890 A closed at the seed.
     static TURN_CONVERSATION: Option<String>;
 
-    /// TinyHiveMind dispatch depth of the current conversational turn.
-    static TURN_MESSAGE_HOP: u32;
 
     /// The hive seat the current turn runs as, when it is one (plan
     /// hive-desks, Phase 4).
@@ -4084,14 +4082,6 @@ pub(crate) async fn with_turn_conversation<F: std::future::Future>(
     fut: F,
 ) -> F::Output {
     TURN_CONVERSATION.scope(chat_id, fut).await
-}
-
-pub(crate) async fn with_turn_message_hop<F: std::future::Future>(hop: u32, fut: F) -> F::Output {
-    TURN_MESSAGE_HOP.scope(hop, fut).await
-}
-
-pub(crate) fn turn_message_hop() -> u32 {
-    TURN_MESSAGE_HOP.try_with(|hop| *hop).unwrap_or(0)
 }
 
 /// The channel the current turn is answering in, or `None` outside one — a
