@@ -1463,13 +1463,20 @@ impl CompanyAgent {
         drop(_turn);
 
         let events = pump.finish().await;
-        if usages.iter().any(TurnUsage::is_zero) {
+        // The bridge tap is authoritative for tokens and for a charged amount
+        // the provider reported. A provider that reports tokens but no price
+        // (the managed backend's billing meta is absent on a BYOK route, and
+        // on every scripted double) leaves the cost at zero there, while the
+        // runtime's own `TurnCostUpdated` carries its catalogue estimate — the
+        // figure the in-turn spend brake fired on — so that estimate stands
+        // in for the price, and for everything when the tap saw nothing.
+        if usages.iter().any(|usage| usage.is_zero() || usage.cost_usd == 0.0) {
             let segments = progress_pump::attempt_event_segments(&events, usages.len());
             for (usage, segment) in usages.iter_mut().zip(segments) {
-                if !usage.is_zero() {
+                let Some(observed) = progress_pump::last_observed_turn_cost(segment) else {
                     continue;
-                }
-                if let Some(observed) = progress_pump::last_observed_turn_cost(segment) {
+                };
+                if usage.is_zero() {
                     tracing::info!(
                         agent = %self.agent_id,
                         input_tokens = observed.input_tokens,
@@ -1479,6 +1486,8 @@ impl CompanyAgent {
                          its own progress-stream segment"
                     );
                     *usage = observed;
+                } else if usage.cost_usd == 0.0 && observed.cost_usd > 0.0 {
+                    usage.cost_usd = observed.cost_usd;
                 }
             }
         }
