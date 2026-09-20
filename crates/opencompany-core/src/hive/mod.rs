@@ -19,3 +19,6 @@ pub mod tools;
 /// Jev routing over the TinyHumans System One proxy: the host-owned
 /// `SystemOneTransport` and the `jev_router` constructor (plan Phase 7).
 pub mod jev;
+/// The `[group_chat.routing]` block, its resolved `RoutingPolicy`, and the
+/// desk-routing wire shapes (plan Phase 4).
+pub mod routing;
