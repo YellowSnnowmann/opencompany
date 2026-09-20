@@ -99,7 +99,7 @@ impl Confinement {
 
 /// A [`ContextStore`] that stores nothing and finds nothing.
 ///
-/// Stands in for the company's real store so a confined agent's [`Memory`] is
+/// Stands in for the company's real store so a confined agent's memory is
 /// structurally present (openhuman requires one) and substantively empty. Reads
 /// answer empty rather than erroring: a confined turn that *fails* on recall
 /// would be a turn whose confinement is visible to the model as a fault, and
