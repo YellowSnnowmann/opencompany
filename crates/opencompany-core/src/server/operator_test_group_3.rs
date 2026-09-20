@@ -670,10 +670,9 @@ async fn deleting_a_desk_drops_its_installed_routing() {
     )
     .unwrap();
     assert_eq!(body["source"], "default");
-    for seat in body["seats"].as_array().unwrap() {
-        assert_eq!(
-            seat["governed"], false,
-            "a re-created desk inherited a grammar"
-        );
-    }
+    assert_eq!(
+        body["declared"],
+        serde_json::json!({}),
+        "a re-created desk inherited a routing block"
+    );
 }
