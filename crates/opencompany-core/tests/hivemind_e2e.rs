@@ -38,6 +38,8 @@
 //! path asks for `shell`, so nothing parks for approval and no test depends on
 //! an approval policy that would make it hang.
 
+mod support;
+
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -47,6 +49,7 @@ use axum::Json;
 use axum::extract::Query;
 use axum::routing::{get, post};
 use serde_json::{Value, json};
+use support::script_model::{Ask, Reply, Responder, Script, spawn_script};
 
 use opencompany::CompanyRuntime;
 use opencompany::company::CompanyManifest;
@@ -59,10 +62,11 @@ use opencompany::{AppConfig, AppState};
 // The content-aware scripted model
 // ---------------------------------------------------------------------------
 
-/// One request as the script sees it: who is speaking, what they were shown,
-/// and what the turn loop has already handed back.
+/// One request as a hive script sees it: who is speaking, what they were
+/// shown, and what the turn loop has already handed back — the hive-prompt
+/// reading of the shared [`Ask`].
 #[derive(Clone, Debug)]
-struct Ask {
+struct HiveAsk {
     /// The teammate this turn belongs to, read out of the prompt's own
     /// `You are @<id>` opening. `None` for a request that is not a hive turn.
     speaker: Option<String>,
@@ -76,13 +80,9 @@ struct Ask {
     messages: Vec<Value>,
 }
 
-impl Ask {
-    fn read(body: &Value) -> Self {
-        let messages: Vec<Value> = body
-            .get("messages")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+impl HiveAsk {
+    fn of(ask: &Ask) -> Self {
+        let messages: Vec<Value> = ask.messages.clone();
         // The hive prompt is a user message. The memory loop may prepend a
         // "## Relevant prior work" preamble to it, so it is found by content
         // rather than by position.
@@ -233,118 +233,33 @@ fn parse_transcript_line(line: &str) -> Option<(u64, String, String)> {
 }
 
 /// What the scripted model does with one request.
-#[derive(Clone, Debug)]
-enum Reply {
-    /// Finish the turn with this assistant text.
-    Say(String),
-    /// Emit a native `tool_calls` entry with these literal arguments.
-    Call { tool: &'static str, args: Value },
-}
-
-/// Anything that can answer a request from what it can see in it.
-type Responder = Arc<dyn Fn(&Ask) -> Reply + Send + Sync>;
-
-/// A scripted OpenAI-compatible endpoint, served on loopback.
-///
-/// `/embeddings` is served alongside `/chat/completions` for the same reason
-/// `offline_e2e` serves it: the host's embeddings client shares the `base_url`,
-/// and a 404 there reads as an inference failure and is not one.
-struct Script {
-    responder: Responder,
-    /// Every request body the harness sent, in order.
-    seen: Mutex<Vec<Value>>,
-}
-
-impl Script {
-    fn bodies(&self) -> Vec<Value> {
-        self.seen.lock().expect("script poisoned").clone()
-    }
-
-    /// Every request that OPENED a hive turn: its last message is the episode
-    /// prompt itself, so a tool round trip inside one turn is not counted twice.
-    fn turn_openers(&self) -> Vec<Ask> {
-        self.bodies()
-            .iter()
-            .filter(|body| {
-                body.get("messages")
-                    .and_then(Value::as_array)
-                    .and_then(|messages| messages.last())
-                    .is_some_and(|last| {
-                        last.get("role").and_then(Value::as_str) == Some("user")
-                            && last
-                                .get("content")
-                                .and_then(Value::as_str)
-                                .is_some_and(|content| {
-                                    hive_core(content).contains(TRANSCRIPT_HEADING)
-                                })
-                    })
+/// Every request that OPENED a hive turn: its last message is the episode
+/// prompt itself, so a tool round trip inside one turn is not counted twice.
+fn turn_openers(script: &Script) -> Vec<HiveAsk> {
+    script
+        .asks()
+        .iter()
+        .filter(|ask| {
+            ask.messages.last().is_some_and(|last| {
+                last.get("role").and_then(Value::as_str) == Some("user")
+                    && last
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .is_some_and(|content| hive_core(content).contains(TRANSCRIPT_HEADING))
             })
-            .map(Ask::read)
-            .collect()
-    }
-
-    /// Every request that carried a hive prompt at all, opener or follow-up.
-    fn hive_asks(&self) -> Vec<Ask> {
-        self.bodies()
-            .iter()
-            .map(Ask::read)
-            .filter(|ask| ask.speaker.is_some())
-            .collect()
-    }
+        })
+        .map(HiveAsk::of)
+        .collect()
 }
 
-async fn spawn_script(responder: Responder) -> (String, Arc<Script>) {
-    let script = Arc::new(Script {
-        responder,
-        seen: Mutex::new(Vec::new()),
-    });
-    let chat = Arc::clone(&script);
-    let app = axum::Router::new()
-        .route(
-            "/chat/completions",
-            post(move |Json(body): Json<Value>| {
-                let script = Arc::clone(&chat);
-                async move {
-                    script
-                        .seen
-                        .lock()
-                        .expect("script poisoned")
-                        .push(body.clone());
-                    let ask = Ask::read(&body);
-                    let message = match (script.responder)(&ask) {
-                        Reply::Say(text) => json!({ "role": "assistant", "content": text }),
-                        Reply::Call { tool, args } => json!({
-                            "role": "assistant",
-                            "content": null,
-                            "tool_calls": [{
-                                "id": format!("call-{tool}"),
-                                "type": "function",
-                                "function": { "name": tool, "arguments": args.to_string() }
-                            }]
-                        }),
-                    };
-                    Json(json!({
-                        "choices": [{ "index": 0, "message": message, "finish_reason": "stop" }],
-                        "usage": { "prompt_tokens": 12, "completion_tokens": 4 }
-                    }))
-                }
-            }),
-        )
-        .route(
-            "/embeddings",
-            post(|Json(_body): Json<Value>| async move {
-                Json(json!({
-                    "data": [{ "index": 0, "embedding": vec![0.0_f32; 1536] }],
-                    "usage": { "prompt_tokens": 1, "total_tokens": 1 }
-                }))
-            }),
-        );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
-    });
-    (format!("http://{addr}"), script)
+/// Every request that carried a hive prompt at all, opener or follow-up.
+fn hive_asks(script: &Script) -> Vec<HiveAsk> {
+    script
+        .asks()
+        .iter()
+        .map(HiveAsk::of)
+        .filter(|ask| ask.speaker.is_some())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -592,6 +507,8 @@ const TOPIC: &str = "answer42";
 /// would pass whatever the prompt said; this cannot.
 fn converging_script() -> Responder {
     Arc::new(|ask: &Ask| {
+        let ask = HiveAsk::of(ask);
+        let ask = &ask;
         let propose = format!("!propose #{TOPIC} The closed form of the recurrence is 42.");
         // A citation is only available once the proposal is visible. In the
         // blind round it is not, which is exactly what the blind round means.
@@ -625,6 +542,8 @@ const UNANIMOUS: &str = "{ enabled = true, turn_budget = 12, quorum = 3, blind_r
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn one_agent_uses_speech_to_coordinate_multiple_dm_sessions_without_cards() {
     let script: Responder = Arc::new(|ask: &Ask| {
+        let ask = HiveAsk::of(ask);
+        let ask = &ask;
         let user = ask.last_user_text();
         if user.contains("Coordinate the launch") {
             return match ask.tool_outputs.len() {
@@ -833,7 +752,7 @@ async fn a_desk_deliberates_and_converges_through_the_fold() {
     // One model call per turn, and the calls are the turns: the speakers the
     // endpoint was asked for are exactly the authors the journal recorded, in
     // order.
-    let openers = script.turn_openers();
+    let openers = turn_openers(&script);
     let asked: Vec<String> = openers.iter().map(|ask| ask.who().to_owned()).collect();
     let journaled: Vec<String> = turns.iter().map(|(author, _)| author.clone()).collect();
     assert_eq!(
@@ -841,7 +760,7 @@ async fn a_desk_deliberates_and_converges_through_the_fold() {
         "one model call per journaled turn, in the same order"
     );
     assert_eq!(
-        script.hive_asks().len(),
+        hive_asks(&script).len(),
         openers.len(),
         "no hive turn needed a second model call: nothing on this path uses a tool"
     );
@@ -863,7 +782,7 @@ async fn the_opening_round_is_blind_and_every_later_line_is_attributed() {
         .say(DESK, "Settle the closed form of the recurrence.")
         .await;
 
-    let openers = script.turn_openers();
+    let openers = turn_openers(&script);
     assert!(
         openers.len() >= 4,
         "a blind round plus at least one open turn"
@@ -1013,6 +932,8 @@ const OPEN_PAIR: &str = "{ enabled = true, turn_budget = 12, quorum = 2, blind_r
 async fn an_objection_silences_an_advocate_and_a_second_topic_carries() {
     let home = tempfile::tempdir().unwrap();
     let responder: Responder = Arc::new(|ask: &Ask| {
+        let ask = HiveAsk::of(ask);
+        let ask = &ask;
         let wrong = ask.seq_of(&format!("!propose #{WRONG}"));
         let backing = ask.seq_by(PROGRAMMER, &format!("!support #{WRONG}"));
         let right = ask.seq_of(&format!("!propose #{RIGHT}"));
@@ -1111,6 +1032,8 @@ async fn an_objection_silences_an_advocate_and_a_second_topic_carries() {
 async fn a_room_that_settles_on_nothing_reports_itself_exhausted() {
     let home = tempfile::tempdir().unwrap();
     let responder: Responder = Arc::new(|ask: &Ask| {
+        let ask = HiveAsk::of(ask);
+        let ask = &ask;
         Reply::Say(format!(
             "!question {} cannot answer this without the benchmark nobody has run.",
             ask.who()
@@ -1150,6 +1073,8 @@ const BETA: &str = "beta";
 async fn two_carrying_topics_and_no_objection_deadlock() {
     let home = tempfile::tempdir().unwrap();
     let responder: Responder = Arc::new(|ask: &Ask| {
+        let ask = HiveAsk::of(ask);
+        let ask = &ask;
         let alpha = ask.seq_of(&format!("!propose #{ALPHA}"));
         let beta = ask.seq_of(&format!("!propose #{BETA}"));
         let line = match (ask.who(), alpha, beta) {
@@ -1206,6 +1131,8 @@ async fn two_carrying_topics_and_no_objection_deadlock() {
 async fn a_single_member_desk_answers_with_one_ordinary_turn() {
     let home = tempfile::tempdir().unwrap();
     let responder: Responder = Arc::new(|ask: &Ask| {
+        let ask = HiveAsk::of(ask);
+        let ask = &ask;
         assert!(
             ask.speaker.is_none(),
             "a desk of one must never be handed an episode prompt: {}",
@@ -1259,6 +1186,8 @@ const ASK_TWO: &str = "What does the small-case table give for n=3?";
 /// the claim does not depend on which member the library hands the floor to.
 fn remembering_script() -> Responder {
     Arc::new(|ask: &Ask| {
+        let ask = HiveAsk::of(ask);
+        let ask = &ask;
         let grounds = ask.transcript().first().map_or(1, |(seq, _, _)| *seq);
         if ask.task() == ASK_ONE {
             if ask.pending_tool.is_none() {
@@ -1650,6 +1579,8 @@ const FAR_ANSWER: &str = "The front desk's own log shows the recurrence closing 
 /// teammate is answering a colleague rather than taking a seat in this room.
 fn referring_script() -> Responder {
     Arc::new(|ask: &Ask| {
+        let ask = HiveAsk::of(ask);
+        let ask = &ask;
         // The referred turn. Identified by the referral prompt's own opening,
         // which no episode prompt contains.
         if ask.speaker.is_none() {
