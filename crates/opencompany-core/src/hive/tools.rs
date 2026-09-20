@@ -189,8 +189,7 @@ impl InFlight {
         };
         let Some(hive) = &self.hive else {
             return Err(
-                "`dm` is only available inside a desk episode; this turn is not in one"
-                    .to_string(),
+                "`dm` is only available inside a desk episode; this turn is not in one".to_string(),
             );
         };
         for id in to {
@@ -237,10 +236,10 @@ pub struct InFlightRegistry {
 
 impl fmt::Debug for InFlightRegistry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let keys: Vec<String> = self.turns.read().map_or_else(
-            |_| Vec::new(),
-            |turns| turns.keys().cloned().collect(),
-        );
+        let keys: Vec<String> = self
+            .turns
+            .read()
+            .map_or_else(|_| Vec::new(), |turns| turns.keys().cloned().collect());
         f.debug_struct("InFlightRegistry")
             .field("in_flight", &keys)
             .finish()

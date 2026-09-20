@@ -8,19 +8,19 @@
 //! in-process host tool, and a build without `mcp` has no `McpServer` to
 //! attach.
 
-/// The JSON-RPC Streamable-HTTP MCP server the company agents call their
-/// speech and OpenCompany tools on (plan Phase 3).
-#[cfg(feature = "mcp")]
-pub mod mcp_server;
-/// The in-flight turn registry, the speech fold and the tool adapter the
-/// server dispatches through (plan Phase 3).
-#[cfg(feature = "mcp")]
-pub mod tools;
 /// Jev routing over the TinyHumans System One proxy: the host-owned
 /// `SystemOneTransport` and the `jev_router` constructor (plan Phase 7).
 /// Gated with the harness whose credential seam it reads.
 #[cfg(feature = "openhuman")]
 pub mod jev;
+/// The JSON-RPC Streamable-HTTP MCP server the company agents call their
+/// speech and OpenCompany tools on (plan Phase 3).
+#[cfg(feature = "mcp")]
+pub mod mcp_server;
 /// The `[group_chat.routing]` block, its resolved `RoutingPolicy`, and the
 /// desk-routing wire shapes (plan Phase 4).
 pub mod routing;
+/// The in-flight turn registry, the speech fold and the tool adapter the
+/// server dispatches through (plan Phase 3).
+#[cfg(feature = "mcp")]
+pub mod tools;

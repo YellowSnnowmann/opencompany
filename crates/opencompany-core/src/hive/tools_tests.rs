@@ -123,7 +123,10 @@ fn a_dm_to_a_non_member_is_refused_with_the_word_refused() {
 fn a_dm_only_to_oneself_or_outside_an_episode_is_refused() {
     let mut turn = desk_turn("ceo", &["ceo", "engineer"]);
     let reply = turn.speak("dm", &json!({ "to": ["ceo"], "message": "me" }));
-    assert!(matches!(&reply, Speech::Refused(t) if t.contains("refused")), "{reply:?}");
+    assert!(
+        matches!(&reply, Speech::Refused(t) if t.contains("refused")),
+        "{reply:?}"
+    );
 
     let mut direct = InFlight::new(
         CompanyId::new("acme"),
@@ -156,7 +159,10 @@ fn malformed_calls_are_refused_in_the_seats_own_words() {
         "{reply:?}"
     );
     let reply = turn.speak("shout", &json!({ "message": "x" }));
-    assert!(matches!(&reply, Speech::Refused(t) if t.contains("unknown tool")), "{reply:?}");
+    assert!(
+        matches!(&reply, Speech::Refused(t) if t.contains("unknown tool")),
+        "{reply:?}"
+    );
 }
 
 #[test]
@@ -179,14 +185,19 @@ fn the_registry_holds_one_turn_per_agent() {
     assert_eq!(registry.in_flight(), vec!["acme--ceo", "acme--engineer"]);
 
     registry
-        .with("acme--ceo", |turn| turn.speak("post", &json!({ "message": "hi" })))
+        .with("acme--ceo", |turn| {
+            turn.speak("post", &json!({ "message": "hi" }))
+        })
         .expect("the turn is registered");
     let finished = ticket.finish();
     assert_eq!(finished.outbox.len(), 1);
     assert!(!registry.is_in_flight("acme--ceo"));
     assert!(registry.is_in_flight("acme--engineer"));
     drop(other);
-    assert!(registry.in_flight().is_empty(), "dropping a ticket deregisters");
+    assert!(
+        registry.in_flight().is_empty(),
+        "dropping a ticket deregisters"
+    );
 }
 
 #[test]
@@ -215,15 +226,23 @@ fn speech_specs_render_to_mcp_descriptors_with_the_contract_argument_names() {
     assert_eq!(names, SPEECH_TOOL_NAMES);
     let dm = descriptors.iter().find(|d| d["name"] == "dm").unwrap();
     assert_eq!(dm["inputSchema"]["properties"]["to"]["type"], "array");
-    assert_eq!(dm["inputSchema"]["properties"]["to"]["items"]["type"], "string");
+    assert_eq!(
+        dm["inputSchema"]["properties"]["to"]["items"]["type"],
+        "string"
+    );
     assert_eq!(dm["inputSchema"]["properties"]["message"]["type"], "string");
     assert_eq!(dm["inputSchema"]["required"], json!(["to", "message"]));
     let read = descriptors.iter().find(|d| d["name"] == "read").unwrap();
-    assert_eq!(read["inputSchema"]["properties"]["limit"]["type"], "integer");
+    assert_eq!(
+        read["inputSchema"]["properties"]["limit"]["type"],
+        "integer"
+    );
     assert_eq!(read["inputSchema"]["required"], json!([]));
     for descriptor in &descriptors {
         assert!(
-            descriptor["description"].as_str().is_some_and(|d| !d.is_empty()),
+            descriptor["description"]
+                .as_str()
+                .is_some_and(|d| !d.is_empty()),
             "every spec description is rendered verbatim"
         );
     }

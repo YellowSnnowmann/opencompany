@@ -20,10 +20,7 @@ fn request() -> SystemOneRequest {
         "primary".to_string(),
         Question::Choice {
             instructions: json!("Who answers?"),
-            criteria: BTreeMap::from([
-                ("engineer".to_string(), None),
-                ("none".to_string(), None),
-            ]),
+            criteria: BTreeMap::from([("engineer".to_string(), None), ("none".to_string(), None)]),
         },
     );
     SystemOneRequest {
@@ -131,7 +128,13 @@ async fn a_4xx_is_not_retried() {
     let transport = TinyHumansSystemOne::with_key(server.uri(), "th_test_key").unwrap();
     let error = transport.evaluate(&request()).await.unwrap_err();
     assert!(
-        matches!(error, Error::Transport { status: Some(401), .. }),
+        matches!(
+            error,
+            Error::Transport {
+                status: Some(401),
+                ..
+            }
+        ),
         "got {error:?}"
     );
 }
@@ -236,7 +239,10 @@ fn jev_router_takes_the_default_url_and_the_inference_key_ladder() {
     let env = MapEnv::new([
         ("OPENCOMPANY_INFERENCE_KEY", "th_inference"),
         ("TINYHUMANS_API_KEY", "th_account"),
-        (JEV_URL_ENV, "https://staging.tinyhumans.ai/agent-integrations/openrouter/systemone"),
+        (
+            JEV_URL_ENV,
+            "https://staging.tinyhumans.ai/agent-integrations/openrouter/systemone",
+        ),
     ]);
     let router = jev_router(&env, None).unwrap().expect("a router");
     assert_eq!(
@@ -245,13 +251,18 @@ fn jev_router_takes_the_default_url_and_the_inference_key_ladder() {
     );
     // The transport's Debug never prints the key, whichever tier it came from.
     let shown = format!("{:?}", router.transport());
-    assert!(!shown.contains("th_inference") && !shown.contains("th_account"), "{shown}");
+    assert!(
+        !shown.contains("th_inference") && !shown.contains("th_account"),
+        "{shown}"
+    );
 }
 
 #[test]
 fn jev_router_prefers_a_caller_supplied_key_over_the_environment() {
     let env = MapEnv::new([("TINYHUMANS_API_KEY", "th_account")]);
-    let router = jev_router(&env, Some("th_company")).unwrap().expect("a router");
+    let router = jev_router(&env, Some("th_company"))
+        .unwrap()
+        .expect("a router");
     assert_eq!(
         router.transport().bearer.source(),
         crate::company::credentials::CredentialSource::Static
@@ -266,7 +277,10 @@ fn jev_router_refuses_a_plain_http_proxy_on_a_routable_host() {
     ]);
     let error = jev_router(&env, None).unwrap_err();
     let text = error.to_string();
-    assert!(text.contains(JEV_URL_ENV) && text.contains("loopback"), "{text}");
+    assert!(
+        text.contains(JEV_URL_ENV) && text.contains("loopback"),
+        "{text}"
+    );
 }
 
 #[tokio::test]

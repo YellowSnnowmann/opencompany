@@ -9,9 +9,9 @@ use crate::ports::events::EventStreamItem;
 use crate::ports::types::{CompanyEvent, EventSeq, StoredEvent};
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
+use tinyhivemind_embed::{ConversationKind, ConversationRef};
 use tinymcp::McpHttpClient;
 use tinymcp::tinymcp_bus::McpAuthConfig as ClientAuth;
-use tinyhivemind_embed::{ConversationKind, ConversationRef};
 use tinytools::{ToolCallOptions, ToolResult, ToolRunContext};
 
 const COMPANY: &str = "acme";
@@ -154,7 +154,13 @@ fn journal() -> Arc<dyn EventLog> {
     Arc::new(FixedLog(vec![
         operator_says(1, "engineering", "ship it"),
         agent_says(2, "engineering", "engineer", "on it", &[]),
-        agent_says(3, "engineering", "engineer", "private to writer", &["writer"]),
+        agent_says(
+            3,
+            "engineering",
+            "engineer",
+            "private to writer",
+            &["writer"],
+        ),
         agent_says(4, "content", "writer", "elsewhere", &[]),
         agent_says(5, "engineering", "engineer", "private to ceo", &[AGENT]),
     ]))
@@ -167,7 +173,9 @@ async fn boot(agent: McpAgent) -> (Arc<McpHost>, Arc<McpAgent>, McpHttpClient) {
     let agent = host.register(agent);
     let addr = host.serve_loopback().await.expect("loopback bind");
     assert_eq!(host.serve_loopback().await.unwrap(), addr, "idempotent");
-    let endpoint = host.endpoint_for(&agent.company, &agent.runtime_agent_id).unwrap();
+    let endpoint = host
+        .endpoint_for(&agent.company, &agent.runtime_agent_id)
+        .unwrap();
     assert_eq!(
         endpoint,
         format!("http://{addr}{MCP_PATH_PREFIX}/{COMPANY}/{RUNTIME_ID}")
@@ -183,9 +191,14 @@ async fn boot(agent: McpAgent) -> (Arc<McpHost>, Arc<McpAgent>, McpHttpClient) {
 }
 
 fn plain_agent() -> McpAgent {
-    McpAgent::new(CompanyId::new(COMPANY), AGENT, RUNTIME_ID, McpAgent::mint_bearer())
-        .tools(vec![Arc::new(WhoAmI) as Arc<dyn Tool>])
-        .events(journal())
+    McpAgent::new(
+        CompanyId::new(COMPANY),
+        AGENT,
+        RUNTIME_ID,
+        McpAgent::mint_bearer(),
+    )
+    .tools(vec![Arc::new(WhoAmI) as Arc<dyn Tool>])
+    .events(journal())
 }
 
 #[tokio::test]
@@ -197,7 +210,14 @@ async fn initialize_and_list_tools_serve_speech_and_custom_tools() {
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(
         names,
-        ["post", "broadcast", "dm", "complete_episode", "read", "who_am_i"]
+        [
+            "post",
+            "broadcast",
+            "dm",
+            "complete_episode",
+            "read",
+            "who_am_i"
+        ]
     );
     assert_eq!(agent.allow_tools(), names);
     let dm = tools.iter().find(|t| t.name == "dm").unwrap();
@@ -207,7 +227,9 @@ async fn initialize_and_list_tools_serve_speech_and_custom_tools() {
 #[tokio::test]
 async fn an_unknown_bearer_is_401() {
     let (host, agent, _client) = boot(plain_agent()).await;
-    let endpoint = host.endpoint_for(&agent.company, &agent.runtime_agent_id).unwrap();
+    let endpoint = host
+        .endpoint_for(&agent.company, &agent.runtime_agent_id)
+        .unwrap();
     let wrong = McpHttpClient::builder(endpoint.clone())
         .timeout_secs(10)
         .auth(ClientAuth::BearerToken {
@@ -216,11 +238,17 @@ async fn an_unknown_bearer_is_401() {
         .build()
         .unwrap();
     let error = wrong.initialize().await.expect_err("wrong bearer");
-    assert!(matches!(error, tinymcp::Error::Unauthorized { .. }), "{error:?}");
+    assert!(
+        matches!(error, tinymcp::Error::Unauthorized { .. }),
+        "{error:?}"
+    );
 
     let none = McpHttpClient::new(endpoint, 10).unwrap();
     let error = none.initialize().await.expect_err("no bearer");
-    assert!(matches!(error, tinymcp::Error::Unauthorized { .. }), "{error:?}");
+    assert!(
+        matches!(error, tinymcp::Error::Unauthorized { .. }),
+        "{error:?}"
+    );
 
     // The right bearer on the wrong route is refused too: a token names one
     // agent, and the path has to agree with it.
@@ -296,7 +324,11 @@ async fn a_dm_to_a_non_member_is_a_tool_error_containing_refused() {
         .await
         .unwrap();
     assert!(refused.rendered.is_error);
-    assert!(refused.rendered.output().contains("refused"), "{}", refused.rendered.output());
+    assert!(
+        refused.rendered.output().contains("refused"),
+        "{}",
+        refused.rendered.output()
+    );
     assert!(ticket.snapshot().outbox.is_empty());
 
     let ok = client
@@ -318,7 +350,10 @@ impl DmResolver for NobodyResolver {
         speaker: &str,
         to: &[String],
     ) -> Result<(), String> {
-        Err(format!("{speaker} may not dm {} on {desk_id}", to.join(",")))
+        Err(format!(
+            "{speaker} may not dm {} on {desk_id}",
+            to.join(",")
+        ))
     }
 }
 
@@ -333,11 +368,17 @@ async fn an_installed_dm_resolver_outranks_the_membership_snapshot() {
         .unwrap();
     assert!(refused.rendered.is_error);
     assert!(
-        refused.rendered.output().contains("refused: ceo may not dm engineer on engineering"),
+        refused
+            .rendered
+            .output()
+            .contains("refused: ceo may not dm engineer on engineering"),
         "{}",
         refused.rendered.output()
     );
-    assert!(ticket.finish().outbox.is_empty(), "a refused dm is unrecorded");
+    assert!(
+        ticket.finish().outbox.is_empty(),
+        "a refused dm is unrecorded"
+    );
 }
 
 #[tokio::test]
@@ -351,9 +392,22 @@ async fn read_serves_the_conversation_narrowed_to_what_the_agent_may_see() {
         text,
         "[1] operator: ship it\n[2] engineer: on it\n[5] engineer: private to ceo"
     );
-    let limited = client.call_tool("read", json!({ "limit": 1 })).await.unwrap();
-    assert!(limited.rendered.output().starts_with("[5] engineer: private to ceo"));
-    assert!(limited.rendered.output().contains("Older messages are not in this reply"));
+    let limited = client
+        .call_tool("read", json!({ "limit": 1 }))
+        .await
+        .unwrap();
+    assert!(
+        limited
+            .rendered
+            .output()
+            .starts_with("[5] engineer: private to ceo")
+    );
+    assert!(
+        limited
+            .rendered
+            .output()
+            .contains("Older messages are not in this reply")
+    );
 }
 
 #[tokio::test]
@@ -403,7 +457,11 @@ async fn the_policy_parks_or_denies_a_custom_tool_call() {
         parked.rendered.output()
     );
     let drained = queue.drain(8);
-    assert_eq!(drained.requests.len(), 1, "the park reached the cycle's queue");
+    assert_eq!(
+        drained.requests.len(),
+        1,
+        "the park reached the cycle's queue"
+    );
     assert_eq!(drained.requests[0].tool, "who_am_i");
 
     let readonly = ApprovalPolicy::new(
@@ -447,7 +505,10 @@ async fn unregistering_an_agent_revokes_its_bearer() {
     host.unregister_company(&agent.company);
     assert!(host.agent(RUNTIME_ID).is_none());
     let error = client.list_tools().await.expect_err("revoked");
-    assert!(matches!(error, tinymcp::Error::Unauthorized { .. }), "{error:?}");
+    assert!(
+        matches!(error, tinymcp::Error::Unauthorized { .. }),
+        "{error:?}"
+    );
 }
 
 #[tokio::test]

@@ -118,12 +118,19 @@ impl TinyHumansSystemOne {
 
     /// One attempt: post the request, map every failure onto
     /// [`Error::Transport`] with the status when there is one.
-    async fn attempt(&self, request: &SystemOneRequest) -> std::result::Result<SystemOneResponse, Error> {
+    async fn attempt(
+        &self,
+        request: &SystemOneRequest,
+    ) -> std::result::Result<SystemOneResponse, Error> {
         let mut builder = self.client.post(&self.url).json(request);
-        let bearer = self.bearer.current().await.map_err(|error| Error::Transport {
-            status: None,
-            message: format!("jev credential: {error}"),
-        })?;
+        let bearer = self
+            .bearer
+            .current()
+            .await
+            .map_err(|error| Error::Transport {
+                status: None,
+                message: format!("jev credential: {error}"),
+            })?;
         if let Some(token) = bearer {
             builder = builder.bearer_auth(token);
         }
@@ -221,8 +228,7 @@ pub fn should_retry(status: u16) -> bool {
 pub fn validate_url(url: String) -> Result<String> {
     let parsed = url::Url::parse(&url)
         .map_err(|error| OpenCompanyError::Config(format!("{JEV_URL_ENV}: {error}")))?;
-    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none_or(str::is_empty)
-    {
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none_or(str::is_empty) {
         return Err(OpenCompanyError::Config(format!(
             "{JEV_URL_ENV} must be an http(s) URL with a host, got {url:?}"
         )));

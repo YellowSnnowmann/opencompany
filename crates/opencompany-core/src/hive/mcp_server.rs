@@ -521,7 +521,10 @@ async fn handle(
         "ping" => rpc_result(id, json!({})),
         "tools/list" => rpc_result(id, json!({ "tools": agent.catalogue() })),
         "tools/call" => {
-            let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let arguments = params
                 .get("arguments")
                 .cloned()
@@ -683,7 +686,10 @@ async fn read(host: &McpHost, agent: &McpAgent, limit: usize) -> Value {
     let page = match log.read_before(None, limit).await {
         Ok(page) => page,
         Err(error) => {
-            return tool_result(format!("this conversation could not be read: {error}"), true);
+            return tool_result(
+                format!("this conversation could not be read: {error}"),
+                true,
+            );
         }
     };
     let viewer = Viewer::Agent {
