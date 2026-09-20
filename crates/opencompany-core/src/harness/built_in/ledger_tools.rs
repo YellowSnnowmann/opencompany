@@ -36,7 +36,6 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use tinytools::{PermissionLevel, Tool, ToolResult};
-use openhuman_core as oh;
 
 use crate::company::ledgers::{self, Ledgers, Query};
 use crate::company::{LedgerAccess, LedgerGrant};

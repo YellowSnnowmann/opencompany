@@ -30,7 +30,6 @@
 use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
-use openhuman_core as oh;
 use serde_json::{Value, json};
 
 use tinytools::{PermissionLevel, Tool, ToolResult};

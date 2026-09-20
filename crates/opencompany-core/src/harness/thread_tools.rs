@@ -39,7 +39,6 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use tinytools::{PermissionLevel, Tool, ToolResult};
-use openhuman_core as oh;
 
 use crate::ports::events::EventLog;
 use crate::ports::types::{CompanyEvent, CompanyId, EventSeq};

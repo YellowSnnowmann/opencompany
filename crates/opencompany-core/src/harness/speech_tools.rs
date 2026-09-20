@@ -52,7 +52,6 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use tinytools::{PermissionLevel, Tool, ToolResult};
-use openhuman_core as oh;
 use tinyhivemind_hive::speech::{self, CallArguments, ToolCall, Utterance, UtteranceRejection};
 
 use crate::ports::events::EventLog;
