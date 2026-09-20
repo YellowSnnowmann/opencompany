@@ -110,7 +110,6 @@ use tinytools::Tool;
 
 use crate::company::Agent as ManifestAgent;
 use crate::company::inference::store as inference_store;
-use crate::error::OpenCompanyError;
 use crate::harness::HarnessDeps;
 use crate::harness::built_in::provider::HarnessModel;
 #[cfg(feature = "mcp")]
