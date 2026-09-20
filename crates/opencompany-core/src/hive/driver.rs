@@ -181,6 +181,10 @@ impl HiveDispatcher {
             OpenCompanyError::InvalidRequest(format!("desk `{desk_id}` runs no hive"))
         })?;
         let thread_root = trigger.parent.unwrap_or(trigger.seq);
+        // One driver per episode at a time: a follow-up in the thread waits
+        // for the round in flight rather than folding beside it.
+        let lock = episode_lock(&self.record.id, desk_id, thread_root);
+        let _driving = lock.lock().await;
         let mut run = match episode_store::open_episode_for(
             self.events.as_ref(),
             &self.record.id,
@@ -909,6 +913,8 @@ fn spawn_desk_message(dispatcher: Arc<HiveDispatcher>, desk_id: String, trigger:
 fn spawn_drive(dispatcher: Arc<HiveDispatcher>, mut home: EpisodeRun) {
     let task: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
         Box::pin(async move {
+            let lock = episode_lock(&dispatcher.record.id, &home.desk.desk_id, home.thread_root);
+            let _driving = lock.lock().await;
             match dispatcher.drive(&mut home).await {
                 Ok(report) => {
                     if let Some(origin) = home.origin.clone()
@@ -921,6 +927,27 @@ fn spawn_drive(dispatcher: Arc<HiveDispatcher>, mut home: EpisodeRun) {
             }
         });
     tokio::spawn(task);
+}
+
+/// The lock one episode's driver holds while it runs, keyed by the desk
+/// thread the episode lives on.
+///
+/// Process-wide because the dispatcher is built per message: two messages
+/// on one thread must find the same lock. The map only grows by one entry
+/// per thread that ever ran an episode; each entry is two words.
+fn episode_lock(company: &CompanyId, desk_id: &str, thread_root: EventSeq) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+        std::sync::OnceLock::new();
+    let key = format!("{company}:{desk_id}:{}", thread_root.value());
+    let mut locks = LOCKS
+        .get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    Arc::clone(
+        locks
+            .entry(key)
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+    )
 }
 
 /// The plan's seats, used by the resume path and the tests.
