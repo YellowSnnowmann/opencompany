@@ -71,40 +71,6 @@ impl RunTurn for ConcurrentConversationTurns {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn independent_dm_messages_run_distinct_agent_sessions_concurrently_without_cards() {
-    let fixture = Fixture::peers();
-    let turns = ConcurrentConversationTurns::new();
-    let _claim = fixture.queue.claim();
-    for (target, seq) in [("seo_specialist", 10), ("copywriter", 11)] {
-        fixture.queue.push(Delegation::ConversationDispatch {
-            source: "brand_strategist".to_string(),
-            target: target.to_string(),
-            message: format!("question for {target}"),
-            chat_id: target.to_string(),
-            trigger_sequence: seq,
-            child_hop: 1,
-        });
-    }
-
-    let drained = fixture
-        .runner(&turns)
-        .drain_and_execute(None, MessageContext::default(), HandOffs::Run)
-        .await
-        .expect("conversation dispatches run");
-
-    assert_eq!(
-        turns.max_active.load(std::sync::atomic::Ordering::SeqCst),
-        2,
-        "two independent recipient sessions should overlap"
-    );
-    assert_eq!(drained.bubbles.len(), 2);
-    assert!(
-        fixture.cards().await.is_empty(),
-        "conversation opens no card"
-    );
-}
-
 /// Two assignments that read the same card revision admit one writer and
 /// explicitly refuse the stale one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -2075,7 +2075,6 @@ impl<'a> DelegationRunner<'a> {
         hand_offs: HandOffs,
     ) -> Result<Drained> {
         let mut drained = Drained::default();
-        let mut conversation_dispatches = Vec::new();
         for delegation in self.queue.drain(self.max_delegations) {
             if hand_offs == HandOffs::Drop
                 && let Some(target) = hand_off_target_of(&delegation)
@@ -2088,30 +2087,10 @@ impl<'a> DelegationRunner<'a> {
                 );
                 continue;
             }
-            if matches!(delegation, Delegation::ConversationDispatch { .. }) {
-                conversation_dispatches.push(delegation);
-                continue;
-            }
             // Captured before the delegation is consumed, so a cancellation can
             // be reported against whoever it was aimed at (issues #176, #884).
             let target = hand_off_target_of(&delegation).map(str::to_string);
             let out = self.run_delegation(delegation, chat_id, ctx).await?;
-            drained.absorb(out, target);
-        }
-        // Separate committed DM messages are independent one-target decisions.
-        // Run them together: distinct agents proceed concurrently, while two
-        // messages to the same agent serialize on that agent's own session lock.
-        let dispatched = futures::future::join_all(conversation_dispatches.into_iter().map(
-            |delegation| async move {
-                let target = hand_off_target_of(&delegation).map(str::to_string);
-                self.run_delegation(delegation, chat_id, ctx)
-                    .await
-                    .map(|out| (out, target))
-            },
-        ))
-        .await;
-        for outcome in dispatched {
-            let (out, target) = outcome?;
             drained.absorb(out, target);
         }
         if self.queue.has_queued() {
@@ -3560,7 +3539,6 @@ fn kind_label(delegation: &Delegation) -> &'static str {
         Delegation::SpawnTask { .. } => "spawn_task",
         Delegation::DelegateToDesk { .. } => "delegate_to_desk",
         Delegation::DelegateToTeammate { .. } => "delegate_to_teammate",
-        Delegation::ConversationDispatch { .. } => "conversation_dispatch",
         Delegation::AssignTask { .. } => "assign_task",
         Delegation::ReviewTask { .. } => "review_task",
     }
@@ -3581,7 +3559,6 @@ fn hand_off_target_of(delegation: &Delegation) -> Option<&str> {
     match delegation {
         Delegation::DelegateToDesk { desk, .. } => Some(desk),
         Delegation::DelegateToTeammate { teammate, .. } => Some(teammate),
-        Delegation::ConversationDispatch { target, .. } => Some(target),
         _ => None,
     }
 }
