@@ -336,10 +336,7 @@ impl tinytools::Tool for EscalateToHumanTool {
         tinytools::PermissionLevel::Write
     }
 
-    async fn execute(
-        &self,
-        args: serde_json::Value,
-    ) -> anyhow::Result<tinytools::ToolResult> {
+    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<tinytools::ToolResult> {
         use tinytools::ToolResult;
 
         let question = args

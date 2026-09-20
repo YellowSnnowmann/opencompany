@@ -178,10 +178,9 @@ pub fn executor() -> &'static tokio::runtime::Handle {
 pub async fn global(boot: RuntimeBoot) -> crate::Result<Arc<Runtime>> {
     GLOBAL
         .get_or_try_init(|| async move {
-            executor()
-                .spawn(build(boot))
-                .await
-                .map_err(|err| OpenCompanyError::Harness(format!("build the OpenHuman runtime: {err}")))?
+            executor().spawn(build(boot)).await.map_err(|err| {
+                OpenCompanyError::Harness(format!("build the OpenHuman runtime: {err}"))
+            })?
         })
         .await
         .cloned()
@@ -202,7 +201,9 @@ pub fn global_blocking(boot: RuntimeBoot) -> crate::Result<Arc<Runtime>> {
     std::thread::Builder::new()
         .name("openhuman-boot".to_string())
         .spawn(move || executor().block_on(global(boot)))
-        .map_err(|err| OpenCompanyError::Harness(format!("spawn the OpenHuman boot thread: {err}")))?
+        .map_err(|err| {
+            OpenCompanyError::Harness(format!("spawn the OpenHuman boot thread: {err}"))
+        })?
         .join()
         .map_err(|_| OpenCompanyError::Harness("the OpenHuman boot thread panicked".to_string()))?
 }

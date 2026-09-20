@@ -76,7 +76,6 @@ use async_trait::async_trait;
 use futures::future::FutureExt;
 use serde_json::{Value, json};
 
-
 use tinytools::{PermissionLevel, Tool, ToolResult};
 
 use crate::company::{
@@ -2433,6 +2432,10 @@ fn summarize_event(event: &CompanyEvent) -> String {
         // carry.
         CompanyEvent::TurnStarted { turn_id, .. } => format!("turn accepted: {turn_id}"),
         CompanyEvent::TurnFailed { turn_id, .. } => format!("turn unanswered: {turn_id}"),
+        CompanyEvent::TurnSettled { turn_id, agent_id } => match agent_id {
+            Some(agent) => format!("turn answered by {agent}: {turn_id}"),
+            None => format!("turn answered: {turn_id}"),
+        },
         // Issue #1015. Structural only: the minted id and the status word, a
         // fixed vocabulary. The failure reason is our own prose about the host
         // and is tenant-scoped, so it stays off this surface exactly as

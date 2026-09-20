@@ -16,7 +16,6 @@ use futures::stream::{self, BoxStream};
 use serde_json::{Value, json};
 
 use super::*;
-use openhuman_core as oh;
 use crate::company::CompanyManifest;
 use crate::error::Result;
 use crate::ports::types::{
@@ -24,6 +23,7 @@ use crate::ports::types::{
     StoredEvent,
 };
 use crate::ports::workflow_revisions::WorkflowRevisionRecord;
+use openhuman_core as oh;
 
 // ---------------------------------------------------------------------------
 // Test doubles

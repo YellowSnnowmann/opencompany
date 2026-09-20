@@ -126,9 +126,6 @@ pub mod orchestrator;
 /// bounded model call that keeps what answers the turn, in place of a byte cut
 /// that keeps whatever happened to come first. See [`payload_extract`].
 pub mod payload_extract;
-/// The per-turn progress pump: OpenHuman's progress stream → live console
-/// frames, the run trace, and the event buffer steps and cost are read from.
-pub mod progress_pump;
 /// Chargebee billing tools (issue #788), wired per company from its own
 /// SecretStore. Always compiled so the credential resolution and the fail-closed
 /// decision are testable at default features; only the tools are gated.
@@ -142,6 +139,9 @@ pub mod paypal;
 /// prerequisite the model claims. See [`planning`].
 pub mod planning;
 pub mod policy;
+/// The per-turn progress pump: OpenHuman's progress stream → live console
+/// frames, the run trace, and the event buffer steps and cost are read from.
+pub mod progress_pump;
 pub mod provider;
 /// Issue #244: `publish_artifact` — the only way a workspace file becomes a
 /// deliverable — plus the staging queue the brain drains, the bounded workspace
@@ -741,7 +741,6 @@ impl std::fmt::Debug for CompanyAgent {
     }
 }
 
-
 /// The embedded runtime's deterministic summary for a turn whose model
 /// produced no result at all (`turn_checkpoint::build_deterministic_final_summary`).
 /// This host reads it as the transient empty class — or, when the bridge saw
@@ -1237,7 +1236,10 @@ impl CompanyAgent {
 
     /// The names of the tools this agent's belt wires, in belt order.
     pub fn tool_names(&self) -> Vec<String> {
-        self.tools.iter().map(|tool| tool.name().to_string()).collect()
+        self.tools
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect()
     }
 
     /// The assembled belt (unattached in this phase; the Phase 3 MCP catalogue).
@@ -1365,7 +1367,10 @@ impl CompanyAgent {
         // the attributed delta that names the other speakers is Phase 4's.
         let cued: std::borrow::Cow<'_, str> = match turn_chat_id.as_deref() {
             Some(chat_id) if !isolated => std::borrow::Cow::Owned(match chat.thread_root {
-                Some(root) => format!("[conversation: {chat_id}, thread {}]\n{message}", root.value()),
+                Some(root) => format!(
+                    "[conversation: {chat_id}, thread {}]\n{message}",
+                    root.value()
+                ),
                 None => format!("[conversation: {chat_id}]\n{message}"),
             }),
             _ => std::borrow::Cow::Borrowed(message),
@@ -1445,8 +1450,7 @@ impl CompanyAgent {
                                 Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
                             } else {
                                 let retry_started = std::time::Instant::now();
-                                let second =
-                                    send(pump.sender()).await.map(|outcome| outcome.reply);
+                                let second = send(pump.sender()).await.map(|outcome| outcome.reply);
                                 let second_elapsed = retry_started.elapsed();
                                 usages.push(self.tapped_usage());
                                 match self.classify_turn(self.unmask(second), second_elapsed) {
@@ -1482,7 +1486,10 @@ impl CompanyAgent {
         // runtime's own `TurnCostUpdated` carries its catalogue estimate — the
         // figure the in-turn spend brake fired on — so that estimate stands
         // in for the price, and for everything when the tap saw nothing.
-        if usages.iter().any(|usage| usage.is_zero() || usage.cost_usd == 0.0) {
+        if usages
+            .iter()
+            .any(|usage| usage.is_zero() || usage.cost_usd == 0.0)
+        {
             let segments = progress_pump::attempt_event_segments(&events, usages.len());
             for (usage, segment) in usages.iter_mut().zip(segments) {
                 let Some(observed) = progress_pump::last_observed_turn_cost(segment) else {
@@ -1613,7 +1620,6 @@ impl CompanyAgent {
                 cost_usd: acc.cost_usd + call.cost_usd,
             })
     }
-
 
     /// This turn's in-turn spend ceiling, in USD — the value that
     /// [`BudgetStopHook`](oh::agent::stop_hooks::BudgetStopHook) halts the turn

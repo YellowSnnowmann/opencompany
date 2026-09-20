@@ -75,7 +75,9 @@ async fn tool_calls_are_executed_and_the_reply_ends_the_loop() {
         calls: Mutex::new(0),
     });
     let tools: Vec<Box<dyn Tool>> = vec![Box::new(Recorder(Mutex::new(Vec::new())))];
-    let outcome = run(&model, "m", "sys", "go", &tools, 5).await.expect("loop");
+    let outcome = run(&model, "m", "sys", "go", &tools, 5)
+        .await
+        .expect("loop");
     assert_eq!(outcome.end, LoopEnd::Replied("finished".to_string()));
     assert_eq!(outcome.usage.input_tokens, 6, "two calls summed");
 }
@@ -87,7 +89,9 @@ async fn the_cap_ends_a_loop_still_calling_tools() {
         calls: Mutex::new(0),
     });
     let tools: Vec<Box<dyn Tool>> = vec![Box::new(Recorder(Mutex::new(Vec::new())))];
-    let outcome = run(&model, "m", "sys", "go", &tools, 2).await.expect("loop");
+    let outcome = run(&model, "m", "sys", "go", &tools, 2)
+        .await
+        .expect("loop");
     assert_eq!(outcome.end, LoopEnd::HitCap("calling".to_string()));
     assert_eq!(outcome.usage.output_tokens, 2);
 }

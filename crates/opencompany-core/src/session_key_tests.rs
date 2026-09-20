@@ -68,7 +68,10 @@ fn a_long_runtime_agent_id_is_truncated_with_a_hash_that_keeps_it_unique() {
     let two = runtime_agent_id(&company, "two");
     assert!(one.len() <= 64, "{one}");
     assert!(two.len() <= 64, "{two}");
-    assert_ne!(one, two, "two ids sharing their first 56 bytes stay distinct");
+    assert_ne!(
+        one, two,
+        "two ids sharing their first 56 bytes stay distinct"
+    );
     assert!(
         one.bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')

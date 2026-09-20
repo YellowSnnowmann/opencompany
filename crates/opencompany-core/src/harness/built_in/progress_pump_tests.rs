@@ -35,10 +35,12 @@ fn attempts_are_segmented_at_each_turn_start() {
     assert_eq!(segments.len(), 3);
     assert_eq!(segments[0].len(), 2);
     assert_eq!(segments[1].len(), 2);
-    assert!(segments[2].is_empty(), "an attempt that never started has no events");
     assert!(
-        (last_observed_turn_cost(segments[1]).expect("cost").cost_usd - 0.5).abs()
-            < f64::EPSILON
+        segments[2].is_empty(),
+        "an attempt that never started has no events"
+    );
+    assert!(
+        (last_observed_turn_cost(segments[1]).expect("cost").cost_usd - 0.5).abs() < f64::EPSILON
     );
 }
 

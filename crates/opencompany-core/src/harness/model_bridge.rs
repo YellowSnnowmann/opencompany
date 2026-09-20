@@ -160,19 +160,14 @@ pub fn register(model: Arc<dyn ChatModel<()>>, model_name: &str) -> crate::Resul
     let token = format!("ocb_{}", uuid::Uuid::new_v4().simple());
     let tap = Arc::new(Mutex::new(Vec::new()));
     let errors = Arc::new(Mutex::new(Vec::new()));
-    bridge
-        .state
-        .models
-        .lock()
-        .map_err(|_| poisoned())?
-        .insert(
-            token.clone(),
-            Registration {
-                model,
-                tap: tap.clone(),
-                errors: errors.clone(),
-            },
-        );
+    bridge.state.models.lock().map_err(|_| poisoned())?.insert(
+        token.clone(),
+        Registration {
+            model,
+            tap: tap.clone(),
+            errors: errors.clone(),
+        },
+    );
     Ok(BridgeHandle {
         token,
         base_url: format!("http://{}/v1", bridge.addr),
@@ -265,7 +260,10 @@ async fn complete(
             if let Ok(mut tap) = registration.tap.lock() {
                 tap.push(usage_of(&response));
             }
-            (StatusCode::OK, Json(response_to_wire(&response, &model_name)))
+            (
+                StatusCode::OK,
+                Json(response_to_wire(&response, &model_name)),
+            )
         }
         Err(err) => {
             let message = format!("{err:#}");
@@ -305,9 +303,9 @@ fn usage_of(response: &ModelResponse) -> TurnUsage {
         .raw
         .as_ref()
         .and_then(|raw| {
-                raw.pointer("/openhuman/billing/charged_amount_usd")
-                    .or_else(|| raw.pointer("/openhuman_usage_meta/charged_amount_usd"))
-            })
+            raw.pointer("/openhuman/billing/charged_amount_usd")
+                .or_else(|| raw.pointer("/openhuman_usage_meta/charged_amount_usd"))
+        })
         .and_then(Value::as_f64)
         .or_else(|| {
             usage
@@ -398,7 +396,10 @@ fn text_of(content: Option<&Value>) -> String {
 }
 
 fn message_from_wire(message: &Value) -> Result<Message, String> {
-    let role = message.get("role").and_then(Value::as_str).unwrap_or("user");
+    let role = message
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or("user");
     let text = text_of(message.get("content"));
     Ok(match role {
         "system" | "developer" => Message::system(text),

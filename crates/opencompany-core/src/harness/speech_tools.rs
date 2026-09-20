@@ -51,8 +51,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use tinytools::{PermissionLevel, Tool, ToolResult};
 use tinyhivemind_hive::speech::{self, CallArguments, ToolCall, Utterance, UtteranceRejection};
+use tinytools::{PermissionLevel, Tool, ToolResult};
 
 use crate::ports::events::EventLog;
 use crate::ports::types::{CompanyEvent, CompanyId, EventSeq};

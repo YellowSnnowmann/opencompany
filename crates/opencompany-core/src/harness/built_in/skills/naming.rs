@@ -79,8 +79,8 @@
 use async_trait::async_trait;
 use serde_json::Value;
 
-use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
 use openhuman_core as oh;
+use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
 
 /// Tool name: enumerate the skills installed for this agent.
 pub const LIST_SKILLS_TOOL: &str = "list_skills";

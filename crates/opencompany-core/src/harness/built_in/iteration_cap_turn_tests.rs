@@ -325,10 +325,7 @@ async fn company_agent(
     // A fresh id per fixture: one test binary registers this agent many
     // times over, and a runtime id stays taken while a prior fixture's
     // handle is alive.
-    let company = crate::ports::CompanyId::new(format!(
-        "test-{}",
-        uuid::Uuid::new_v4().simple()
-    ));
+    let company = crate::ports::CompanyId::new(format!("test-{}", uuid::Uuid::new_v4().simple()));
     CompanyAgent::register(
         &runtime,
         &company,

@@ -85,7 +85,8 @@ pub(super) fn scripted_agent_over(provider: ScriptedProvider) -> (Arc<CompanyAge
         tenant_search: None,
         workspace: None,
     };
-    let roster = build_roster(&test_runtime(), &record(), &deps, &[], &HashMap::new()).expect("roster");
+    let roster =
+        build_roster(&test_runtime(), &record(), &deps, &[], &HashMap::new()).expect("roster");
     // Keep the tempdir alive for the agent's workspace by leaking it into the
     // test's lifetime — the process ends the test anyway.
     std::mem::forget(dir);

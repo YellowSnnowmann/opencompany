@@ -587,7 +587,8 @@ async fn mock_context_addresses_survive_deletion_without_reuse() {
 #[tokio::test]
 async fn roster_builds_every_manifest_agent() {
     let fx = fixture();
-    let roster = build_roster(&test_runtime(), &record(), &fx.deps, &[], &HashMap::new()).expect("roster builds");
+    let roster = build_roster(&test_runtime(), &record(), &fx.deps, &[], &HashMap::new())
+        .expect("roster builds");
     let ids: Vec<_> = roster.iter().map(|a| a.agent_id.as_str()).collect();
     assert_eq!(ids, vec!["ceo", "engineer"]);
     assert_eq!(roster[0].role, "Chief Executive");
@@ -613,7 +614,8 @@ async fn roster_builds_every_manifest_agent() {
 async fn every_roster_teammate_gets_its_own_openhuman_session_name() {
     let rec = record();
     let fx = fixture();
-    let roster = build_roster(&test_runtime(), &rec, &fx.deps, &[], &HashMap::new()).expect("roster builds");
+    let roster =
+        build_roster(&test_runtime(), &rec, &fx.deps, &[], &HashMap::new()).expect("roster builds");
 
     for agent in &roster {
         assert_eq!(

@@ -17,7 +17,11 @@ impl ChatModel<()> for Scripted {
         None
     }
 
-    async fn invoke(&self, _state: &(), request: ModelRequest) -> tinyinference::Result<ModelResponse> {
+    async fn invoke(
+        &self,
+        _state: &(),
+        request: ModelRequest,
+    ) -> tinyinference::Result<ModelResponse> {
         let mut calls = self.calls.lock().unwrap();
         *calls += 1;
         assert_eq!(request.model.as_deref(), Some("chat-v1"), "prefix stripped");
@@ -133,7 +137,11 @@ async fn a_registered_model_is_served_over_loopback_with_its_usage_tapped() {
         .send()
         .await
         .expect("send");
-    assert_eq!(gone.status(), StatusCode::UNAUTHORIZED, "unregistered on drop");
+    assert_eq!(
+        gone.status(),
+        StatusCode::UNAUTHORIZED,
+        "unregistered on drop"
+    );
 }
 
 #[test]

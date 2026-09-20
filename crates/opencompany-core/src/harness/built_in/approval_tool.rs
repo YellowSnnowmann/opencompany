@@ -7,8 +7,8 @@
 //! advertise that their own call stages a concrete approval.
 
 use async_trait::async_trait;
-use tinytools::{PermissionLevel, Tool, ToolResult};
 use serde_json::{Value, json};
+use tinytools::{PermissionLevel, Tool, ToolResult};
 
 use crate::harness::policy::{ApprovalRequest, ApprovalRequestQueue};
 use crate::ports::types::{Effect, EffectGroup, REQUEST_APPROVAL_EFFECT_KIND};

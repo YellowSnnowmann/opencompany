@@ -71,8 +71,8 @@ use serde_json::{Value, json};
 
 use oh::integrations::IntegrationClient;
 use oh::search::tools::{SearchResponse, SearchResultItem};
-use tinytools::{PermissionLevel, Tool, ToolResult};
 use openhuman_core as oh;
+use tinytools::{PermissionLevel, Tool, ToolResult};
 
 use crate::company::credentials::Credential;
 use crate::metering::record_search_call;

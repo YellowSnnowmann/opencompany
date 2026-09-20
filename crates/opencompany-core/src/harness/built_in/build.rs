@@ -102,10 +102,10 @@ use std::sync::Arc;
 use openhuman_core as oh;
 
 use oh::security::SecurityPolicy;
-use openhuman_embed::{Access, AgentDefinitionSpec, AgentSpec, ToolScopeSpec};
 #[cfg(feature = "mcp")]
 use oh::tools::McpListToolsTool;
 use oh::tools::{EditFileTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ListFilesTool};
+use openhuman_embed::{Access, AgentDefinitionSpec, AgentSpec, ToolScopeSpec};
 use tinytools::Tool;
 
 use crate::company::Agent as ManifestAgent;
@@ -1379,7 +1379,10 @@ impl AgentBlueprint {
     /// `Agent::tools()` listed, kept for the tests that pin a grant to the
     /// tools it wires.
     pub fn tool_names(&self) -> Vec<String> {
-        self.tools.iter().map(|tool| tool.name().to_string()).collect()
+        self.tools
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect()
     }
 }
 
@@ -1489,12 +1492,12 @@ pub fn agent_spec_for(
         );
     }
     spec.config(move |config| {
-            config
-                .agent_registry
-                .entries
-                .retain(|existing| existing.id != entry.id);
-            config.agent_registry.entries.push(entry);
-        })
+        config
+            .agent_registry
+            .entries
+            .retain(|existing| existing.id != entry.id);
+        config.agent_registry.entries.push(entry);
+    })
 }
 
 /// [`build_agent_with_model`], discarding the [`HarnessModel`] it resolved.
