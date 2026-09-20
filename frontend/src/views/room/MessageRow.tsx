@@ -5,8 +5,7 @@ import type { TaskStatus } from "@/api/tasks";
 import type { CognitionState, TurnStep } from "@/api/types";
 import { AgentAvatarButton, useAgentProfileOpener } from "@/components/agent-profile-sheet";
 import { Markdown } from "@/components/markdown";
-import { MoveChip } from "@/components/hive/MoveChip";
-import type { EpisodeTurn } from "@/lib/hive/episode";
+import { UtteranceChip } from "@/components/episode/UtteranceChip";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Button } from "@/components/ui/button";
 import { consoleHref } from "@/lib/console-paths";
@@ -29,12 +28,7 @@ import {
   type TimelineEntry,
 } from "./model";
 import { EchoPlaceholder, echoMarkerFor } from "./EchoPlaceholder";
-import {
-  CardChip,
-  ReferralChip,
-  AsideConversation,
-  ReferralConversation,
-} from "./StepTimeline";
+import { CardChip, ReferralChip, ReferralConversation } from "./StepTimeline";
 import { WorkingIndicator } from "./WorkingIndicator";
 
 interface Props {
@@ -163,13 +157,10 @@ interface Props {
    */
   readOnly?: boolean;
   /**
-   * What this line did inside a desk's deliberation, when it was a turn in one.
-   *
-   * Absent for every ordinary reply, which is the whole of the rule: a room's
-   * affordances follow the data, never the channel kind, so a DM and a
-   * single-responder desk are untouched by this.
+   * Display names by agent id, for the utterance chip's `dm → @name`. Optional:
+   * without it the chip names the id, which is still the truth.
    */
-  turn?: EpisodeTurn;
+  agentNames?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -268,7 +259,7 @@ export function MessageRow({
   redeemingBudgetPauseAgent,
   latestBudgetPauseMessageIdByAgent,
   readOnly,
-  turn,
+  agentNames,
 }: Props) {
   const { message, sender, continuation, replies, isLatestSettlePill } = entry;
   const chips = reactionChips(message.reactions);
@@ -355,56 +346,7 @@ export function MessageRow({
             placeholder={echoMarkerFor(message, sender, cognition)}
           />
         )}
-        {turn?.move ? (
-          /*
-           * A deliberation turn renders as its move plus what the member
-           * actually said, rather than as the raw marker line.
-           *
-           * The host journals ONLY the marker line, so `!support #stage ^4
-           * agreed, staging first` is the entire message — and rendered
-           * verbatim it is punctuation an operator has to decode on every row.
-           * The chip carries the grammar and the prose carries the argument.
-           * The citations stay visible as chips because which message grounds a
-           * claim is the substance of the claim.
-           */
-          <div className="flex flex-wrap items-baseline gap-1.5 text-sm leading-6">
-            <MoveChip kind={turn.move.kind} />
-            {turn.move.topic ? (
-              <span className="font-mono text-2xs text-muted-foreground">
-                #{turn.move.topic}
-              </span>
-            ) : null}
-            {turn.move.target !== undefined ? (
-              /*
-               * Who the objection is aimed at. The substance of an objection is
-               * which line it answers — an objection with its target dropped
-               * reads as generic disagreement, and the room's cross-inhibition
-               * becomes invisible.
-               */
-              <span className="font-mono text-2xs text-muted-foreground">
-                &gt;{turn.move.target}
-              </span>
-            ) : null}
-            {turn.move.cites.map((cite) => (
-              <span key={cite} className="font-mono text-2xs text-muted-foreground">
-                ^{cite}
-              </span>
-            ))}
-            <span className="break-words">{turn.move.body}</span>
-          </div>
-        ) : (
-          <>
-            {turn?.demoted ? (
-              /*
-               * A move this seat does not hold. The host records the line with
-               * its marker stripped so it deposits no trace, and showing that is
-               * the difference between a desk whose grammar is wrong and a desk
-               * whose members are unhelpful.
-               */
-              <div className="pb-1">
-                <MoveChip kind={turn.demoted} demoted />
-              </div>
-            ) : null}
+        <>
             {message.turnFailure ? (
               // KR-L2-03: the host computed its own exact, actionable X9
               // sentence for this fail-closed turn — a switched-off or
