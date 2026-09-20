@@ -2885,6 +2885,7 @@ async fn run_chat(
             // through history like any other reply.
             let notice = CompanyEvent::AgentReply {
                 audience: Vec::new(),
+                episode: None,
                 parent: reply_thread(accepted.thread_root(), accepted.message_seq),
                 chat_id: message
                     .chat
@@ -3969,6 +3970,7 @@ fn spawn_chat_turn(turn: ChatTurn) -> JoinHandle<Result<(CycleReport, Option<Str
                 };
                 let notice = CompanyEvent::AgentReply {
                     audience: Vec::new(),
+                    episode: None,
                     // Issue #1890 D: threaded on exactly the terms a successful
                     // reply is. This notice IS the answer when there is no
                     // other one, and `reply_thread`'s whole argument is that
@@ -4308,6 +4310,7 @@ pub(crate) async fn journal_chat_replies(
                 id,
                 CompanyEvent::AgentReply {
                     audience: Vec::new(),
+                    episode: None,
                     // Who this reply names. Rendered as chips and — unlike an
                     // operator message's — never consulted by dispatch, which
                     // is the mention-loop fuse.

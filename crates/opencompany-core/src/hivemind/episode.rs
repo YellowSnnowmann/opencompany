@@ -654,6 +654,7 @@ impl<'a> EpisodeDriver<'a> {
                                     // would be reading a transcript with a hole in
                                     // it that nothing accounts for.
                                     audience: Vec::new(),
+                                    episode: None,
                                     steps: Vec::new(),
                                     task_id: None,
                                     outputs: Vec::new(),
@@ -691,6 +692,7 @@ impl<'a> EpisodeDriver<'a> {
                             // aside is a *second* row riding alongside it, appended
                             // below.
                             audience: Vec::new(),
+                            episode: None,
                             // The episode's own turns carry no step timeline: the
                             // room is reading one line per turn, and a tool trace
                             // belongs to the turn's own bubble, which this path
@@ -987,6 +989,7 @@ impl<'a> EpisodeDriver<'a> {
                                             agent_id: turn.agent_id.clone(),
                                             text: second.clone(),
                                             audience: Vec::new(),
+                                            episode: None,
                                             steps: Vec::new(),
                                             task_id: None,
                                             outputs: Vec::new(),
@@ -1913,6 +1916,7 @@ impl<'a> EpisodeDriver<'a> {
                     text: outcome.summary(),
                     // Always desk-visible, for the reason above.
                     audience: Vec::new(),
+                    episode: None,
                     steps: Vec::new(),
                     task_id: None,
                     outputs: Vec::new(),

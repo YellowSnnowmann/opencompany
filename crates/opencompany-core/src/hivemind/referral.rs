@@ -879,6 +879,7 @@ impl<'a> EpisodeReferrals<'a> {
                 &self.company,
                 CompanyEvent::AgentReply {
                     audience: Vec::new(),
+                    episode: None,
                     chat_id: conversation.desk_id.clone(),
                     agent_id: author.to_owned(),
                     text,

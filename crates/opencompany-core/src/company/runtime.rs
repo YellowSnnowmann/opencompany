@@ -526,6 +526,7 @@ pub struct CompanyRuntime {
 fn continuation_failure_notice(thread: String, parent: Option<EventSeq>) -> CompanyEvent {
     CompanyEvent::AgentReply {
         audience: Vec::new(),
+        episode: None,
         parent,
         chat_id: thread,
         agent_id: crate::ports::SYSTEM_AUTHOR.to_string(),
@@ -4550,6 +4551,7 @@ impl CompanyRuntime {
             created_at: crate::ports::now_millis(),
             title: format!("{who} mentioned you in {desk}"),
             audience: Some(audience),
+            episode: None,
             // The console's channel-id space, so a badge lands without the
             // browser having loaded that transcript. Whether the thread is a DM
             // is a question about the roster, not the human user directory —
@@ -4685,6 +4687,7 @@ impl CompanyRuntime {
                     &self.id,
                     CompanyEvent::AgentReply {
                         audience: Vec::new(),
+                        episode: None,
                         parent,
                         chat_id: chat_id.to_string(),
                         // Issue #885: the author, falling back to the
@@ -5200,6 +5203,7 @@ impl CompanyRuntime {
                     &self.id,
                     CompanyEvent::AgentReply {
                         audience: Vec::new(),
+                        episode: None,
                         parent,
                         chat_id: chat_id.clone(),
                         // Issue #885: the author, not the destination. Same
@@ -6996,6 +7000,7 @@ impl CompanyRuntime {
                 &self.id,
                 CompanyEvent::AgentReply {
                     audience: Vec::new(),
+                    episode: None,
                     parent,
                     chat_id: thread.to_string(),
                     agent_id,
