@@ -56,8 +56,8 @@ name = "desktop_serve_parity"
 path = "tests/desktop_serve_parity.rs"
 
 [[test]]
-name = "hivemind_e2e"
-path = "tests/hivemind_e2e.rs"
+name = "hive_e2e"
+path = "tests/hive_e2e.rs"
 
 [[test]]
 name = "offline_e2e"

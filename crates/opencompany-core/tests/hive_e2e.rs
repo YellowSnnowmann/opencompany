@@ -1,8 +1,15 @@
 #![cfg(feature = "openhuman")]
-//! **End-to-end proof that a hive-mind desk actually deliberates.**
+//! **End-to-end scaffold for hive desks** (plan hive-desks, Phase 8 rewrites
+//! the suite on the per-desk `OpenHumanHive`; the boot/login/script scaffold
+//! below is what it reuses, exercised today by
+//! `a_single_member_desk_answers_with_one_ordinary_turn`).
 //!
-//! The unit tests in [`hivemind`](opencompany::hivemind) drive the episode
-//! driver with a `HiveTurnRunner` that returns strings. They pin the fold, and
+//! The trace-grammar tests this file carried are `#[ignore]`d: they drove
+//! `src/hivemind/`, which Phase 4 deleted, and stay only as the shape Phase 8
+//! rewrites against episodes.
+//!
+//! The unit tests in [`hive::driver`](opencompany::hive::driver) drive the
+//! episode host with a scripted `SeatRunner`. They pin the fold, and
 //! they cannot tell you whether a *company* deliberates: whether the brain hook
 //! fires on an operator message, whether each authorized turn goes through the
 //! ordinary harness turn path with its tools and its memory loop, whether the
@@ -53,7 +60,10 @@ use support::script_model::{Ask, Reply, Responder, Script, spawn_script};
 
 use opencompany::CompanyRuntime;
 use opencompany::company::CompanyManifest;
-use opencompany::hivemind::{HIVE_REFERRAL_AUTHOR, HIVE_REPORT_AUTHOR};
+use opencompany::hive::referral::HIVE_REFERRAL_AUTHOR;
+
+/// The retired trace-grammar report author, kept for the ignored tests.
+const HIVE_REPORT_AUTHOR: &str = "hive-report";
 use opencompany::ports::types::{CompanyEvent, EventSeq};
 use opencompany::runtime::{RuntimeBuilder, company_id_from_name};
 use opencompany::{AppConfig, AppState};
@@ -597,7 +607,7 @@ async fn one_agent_uses_speech_to_coordinate_multiple_dm_sessions_without_cards(
     assert!(response["responses"].is_array(), "{response}");
 
     for recipient in [THEORIST, PROGRAMMER] {
-        let conversation = opencompany::hivemind::referral::pair_conversation("greeter", recipient);
+        let conversation = opencompany::hive::referral::pair_conversation("greeter", recipient);
         let dm = replies(&runtime, &conversation).await;
         assert!(
             dm.iter().any(|(_, author, _)| author == "greeter"),

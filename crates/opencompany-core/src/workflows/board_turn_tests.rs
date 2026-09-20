@@ -179,7 +179,7 @@ async fn a_workflow_node_opens_a_card_stamped_with_its_run() {
     )
     .await;
 
-    let card = only_card(&store, &CompanyId::new("acme")).await;
+    let card = only_card(&store, &crate::test_support::per_test_company_id("acme")).await;
     assert_eq!(card.title, "Reply to the auditor");
     assert_eq!(
         card.column,
@@ -261,7 +261,7 @@ async fn a_workflow_node_assigns_an_existing_card_without_moving_it() {
     )
     .await;
 
-    let card = only_card(&store, &CompanyId::new("acme")).await;
+    let card = only_card(&store, &crate::test_support::per_test_company_id("acme")).await;
     assert_eq!(card.assignee, "ceo", "the owner must actually be written");
     assert_eq!(
         card.column,
@@ -595,7 +595,7 @@ async fn a_node_that_touches_no_card_reports_no_rows() {
     assert!(run.board.is_empty());
     assert!(
         store
-            .list(&CompanyId::new("acme"))
+            .list(&crate::test_support::per_test_company_id("acme"))
             .await
             .expect("list")
             .is_empty()
