@@ -2120,8 +2120,7 @@ impl RuntimeBuilder {
                         );
                     }
                 }
-                let channels: Vec<Arc<dyn ChannelAdapter>> =
-                    vec![Arc::new(OperatorChannel::new())];
+                let channels: Vec<Arc<dyn ChannelAdapter>> = vec![Arc::new(OperatorChannel::new())];
                 channels
             }
         };
