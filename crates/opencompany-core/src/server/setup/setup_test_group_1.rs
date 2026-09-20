@@ -194,8 +194,8 @@ async fn mail_with_a_transport_wired_reports_a_real_send() {
 }
 
 /// `auth_modes` says which modes are *legal*, not which are convenient today.
-/// A host with no SMTP still runs `email` mode perfectly well over hub OAuth
-/// and passwords, so withholding the mode here would take away a working
+/// A host with no SMTP still runs `email` mode perfectly well over passwords,
+/// so withholding the mode here would take away a working
 /// sign-in on the strength of a transport it does not need. `mail` is the field
 /// that says what the mailbox path can do; this one must stay a policy answer.
 #[tokio::test]

@@ -1396,6 +1396,10 @@ impl AppState {
         // lowered two-way form asks an unaware host for a different action.
         #[cfg(feature = "openhuman")]
         out.push("blocker-verdict");
+        // Kept under its historical name: it once meant "hub sign-in is
+        // offered" and now means "a TinyHumans key grant can be completed",
+        // which is the only thing the exchange still does. A client reading
+        // it decides whether to draw the Connect button, nothing about login.
         if self.hub_identity.is_some() {
             out.push("hub-identity");
         }
