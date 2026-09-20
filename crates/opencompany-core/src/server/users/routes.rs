@@ -803,6 +803,12 @@ async fn deliver_code(
     if !mail_transport_wired(state) {
         return false;
     }
+    // A plain username has no mailbox: a login on a host with no mail that
+    // later gained one. Nothing to send to, so nothing is sent — the person
+    // signs in with their password, as they always did.
+    if LoginIdentity::parse(email).mailbox().is_none() {
+        return false;
+    }
     let connections = state.connections();
     let (Some(sender), Some(creds)) = (&connections.mail, &connections.mail_credentials) else {
         return false;
