@@ -15,7 +15,7 @@ L4  Surfaces        Axum HTTP (operator API, A2A, webhooks), CLI, console
 L3  Company Brain   cycle loop, approvals, effect routing, feedback loop
 L2  Kernel ports    Brain, CompanyStore, EventLog, MemoryStore, ContextStore,
                     ChannelAdapter, ToolProvider, AgentEconomy, ApprovalGate
-L1  Adapters        hosted-medulla | openhuman-rpc | tinyagents | tinycortex |
+L1  Adapters        hosted-medulla | openhuman (embedded) | tinyhivemind | tinycortex |
                     tinyplace | fs (default)
 L0  Substrate       api.tinyhumans.ai, openhuman-core, tiny.place, filesystem
 ```

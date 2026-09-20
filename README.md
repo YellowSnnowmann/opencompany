@@ -242,8 +242,8 @@ DigitalOcean / AWS deploys.
 Each company folder holds a `company.toml`, a plain text file naming the roles,
 what each one owns, which desks they sit at, and where you want to be asked
 before anything happens. It's written to be read by people; changing a role, or
-tuning how a desk deliberates (its quorum, its turn budget, whether it can refer
-a question to another desk), is editing a few lines rather than programming. `opencompany check` reports any problems in plain language, and
+tuning how a desk works (how many seats run at once, its round cap, whether it
+can refer a question to another desk), is editing a few lines rather than programming. `opencompany check` reports any problems in plain language, and
 adding a new business is a new folder, not a new program.
 [Your first company](docs/gitbooks/get-started/your-first-company.md) walks through it.
 
