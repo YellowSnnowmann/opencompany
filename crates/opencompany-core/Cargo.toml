@@ -239,6 +239,15 @@ openhuman_core = { package = "openhuman", path = "../../vendor/openhuman/crates/
 # for `AgentSpec::mcp`, which is how a company agent reaches this host's own
 # tools (Phase 3 serves them over MCP).
 openhuman-embed = { path = "../../vendor/openhuman/crates/openhuman-embed", optional = true, default-features = false, features = ["mcp", "skills"] }
+# The TinyHumans backend transport for the same core. At the 1ecf1b0 pin
+# `openhuman-embed` alone installs NO backend transport: every hosted-backend
+# surface (`/agent-integrations/*` — managed search, Composio, media) answers
+# `BACKEND_UNAVAILABLE` until a host installs one. This crate carries the
+# SDK-backed `SdkBackendTransport`; `harness::backend_transport` installs it
+# once per process, before the runtime boots and before any
+# `IntegrationClient` is built. Feature-less: the transport is the one thing
+# taken from it.
+openhuman-tinyhumans = { path = "../../vendor/openhuman/crates/openhuman-tinyhumans", optional = true, default-features = false }
 
 # Desks, rosters, mentions and shared session transcripts — the pure algebra
 # behind a group chat several teammates share (`vendor/tinyhivemind`). It is the
@@ -591,7 +600,7 @@ tiny = ["tinyagents-harness", "tinyinference"]
 # Enables `tiny` so the `tinyagents` crate is in scope: the harness's inference
 # models implement its `ChatModel<()>` trait (openhuman's old `Provider` trait
 # was deleted upstream); it is the same vendored crate `openhuman_core` uses.
-openhuman = ["tiny", "dep:openhuman_core", "dep:openhuman-embed", "dep:tinyhivemind-openhuman", "dep:tinymcp", "dep:tinytools", "dep:reqwest", "dep:anyhow", "dep:log", "dep:tinyflows", "dep:regex", "dep:uuid", "dep:swc_core"]
+openhuman = ["tiny", "dep:openhuman_core", "dep:openhuman-embed", "dep:openhuman-tinyhumans", "dep:tinyhivemind-openhuman", "dep:tinymcp", "dep:tinytools", "dep:reqwest", "dep:anyhow", "dep:log", "dep:tinyflows", "dep:regex", "dep:uuid", "dep:swc_core"]
 # MCP server management and agent tools share OpenHuman's in-process registry.
 # Enabling it necessarily enables the embedded harness and OpenHuman MCP
 # domain, while the default build remains unchanged.
