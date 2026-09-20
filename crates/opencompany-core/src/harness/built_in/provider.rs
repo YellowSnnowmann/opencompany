@@ -1096,6 +1096,20 @@ fn model_response_from_payload(payload: serde_json::Value) -> TaResult<ModelResp
     )
 }
 
+/// The tool names a request's system prompt advertises on the `opencompany`
+/// MCP server (plan hive-desks Phase 3), added to the salvage's `offered` set:
+/// a model that writes `web_search` as prose meant the served tool, and the
+/// brief is the only place the wire names it — the `tools` array carries
+/// `mcp_call_tool`, not the catalogue behind it. Read from the same messages
+/// that go on the wire, so it can never name a tool this turn did not offer.
+fn mcp_served_tools(messages: &[Message]) -> std::collections::BTreeSet<String> {
+    messages
+        .iter()
+        .filter(|message| matches!(message, Message::System(_)))
+        .flat_map(|message| crate::harness::build::tools_named_in_mcp_brief(&message.text()))
+        .collect()
+}
+
 /// [`model_response_from_payload`], plus the tool names **this turn offered the
 /// model**.
 ///
@@ -1324,7 +1338,22 @@ fn model_response_from_payload_offering(
         // it cannot cross there (Codex review on #2011).
         refuse_approval_siblings(&recovered)?;
         content = cleaned;
-        tool_calls = recovered;
+        // A recovered call to a tool the turn offers only through the
+        // `opencompany` MCP server (plan hive-desks Phase 3) is dispatched the
+        // way a native-channel call to it would be: as `mcp_call_tool`. The
+        // name is only in `offered` because `mcp_served_tools` put it there.
+        tool_calls = recovered
+            .into_iter()
+            .map(|call| {
+                let (name, arguments) =
+                    crate::hive::tools::via_opencompany_mcp(&call.name, call.arguments);
+                ToolCall {
+                    id: call.id,
+                    name,
+                    arguments,
+                }
+            })
+            .collect();
     }
 
     // Only a genuinely empty turn (no text anywhere, no tool call) is an error.
@@ -1671,10 +1700,13 @@ impl ChatModel<()> for HostedProvider {
         // Captured from the same list and the same choice that go on the wire,
         // so what the response is allowed to name can never drift from what the
         // request authorized.
-        let offered = crate::harness::native_salvage::authorized_tool_names(
+        let mut offered = crate::harness::native_salvage::authorized_tool_names(
             &request.tools,
             &request.tool_choice,
         );
+        if offered.contains("mcp_call_tool") {
+            offered.extend(mcp_served_tools(&request.messages));
+        }
         let schemas = crate::harness::native_salvage::authorized_tool_schemas(
             &request.tools,
             &request.tool_choice,
@@ -2442,10 +2474,13 @@ impl ChatModel<()> for TenantProvider {
         .map_err(|e| InferenceError::Model(e.to_string()))?;
         // Captured from the same list and choice the plan puts on the wire —
         // see the matching lines in `HostedProvider::invoke`.
-        let offered = crate::harness::native_salvage::authorized_tool_names(
+        let mut offered = crate::harness::native_salvage::authorized_tool_names(
             &request.tools,
             &request.tool_choice,
         );
+        if offered.contains("mcp_call_tool") {
+            offered.extend(mcp_served_tools(&request.messages));
+        }
         let schemas = crate::harness::native_salvage::authorized_tool_schemas(
             &request.tools,
             &request.tool_choice,
