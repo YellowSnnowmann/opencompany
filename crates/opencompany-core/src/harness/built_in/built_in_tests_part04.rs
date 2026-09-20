@@ -78,13 +78,13 @@ fn the_observed_turn_cost_is_the_last_tally_not_the_first_or_the_sum() {
         frame(2, 900, 250, 0.019),
     ];
 
-    let observed = last_observed_turn_cost(&events).expect("a tally was published");
+    let observed = progress_pump::last_observed_turn_cost(&events).expect("a tally was published");
 
     assert_eq!(observed.input_tokens, 900);
     assert_eq!(observed.output_tokens, 250);
     assert!((observed.cost_usd - 0.019).abs() < f64::EPSILON);
     assert_eq!(
-        last_observed_turn_cost(&[]),
+        progress_pump::last_observed_turn_cost(&[]),
         None,
         "a turn that made no metered model call has no tally to report"
     );
