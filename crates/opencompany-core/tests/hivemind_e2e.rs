@@ -540,6 +540,7 @@ fn converging_script() -> Responder {
 const UNANIMOUS: &str = "{ enabled = true, turn_budget = 12, quorum = 3, blind_round = true }";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "TODO(Phase 3): drives the `desk_dm` speech tool through a turn; the speech belt is served over MCP in Phase 3."]
 async fn one_agent_uses_speech_to_coordinate_multiple_dm_sessions_without_cards() {
     let script: Responder = Arc::new(|ask: &Ask| {
         let ask = HiveAsk::of(ask);
@@ -642,6 +643,7 @@ async fn one_agent_uses_speech_to_coordinate_multiple_dm_sessions_without_cards(
 ///
 /// One operator message, three teammates, and an outcome the room can name.
 #[tokio::test]
+#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
 async fn a_desk_deliberates_and_converges_through_the_fold() {
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script(converging_script()).await;
@@ -771,6 +773,7 @@ async fn a_desk_deliberates_and_converges_through_the_fold() {
 /// Asserted from the captured request bodies, which is the only place the
 /// claim actually lives: the journal cannot tell you what a member was *shown*.
 #[tokio::test]
+#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
 async fn the_opening_round_is_blind_and_every_later_line_is_attributed() {
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script(converging_script()).await;
@@ -929,6 +932,7 @@ const OPEN_PAIR: &str = "{ enabled = true, turn_budget = 12, quorum = 2, blind_r
 /// the option the room finally records is the other one, with the objected
 /// author nowhere in its supporters.
 #[tokio::test]
+#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
 async fn an_objection_silences_an_advocate_and_a_second_topic_carries() {
     let home = tempfile::tempdir().unwrap();
     let responder: Responder = Arc::new(|ask: &Ask| {
@@ -1029,6 +1033,7 @@ async fn an_objection_silences_an_advocate_and_a_second_topic_carries() {
 
 /// **A room that settles on nothing says so.**
 #[tokio::test]
+#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
 async fn a_room_that_settles_on_nothing_reports_itself_exhausted() {
     let home = tempfile::tempdir().unwrap();
     let responder: Responder = Arc::new(|ask: &Ask| {
@@ -1070,6 +1075,7 @@ const BETA: &str = "beta";
 /// left — which is the library's own condition for calling it terminal rather
 /// than giving the floor to whoever could still settle it.
 #[tokio::test]
+#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
 async fn two_carrying_topics_and_no_objection_deadlock() {
     let home = tempfile::tempdir().unwrap();
     let responder: Responder = Arc::new(|ask: &Ask| {
@@ -1243,6 +1249,7 @@ fn tool_results_for(script: &Script, task: &str) -> Vec<String> {
 /// `memory_recall` reads in episode two, and the line the room journals is
 /// written from what came back.
 #[tokio::test]
+#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
 async fn a_desk_reasons_with_what_it_stored_in_an_earlier_episode() {
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script(remembering_script()).await;
@@ -1509,6 +1516,7 @@ async fn spawn_cortexdb() -> (String, Arc<CortexMock>) {
 /// `StorageSettings`, which is what `OPENCOMPANY_MEMORY*` parses into — so the
 /// binding under test is the real one and no process environment is mutated.
 #[tokio::test]
+#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
 async fn a_desk_reasons_with_memory_held_in_a_remote_engine() {
     use opencompany::store::{MemoryBackend, StorageSettings, open_memory_overlay};
 
@@ -1627,6 +1635,7 @@ fn referring_script() -> Responder {
 /// is a row the room authored — so a teammate on `front` can inform `lab`
 /// without ever being able to carry a topic on it.
 #[tokio::test]
+#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
 async fn a_desk_asks_another_desk_and_only_the_information_crosses() {
     let home = tempfile::tempdir().unwrap();
     let (base_url, _script) = spawn_script(referring_script()).await;
