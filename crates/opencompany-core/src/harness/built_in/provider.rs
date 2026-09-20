@@ -554,6 +554,13 @@ fn wire_message(message: &Message) -> serde_json::Value {
             "tool_call_id": tool.tool_call_id,
             "content": message.text(),
         }),
+        // A host-defined message kind (tinyinference at the 1ecf1b0 pin). Its
+        // display text is what an OpenAI endpoint can carry; sent as a user
+        // turn so no provider rejects an unknown role.
+        Message::Custom(custom) => serde_json::json!({
+            "role": "user",
+            "content": custom.display.clone().unwrap_or_else(|| message.text()),
+        }),
     }
 }
 

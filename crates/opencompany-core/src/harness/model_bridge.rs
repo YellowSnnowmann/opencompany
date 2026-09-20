@@ -392,6 +392,7 @@ fn message_from_wire(message: &Value) -> Result<Message, String> {
                 content,
                 tool_calls,
                 usage: None,
+                origin: None,
             })
         }
         "tool" => Message::Tool(ToolMessage {
