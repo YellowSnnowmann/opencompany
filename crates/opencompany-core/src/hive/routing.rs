@@ -426,24 +426,21 @@ pub fn fallback_word(reason: RoutingFallback) -> &'static str {
 }
 
 /// The routing block in force on a desk, and where it came from.
+///
+/// Precedence is [`CompanyRecord::effective_desk_hive`]'s; this only names the
+/// rung that answered. A console-created desk's own block counts as
+/// `Manifest`: it is the desk's declaration, not an operator override of one.
 #[must_use]
 pub fn effective_routing(record: &CompanyRecord, desk_id: &str) -> (RoutingConfig, RoutingSource) {
-    if let Some(installed) = record
-        .overlay_desk_hive
-        .iter()
-        .find(|held| held.desk_id == desk_id)
-    {
-        return (installed.hive.clone(), RoutingSource::Overlay);
-    }
-    match record
-        .manifest
-        .group_chats
-        .iter()
-        .find(|group| group.id == desk_id)
-    {
-        Some(group) if !group.hive.is_default() => (group.hive.clone(), RoutingSource::Manifest),
-        _ => (RoutingConfig::default(), RoutingSource::Default),
-    }
+    let config = record.effective_desk_hive(desk_id);
+    let source = if record.desk_hive_is_installed(desk_id) {
+        RoutingSource::Overlay
+    } else if config.is_default() {
+        RoutingSource::Default
+    } else {
+        RoutingSource::Manifest
+    };
+    (config, source)
 }
 
 /// The resolved numbers a desk runs under.
