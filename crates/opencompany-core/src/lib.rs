@@ -51,9 +51,6 @@ pub mod hive;
 /// teammate's turn. Ungated — the episode machine is pure and the routing
 /// decision is one the default build makes as readily as the harness one does.
 pub mod hivemind;
-/// Hive desks: one `OpenHumanHive` per `[[group_chat]]`, completion-driven
-/// episodes, Jev routing (`docs/spec/runtime/hive.md`).
-pub mod hive;
 /// Turning dropped files and links into memory: extraction, then chunking.
 /// The console's Brain drop zone is the caller; the ports are unchanged.
 pub mod ingest;

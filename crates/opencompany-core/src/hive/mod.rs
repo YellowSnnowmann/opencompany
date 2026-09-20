@@ -16,3 +16,6 @@ pub mod mcp_server;
 /// server dispatches through (plan Phase 3).
 #[cfg(feature = "mcp")]
 pub mod tools;
+/// Jev routing over the TinyHumans System One proxy: the host-owned
+/// `SystemOneTransport` and the `jev_router` constructor (plan Phase 7).
+pub mod jev;
