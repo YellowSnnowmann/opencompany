@@ -217,7 +217,7 @@ fn bridge() -> crate::Result<&'static Bridge> {
     // Two callers can race here; the loser's listener is dropped and its task
     // ends with the listener, so nothing leaks past the first registration.
     let _ = BRIDGE.set(bridge);
-    BRIDGE.get().ok_or_else(|| poisoned())
+    BRIDGE.get().ok_or_else(poisoned)
 }
 
 async fn complete(
@@ -514,8 +514,7 @@ fn response_to_wire(response: &ModelResponse, model_name: &str) -> Value {
     }
     let usage: Usage = response
         .usage
-        .clone()
-        .or_else(|| response.message.usage.clone())
+        .or(response.message.usage)
         .unwrap_or_default();
     json!({
         "id": format!("ocb-{}", uuid::Uuid::new_v4().simple()),

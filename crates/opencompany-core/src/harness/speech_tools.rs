@@ -214,6 +214,9 @@ impl SpeechContext {
     /// with its own provenance chip and its own return path — and letting
     /// `desk_post` write into a room its author is not in would put a line in
     /// front of people with no record of who let it in.
+    // `ToolResult` grew past clippy's `Err` size threshold at the 1ecf1b0
+    // tinytools pin; the refusal IS the tool's answer, so it stays by value.
+    #[allow(clippy::result_large_err)]
     async fn resolve_desk(&self, desk: Option<&str>, ambient: &str) -> Result<String, ToolResult> {
         let Some(desk) = desk.map(str::trim).filter(|desk| !desk.is_empty()) else {
             return Ok(ambient.to_string());

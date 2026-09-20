@@ -1739,8 +1739,6 @@ fn budget_paused_summary(agent_id: &str, err: &anyhow::Error) -> String {
     )
 }
 
-/// Reads the just-completed turn's usage (zero when the provider reported none).
-
 /// The [`HarnessModel`] a **per-agent auxiliary** model pass (today: payload
 /// extraction; any future one built inside [`build::build_agent_with_model`])
 /// should run against, given that agent's own `{provider, model}` pin when it

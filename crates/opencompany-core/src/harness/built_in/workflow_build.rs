@@ -2106,7 +2106,7 @@ async fn run_copilot(
     // proposal. A timed-out or errored loop hands nothing back; its spend is
     // the one figure this path cannot recover.
     let turn = match &outcome {
-        Ok(Ok(loop_outcome)) => loop_outcome.usage.clone(),
+        Ok(Ok(loop_outcome)) => loop_outcome.usage,
         _ => crate::harness::cost::TurnUsage::default(),
     };
     let usage = TokenUsage {

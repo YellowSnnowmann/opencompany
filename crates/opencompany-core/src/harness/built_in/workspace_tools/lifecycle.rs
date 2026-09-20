@@ -159,6 +159,9 @@ fn revision_arg(args: &Value) -> Option<u64> {
 /// questions (what is under this folder, is the target path free) after the
 /// node itself has resolved, and re-reading the tree for each would give two
 /// answers from two snapshots.
+// `ToolResult` grew past clippy's `Err` size threshold at the 1ecf1b0
+// tinytools pin; the refusal IS the tool's answer, so it stays by value.
+#[allow(clippy::result_large_err)]
 async fn resolve_in_index(
     workspace: &CompanyWorkspace,
     path: Option<&str>,
