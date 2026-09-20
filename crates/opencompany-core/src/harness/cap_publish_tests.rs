@@ -134,6 +134,12 @@ async fn spawn_script(turns: Vec<Turn>) -> (String, Arc<Script>) {
 }
 
 fn tool_call_message(tool: &str, args: &Value) -> Value {
+    // Plan hive-desks Phase 3: this crate's tools are served over the
+    // `opencompany` MCP server, so a scripted model reaches one exactly as a
+    // real one does — through `mcp_call_tool`. A native tool is unchanged.
+    let (tool, args) = crate::hive::tools::via_opencompany_mcp(tool, args.clone());
+    let tool = tool.as_str();
+    let args = &args;
     json!({
         "role": "assistant",
         "content": null,
