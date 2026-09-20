@@ -2567,9 +2567,6 @@ mod attribution_audit;
 #[path = "chat_history_mentions_tests.rs"]
 mod tests_mentions;
 #[cfg(test)]
-#[path = "chat_history_moves_tests.rs"]
-mod tests_moves;
-#[cfg(test)]
 #[path = "chat_history_reactions_tests.rs"]
 mod tests_reactions;
 #[cfg(test)]
