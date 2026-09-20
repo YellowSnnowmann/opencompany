@@ -176,7 +176,12 @@ interface Props {
    * the shell keyed its open turns per thread rather than per channel; before
    * that there was no way to ask "is *this* thread working".
    */
-  openTurn?: { queued: boolean };
+  openTurn?: { queued: boolean; agentId?: string };
+  /**
+   * The open turn's teammate, already resolved to a display name — never a raw
+   * id, on the same terms as the channel pane's own rule.
+   */
+  turnAgentName?: string;
   /** This console is typing here. Distinct from the main composer's callback
    * so the ping this thread sends carries the thread's own `parentId`. */
   onTyping?: () => void;
@@ -244,6 +249,7 @@ export function ThreadPanel({
   onClose,
   typingNames = [],
   openTurn,
+  turnAgentName,
   onTyping,
   cognition,
   onRedeemBudgetPause,
@@ -352,7 +358,7 @@ export function ThreadPanel({
         </p>
       ) : (
         <>
-          {openTurn && (
+          {(openTurn || !!openTurnSteps?.length) && (
             <div className="px-4 py-2">
               {/* Named, not blind. The rows used to render against each line
                   in the body while this row said only "Replying…" — so the
@@ -360,9 +366,10 @@ export function ThreadPanel({
                   the presence in the present tense of its wording. One row,
                   at the foot, carrying both. */}
               <WorkingIndicator
-                srLabel={openTurn.queued ? "Queued…" : "Replying…"}
+                srLabel={openTurn?.queued ? "Queued…" : "Replying…"}
                 steps={openTurnSteps}
-                queued={openTurn.queued}
+                name={turnAgentName}
+                queued={openTurn?.queued}
               />
             </div>
           )}

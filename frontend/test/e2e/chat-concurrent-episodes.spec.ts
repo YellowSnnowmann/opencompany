@@ -71,18 +71,19 @@ function question(seq: number, text: string, atMillis: number) {
   };
 }
 
-/** A seat taking the floor: a call that starts and does not finish. */
-function seatWorking(
-  seq: number,
-  messageSeq: number,
-  agentId: string,
-  label: string,
-  atMillis: number,
-) {
+/**
+ * A seat taking the floor: a call that starts and does not finish.
+ *
+ * No `atMillis`. Verified against a live host: a turn frame carries
+ * `type`/`seq`/`agentId`/`chatId`/`toolCallId`/`label`/`status`/`messageSeq`
+ * and nothing else — the wall-clock fields belong to the durable projections,
+ * not to the transient bus. A fixture that invents one is a fixture that can
+ * drift from the wire without anything saying so.
+ */
+function seatWorking(seq: number, messageSeq: number, agentId: string, label: string) {
   return {
     type: "tool_call",
     seq,
-    atMillis,
     chatId: ENGINEERING.id,
     agentId,
     messageSeq,
@@ -91,18 +92,11 @@ function seatWorking(
   };
 }
 
-/** That seat handing back: the same call, settled. */
-function seatDone(
-  seq: number,
-  messageSeq: number,
-  agentId: string,
-  callSeq: number,
-  atMillis: number,
-) {
+/** That seat handing back: the same call, settled. See {@link seatWorking}. */
+function seatDone(seq: number, messageSeq: number, agentId: string, callSeq: number) {
   return {
     type: "tool_result",
     seq,
-    atMillis,
     chatId: ENGINEERING.id,
     agentId,
     messageSeq,
@@ -170,15 +164,15 @@ test("two rooms in one channel keep their rows apart", async ({ page }) => {
       // Room one deliberates. Two seats, one query, still open at the end —
       // a room blocked on a peer emits nothing further, which is exactly the
       // turn the old per-thread reset used to erase.
-      seatWorking(1, FIRST_QUERY, "a-ada", "design_review", t0 + 1),
-      seatDone(2, FIRST_QUERY, "a-ada", 1, t0 + 2),
-      seatWorking(3, FIRST_QUERY, "a-grace", "changelog_read", t0 + 3),
+      seatWorking(1, FIRST_QUERY, "a-ada", "design_review"),
+      seatDone(2, FIRST_QUERY, "a-ada", 1),
+      seatWorking(3, FIRST_QUERY, "a-grace", "changelog_read"),
 
       // Room two convenes on the SECOND question while the first is still
       // going. Same channel, same desk — only `messageSeq` tells them apart.
-      seatWorking(4, SECOND_QUERY, "a-lin", "issue_search", t0 + 11),
-      seatDone(5, SECOND_QUERY, "a-lin", 4, t0 + 12),
-      seatWorking(6, SECOND_QUERY, "a-moss", "dependency_graph", t0 + 13),
+      seatWorking(4, SECOND_QUERY, "a-lin", "issue_search"),
+      seatDone(5, SECOND_QUERY, "a-lin", 4),
+      seatWorking(6, SECOND_QUERY, "a-moss", "dependency_graph"),
     ],
   );
 
@@ -205,11 +199,11 @@ test("the line follows the floor inside one room", async ({ page }) => {
     page,
     [question(FIRST_QUERY, "Should we ship on Friday?", t0)],
     [
-      seatWorking(1, FIRST_QUERY, "a-ada", "risk_register", t0 + 1),
-      seatDone(2, FIRST_QUERY, "a-ada", 1, t0 + 2),
-      seatWorking(3, FIRST_QUERY, "a-grace", "release_notes", t0 + 3),
-      seatDone(4, FIRST_QUERY, "a-grace", 3, t0 + 4),
-      seatWorking(5, FIRST_QUERY, "a-moss", "oncall_roster", t0 + 5),
+      seatWorking(1, FIRST_QUERY, "a-ada", "risk_register"),
+      seatDone(2, FIRST_QUERY, "a-ada", 1),
+      seatWorking(3, FIRST_QUERY, "a-grace", "release_notes"),
+      seatDone(4, FIRST_QUERY, "a-grace", 3),
+      seatWorking(5, FIRST_QUERY, "a-moss", "oncall_roster"),
     ],
   );
 
@@ -232,7 +226,7 @@ test("a room's rows stay beneath the lines it journals as it deliberates", async
     page,
     [question(FIRST_QUERY, "What did design ship this week?", t0)],
     [
-      seatWorking(1, FIRST_QUERY, "a-ada", "design_review", t0 + 1),
+      seatWorking(1, FIRST_QUERY, "a-ada", "design_review"),
       {
         type: "agent_reply",
         seq: 2,
@@ -241,7 +235,7 @@ test("a room's rows stay beneath the lines it journals as it deliberates", async
         agentId: "a-ada",
         text: "Onboarding flow went out Tuesday.",
       },
-      seatWorking(3, FIRST_QUERY, "a-grace", "changelog_read", t0 + 3),
+      seatWorking(3, FIRST_QUERY, "a-grace", "changelog_read"),
       {
         type: "agent_reply",
         seq: 4,

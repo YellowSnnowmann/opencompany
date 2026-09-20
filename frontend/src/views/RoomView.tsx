@@ -3276,6 +3276,10 @@ export function RoomView({
                   onClose={() => setOpenThreadId(null)}
                   typingNames={resolveTypingNames?.(active.id, parent.id) ?? []}
                   openTurn={threadTurn}
+                  // Resolved here, never in the panel: "never a raw id" is one
+                  // rule in one place, the same way the channel pane resolves
+                  // its own row's name.
+                  turnAgentName={threadTurn?.agentId ? agentNames?.[threadTurn.agentId] : undefined}
                   onTyping={() => onTyping?.(active.id, parent.id)}
                   onRetrySend={retrySend}
                   // A thread is not a lesser transcript (issue #1734): an echoed
