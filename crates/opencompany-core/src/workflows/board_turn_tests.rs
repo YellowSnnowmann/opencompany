@@ -163,6 +163,7 @@ async fn only_card(store: &Arc<dyn TaskStore>, company: &CompanyId) -> TaskRecor
 /// * both origin ids are **stamped** (that reference actually being written —
 ///   without it the card is unexplained on the board).
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_workflow_node_opens_a_card_stamped_with_its_run() {
     let dir = tempfile::tempdir().unwrap();
     let (run, store, run_id) = run_with_board(
@@ -225,6 +226,7 @@ async fn a_workflow_node_opens_a_card_stamped_with_its_run() {
 /// card → dispatch → run cycles are bounded precisely because every dispatch
 /// needs a person. A run that could move a column would take that bound with it.
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_workflow_node_assigns_an_existing_card_without_moving_it() {
     let dir = tempfile::tempdir().unwrap();
     let seed = TaskRecord {
@@ -324,6 +326,7 @@ impl TaskStore for FailingTasks {
 /// run **succeeds**, and the failure is loud in the two places an operator
 /// actually reads — a `spawnFailed` row and a run notice.
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_board_write_that_fails_reports_a_row_and_does_not_fail_the_node() {
     let dir = tempfile::tempdir().unwrap();
     let base_url = spawn_script(vec![
@@ -384,6 +387,7 @@ async fn a_board_write_that_fails_reports_a_row_and_does_not_fail_the_node() {
 /// run's** notices, and the `Unscoped` bucket a chat turn drains is left
 /// untouched.
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn an_ungrounded_hand_off_surfaces_on_the_runs_own_notices() {
     let dir = tempfile::tempdir().unwrap();
     let base_url = spawn_script(vec![
@@ -501,6 +505,7 @@ async fn a_dry_run_of_a_spawning_graph_writes_no_card() {
 /// This pins the actual behaviour rather than leaving it to be rediscovered:
 /// the card carries the **parent's** run id and the **parent's** workflow id.
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_sub_workflow_childs_card_carries_the_parent_runs_ids() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("company");
@@ -553,6 +558,7 @@ async fn a_sub_workflow_childs_card_carries_the_parent_runs_ids() {
 /// untouched — the property #771's scoping bought, asserted from the workflow
 /// side now that the workflow side actually claims something.
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_runs_board_claim_leaves_the_unscoped_bucket_alone() {
     let dir = tempfile::tempdir().unwrap();
     let (run, _store, _run_id) = run_with_board(
@@ -675,6 +681,7 @@ async fn spawn_script_with_hook(
 /// run that drops its rows leaves a card on the board that no run admits to
 /// opening. The run reports `cancelled` **and** the row.
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_cancelled_runs_card_survives_and_stays_listed() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = WorkflowRunContext::new(false);

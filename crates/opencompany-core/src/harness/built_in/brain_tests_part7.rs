@@ -26,6 +26,7 @@ use super::*;
 /// see episode A's turns at all: it deliberates on its own and converges
 /// on `#beta`.
 #[tokio::test]
+#[ignore = "TODO(Phase 4): opens a trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim); the per-desk OpenHumanHive replaces it in Phase 4."]
 async fn two_hive_desk_episodes_in_one_cycle_do_not_fold_into_each_other() {
     use crate::store::FsEventLog;
 

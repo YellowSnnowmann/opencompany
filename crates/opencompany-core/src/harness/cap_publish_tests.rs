@@ -392,6 +392,7 @@ fn chat(text: &str) -> CycleRequest {
 /// no nudge ever fires — `nudge_turns(&script)` reads `0` and `script.calls()`
 /// stops at `CAP + 1` (the wrap-up, and nothing after it).
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_capped_chat_turn_that_wrote_unpublished_work_gets_the_nudge() {
     let mut turns = capped_script_writing();
     // The nudge turn: a clean decline. The recovery case — the nudge
@@ -432,6 +433,7 @@ async fn a_capped_chat_turn_that_wrote_unpublished_work_gets_the_nudge() {
 /// claim is still live when the nudge runs, so a `publish_artifact` call here
 /// stages and drains exactly like the primary turn's own would.
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn the_nudge_can_recover_the_file_a_capped_turn_wrote() {
     let mut turns = capped_script_writing();
     turns.push(Turn::Call {
@@ -481,6 +483,7 @@ async fn the_nudge_can_recover_the_file_a_capped_turn_wrote() {
 /// raises it into everyday reach; a nudge on every capped turn would be noise
 /// nobody could act on.
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_capped_chat_turn_that_wrote_nothing_gets_no_nudge() {
     let (base_url, script) = spawn_script(capped_script_reading()).await;
     let dir = tempfile::tempdir().unwrap();

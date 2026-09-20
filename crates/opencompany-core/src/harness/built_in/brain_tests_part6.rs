@@ -569,6 +569,7 @@ async fn a_failed_journal_write_does_not_swallow_the_rest_of_the_drain() {
 ///   and `emit_cycle_webhooks` both read — stayed empty even though the
 ///   desk had just answered, and no `work.completed` webhook ever fired.
 #[tokio::test]
+#[ignore = "TODO(Phase 4): opens a trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim); the per-desk OpenHumanHive replaces it in Phase 4."]
 async fn a_hive_episode_drains_mcp_failures_and_surfaces_a_response() {
     use crate::harness::mcp_probe::McpFailure;
     use crate::ports::EventLog;

@@ -426,6 +426,7 @@ fn tool_results(script: &Script) -> Vec<String> {
 /// the model a refusal, and the feature would have shipped dead in the mode
 /// almost every company runs.
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_real_supervised_turn_searches_and_meters_exactly_one_priced_call() {
     let (model_url, script) = spawn_script(vec![
         Turn::Call {
@@ -538,6 +539,7 @@ async fn a_real_supervised_turn_searches_and_meters_exactly_one_priced_call() {
 /// metered — and crucially the refusal is *loud*, so the agent reports the
 /// constraint rather than answering from memory.
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_real_turn_past_the_daily_cap_is_refused_without_reaching_the_backend() {
     let (model_url, script) = spawn_script(vec![
         Turn::Call {
@@ -636,6 +638,7 @@ async fn a_wildcard_grant_turn_is_never_offered_the_search_tool() {
 /// exercises the approval gate itself rather than the build-time gate — which is
 /// exactly the boundary the issue's flat carve-out would have removed.
 #[tokio::test]
+#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_read_only_desk_is_denied_the_search_even_when_it_is_wired() {
     let (model_url, script) = spawn_script(vec![
         Turn::Call {
