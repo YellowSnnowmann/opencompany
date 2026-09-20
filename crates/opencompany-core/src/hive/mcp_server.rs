@@ -784,9 +784,7 @@ async fn read(host: &McpHost, agent: &McpAgent, limit: usize) -> Value {
     else {
         return tool_result("refused: no turn is in flight for this agent", true);
     };
-    // TODO(Phase 4): `EventLogSessionLog` moves to `crate::hive::session_log`;
-    // repoint this one import when it does.
-    let log = crate::hivemind::log::EventLogSessionLog::new(
+    let log = crate::hive::session_log::EventLogSessionLog::new(
         events,
         agent.company.clone(),
         surface.id.clone(),

@@ -47,11 +47,6 @@ pub mod harness;
 /// folds are read by the default build (manifest, `ports::types`,
 /// `chat_history`); the modules that drive a runtime are gated inside it.
 pub mod hive;
-/// Hive-mind desks: a `[[group_chat]]` with two or more members answers an
-/// operator message as a bounded deliberation episode rather than as one
-/// teammate's turn. Ungated — the episode machine is pure and the routing
-/// decision is one the default build makes as readily as the harness one does.
-pub mod hivemind;
 /// Turning dropped files and links into memory: extraction, then chunking.
 /// The console's Brain drop zone is the caller; the ports are unchanged.
 pub mod ingest;

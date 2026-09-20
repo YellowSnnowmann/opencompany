@@ -4,8 +4,6 @@ use tinyinference::model::{ChatModel, ModelRequest, ModelResponse};
 
 pub(super) use crate::company::CompanyManifest;
 pub(super) use crate::harness::provider::{HarnessModel, MockProvider};
-pub(super) use crate::hivemind::episode::HiveTurnRunner;
-pub(super) use crate::hivemind::referral::HiveReferralRunner;
 pub(super) use crate::ports::brain::CycleHost;
 // Issue #301: every lifecycle return now lands in To-do (the `backlog` pool
 // is gone), so these assertions read the const rather than a literal.
