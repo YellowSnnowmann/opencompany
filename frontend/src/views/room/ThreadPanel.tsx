@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { TriangleAlert, X } from "lucide-react";
 
 import { Markdown } from "@/components/markdown";
@@ -256,6 +257,27 @@ export function ThreadPanel({
   const countedReplies = inlineReplyIds
     ? replies.reduce((n, r) => (inlineReplyIds.has(r.id) ? n : n + 1), 0)
     : replies.length;
+  /**
+   * The open turn's rows, for the one indicator at the foot of this panel.
+   *
+   * Newest first over this thread's own lines, so a second question asked in
+   * the thread owns the row while an earlier one keeps its rows bucketed rather
+   * than losing them — the same rule the channel pane applies, over the subset
+   * of messages this panel actually renders.
+   *
+   * Resolved here rather than handed to each line, because position in a
+   * transcript is chronology: a "happening now" row placed back at the asking
+   * message claims the work finished before every reply beneath it, which is
+   * false the moment anything is journaled in between.
+   */
+  const openTurnSteps = useMemo(() => {
+    if (!liveStepsByMessage) return undefined;
+    for (let i = replies.length - 1; i >= 0; i -= 1) {
+      const rows = liveStepsByMessage[replies[i].id];
+      if (rows?.length) return rows;
+    }
+    return liveStepsByMessage[parent.id];
+  }, [liveStepsByMessage, replies, parent.id]);
   return (
     <aside className="flex w-96 shrink-0 flex-col border-l bg-background">
       <header className="flex h-13 shrink-0 items-center gap-2 border-b px-3">
@@ -273,7 +295,6 @@ export function ThreadPanel({
           channel={channel}
           members={members}
           message={parent}
-          liveSteps={liveStepsByMessage?.[parent.id]}
           youAvatar={youAvatar}
           resolveAttachmentUrl={resolveAttachmentUrl}
           cognition={cognition}
@@ -294,7 +315,6 @@ export function ThreadPanel({
             channel={channel}
             members={members}
             message={r}
-            liveSteps={liveStepsByMessage?.[r.id]}
             youAvatar={youAvatar}
             resolveAttachmentUrl={resolveAttachmentUrl}
             cognition={cognition}
@@ -334,8 +354,14 @@ export function ThreadPanel({
         <>
           {openTurn && (
             <div className="px-4 py-2">
+              {/* Named, not blind. The rows used to render against each line
+                  in the body while this row said only "Replying…" — so the
+                  panel showed the work in the past tense of its position and
+                  the presence in the present tense of its wording. One row,
+                  at the foot, carrying both. */}
               <WorkingIndicator
                 srLabel={openTurn.queued ? "Queued…" : "Replying…"}
+                steps={openTurnSteps}
                 queued={openTurn.queued}
               />
             </div>
@@ -400,7 +426,6 @@ function Line({
   channel,
   members,
   message,
-  liveSteps,
   youAvatar,
   resolveAttachmentUrl,
   cognition,
@@ -412,8 +437,6 @@ function Line({
   channel: Channel;
   members: TeamMember[];
   message: ChatMessage;
-  /** This message's in-flight turn rows, if one is running (see `MessageRow`). */
-  liveSteps?: readonly TurnStep[];
   youAvatar?: string;
   resolveAttachmentUrl?: (nodeId: string) => Promise<string>;
   cognition?: CognitionState | null;
@@ -518,9 +541,6 @@ function Line({
         )}
         {message.outputs && message.outputs.length > 0 && (
           <OutputLinkRow outputs={message.outputs} />
-        )}
-        {!!liveSteps?.length && (
-          <WorkingIndicator srLabel="Working…" steps={liveSteps} />
         )}
         {/* And the crossings, for the same reason the steps are here: a room's
             turns are threaded, so this panel is the only surface a deliberating

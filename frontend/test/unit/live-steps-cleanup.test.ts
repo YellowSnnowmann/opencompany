@@ -23,15 +23,30 @@ describe("a threaded query's rows have somewhere to render", () => {
    * `MessageTimeline` left such a turn with no render path — and, because its
    * frames now carry `messageSeq`, no per-thread fallback either.
    */
-  it("ThreadPanel takes the per-query map and hands it to every line", () => {
+  it("ThreadPanel takes the per-query map", () => {
     expect(threadPanel).toContain("liveStepsByMessage?: Record<string, TurnStep[]>;");
-    // Both the question at the top of the panel and each reply under it.
-    expect(threadPanel).toContain("liveSteps={liveStepsByMessage?.[parent.id]}");
-    expect(threadPanel).toContain("liveSteps={liveStepsByMessage?.[r.id]}");
   });
 
-  it("a panel line names live activity without exposing raw calls in chat", () => {
-    expect(threadPanel).toContain('<WorkingIndicator srLabel="Working…" steps={liveSteps} />');
+  /**
+   * …and resolves it to ONE row at the foot rather than one per line.
+   *
+   * Position in a transcript is chronology. A "happening now" row placed back
+   * at the asking message claims the work finished before every reply beneath
+   * it — false the moment anything is journaled in between, which in a thread
+   * is every follow-up. The panel also said the two things in two tenses at
+   * once: rows against the body lines, and a foot row that could only manage
+   * "Replying…" because it was handed no steps.
+   */
+  it("resolves the per-query map to one row at the foot, not one per line", () => {
+    expect(threadPanel).toContain("const openTurnSteps");
+    expect(threadPanel).toContain("steps={openTurnSteps}");
+    // No line in the body may carry live rows again.
+    expect(threadPanel).not.toContain("liveSteps={liveStepsByMessage");
+    expect(threadPanel).not.toContain("liveSteps?: readonly TurnStep[];");
+  });
+
+  it("names live activity without exposing raw calls in chat", () => {
+    expect(threadPanel).toContain("<WorkingIndicator");
     expect(threadPanel).not.toContain("<StepTimeline");
   });
 
