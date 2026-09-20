@@ -978,6 +978,14 @@ export interface AgentReplyEvent {
    * available through  (see {@link fromHistory}).
    */
   mentions?: ChatMentionDto[];
+  /**
+   * What this reply was inside the episode that produced it — its round, its
+   * speech act, a `dm`'s recipients. Carried so a live row folds into the same
+   * round band the reloaded one does. Absent outside an episode.
+   */
+  episode?: EpisodeReplyMeta;
+  /** Who may read this line, when the host narrowed it. */
+  audience?: string[];
 }
 
 interface Options {

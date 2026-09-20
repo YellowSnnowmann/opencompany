@@ -320,9 +320,6 @@ function SessionRow({ line, agentId }: { line: SessionLine; agentId: string }) {
         {message.referralConversation && (
           <ReferralConversation crossing={message.referralConversation} rowId={message.id} />
         )}
-        {message.asideConversation && (
-          <AsideConversation aside={message.asideConversation} />
-        )}
       </div>
     </li>
   );
