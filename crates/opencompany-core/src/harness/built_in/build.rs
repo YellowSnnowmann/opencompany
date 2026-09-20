@@ -1435,12 +1435,36 @@ pub fn native_tool_names(tools: &[Box<dyn Tool>]) -> Vec<String> {
 ///   OpenHuman's process-wide gate;
 /// * `max_iterations` is [`MAX_TOOL_ITERATIONS`], unchanged;
 /// * `action_dir` is the agent workspace, so a relative path in a tool call
-///   resolves where the file tools were sandboxed.
+///   resolves where the file tools were sandboxed;
+/// * the same definition is ALSO declared as a custom
+///   [`AgentRegistryEntry`](oh::agent::registry::AgentRegistryEntry) in the
+///   agent's own config. Since OpenHuman 33566d38 ("run sessions through
+///   TinyAgents runtime") every chat turn is a *hosted* invocation that
+///   resolves its agent by id through the host definition registry — the
+///   process-global registry plus the config's custom entries — and the
+///   session's own definition is not consulted for that lookup, so a spec
+///   without the entry fails every turn with "agent definition … was not
+///   found". The tinyhivemind reference host registers its seats the same
+///   way (`examples/openhuman/src/main.rs::registry_entry`).
 pub fn agent_spec_for(
     blueprint: &AgentBlueprint,
     runtime_id: &str,
     provider: openhuman_embed::Provider,
 ) -> AgentSpec {
+    let entry = oh::agent::registry::AgentRegistryEntry {
+        id: runtime_id.to_string(),
+        name: blueprint.definition_name.clone(),
+        description: format!("OpenCompany agent {}", blueprint.definition_name),
+        source: oh::agent::registry::AgentRegistrySource::Custom,
+        enabled: true,
+        model: None,
+        system_prompt: Some(blueprint.system_prompt.clone()),
+        tool_allowlist: blueprint.native_tool_names.clone(),
+        tool_denylist: Vec::new(),
+        subagents: oh::agent::registry::types::AgentSubagentPolicy::default(),
+        tags: Vec::new(),
+        metadata: serde_json::Value::Null,
+    };
     AgentSpec::new(runtime_id)
         .definition(
             AgentDefinitionSpec::new()
@@ -1452,6 +1476,13 @@ pub fn agent_spec_for(
         .provider(provider)
         .access(Access::full())
         .action_dir(blueprint.workspace.clone())
+        .config(move |config| {
+            config
+                .agent_registry
+                .entries
+                .retain(|existing| existing.id != entry.id);
+            config.agent_registry.entries.push(entry);
+        })
 }
 
 /// [`build_agent_with_model`], discarding the [`HarnessModel`] it resolved.
