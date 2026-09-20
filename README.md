@@ -80,99 +80,66 @@ TinyHumans runtimes.
 
 Most "multi-agent" systems are fan-out: publish a task, wake N agents, collect
 the replies, average them somehow. That's a thread pool with a prompt attached.
-It has no notion of who is convinced, no way to register a grounded objection,
-no reason to stop other than running out of members, and no answer when you ask
-afterwards why the group chose what it chose.
+It has no notion of who is talking to whom, no way for one specialist to hand
+a finding to the one colleague who needs it, and no reason to stop other than
+running out of members.
 
-Real collectives don't work that way. Ant colonies, honeybee swarms and termite
-mounds reach decisions with no leader, no shared memory and far less bandwidth
-than five language models sharing a channel, and the mechanisms that let them
-have been studied for decades. OpenCompany runs its desks on those mechanisms,
-via [tinyhivemind](https://github.com/tinyhumansai/tinyhivemind), the hive-mind
-library that grew out of this repo.
+OpenCompany runs its desks as rooms, via
+[tinyhivemind](https://github.com/tinyhumansai/tinyhivemind), the hive-mind
+library that grew out of this repo, hosted over the
+[OpenHuman](https://github.com/tinyhumansai/openhuman) agent runtime.
 
 ### How a desk thinks
 
-A message to a desk with two or more members doesn't pick a responder. It opens
-an **episode**: a bounded sequence of rounds in which members deposit marker
-lines into the desk's shared transcript, and a pure fold over that transcript
-decides who speaks next and when the room is done.
+A message to a desk with two or more members doesn't pick a responder. It
+opens an **episode**: the room is asked who the message needs, those seats
+take their turns **at the same time**, each one ends its turn by saying
+exactly one thing, and the room goes round again until a seat reports the
+work complete.
 
 ```text
-!propose #stage Stage the rollout across three regions.
-!support #stage ^1 Staging bounds the blast radius if the migration is wrong.
-!object  >3      The regions are not independent, so this bounds nothing.
-!commit  #stage
+engineer  post              I can have the backend flag ready Thursday.
+ceo       dm  → writer      Keep the copy short; the page ships Friday.
+writer    broadcast         Draft is up — who checks the pricing numbers?
+engineer  complete_episode  Numbers checked against the ledger. Done.
 ```
 
-- **Stigmergy.** Work leaves a trace in a shared medium, and the trace is the
-  stimulus for the next piece of work. Nobody dispatches anybody and no agent
-  addresses another. The transcript is the medium; a marker line is a deposit
-  in it.
-- **Quorum sensing.** An option carries when enough *distinct* members have
-  *grounded* support for it inside a window, the way a honeybee swarm settles a
-  nest site. Not a majority, not a score to beat. A `!support` with no citation
-  counts for nothing, and a late member folds to exactly the same standing as
-  one that watched live.
-- **Cross-inhibition.** An objection names a *message* and removes its author
-  from the supporter set of whatever they were advocating. It doesn't debit the
-  option. Subtracting from a score can't break a tie between two equally backed
-  options; silencing an advocate can. Honeybees do this too, with stop signals.
-- **Pheromone decay.** A trace's pull on the room's attention decays with
-  distance in the transcript, so whoever spoke first doesn't hold the floor
-  forever. The trace's standing importance is the floor under that decay, which
-  is why a proposal nobody has touched for eighty messages still outranks a
-  fresh question.
-- **Response thresholds.** Every member computes an urge from the salience
-  field and its own affinity, and whoever bids highest takes the floor. A
-  member whose urge never clears its threshold doesn't bid at all. That's the
-  response-threshold model of division of labour in social insects, and it's
-  what keeps a specialist quiet on questions it has nothing to add to.
-
-### Why it converges instead of conforming
-
-- **The first round is blind.** Each member deposits what it knows before it
-  can read its peers, because a shared transcript destroys independence: the
-  third speaker has already read the first two. And what a blind member is
-  asked for is a *deposit*, not a position. On a desk of specialists, where one
-  member holds the decisive fact and the rest share a prior, asking for
-  positions lets the shared prior reach quorum before the informed member says
-  anything. On the hidden-profile benchmark, asking for deposits takes a room
-  from **16% to 67%** correct.
-- **A reason to stop.** An episode ends on a quorum it can name, a deadlock
-  between two carried options, a spent turn budget, or a room that has nothing
-  to say. Never because one agent decided it was finished. One operator message
-  is one bounded number of turns, whatever the desk's size.
-- **Small budgets on purpose.** Conformity among language models rises with
-  interaction time, so a long episode buys correlated error rather than better
-  judgement. The default budget is small, and raising it is a decision you make
-  per desk, not a setting you forget.
-- **Cross-desk referral.** Members of one desk read the same transcript, work
-  the same part of the company, and are wrong about the same things. Averaging
-  correlated error doesn't remove it; only pooling *across* the boundary can. A
-  desk can put a question to another desk, which answers with one real turn on
-  its own channel, and what crosses carries information, never a vote. Three
-  desks each confidently wrong about a different option: deliberating inside
-  them scored **0.2%**; crossing between them, **77.5%**.
-- **Private asides, off by default.** Two members of a desk can compare notes
-  without the room, and the exchange is on the record even though the room
-  can't read it. The library measured it: it loses 15 points on a hidden
-  profile, because averaging inside one correlated desk imports the shared
-  bias. So it's a knob you turn on deliberately, not a feature that's on.
+- **Speaking is a tool call.** A seat `post`s to the room, `dm`s the seats it
+  names, `broadcast`s when the room should decide who picks it up, or calls
+  `complete_episode` when its part is finished. The host appends the row and
+  decides what it means; nothing is said by accident, and nothing goes unsaid
+  because a model forgot.
+- **Rounds, not a queue.** Every seat with something to do runs at once. One
+  agent runs one turn at a time across every desk it sits on, and that is the
+  only lock — two desks working two problems proceed independently, and the
+  CEO on both of them is the same agent with the same memory.
+- **Routing by a model built for it.** Who a message needs, and who picks up
+  a broadcast, is asked of Jev — TypeSafe's System One routing model — through
+  the TinyHumans proxy on the key you already have. No key, and the desk lead
+  answers and the next seat picks up: the room still runs, with less
+  initiative.
+- **A reason to stop.** An episode ends when the assigned seats say it is
+  done, or when the desk's round cap is spent. Never because a fan-out ran out
+  of members. One operator message is one bounded number of turns.
+- **Cross-desk referral.** Members of one desk read the same transcript and
+  are wrong about the same things. A desk can put a question to another
+  desk, which answers in its own room, and only the answer crosses back.
+- **One continuous agent.** Each teammate is one agent with one session that
+  spans every desk it sits on, its DMs and the general line. It is handed
+  what it has not yet seen, never re-seeded, so the question it answered on a
+  desk an hour ago is one it remembers in a DM now.
 
 ### What you get out of it
 
-Every episode closes with a line the operator can read: what carried, who
-supported it, what was objected to and why, or that the desk deadlocked and
-between what. Decisions that settled long ago stay on a pinboard so they don't
-scroll away, and a desk remembers its past episodes. A desk of one behaves
-byte-for-byte like a single agent, so nothing here costs you anything until a
-desk has somebody to deliberate with.
+Every round is on the record: who was asked, who spoke, who was DMed, what
+carried the work forward and who called it done — live in the room as it
+happens, and rebuilt from the journal after a reload. A desk of one behaves
+like a single agent, so nothing here costs you anything until a desk has
+somebody to work with.
 
-[`docs/spec/runtime/hivemind.md`](docs/spec/runtime/hivemind.md) has the whole
-mechanism, and the
-[tinyhivemind benchmarks](https://github.com/tinyhumansai/tinyhivemind/wiki/Benchmarks)
-have the numbers.
+[`docs/spec/runtime/hive.md`](docs/spec/runtime/hive.md) has the whole
+mechanism, and `scripts/measure-coordination.sh` has the numbers on a
+two-desk company.
 
 ## What one person can now run
 
@@ -256,9 +223,10 @@ DigitalOcean / AWS deploys.
   agents with distinct mandates in a simple `company.toml`. The host
   instantiates them, coordinates them, and keeps them running.
 - **Desks that think as a hive.** Any desk with two or more members answers as
-  a room: an episode of bounded rounds that converges on a named option, with
-  the proposals, support and objections on the record. A desk of one behaves
-  exactly like a single agent. No fan-out, no vote-averaging.
+  a room: rounds of concurrent turns in which seats post, DM and broadcast to
+  each other until one reports the work complete, every utterance on the
+  record. A desk of one behaves exactly like a single agent. No fan-out, no
+  vote-averaging.
 - **Humans in the loop where it counts.** Every harness names the exact
   decisions reserved for you. Delegate the work; keep the judgment.
 - **Built on proven runtimes.** OpenCompany is a light host over OpenHuman, the
@@ -317,7 +285,7 @@ configure it, and goes to your own Sentry project rather than ours —
 | [`docs/running-locally.md`](docs/running-locally.md) | Docker, Compose, from-source builds, feature flags, desktop preview, deploy targets |
 | [`docs/repository-layout.md`](docs/repository-layout.md) | Where everything lives in the tree and what each package owns |
 | [`docs/spec/README.md`](docs/spec/README.md) | Architecture reference |
-| [`docs/spec/runtime/hivemind.md`](docs/spec/runtime/hivemind.md) | How a desk deliberates: episodes, rounds, quorum, [referral](docs/spec/runtime/hivemind-referral.md) and [asides](docs/spec/runtime/hivemind-asides.md) |
+| [`docs/spec/runtime/hive.md`](docs/spec/runtime/hive.md) | How a desk works: episodes, concurrent rounds, speaking as a tool call, Jev routing and cross-desk referral |
 | [`docs/gitbooks/developers/`](docs/gitbooks/developers/README.md) | Build, CLI, authoring companies, deployment, configuration |
 | [`scripts/qa/`](scripts/qa/README.md) | Checking a release against a deployed tenant |
 
