@@ -327,14 +327,6 @@ pub fn build_agent_with_model(
     // `is_orchestrator` precedent: this function builds one agent from parts
     // the caller decided, and the roster is one of them.
     team_section: &str,
-    // Whether this company's `[speech]` block turns talking into a tool call.
-    //
-    // A `bool` resolved by the caller rather than a `&CompanyManifest` read
-    // here, on exactly the precedent `is_orchestrator` above sets: this
-    // function builds one agent from parts its caller has already decided, and
-    // handing it the whole manifest so it could re-derive one flag would give
-    // it a second, drifting opinion about the company.
-    speech_enabled: bool,
 ) -> crate::Result<AgentBlueprint> {
     // Create the sandbox now, before any tool — or any `SecurityPolicy` — is
     // bound to it. See [`ensure_agent_workspace`] for why an absent directory
@@ -374,49 +366,12 @@ pub fn build_agent_with_model(
             deps.approval_requests.clone(),
         ),
     ));
-    // Issue #1890 F: reading another thread of the channel this turn is in.
-    //
-    // On **every** roster agent's belt, not just the orchestrator's — the agent
-    // that needs it is the one answering in the channel, and gating it on
-    // delegation grants would leave a desk lead able to see #1890 E's thread
-    // index and unable to follow any of it.
-    //
-    // Intrinsic on the same terms as the approval tool above: it reads this
-    // company's own journal, scoped at call time to the conversation the turn
-    // is in, so there is no grant for it to be covered by.
-    if let Some(events) = deps.events.clone() {
-        tools.push(Box::new(crate::harness::thread_tools::ReadThreadTool::new(
-            company.clone(),
-            events,
-            deps.store.clone(),
-        )));
-    }
-    // Talking as a tool call (`[speech] enabled`). On unless the manifest opts
-    // out, and on every roster agent's belt when enabled — speaking is not a
-    // capability one teammate has and another does not, so there is no grant
-    // for it to be scoped by, exactly as with the two intrinsic tools above.
-    //
-    // Needs the journal: these tools ARE the append, so without an `EventLog`
-    // there is nothing for them to do and registering them would advertise a
-    // voice the host cannot give. A company in that configuration keeps the
-    // return-text path, which is the same fallback an un-called tool gets.
-    // `speech_enabled` is the resolved default-on/opt-out value; whether the
-    // tools actually got wired also needs a journal to append to (the comment
-    // above). The persona brief below must agree with THIS — the AND, not the
-    // flag alone — or a company with no `EventLog` gets a brief instructing it
-    // to call tools that were never registered.
-    let speech_wired = speech_enabled && deps.events.is_some();
-    if speech_wired && let Some(events) = deps.events.clone() {
-        tools.extend(crate::harness::speech_tools::speech_belt(
-            crate::harness::speech_tools::SpeechContext::new(
-                company.clone(),
-                manifest_agent.id.clone(),
-                events,
-                deps.store.clone(),
-            )
-            .with_dispatch(deps.delegations.clone()),
-        ));
-    }
+    // Speaking — `post`, `broadcast`, `dm`, `complete_episode`, `read` — and
+    // reading another thread are served to every agent by the `opencompany`
+    // MCP server (plan hive-desks, Phases 3-4), not by tools on this belt:
+    // `openhuman_embed::Agent` has no seam for an in-process host tool, and
+    // a seat's one utterance per turn is attributed to its round by the
+    // in-flight registry the server reads, which a belt tool cannot reach.
     // Installed-MCP-registry surface (`mcp_registry_list_tools` /
     // `mcp_registry_tool_call`) — distinct from the per-server `mcp:<name>`
     // bridge below, and reaching further: `mcp_registry_tool_call` invokes an
@@ -947,17 +902,6 @@ pub fn build_agent_with_model(
 
     // How this company talks, when it talks by calling a tool.
     //
-    // Placed high, beside the mention brief, because it is a rule about every
-    // reply rather than a note about one namespace — and because the failure it
-    // prevents is silent: an agent that never learns about `desk_post` just
-    // answers in text, the reply path journals it, and nothing reports that the
-    // feature did nothing. Gated on the same condition that wired the tools
-    // (`speech_wired`, not the bare `speech_enabled` flag — Codex/CodeRabbit),
-    // so the brief can never describe a voice this agent was not given.
-    if speech_wired {
-        persona.push_str(&crate::harness::speech_tools::speech_brief());
-    }
-
     // A short, STATIC brief — never a tree snapshot. A snapshot baked into the
     // system prompt would be stale the moment the operator edits a note, which
     // is exactly what hitting the store per call avoids.
@@ -1589,7 +1533,6 @@ pub fn build_agent(
     routed_context: &[(String, String)],
     instructions: Option<&str>,
     is_orchestrator: bool,
-    speech_enabled: bool,
 ) -> crate::Result<AgentBlueprint> {
     build_agent_with_model(
         company,
@@ -1605,7 +1548,6 @@ pub fn build_agent(
         // Test-only wrapper; the roster section is the caller's to render, and
         // every caller of this wrapper is exercising something else.
         "",
-        speech_enabled,
     )
 }
 

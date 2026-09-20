@@ -519,7 +519,6 @@ pub(super) fn belt(grants: &[&str], is_orchestrator: bool, wire_everything: bool
         &[],
         None,
         is_orchestrator,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     agent.tools().iter().map(|t| t.name().to_string()).collect()

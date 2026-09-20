@@ -384,7 +384,6 @@ fn nothing_that_declares_itself_executable_is_internal_or_grantable() {
         &[],
         None,
         true,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let args = serde_json::json!({});

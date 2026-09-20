@@ -292,7 +292,6 @@ fn built_tool_names_delegating(
         &[],
         None,
         is_orchestrator,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let mut names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
@@ -346,7 +345,6 @@ fn built_tool_names_with_search(grants: &[&str]) -> Vec<String> {
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let mut names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
@@ -399,7 +397,6 @@ fn built_native_caps_with_search(grants: &[&str]) -> Vec<String> {
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     toolbelt::native_capabilities_on_belt(agent.tools())
@@ -460,7 +457,6 @@ fn built_tool_names_with_byo_search(grants: &[&str], provider: &str) -> Vec<Stri
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let mut names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
@@ -510,7 +506,6 @@ fn built_tool_names_with_workspace(grants: &[&str]) -> Vec<String> {
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let mut names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
@@ -558,7 +553,6 @@ fn built_tool_names_with_artifacts(grants: &[&str]) -> Vec<String> {
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let mut names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();

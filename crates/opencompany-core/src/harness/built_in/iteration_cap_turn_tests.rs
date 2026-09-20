@@ -303,7 +303,6 @@ async fn company_agent(
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
 

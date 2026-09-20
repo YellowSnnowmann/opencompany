@@ -435,7 +435,6 @@ fn every_built_agent_states_a_raised_tool_iteration_cap() {
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
 
