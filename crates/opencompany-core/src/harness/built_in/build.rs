@@ -1365,6 +1365,16 @@ impl std::fmt::Debug for AgentBlueprint {
 }
 
 impl AgentBlueprint {
+    /// The assembled belt.
+    pub fn tools(&self) -> &[Box<dyn Tool>] {
+        &self.tools
+    }
+
+    /// The tool-iteration cap the spec is rendered with.
+    pub fn max_tool_iterations(&self) -> usize {
+        MAX_TOOL_ITERATIONS
+    }
+
     /// The belt's tool names, in belt order — what the previous builder's
     /// `Agent::tools()` listed, kept for the tests that pin a grant to the
     /// tools it wires.

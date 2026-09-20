@@ -440,7 +440,7 @@ fn every_built_agent_states_a_raised_tool_iteration_cap() {
     .expect("agent builds");
 
     assert_eq!(
-        agent.agent_config().max_tool_iterations,
+        agent.max_tool_iterations(),
         MAX_TOOL_ITERATIONS,
         "the built agent is not running on the cap this crate states"
     );

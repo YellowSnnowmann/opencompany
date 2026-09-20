@@ -185,8 +185,7 @@ fn the_tool_iteration_cap_is_uniform_and_not_manifest_configurable() {
             /* speech_enabled */ false,
         )
         .expect("agent builds")
-        .agent_config()
-        .max_tool_iterations
+        .max_tool_iterations()
     };
 
     for (label, got) in [

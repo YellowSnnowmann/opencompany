@@ -288,7 +288,7 @@ async fn shell_factory_blocks_high_risk_commands_on_every_execution_path() {
     assert_eq!(tool.max_result_size_chars(), Some(30_000));
     assert_eq!(
         tool.timeout_policy(&json!({ "timeout_secs": 17 })),
-        ToolTimeout::Secs(17)
+        ToolTimeout::Millis(17_000)
     );
 
     let audit_dir = tempfile::tempdir().unwrap();

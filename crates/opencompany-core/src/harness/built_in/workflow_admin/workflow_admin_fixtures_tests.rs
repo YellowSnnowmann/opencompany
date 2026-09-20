@@ -16,6 +16,7 @@ use futures::stream::{self, BoxStream};
 use serde_json::{Value, json};
 
 use super::*;
+use openhuman_core as oh;
 use crate::company::CompanyManifest;
 use crate::error::Result;
 use crate::ports::types::{
