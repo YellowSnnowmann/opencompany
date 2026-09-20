@@ -366,6 +366,8 @@ fn rewrite_result(mut result: ToolResult) -> ToolResult {
                 }
                 _ => *text = rewrite_prose(text),
             },
+            // Binary blocks carry no key to rename.
+            ToolContent::Image { .. } | ToolContent::File { .. } => {}
         }
     }
     if let Some(md) = result.markdown_formatted.as_mut() {

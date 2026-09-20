@@ -3540,6 +3540,11 @@ impl HarnessBrain {
                 mentions: mentions.iter().map(tinyhivemind_mention).collect(),
                 orchestrator_id: self.responder.clone(),
                 selection_policy: tinyhivemind::responder::SelectionPolicy::Allowed,
+                // Half: the vendored ladder's own test floor. The metered
+                // selector answers with a single choice at full confidence
+                // (below), so any floor short of certainty admits it.
+                minimum_selection_confidence: tinyhivemind::responder::Probability::new(500_000)
+                    .unwrap_or(tinyhivemind::responder::Probability::ZERO),
             };
             (company, members, desks, candidates, request)
         };
@@ -3622,7 +3627,19 @@ impl tinyhivemind::responder::Selector for TinyHiveSelector<'_> {
                 })
                 .collect::<Vec<_>>();
             match self.0.select(&request.message, &candidates).await {
-                crate::harness::selector::SelectorVerdict::Member(id) => Ok(id),
+                // The metered selector names one member; rendered as a
+                // point distribution, which is what a typed evaluation is
+                // for a picker that reports no probabilities of its own.
+                crate::harness::selector::SelectorVerdict::Member(id) => {
+                    Ok(tinyhivemind::responder::SelectionEvaluation {
+                        choice: id.clone(),
+                        probabilities: vec![tinyhivemind::responder::CandidateProbability {
+                            candidate_id: id,
+                            probability: tinyhivemind::responder::Probability::ONE,
+                        }],
+                        confidence: tinyhivemind::responder::Probability::ONE,
+                    })
+                }
                 crate::harness::selector::SelectorVerdict::Unavailable => {
                     Err("the responder selector was unavailable".into())
                 }
