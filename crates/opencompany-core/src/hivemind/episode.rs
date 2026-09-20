@@ -1167,6 +1167,7 @@ impl<'a> EpisodeDriver<'a> {
                     agent_id: agent_id.to_owned(),
                     text: aside_line,
                     audience,
+                    episode: None,
                     steps: Vec::new(),
                     task_id: None,
                     outputs: Vec::new(),
