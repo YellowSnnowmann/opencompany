@@ -106,6 +106,34 @@ export function formatElapsed(ms: number): string {
 }
 
 /**
+ * Which agent the receipt should name, given the one a live frame just
+ * reported and the one it is already showing.
+ *
+ * **The newest frame's agent wins.** One query can span several agents: a desk
+ * hand-off runs the delegate's turn under the same `messageSeq`, and a hive
+ * episode passes the floor between seats for the whole deliberation — the
+ * episode's trigger seq is fixed at its start while `agent_id` is a per-turn
+ * argument. Latching the first agent seen therefore pinned the receipt to
+ * whoever spoke first and left it there while somebody else was visibly
+ * working, which is exactly the question this row exists to answer.
+ *
+ * **A frame with no agent changes nothing.** Absence is not a hand-back, and
+ * blanking the name mid-turn would drop the line to "Sent", reading as though
+ * the turn had been un-picked-up.
+ *
+ * Extracted from `AppShell.onTurnEvent` so a test can call the rule instead of
+ * restating it — the same reason `foldLiveFrame` lives apart from the shell,
+ * and the trap the #2068 review caught when a test duplicated a conditional
+ * and would have kept passing through a regression in the branch that runs.
+ */
+export function receiptAgentAfter(
+  current: string | undefined,
+  frameAgentId: string | undefined,
+): string | undefined {
+  return frameAgentId || current;
+}
+
+/**
  * The teammate on the other end of this receipt, by name — never a raw id.
  *
  * Resolves the captured `agentId` against the roster's name map, falling back

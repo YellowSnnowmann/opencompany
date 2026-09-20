@@ -129,7 +129,7 @@ import { CompanyView } from "@/views/company/CompanyView";
 import { ManageListsView } from "@/views/company/ManageListsView";
 import { readLastChannel } from "@/lib/last-channel";
 import { RoomView } from "@/views/RoomView";
-import { shouldClearReceipt } from "@/views/room/ChatLiveReceipt";
+import { receiptAgentAfter, shouldClearReceipt } from "@/views/room/ChatLiveReceipt";
 import {
   buildChannels,
   channelForThread,
@@ -2912,14 +2912,17 @@ export function AppShell({
     });
     // Keep this thread's receipt alive off the same frame (issue #1934): a frame
     // arriving means the turn is advancing, so bump `lastFrameAt` (which clears
-    // any stall) and capture the first agent id we see. Guarded on an existing
+    // any stall) and name whoever is working right now. Guarded on an existing
     // receipt — a stray background frame for a thread we never sent on must not
     // conjure one, mirroring the `if (!threadId) return` guard above.
+    //
+    // Who is named is `receiptAgentAfter`'s rule, not this callback's — see it
+    // for why the newest frame's agent wins over the first one seen.
     setReceiptByThread((prev) => {
       const existing = prev[threadId];
       if (!existing) return prev;
       const frameAgentId = "agentId" in event ? event.agentId : undefined;
-      const agentId = existing.agentId ?? (frameAgentId || undefined);
+      const agentId = receiptAgentAfter(existing.agentId, frameAgentId);
       return { ...prev, [threadId]: { ...existing, lastFrameAt: Date.now(), agentId } };
     });
   }, []);
