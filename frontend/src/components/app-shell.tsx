@@ -2418,7 +2418,7 @@ export function AppShell({
   /**
    * Who is answering a crossing right now, per asking desk (#2341 live report).
    *
-   * A referred turn runs through `HiveReferralRunner::refer`, outside the
+   * A referred turn runs on the far desk's own episode, outside the
    * `turn_started`/`turn_settled` bracket every other turn is announced by — so
    * while a crossing ran, and `pair_messages` lets that be several model turns,
    * the desk showed a generic working row naming nobody. The `referral` frame

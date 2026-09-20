@@ -406,7 +406,7 @@ export type CompanyStreamEvent =
   // `GET …/workflows`, so the picker's content keeps exactly one source.
   /**
    * The company's own shape changed: a teammate or desk was created, a seat
-   * moved, or a desk's move grammar was installed or restored.
+   * moved, or a desk's routing block was installed or restored.
    *
    * Thin on purpose, like the workflow frames beside them — ids and enough
    * identity to act on, never a configuration body. A consumer reacts by
