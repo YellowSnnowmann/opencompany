@@ -24,8 +24,8 @@ const ROWS: ChatMessage[] = [
   { id: "h6", from: "you", byPerson: true, at: 40, text: "thanks" },
 ];
 
-const kinds = (rows: ChatMessage[], ...rest: Parameters<typeof foldEpisodes>) =>
-  buildTimelineItems(buildTimeline(rows, CHANNEL, []), [], {}, foldEpisodes(rows, ...rest.slice(1) as [never, never])).map((item) =>
+const kinds = (rows: ChatMessage[]) =>
+  buildTimelineItems(buildTimeline(rows, CHANNEL, []), [], {}, foldEpisodes(rows)).map((item) =>
     item.kind === "round"
       ? `round:${item.round.revision}[${item.items.map((r) => r.key).join(",")}]`
       : item.kind === "episode_complete"
@@ -41,7 +41,7 @@ describe("round grouping", () => {
   });
 
   it("collapses each round's rows into one item, in transcript order, then the marker", () => {
-    expect(kinds(ROWS, ROWS)).toEqual([
+    expect(kinds(ROWS)).toEqual([
       "message:h1",
       "round:0[h2,h3]",
       "round:1[h4]",
