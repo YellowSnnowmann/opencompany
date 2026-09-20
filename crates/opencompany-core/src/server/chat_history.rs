@@ -353,7 +353,7 @@ pub fn agent_channels(record: &CompanyRecord, agent_id: &str) -> Vec<Channel> {
         }
     }
     for partner in partners {
-        let thread = crate::hivemind::referral::pair_conversation(agent_id, &partner);
+        let thread = crate::hive::referral::pair_conversation(agent_id, &partner);
         if seen.insert(thread.clone()) {
             channels.push(Channel {
                 label: format!("@{partner}"),
@@ -517,36 +517,6 @@ pub struct ReferralConversation {
     /// The exchange, oldest first. Its length is the message count the
     /// collapsed label shows.
     pub lines: Vec<ReferralLine>,
-}
-
-/// One line of a private aside, in the order it was said.
-///
-/// No `author_label`: unlike a referral, both sides of an aside sit on the desk
-/// being read, so the console already knows their names.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AsideLine {
-    /// The agent that wrote it.
-    pub author_id: String,
-    /// What they said, with the `!aside @peer` head already stripped.
-    pub text: String,
-}
-
-/// A private exchange between members of one desk, folded onto the move it rode
-/// under.
-///
-/// The same idiom as [`ReferralConversation`] and for the same reason: it is
-/// detail behind a line, not part of the desk's own conversation. It differs in
-/// who may read it — an operator reads every row in full (`Audience::admits`
-/// admits `Viewer::Operator` unconditionally), because privacy here is between
-/// agents and is a deliberation device, never a security boundary. Collapsing it
-/// is a rendering choice, not an access-control one, and nothing here withholds
-/// anything from the person reading.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AsideConversation {
-    /// Everyone in it — the author first, then who they addressed.
-    pub members: Vec<String>,
-    /// The exchange, oldest first. Its length is the collapsed label's count.
-    pub lines: Vec<AsideLine>,
 }
 
 #[cfg(test)]
@@ -1591,7 +1561,7 @@ pub async fn history_for_desk(
                 // FAILED turn's notice carries its own reserved id and is not
                 // dropped — the turn it describes does not exist, so there is
                 // no gap for a reader to notice.
-                if message.channel == crate::hivemind::HIVE_REPORT_AUTHOR {
+                if crate::hive::referral::is_legacy_report_author(&message.channel) {
                     continue;
                 }
                 messages.push(message);
@@ -1649,143 +1619,9 @@ pub async fn history_for_desk(
     drop_dead_cards(runtime, &mut messages).await?;
     drop_dead_outputs(runtime, &mut messages).await?;
     attach_referral_origins(runtime, desk_id, &mut messages).await?;
-    fold_asides(&mut messages);
     Ok(messages)
 }
 
-/// Fold each private aside onto the move it rode under.
-///
-/// A seat writes its move and may add one `!aside @peer` line beneath it; the
-/// host journals that line as its own row carrying an `audience`. Left alone it
-/// renders in the transcript as an ordinary message with the raw marker still in
-/// its body — which is both a leak of the grammar into the operator's view and a
-/// misreading of what happened, since the row was never addressed to the room.
-///
-/// So the aside rows are lifted out of the transcript and hung on the nearest
-/// preceding desk-visible row by the same author — the move they rode under.
-///
-/// **An orphan is kept, never dropped.** An aside with no move above it (the
-/// author's first row, or a history page that begins mid-exchange) stays where it
-/// is as an ordinary row. A rendered line in the wrong shape is a cosmetic
-/// defect; a dropped one is a lost message, and this projection already refuses
-/// that trade for referrals one function below.
-pub(crate) fn fold_asides(messages: &mut Vec<MessageView>) {
-    if messages
-        .iter()
-        .all(|message| message.aside_audience.is_empty())
-    {
-        return;
-    }
-    let mut folded = Vec::with_capacity(messages.len());
-    for message in std::mem::take(messages) {
-        if message.aside_audience.is_empty() {
-            folded.push(message);
-            continue;
-        }
-        // The move this aside rode under: the nearest row above it that this same
-        // seat wrote in the open. Searching by author rather than by adjacency
-        // keeps the pairing right when two seats aside in the same round.
-        let anchor = folded.iter_mut().rev().find(|earlier| {
-            // Same seat, and speaking in the open: an orphaned aside kept
-            // above must not become the anchor for the one below it.
-            earlier.author == message.author && earlier.aside_audience.is_empty()
-        });
-        let Some(anchor) = anchor else {
-            // Orphan: no move of ours above it. Keep the row.
-            folded.push(message);
-            continue;
-        };
-        let line = AsideLine {
-            author_id: message.author.clone(),
-            text: aside_body(&message.text),
-        };
-        match &mut anchor.aside_conversation {
-            Some(conversation) => {
-                for member in &message.aside_audience {
-                    if !conversation.members.contains(member) {
-                        conversation.members.push(member.clone());
-                    }
-                }
-                conversation.lines.push(line);
-            }
-            slot @ None => {
-                let mut members = vec![message.author.clone()];
-                members.extend(message.aside_audience.iter().cloned());
-                *slot = Some(AsideConversation {
-                    members,
-                    lines: vec![line],
-                });
-            }
-        }
-    }
-    *messages = folded;
-}
-
-/// `!aside @peer the body` -> `the body`.
-///
-/// The marker and the addressee are what the collapsed chip's header already
-/// says; leaving them in the body is the leak this fold exists to close.
-/// `line_kind` cannot do it — `MOVE_KINDS` deliberately omits `aside`, because a
-/// marker the fold discards is not a move anybody made — so the strip is here.
-fn aside_body(text: &str) -> String {
-    let trimmed = text.trim_start();
-    let Some(rest) = trimmed.strip_prefix("!aside") else {
-        return text.to_string();
-    };
-    let mut rest = rest.trim_start();
-    // Every leading `@name`, not just the first: an aside may name more than one
-    // peer when a desk raised `max_members`.
-    while let Some(after_at) = rest.strip_prefix('@') {
-        let cut = after_at.find(char::is_whitespace).unwrap_or(after_at.len());
-        rest = after_at[cut..].trim_start();
-    }
-    // Trailing space too: the head strip is the only thing standing between the
-    // authored line and a chat bubble, and a bubble padded with the whitespace
-    // that used to separate `@peer` from the body is a rendering artefact.
-    rest.trim_end().to_string()
-}
-
-/// Fold each `ReferralEnqueued` marker onto the message it caused
-/// (tinyhivemind P15).
-///
-/// # Why a fold and not a field on the message
-///
-/// The marker is written INSIDE the enqueue transaction, which is necessarily
-/// before the child turn exists — that ordering is what makes it an idempotency
-/// marker at all. So the message it causes cannot carry the provenance at write
-/// time, and the projection is the only place the two can meet.
-///
-/// # How they are matched
-///
-/// A marker names the desk the child runs on and the agent that asked. The
-/// child is the first message on that desk, after the marker, authored by that
-/// agent. Both are written by one task with nothing in between, so "first
-/// after" is exact rather than probabilistic — and the match still requires the
-/// author to agree, so an unrelated line landing between them is not adopted.
-///
-/// # The return leg is an INPUT, not a line in the channel
-///
-/// One agent speaks in both rooms, and it is the ASKER. It goes to the other
-/// desk and asks there under its own name; the desk that answers, answers on
-/// its OWN desk and never appears in the room it was asked from. When the asker
-/// judges the answer sufficient, it comes home and reports — in its own words,
-/// under its own name.
-///
-/// So the child of a RETURN marker is not a message anyone should read. It is
-/// the answer being handed back to the asker so the asker can run a turn on it,
-/// and rendering it produced exactly the double the single-accountable-voice
-/// rule exists to prevent: the other desk's agent posting its answer verbatim
-/// into a room it is not part of, immediately followed by the asker summarising
-/// that same answer. The reader saw the same content twice, in two voices, one
-/// of which does not belong there.
-///
-/// The relay is therefore dropped from the projection and its provenance moves
-/// onto the asker's report — which is the line a reader wants the chip on
-/// anyway, because that is the message whose origin is not otherwise visible.
-///
-/// **Only when the report actually exists.** If the asker's turn has not landed
-/// yet, or failed, the relay renders as it did before. A rendered line in the
-/// wrong voice is a cosmetic defect; a dropped one is a lost answer, and this
 /// projection already refuses that trade once (see the orphan arm below).
 async fn attach_referral_origins(
     runtime: &CompanyRuntime,
@@ -2037,7 +1873,7 @@ async fn attach_referral_origins(
                     chat_id, agent_id, ..
                 } => {
                     chat_id == to_desk
-                        && (agent_id == crate::hivemind::HIVE_REFERRAL_AUTHOR
+                        && (agent_id == crate::hive::referral::HIVE_REFERRAL_AUTHOR
                         // **The answering desk's own view of the crossing.**
                         //
                         // The two shapes above are both the ASKING desk's: the
@@ -2270,7 +2106,7 @@ async fn attach_referral_origins(
                     lines.push(ReferralLine {
                         author_id: target.clone(),
                         author_label: String::new(),
-                        text: readable_moves(crate::hivemind::referral::asked_message(&text)),
+                        text: readable_moves(crate::hive::referral::asked_message(&text)),
                         outbound: true,
                     });
                 }
@@ -2323,7 +2159,7 @@ async fn attach_referral_origins(
                             audience,
                             ..
                         } if chat_id == from_desk
-                            && !crate::hivemind::is_hive_author(agent_id)
+                            && !crate::hive::referral::is_hive_author(agent_id)
                             // **An aside is not a turn, here as in `turns_of`.**
                             //
                             // A room's `!aside` is journaled with the same
@@ -2355,7 +2191,7 @@ async fn attach_referral_origins(
                                 // The room's attribution removed — this line is
                                 // already attributed by the fold that carries
                                 // it. See `referral::unattributed`.
-                                text: readable_moves(crate::hivemind::referral::unattributed(
+                                text: readable_moves(crate::hive::referral::unattributed(
                                     asker,
                                     from_desk_name,
                                     &text,
@@ -2493,31 +2329,14 @@ fn strip_relay_note(event: &CompanyEvent) -> Option<String> {
     (!words.is_empty()).then(|| words.to_string())
 }
 
-/// Renders a deliberation turn for a person, leaving every other reply alone.
+/// The operator-facing body of a reply.
 ///
-/// A room's grammar — `!move`, `#topic`, `^N`, `>N` — is addressed to the fold
-/// and was reaching the operator verbatim: `!support #lazy-load ^3 agreed`
-/// rendered as-is in a chat window. Each line that carries a move is rewritten
-/// to a plain-English lead; a line that carries none passes through untouched,
-/// which is every reply on every desk that does not deliberate.
-///
-/// Line by line, because a turn may pair prose with its move, and only the
-/// marked line is grammar.
-///
-/// **The journal keeps the original.** The fold reads markers off the stored
-/// line, so this rewrite lives here and nowhere earlier — a room whose own
-/// transcript had been cleaned could not count itself.
+/// An identity since plan hive-desks, Phase 4: a seat speaks through a tool
+/// call, so nothing a person reads carries a move grammar to rewrite. Kept as
+/// a function because every projection calls it at the display edge, and the
+/// seam is where a future rewrite would go.
 pub(crate) fn readable_moves(text: String) -> String {
-    if !text
-        .lines()
-        .any(|line| crate::hivemind::line_kind(line).is_some())
-    {
-        return text;
-    }
-    text.lines()
-        .map(|line| crate::hivemind::readable(line).unwrap_or_else(|| line.to_string()))
-        .collect::<Vec<_>>()
-        .join("\n")
+    text
 }
 
 /// Blanks `task_id` on any row naming a card the board no longer has
