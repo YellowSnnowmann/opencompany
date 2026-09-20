@@ -1581,14 +1581,12 @@ function SignInStep({
         })}
       </div>
 
-      {/* What choosing email actually gets you on *this* host. Passwords sign
-          people in with no transport anywhere in sight, so "no mail" means the
-          magic link is off the table, not that email sign-in is broken.
-          Not a reason to hide the mode or grey the card out: hub OAuth and a
-          password sign people in with no transport anywhere in sight, so "no
-          mail" means the magic link is undeliverable, not that email sign-in is
-          broken. Hiding it would refuse a mode the operator may wire mail up
-          for ten minutes from now. */}
+      {/* What choosing email actually gets you on *this* host. Not a reason
+          to hide the mode or grey the card out: a password signs people in
+          with no transport anywhere in sight, so "no mail" means the magic
+          link is off the table, not that email sign-in is broken. Hiding it
+          would refuse a mode the operator may wire mail up for ten minutes
+          from now. */}
       {status.auth_modes.includes("email") && !status.mail.wired && (
         <p className="mt-3 text-xs text-muted-foreground" data-testid="setup-mail-note">
           This host has no mail transport, so nobody gets a sign-in link here — you and
