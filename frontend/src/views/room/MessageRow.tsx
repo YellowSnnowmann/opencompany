@@ -346,41 +346,39 @@ export function MessageRow({
             placeholder={echoMarkerFor(message, sender, cognition)}
           />
         )}
-        <>
-            {message.turnFailure ? (
-              // KR-L2-03: the host computed its own exact, actionable X9
-              // sentence for this fail-closed turn — a switched-off or
-              // deleted pin, a broken company default, no model chosen at
-              // all. Rendered verbatim in place of the generic retry text
-              // `message.text` would otherwise carry, with the one action
-              // that actually fixes it.
-              <TurnFailureNotice failure={message.turnFailure} />
-            ) : (
-              <Markdown
-                mentions={message.mentions}
-                className={cn(
-                  "text-sm leading-6 break-words prose-p:my-0 prose-pre:my-1.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1",
-                  // A line that never left the browser is dimmed, so the
-                  // difference between sent and not-sent is visible in the text
-                  // itself and not only in a note under it (B-099). Muted rather
-                  // than struck through: the words are still the operator's own
-                  // draft, and Retry means they may yet be delivered.
-                  //
-                  // `!== undefined` rather than truthy: an `ApiError` can carry
-                  // an empty `message` when the host's envelope sends
-                  // `error: ""` (`httpError`'s `envelope?.error ?? statusMessage(res)`
-                  // keeps an empty string as-is, since `??` only falls back on
-                  // nullish). A truthy check would silently hide the failed
-                  // styling, the notice, and the Retry control for exactly that
-                  // response (CodeRabbit review).
-                  //
-                  message.sendFailed !== undefined && "text-muted-foreground",
-                )}
-              >
-                {message.text}
-              </Markdown>
+        {message.turnFailure ? (
+          // KR-L2-03: the host computed its own exact, actionable X9
+          // sentence for this fail-closed turn — a switched-off or
+          // deleted pin, a broken company default, no model chosen at
+          // all. Rendered verbatim in place of the generic retry text
+          // `message.text` would otherwise carry, with the one action
+          // that actually fixes it.
+          <TurnFailureNotice failure={message.turnFailure} />
+        ) : (
+          <Markdown
+            mentions={message.mentions}
+            className={cn(
+              "text-sm leading-6 break-words prose-p:my-0 prose-pre:my-1.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1",
+              // A line that never left the browser is dimmed, so the
+              // difference between sent and not-sent is visible in the text
+              // itself and not only in a note under it (B-099). Muted rather
+              // than struck through: the words are still the operator's own
+              // draft, and Retry means they may yet be delivered.
+              //
+              // `!== undefined` rather than truthy: an `ApiError` can carry
+              // an empty `message` when the host's envelope sends
+              // `error: ""` (`httpError`'s `envelope?.error ?? statusMessage(res)`
+              // keeps an empty string as-is, since `??` only falls back on
+              // nullish). A truthy check would silently hide the failed
+              // styling, the notice, and the Retry control for exactly that
+              // response (CodeRabbit review).
+              //
+              message.sendFailed !== undefined && "text-muted-foreground",
             )}
-        </>
+          >
+            {message.text}
+          </Markdown>
+        )}
         {message.sendFailed !== undefined && (
           <FailedSendNotice
             reason={message.sendFailed || "something went wrong"}
