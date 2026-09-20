@@ -54,32 +54,6 @@ pub(super) fn abnormal_stop_outcome(reply: &str) -> crate::harness::built_in::Tu
     }
 }
 
-/// A bare brain over a fresh temp-dir store, for tests that only need
-/// `HiveDeskRunner`'s `brain`/`host` fields satisfied and are not
-/// exercising the approval-parking path itself.
-pub(super) fn hive_test_brain(dir: &std::path::Path) -> HarnessBrain {
-    brain_with_approval_queue(dir, crate::harness::policy::ApprovalRequestQueue::default())
-}
-
-pub(super) fn hive_desk_runner<'a>(
-    brain: &'a HarnessBrain,
-    host: &'a dyn CycleHost,
-    outcome: crate::harness::built_in::TurnOutcome,
-) -> HiveDeskRunner<'a> {
-    HiveDeskRunner {
-        run_turn: Arc::new(FixedOutcomeTurn {
-            outcome,
-            approval_requests: None,
-        }),
-        company: CompanyId::new("acme"),
-        chat_id: Some("lab".to_string()),
-        thread_root: None,
-        trigger_seq: None,
-        brain,
-        host,
-    }
-}
-
 /// A brain whose provider steers the dispatched card `key` with `actions`
 /// (one per turn). Returns the brain + its task store so a test can seed the
 /// card and read the disposition back.

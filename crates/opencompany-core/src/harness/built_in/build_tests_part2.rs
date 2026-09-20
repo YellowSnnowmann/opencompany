@@ -366,7 +366,6 @@ fn mcp_registry_tools_fail_closed_with_no_registry_home() {
         &[],
         None,
         false,
-        false,
     )
     .expect("agent builds");
     let names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
