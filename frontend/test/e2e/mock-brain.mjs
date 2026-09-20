@@ -62,6 +62,15 @@
 //      emit the named call with the arguments the instruction dictates. The
 //      directive that produced the parked call has already been served, so
 //      without this arm no approval-gated tool can run in this lane at all.
+//   2b. a **hive turn** — the last user message opens with the host's seat
+//      sentinel `Hive turn: desk <deskId>, episode <episodeId>, round <n>.` and
+//      the belt offers `mcp_call_tool` — end the turn with exactly one speech
+//      act on the `opencompany` MCP server, chosen by round: `post` in round 0,
+//      `broadcast` in round 1 (or `dm` to the agent a `__MOCK_DM__ <agent>`
+//      directive names), `complete_episode` from round 2 on. A tool output as
+//      the last message is that utterance recorded, and ends the turn.
+//      `desk-episode-live.spec.ts` and `scripts/measure-coordination.sh` drive
+//      a two-desk company to completion with it.
 //   3. a message carrying `__MOCK_PLAN__ [[{…},{…}],[…]]` — a whole scripted
 //      turn: several calls in one assistant message, and several steps across
 //      one turn's tool loop. `orchestration-simulation.spec.ts` drives a goal
@@ -275,6 +284,123 @@ const SPAWN_DIRECTIVE = "SPAWNONE";
  * stay two plans rather than sharing one cursor.
  */
 const PLAN_DIRECTIVE = "__MOCK_PLAN__";
+
+/**
+ * The host's seat sentinel — the first line of every turn a seat runs inside
+ * a desk episode (`src/hive/prompt.rs`). The three captures are what the arm
+ * keys its speech act on: the round decides the kind, the desk and episode
+ * make the message self-describing in a transcript.
+ *
+ * Matched anywhere in the last user message rather than only at its start,
+ * because a retry reminder may precede it — but on the LAST message only: an
+ * older sentinel is a turn already taken.
+ */
+const HIVE_TURN_PATTERN = /Hive turn: desk (\S+?), episode (\S+?), round (\d+)\./;
+
+/**
+ * "DM this seat in round 1 instead of broadcasting", followed by an agent id
+ * — e.g. `__MOCK_DM__ ceo`. What lets a spec assert the dm chip and the
+ * audience narrowing without a model that might decide otherwise.
+ */
+const DM_DIRECTIVE = "__MOCK_DM__";
+
+/** The MCP server slug the host mounts the speech tools on. */
+const HIVE_SERVER = "opencompany";
+
+/**
+ * The seat sentinel in the last message, or null.
+ *
+ * @param {any[]} messages
+ * @returns {{desk: string, episode: string, round: number} | null}
+ */
+function findHiveTurn(messages) {
+  // The last USER message: a tool output can sit after it in the same turn.
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role !== "user" || isToolOutput(message)) continue;
+    const match = HIVE_TURN_PATTERN.exec(textOf(message));
+    if (!match) return null;
+    return { desk: match[1], episode: match[2], round: Number.parseInt(match[3], 10) };
+  }
+  return null;
+}
+
+/**
+ * The agent a `__MOCK_DM__` directive names, anywhere in the transcript, or
+ * null. The directive rides the operator's message, which reaches the seat
+ * inside the desk delta — so it is searched everywhere, not only last.
+ *
+ * @param {any[]} messages
+ * @returns {string | null}
+ */
+function findDmDirective(messages) {
+  for (const message of messages) {
+    const text = textOf(message);
+    const at = text.indexOf(DM_DIRECTIVE);
+    if (at === -1) continue;
+    const word = text.slice(at + DM_DIRECTIVE.length).trim().split(/\s+/)[0] ?? "";
+    const id = word.replace(/^@/, "").replace(/[^a-z0-9_-]/gi, "");
+    if (id) return id;
+  }
+  return null;
+}
+
+/**
+ * Whether a tool output reads as the host refusing the call — a dm to a seat
+ * that is not on the desk, a second speech act in one turn. The arm then
+ * falls back to the act that cannot be refused for the round, rather than
+ * ending the turn with nothing recorded.
+ *
+ * @param {any} message
+ * @returns {boolean}
+ */
+function isRefusedToolOutput(message) {
+  return /\b(error|refused|rejected|invalid|not a member|cannot)\b/i.test(toolOutputText(message));
+}
+
+/**
+ * The one speech act for a hive turn, as an OpenHuman `mcp_call_tool` call.
+ *
+ * @param {string} model
+ * @param {{desk: string, episode: string, round: number}} hive
+ * @param {string | null} dm
+ * @param {boolean} refused whether the previous act in this turn was refused
+ * @returns {any}
+ */
+function hiveCompletion(model, hive, dm, refused) {
+  const stamp = `${MARKER} desk ${hive.desk} episode ${hive.episode} round ${hive.round}`;
+  /** @type {{tool: string, arguments: Record<string, unknown>}} */
+  let act;
+  if (hive.round === 0) {
+    act = { tool: "post", arguments: { message: `${stamp}: opening post.` } };
+  } else if (hive.round === 1) {
+    act =
+      dm && !refused
+        ? { tool: "dm", arguments: { to: [dm], message: `${stamp}: a word for @${dm}.` } }
+        : { tool: "broadcast", arguments: { message: `${stamp}: work for whoever is best placed.` } };
+  } else {
+    act = { tool: "complete_episode", arguments: { message: `${stamp}: done, nothing left open.` } };
+  }
+  process.stderr.write(`[mock brain] hive turn: ${act.tool} (${hive.desk}/${hive.episode}/r${hive.round})\n`);
+  return completion(
+    model,
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: `mock-hive-${hive.episode}-${hive.round}`,
+          type: "function",
+          function: {
+            name: "mcp_call_tool",
+            arguments: JSON.stringify({ server: HIVE_SERVER, tool: act.tool, arguments: act.arguments }),
+          },
+        },
+      ],
+    },
+    "tool_calls",
+  );
+}
 
 /**
  * The host's own briefing blocks, appended to an operator message before it
@@ -963,6 +1089,23 @@ function chatCompletion(body) {
       },
       "tool_calls",
     );
+  }
+
+  // A seat's turn inside a desk episode. Ahead of the plan and directive arms
+  // because the sentinel says what this request IS: a turn that must end in
+  // exactly one speech act, whatever the operator's message carried. Only for
+  // a belt that can make the call — a seat handed no MCP bridge falls through
+  // to prose, which is what a real model does too.
+  const hive = findHiveTurn(messages);
+  if (hive && offeredTools(body).has("mcp_call_tool")) {
+    const last = messages[messages.length - 1];
+    if (isToolOutput(last) && !isRefusedToolOutput(last)) {
+      // The utterance was recorded; the turn is over. Prose here reaches
+      // nobody by the room's own rules, so it only carries the marker.
+      process.stderr.write("[mock brain] hive turn: utterance recorded, ending the turn\n");
+      return completion(model, { role: "assistant", content: `${MARKER} hive turn done.` }, "stop");
+    }
+    return hiveCompletion(model, hive, findDmDirective(messages), isToolOutput(last));
   }
 
   // The scripted-turn arm, ahead of the single-call directives: a plan is the
