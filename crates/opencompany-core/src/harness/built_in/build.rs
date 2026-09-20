@@ -1526,17 +1526,47 @@ pub fn agent_spec_for(
 /// the model calls `publish_artifact` by its bare name — the tool the belt
 /// brief describes — and OpenHuman answers that no such tool exists.
 fn opencompany_mcp_brief(tools: &[String]) -> String {
-    let mut brief = String::from(
-        "\n\n## Company tools (MCP server `opencompany`)\n\nEvery tool named below is served \
+    let mut brief = String::from(MCP_BRIEF_HEADING);
+    brief.push_str(
+        "\n\nEvery tool named below is served \
          by the MCP server `opencompany`. Call one with `mcp_call_tool` and the arguments \
          object the tool's schema describes — `{\"server\": \"opencompany\", \"tool\": \"<name>\", \
          \"arguments\": {...}}` — never by its bare name; `mcp_list_tools` on that server shows \
          each schema. A result whose text begins `refused:` or `awaiting approval:` is final \
-         for this turn: do not retry it.\n\nTools: ",
+         for this turn: do not retry it.\n\n",
     );
+    brief.push_str(MCP_BRIEF_TOOLS_PREFIX);
     brief.push_str(&tools.join(", "));
     brief.push('\n');
     brief
+}
+
+/// The heading [`opencompany_mcp_brief`] opens with.
+const MCP_BRIEF_HEADING: &str = "\n\n## Company tools (MCP server `opencompany`)";
+/// The line of the brief that lists the served tools.
+const MCP_BRIEF_TOOLS_PREFIX: &str = "Tools: ";
+
+/// The tools a system prompt advertises on the `opencompany` MCP server —
+/// what [`opencompany_mcp_brief`] wrote, read back. Empty when the prompt
+/// carries no brief. A turn test that used to look for a tool in the wire's
+/// `tools` array looks here for the half of the belt that moved to MCP.
+#[must_use]
+pub fn tools_named_in_mcp_brief(system_prompt: &str) -> Vec<String> {
+    let Some(at) = system_prompt.find(MCP_BRIEF_HEADING.trim_start()) else {
+        return Vec::new();
+    };
+    let rest = &system_prompt[at..];
+    let Some(line) = rest
+        .lines()
+        .find_map(|line| line.strip_prefix(MCP_BRIEF_TOOLS_PREFIX))
+    else {
+        return Vec::new();
+    };
+    line.split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// [`build_agent_with_model`], discarding the [`HarnessModel`] it resolved.

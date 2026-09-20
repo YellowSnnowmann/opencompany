@@ -728,13 +728,7 @@ impl HiveDispatcher {
             origin: crossing.return_address(forward),
             referred_from: Some(crossing.from_desk_name.clone()),
         };
-        let dispatcher = self.clone_for_task();
-        let to_desk = crossing.to_desk.clone();
-        tokio::spawn(async move {
-            if let Err(error) = dispatcher.run_desk_message(&to_desk, trigger).await {
-                tracing::warn!(desk = %to_desk, %error, "[hive] a referred episode failed");
-            }
-        });
+        spawn_desk_message(self.clone_for_task(), crossing.to_desk.clone(), trigger);
         Ok(())
     }
 
@@ -807,19 +801,7 @@ impl HiveDispatcher {
             origin.asker.clone(),
             SeatAssignment::answer(&run.desk.desk_name, answer_seq),
         );
-        let dispatcher = self.clone_for_task();
-        tokio::spawn(async move {
-            match dispatcher.drive(&mut home).await {
-                Ok(report) => {
-                    if let Some(origin) = home.origin.clone()
-                        && let Err(error) = dispatcher.deliver_answer(&home, &origin, &report).await
-                    {
-                        tracing::warn!(%error, "[hive] an answer could not be carried home");
-                    }
-                }
-                Err(error) => tracing::warn!(%error, "[hive] a reopened episode failed"),
-            }
-        });
+        spawn_drive(self.clone_for_task(), home);
         Ok(())
     }
 
@@ -872,6 +854,38 @@ impl EpisodeReason {
             (held, _) => held,
         }
     }
+}
+
+/// Drives a desk message on its own task. Type-erased so the referral chain
+/// — an episode that opens an episode that answers back into an episode —
+/// is not one infinitely recursive future type.
+fn spawn_desk_message(dispatcher: Arc<HiveDispatcher>, desk_id: String, trigger: Trigger) {
+    let task: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
+        Box::pin(async move {
+            if let Err(error) = dispatcher.run_desk_message(&desk_id, trigger).await {
+                tracing::warn!(desk = %desk_id, %error, "[hive] a referred episode failed");
+            }
+        });
+    tokio::spawn(task);
+}
+
+/// Drives a reopened episode on its own task, carrying its answer home when
+/// it has one. Type-erased for the reason [`spawn_desk_message`] is.
+fn spawn_drive(dispatcher: Arc<HiveDispatcher>, mut home: EpisodeRun) {
+    let task: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
+        Box::pin(async move {
+            match dispatcher.drive(&mut home).await {
+                Ok(report) => {
+                    if let Some(origin) = home.origin.clone()
+                        && let Err(error) = dispatcher.deliver_answer(&home, &origin, &report).await
+                    {
+                        tracing::warn!(%error, "[hive] an answer could not be carried home");
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "[hive] a reopened episode failed"),
+            }
+        });
+    tokio::spawn(task);
 }
 
 /// The plan's seats, used by the resume path and the tests.

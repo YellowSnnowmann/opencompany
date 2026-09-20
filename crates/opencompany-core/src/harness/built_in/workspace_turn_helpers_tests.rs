@@ -381,6 +381,21 @@ pub(crate) fn advertised_tools(script: &Script) -> Vec<String> {
                 .map(str::to_string)
         })
         .collect();
+    // Plan hive-desks Phase 3: this crate's own tools reach the model as the
+    // `opencompany` MCP catalogue, named in the system prompt and called
+    // through `mcp_call_tool`, so "advertised" reads both halves.
+    names.extend(
+        script
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|body| body.get("messages").and_then(Value::as_array).cloned())
+            .flatten()
+            .filter(|message| message.get("role").and_then(Value::as_str) == Some("system"))
+            .filter_map(|message| message.get("content").and_then(Value::as_str).map(str::to_string))
+            .flat_map(|prompt| crate::harness::build::tools_named_in_mcp_brief(&prompt)),
+    );
     names.sort();
     names.dedup();
     names
