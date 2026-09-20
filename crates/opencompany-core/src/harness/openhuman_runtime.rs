@@ -222,6 +222,9 @@ async fn build(boot: RuntimeBoot) -> crate::Result<Arc<Runtime>> {
     let mut builder = Runtime::builder()
         .workspace(boot.workspace())
         .tool_groups(openhuman_embed::ToolGroups::advertised());
+    if let Some(transport) = crate::harness::backend_transport::ensure_installed() {
+        builder = builder.backend_transport(transport);
+    }
     if let Some(key) = boot.api_key.as_deref() {
         builder = builder.api_key(key);
     }

@@ -16,9 +16,6 @@ use std::sync::Arc;
 
 use openhuman_core::api::transport::BackendTransport;
 
-/// This process's product identity on every backend request (`x-sdk-name`).
-const PRODUCT: &str = "opencompany";
-
 /// Installs the SDK-backed transport if none is installed yet, and returns
 /// it. Idempotent and cheap after the first call.
 ///
@@ -33,7 +30,9 @@ pub fn ensure_installed() -> Option<Arc<dyn BackendTransport>> {
         // The hosted RPC proxies (`billing`, `team`, …) are the desktop
         // app's surface; this host serves none of them.
         .hosted_controllers(false);
-    if let Some(identity) = openhuman_core::api::ProductIdentity::new(PRODUCT) {
+    if let Some(identity) =
+        openhuman_core::api::ProductIdentity::new(crate::product::PRODUCT_IDENTITY)
+    {
         options = options.product_identity(identity);
     }
     match openhuman_tinyhumans::install(options) {

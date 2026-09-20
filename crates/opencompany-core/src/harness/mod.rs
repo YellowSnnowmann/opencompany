@@ -27,6 +27,9 @@
 //! and the paths are updated separately.
 
 pub mod acp;
+/// The TinyHumans backend transport, installed once per process so managed
+/// search, Composio and media reach the backend. See [`backend_transport`].
+pub mod backend_transport;
 pub mod built_in;
 /// A small in-process tool loop over a `ChatModel`, for host-side passes whose
 /// tools' side effect is the result (the workflow copilot). See [`host_loop`].

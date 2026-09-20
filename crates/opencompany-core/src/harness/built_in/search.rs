@@ -536,6 +536,7 @@ impl Tool for WebSearchTool {
             }
         });
 
+        crate::harness::backend_transport::ensure_installed();
         let client = IntegrationClient::new(self.backend.backend_url.clone(), token.clone());
         let response = match dispatch_search(&client, &body, self.pre_dispatch).await {
             Ok(response) => response,
