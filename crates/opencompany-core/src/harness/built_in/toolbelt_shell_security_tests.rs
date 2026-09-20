@@ -393,7 +393,7 @@ fn shell_factory_preserves_explicit_deadlines_and_inherits_for_invalid_values() 
     for secs in [1, 17, 3600] {
         assert_eq!(
             shell.timeout_policy(&json!({"timeout_secs": secs})),
-            ToolTimeout::Secs(secs),
+            ToolTimeout::Millis(secs * 1000),
             "valid explicit deadline must survive the audit wrapper"
         );
     }

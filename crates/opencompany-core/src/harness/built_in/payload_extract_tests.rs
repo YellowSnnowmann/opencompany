@@ -1,4 +1,5 @@
 use super::*;
+use openhuman_core as oh;
 
 use tinyinference::Result as TaResult;
 use tinyinference::model::{ChatModel, ModelRequest, ModelResponse};
@@ -42,7 +43,7 @@ fn extractor(behaviour: Behaviour) -> PayloadExtractor {
 async fn run(behaviour: Behaviour, hint: Option<&str>, raw: &str) -> SummarizeOutcome {
     let ctx = tinyagents_harness::context::RunContext::new(
         tinyagents_harness::context::RunConfig::new("payload-extract-test"),
-        (),
+        oh::agent::tinyagents::host::run_context::OpenHumanRunContext::default(),
     );
     extractor(behaviour)
         .maybe_summarize_in_parent(&ctx, "GITHUB_LIST_ISSUES", hint, raw)
