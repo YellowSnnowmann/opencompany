@@ -13,7 +13,6 @@ use opencompany::{
     AppConfig, AppState, CompanyId, CompanyManifest, Result,
     app::config::{ConfigFile, ProcessEnv, resolve},
     app::doctor,
-    openhuman::{LaunchMode, OpenHumanLaunch},
     runtime::RuntimeBuilder,
 };
 use tokio::sync::Notify;
@@ -228,34 +227,9 @@ enum Command {
         #[command(subcommand)]
         cmd: MemoryCmd,
     },
-    /// Launch a sibling OpenHuman checkout: the core binary (`--mode core`)
-    /// or the Tauri desktop host (`--mode desktop`). Desktop calls `cargo tauri`
-    /// directly and performs the preflight OpenHuman's own scripts do — install
-    /// the vendored CEF-aware `tauri-cli`, pin `CEF_PATH`, load `<root>/.env`,
-    /// and on macOS seed the Chromium keychain + signing identity (CEF on macOS,
-    /// `wry` on Linux/Windows; Tauri still drives the Vite dev server). Pass
-    /// `--dry-run` to preview.
-    OpenHuman {
-        /// OpenHuman checkout path.
-        #[arg(long, default_value = "vendor/openhuman")]
-        root: PathBuf,
-        /// Launch target.
-        #[arg(long, value_enum, default_value_t = ModeArg::Core)]
-        mode: ModeArg,
-        /// Build a release bundle instead of launching a dev session
-        /// (`cargo run --release` for core; `cargo tauri build` for desktop —
-        /// a signed `.app`/dmg on macOS, a deb/AppImage elsewhere).
-        #[arg(long)]
-        release: bool,
-        /// Print the command without executing it.
-        #[arg(long)]
-        dry_run: bool,
-        /// Arguments passed after `--` to the OpenHuman core binary. Ignored
-        /// (and rejected) in desktop mode, which drives fixed pnpm scripts.
-        #[arg(last = true)]
-        args: Vec<String>,
-    },
 }
+
+/// The `memory` subcommands.}
 
 /// The `memory` subcommands.
 #[derive(clap::Subcommand)]
@@ -311,21 +285,6 @@ impl std::fmt::Debug for MemoryCmd {
                 .field("dry_run", dry_run)
                 .field("resume_cursor", &resume_cursor.is_some())
                 .finish(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum ModeArg {
-    Core,
-    Desktop,
-}
-
-impl From<ModeArg> for LaunchMode {
-    fn from(value: ModeArg) -> Self {
-        match value {
-            ModeArg::Core => LaunchMode::Core,
-            ModeArg::Desktop => LaunchMode::Desktop,
         }
     }
 }
@@ -584,7 +543,7 @@ fn company_builder(
 ) -> Result<RuntimeBuilder> {
     let mut builder = attach_tinyhumans_feedback(
         attach_harness(
-            attach_openhuman(RuntimeBuilder::new(home.to_path_buf(), manifest)),
+            RuntimeBuilder::new(home.to_path_buf(), manifest),
             state.config(),
         ),
         state.config(),
@@ -893,31 +852,6 @@ fn spawn_mailbox_poller(
     #[cfg(not(feature = "imap"))]
     {
         let _ = (state, id, shutdown, handles, cfg);
-    }
-}
-
-/// Attaches an OpenHuman JSON-RPC transport when the `openhuman-rpc` feature is
-/// enabled and `OPENCOMPANY_OPENHUMAN_URL` is set (the attach path).
-///
-/// Without the feature this is the identity function, so the default build
-/// stays network-free and degrades to built-in tools and the operator channel.
-#[cfg(not(feature = "openhuman-rpc"))]
-fn attach_openhuman(builder: RuntimeBuilder) -> RuntimeBuilder {
-    builder
-}
-
-#[cfg(feature = "openhuman-rpc")]
-fn attach_openhuman(builder: RuntimeBuilder) -> RuntimeBuilder {
-    use opencompany::openhuman::HttpOpenHumanRpc;
-    use opencompany::ports::SecretValue;
-
-    match std::env::var("OPENCOMPANY_OPENHUMAN_URL") {
-        Ok(url) if !url.trim().is_empty() => {
-            let bearer =
-                SecretValue(std::env::var("OPENCOMPANY_OPENHUMAN_TOKEN").unwrap_or_default());
-            builder.with_openhuman_rpc(Arc::new(HttpOpenHumanRpc::attach(url, bearer)))
-        }
-        _ => builder,
     }
 }
 
@@ -1781,41 +1715,6 @@ async fn run_memory_cmd(cmd: MemoryCmd) -> Result<()> {
          its Portability family lives on)."
             .into(),
     ))
-}
-
-/// Handle the `openhuman` subcommand: build the launch request, reject
-/// passthrough args in Desktop mode via [`OpenHumanLaunch::validate`]
-/// (before the dry-run branch so `--dry-run -- --arg` reports the same error
-/// as a real launch instead of printing an unlaunchable command), then either
-/// print the preview or run to completion and exit with the child's code.
-async fn run_openhuman(
-    root: PathBuf,
-    mode: ModeArg,
-    release: bool,
-    dry_run: bool,
-    args: Vec<String>,
-) -> Result<()> {
-    let mut launch = match LaunchMode::from(mode) {
-        LaunchMode::Core => OpenHumanLaunch::core(root),
-        LaunchMode::Desktop => OpenHumanLaunch::desktop(root),
-    }
-    .with_args(args);
-    if release {
-        launch = launch.release();
-    }
-
-    // validate() rejects passthrough args in Desktop mode; run it before
-    // the dry-run branch so `--dry-run -- --arg` reports the same error
-    // as an actual launch instead of printing an unlaunchable command.
-    launch.validate()?;
-
-    if dry_run {
-        println!("{}", launch.dry_run_preview());
-        return Ok(());
-    }
-
-    let status = launch.run().await?;
-    std::process::exit(status.code().unwrap_or(1));
 }
 
 #[cfg(feature = "openhuman")]
@@ -2761,13 +2660,6 @@ async fn async_main() -> Result<()> {
         }) => run_export(company, out, include_secrets, home).await,
         Some(Command::Import { path, home }) => run_import(path, home).await,
         Some(Command::Memory { cmd }) => run_memory_cmd(cmd).await,
-        Some(Command::OpenHuman {
-            root,
-            mode,
-            release,
-            dry_run,
-            args,
-        }) => run_openhuman(root, mode, release, dry_run, args).await,
         None => {
             // The commit as well as the version: `0.1.0` has been thousands of
             // commits wide, so this line could not tell an operator which
