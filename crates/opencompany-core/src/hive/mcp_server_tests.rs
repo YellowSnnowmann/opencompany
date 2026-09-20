@@ -482,12 +482,18 @@ fn attach_opencompany_mcp_names_the_server_slug_and_allow_list() {
         bearer: agent.bearer().to_string(),
         allow_tools: agent.allow_tools(),
     };
-    let spec = attach_opencompany_mcp(AgentSpec::new(RUNTIME_ID), &ctx);
-    let rendered = format!("{spec:?}");
-    assert!(rendered.contains(SERVER_SLUG), "{rendered}");
+    let server = opencompany_mcp_server(&ctx);
+    assert_eq!(server.name(), SERVER_SLUG);
+    let rendered = format!("{server:?}");
+    assert!(rendered.contains(&ctx.endpoint), "{rendered}");
     assert!(rendered.contains("who_am_i"), "{rendered}");
+    assert!(rendered.contains("\"post\""), "{rendered}");
     assert!(
         !rendered.contains(agent.bearer()),
-        "the bearer is redacted from the spec's Debug"
+        "the bearer is redacted from the server's Debug"
     );
+    // The spec accepts it; nothing on `AgentSpec` reads it back, so the
+    // registration is proven by the runtime, not here.
+    let spec = attach_opencompany_mcp(AgentSpec::new(RUNTIME_ID), &ctx);
+    assert_eq!(spec.id(), RUNTIME_ID);
 }

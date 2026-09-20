@@ -406,15 +406,20 @@ impl McpAttach {
 /// agent; a spec without it has only OpenHuman's native tools.
 #[must_use]
 pub fn attach_opencompany_mcp(spec: AgentSpec, ctx: &McpAttach) -> AgentSpec {
-    spec.mcp(
-        McpServer::http(SERVER_SLUG, ctx.endpoint.clone())
-            .auth(McpAuthConfig::BearerToken {
-                token: ctx.bearer.clone(),
-            })
-            .allow_tools(ctx.allow_tools.clone())
-            .timeout_secs(CALL_TIMEOUT_SECS)
-            .description("OpenCompany: speak to the desk and use the company's tools"),
-    )
+    spec.mcp(opencompany_mcp_server(ctx))
+}
+
+/// The `McpServer` declaration [`attach_opencompany_mcp`] fixes on the spec:
+/// slug [`SERVER_SLUG`], the agent's endpoint and bearer, its allow list.
+#[must_use]
+pub fn opencompany_mcp_server(ctx: &McpAttach) -> McpServer {
+    McpServer::http(SERVER_SLUG, ctx.endpoint.clone())
+        .auth(McpAuthConfig::BearerToken {
+            token: ctx.bearer.clone(),
+        })
+        .allow_tools(ctx.allow_tools.clone())
+        .timeout_secs(CALL_TIMEOUT_SECS)
+        .description("OpenCompany: speak to the desk and use the company's tools")
 }
 
 // ---------------------------------------------------------------------------
