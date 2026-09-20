@@ -120,6 +120,7 @@ use crate::harness::orchestrator;
 use crate::harness::policy::ApprovalPolicy;
 use crate::harness::skills::EffectiveSkills;
 use crate::harness::toolbelt;
+use crate::hive::mcp_server::{McpAttach, attach_opencompany_mcp};
 use crate::ports::skills_state::SkillState;
 use crate::ports::types::CompanyId;
 use crate::runtime::tools::{NAMESPACE_SEPARATORS, extends_on_boundary};
@@ -1453,7 +1454,24 @@ pub fn agent_spec_for(
     blueprint: &AgentBlueprint,
     runtime_id: &str,
     provider: openhuman_embed::Provider,
+    mcp: Option<&McpAttach>,
 ) -> AgentSpec {
+    // Plan hive-desks Phase 3: this crate's own tools reach the agent over
+    // the `opencompany` MCP server, which the model calls through OpenHuman's
+    // bridge tools — so those two join the native scope whenever the server
+    // is attached, and the prompt says where the belt went. Without an
+    // attachment (no listener yet: a roster built by a test that never
+    // dispatches) the spec is exactly the Phase 2 one.
+    let mut tool_names = blueprint.native_tool_names.clone();
+    let mut system_prompt = blueprint.system_prompt.clone();
+    if let Some(mcp) = mcp {
+        for bridge in ["mcp_list_tools", "mcp_call_tool"] {
+            if !tool_names.iter().any(|name| name == bridge) {
+                tool_names.push(bridge.to_string());
+            }
+        }
+        system_prompt.push_str(&opencompany_mcp_brief(&mcp.allow_tools));
+    }
     let entry = oh::agent::registry::AgentRegistryEntry {
         id: runtime_id.to_string(),
         name: blueprint.definition_name.clone(),
@@ -1461,8 +1479,8 @@ pub fn agent_spec_for(
         source: oh::agent::registry::AgentRegistrySource::Custom,
         enabled: true,
         model: None,
-        system_prompt: Some(blueprint.system_prompt.clone()),
-        tool_allowlist: blueprint.native_tool_names.clone(),
+        system_prompt: Some(system_prompt.clone()),
+        tool_allowlist: tool_names.clone(),
         tool_denylist: Vec::new(),
         subagents: oh::agent::registry::types::AgentSubagentPolicy::default(),
         tags: Vec::new(),
@@ -1471,13 +1489,16 @@ pub fn agent_spec_for(
     let mut spec = AgentSpec::new(runtime_id)
         .definition(
             AgentDefinitionSpec::new()
-                .system_prompt(blueprint.system_prompt.clone())
+                .system_prompt(system_prompt)
                 .display_name(blueprint.definition_name.clone())
-                .tools(ToolScopeSpec::Named(blueprint.native_tool_names.clone()))
+                .tools(ToolScopeSpec::Named(tool_names))
                 .max_iterations(MAX_TOOL_ITERATIONS),
         )
         .provider(provider)
         .access(Access::full());
+    if let Some(mcp) = mcp {
+        spec = attach_opencompany_mcp(spec, mcp);
+    }
     // The runtime refuses an agent whose action dir it cannot create. A
     // workspace root that cannot be provisioned is reported once per agent
     // by the pool (issue #551) and must not stop dispatch — the file tools
@@ -1498,6 +1519,24 @@ pub fn agent_spec_for(
             .retain(|existing| existing.id != entry.id);
         config.agent_registry.entries.push(entry);
     })
+}
+
+/// The prompt section that tells an agent where this crate's tools went: on
+/// the `opencompany` MCP server, reached through `mcp_call_tool`. Without it
+/// the model calls `publish_artifact` by its bare name — the tool the belt
+/// brief describes — and OpenHuman answers that no such tool exists.
+fn opencompany_mcp_brief(tools: &[String]) -> String {
+    let mut brief = String::from(
+        "\n\n## Company tools (MCP server `opencompany`)\n\nEvery tool named below is served \
+         by the MCP server `opencompany`. Call one with `mcp_call_tool` and the arguments \
+         object the tool's schema describes — `{\"server\": \"opencompany\", \"tool\": \"<name>\", \
+         \"arguments\": {...}}` — never by its bare name; `mcp_list_tools` on that server shows \
+         each schema. A result whose text begins `refused:` or `awaiting approval:` is final \
+         for this turn: do not retry it.\n\nTools: ",
+    );
+    brief.push_str(&tools.join(", "));
+    brief.push('\n');
+    brief
 }
 
 /// [`build_agent_with_model`], discarding the [`HarnessModel`] it resolved.
