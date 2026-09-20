@@ -324,7 +324,7 @@ impl CompanyManifest {
                 source,
             })?;
 
-        if let Some(problem) = legacy_hive_block(&text) {
+        if let Some(problem) = legacy_hive_block(&text).or_else(|| legacy_speech_block(&text)) {
             return Err(OpenCompanyError::ManifestParse(path.to_path_buf(), problem));
         }
         toml::from_str(&text).map_err(|err| {
@@ -342,6 +342,16 @@ impl CompanyManifest {
     /// see a key it does not declare.
     pub fn legacy_hive_block(text: &str) -> Option<String> {
         legacy_hive_block(text)
+    }
+
+    /// Whether a manifest still carries the retired `[speech]` block, and the
+    /// migration hint if it does (plan hive-desks, Phase 6).
+    ///
+    /// Speaking is no longer a belt tool a company opts into: every agent is
+    /// served `post`, `broadcast`, `dm` and `complete_episode` by the
+    /// `opencompany` MCP server, so the block has nothing left to switch.
+    pub fn legacy_speech_block(text: &str) -> Option<String> {
+        legacy_speech_block(text)
     }
 
     /// Parses a manifest that came back out of the store, applying the global
@@ -1486,6 +1496,19 @@ mod tests_surfaces;
 #[cfg(test)]
 #[path = "manifest_harness_tests.rs"]
 mod harness_tests;
+
+/// The migration hint for a manifest that still declares `[speech]` (plan
+/// hive-desks, Phase 6).
+fn legacy_speech_block(text: &str) -> Option<String> {
+    let document: toml::Value = toml::from_str(text).ok()?;
+    document.get("speech")?;
+    Some(
+        "`[speech]` no longer exists — speaking is not a belt tool a company switches on: every \
+         agent is served `post`, `broadcast`, `dm`, `complete_episode` and `read` by the \
+         `opencompany` MCP server (`docs/spec/runtime/hive.md`). Delete the block."
+            .to_string(),
+    )
+}
 
 /// The migration hint for a manifest that still declares `[group_chat.hive]`
 /// (plan hive-desks, Phase 4).

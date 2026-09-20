@@ -569,63 +569,6 @@ pub struct CompanyManifest {
     /// How this company relates to the global baseline ([`crate::globals`]).
     #[serde(default)]
     pub globals: Globals,
-    /// `[speech]` — whether this company's agents speak by tool call.
-    #[serde(default)]
-    pub speech: Speech,
-}
-
-/// `[speech]` — whether talking is a tool call rather than a turn's return text.
-///
-/// # Why this is company-level and not per-desk
-///
-/// [`hive.aside`](GroupChatHive) and `hive.referral` are nested under a desk
-/// because they are properties of a *deliberation on that desk*. Speech is a
-/// property of an agent's **session**, which since the session became
-/// continuous spans every desk it sits on plus its DM plus the company's
-/// General line. A per-desk knob would let one agent speak by tool call on one
-/// desk and by return text on another inside one unbroken session — which is
-/// exactly the incoherence the continuous session exists to remove.
-///
-/// # On by default, explicitly opt-out, and never silencing
-///
-/// Every company gets the speech tools unless it explicitly sets
-/// `[speech] disabled = true`. A company that opts out keeps the old return-text
-/// path. A company that uses speech still has that path underneath it: an agent that answers
-/// without calling a speech tool has its return text journaled as before, and
-/// the omission is counted rather than dropped. Going quiet because a model
-/// forgot to call a tool is not an acceptable failure mode, so it is not one
-/// this knob can produce.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Speech {
-    /// Legacy wire field. Older hosts serialized `false` into every company
-    /// because speech used to default off; it is retained for compatibility
-    /// but no longer acts as an opt-out.
-    #[serde(default = "default_speech_enabled")]
-    pub enabled: bool,
-    /// Explicit default-on opt-out. This new field is what makes a stored choice
-    /// distinguishable from the old automatically-serialized `enabled = false`.
-    #[serde(default)]
-    pub disabled: bool,
-}
-
-impl Default for Speech {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            disabled: false,
-        }
-    }
-}
-
-impl Speech {
-    pub const fn is_enabled(&self) -> bool {
-        !self.disabled
-    }
-}
-
-const fn default_speech_enabled() -> bool {
-    true
 }
 
 /// `[globals]` — this company's relationship to the global baseline.
