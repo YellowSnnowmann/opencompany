@@ -1,6 +1,5 @@
 use super::*;
 use crate::ports::TaskStore;
-use tinyinference::model::{ChatModel, ModelRequest, ModelResponse};
 
 // -- issue #552: the write ordering, proven by failure injection ---------
 
