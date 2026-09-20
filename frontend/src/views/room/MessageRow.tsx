@@ -374,17 +374,13 @@ export function MessageRow({
                   // styling, the notice, and the Retry control for exactly that
                   // response (CodeRabbit review).
                   //
-                  // Only this branch needs it: a deliberation move is a line the
-                  // host journalled, so it reached the server by definition and
-                  // can never carry `sendFailed`.
                   message.sendFailed !== undefined && "text-muted-foreground",
                 )}
               >
                 {message.text}
               </Markdown>
             )}
-          </>
-        )}
+        </>
         {message.sendFailed !== undefined && (
           <FailedSendNotice
             reason={message.sendFailed || "something went wrong"}
@@ -426,8 +422,17 @@ export function MessageRow({
         {message.referralConversation && (
           <ReferralConversation crossing={message.referralConversation} rowId={message.id} />
         )}
-        {message.asideConversation && (
-          <AsideConversation aside={message.asideConversation} />
+        {/* What this line was inside its episode — its speech act and, for a
+            dm, who it went to. Absent for every ordinary reply, which is what
+            keeps a DM, `#general` and a single-responder desk rendering exactly
+            as they always have: the affordance follows the data, never the
+            channel kind. */}
+        {message.episode && (
+          <UtteranceChip
+            episode={message.episode}
+            audience={message.audience}
+            agentNames={agentNames}
+          />
         )}
         {message.taskId && (
           <div className="flex flex-wrap items-center gap-2">
