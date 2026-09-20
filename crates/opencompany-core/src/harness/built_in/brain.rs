@@ -3704,251 +3704,65 @@ impl HarnessBrain {
                         channel_responses.push(confined_turn_bubble(outcome));
                         continue;
                     }
-                    // Issue: hive-mind desks. A desk with somebody to
-                    // deliberate WITH answers as a room rather than through one
-                    // responder — `tinyhivemind_hive::step` decides who speaks
-                    // next, that teammate runs an ordinary turn, its line is
-                    // journaled on the desk, and the loop continues until the
-                    // room converges, deadlocks, or spends its budget.
+                    // Plan hive-desks, Phase 4/5: a desk with somebody to
+                    // deliberate WITH answers as a room. The message opens
+                    // (or joins) an episode on that desk's hive; the seats run
+                    // in concurrent rounds until every assigned one calls
+                    // `complete_episode`; every utterance is journaled by the
+                    // driver as an `AgentReply` with its episode metadata, so
+                    // no bubble goes back through `channel_responses` — the
+                    // REST route would journal it a second time.
                     //
-                    // It sits ABOVE the responder ladder below and BELOW the
-                    // mention rung, which is the same explicit-beats-implicit
-                    // ordering the rest of the ladder already applies: naming
-                    // one teammate in a room addresses that teammate, not the
-                    // room, so a `@mention` still runs exactly one turn.
-                    // `desk_episode` declines everything else that must keep
-                    // the single-turn path — an unaddressed message, a General
-                    // spelling, a DM, a key that names no desk, a desk with
-                    // fewer than two effective roster members, and a desk that
-                    // opted out — so a company with one teammate per desk is
-                    // unaffected byte-for-byte. A copilot thread never reaches
-                    // here at all: it returned above.
+                    // Every other surface — a DM, `#general`, a workflow
+                    // thread, a desk of one — takes the single-turn path
+                    // below. A copilot thread returned above.
                     //
-                    // The episode journals its own turns, and deliberately
-                    // pushes NO bubble onto `channel_responses`: the REST
-                    // chat route journals every response it is handed as an
-                    // `AgentReply`, so a bubble here would write a second row
-                    // for a line the driver has already made durable. The
-                    // console still sees each turn arrive live — the operator
-                    // SSE feed projects journal rows — and a reload reads the
-                    // same transcript the room itself folded.
-                    //
-                    // Skipped when the journal is not wired: the episode reads
-                    // its own turns back out of it to fold the next step, so a
-                    // driver with nowhere to append could not deliberate at
-                    // all, and falling through answers exactly as before.
-                    // Plan hive-desks, Phase 2 interim: the trace-grammar
-                    // episode never opens. Every desk message takes the
-                    // single-turn path below until Phase 4 hosts a
-                    // `tinyhivemind_openhuman::OpenHumanHive` per desk in its
-                    // place. `src/hivemind/` stays compiled and tested until
-                    // then; only this gate is closed.
-                    // TODO(Phase 4): replace this arm with `hive::dispatch`.
-                    const HIVE_EPISODES_OPEN: bool = false;
-                    if HIVE_EPISODES_OPEN
-                        && crate::runtime::mentions::mention_responder(
-                            &self.record(),
-                            chat.as_deref(),
-                            mentions,
-                        )
-                        .is_none()
-                        && let Some(events) = self.deps.events.clone()
-                        && let Some(desk) =
-                            crate::hivemind::desk_episode(&self.record(), chat.as_deref())
-                    {
-                        // The operator message's own sequence: the episode's
-                        // watermark, so the room folds what was said after it
-                        // was asked and merely reads what came before. A
-                        // request built without seqs falls back to the message
-                        // itself being the whole of the room's history.
-                        let trigger = event_seq.unwrap_or_else(|| EventSeq::new(0));
-                        // The thread this episode's turns and closing report
-                        // are parented to (issue: hive replies were never
-                        // threaded to their trigger). Mirrors
-                        // `server::operator::reply_thread`: already in a
-                        // thread, the episode stays in it; otherwise the
-                        // triggering operator message becomes the thread
-                        // root, exactly as an ordinary single-responder reply
-                        // threads itself. Without this, every hive turn for a
-                        // top-level desk send is journaled with `parent: None`
-                        // — unrelated top-level channel traffic detached from
-                        // the question that asked it, and (worse) sharing the
-                        // desk's channel-level projection with every other
-                        // top-level hive send on the same desk, so a second
-                        // operator message answered in the same cycle can
-                        // fold the first episode's still-fresh turns as its
-                        // own votes.
-                        let thread_root = Some((*parent).unwrap_or(trigger));
-                        let runner = HiveDeskRunner {
-                            run_turn: self.run_turn(),
-                            company: self.record().id.clone(),
-                            chat_id: chat.clone(),
-                            thread_root,
-                            trigger_seq: Some(trigger),
-                            brain: self,
-                            host,
-                        };
-                        // The desk's own memory, over the same `ContextStore`
-                        // the per-turn memory loop and the `memory_recall` belt
-                        // read — so a hosted-memory overlay (CortexDB under
-                        // `OPENCOMPANY_MEMORY=remote`) applies to what a room
-                        // remembers exactly as it does to what a teammate does.
-                        let memory = Arc::new(HiveDeskMemory {
-                            context: Arc::clone(&self.deps.context),
-                            company: self.record().id.clone(),
-                            desk_id: desk.id.clone(),
-                        });
-                        // The company's other desks, when this one opted in to
-                        // referral and there is a peer with somebody on it.
-                        // `None` is the default and every desk that never wrote
-                        // the block, so the driver below is byte-identical to
-                        // the one that ran before referral existed.
-                        let federation = crate::hivemind::desk_federation(&self.record(), &desk);
-                        let mut driver = crate::hivemind::EpisodeDriver::new(
-                            self.record().id.clone(),
-                            desk,
-                            events,
-                            &runner,
-                            composed.clone(),
-                        )
-                        .in_thread(thread_root)
-                        .with_memory(memory)
-                        // Every desk in the company, so a seat that also sits
-                        // elsewhere reads its own other conversations. Ungated,
-                        // unlike the federation above: this hands a member what
-                        // it can already see, not permission to ask anyone
-                        // anything.
-                        .with_context_desks(crate::hivemind::company_desks(&self.record()));
-                        if let Some(federation) = federation {
-                            driver = driver.with_federation(federation, &runner);
-                        }
-                        let run_result = driver.run(trigger).await;
-                        // Issue: an MCP tool-call failure inside a hive
-                        // member's turn queues on `self.deps.mcp_failures`
-                        // exactly as one inside an ordinary responder turn
-                        // does, but nothing on this path ever drained it —
-                        // the queue sat until a later, unrelated chat turn
-                        // cleared it silently, and the failing call produced
-                        // neither an error step nor a `McpCallFailed` journal
-                        // row. Drained here, unconditionally, the same way
-                        // the ordinary responder path drains it below: on
-                        // success AND on error, since a failed episode may
-                        // still have queued a real tool failure. The steps
-                        // vec is discarded — a hive episode has no single
-                        // bubble to attach them to, the transcript is already
-                        // the record — but the drain's real effect, the
-                        // journaled `McpCallFailed` row, does not depend on
-                        // it. Best-effort: a failure surfacing its own
-                        // failure must not cost the episode's real outcome.
-                        let mut discarded_steps = Vec::new();
-                        if let Err(err) =
-                            self.surface_mcp_failures(&mut discarded_steps, None).await
+                    // The episode runs on its own task: the cycle accepted the
+                    // message, the request is journaled, and the console
+                    // follows the rounds live. Skipped when the journal is not
+                    // wired: the driver reads its own rows back.
+                    if let Some(events) = self.deps.events.clone() {
+                        let record = self.record();
+                        let hives = self.desk_hives(&record).await;
+                        if let crate::hive::dispatch::Surface::Room { desk_id } =
+                            crate::hive::dispatch::surface_of(&record, &hives, chat.as_deref())
                         {
-                            tracing::warn!(
-                                company = %self.record().id,
-                                error = %err,
-                                "[hive] failed to surface queued MCP failures after an episode"
+                            let dispatcher = crate::hive::dispatch::dispatcher(
+                                record,
+                                events,
+                                hives,
+                                Arc::new(crate::hive::seats::HarnessSeatRunner {
+                                    run_turn: self.run_turn(),
+                                }),
                             );
+                            let trigger = crate::hive::dispatch::trigger_for(
+                                event_seq,
+                                &composed,
+                                *parent,
+                                mentions,
+                            );
+                            crate::hive::dispatch::spawn_episode(dispatcher, desk_id, trigger);
+                            room_answered = true;
+                            continue;
                         }
-                        let outcome = run_result?;
-                        tracing::info!(
-                            company = %self.record().id,
-                            chat = %chat.as_deref().unwrap_or_default(),
-                            ending = %outcome.ending.label(),
-                            turns = outcome.turns,
-                            failed_turns = outcome.failed_turns,
-                            demoted = outcome.violations.len(),
-                            asked = outcome.referrals.asked.len(),
-                            "[hive] a desk answered as a room"
-                        );
-                        // Issue: a hive episode journals every turn and its
-                        // own closing report directly (`EpisodeDriver`), so a
-                        // synchronous chat-API caller and `emit_cycle_webhooks`
-                        // — both of which read `CycleReport.responses`
-                        // (`CycleResult.channel_responses` here) rather than
-                        // the journal — saw an empty response collection and
-                        // never fired `work.completed`, even though the desk
-                        // had just answered at length. Pushing the closing
-                        // report's own text back through here is NOT a second
-                        // journal write: `outcome.report_seq` is the sequence
-                        // the episode already journaled it under, so this
-                        // response carries that durable id and
-                        // `journal_chat_replies` — which otherwise journals
-                        // every response it is handed — skips a response that
-                        // already names one. When the report itself failed to
-                        // journal (`report_seq` is `None`, logged where it
-                        // happened), leaving `message_id` unset lets the
-                        // ordinary path journal it now rather than losing it
-                        // twice.
-                        channel_responses.push(OutboundMessage {
-                            message_id: outcome.report_seq.map(|seq| seq.value().to_string()),
-                            task_id: None,
-                            outputs: Vec::new(),
-                            channel: "operator".to_string(),
-                            agent: Some(crate::hivemind::HIVE_REPORT_AUTHOR.to_string()),
-                            text: outcome.summary(),
-                            steps: Vec::new(),
-                            reply_to: None,
-                            mentions: Vec::new(),
-                        });
-                        room_answered = true;
-                        continue;
                     }
                     // Route to the teammate the message named, else to the
-                    // addressed desk's lead, else the orchestrator.
+                    // addressed desk's default responder, else the
+                    // orchestrator (plan hive-desks, Phase 5: the responder
+                    // ladder — selector, thread overseer — is gone; a desk
+                    // with a room routes through its hive above, and every
+                    // other surface has one deterministic answerer).
                     //
-                    // Naming somebody in a room is a stronger address than the
-                    // room's default answerer, so a mention outranks the desk
-                    // lead. That is the same explicit-beats-implicit ordering
-                    // `responder_for` already applies between an addressed desk
-                    // and the orchestrator (issue #884) — one more rung at the
-                    // top of the existing ladder, not a second competing notion
-                    // of who a message is for.
-                    //
-                    // Resolves nothing on a message that mentions no teammate,
-                    // which is every message journaled before mentions existed,
-                    // so routing is unchanged byte-for-byte for them.
-                    // SPIKE: the thread-overseer rung.
-                    //
-                    // Oversight of a prompt transfers on hand-off: the operator
-                    // opens the conversation, and whoever it delegates to owns
-                    // the thread from there. So a reply *inside* a thread must
-                    // reach whoever currently holds it — not the room's default
-                    // answerer, which is what `responder_for` gives and which
-                    // made a follow-up land on the desk lead while the actual
-                    // overseer sat one message above.
-                    //
-                    // Derived, never stored: the overseer is the last teammate
-                    // to have spoken under this root. That transfers for free —
-                    // a delegate becomes the last speaker the moment it answers.
-                    //
-                    // Sits BELOW an @mention (naming somebody is still the
-                    // strongest address) and ABOVE the channel default, which is
-                    // the same explicit-beats-implicit ordering the ladder
-                    // already applies.
-                    let overseer = self.thread_overseer(chat.as_deref(), *parent).await;
+                    // Naming somebody is the strongest address, so a mention
+                    // outranks the channel default. Resolves nothing on a
+                    // message that mentions no teammate, which is every
+                    // message journaled before mentions existed.
                     // One thread, one card: a follow-up joins the work its
                     // thread already opened instead of opening another.
                     let thread_card = self.thread_card(chat.as_deref(), *parent).await;
-                    let routed = self
-                        .tinyhivemind_responder(chat.as_deref(), text, mentions)
-                        .await;
-                    // A direct address remains stronger than thread ownership.
-                    // Otherwise the last agent holding the thread keeps it;
-                    // TinyHiveMind supplies the channel/DM/orchestrator fallback.
-                    let responder = match routed {
-                        Some(decision)
-                            if matches!(
-                                decision.rung,
-                                tinyhivemind::responder::ResponderRung::ExplicitMention
-                                    | tinyhivemind::responder::ResponderRung::DirectAgent
-                            ) =>
-                        {
-                            decision.responder_id
-                        }
-                        Some(decision) => overseer.unwrap_or(decision.responder_id),
-                        None => overseer.unwrap_or_else(|| self.responder_for(chat.as_deref())),
-                    };
+                    let responder = self
+                        .mentioned_responder(mentions)
+                        .unwrap_or_else(|| self.responder_for(chat.as_deref()));
                     // Everyone else the message named, for the answering turn's
                     // context. A list, not a fan-out: one operator message still
                     // spawns exactly one turn, and this teammate spreads the
@@ -3964,12 +3778,8 @@ impl HarnessBrain {
                     // alias, so a broadcast from the main thread would otherwise
                     // expand against no desk at all.
                     let addressed_desk = Self::everyone_desk(&self.record(), chat.as_deref());
-                    let also_mentioned = crate::runtime::mentions::mentioned_agents(
-                        &self.record(),
-                        &addressed_desk,
-                        mentions,
-                        Some(&responder),
-                    );
+                    let also_mentioned =
+                        self.mentioned_members(&addressed_desk, mentions, Some(&responder));
                     // The chat/desk thread this turn answers — the same id the
                     // reply is journaled under (`AgentReply.chat_id`). Passed into
                     // the pool so the live turn-stream frames carry it and the
