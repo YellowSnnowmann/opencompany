@@ -1676,7 +1676,9 @@ impl CompanyAgent {
                     *outbox = finished.outbox;
                 }
             }
-            None => in_flight.with(&self.runtime_id, |turn| turn.executor = None),
+            None => {
+                in_flight.with(&self.runtime_id, |turn| turn.executor = None);
+            }
         }
         drop(_turn);
 
