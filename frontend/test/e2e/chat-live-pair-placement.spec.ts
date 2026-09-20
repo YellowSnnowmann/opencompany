@@ -9,10 +9,13 @@ import { openChannel, workingRow } from "./chat-helpers";
  * Three claims no unit test can make, because all three are about **rendered
  * order and rendered state** rather than about a pure function:
  *
- * 1. it names whoever is working *now*, following the floor as it changes
- *    hands;
+ * 1. the line names the newest running call rather than a settled one;
  * 2. a call parked on a sign-off reads as parked *while it waits*, not once
  *    the reply lands.
+ *
+ * Not the agent hand-over: a running step outranks the name, so these
+ * scenarios never put one on screen. That lives in `live-pair-render.test.ts`,
+ * which controls `agentNames` and asserts the name directly.
  *
  * The ordering claim — that the row sits beneath every line journaled while
  * the turn ran — lives in `chat-concurrent-episodes.spec.ts` instead, and has
@@ -95,11 +98,16 @@ async function openWithFrames(page: import("@playwright/test").Page, frames: unk
   await channelOpened;
 }
 
-test("the live row names the agent working now, not the one who started", async ({ page }) => {
+test("the line names the newest running call, not a settled one", async ({ page }) => {
   test.skip(LIVE_BRAIN, "the default Console E2E lane covers the synthetic SSE rendering fixture");
-  // One query, two agents — the shape a desk hand-off and a hive episode both
-  // produce. The row used to latch the first agent it saw and sit there while
-  // somebody else was visibly working.
+  // One turn, two agents, and the second's call still open.
+  //
+  // This asserts the STEP, not the agent name — deliberately, because a
+  // running step outranks the name by design (`WorkingIndicator`), so in this
+  // scenario no name is on screen to assert. The agent hand-over is covered
+  // in `live-pair-render.test.ts`, which can hold `agentNames` steady and so
+  // can see the name the running label would otherwise hide. Confirmed by
+  // mutation: reverting the live-agent preference leaves this test green.
   const atMillis = Date.now();
   await openWithFrames(page, [
     {
