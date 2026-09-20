@@ -264,6 +264,24 @@ impl Default for McpHost {
     }
 }
 
+/// The one host this process serves every company's agents on.
+///
+/// Process-wide for the same reason the OpenHuman runtime is
+/// ([`openhuman_runtime::global`](crate::harness::openhuman_runtime::global)):
+/// an agent is registered on the runtime once, its spec names one endpoint,
+/// and every pool in the process — the serving one, a desktop-parity one, a
+/// test's — must resolve that endpoint to the same registry of bearers and
+/// in-flight turns. Bind it with [`McpHost::serve_loopback`] before the first
+/// roster is built; until then [`McpHost::endpoint_for`] is `None` and an agent
+/// spec carries no server.
+static GLOBAL: OnceLock<Arc<McpHost>> = OnceLock::new();
+
+/// The process-wide host (see [`GLOBAL`]).
+#[must_use]
+pub fn global() -> Arc<McpHost> {
+    GLOBAL.get_or_init(McpHost::new).clone()
+}
+
 impl McpHost {
     /// An empty host with no listener.
     #[must_use]
@@ -293,6 +311,19 @@ impl McpHost {
             .write()
             .expect("mcp agents poisoned")
             .remove(runtime_agent_id);
+    }
+
+    /// Forgets the agent registered under `runtime_agent_id` only if it still
+    /// holds `bearer` — a dropped roster entry must not evict the rebuilt one
+    /// that has since taken its id.
+    pub fn unregister_if_bearer(&self, runtime_agent_id: &str, bearer: &str) {
+        let mut agents = self.agents.write().expect("mcp agents poisoned");
+        if agents
+            .get(runtime_agent_id)
+            .is_some_and(|agent| constant_time_eq(agent.bearer.as_bytes(), bearer.as_bytes()))
+        {
+            agents.remove(runtime_agent_id);
+        }
     }
 
     /// Forgets every agent of `company` — a roster rebuild.
