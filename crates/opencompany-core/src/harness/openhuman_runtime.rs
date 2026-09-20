@@ -147,18 +147,24 @@ pub async fn global(boot: RuntimeBoot) -> crate::Result<Arc<Runtime>> {
         .cloned()
 }
 
-/// [`global`] for a caller with no async context of its own (a synchronous
-/// test that builds a roster).
+/// [`global`] for a caller that cannot await — a synchronous roster build
+/// in a test fixture, possibly called from inside some other tokio runtime.
 ///
-/// Refuses to run inside a tokio runtime: blocking a worker on the executor
-/// is how a test binary deadlocks itself.
+/// Blocks the calling thread on a helper thread that drives the build on the
+/// executor, so it is safe from inside a `#[tokio::test]` body (the
+/// executor is a different runtime; nothing this thread owns is needed to
+/// finish the build). After the first call it returns the cell's runtime at
+/// once. Production code awaits [`global`].
 pub fn global_blocking(boot: RuntimeBoot) -> crate::Result<Arc<Runtime>> {
-    if tokio::runtime::Handle::try_current().is_ok() {
-        return Err(OpenCompanyError::Harness(
-            "global_blocking called inside a tokio runtime; await `global` instead".to_string(),
-        ));
+    if let Some(runtime) = existing() {
+        return Ok(runtime);
     }
-    executor().block_on(global(boot))
+    std::thread::Builder::new()
+        .name("openhuman-boot".to_string())
+        .spawn(move || executor().block_on(global(boot)))
+        .map_err(|err| OpenCompanyError::Harness(format!("spawn the OpenHuman boot thread: {err}")))?
+        .join()
+        .map_err(|_| OpenCompanyError::Harness("the OpenHuman boot thread panicked".to_string()))?
 }
 
 /// The runtime if it has already been built, without building one.
