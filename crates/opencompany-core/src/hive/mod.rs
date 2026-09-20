@@ -40,3 +40,5 @@ pub mod referral;
 /// The company journal read as a tinyhivemind `SessionLog`, one desk at a
 /// time (ex `hivemind/log.rs`).
 pub mod session_log;
+#[cfg(test)]
+pub(crate) mod test_support;
