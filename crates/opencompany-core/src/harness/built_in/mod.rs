@@ -246,6 +246,7 @@ use crate::harness::cost::{TurnUsage, record_turn_cost};
 use crate::harness::mcp_probe::McpFailureQueue;
 use crate::harness::orchestrator::DelegationQueue;
 use crate::harness::policy::{ApprovalPolicy, ApprovalRequestQueue};
+use crate::hive::mcp_server::McpHost;
 use crate::ports::skills_state::{SkillState, SkillStateStore};
 use crate::ports::types::{
     Actor, ActorKind, AgentOverride, BudgetOverride, CompanyId, CompanyRecord, OverlayAgent,
@@ -691,11 +692,15 @@ pub struct CompanyAgent {
     /// key everything the runtime writes for it — transcripts, skills root,
     /// action dir — lives under.
     pub runtime_id: String,
-    /// The bearer the Phase 3 per-agent MCP server will authenticate this
-    /// agent's tool calls with. Minted at build so the attribution rule
-    /// (bearer → agent → in-flight turn) has a stable key from the first
-    /// turn; nothing reads it yet.
+    /// The bearer the `opencompany` MCP server authenticates this agent's
+    /// tool calls with (plan hive-desks Phase 3): minted at build, registered
+    /// on the process-wide [`McpHost`] under [`runtime_id`](Self::runtime_id),
+    /// and fixed on the agent's spec, so bearer → agent → in-flight turn is a
+    /// total function for the life of a turn.
     pub mcp_bearer: String,
+    /// The company this agent belongs to — the first half of every key the
+    /// MCP host and the in-flight registry use.
+    pub company: CompanyId,
     /// The runtime agent. Shared, not locked: see the type docs.
     agent: openhuman_embed::Agent,
     /// Serialises this agent's turns.
@@ -711,11 +716,15 @@ pub struct CompanyAgent {
     /// for the life of a pooled agent, and a rebuild — the only thing that can
     /// change which search belt is wired — mints a new `CompanyAgent` anyway.
     step_labels: steps::StepLabels,
-    /// The assembled toolbelt, **unattached** to the runtime agent in this
-    /// phase (OpenHuman has no seam for a host-built tool). Carried so Phase 3
-    /// can serve it as this agent's MCP catalogue, and so a test can still ask
-    /// which tools a grant wired.
-    tools: Arc<Vec<Box<dyn tinytools::Tool>>>,
+    /// This crate's own tools on the belt — everything OpenHuman does not run
+    /// natively — as the `opencompany` MCP server serves them to this agent.
+    /// Shared with the host's [`McpAgent`] entry; kept here so a test can
+    /// still ask which tools a grant wired.
+    tools: Arc<Vec<Arc<dyn tinytools::Tool>>>,
+    /// The process-wide MCP host this agent is registered on, held so a
+    /// dropped roster entry revokes its bearer and a turn can register itself
+    /// in flight.
+    mcp: Arc<McpHost>,
     /// The agent workspace: the file tools' sandbox and every turn's `cwd`.
     workspace: PathBuf,
     /// The [`HarnessModel`] this agent's turns actually run against — the same
@@ -738,6 +747,17 @@ impl std::fmt::Debug for CompanyAgent {
             .field("runtime_id", &self.runtime_id)
             .field("tools", &self.tools.len())
             .finish_non_exhaustive()
+    }
+}
+
+impl Drop for CompanyAgent {
+    fn drop(&mut self) {
+        // A retired roster entry's bearer stops working with it. Guarded by
+        // the bearer so a rebuilt agent that took this runtime id — possible
+        // only after this one released it — is never evicted by the old
+        // one's drop.
+        self.mcp
+            .unregister_if_bearer(&self.runtime_id, &self.mcp_bearer);
     }
 }
 
@@ -1162,6 +1182,13 @@ impl CompanyAgent {
     /// once — is retried under a numbered suffix rather than failed: the
     /// suffix changes only which transcripts directory the runtime writes,
     /// never the session key a turn resumes.
+    ///
+    /// The agent is also registered on the process-wide `opencompany` MCP
+    /// host (plan hive-desks Phase 3) under the same runtime id, with a fresh
+    /// bearer, its non-native belt as the catalogue and its
+    /// [`ApprovalPolicy`] as the gate; when the host's listener is up, the
+    /// spec carries the matching `McpServer`. `events` is the journal `read`
+    /// is served from — `None` leaves that one tool refusing.
     pub(crate) fn register(
         runtime: &openhuman_embed::Runtime,
         company: &CompanyId,
@@ -1169,16 +1196,39 @@ impl CompanyAgent {
         role: &str,
         budget_usd_daily: Option<f64>,
         blueprint: build::AgentBlueprint,
+        events: Option<Arc<dyn EventLog>>,
     ) -> crate::Result<Self> {
         let bridge = crate::harness::model_bridge::register(
             blueprint.chat_model.clone() as Arc<dyn tinyinference::model::ChatModel<()>>,
             &blueprint.model,
         )?;
+        let mcp = crate::hive::mcp_server::global();
+        let mcp_bearer = crate::hive::mcp_server::McpAgent::mint_bearer();
+        // The served catalogue: the belt minus what OpenHuman runs itself.
+        let served_names: Vec<String> = blueprint
+            .tools
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .filter(|name| !build::OPENHUMAN_NATIVE_TOOLS.contains(&name.as_str()))
+            .collect();
+        let mut allow_tools: Vec<String> = crate::hive::tools::SPEECH_TOOL_NAMES
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect();
+        allow_tools.extend(served_names.iter().cloned());
         let base_id = crate::session_key::runtime_agent_id(company, agent_id);
         let mut runtime_id = base_id.clone();
         let mut attempt = 0u32;
         let agent = loop {
-            let spec = build::agent_spec_for(&blueprint, &runtime_id, bridge.provider());
+            let attach = mcp.endpoint_for(company, &runtime_id).map(|endpoint| {
+                crate::hive::mcp_server::McpAttach {
+                    endpoint,
+                    bearer: mcp_bearer.clone(),
+                    allow_tools: allow_tools.clone(),
+                }
+            });
+            let spec =
+                build::agent_spec_for(&blueprint, &runtime_id, bridge.provider(), attach.as_ref());
             match runtime.agent(spec) {
                 Ok(agent) => break agent,
                 Err(openhuman_embed::AgentError::DuplicateId(_)) if attempt < 64 => {
@@ -1206,21 +1256,73 @@ impl CompanyAgent {
             );
         }
         let step_labels = steps::StepLabels::from_tools(&blueprint.tools);
+        let build::AgentBlueprint {
+            tools,
+            policy,
+            workspace,
+            chat_model,
+            ..
+        } = blueprint;
+        let served: Vec<Arc<dyn tinytools::Tool>> = crate::hive::tools::share_belt(
+            tools
+                .into_iter()
+                .filter(|tool| !build::OPENHUMAN_NATIVE_TOOLS.contains(&tool.name()))
+                .collect(),
+        );
+        let mut entry = crate::hive::mcp_server::McpAgent::new(
+            company.clone(),
+            agent_id,
+            runtime_id.clone(),
+            mcp_bearer.clone(),
+        )
+        .tools(served.clone())
+        .policy(Arc::new(policy))
+        .workspace(workspace.clone());
+        if let Some(events) = events {
+            entry = entry.events(events);
+        }
+        mcp.register(entry);
         Ok(Self {
             agent_id: agent_id.to_string(),
             role: role.to_string(),
             budget_usd_daily,
             session_key: crate::harness::session_key::openhuman_session_key(company, agent_id),
             runtime_id,
-            mcp_bearer: format!("ocm_{}", uuid::Uuid::new_v4().simple()),
+            mcp_bearer,
+            company: company.clone(),
             agent,
             turn_lock: Arc::new(Mutex::new(())),
             bridge,
             step_labels,
-            tools: Arc::new(blueprint.tools),
-            workspace: blueprint.workspace,
-            chat_model: blueprint.chat_model,
+            tools: Arc::new(served),
+            mcp,
+            workspace,
+            chat_model,
         })
+    }
+
+    /// The conversation a turn on `chat_id` answers in, as the in-flight
+    /// registry records it. `None` — a dispatched card, a workflow node — is
+    /// a workflow surface keyed by the session the turn runs on.
+    fn surface_for(
+        chat_id: Option<&str>,
+        thread_root: Option<EventSeq>,
+        session_id: &str,
+    ) -> tinyhivemind_embed::ConversationRef {
+        use tinyhivemind_embed::ConversationKind;
+        let (id, kind) = match chat_id {
+            Some(chat) if tinyhivemind_core::chat::is_general_chat(Some(chat)) => {
+                (chat.to_string(), ConversationKind::General)
+            }
+            Some(chat) if chat.starts_with("dm:") => (chat.to_string(), ConversationKind::Direct),
+            Some(chat) => (chat.to_string(), ConversationKind::Desk),
+            None => (session_id.to_string(), ConversationKind::Workflow),
+        };
+        tinyhivemind_embed::ConversationRef {
+            id,
+            kind,
+            thread_root: thread_root.map(|root| tinyhivemind::Sequence(root.value())),
+        }
     }
 
     /// The runtime agent handle, for a hive binding.
@@ -1242,9 +1344,15 @@ impl CompanyAgent {
             .collect()
     }
 
-    /// The assembled belt (unattached in this phase; the Phase 3 MCP catalogue).
-    pub fn tools(&self) -> &[Box<dyn tinytools::Tool>] {
+    /// This crate's own tools on the belt — the `opencompany` MCP catalogue
+    /// the agent reaches through `mcp_call_tool`.
+    pub fn tools(&self) -> &[Arc<dyn tinytools::Tool>] {
         &self.tools
+    }
+
+    /// The process-wide MCP host this agent is served on.
+    pub fn mcp(&self) -> &Arc<McpHost> {
+        &self.mcp
     }
 
     /// The agent workspace directory.
@@ -1401,6 +1509,21 @@ impl CompanyAgent {
         let budget_pause_summary: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
         let _turn = self.turn_lock.lock().await;
+        // Register the turn in flight so the `opencompany` MCP server can
+        // attribute this agent's tool calls to it (plan hive-desks Phase 3).
+        // A caller that registered first — the hive driver, with its episode
+        // and round — keeps its own entry; the ticket then is `None` and the
+        // caller takes the outbox back itself.
+        let _in_flight = self
+            .mcp
+            .in_flight()
+            .begin(crate::hive::tools::InFlight::new(
+                self.company.clone(),
+                self.runtime_id.clone(),
+                self.agent_id.clone(),
+                Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id),
+            ))
+            .ok();
         // Anything left on the taps belongs to no attempt of ours.
         let _ = self.bridge.take_usage();
         let _ = self.bridge.take_errors();
@@ -2126,6 +2249,10 @@ where
 /// A pool of live agents, one roster per company.
 pub struct HarnessPool {
     agents: RwLock<HashMap<CompanyId, Vec<Arc<CompanyAgent>>>>,
+    /// The process-wide `opencompany` MCP host every roster agent is served
+    /// on (plan hive-desks Phase 3): its listener, its bearers, and the
+    /// in-flight turn registry the hive driver attributes calls through.
+    mcp: Arc<McpHost>,
     monthly_budgets: RwLock<HashMap<CompanyId, Option<f64>>>,
     /// Fingerprint of the effective MCP server set the cached roster was built
     /// from, keyed by company. Drives MCP-freshness: [`ensure`](Self::ensure)
@@ -2425,6 +2552,7 @@ impl HarnessPool {
     pub fn new() -> Self {
         Self {
             agents: RwLock::new(HashMap::new()),
+            mcp: crate::hive::mcp_server::global(),
             monthly_budgets: RwLock::new(HashMap::new()),
             mcp_fingerprints: RwLock::new(HashMap::new()),
             overlay_fingerprints: RwLock::new(HashMap::new()),
@@ -2931,6 +3059,11 @@ impl HarnessPool {
             crate::harness::openhuman_runtime::RuntimeBoot::from_env(),
         )
         .await?;
+        // The `opencompany` MCP listener has to be up before a spec names its
+        // endpoint (plan hive-desks Phase 3). Idempotent after the first bind.
+        self.mcp.serve_loopback().await.map_err(|err| {
+            OpenCompanyError::Harness(format!("bind the opencompany MCP listener: {err}"))
+        })?;
 
         // Retire the previous roster before the new one registers: a runtime
         // agent id stays reserved while any clone of it lives, so the old
@@ -4129,6 +4262,9 @@ impl HarnessPool {
             crate::harness::openhuman_runtime::RuntimeBoot::from_env(),
         )
         .await?;
+        self.mcp.serve_loopback().await.map_err(|err| {
+            OpenCompanyError::Harness(format!("bind the opencompany MCP listener: {err}"))
+        })?;
         let blueprint = confine::build_confined_agent(company, company_name, confinement, deps)?;
         // Registered under a per-turn id: the copilot is not on the roster,
         // and two confined turns of one company may overlap.
@@ -4144,6 +4280,7 @@ impl HarnessPool {
             "Workflow copilot",
             None,
             blueprint,
+            deps.events.clone(),
         )?;
 
         let stream_ctx = Some(crate::turn_stream::TurnStreamCtx {
@@ -4778,6 +4915,35 @@ impl HarnessPool {
         }
 
         Ok(outcome)
+    }
+
+    /// The `opencompany` MCP host the pool's agents are served on.
+    pub fn mcp(&self) -> &Arc<McpHost> {
+        &self.mcp
+    }
+
+    /// The turns in flight across every agent the pool serves — the hive
+    /// driver registers a seat's turn here before `agent.turn(..)` and takes
+    /// its outbox back after.
+    pub fn in_flight(&self) -> &Arc<crate::hive::tools::InFlightRegistry> {
+        self.mcp.in_flight()
+    }
+
+    /// The loopback address the MCP listener is bound to, once
+    /// [`ensure`](Self::ensure) has run.
+    pub fn mcp_addr(&self) -> Option<std::net::SocketAddr> {
+        self.mcp.addr()
+    }
+
+    /// The live agent `agent_id` of `company`, if the roster holds one.
+    pub async fn agent(&self, company: &CompanyId, agent_id: &str) -> Option<Arc<CompanyAgent>> {
+        self.agents
+            .read()
+            .await
+            .get(company)?
+            .iter()
+            .find(|agent| agent.agent_id == agent_id)
+            .cloned()
     }
 
     /// Number of companies currently resident in the pool (test/observability).
@@ -5529,6 +5695,7 @@ pub(crate) fn build_roster(
             &manifest_agent.role,
             effective_budget,
             blueprint,
+            deps.events.clone(),
         )?));
     }
 
@@ -5618,6 +5785,7 @@ pub(crate) fn build_roster(
             &manifest_agent.role,
             effective_budget,
             blueprint,
+            deps.events.clone(),
         )?));
     }
 

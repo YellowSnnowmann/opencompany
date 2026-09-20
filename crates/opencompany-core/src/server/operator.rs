@@ -4320,22 +4320,52 @@ pub(crate) struct ReferralConversationDto {
     lines: Vec<ReferralLineDto>,
 }
 
+/// What a journaled reply was inside the episode that produced it. Mirrors
+/// `MessageEpisodeDto` in `frontend/src/api/types.ts`; the same shape rides
+/// on the `agent_reply` SSE frame as `episode`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct AsideLineDto {
-    /// The agent that wrote it.
-    author_id: String,
-    /// What they said, with the `!aside @peer` head already stripped.
-    text: String,
+pub(crate) struct MessageEpisodeDto {
+    /// The episode.
+    id: String,
+    /// The round it was committed in (raw revision).
+    revision: u64,
+    /// The speech act.
+    kind: crate::ports::types::UtteranceKind,
+    /// A `dm`'s recipients.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    to: Option<Vec<String>>,
+    /// How a `broadcast` was routed on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    routed_by: Option<RoutedByDto>,
 }
 
+/// `MessageEpisodeDto.routedBy`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct AsideConversationDto {
-    /// Everyone in it — the author first, then who they addressed.
-    members: Vec<String>,
-    /// The exchange, oldest first. Its length is the count in the label.
-    lines: Vec<AsideLineDto>,
+pub(crate) struct RoutedByDto {
+    plan: crate::hive::routing::RoutingPlanDto,
+    router: crate::hive::routing::Router,
+}
+
+impl From<crate::ports::types::ReplyEpisode> for MessageEpisodeDto {
+    fn from(episode: crate::ports::types::ReplyEpisode) -> Self {
+        Self {
+            id: episode.id,
+            revision: episode.revision,
+            kind: episode.kind,
+            to: (!episode.to.is_empty()).then_some(episode.to),
+            routed_by: episode.routed_by.map(|routed| RoutedByDto {
+                plan: routed.plan,
+                router: routed.router,
+            }),
+        }
+    }
+}
+
+/// The `episode` object an `agent_reply` frame carries, as JSON.
+pub(crate) fn episode_json(episode: &crate::ports::types::ReplyEpisode) -> serde_json::Value {
+    serde_json::to_value(MessageEpisodeDto::from(episode.clone())).unwrap_or_default()
 }
 
 #[derive(Debug, Serialize)]
@@ -4398,7 +4428,14 @@ struct ChatHistoryMessageDto {
     /// every ordinary message, so the wire shape is unchanged for them.
     #[serde(skip_serializing_if = "Option::is_none")]
     referral_conversation: Option<ReferralConversationDto>,
-    aside_conversation: Option<AsideConversationDto>,
+    /// What this reply was inside the episode that produced it (plan
+    /// hive-desks, Phase 4). Absent for every reply outside an episode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    episode: Option<MessageEpisodeDto>,
+    /// Who may read this line, when the host narrowed it (a desk `dm`).
+    /// Absent means everyone on the desk.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    audience: Vec<String>,
     /// When it was journaled, epoch millis.
     at_millis: f64,
     /// Whether it is the operator's own message.
@@ -4580,17 +4617,8 @@ impl From<MessageView> for ChatHistoryMessageDto {
         let cue_text = (view.cue_text != view.text).then(|| view.cue_text.clone());
         Self {
             cue_text,
-            aside_conversation: view.aside_conversation.map(|aside| AsideConversationDto {
-                members: aside.members,
-                lines: aside
-                    .lines
-                    .into_iter()
-                    .map(|line| AsideLineDto {
-                        author_id: line.author_id,
-                        text: line.text,
-                    })
-                    .collect(),
-            }),
+            episode: view.episode.map(MessageEpisodeDto::from),
+            audience: view.aside_audience,
             referral_conversation: view.referral_conversation.map(|crossing| {
                 ReferralConversationDto {
                     asker_id: crossing.asker_id,
