@@ -59,8 +59,8 @@ use tinyhivemind_core::aside::Viewer;
 use tinytools::Tool;
 
 use super::tools::{
-    InFlightContext, InFlightRegistry, McpToolAdapter, SPEECH_TOOL_NAMES, Speech, is_speech_tool,
-    speech_descriptor,
+    InFlight, InFlightContext, InFlightRegistry, McpToolAdapter, SPEECH_TOOL_NAMES, Speech,
+    ToolJob, is_speech_tool, speech_descriptor,
 };
 use crate::harness::policy::ApprovalPolicy;
 use crate::ports::events::EventLog;
@@ -633,58 +633,87 @@ async fn call(host: &McpHost, agent: &McpAgent, name: &str, arguments: Value) ->
         }
         return call_speech(host, agent, name, &arguments).await;
     }
-    let Some(tool) = agent.tool(name) else {
+    if agent.tool(name).is_none() {
         return tool_result(format!("refused: unknown tool '{name}'"), true);
-    };
+    }
     let turn = host.in_flight.snapshot(&agent.runtime_agent_id);
-    if let Some(policy) = &agent.policy {
-        let channel = turn
-            .as_ref()
-            .map_or_else(|| "mcp".to_string(), |turn| turn.surface.id.clone());
-        let request = ToolPolicyRequest::new(
-            name,
-            arguments.clone(),
-            ToolCallContext::session(
-                agent.runtime_agent_id.clone(),
-                channel,
-                agent.agent_id.clone(),
-                uuid::Uuid::new_v4().simple().to_string(),
-                0,
-            ),
-        );
-        // Decide inside the turn's own approval scope, not the handler's
-        // task: see `within_turn`.
-        let (scope, pending) = turn.as_ref().map_or_else(
-            || (crate::harness::policy::ApprovalScope::default(), false),
-            |turn| (turn.approval_scope.clone(), turn.explicit_request_pending),
-        );
-        let (decision, pending_after) =
-            crate::harness::policy::within_turn(scope, pending, policy.check(&request)).await;
-        if pending_after != pending {
-            host.in_flight.with(&agent.runtime_agent_id, |turn| {
-                turn.explicit_request_pending = pending_after;
-            });
-        }
-        match decision {
-            ToolPolicyDecision::Allow => {}
-            ToolPolicyDecision::Deny { reason } => {
-                return tool_result(format!("refused: {reason}"), true);
+    // A turn that is running hands the call to its own task (see `ToolJob`);
+    // anything else — a test over a bare agent, a registered turn nobody is
+    // driving — is served here.
+    if let Some(executor) = turn.as_ref().and_then(|turn| turn.executor.clone()) {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        let job = ToolJob {
+            tool: name.to_string(),
+            arguments: arguments.clone(),
+            reply,
+        };
+        match executor.send(job).await {
+            Ok(()) => {
+                return answer.await.unwrap_or_else(|_| {
+                    tool_result(
+                        format!("'{name}' did not run: the turn ended before it could"),
+                        true,
+                    )
+                });
             }
-            ToolPolicyDecision::RequireApproval { reason } => {
-                return tool_result(
-                    format!(
-                        "awaiting approval: {reason}. The request has been parked for the \
-                         operator; stop and wait for the decision."
-                    ),
-                    true,
+            Err(_) => {
+                tracing::debug!(
+                    agent = %agent.runtime_agent_id,
+                    tool = name,
+                    "[hive::mcp] the turn's executor is gone; serving the call on the server"
                 );
             }
         }
     }
-    let context = InFlightContext::new(turn, agent.workspace.clone());
-    let result = tool.execute(arguments, &context).await;
-    let is_error = result.is_error;
-    tool_result(result.output(), is_error)
+    agent.serve_call(name, arguments, turn).await
+}
+
+impl McpAgent {
+    /// Decides `name` under this agent's [`ApprovalPolicy`] and, when allowed,
+    /// runs it under `turn`'s context — returning the MCP tool result either
+    /// way. Called on the turn's own task when one is running (so the policy's
+    /// parks and the tool's own claims file where that turn reads them), else
+    /// on the server's.
+    pub async fn serve_call(&self, name: &str, arguments: Value, turn: Option<InFlight>) -> Value {
+        let Some(tool) = self.tool(name) else {
+            return tool_result(format!("refused: unknown tool '{name}'"), true);
+        };
+        if let Some(policy) = &self.policy {
+            let channel = turn
+                .as_ref()
+                .map_or_else(|| "mcp".to_string(), |turn| turn.surface.id.clone());
+            let request = ToolPolicyRequest::new(
+                name,
+                arguments.clone(),
+                ToolCallContext::session(
+                    self.runtime_agent_id.clone(),
+                    channel,
+                    self.agent_id.clone(),
+                    uuid::Uuid::new_v4().simple().to_string(),
+                    0,
+                ),
+            );
+            match policy.check(&request).await {
+                ToolPolicyDecision::Allow => {}
+                ToolPolicyDecision::Deny { reason } => {
+                    return tool_result(format!("refused: {reason}"), true);
+                }
+                ToolPolicyDecision::RequireApproval { reason } => {
+                    return tool_result(
+                        format!(
+                            "awaiting approval: {reason}. The request has been parked for the \
+                             operator; stop and wait for the decision."
+                        ),
+                        true,
+                    );
+                }
+            }
+        }
+        let context = InFlightContext::new(turn, self.workspace.clone());
+        let result = tool.execute(arguments, &context).await;
+        let is_error = result.is_error;
+        tool_result(result.output(), is_error)
+    }
 }
 
 async fn call_speech(host: &McpHost, agent: &McpAgent, name: &str, arguments: &Value) -> Value {
