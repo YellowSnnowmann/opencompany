@@ -214,7 +214,14 @@ pub fn existing() -> Option<Arc<Runtime>> {
 
 async fn build(boot: RuntimeBoot) -> crate::Result<Arc<Runtime>> {
     let boot = boot.resolved();
-    let mut builder = Runtime::builder().workspace(boot.workspace());
+    // Every tool group's schema on the wire. The runtime's default withholds
+    // each group behind OpenHuman's `use_skill` envelope (its desktop
+    // posture), which would turn a company agent's `file_read` into an
+    // unknown tool; this host routes and scopes tools itself, per agent, and
+    // wants native function calling on exactly the names the spec grants.
+    let mut builder = Runtime::builder()
+        .workspace(boot.workspace())
+        .tool_groups(openhuman_embed::ToolGroups::advertised());
     if let Some(key) = boot.api_key.as_deref() {
         builder = builder.api_key(key);
     }
