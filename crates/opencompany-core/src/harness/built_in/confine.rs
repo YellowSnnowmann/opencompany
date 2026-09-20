@@ -49,7 +49,6 @@
 //! Compiled only under `feature = "openhuman"`, with the rest of the harness.
 
 use std::ops::Range;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use openhuman_core as oh;
