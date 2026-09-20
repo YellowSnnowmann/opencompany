@@ -223,7 +223,6 @@ async fn a_background_turn_does_not_leak_into_the_next_turn_on_its_bound_chat() 
             None,
             None,
             None,
-            None,
             // A background task names no conversation — the point of the case.
             ChatTarget::default(),
         )
