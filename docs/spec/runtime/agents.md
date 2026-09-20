@@ -440,8 +440,8 @@ not be in `company.toml` and not in the console). Four shipped templates do set
 `e2e_harness` — so the opt-in path is genuinely exercised, not dead code.
 
 Since a budget halt and an iteration-cap pause are different outcomes, the
-runtime reports them separately: `TurnOutcome::hit_iteration_cap` is read from
-[`Agent::last_turn_hit_cap`](oh::agent::Agent::last_turn_hit_cap), which stays
+runtime reports them separately: `TurnOutcome::hit_iteration_cap` is read off
+the turn's progress stream (`progress_pump::hit_iteration_cap`), which stays
 `false` for a hook-driven stop — the run paused below the 25-round ceiling, so
 the cap predicate never held. A cap pause means the teammate ran out of rounds
 with work still to do and can be resumed via the "continue" bubble above; a
