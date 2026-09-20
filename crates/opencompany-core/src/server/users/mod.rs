@@ -94,6 +94,9 @@ mod auth_test_group_2;
 #[path = "auth_test_support_1.rs"]
 mod auth_test_support_1;
 #[cfg(test)]
+#[path = "claim_tests.rs"]
+mod claim_tests;
+#[cfg(test)]
 #[path = "mode_test_group_1.rs"]
 mod mode_test_group_1;
 #[cfg(test)]
