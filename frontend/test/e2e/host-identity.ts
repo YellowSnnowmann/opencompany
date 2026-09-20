@@ -118,7 +118,9 @@ export const MANAGED_HOST_HOME: string | undefined = process.env.PW_BASE_URL
       ? join(repoRoot, "target/e2e/first-run-data")
       : EULER
         ? join(repoRoot, "target/e2e/euler-data")
-        : process.env.PW_HOST_DATA_DIR || join(repoRoot, "target/e2e/data");
+        : HIVE
+          ? join(repoRoot, "target/e2e/hive-data")
+          : process.env.PW_HOST_DATA_DIR || join(repoRoot, "target/e2e/data");
 
 /**
  * The instance id the caller says this run must be talking to.
