@@ -1387,13 +1387,21 @@ impl CompanyAgent {
         // Anything left on the taps belongs to no attempt of ours.
         let _ = self.bridge.take_usage();
         let _ = self.bridge.take_errors();
+        // `cwd` only where the workspace exists: the runtime refuses a turn
+        // rooted at an inaccessible path, and a broken workspace root is a
+        // reported-once condition the turn survives (issue #551) — relative
+        // file writes are what the operator loses, not the reply.
+        let cwd = self.workspace.is_dir().then_some(self.workspace.as_path());
         let send = |sender: tokio::sync::mpsc::Sender<oh::agent::progress::AgentProgress>| {
-            self.agent
+            let mut turn = self
+                .agent
                 .turn(message)
                 .session(session_id.clone())
-                .cwd(&self.workspace)
-                .on_progress(sender)
-                .send()
+                .on_progress(sender);
+            if let Some(cwd) = cwd {
+                turn = turn.cwd(cwd);
+            }
+            turn.send()
         };
 
         let (reply, mut usages): (crate::Result<String>, Vec<TurnUsage>) =
