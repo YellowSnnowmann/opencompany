@@ -198,8 +198,9 @@ async fn a_two_seat_desk_completes_in_two_rounds_with_both_seats_running_at_once
         .expect("the episode runs");
     assert_eq!(report.reason, EpisodeReason::CompleteEpisode);
     assert_eq!(report.rounds, 2);
-    assert_eq!(report.completed_by.as_deref(), Some("ceo"));
-    assert_eq!(report.summary.as_deref(), Some("Approved."));
+    // The primary seat's completion is the room's answer.
+    assert_eq!(report.completed_by.as_deref(), Some("engineer"));
+    assert_eq!(report.summary.as_deref(), Some("Plan stands."));
     assert!(script.peak_concurrency() >= 2, "seats ran together");
 
     // Without a router the opening round is the desk in order, bounded by

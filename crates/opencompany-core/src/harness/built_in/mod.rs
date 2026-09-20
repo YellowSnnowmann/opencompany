@@ -1510,23 +1510,50 @@ impl CompanyAgent {
 
         let _turn = self.turn_lock.lock().await;
         // Register the turn in flight so the `opencompany` MCP server can
-        // attribute this agent's tool calls to it (plan hive-desks Phase 3).
-        // A caller that registered first — the hive driver, with its episode
-        // and round — keeps its own entry; the ticket then is `None` and the
-        // caller takes the outbox back itself.
-        let _in_flight = self
-            .mcp
-            .in_flight()
-            .begin(
-                crate::hive::tools::InFlight::new(
-                    self.company.clone(),
-                    self.runtime_id.clone(),
-                    self.agent_id.clone(),
-                    Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id),
-                )
-                .with_approval_context_now(),
+        // attribute this agent's tool calls to it (plan hive-desks Phase 3),
+        // and hand it the channel those calls come back on: the belt's tools
+        // file into task-local queues (approval scope, publish and delegation
+        // claims), so they must run on THIS task — `serve_jobs` below, joined
+        // with the turn. A caller that registered first — the hive driver,
+        // with its episode and round — keeps its own entry and takes the
+        // outbox back itself; this turn only lends it the executor.
+        let (job_tx, mut job_rx) = tokio::sync::mpsc::channel::<crate::hive::tools::ToolJob>(8);
+        let in_flight = self.mcp.in_flight();
+        let _in_flight = match in_flight.begin(
+            crate::hive::tools::InFlight::new(
+                self.company.clone(),
+                self.runtime_id.clone(),
+                self.agent_id.clone(),
+                Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id),
             )
-            .ok();
+            .with_executor(job_tx.clone()),
+        ) {
+            Ok(ticket) => Some(ticket),
+            Err(_) => {
+                in_flight.with(&self.runtime_id, |turn| turn.executor = Some(job_tx.clone()));
+                None
+            }
+        };
+        drop(job_tx);
+        let served = self.mcp.agent(&self.runtime_id);
+        let serve_jobs = async {
+            while let Some(job) = job_rx.recv().await {
+                let turn = in_flight.snapshot(&self.runtime_id);
+                let result = match &served {
+                    Some(agent) => agent.serve_call(&job.tool, job.arguments, turn).await,
+                    None => serde_json::json!({
+                        "content": [{ "type": "text", "text": format!(
+                            "refused: '{}' is not served for this agent", job.tool
+                        ) }],
+                        "isError": true,
+                    }),
+                };
+                let _ = job.reply.send(result);
+            }
+            // The registry's sender outlives the turn, so this loop ends only
+            // if the entry was dropped under us; never let it end the select.
+            std::future::pending::<()>().await;
+        };
         // Anything left on the taps belongs to no attempt of ours.
         let _ = self.bridge.take_usage();
         let _ = self.bridge.take_errors();
@@ -1547,8 +1574,7 @@ impl CompanyAgent {
             turn.send()
         };
 
-        let (reply, mut usages): (crate::Result<String>, Vec<TurnUsage>) =
-            oh::agent::stop_hooks::with_stop_hooks(
+        let turn_body = oh::agent::stop_hooks::with_stop_hooks(
                 hooks,
                 Box::pin(async {
                     let mut usages: Vec<TurnUsage> = Vec::new();
@@ -1600,8 +1626,15 @@ impl CompanyAgent {
                     };
                     (reply, usages)
                 }),
-            )
-            .await;
+            );
+        let (reply, mut usages): (crate::Result<String>, Vec<TurnUsage>) = tokio::select! {
+            biased;
+            outcome = turn_body => outcome,
+            () = serve_jobs => unreachable!("the tool-job loop never completes"),
+        };
+        if _in_flight.is_none() {
+            in_flight.with(&self.runtime_id, |turn| turn.executor = None);
+        }
         drop(_turn);
 
         let events = pump.finish().await;
