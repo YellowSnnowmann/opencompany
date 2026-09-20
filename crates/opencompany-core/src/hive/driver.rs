@@ -395,7 +395,8 @@ impl HiveDispatcher {
     /// Runs rounds until the episode completes or the host closes it.
     pub(crate) async fn drive(&self, run: &mut EpisodeRun) -> Result<EpisodeReport> {
         let routing = crate::hive::routing::desk_routing(&self.record, &run.desk.desk_id);
-        let driver = CompletionDriver::new(&run.desk.hive, routing.round_width)
+        let desk = Arc::clone(&run.desk);
+        let driver = CompletionDriver::new(&desk.hive, routing.round_width)
             .map_err(|error| OpenCompanyError::Harness(error.to_string()))?;
         let policy = routing.policy();
         loop {
@@ -409,13 +410,17 @@ impl HiveDispatcher {
             if run.rounds >= routing.max_rounds {
                 return self.complete(run, EpisodeReason::RoundCap).await;
             }
+            // Proposed from a snapshot so the round can run against the
+            // live run; the fold below checks the snapshot still equals the
+            // state it is applied to.
+            let snapshot = run.state.clone();
             let pending = driver
-                .pending_round(&run.state)
+                .pending_round(&snapshot)
                 .map_err(|error| OpenCompanyError::Harness(error.to_string()))?;
             if pending.is_empty() {
                 return self.complete(run, EpisodeReason::Failed).await;
             }
-            let outcome: RoundOutcome = round::run_round(self, run, &pending, &routing).await?;
+            let mut outcome: RoundOutcome = round::run_round(self, run, &pending, &routing).await?;
             let thread_context: Vec<String> = Vec::new();
             let transition = driver
                 .apply_committed_round(
@@ -439,7 +444,7 @@ impl HiveDispatcher {
             if let Some(reason) = outcome.forced {
                 run.forced = Some(run.forced.map_or(reason, |held| held.min_severity(reason)));
             }
-            if let Some(completion) = outcome.last_completion {
+            if let Some(completion) = outcome.last_completion.take() {
                 run.last_completion = Some(completion);
             }
             let actions: Vec<serde_json::Value> = transition
