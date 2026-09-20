@@ -1134,18 +1134,25 @@ pub struct GroupChat {
     /// [`agent_scoped_grants`](crate::runtime::builder::agent_scoped_grants).
     #[serde(default)]
     pub tools: Vec<String>,
-    /// Whether this desk answers as a **room** rather than through one
-    /// responder, and how far it may go doing so (`[[group_chat]].hive`).
+    /// How this desk routes and paces the episodes it opens, and whether it
+    /// may refer across desks (`[group_chat.routing]`).
     ///
-    /// Every key is optional and every default is derived from the desk's own
-    /// membership, so an omitted section is not a no-op the way `tools` is: a
-    /// desk that grew to two members starts deliberating, which is the point.
-    /// A desk that should keep answering through its lead says
-    /// `hive = { enabled = false }`, and a desk of one is unaffected either way
-    /// — there is nobody to deliberate with. See
-    /// [`crate::hivemind`] and `docs/spec/runtime/hivemind.md`.
-    #[serde(default)]
-    pub hive: crate::hivemind::HiveConfig,
+    /// Every key is optional and every default is the library's, so an
+    /// omitted section is a no-op the way `tools` is: a desk of two runs
+    /// rounds of up to five, routes by Jev when the host has a TinyHumans
+    /// key and by its lead otherwise, and asks nobody outside the room. See
+    /// [`crate::hive::routing`] and `docs/spec/runtime/hive.md`.
+    ///
+    /// The field is named `hive` because it replaced the trace-grammar block
+    /// of that name in place and ~30 fixtures spell it; the manifest key is
+    /// `routing`, and a stale `[group_chat.hive]` is refused by the loader
+    /// with a migration hint.
+    #[serde(
+        default,
+        rename = "routing",
+        skip_serializing_if = "crate::hive::routing::RoutingConfig::is_default"
+    )]
+    pub hive: crate::hive::routing::RoutingConfig,
 }
 
 /// A `[[connection]]` entry — an integration to prioritize wiring. This is

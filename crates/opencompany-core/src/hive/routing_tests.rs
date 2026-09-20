@@ -85,7 +85,7 @@ fn an_undeclared_desk_reads_as_default_and_an_overlay_outranks_the_manifest() {
     let (config, source) = effective_routing(&record, "engineering");
     assert_eq!(source, RoutingSource::Overlay);
     assert_eq!(config.round_width, Some(1));
-    assert!(record.reset_desk_hive("engineering"));
+    assert!(record.clear_desk_hive("engineering"));
     assert_eq!(
         effective_routing(&record, "engineering").1,
         RoutingSource::Manifest
