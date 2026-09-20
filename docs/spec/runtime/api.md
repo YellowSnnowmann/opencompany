@@ -223,6 +223,43 @@ of the new mode is the old mode. Selection spend is metered under its own
 usage kind (`selectorCall`), charged to the whole-company bucket.
 
 
+## Desk routing and episodes
+
+A desk of two or more members answers as a room (see
+[events.md](events.md#hive-episodes-and-rounds)). Its pacing is the manifest's
+`[group_chat.routing]` block — `round_width` (default 5), `choice_option_limit`
+(8), `minimum_confidence`, `high_impact_minimum_confidence`,
+`clarification_threshold`, `high_impact_threshold`, `max_rounds`,
+`turn_timeout_secs` (600) and `[group_chat.routing.referral] {enabled, max_hops,
+reach, returns}` — or an operator overlay installed over it:
+
+- `GET {scope}/desks/{id}/routing` → `DeskRoutingDto {deskId, source: overlay |
+  manifest | default, declared, effective, candidates[]}`. `declared` is the
+  block as authored, snake_case; `effective` is what the runtime will use,
+  camelCase, every default resolved, plus `router: jev | fallback | explicit`;
+  `candidates[{agentId, label, role, sharedWith[]}]` lists every seat the
+  router may pick and the other desks each also sits on — a shared seat runs
+  one turn at a time across all of them.
+- `PUT {scope}/desks/{id}/routing` with a `declared` body installs an overlay
+  and answers the resolved `DeskRoutingDto`; a refusal is a `400` carrying the
+  host's own sentence. `DELETE` drops the overlay and restores the manifest.
+  Both journal `DeskRoutingConfigured {desk_id, reset}`. `/desks/{id}/hive` is
+  gone; a manifest still carrying `[group_chat.hive]` is refused at load with
+  a migration hint.
+- `GET {scope}/desks` rows carry `routing?: {source, roundWidth,
+  choiceOptionLimit, maxRounds, turnTimeoutSecs, router}` — the summary, so the
+  room can label a round without the second read. Absent on a desk that runs
+  no rounds.
+- `GET {scope}/episodes?desk&status=open|completed&limit` → `EpisodeDto[]
+  {id, chatId, openedBySeq, parentId?, participants[], plan, revision, status,
+  openedAtMillis, completedAtMillis?, completedBy?, reason?}`, newest first.
+- `GET {scope}/chat/history` rows (+): `episode?: {id, revision, kind, to?,
+  routedBy?}` and `audience?: string[]` — see the events page for the shape.
+  Removed: `asideConversation`, and the `hive-report` / `hive-failure`
+  authors; `hive-referral` stays for a referral's returned answer.
+- `GET {scope}/runs` rows and the GraphQL `AgentRun` (+): `episodeId?`,
+  `roundRevision?` — the round an attempt was a seat's turn in.
+
 ### Chat attachments (issue #1682)
 
 ```text
