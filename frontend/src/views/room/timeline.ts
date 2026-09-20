@@ -1,5 +1,5 @@
 // How a channel's rows are grouped and rendered: senders, hydration, the
-// timeline entries, the approval and episode items interleaved among them, and
+// timeline entries, the approval and round items interleaved among them, and
 // reactions.
 //
 // Split out of the old `model.ts` (issue: room store / P2). Pure.
@@ -16,7 +16,7 @@ import {
   type ChatMessage,
   type Reaction,
 } from "@/lib/chat";
-import type { Episode, EpisodeTurn } from "@/lib/hive/episode";
+import type { Episode, EpisodeRound } from "@/lib/episodes";
 import { initials as nameInitials, type TeamMember } from "@/lib/team";
 import type { Channel } from "./channels";
 import { latestSettlePillIdByTaskId } from "./review";
@@ -617,24 +617,31 @@ export type TimelineItem =
     }
   | {
       /**
-       * A desk answering as a room.
+       * One round of a desk answering as a room.
        *
-       * The turns of one episode collapse into a single item so the block can
-       * draw what a flat list cannot: a band around the blind opening round, the
-       * standings the turns added up to, and the desk's own closing verdict.
+       * The rows a round committed collapse into a single item so the band can
+       * draw what a flat list cannot: the seats that ran together, which of
+       * them is still working, and the plan the episode opened with.
        *
-       * The operator message that opened the room is deliberately **not** inside
-       * it. The question is the operator's and the answer is the room's; nesting
-       * the former inside the latter reads as though the desk asked itself.
+       * The operator message that opened the episode is deliberately **not**
+       * inside it. The question is the operator's and the answer is the room's;
+       * nesting the former inside the latter reads as though the desk asked
+       * itself.
        */
-      kind: "episode";
+      kind: "round";
       key: string;
       at: number;
       episode: Episode;
-      /** The rows this room produced, in transcript order. */
+      round: EpisodeRound;
+      /** The rows this round produced, in transcript order. */
       items: TimelineItem[];
-      /** Each row's folded turn, so a renderer needs no second parse. */
-      turnByMessageId: Record<string, EpisodeTurn>;
+    }
+  | {
+      /** The line that says an episode is over, after its last round. */
+      kind: "episode_complete";
+      key: string;
+      at: number;
+      episode: Episode;
     };
 
 /**
@@ -692,10 +699,10 @@ export function buildTimelineItems(
   approvals: ApprovalSummary[],
   decided: Record<string, DecidedApproval> = {},
   /**
-   * The rooms this channel held, if any.
+   * The episodes this channel ran, if any.
    *
    * Optional and defaulted, so every existing call site and every test written
-   * before deliberation keeps its exact behaviour: with no episodes this returns
+   * before episodes keeps its exact behaviour: with no episodes this returns
    * precisely what it always did.
    */
   episodes: Episode[] = [],
@@ -748,70 +755,89 @@ export function buildTimelineItems(
 }
 
 /**
- * Collapse each episode's rows into one item, leaving everything else alone.
+ * Collapse each round's rows into one item, leaving everything else alone.
  *
- * The block takes the position of its **first** row, so a room stays where the
- * conversation put it. Rows an episode claims that are not in this window —
- * history that has not loaded — are simply absent: the block renders what it has,
- * and `Episode.ambiguous` is what says the rest is missing.
+ * A round takes the position of its **first** row, so it stays where the
+ * conversation put it. A round with no rows yet — one that just opened, whose
+ * seats are all still working — takes the moment it opened, which is after
+ * every row of the round before it. A completed episode gets its marker after
+ * its last round. Rows an episode claims that are not in this window (history
+ * that has not loaded) are simply absent: the band renders what it has.
+ *
+ * Approvals raised mid-round stay in the channel at their own time, beside the
+ * band rather than inside it: a card is a question to the operator, not a
+ * seat's utterance.
  */
 function groupEpisodes(items: TimelineItem[], episodes: Episode[]): TimelineItem[] {
-  const owner = new Map<string, Episode>();
-  const turnOf = new Map<string, EpisodeTurn>();
+  const owner = new Map<string, { episode: Episode; round: EpisodeRound }>();
   for (const episode of episodes) {
-    for (const turn of [...episode.turns, ...episode.referrals, ...episode.failed]) {
-      owner.set(turn.messageId, episode);
-      turnOf.set(turn.messageId, turn);
+    for (const round of episode.rounds) {
+      for (const id of round.messageIds) owner.set(id, { episode, round });
     }
-    if (episode.reportId) owner.set(episode.reportId, episode);
   }
 
   const out: TimelineItem[] = [];
-  const blocks = new Map<string, Extract<TimelineItem, { kind: "episode" }>>();
-
-  const episodeAt = (item: TimelineItem): Episode | undefined => {
-    if (item.kind === "message") return owner.get(item.entry.message.id);
-    // An approval raised mid-deliberation belongs in that block too. Keeping it
-    // at its timestamp preserves the causal order instead of moving it below
-    // turns that happened after the approval was requested.
-    return episodes.find((candidate) => {
-      const rows = [...candidate.turns, ...candidate.referrals, ...candidate.failed];
-      const first = rows[0]?.at;
-      const reportAt = items.find(
-        (row) => row.kind === "message" && row.entry.message.id === candidate.reportId,
-      )?.at;
-      const last = reportAt ?? rows.at(-1)?.at;
-      return first !== undefined && last !== undefined && item.at >= first && item.at <= last;
-    });
-  };
+  const blocks = new Map<string, Extract<TimelineItem, { kind: "round" }>>();
+  const blockKey = (round: EpisodeRound) => `round:${round.episodeId}:${round.revision}`;
 
   for (const item of items) {
-    const episode = episodeAt(item);
-    if (!episode) {
+    const owned = item.kind === "message" ? owner.get(item.entry.message.id) : undefined;
+    if (!owned) {
       out.push(item);
       continue;
     }
-    let block = blocks.get(episode.key);
+    const key = blockKey(owned.round);
+    let block = blocks.get(key);
     if (!block) {
       block = {
-        kind: "episode",
-        key: `episode:${episode.key}`,
+        kind: "round",
+        key,
         at: item.at,
-        episode,
+        episode: owned.episode,
+        round: owned.round,
         items: [],
-        turnByMessageId: {},
       };
-      blocks.set(episode.key, block);
+      blocks.set(key, block);
       out.push(block);
     }
     block.items.push(item);
-    if (item.kind === "message") {
-      const turn = turnOf.get(item.entry.message.id);
-      if (turn) block.turnByMessageId[item.entry.message.id] = turn;
+  }
+
+  // Rounds no row has reached yet, and the completion markers. Each is placed
+  // just after the last thing its episode put on screen, so a live round with
+  // no rows sits below the previous round's replies rather than at the top.
+  for (const episode of episodes) {
+    let last = -Infinity;
+    for (const round of episode.rounds) {
+      const held = blocks.get(blockKey(round));
+      if (held) {
+        last = Math.max(last, ...held.items.map((row) => row.at));
+        continue;
+      }
+      const at = Math.max(round.startedAt ?? -Infinity, last === -Infinity ? -Infinity : last + 1);
+      if (at === -Infinity) continue;
+      const block: Extract<TimelineItem, { kind: "round" }> = {
+        kind: "round",
+        key: blockKey(round),
+        at,
+        episode,
+        round,
+        items: [],
+      };
+      blocks.set(block.key, block);
+      out.push(block);
+      last = at;
+    }
+    if (episode.status === "completed") {
+      const at = Math.max(episode.completedAt ?? -Infinity, last === -Infinity ? -Infinity : last + 1);
+      if (at === -Infinity) continue;
+      out.push({ kind: "episode_complete", key: `episode_complete:${episode.id}`, at, episode });
     }
   }
 
-  return out;
+  // Stable, like `buildTimelineItems`'s own sort: a block minted after the
+  // rows keeps its place among equal timestamps.
+  return out.sort((a, b) => a.at - b.at);
 }
 
 /* ---- formatting ---- */
