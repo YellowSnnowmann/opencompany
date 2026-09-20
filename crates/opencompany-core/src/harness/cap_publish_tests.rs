@@ -457,6 +457,11 @@ async fn the_nudge_can_recover_the_file_a_capped_turn_wrote() {
         .expect("cycle runs");
 
     assert_eq!(nudge_turns(&script), 1);
+    for body in script.seen.lock().unwrap().iter() {
+        for m in body["messages"].as_array().unwrap() {
+            if m["role"] == "tool" { eprintln!("TOOL RESULT: {}", m["content"]); }
+        }
+    }
 
     let cards = TaskStore::list(&*ops, &company()).await.expect("list");
     assert_eq!(
