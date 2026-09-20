@@ -1064,7 +1064,7 @@ pub struct TurnOutcome {
     /// `Some` exactly when [`classify_turn`](CompanyAgent) recognised the
     /// model provider's `Err` as the same budget-exhausted wire shape the
     /// delegated sub-agent path already halts gracefully on
-    /// (`oh::inference::provider::is_budget_exhausted_message`). `None` on
+    /// (`oh::api::classify::is_budget_exhausted_message`). `None` on
     /// every other path, including a turn that failed for an unrelated
     /// reason — those still propagate as `Err`, never as this field.
     ///
@@ -2246,13 +2246,13 @@ impl CompanyAgent {
 /// account for), matches the single existing budget-exhausted wire-shape
 /// classifier.
 ///
-/// Deliberately reuses `oh::inference::provider::is_budget_exhausted_message`
+/// Deliberately reuses `oh::api::classify::is_budget_exhausted_message`
 /// rather than forking a second copy of the phrase list — the whole point of
 /// this fix is to close the asymmetry, not add a second place for the two to
 /// drift apart. See `budget_wire_shapes_all_classify_as_budget_paused` for the
 /// drift-coupling test that fails CI if the two ever disagree.
 fn is_top_level_budget_exhausted(err: &anyhow::Error) -> bool {
-    oh::inference::provider::is_budget_exhausted_message(&format!("{err:#}"))
+    oh::api::classify::is_budget_exhausted_message(&format!("{err:#}"))
 }
 
 /// UTF-8-safe truncation to at most `max` chars, appending a truncation marker

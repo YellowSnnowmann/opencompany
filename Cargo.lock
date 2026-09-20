@@ -3929,6 +3929,7 @@ dependencies = [
  "tinymemory-api",
  "tinymemory-conformance",
  "tinymemory-remote",
+ "tinytools 0.3.0",
  "tokio",
  "tokio-rustls",
  "tokio-util",

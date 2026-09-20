@@ -374,7 +374,7 @@ async fn classify_turn_reframes_a_ceiling_hit_and_keeps_it_hard() {
 }
 
 /// Drift-coupling: `is_top_level_budget_exhausted` must be a thin wrapper
-/// over `oh::inference::provider::is_budget_exhausted_message`, never a
+/// over `oh::api::classify::is_budget_exhausted_message`, never a
 /// second, independently-maintained phrase list. Computes both sides for
 /// a spread of real and synthetic bodies and asserts they never disagree,
 /// so an edit that "helps" by hardcoding a phrase here fails CI instead of
@@ -399,7 +399,7 @@ fn top_level_budget_classifier_never_drifts_from_the_shared_source() {
         let err = anyhow::anyhow!("{body}");
         assert_eq!(
             is_top_level_budget_exhausted(&err),
-            oh::inference::provider::is_budget_exhausted_message(&format!("{err:#}")),
+            oh::api::classify::is_budget_exhausted_message(&format!("{err:#}")),
             "top-level classifier drifted from the shared source for: {body}"
         );
     }
