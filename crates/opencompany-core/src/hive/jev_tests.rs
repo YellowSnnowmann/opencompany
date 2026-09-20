@@ -209,7 +209,8 @@ fn url_rule_allows_https_and_loopback_http_only() {
         "http://127.0.0.1.evil.example/systemone",
         "ftp://127.0.0.1/systemone",
         "not a url",
-        "https:///nohost",
+        "https://",
+        "mailto:ops@example.com",
     ] {
         let error = validate_url(bad.into()).unwrap_err();
         assert!(
