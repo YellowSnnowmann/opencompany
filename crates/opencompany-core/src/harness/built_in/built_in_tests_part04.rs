@@ -107,7 +107,6 @@ async fn steered_empty_turn_makes_exactly_one_attempt() {
             Some(&control),
             None,
             None,
-            None,
             crate::runtime::delegation::ChatTarget::default(),
         )
         .await;
@@ -133,7 +132,6 @@ async fn a_steer_pending_before_a_successful_attempt_does_not_drop_its_reply() {
         .run_with_steer(
             "hi",
             Some(&control),
-            None,
             None,
             None,
             crate::runtime::delegation::ChatTarget::default(),

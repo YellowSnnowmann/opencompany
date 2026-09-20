@@ -70,7 +70,6 @@ async fn a_greeting_after_a_task_runs_no_tools_and_leaks_no_prior_context() {
             None,
             Some(stream_for("sports")),
             None,
-            None,
             ChatTarget::channel(Some("sports")),
         )
         .await;
@@ -106,7 +105,6 @@ async fn a_greeting_after_a_task_runs_no_tools_and_leaks_no_prior_context() {
             "hi",
             None,
             Some(stream_for("smalltalk")),
-            None,
             None,
             ChatTarget::channel(Some("smalltalk")),
         ),
@@ -212,7 +210,6 @@ async fn a_background_turn_does_not_leak_into_the_next_turn_on_its_bound_chat() 
             None,
             Some(stream_for("sports")),
             None,
-            None,
             ChatTarget::channel(Some("sports")),
         )
         .await
@@ -255,7 +252,6 @@ async fn a_background_turn_does_not_leak_into_the_next_turn_on_its_bound_chat() 
             "still there?",
             None,
             Some(stream_for("sports")),
-            None,
             None,
             ChatTarget::channel(Some("sports")),
         )
