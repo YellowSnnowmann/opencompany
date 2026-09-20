@@ -288,8 +288,7 @@ pub(super) async fn ceo_tool_names(pool: &HarnessPool, id: &CompanyId) -> Vec<St
         .iter()
         .find(|a| a.agent_id == "ceo")
         .expect("ceo present");
-    let agent = ceo.agent.lock().await;
-    agent.tools().iter().map(|t| t.name().to_string()).collect()
+    ceo.tool_names()
 }
 
 /// Builds a `HarnessDeps` carrying the given plan + meter, for the total-

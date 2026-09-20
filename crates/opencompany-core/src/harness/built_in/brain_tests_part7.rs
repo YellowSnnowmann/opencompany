@@ -564,11 +564,12 @@ async fn an_approved_threaded_grant_redispatches_in_its_origin_thread() {
     // thread regardless — grounded in one conversation, answering into
     // another. Identity is no longer inferred from the absent stream, so
     // the turn now binds to the conversation the grant recorded.
-    assert_eq!(
-        *agent.bound_chat.lock().await,
-        Some(("general".to_string(), Some(root))),
-        "the re-issued call binds to the conversation the approval was raised in"
-    );
+    // The pooled agent no longer carries a chat binding (plan hive-desks,
+    // Phase 2: OpenHuman owns the thread; the conversation rides in the turn
+    // text). What the grant recorded is asserted on the journal above; the
+    // binding itself has nothing left to read.
+    // TODO(Phase 4): assert the conversation cue on the recorded turn text.
+    let _ = (&agent, root);
 }
 
 /// Issue #1846 review (Codex #3869725683) — **the regression.** Same
