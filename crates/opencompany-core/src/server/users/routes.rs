@@ -25,7 +25,7 @@
 //! kind of grant, not a second one: eligibility only, minted on redemption,
 //! revoked by unsetting the source.
 
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
