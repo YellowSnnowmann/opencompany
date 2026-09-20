@@ -232,7 +232,8 @@ async fn a_two_seat_desk_completes_in_two_rounds_with_both_seats_running_at_once
     // trigger again.
     assert!(prompts[1].contains("@engineer (^"));
     assert!(prompts[1].contains("Plan: two sprints."));
-    assert!(!prompts[1].contains("The operator asked (^1)") || prompts[1].contains("Carry your"));
+    // The assignment stands for the whole episode.
+    assert!(prompts[1].contains("The operator asked (^1)"));
 
     // The reply rows carry the episode metadata, the brackets carry the seat.
     let rows = log.rows();

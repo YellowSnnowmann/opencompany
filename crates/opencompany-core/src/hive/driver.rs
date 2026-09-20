@@ -465,7 +465,21 @@ impl HiveDispatcher {
             if let Some(reason) = outcome.forced {
                 run.forced = Some(run.forced.map_or(reason, |held| held.min_severity(reason)));
             }
-            if let Some(completion) = outcome.last_completion.take() {
+            // The primary seat's completion is the room's answer when it
+            // gave one this round; otherwise the last seat to complete.
+            let primary = run
+                .state
+                .episode()
+                .participants
+                .first()
+                .map(|participant| participant.agent_id.clone());
+            let completions = std::mem::take(&mut outcome.completions);
+            if let Some(completion) = completions
+                .iter()
+                .find(|(agent, _)| Some(agent) == primary.as_ref())
+                .or_else(|| completions.last())
+                .cloned()
+            {
                 run.last_completion = Some(completion);
             }
             let actions: Vec<serde_json::Value> = transition

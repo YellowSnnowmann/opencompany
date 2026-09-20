@@ -110,8 +110,9 @@ pub struct RoundOutcome {
     pub texts: HashMap<String, String>,
     /// A host-forced reason, when a seat had to be completed synthetically.
     pub forced: Option<EpisodeReason>,
-    /// The last seat that completed this round, and what it said.
-    pub last_completion: Option<(String, String)>,
+    /// The seats that completed this round, in commit order, with what
+    /// they said.
+    pub completions: Vec<(String, String)>,
 }
 
 /// The kind a journaled reply carried, back as the utterance the driver
@@ -312,7 +313,9 @@ pub(crate) async fn run_round(
             )
             .await?;
         if matches!(done.utterance, Utterance::CompleteEpisode { .. }) {
-            outcome.last_completion = Some((done.agent_id.clone(), text.clone()));
+            outcome
+                .completions
+                .push((done.agent_id.clone(), text.clone()));
         }
         if let Some(reason) = done.forced {
             outcome.forced = Some(match outcome.forced {
