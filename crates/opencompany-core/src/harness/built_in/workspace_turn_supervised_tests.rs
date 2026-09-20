@@ -2,7 +2,7 @@ use serde_json::json;
 
 use super::workspace_turn_helpers_tests::*;
 use crate::harness::{HarnessDeps, HarnessPool};
-use crate::ports::types::{CompanyId, CompanyRecord};
+use crate::ports::types::CompanyRecord;
 
 // ---------------------------------------------------------------------------
 // The approval boundary, driven by a model (issues #443, #444)

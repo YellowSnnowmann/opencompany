@@ -43,7 +43,7 @@ use crate::company::{CompanyManifest, parse_workflow};
 use crate::harness::HarnessPool;
 use crate::harness::publish::PublishDestination;
 use crate::ports::WorkflowRunContext;
-use crate::ports::types::{CompanyId, CompanyRecord};
+use crate::ports::types::CompanyRecord;
 use crate::store::FsOps;
 
 use super::gated_tool_turn_tests::{Turn, deps, spawn_script};

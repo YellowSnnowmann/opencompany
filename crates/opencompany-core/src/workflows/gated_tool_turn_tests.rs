@@ -41,7 +41,7 @@ use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{HarnessDeps, HarnessPool};
 use crate::ports::WorkflowRunContext;
-use crate::ports::types::{CompanyId, CompanyRecord};
+use crate::ports::types::CompanyRecord;
 use crate::runtime::journal::RuntimeJournal;
 use crate::store::{FsCompanyStore, FsContextStore, FsInboxStore, FsOps};
 use crate::workflows::delivery::{DeliveryParking, WorkflowDeliveryDeps};

@@ -34,7 +34,7 @@ use serde_json::json;
 
 use crate::company::{CompanyManifest, parse_workflow};
 use crate::harness::HarnessPool;
-use crate::ports::types::{CompanyId, CompanyRecord, WorkflowNodeStatus};
+use crate::ports::types::{CompanyRecord, WorkflowNodeStatus};
 use crate::ports::{WorkflowApprovalOutcome, WorkflowRun, WorkflowRunContext};
 use crate::runtime::journal::RuntimeJournal;
 
