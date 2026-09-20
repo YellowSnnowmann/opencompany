@@ -2,7 +2,7 @@
 //! `tinymcp::McpHttpClient`, OpenHuman's own — over a real loopback socket.
 
 use super::*;
-use crate::company::types::Policy;
+use crate::company::Policy;
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::hive::tools::{HiveTurn, InFlight, InFlightContext};
 use crate::ports::events::EventStreamItem;
@@ -205,7 +205,7 @@ fn plain_agent() -> McpAgent {
 async fn initialize_and_list_tools_serve_speech_and_custom_tools() {
     let (_host, agent, client) = boot(plain_agent()).await;
     let init = client.initialize().await.expect("initialize");
-    assert_eq!(init.server_info.name, SERVER_SLUG);
+    assert_eq!(init.server_info["name"], SERVER_SLUG);
     let tools = client.list_tools().await.expect("tools/list");
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(

@@ -333,6 +333,7 @@ async fn company_agent(
         "Chief Executive",
         budget_usd_daily,
         agent,
+        None,
     )
     .expect("the agent registers")
 }
