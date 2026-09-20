@@ -81,19 +81,14 @@ members = [
     "archivist",
 ]
 
-[group_chat.hive]
-enabled = true
+[group_chat.routing]
 # Six members x three turns each: enough for an opening position, a reply to
 # the room, and a commit — the shortest sequence that can actually reach a
 # quorum of three grounded, distinct supporters.
-turn_budget = 18
-quorum = 3
-blind_round = true
 # A `!support`/`!object` with no `^citation` does not count towards quorum.
 # Without this a room can converge on a proposal nobody actually checked —
 # exactly the failure the live run showed: two identical `!propose`s and no
 # `!evidence` behind either.
-require_evidential = true
 
 # The following four keys are read by `tinyhivemind_hive` as it lands
 # (concurrent with this bundle); `check` on this manifest may not yet enforce
@@ -110,9 +105,6 @@ require_evidential = true
 #   - `repetition_cap`: how many turns in a row a member may restate a
 #     position that added no new citation before the episode discounts it.
 #     One — the prompt already shows a member its own last line.
-refutation_cap = 2
-dominance_cap = 3
-repetition_cap = 1
 
 # Per-member move budget, enforced by the driver. This is the actual fix for
 # the live run's symptom: nobody but the programmer may ever `!propose`, so
@@ -155,16 +147,6 @@ repetition_cap = 1
 # to say, spending eight turns before reporting itself exhausted on an answer
 # it had already carried. Recording a topic the room has carried re-derives
 # nothing, so there is no seat too cheap to do it.
-[group_chat.hive.moves]
-theorist = ["support", "object", "evidence", "question", "pin", "defer"]
-programmer = ["propose", "evidence", "support", "commit", "defer"]
-verifier = ["support", "object", "evidence", "commit", "defer"]
-skeptic = ["question", "object", "evidence", "defer"]
-brute_forcer = ["support", "evidence", "object", "defer"]
-archivist = ["evidence", "question", "pin", "defer"]
-
-# The records desk is kept so an accepted answer still has somewhere to be
-# written down. One member, so it answers as it always did.
 [[group_chat]]
 id = "records"
 name = "Records desk"
