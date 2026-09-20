@@ -33,7 +33,7 @@ use openhuman_core as oh;
 
 use oh::config::Config;
 use oh::skills::tools::{WorkflowDescribeTool, WorkflowListTool, WorkflowReadResourceTool};
-use oh::tools::Tool;
+use tinytools::Tool;
 
 use crate::company::SkillDoc;
 use crate::company::skill_effective::{self, SkillBody};

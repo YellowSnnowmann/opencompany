@@ -1,7 +1,7 @@
 use super::*;
 use crate::harness::built_in::policy::ApprovalRequestQueue;
 use crate::ports::blockers::{BlockerKind, BlockerPayload, BlockerSource};
-use openhuman_core::tools::traits::Tool;
+use tinytools::Tool;
 
 fn tool(queue: &ApprovalRequestQueue) -> EscalateToHumanTool {
     EscalateToHumanTool::new(queue.clone(), "engineer".to_string())

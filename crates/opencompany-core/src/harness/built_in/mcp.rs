@@ -28,7 +28,7 @@ use oh::config::{Config, McpAuthConfig, McpServerConfig};
 use oh::mcp::config_servers::{McpRegistrySource, McpServerRegistry};
 use oh::mcp::registry::types::{ConnStatus, InstalledServer, McpTool};
 use oh::security::{SecurityPolicy, ToolOperation};
-use oh::tools::traits::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
+use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
 
 use crate::company::mcp::{AuthMaterial, McpServerDecl, stdio_install_refusal};
 use crate::error::OpenCompanyError;

@@ -138,7 +138,7 @@ async fn the_credential_never_reaches_a_debug_rendering() {
 
 #[test]
 fn both_tools_are_read_only() {
-    use oh::tools::traits::PermissionLevel;
+    use tinytools::PermissionLevel;
     use openhuman_core as oh;
 
     let config = TenantPaypal {

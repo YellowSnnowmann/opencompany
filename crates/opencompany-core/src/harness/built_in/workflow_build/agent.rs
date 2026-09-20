@@ -27,7 +27,7 @@ use oh::agent::dispatcher::{NativeToolDispatcher, ToolDispatcher};
 use oh::agent::prompts::SystemPromptBuilder;
 use oh::agent::{Agent, AgentBuilder};
 use oh::memory::{Memory, MemoryCategory, MemoryEntry, NamespaceSummary, RecallOpts};
-use oh::tools::traits::Tool;
+use tinytools::Tool;
 
 use crate::error::OpenCompanyError;
 use crate::harness::HarnessDeps;

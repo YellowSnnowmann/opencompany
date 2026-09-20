@@ -214,7 +214,7 @@ async fn overlay_agent_id_colliding_with_manifest_agent_is_skipped() {
 /// — saved to the record, never materialised, no error anywhere.
 #[tokio::test]
 async fn a_tool_added_teammate_colliding_with_a_manifest_id_still_joins_the_roster() {
-    use openhuman_core::tools::Tool;
+    use tinytools::Tool;
 
     use crate::harness::orchestrator::unscoped_add_agent;
 

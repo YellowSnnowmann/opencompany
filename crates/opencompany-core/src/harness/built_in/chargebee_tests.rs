@@ -102,7 +102,7 @@ async fn a_complete_pair_resolves_and_never_exposes_the_key() {
 
 #[test]
 fn the_five_tools_split_reads_from_writes() {
-    use oh::tools::traits::PermissionLevel;
+    use tinytools::PermissionLevel;
     use openhuman_core as oh;
 
     let config = TenantChargebee {

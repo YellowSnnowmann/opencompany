@@ -32,13 +32,13 @@ struct LabelledTool {
 }
 
 impl LabelledTool {
-    fn boxed(name: &'static str, label: Option<&'static str>) -> Box<dyn oh::tools::traits::Tool> {
+    fn boxed(name: &'static str, label: Option<&'static str>) -> Box<dyn tinytools::Tool> {
         Box::new(Self { name, label })
     }
 }
 
 #[async_trait::async_trait]
-impl oh::tools::traits::Tool for LabelledTool {
+impl tinytools::Tool for LabelledTool {
     fn name(&self) -> &str {
         self.name
     }
@@ -55,8 +55,8 @@ impl oh::tools::traits::Tool for LabelledTool {
         self.label.map(str::to_string)
     }
 
-    async fn execute(&self, _args: Value) -> anyhow::Result<oh::tools::traits::ToolResult> {
-        Ok(oh::tools::traits::ToolResult::success("ok"))
+    async fn execute(&self, _args: Value) -> anyhow::Result<tinytools::ToolResult> {
+        Ok(tinytools::ToolResult::success("ok"))
     }
 }
 

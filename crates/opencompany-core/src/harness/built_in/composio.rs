@@ -590,7 +590,7 @@ mod live {
         ComposioAuthorizeResponse, ComposioConnectionsResponse, ComposioDeleteResponse,
         ComposioExecuteResponse, ComposioToolkitsResponse, ComposioToolsResponse,
     };
-    use oh::tools::traits::{PermissionLevel, Tool, ToolResult};
+    use tinytools::{PermissionLevel, Tool, ToolResult};
     use openhuman_core as oh;
 
     use crate::harness::built_in::composio_direct::DirectComposio;

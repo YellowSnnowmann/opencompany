@@ -56,7 +56,7 @@ use oh::tools::{
 };
 // Not re-exported from `oh::tools` (upstream's `pub use traits::{…}` list omits
 // it), so it is named through the module it lives in.
-use oh::tools::traits::ToolTimeout;
+use tinytools::ToolTimeout;
 
 use crate::harness::toolbelt::ShellAudit;
 
@@ -195,7 +195,7 @@ impl Tool for AuditedShellTool {
         &self,
         args: serde_json::Value,
         options: ToolCallOptions,
-        context: Option<&dyn oh::tools::traits::ToolRunContext>,
+        context: Option<&dyn tinytools::ToolRunContext>,
     ) -> anyhow::Result<ToolResult> {
         if let Some(refusal) = self.record_intent(&args) {
             return Ok(refusal);

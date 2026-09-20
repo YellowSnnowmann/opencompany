@@ -50,7 +50,7 @@ use oh::agent::dispatcher::{
 use oh::agent::messages::{ChatMessage, ConversationMessage};
 use oh::agent::prompts::ToolCallFormat;
 use oh::inference::provider::ChatResponse;
-use oh::tools::{Tool, ToolSpec};
+use tinytools::{Tool, ToolSpec};
 
 /// Matches an **open** tag of the `tool_call` family that carries one or more
 /// attributes before its `>` — e.g. `<tool_call id="call_2">`,

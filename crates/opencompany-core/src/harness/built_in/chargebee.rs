@@ -117,7 +117,7 @@ mod live {
         CreateCustomerArgs, GetCustomerArgs, GetInvoiceArgs, ListInvoicesArgs, SendInvoiceArgs,
     };
 
-    use oh::tools::traits::{PermissionLevel, Tool, ToolResult};
+    use tinytools::{PermissionLevel, Tool, ToolResult};
     use openhuman_core as oh;
 
     /// Builds the five per-tenant Chargebee tools over a resolved connection.

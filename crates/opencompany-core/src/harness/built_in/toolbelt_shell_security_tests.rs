@@ -329,7 +329,7 @@ fn high_risk_guard_respects_the_flag_without_blocking_ordinary_commands() {
 
 #[test]
 fn shell_timeout_policy_honors_its_schema_fallback_claim() {
-    use oh::tools::traits::ToolTimeout;
+    use tinytools::ToolTimeout;
 
     let ws = std::env::temp_dir();
     let security = test_security(&ws, PolicyMode::Full);

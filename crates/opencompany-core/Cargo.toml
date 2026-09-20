@@ -268,6 +268,13 @@ tinyhivemind = { path = "../../vendor/tinyhivemind/crates/tinyhivemind" }
 # `McpUnauthorizedError`) is a variant of it. Same vendored path OpenHuman
 # itself depends on, so Cargo resolves one copy, not two.
 tinymcp = { path = "../../vendor/openhuman/vendor/tinymcp/crates/tinymcp", optional = true, default-features = false }
+# The tool vocabulary every in-process tool here implements — `Tool`,
+# `ToolResult`, `PermissionLevel`, `ToolRunContext`. OpenHuman used to re-export
+# it as `openhuman_core::tools::traits`; at the 1ecf1b0 pin that module is gone
+# and the crate is named directly. Reached through tinyagents' vendored
+# checkout, the exact path `openhuman-core` declares, so cargo resolves ONE
+# package and a tool built here still satisfies OpenHuman's registry.
+tinytools = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/tinytools/crates/tinytools", optional = true }
 # The openhuman `Provider`/`Memory` traits return `anyhow::Result` and log via
 # the `log` facade; both only link under the `openhuman` feature.
 anyhow = { version = "1", optional = true }
@@ -584,7 +591,7 @@ tiny = ["tinyagents-harness", "tinyinference"]
 # Enables `tiny` so the `tinyagents` crate is in scope: the harness's inference
 # models implement its `ChatModel<()>` trait (openhuman's old `Provider` trait
 # was deleted upstream); it is the same vendored crate `openhuman_core` uses.
-openhuman = ["tiny", "dep:openhuman_core", "dep:openhuman-embed", "dep:tinyhivemind-openhuman", "dep:tinymcp", "dep:reqwest", "dep:anyhow", "dep:log", "dep:tinyflows", "dep:regex", "dep:uuid", "dep:swc_core"]
+openhuman = ["tiny", "dep:openhuman_core", "dep:openhuman-embed", "dep:tinyhivemind-openhuman", "dep:tinymcp", "dep:tinytools", "dep:reqwest", "dep:anyhow", "dep:log", "dep:tinyflows", "dep:regex", "dep:uuid", "dep:swc_core"]
 # MCP server management and agent tools share OpenHuman's in-process registry.
 # Enabling it necessarily enables the embedded harness and OpenHuman MCP
 # domain, while the default build remains unchanged.

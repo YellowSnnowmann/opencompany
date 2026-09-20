@@ -98,7 +98,7 @@ use oh::tools::{
 
 use crate::harness::policy::PolicyMode;
 
-use oh::tools::traits::{
+use tinytools::{
     PermissionLevel, ToolCallOptions, ToolCategory, ToolResult, ToolRunContext, ToolScope,
     ToolSpec, ToolTimeout,
 };

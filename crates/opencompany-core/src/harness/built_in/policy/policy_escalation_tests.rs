@@ -8,7 +8,7 @@ use crate::policy::test_support::{composio_send_args, composio_unclassified_args
 
 #[tokio::test]
 async fn escalate_to_human_sets_the_turn_boundary_and_explicitly_refuses_overflow() {
-    use openhuman_core::tools::traits::Tool as _;
+    use tinytools::Tool as _;
 
     let queue = ApprovalRequestQueue::default();
     let tool = crate::harness::built_in::blockers::EscalateToHumanTool::new(
@@ -73,7 +73,7 @@ async fn escalate_to_human_sets_the_turn_boundary_and_explicitly_refuses_overflo
 /// about to commit to spending.
 #[tokio::test]
 async fn a_flood_of_escalations_can_push_a_paid_media_card_off_the_shared_cap() {
-    use openhuman_core::tools::traits::Tool as _;
+    use tinytools::Tool as _;
 
     let queue = ApprovalRequestQueue::default();
     let policy = policy("full", &[], None)
@@ -131,7 +131,7 @@ async fn a_flood_of_escalations_can_push_a_paid_media_card_off_the_shared_cap() 
 /// second `request_approval` would be.
 #[tokio::test]
 async fn escalate_to_human_respects_combined_cycle_and_unscoped_capacity() {
-    use openhuman_core::tools::traits::Tool as _;
+    use tinytools::Tool as _;
 
     for initially_scoped in [false, true] {
         let queue = ApprovalRequestQueue::default();
@@ -187,7 +187,7 @@ async fn escalate_to_human_respects_combined_cycle_and_unscoped_capacity() {
 
 #[tokio::test]
 async fn accepted_blockers_survive_later_ordinary_approvals_across_scopes() {
-    use openhuman_core::tools::traits::Tool as _;
+    use tinytools::Tool as _;
 
     for blocker_in_cycle in [false, true] {
         for preceding in [0, MAX_APPROVAL_REQUESTS_PER_TURN - 1] {
@@ -262,7 +262,7 @@ async fn accepted_blockers_survive_later_ordinary_approvals_across_scopes() {
 
 #[tokio::test]
 async fn a_blocker_duplicate_outside_the_drain_budget_is_refused() {
-    use openhuman_core::tools::traits::Tool as _;
+    use tinytools::Tool as _;
 
     let fixture = ApprovalRequestQueue::default();
     let args = serde_json::json!({ "question": "outside the budget" });
@@ -372,7 +372,7 @@ async fn mixed_scope_drain_preserves_enqueue_order_and_scoped_stamping() {
 
 #[tokio::test]
 async fn escalate_to_human_refuses_a_sibling_gated_call_in_the_same_turn() {
-    use openhuman_core::tools::traits::Tool as _;
+    use tinytools::Tool as _;
 
     let queue = ApprovalRequestQueue::default();
     let policy = policy("supervised", &[], None).with_requests(queue.clone());
@@ -416,7 +416,7 @@ async fn escalate_to_human_refuses_a_sibling_gated_call_in_the_same_turn() {
 /// duplicate.
 #[tokio::test]
 async fn a_repeated_identical_escalation_collapses_but_a_distinct_one_survives() {
-    use openhuman_core::tools::traits::Tool as _;
+    use tinytools::Tool as _;
 
     let queue = ApprovalRequestQueue::default();
     let tool = crate::harness::built_in::blockers::EscalateToHumanTool::new(

@@ -7,7 +7,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::routing::get;
-use oh::tools::traits::Tool;
+use tinytools::Tool;
 use openhuman_core as oh;
 use serde_json::{Value, json};
 

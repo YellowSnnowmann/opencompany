@@ -51,7 +51,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use oh::tools::traits::{PermissionLevel, Tool, ToolResult};
+use tinytools::{PermissionLevel, Tool, ToolResult};
 use openhuman_core as oh;
 use tinyhivemind_hive::speech::{self, CallArguments, ToolCall, Utterance, UtteranceRejection};
 
@@ -748,7 +748,7 @@ fn tool_result_text(result: &ToolResult) -> String {
         .content
         .iter()
         .filter_map(|block| match block {
-            oh::tools::traits::ToolContent::Text { text } => Some(text.as_str()),
+            tinytools::ToolContent::Text { text } => Some(text.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>()
