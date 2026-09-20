@@ -16,7 +16,7 @@ async fn two_crossings_to_one_person_each_fold_their_own_exchange() {
     let home = tempfile::tempdir().expect("tempdir");
     let runtime = runtime(home.path()).await;
     let id = CompanyId::new("acme");
-    let pair = crate::hivemind::referral::pair_conversation("software_engineer", "researcher");
+    let pair = crate::hive::referral::pair_conversation("software_engineer", "researcher");
 
     let ask = |text: &str| CompanyEvent::AgentReply {
         chat_id: "engineering".to_string(),
@@ -206,11 +206,8 @@ async fn a_convened_desks_own_turns_are_the_folded_crossing() {
         .append(
             &id,
             CompanyEvent::OperatorMessage {
-                text: crate::hivemind::referral::referral_room_prompt(
-                    "software_engineer",
-                    "Engineering",
-                    "can the error messages be redone?",
-                ),
+                text: "@software_engineer on #Engineering asks: can the error messages be redone?"
+                    .to_string(),
                 by: Some(Actor {
                     kind: ActorKind::Agent,
                     id: "software_engineer".to_string(),
@@ -233,7 +230,9 @@ async fn a_convened_desks_own_turns_are_the_folded_crossing() {
             "!propose #copy they read like a copy task",
         ),
         ("researcher", "!support #copy ^1 and the tests agree"),
-        (crate::hivemind::HIVE_REPORT_AUTHOR, "The desk settled."),
+        // A legacy closing row (the trace-grammar hive's), never a line
+        // somebody said: dropped from the fold as it is from the transcript.
+        ("hive-report", "The desk settled."),
     ]
     .into_iter()
     .map(|(agent, text)| CompanyEvent::AgentReply {
@@ -290,8 +289,12 @@ async fn a_convened_desks_own_turns_are_the_folded_crossing() {
         },
         CompanyEvent::AgentReply {
             chat_id: "engineering".to_string(),
-            agent_id: crate::hivemind::HIVE_REFERRAL_AUTHOR.to_string(),
-            text: crate::hivemind::referral::room_note("Design", "The desk settled."),
+            agent_id: crate::hive::referral::HIVE_REFERRAL_AUTHOR.to_string(),
+            text: crate::hive::referral::returned_note(
+                "product_designer",
+                "Design",
+                "The desk settled.",
+            ),
             steps: Vec::new(),
             task_id: None,
             outputs: Vec::new(),

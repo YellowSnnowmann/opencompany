@@ -33,7 +33,7 @@ async fn the_answering_desk_carries_the_question_it_was_asked() {
             CompanyEvent::AgentReply {
                 chat_id: "engineering".to_string(),
                 agent_id: "software_engineer".to_string(),
-                text: "!question @#design ^2 can the error messages be redone?".to_string(),
+                text: "@#design can the error messages be redone?".to_string(),
                 steps: Vec::new(),
                 task_id: None,
                 outputs: Vec::new(),
@@ -133,7 +133,7 @@ async fn the_answering_desk_carries_the_question_it_was_asked() {
     );
     assert!(
         !question.text.starts_with('!'),
-        "a room's move grammar is addressed to the fold, not to a reader: {:?}",
+        "a seat speaks in prose; nothing is rewritten for a reader: {:?}",
         question.text
     );
 }

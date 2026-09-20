@@ -2162,6 +2162,7 @@ async fn attach_referral_origins(
                             ..
                         } if chat_id == from_desk
                             && !crate::hive::referral::is_hive_author(agent_id)
+                            && !crate::hive::referral::is_legacy_report_author(agent_id)
                             // **An aside is not a turn, here as in `turns_of`.**
                             //
                             // A room's `!aside` is journaled with the same
