@@ -71,9 +71,8 @@ The same build works against any host/company. Resolution order (first wins):
 3. **Build env** — `VITE_OC_API`, `VITE_OC_COMPANY`, `VITE_OC_TOKEN`
 4. **Defaults** — same-origin API, single-company mode
 
-- **Single-company (prosumer)** hosts: omit `company`; the console
-  auto-selects the sole company (falling back to the `/api/v1/company/*`
-  aliases).
+- **Single-company (prosumer)** hosts: omit `company`; the console auto-selects
+  the sole company (falling back to the `/api/v1/company/*` aliases).
 - **Multi-company (platform)** hosts: it lists companies and shows a picker;
   `?company=<id>` jumps straight in. Add `?token=` for platform/operator auth.
 
@@ -125,13 +124,10 @@ backend should read.
 Everything is decoupled so you can embed parts elsewhere:
 
 - [`src/api/client.ts`](src/api/client.ts) — a typed `OpenCompanyClient` with no
-  React dependency; use it from any TS app. Includes a forward-looking
-  `connections` seam that light hosts can ignore.
-- [`src/api/types.ts`](src/api/types.ts) — the API payload types, mirrored from
-  the Rust server.
+  React dependency (plus a `connections` seam light hosts can ignore), and
+  [`src/api/types.ts`](src/api/types.ts), the payload types mirrored from Rust.
 - [`src/views/`](src/views/) and [`src/components/`](src/components/) —
-  prop-driven views and pieces (`ChatView`, `LedgersView`, `WorkflowsView`,
-  `FeedbackForm`, …).
+  prop-driven views and pieces (`ChatView`, `LedgersView`, `WorkflowsView`, …).
 
 ## Build
 
