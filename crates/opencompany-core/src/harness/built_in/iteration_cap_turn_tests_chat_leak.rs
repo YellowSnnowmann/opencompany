@@ -32,6 +32,11 @@ fn stream_for(chat: &str) -> crate::turn_stream::TurnStreamCtx {
 /// from the prior task. Reverting the fix (see the module note) makes the "hi"
 /// turn offer its tools and replay the fetched content — the screenshot bug.
 #[tokio::test]
+#[ignore = "TODO(Phase 4): asserts the per-chat clear-and-reseed the pooled agent used to do. \
+Since plan hive-desks Phase 2 one agent has ONE OpenHuman session across every chat (the \
+plan's decision: OpenHuman owns the thread), so a prior task's tool output IS in the \
+transcript a later greeting resumes; what a turn is TOLD about other conversations becomes \
+the tinyhivemind sharing delta in Phase 4, which is where this assertion is re-homed."]
 async fn a_greeting_after_a_task_runs_no_tools_and_leaks_no_prior_context() {
     // A body distinctive enough that its presence in a later turn's model
     // request is unambiguous — this stands in for the replayed ranking HTML.
