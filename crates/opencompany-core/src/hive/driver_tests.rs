@@ -202,9 +202,8 @@ async fn a_two_seat_desk_completes_in_two_rounds_with_both_seats_running_at_once
     assert_eq!(report.summary.as_deref(), Some("Approved."));
     assert!(script.peak_concurrency() >= 2, "seats ran together");
 
-    // Without a router the lead answers, and the other seat is not in the
-    // opening plan — so the round is the lead alone... unless the fallback
-    // plan is `One`. Check what the journal says.
+    // Without a router the opening round is the desk in order, bounded by
+    // the round width: both seats.
     let kinds = log.kinds();
     assert_eq!(kinds[1], "EpisodeOpened");
     assert!(kinds.contains(&"RoundStarted"));
@@ -346,11 +345,6 @@ async fn a_dm_narrows_its_row_and_a_broadcast_without_jev_falls_back_to_the_othe
     assert_eq!(routed.0, "ceo");
     assert_eq!(routed.1, vec!["engineer"]);
     assert_eq!(routed.2, crate::hive::routing::Router::Fallback);
-    // The engineer was reopened by the broadcast and told so.
-    let prompts = host
-        .seats
-        .as_ref() as *const dyn SeatRunner;
-    let _ = prompts;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -472,9 +466,8 @@ async fn a_follow_up_in_the_thread_joins_the_open_episode_and_a_resume_replays_a
         .await
         .expect("runs");
     assert_eq!(first.reason, EpisodeReason::CompleteEpisode);
-    // A completed episode is not joined: the next message on the thread
-    // opens... no — the thread is the same, and the episode is complete, so a
-    // new one opens on the same thread.
+    // The episode on this thread is complete, so a follow-up in the thread
+    // opens a new one on the same thread rather than joining a closed room.
     let follow = log
         .append(
             &company,

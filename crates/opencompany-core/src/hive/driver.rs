@@ -233,6 +233,27 @@ impl HiveDispatcher {
             // the lead answers, and asks if it must.
             participants.push(lead.clone());
         }
+        if matches!(
+            &plan,
+            RoutingPlan::Fallback {
+                reason: tinyhivemind_embed::RoutingFallback::ProviderUnavailable,
+                ..
+            }
+        ) {
+            // No router: the deterministic opening is the desk in order, up
+            // to the round width — not the lead alone. A room of one seat
+            // has nobody to broadcast to (the fold refuses a broadcast with
+            // no fallback), and a desk that declared two seats declared a
+            // room; only a mention narrows it to one.
+            for member in desk.members() {
+                if participants.len() >= routing.round_width {
+                    break;
+                }
+                if !participants.contains(&member) {
+                    participants.push(member);
+                }
+            }
+        }
         let episode_id = uuid::Uuid::new_v4().simple().to_string();
         self.events
             .append(
