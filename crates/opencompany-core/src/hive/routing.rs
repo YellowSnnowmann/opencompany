@@ -78,6 +78,11 @@ pub struct RoutingConfig {
     pub referral: Option<ReferralConfig>,
 }
 
+// Probabilities are `f64`, which is not `Eq`; the record types that hold a
+// block derive `Eq`, and validation refuses `NaN`, so total equality holds for
+// every value a block can carry.
+impl Eq for RoutingConfig {}
+
 /// The `[group_chat.routing.referral]` block as authored.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReferralConfig {
