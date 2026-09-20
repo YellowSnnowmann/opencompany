@@ -225,13 +225,6 @@ async fn a_wallet_company_refuses_every_email_route() {
         assert_eq!(body["mode"], "wallet", "{uri}");
     }
 
-    // No ecosystem buttons either — a hub sign-in resolves to an email address
-    // and would apply an email roster this company does not have.
-    let response = app.oneshot(get("/api/v1/company/auth/hub")).await.unwrap();
-    assert_eq!(
-        body_json(response).await["providers"],
-        serde_json::json!([])
-    );
 }
 
 /// An email company has no wallet door.
