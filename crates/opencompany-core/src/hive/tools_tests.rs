@@ -307,3 +307,20 @@ async fn the_adapter_runs_a_tool_under_the_in_flight_context() {
         "thread=engineering agent=ceo workspace=/tmp/acme/ceo"
     );
 }
+
+#[test]
+fn a_company_tool_is_reached_through_mcp_call_tool_and_a_native_one_directly() {
+    let (name, args) = via_opencompany_mcp("publish_artifact", json!({ "path": "memo.md" }));
+    assert_eq!(name, "mcp_call_tool");
+    assert_eq!(
+        args,
+        json!({
+            "server": "opencompany",
+            "tool": "publish_artifact",
+            "arguments": { "path": "memo.md" }
+        })
+    );
+    let (name, args) = via_opencompany_mcp("file_read", json!({ "path": "memo.md" }));
+    assert_eq!(name, "file_read");
+    assert_eq!(args, json!({ "path": "memo.md" }));
+}

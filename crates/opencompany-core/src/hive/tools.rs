@@ -484,6 +484,25 @@ pub fn share_belt(belt: Vec<Box<dyn Tool>>) -> Vec<Arc<dyn Tool>> {
     belt.into_iter().map(Arc::from).collect()
 }
 
+/// How a model reaches `tool` on a company agent: by its bare name when
+/// OpenHuman runs it natively, else as `mcp_call_tool` on the `opencompany`
+/// server with `args` as the arguments object — the shape the scripted
+/// models in this crate's turn tests emit, and the console's mock brain.
+#[must_use]
+pub fn via_opencompany_mcp(tool: &str, args: Value) -> (String, Value) {
+    if crate::harness::build::OPENHUMAN_NATIVE_TOOLS.contains(&tool) {
+        return (tool.to_string(), args);
+    }
+    (
+        "mcp_call_tool".to_string(),
+        json!({
+            "server": crate::hive::mcp_server::SERVER_SLUG,
+            "tool": tool,
+            "arguments": args,
+        }),
+    )
+}
+
 /// Renders one speech spec to an MCP tool descriptor.
 #[must_use]
 pub fn speech_descriptor(spec: &ToolSpec) -> Value {
