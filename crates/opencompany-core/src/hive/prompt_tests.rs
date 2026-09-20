@@ -7,6 +7,7 @@ use super::*;
 use crate::hive::session_log::EventLogSessionLog;
 use crate::hive::test_support::{MemoryLog, agent_reply, agent_reply_in, operator_message};
 use crate::ports::events::EventLog;
+use crate::ports::types::CompanyEvent;
 use tinyhivemind::aside::Audience;
 
 fn message(seq: u64, author: SessionAuthor, text: &str) -> SessionMessage {

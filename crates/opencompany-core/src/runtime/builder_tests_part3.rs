@@ -353,7 +353,9 @@ async fn boot_reclaims_a_chat_turn_stranded_by_a_previous_host() {
         .unwrap()
         .into_iter()
         .filter_map(|s| match s.event {
-            CompanyEvent::TurnFailed { turn_id, error } if turn_id == "turn-dead" => Some(error),
+            CompanyEvent::TurnFailed { turn_id, error, .. } if turn_id == "turn-dead" => {
+                Some(error)
+            }
             _ => None,
         })
         .collect();

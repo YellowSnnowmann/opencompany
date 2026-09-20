@@ -283,6 +283,7 @@ fn projects_agent_reply_with_chat_fields_and_steps() {
     use crate::ports::types::{TurnStep, TurnStepKind, TurnStepStatus};
     let v = super::project_event(&stored(CompanyEvent::AgentReply {
         audience: Vec::new(),
+        episode: None,
         mentions: Vec::new(),
         mention_depth: 0,
         parent: None,
@@ -418,6 +419,7 @@ fn a_returning_crossing_names_the_desk_that_asked() {
 fn projects_the_agents_own_body_beside_the_operators() {
     let stored = stored(CompanyEvent::AgentReply {
         audience: Vec::new(),
+        episode: None,
         mentions: Vec::new(),
         mention_depth: 0,
         parent: None,
@@ -453,6 +455,7 @@ fn projects_the_agents_own_body_beside_the_operators() {
 fn a_reply_with_no_move_carries_the_same_body_twice() {
     let stored = stored(CompanyEvent::AgentReply {
         audience: Vec::new(),
+        episode: None,
         mentions: Vec::new(),
         mention_depth: 0,
         parent: None,
@@ -480,6 +483,7 @@ fn projects_agent_reply_with_viewer_mention_metadata() {
     use crate::ports::types::{Mention, MentionTarget};
     let stored = stored(CompanyEvent::AgentReply {
         audience: Vec::new(),
+        episode: None,
         mentions: vec![
             Mention {
                 target: MentionTarget::User { id: "u-1".into() },
@@ -525,6 +529,7 @@ fn projects_agent_reply_with_viewer_mention_metadata() {
 fn drops_owner_fallback_report_from_a_non_admin_viewer() {
     let event = stored(CompanyEvent::AgentReply {
         audience: Vec::new(),
+        episode: None,
         mentions: Vec::new(),
         mention_depth: 0,
         parent: None,
@@ -576,6 +581,7 @@ fn drops_owner_fallback_report_from_a_non_admin_viewer() {
 fn projects_agent_reply_with_its_thread_parent() {
     let v = super::project_event(&stored(CompanyEvent::AgentReply {
         audience: Vec::new(),
+        episode: None,
         mentions: Vec::new(),
         mention_depth: 0,
         parent: Some(EventSeq::new(4)),

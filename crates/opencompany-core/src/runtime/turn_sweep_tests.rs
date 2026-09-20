@@ -35,7 +35,7 @@ async fn failures(events: &Arc<dyn EventLog>, company: &CompanyId) -> Vec<(Strin
         .expect("read")
         .into_iter()
         .filter_map(|s| match s.event {
-            CompanyEvent::TurnFailed { turn_id, error } => Some((turn_id, error)),
+            CompanyEvent::TurnFailed { turn_id, error, .. } => Some((turn_id, error)),
             _ => None,
         })
         .collect()
