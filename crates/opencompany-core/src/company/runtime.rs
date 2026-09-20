@@ -4551,7 +4551,6 @@ impl CompanyRuntime {
             created_at: crate::ports::now_millis(),
             title: format!("{who} mentioned you in {desk}"),
             audience: Some(audience),
-            episode: None,
             // The console's channel-id space, so a badge lands without the
             // browser having loaded that transcript. Whether the thread is a DM
             // is a question about the roster, not the human user directory —
