@@ -316,13 +316,12 @@ export function createSseSplitter() {
   return {
     /** @param {string} chunk @returns {string[]} the blocks completed by this chunk */
     push(chunk) {
-      buffer += chunk;
+      buffer += chunk.replace(/\r\n/g, "\n");
       const blocks = [];
       let at;
-      while ((at = buffer.search(/\r?\n\r?\n/)) !== -1) {
-        const end = buffer.indexOf("\n", at) + 1;
+      while ((at = buffer.indexOf("\n\n")) !== -1) {
         const block = buffer.slice(0, at);
-        buffer = buffer.slice(buffer.indexOf("\n", end) === end ? end + 1 : end);
+        buffer = buffer.slice(at + 2);
         if (block.trim()) blocks.push(block);
       }
       return blocks;
