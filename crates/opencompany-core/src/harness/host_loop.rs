@@ -92,7 +92,10 @@ pub async fn run(
         if let Some(charged) = response
             .raw
             .as_ref()
-            .and_then(|raw| raw.pointer("/openhuman/billing/charged_amount_usd"))
+            .and_then(|raw| {
+                raw.pointer("/openhuman/billing/charged_amount_usd")
+                    .or_else(|| raw.pointer("/openhuman_usage_meta/charged_amount_usd"))
+            })
             .and_then(serde_json::Value::as_f64)
         {
             usage.cost_usd += charged;

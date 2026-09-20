@@ -74,7 +74,12 @@ pub const SPEECH_TOOLS: [&str; 4] = [POST_TOOL, DM_TOOL, CLOSE_TOOL, READ_TOOL];
 /// The prefix is this host's, so it is stripped before the crate is asked —
 /// `interpret` is documented to take the bare name.
 fn bare(name: &str) -> &str {
-    name.strip_prefix("desk_").unwrap_or(name)
+    match name.strip_prefix("desk_").unwrap_or(name) {
+        // The crate renamed the closing move (`Close` → `CompleteEpisode`,
+        // serde alias kept); this host's tool keeps its `desk_close` spelling.
+        "close" => "complete_episode",
+        bare => bare,
+    }
 }
 
 /// The crate's own description for a tool, rendered verbatim.

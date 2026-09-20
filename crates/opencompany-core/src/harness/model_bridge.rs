@@ -304,7 +304,10 @@ fn usage_of(response: &ModelResponse) -> TurnUsage {
     let charged = response
         .raw
         .as_ref()
-        .and_then(|raw| raw.pointer("/openhuman/billing/charged_amount_usd"))
+        .and_then(|raw| {
+                raw.pointer("/openhuman/billing/charged_amount_usd")
+                    .or_else(|| raw.pointer("/openhuman_usage_meta/charged_amount_usd"))
+            })
         .and_then(Value::as_f64)
         .or_else(|| {
             usage
