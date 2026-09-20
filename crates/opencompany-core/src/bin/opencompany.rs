@@ -229,8 +229,6 @@ enum Command {
     },
 }
 
-/// The `memory` subcommands.}
-
 /// The `memory` subcommands.
 #[derive(clap::Subcommand)]
 enum MemoryCmd {
