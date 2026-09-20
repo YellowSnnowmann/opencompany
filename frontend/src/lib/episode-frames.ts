@@ -192,7 +192,6 @@ export function reduceEpisodeFrame(
 ): EpisodeFrames {
   const episodeId = "episodeId" in frame ? frame.episodeId : undefined;
   if (!episodeId) return state;
-  if (frame.type === "referral" && !("chatId" in frame)) return state;
 
   const chatId = "chatId" in frame && frame.chatId ? frame.chatId : "";
   const held = state.byId[episodeId];
