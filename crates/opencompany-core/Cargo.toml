@@ -626,9 +626,6 @@ media = ["openhuman", "openhuman_core/media"]
 # from the JWT); the token has NO env fallback and a missing token fails closed
 # (no tools wired), so a company can never reach another tenant's connections.
 composio = ["openhuman"]
-# Real HTTP transport to openhuman-core. The trait + offline mock + providers
-# compile without this; only `HttpOpenHumanRpc` is gated behind it.
-openhuman-rpc = ["dep:reqwest"]
 # Real GitHub REST filer for feedback issues. The `GitHubClient` trait + offline
 # mock + the whole filing flow compile without this; only `HttpGitHubClient` is
 # gated behind it.

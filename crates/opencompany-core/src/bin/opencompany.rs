@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use std::sync::Arc;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use opencompany::app::config::HostedDefault;
 use opencompany::company::Schedule;
 use opencompany::runtime::lifecycle_scheduler::load_or_create_cutoff_millis;
