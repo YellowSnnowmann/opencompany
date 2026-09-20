@@ -298,10 +298,14 @@ fn tool_call_message(calls: &[(String, Value)]) -> Value {
         .iter()
         .enumerate()
         .map(|(i, (tool, args))| {
+            // Plan hive-desks Phase 3: a company tool is reached through
+            // `mcp_call_tool` on the `opencompany` server, as a real model
+            // reaches it; a native one keeps its bare name.
+            let (name, args) = opencompany::hive::tools::via_opencompany_mcp(tool, args.clone());
             json!({
                 "id": format!("call_{i}"),
                 "type": "function",
-                "function": { "name": tool, "arguments": args.to_string() }
+                "function": { "name": name, "arguments": args.to_string() }
             })
         })
         .collect();

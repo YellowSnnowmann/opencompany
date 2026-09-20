@@ -648,15 +648,20 @@ async fn spawn_script_with_hook(
                 };
                 let message = match next.unwrap_or(Turn::Say("done")) {
                     Turn::Say(text) => json!({ "role": "assistant", "content": text }),
-                    Turn::Call { tool, args } => json!({
-                        "role": "assistant",
-                        "content": null,
-                        "tool_calls": [{
-                            "id": format!("call-{tool}"),
-                            "type": "function",
-                            "function": { "name": tool, "arguments": args.to_string() }
-                        }]
-                    }),
+                    Turn::Call { tool, args } => {
+                        // Plan hive-desks Phase 3: a company tool is reached
+                        // through `mcp_call_tool` on the `opencompany` server.
+                        let (name, args) = crate::hive::tools::via_opencompany_mcp(tool, args);
+                        json!({
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "id": format!("call-{tool}"),
+                                "type": "function",
+                                "function": { "name": name, "arguments": args.to_string() }
+                            }]
+                        })
+                    }
                 };
                 Json(json!({
                     "choices": [{ "index": 0, "message": message }],

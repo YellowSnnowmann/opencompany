@@ -226,15 +226,23 @@ async fn spawn_interleaved_publish_script() -> String {
                             "function": { "name": "file_write", "arguments": json!({ "path": source, "content": "draft" }).to_string() }
                         }]
                     }),
-                    1 => json!({
-                        "role": "assistant",
-                        "content": null,
-                        "tool_calls": [{
-                            "id": format!("publish-{lane}"),
-                            "type": "function",
-                            "function": { "name": "publish_artifact", "arguments": json!({ "path": source }).to_string() }
-                        }]
-                    }),
+                    1 => {
+                        // Plan hive-desks Phase 3: `publish_artifact` is a
+                        // company tool, reached through `mcp_call_tool`.
+                        let (name, args) = crate::hive::tools::via_opencompany_mcp(
+                            "publish_artifact",
+                            json!({ "path": source }),
+                        );
+                        json!({
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "id": format!("publish-{lane}"),
+                                "type": "function",
+                                "function": { "name": name, "arguments": args.to_string() }
+                            }]
+                        })
+                    }
                     2 => {
                         // Both tool calls have executed and their refusals are
                         // queued; releasing one run before the other would let
