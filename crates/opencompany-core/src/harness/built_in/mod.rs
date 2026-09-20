@@ -2,222 +2,45 @@
 //!
 //! This module supersedes the out-of-process OpenHuman seam
 //! (`src/openhuman/{launcher,rpc,tools,channel}.rs`, JSON-RPC behind
-//! `openhuman-rpc`) with **direct library embedding** of `vendor/openhuman`
-//! (`openhuman_core`): one openhuman [`Agent`](oh::agent::Agent) per manifest
-//! `[[agent]]`, wired with memory, an inference provider, an approval policy,
-//! and a workspace through [`AgentBuilder`](oh::agent::AgentBuilder).
+//! `openhuman-rpc`) with **direct library embedding** of `vendor/openhuman`:
+//! one process-wide [`openhuman_embed::Runtime`]
+//! ([`crate::harness::openhuman_runtime`]) and one
+//! [`openhuman_embed::Agent`] per manifest `[[agent]]`, each instantiated from
+//! an [`AgentSpec`](openhuman_embed::AgentSpec) that carries its system
+//! prompt, tool scope, provider route, access tier and workspace (plan
+//! hive-desks, Phase 2).
 //!
 //! Compiled only under `feature = "openhuman"`. The default build links none of
 //! it and keeps its offline, echo-brained behaviour.
 //!
 //! ## Layout
 //!
-//! * [`build`] — manifest `[[agent]]` → `AgentBuilder`.
-//! * [`provider`] — hosted Medulla [`Provider`] + a `MockProvider` for tests.
-//! * [`memory`] — [`OcMemory`](memory::OcMemory): openhuman `Memory` over the
-//!   opencompany [`ContextStore`](crate::ports::ContextStore).
+//! * [`build`] — manifest `[[agent]]` → [`AgentBlueprint`](build::AgentBlueprint)
+//!   (prompt, belt, model, policy, workspace) → `AgentSpec`.
+//! * [`provider`] — hosted Medulla [`Provider`] + a `MockProvider` for tests;
+//!   served to the runtime over the loopback
+//!   [`model_bridge`](crate::harness::model_bridge).
+//! * [`progress_pump`] — the per-turn progress stream → console frames, run
+//!   trace, steps and cost.
 //! * [`policy`] — [`ApprovalPolicy`](policy::ApprovalPolicy): `[policy]` →
-//!   openhuman `ToolPolicy`.
-//! * [`cost`] — [`TurnCost`](oh::agent::cost::TurnCost) → ledger + usage meter.
+//!   the approval decision (enforced on this crate's own tools; Phase 3).
+//! * [`cost`] — per-turn usage → ledger + usage meter.
 //!
 //! ## Flagged seams
 //!
 //! * **Group-chat / desk routing** is opencompany's job (openhuman is
-//!   single-agent). v1 is single-responder; the full ops `chat` handler that
-//!   resolves a desk's members and journals the `AgentReply` is WS3.
+//!   single-agent). The per-desk `OpenHumanHive` arrives in Phase 4; until
+//!   then every desk message takes the single-responder path.
+//! * **This crate's own tools** (ledger, tasks, pages, workspace, composio,
+//!   hosting, memory, speech, approval) are assembled on the blueprint but
+//!   **unattached**: the embedded runtime's tool set is its own plus MCP
+//!   servers, so they become the per-agent MCP catalogue in Phase 3.
 //!
-//! Live turn cost is **wired**: [`CompanyAgent::run`] reads the completed turn's
-//! token/cost totals from openhuman's public
-//! [`Agent::last_turn_usage`](oh::agent::Agent::last_turn_usage) accessor and
-//! [`HarnessPool::run`] records them through [`cost::record_turn_cost`]. Usage
-//! only reaches the ledger/meter when the provider reports it — the
-//! [`HostedProvider`](provider::HostedProvider) parses it off the wire; the
-//! offline [`MockProvider`](provider::MockProvider) does not, so test turns stay
-//! inert.
+//! Live turn cost is **wired**: [`CompanyAgent::run`] reads each attempt's
+//! token/cost totals off the bridge's usage tap (what the provider reported),
+//! falling back to the runtime's own `TurnCostUpdated` figure, and
+//! [`HarnessPool::run`] records them through [`cost::record_turn_cost`].
 
-pub mod approval_tool;
-/// Issue #775: the fail-closed shell audit wrapper — one intent line appended
-/// (and fsynced) *before* a command runs, refusing the command outright when
-/// that append fails. Pairs with the host-owned, per-agent sink
-/// [`toolbelt::shell_audit`] resolves. See [`audit`].
-pub mod audit;
-pub mod blockers;
-pub mod brain;
-pub mod build;
-pub mod capability_budget;
-#[cfg(feature = "chargebee")]
-pub mod chargebee;
-/// Guarding a chat-only (`suppress_tools`) turn's reply against the tool-call
-/// markup its frozen-at-turn-1 system prompt can still provoke, since that
-/// prompt still advertises tool briefs the turn's own tool schema no longer
-/// carries (#2094). Applied after [`native_salvage`], which is deliberately
-/// inert on this same turn shape — see [`chat_only_guard`]'s module docs for
-/// why the two do not overlap.
-mod chat_only_guard;
-mod checkpoint;
-pub mod composio;
-/// Issue #410: how a Composio action catalogue is narrowed and rendered for an
-/// agent, and why every cut it makes describes itself. Pure and un-gated (the
-/// live tools are behind `composio`, which CI never *runs*) — see
-/// [`composio_catalog`].
-pub mod composio_catalog;
-/// The BYOK half of the Composio surface: a company's **own** Composio account,
-/// reached directly at `backend.composio.dev` instead of through the
-/// OpenHuman-managed proxy. Mirrors OpenHuman's `backend` / `direct` split. See
-/// [`composio_direct`].
-#[cfg(feature = "composio")]
-pub mod composio_direct;
-/// End-to-end proof that #410's narrowable, self-describing Composio listing is
-/// reachable from a real turn on two large toolkits — the harness, the grant
-/// gate, the approval policy and the Composio client are all real; only the
-/// model's choices and the Composio backend are scripted. Test-only.
-#[cfg(all(test, feature = "composio"))]
-mod composio_turn_tests;
-/// Issue #416: the confined turn — an ephemeral agent with no tools, no company
-/// memory and no delegation, for a question that is about one object rather than
-/// about the company. See [`confine`].
-pub mod confine;
-pub mod cost;
-/// Hosting (TinyHosts): the per-company connection and the agent tools over it.
-/// The keys it reads live in `company::hosting`, which is compiled in every
-/// build — the console's Hosting settings write them whether or not this
-/// harness exists to use them.
-pub mod hosting;
-/// End-to-end proof of issue #988: a turn really does get
-/// [`MAX_TOOL_ITERATIONS`](build::MAX_TOOL_ITERATIONS) tool rounds instead of the
-/// vendored ten, and a budget-armed turn's in-turn
-/// [`BudgetStopHook`](oh::agent::stop_hooks::BudgetStopHook) halts it when it
-/// outruns its money — distinguishably from an iteration-cap pause. Test-only.
-///
-/// Declared here rather than at `crate::harness` because it reads
-/// `CompanyAgent`'s private `agent` field (the vendored session) to ask
-/// `last_turn_hit_cap` — a child of `built_in`, not of the re-exporting parent.
-#[cfg(test)]
-mod iteration_cap_turn_tests;
-pub mod ledger_tools;
-pub mod lifecycle;
-pub mod mcp;
-pub mod mcp_probe;
-pub mod memory;
-pub mod memory_loop;
-pub mod memory_tools;
-/// Recovering a tool call that a model on the **native** transport wrote into
-/// its message body as prose instead of emitting it through the structured
-/// channel. Validated against the tools the turn itself offered — the marker a
-/// shared parser cannot use — and applied in the provider, which is the last
-/// point on this turn path where a text-shaped call can still become a real
-/// one. See [`native_salvage`].
-pub mod native_salvage;
-/// End-to-end proof that a tool call a model wrote as **text** is executed by a
-/// real turn: the harness, the grant gates, the approval policy, the dispatch
-/// and the meter are all real, and the recovered call's synthesized id is shown
-/// to keep its cycle paired all the way back into the model's context. Only the
-/// model's output and the search backend are scripted. Test-only.
-#[cfg(test)]
-mod native_salvage_turn_tests;
-pub mod orchestrator;
-/// Issue #6014: task-aware extraction of an oversized tool result — one
-/// bounded model call that keeps what answers the turn, in place of a byte cut
-/// that keeps whatever happened to come first. See [`payload_extract`].
-pub mod payload_extract;
-/// The per-turn progress pump: OpenHuman's progress stream → live console
-/// frames, the run trace, and the event buffer steps and cost are read from.
-pub mod progress_pump;
-/// Chargebee billing tools (issue #788), wired per company from its own
-/// SecretStore. Always compiled so the credential resolution and the fail-closed
-/// decision are testable at default features; only the tools are gated.
-/// PayPal wallet + transaction tools (issue #789), wired per company from its
-/// own SecretStore. Always compiled so credential resolution and the
-/// fail-closed decision are testable at default features.
-#[cfg(feature = "paypal")]
-pub mod paypal;
-/// Issue #337: the planning station — one tool-less model call per card entering
-/// `planning`, with the host gathering the evidence and verifying every
-/// prerequisite the model claims. See [`planning`].
-pub mod planning;
-pub mod policy;
-pub mod provider;
-/// Issue #244: `publish_artifact` — the only way a workspace file becomes a
-/// deliverable — plus the staging queue the brain drains, the bounded workspace
-/// scan that detects unpublished work, and the follow-up nudge's prompt. See
-/// [`publish`].
-pub mod publish;
-#[cfg(test)]
-mod publish_turn_conversation_tests;
-#[cfg(test)]
-mod publish_turn_dispatch_tests;
-/// End-to-end proof that #244's `publish_artifact` is reachable from a real
-/// dispatch, that a re-run extends by identity, and — the part nothing shorter
-/// than a real turn loop can show — that the follow-up nudge fires **once**,
-/// records a decline, and can never fail the run it follows. Test-only.
-#[cfg(test)]
-mod publish_turn_helpers_tests;
-#[cfg(test)]
-mod publish_turn_link_tests;
-pub mod run_origin;
-pub mod run_trace;
-pub mod run_turn;
-pub mod search;
-/// A company's **own** search provider (the BYO half of issue #238): Brave,
-/// Exa, Querit or a self-hosted SearXNG, wired from that company's stored key
-/// through OpenHuman's own search tools. Falls back to [`search`]'s metered
-/// managed surface whenever nothing is configured.
-pub mod search_byo;
-/// End-to-end proof that the #238 `web_search` tool is reachable from a real
-/// turn — the harness, the grant gates, the approval policy, the cap and the
-/// meter are all real; only the model's choices and the search backend's
-/// responses are scripted. Test-only.
-#[cfg(test)]
-mod search_turn_tests;
-/// The per-message responder selection for `auto` channels (issue #1835): the
-/// tool-less model call that picks which member of a leadless channel answers
-/// an unmentioned message, falling back to the channel's first roster member
-/// wherever it cannot run.
-pub mod selector;
-pub mod skills;
-pub mod steer;
-pub mod steps;
-pub mod title;
-pub mod tool_posture;
-pub mod toolbelt;
-pub mod triage;
-pub mod turn_outputs;
-/// Issue #661 (M7): `read_workflow` / `update_workflow` / `delete_workflow` —
-/// the agent's way to fix or retire a workflow instead of only ever creating
-/// another one beside it. Kept out of `orchestrator.rs` (already the largest
-/// file in `src/harness/`) because the three share a handle, a guard and a set
-/// of refusals with each other rather than with anything there. See
-/// [`workflow_admin`].
-pub mod workflow_admin;
-/// Issue #339: the staging queue the orchestrator's `run_workflow` /
-/// `create_workflow` tools push a workflow reference onto and the
-/// [`HarnessBrain`] drains at the end of a dispatch, so a card that built or
-/// Issue #580: the workflow builder pass — turns a `workflow`-deliverable card's
-/// plan into a proposed graph that lands In Review for approval. Modeled on the
-/// planning station (one card, one tool-less model call, one settled outcome),
-/// but it mints an attempt row because building the workflow is the card's work.
-/// See [`workflow_build`].
-pub mod workflow_build;
-/// ran a workflow can link to it. See [`workflow_refs`].
-pub mod workflow_refs;
-/// End-to-end proof that an agent granted `files` and **not** `shell` can write
-/// a relative path on a company that has never run — the #409 provisioning gap,
-/// which only exists before anything has created the agent's workspace. Covers
-/// a manifest teammate and a runtime overlay teammate, and pins that a traversal
-/// out of a provisioned sandbox is still refused. Test-only.
-#[cfg(test)]
-mod workspace_provision_turn_tests;
-pub mod workspace_tools;
-#[cfg(test)]
-mod workspace_turn_basic_tests;
-/// End-to-end proof that the #237 workspace tools are reachable from a real
-/// turn, with only the model's choices stubbed. Test-only.
-#[cfg(test)]
-mod workspace_turn_helpers_tests;
-#[cfg(test)]
-mod workspace_turn_supervised_tests;
-
-use crate::harness::run_trace::RunTraceSink;
 pub use brain::HarnessBrain;
 
 use std::collections::{HashMap, HashSet};
@@ -264,8 +87,8 @@ pub struct HarnessDeps {
     pub emergency_gate: Option<Arc<crate::policy::gate::ManifestApprovalGate>>,
     /// The inference model shared across a company's agents. A [`HarnessModel`]
     /// is a tinyinference [`ChatModel<()>`](tinyinference::model::ChatModel)
-    /// plus the telemetry slug the cost hook reads live per turn; it upcasts to
-    /// `Arc<dyn ChatModel<()>>` at the openhuman `AgentBuilder::chat_model` seam.
+    /// plus the telemetry slug the cost hook reads live per turn; it is served
+    /// to the embedded runtime over the loopback `model_bridge`.
     pub provider: Arc<dyn HarnessModel>,
     /// Stable provider slug attributed to usage samples (e.g. `subscription`).
     pub provider_slug: String,
@@ -1005,7 +828,7 @@ pub struct TurnOutcome {
     /// the operator could not tell.
     ///
     /// Read from openhuman's public
-    /// [`Agent::last_turn_hit_cap`](oh::agent::Agent::last_turn_hit_cap) while
+    /// `progress_pump::hit_iteration_cap` off the turn's progress stream while
     /// the agent lock is still held, the same under-lock idiom
     /// [`read_turn_usage`] uses. `false` on every path that returns an outcome
     /// **without** running a model turn (the two pre-turn budget refusals, the
@@ -4412,7 +4235,7 @@ impl HarnessPool {
         };
 
         // Run the turn and record its real cost. `CompanyAgent::run` reads each
-        // attempt's token/cost totals from openhuman's public `last_turn_usage()`
+        // attempt's token/cost totals from the bridge's usage tap
         // accessor and returns one entry per attempt (two when the empty-response
         // wrapper retried once). A zero-usage attempt (offline provider) writes
         // nothing, so the inert-metering contract holds.

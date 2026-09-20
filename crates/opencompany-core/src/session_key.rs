@@ -3,12 +3,12 @@
 //! # Why this is a module and not a `format!` at the builder
 //!
 //! Every OpenCompany teammate already **is** an openhuman session: the pool
-//! holds one [`Agent`](oh::agent::Agent) — "stateful agent session, the single
+//! holds one `openhuman_embed::Agent` — "stateful agent session, the single
 //! execution tier" in the vendored crate's own words — per `(company,
 //! agent_id)`, behind a mutex, because a turn takes `&mut self` and one session
 //! must serialise its own turns. What it did not have was a *name*.
 //!
-//! [`AgentBuilder`](oh::agent::AgentBuilder) defaults `event_session_id` to the
+//! The previous `AgentBuilder` defaulted `event_session_id` to the
 //! literal string `"standalone"` and `event_channel` to `"internal"`, and
 //! OpenCompany never set either. Those two fields are the identity every
 //! `DomainEvent` the session publishes is tagged with — `AgentTurnStarted`,
@@ -55,7 +55,7 @@ use crate::ports::CompanyId;
 /// is driven by this product, so the honest answer is one constant rather than
 /// a per-surface value: the surface an OpenCompany turn arrived on — a desk, a
 /// DM, a card, a workflow — is carried by the cue the session is handed
-/// (`agent_session::render_cues`), not by the bus label.
+/// (the conversation cue on the turn text), not by the bus label.
 pub const SESSION_CHANNEL: &str = "opencompany";
 
 /// The openhuman session id for one teammate of one company.

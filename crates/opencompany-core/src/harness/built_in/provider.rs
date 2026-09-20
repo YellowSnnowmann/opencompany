@@ -82,7 +82,8 @@ const OPENHUMAN_USAGE_META_KEY: &str = "openhuman_usage_meta";
 /// one bit the WS5 cost hook needs. It is read **live** after each turn (see
 /// [`HarnessPool::run`](crate::harness::HarnessPool)) so a console BYOK switch
 /// re-attributes spend on the next turn. `Arc<dyn HarnessModel>` upcasts to
-/// `Arc<dyn ChatModel<()>>` at the openhuman `AgentBuilder::chat_model` seam.
+/// `Arc<dyn ChatModel<()>>` where the loopback `model_bridge` serves it to
+/// the embedded runtime.
 pub trait HarnessModel: ChatModel<()> {
     /// Stable provider slug attributed to usage samples (e.g. `managed`, `byok`).
     fn telemetry_provider_id(&self) -> String;
