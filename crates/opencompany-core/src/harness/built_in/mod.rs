@@ -1597,9 +1597,10 @@ impl CompanyAgent {
                                 seat.timed_out
                                     .store(true, std::sync::atomic::Ordering::Relaxed);
                             }
-                            Err(oh::agent::AgentError::Invalid(format!(
-                                "the seat turn ran past its {secs}s timeout"
-                            )))
+                            Err(openhuman_embed::CoreError::Rpc {
+                                method: "agent.turn",
+                                message: format!("the seat turn ran past its {secs}s timeout"),
+                            })
                         }
                     },
                     None => fut.await,
