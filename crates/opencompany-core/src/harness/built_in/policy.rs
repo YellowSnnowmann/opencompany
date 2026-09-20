@@ -488,33 +488,6 @@ tokio::task_local! {
     static EXPLICIT_REQUEST_PENDING: Cell<bool>;
 }
 
-/// Runs `fut` as part of the turn `scope` names, with the explicit-approval
-/// boundary standing at `explicit_pending`, and returns the boundary as it
-/// stands after — `true` once `fut` asked the operator.
-///
-/// The task-locals above are set for the task a turn runs on. Since plan
-/// hive-desks Phase 3 a tool call is decided on the MCP server's task
-/// instead, where both would read as absent: the park would file `Unscoped`
-/// (which only the chat cycle drains, so a workflow run's park would never
-/// reach its run) and a second explicit request in one turn would not be
-/// refused. The in-flight turn carries both values across, and the handler
-/// runs the decision through here.
-pub async fn within_turn<F, T>(scope: ApprovalScope, explicit_pending: bool, fut: F) -> (T, bool)
-where
-    F: std::future::Future<Output = T>,
-{
-    CURRENT_SCOPE
-        .scope(
-            scope,
-            EXPLICIT_REQUEST_PENDING.scope(Cell::new(explicit_pending), async move {
-                let out = fut.await;
-                let pending = EXPLICIT_REQUEST_PENDING.with(Cell::get);
-                (out, pending)
-            }),
-        )
-        .await
-}
-
 /// A turn's exclusive claim on one [`ApprovalScope`]'s bucket (issue #439).
 ///
 /// Modelled on [`PublishClaim`](crate::harness::publish::PublishClaim) and
@@ -643,24 +616,6 @@ impl ApprovalRequestQueue {
         F: std::future::Future<Output = T>,
     {
         EXPLICIT_REQUEST_PENDING.scope(Cell::new(false), fut).await
-    }
-
-    /// The scope the current task files pushes into — what a turn records so
-    /// a tool call decided on another task (the `opencompany` MCP server's,
-    /// plan hive-desks Phase 3) can be run back inside it with
-    /// [`within_turn`].
-    #[must_use]
-    pub fn scope_now() -> ApprovalScope {
-        Self::current_scope()
-    }
-
-    /// Whether the current task's turn has already asked the operator — the
-    /// other half of what [`within_turn`] carries across tasks.
-    #[must_use]
-    pub fn explicit_request_pending_now() -> bool {
-        EXPLICIT_REQUEST_PENDING
-            .try_with(Cell::get)
-            .unwrap_or(false)
     }
 
     /// Takes exclusive ownership of `scope`'s bucket for the life of the

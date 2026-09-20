@@ -42,7 +42,6 @@ use tinyhivemind::speech::{
 use tinyhivemind_embed::ConversationRef;
 use tinytools::{Tool, ToolCallOptions, ToolResult, ToolRunContext, WorkspaceDescriptor};
 
-use crate::harness::policy::{ApprovalRequestQueue, ApprovalScope};
 use crate::ports::types::CompanyId;
 
 /// The bare speech tool names, in the order [`speech::tool_specs`] presents
@@ -89,15 +88,40 @@ pub struct InFlight {
     pub hive: Option<HiveTurn>,
     /// What the seat said this turn — at most one utterance.
     pub outbox: Vec<Utterance>,
-    /// The approval scope the turn's parks file into, captured on the turn's
-    /// own task; the MCP handler decides a call back inside it
-    /// ([`within_turn`](crate::harness::policy::within_turn)).
-    pub approval_scope: ApprovalScope,
-    /// Whether this turn has already asked the operator for approval or an
-    /// answer — the explicit-request boundary, carried across the handler's
-    /// task the same way.
-    pub explicit_request_pending: bool,
+    /// Where an OpenCompany tool call is handed so it runs on the turn's own
+    /// task (see [`ToolJob`]). `None` — a test, or a caller that registered
+    /// the turn without running one — has the server run the call itself.
+    pub executor: Option<ToolJobSender>,
 }
+
+/// One OpenCompany tool call, handed from the MCP server's task to the turn's.
+///
+/// The belt's tools file into task-local queues — the approval scope, the
+/// publish and delegation claims, the explicit-request boundary — that are
+/// set on the task the turn runs on and invisible from the server's. Rather
+/// than carry each of those across (and miss the next one), the server hands
+/// the call back to the turn's task, which decides it under the agent's
+/// policy and runs it there; the reply comes back on `reply`.
+pub struct ToolJob {
+    /// The tool the model called.
+    pub tool: String,
+    /// The arguments object it passed.
+    pub arguments: Value,
+    /// Where the MCP tool result (the `tools/call` result member) goes. A
+    /// dropped sender means the turn ended before the call ran.
+    pub reply: tokio::sync::oneshot::Sender<Value>,
+}
+
+impl fmt::Debug for ToolJob {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ToolJob")
+            .field("tool", &self.tool)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The turn-side end of the hand-off; the turn's task drains the receiver.
+pub type ToolJobSender = tokio::sync::mpsc::Sender<ToolJob>;
 
 /// What one speech call became.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -130,8 +154,7 @@ impl InFlight {
             surface,
             hive: None,
             outbox: Vec::new(),
-            approval_scope: ApprovalScope::default(),
-            explicit_request_pending: false,
+            executor: None,
         }
     }
 
@@ -142,12 +165,10 @@ impl InFlight {
         self
     }
 
-    /// Records the approval scope and explicit-request boundary of the task
-    /// the turn runs on, as they stand now.
+    /// Hands OpenCompany tool calls to the turn's task through `executor`.
     #[must_use]
-    pub fn with_approval_context_now(mut self) -> Self {
-        self.approval_scope = ApprovalRequestQueue::scope_now();
-        self.explicit_request_pending = ApprovalRequestQueue::explicit_request_pending_now();
+    pub fn with_executor(mut self, executor: ToolJobSender) -> Self {
+        self.executor = Some(executor);
         self
     }
 
