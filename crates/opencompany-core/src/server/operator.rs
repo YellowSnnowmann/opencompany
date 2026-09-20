@@ -640,6 +640,63 @@ async fn reset_desk_routing(
     )))
 }
 
+/// `GET {scope}/episodes?desk&status&limit` — the episodes a company ran or
+/// is running, newest first (plan hive-desks, Phase 4).
+///
+/// Folded from the journal's episode record on every call; the room does not
+/// read this (it folds episodes out of the transcript and the live frames),
+/// the measurement script and a reloaded Observatory do.
+async fn list_episodes(
+    scope: ScopedCompany,
+    Query(query): Query<EpisodesQuery>,
+) -> Result<Json<Vec<crate::hive::episode_store::EpisodeDto>>, ApiError> {
+    let status = match query.status.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some("open") => Some(crate::hive::episode_store::EpisodeStatus::Open),
+        Some("completed") => Some(crate::hive::episode_store::EpisodeStatus::Completed),
+        Some(other) => {
+            return Err(ApiError(OpenCompanyError::InvalidRequest(format!(
+                "`status` must be `open` or `completed`, not `{other}`"
+            ))));
+        }
+    };
+    let desk = match query.desk.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(key) => {
+            let record = scope
+                .runtime
+                .store()
+                .load(scope.id())
+                .await?
+                .ok_or_else(|| OpenCompanyError::CompanyNotFound(scope.id().to_string()))?;
+            Some(record.resolve_desk_id(key).unwrap_or_else(|| key.to_string()))
+        }
+    };
+    let limit = query.limit.unwrap_or(EPISODES_DEFAULT_LIMIT).clamp(1, EPISODES_MAX_LIMIT);
+    let episodes = crate::hive::episode_store::list_episodes(
+        scope.runtime.events().as_ref(),
+        scope.id(),
+        desk.as_deref(),
+        status,
+        limit,
+    )
+    .await?;
+    Ok(Json(episodes))
+}
+
+/// Episodes returned when `limit` is not given.
+const EPISODES_DEFAULT_LIMIT: usize = 50;
+/// The most episodes one call returns.
+const EPISODES_MAX_LIMIT: usize = 500;
+
+/// `GET {scope}/episodes` query.
+#[derive(Debug, Deserialize)]
+struct EpisodesQuery {
+    desk: Option<String>,
+    status: Option<String>,
+    limit: Option<usize>,
+}
+
 /// `PUT {scope}/desks/{desk_id}/order` — set the operator's explicit member
 /// order (the desk hierarchy) for a desk through the overlay (issue #131). The
 /// version-controlled `[[group_chat]]` blueprint is never rewritten; the order

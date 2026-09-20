@@ -28,3 +28,15 @@ pub mod routing;
 /// server dispatches through (plan Phase 3).
 #[cfg(feature = "openhuman")]
 pub mod tools;
+/// The journal as the episode store: the `GET {scope}/episodes` fold, the
+/// driver checkpoint a resume reads, and the open-episode lookup (Phase 4).
+pub mod episode_store;
+/// What one seat is handed for one turn: sentinel, delta, assignment, fence
+/// (Phase 4).
+pub mod prompt;
+/// Cross-desk referral: the journal-backed `ReferralQueue`, the crossing
+/// record, and the return address an answer comes home to (Phase 6).
+pub mod referral;
+/// The company journal read as a tinyhivemind `SessionLog`, one desk at a
+/// time (ex `hivemind/log.rs`).
+pub mod session_log;
