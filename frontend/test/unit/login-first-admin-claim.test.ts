@@ -141,7 +141,7 @@ describe("the first-admin claim", () => {
   it("falls back to the sign-in form when somebody got there first", async () => {
     const postSignIn = vi
       .fn()
-      .mockRejectedValue(new ApiError(409, "already claimed", "already_claimed", true));
+      .mockRejectedValue(new ApiError(409, "already_claimed", "already claimed", true));
     await renderLogin(client({ claimable: true }, postSignIn));
 
     await type(find<HTMLInputElement>("claim-login")!, "admin");
