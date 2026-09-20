@@ -89,6 +89,7 @@ enabled = true
 # secret rather than `OPENCOMPANY_INFERENCE_KEY`, so a host-level env var does
 # not stand in for it: the first turn fails with a 401 from the platform
 # endpoint, not from the provider named here.
+
 [inference]
 provider = "openrouter"
 base_url = "https://openrouter.ai/api/v1"
@@ -99,6 +100,7 @@ base_url = "https://openrouter.ai/api/v1"
 # `vision-v1` is mapped too: nothing here sends an image, and leaving a tier
 # unmapped is what makes a stray request fall back to a provider default
 # nobody chose.
+
 [inference.models]
 chat-v1 = "deepseek/deepseek-v4-flash"
 reasoning-v1 = "deepseek/deepseek-v4-flash"
@@ -143,17 +145,15 @@ description = "The company's own line. Everybody who works here."
 members = ["triage", "exchanges", "refunds", "cancellations", "amendments"]
 
 [group_chat.routing]
+# Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
+# in concurrent rounds until every assigned seat calls `complete_episode`.
+# Round width, round cap and turn timeout take the library defaults here.
 
 [group_chat.routing.referral]
 enabled = true
 reach = "desks"
 max_hops = 2
 returns = true
-# How long a question put to a PERSON may run. The default of 2 is one question
-# and one reply, which is what a crossing to a teammate did before it could run
-# as a conversation — and it showed: a live pair opened four separate two-row
-# exchanges rather than one that settled, the fourth ending "hey — i'm not
-# following what you're asking me here", with no way to ask back.
 
 # ---------------------------------------------------------------------------
 # Pending orders. Two seats, competing remedies.
@@ -166,31 +166,15 @@ description = "Pending orders: cancel outright, or amend items, address or payme
 members = ["cancellations", "amendments"]
 
 [group_chat.routing]
-# Two seats, and enough budget to survive ONE bad proposal.
-#
-# Eight was too tight, and the way it failed is instructive: `exchanges`
-# proposed with item ids it had invented, `refunds` objected and named the real
-# ones — cross-inhibition working exactly as intended — and the correction then
-# had nowhere to go. `exchanges` spent its remaining turns supporting its own
-# corrected option, which adds no quorum (two DIFFERENT members must back it),
-# and the budget ran out on "refunds, do you agree?". Three of the eight turns
-# were a duplicate evidence line, an unmarked line that folds to nothing, and
-# that self-support.
-#
-# Twelve leaves room for the correction cycle a two-seat desk needs. It is still
-# short on purpose: conformity in a group of language models rises with
-# interaction time, so a long episode buys correlated error rather than scrutiny.
+# Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
+# in concurrent rounds until every assigned seat calls `complete_episode`.
+# Round width, round cap and turn timeout take the library defaults here.
 
 [group_chat.routing.referral]
 enabled = true
 reach = "desks"
 max_hops = 2
 returns = true
-# How long a question put to a PERSON may run. The default of 2 is one question
-# and one reply, which is what a crossing to a teammate did before it could run
-# as a conversation — and it showed: a live pair opened four separate two-row
-# exchanges rather than one that settled, the fourth ending "hey — i'm not
-# following what you're asking me here", with no way to ask back.
 
 # ---------------------------------------------------------------------------
 # Delivered orders. Same shape.
@@ -203,19 +187,15 @@ description = "Delivered orders: exchange an item for a variant of the same prod
 members = ["exchanges", "refunds"]
 
 [group_chat.routing]
-# Twelve, not eight: one bad proposal plus its correction does not fit in
-# eight when self-support adds no quorum. See the order_ops note above.
+# Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
+# in concurrent rounds until every assigned seat calls `complete_episode`.
+# Round width, round cap and turn timeout take the library defaults here.
 
 [group_chat.routing.referral]
 enabled = true
 reach = "desks"
 max_hops = 2
 returns = true
-# How long a question put to a PERSON may run. The default of 2 is one question
-# and one reply, which is what a crossing to a teammate did before it could run
-# as a conversation — and it showed: a live pair opened four separate two-row
-# exchanges rather than one that settled, the fourth ending "hey — i'm not
-# following what you're asking me here", with no way to ask back.
 
 # **A desk `amendments` sits on, with somebody `order_ops` does not have.**
 #
@@ -229,6 +209,7 @@ returns = true
 # `refunds` is the point of the desk. It is not on `order_ops`, so a crossing
 # here reaches knowledge the asking room genuinely does not hold, which is the
 # only thing a crossing is for.
+
 [[group_chat]]
 id = "policy"
 name = "Remedy Policy"
@@ -236,6 +217,9 @@ description = "Which remedy a case is entitled to, and how the money comes back 
 members = ["amendments", "refunds"]
 
 [group_chat.routing]
+# Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
+# in concurrent rounds until every assigned seat calls `complete_episode`.
+# Round width, round cap and turn timeout take the library defaults here.
 
 [group_chat.routing.referral]
 enabled = true

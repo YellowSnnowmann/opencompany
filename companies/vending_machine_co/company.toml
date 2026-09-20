@@ -81,6 +81,7 @@ enabled = true
 # The webhook lane the simulator drives. `scripts/vending-sim.py` posts each
 # day's triggers here — a machine down, a stockout, a contract clock — which is
 # what makes this a live environment rather than a scripted demo.
+
 [channels.email]
 enabled = true
 
@@ -94,6 +95,7 @@ enabled = true
 # and fall through to `chat-v1`. That is a cost decision, not an oversight:
 # neither is asked to reason about a trade-off, and buying the strongest model
 # for "what does the telemetry say" is money spent on nothing.
+
 [inference]
 models = { "chat-v1" = "flash", "reasoning-v1" = "reasoning", "agentic-v1" = "max-reasoning", "vision-v1" = "flash" }
 
@@ -120,28 +122,10 @@ description = "One day's van at a time: who gets visited, what goes on the shelf
 members = ["route_planner", "fleet_tech", "stock_controller", "field_realist"]
 
 [group_chat.routing]
-# Four members x three turns: an opening position, a reply to the room, and a
-# commit. Small on purpose — conformity in a group of language models rises
-# with interaction time, so a longer episode buys correlated error rather than
-# a better route.
-# A `!support` with no `^citation` does not count. In this desk that bites
-# hardest on the stock controller: "we have enough stock" is a claim about a
-# number the warehouse tool will actually print, and a support that cannot
-# cite it is a guess wearing a marker.
-# `dominance_cap` is a **percent of the room's grounded share**, not a turn
-# count: the library damps a member when `share * 100 > total * cap`. 40 is the
-# lower of the two values the benchmark sweeps and the one its best policy for a
-# four-seat desk uses; the library's own default is 50.
-#
-# This said `3` until the sweep caught it, copied from `hive_math_lab` along
-# with a comment describing a supporter count. Three *percent* means every
-# member that has said anything grounded exceeds the cap and takes the
-# dominance penalty on every later bid — which damps the whole room instead of
-# its loudest seat, the exact opposite of the knob's purpose.
+# Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
+# in concurrent rounds until every assigned seat calls `complete_episode`.
+# Round width, round cap and turn timeout take the library defaults here.
 
-# Only the planner proposes; the two constraint-holders ground or refuse.
-# `commit`, `question` and `defer` are never gated by the runtime whatever a
-# list says — they are written out here for readability only.
 [group_chat.routing.referral]
 enabled = true
 reach = "desks"
@@ -164,13 +148,10 @@ description = "What each line and each host site is actually worth, and what we 
 members = ["account_manager", "pricing_analyst", "contract_counsel"]
 
 [group_chat.routing]
-# A share, not a count — see the operations desk above.
+# Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
+# in concurrent rounds until every assigned seat calls `complete_episode`.
+# Round width, round cap and turn timeout take the library defaults here.
 
-# Two seats may propose here, unlike ops, because a commercial question has two
-# genuinely different framings — "what do we charge" and "what do we sign" —
-# and forcing both through one seat produces a plan that is only ever one of
-# them. Counsel proposes nothing and may refute anything: its whole job is to
-# be the seat that says no with a citation.
 [group_chat.routing.referral]
 enabled = true
 reach = "desks"
@@ -195,28 +176,9 @@ description = "What the market did this week, and which of it should change a pl
 members = ["market_scout", "demand_analyst"]
 
 [group_chat.routing]
-# Eight, not six. See the evidential note below: this desk was the most
-# constrained in the company and spent its budget without deciding in almost
-# every live run.
-# Two members, so a quorum of two is unanimity — correct here. A room of two
-# that could carry on one supporter is a room where either member decides
-# alone, which is a single responder with extra steps.
-# **No `require_evidential` here, unlike the other two desks**, and this is the
-# one knob in the bundle set from measurement rather than from argument.
-#
-# Stacking it on a two-member desk whose quorum is already unanimity means a
-# decision needs *both* seats to file a citation that chains to a stated fact.
-# The deliberation benchmark
-# (`vendor/tinyhivemind/crates/tinyhivemind-hive/examples/bench`) puts numbers
-# on it: at `--agents 2`, `require_evidential` takes the decided rate from
-# 91.6% to **36.2%** and correctness from 63.6% to 30.7% over 2000 seeded
-# rooms. Live runs of this company agreed — the signals desk spent its budget
-# without reaching a decision in nearly every episode it opened.
-#
-# The other two desks keep it. They are larger, and their seats read hard
-# figures off the `vending` MCP on almost every turn, so a citation that
-# reaches a fact is cheap there in a way it is not here: this desk's whole job
-# is to weigh a signal nobody has measured yet.
+# Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
+# in concurrent rounds until every assigned seat calls `complete_episode`.
+# Round width, round cap and turn timeout take the library defaults here.
 
 [group_chat.routing.referral]
 enabled = true

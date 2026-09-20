@@ -324,9 +324,24 @@ impl CompanyManifest {
                 source,
             })?;
 
+        if let Some(problem) = legacy_hive_block(&text) {
+            return Err(OpenCompanyError::ManifestParse(path.to_path_buf(), problem));
+        }
         toml::from_str(&text).map_err(|err| {
             OpenCompanyError::ManifestParse(path.to_path_buf(), err.message().to_string())
         })
+    }
+
+    /// Whether a manifest still carries the retired `[group_chat.hive]`
+    /// block, and the migration hint if it does.
+    ///
+    /// The block is refused rather than ignored: `GroupChat` no longer has a
+    /// field for it, so a plain `toml::from_str` would drop it silently and a
+    /// desk an operator tuned by hand would run on the defaults with nothing
+    /// saying so. Read off the raw document because the typed manifest cannot
+    /// see a key it does not declare.
+    pub fn legacy_hive_block(text: &str) -> Option<String> {
+        legacy_hive_block(text)
     }
 
     /// Parses a manifest that came back out of the store, applying the global
@@ -1471,4 +1486,28 @@ mod tests_surfaces;
 #[cfg(test)]
 #[path = "manifest_harness_tests.rs"]
 mod harness_tests;
+
+/// The migration hint for a manifest that still declares `[group_chat.hive]`
+/// (plan hive-desks, Phase 4).
+fn legacy_hive_block(text: &str) -> Option<String> {
+    let document: toml::Value = toml::from_str(text).ok()?;
+    let desks = document.get("group_chat")?.as_array()?;
+    let stale: Vec<String> = desks
+        .iter()
+        .filter(|desk| desk.get("hive").is_some())
+        .map(|desk| {
+            desk.get("id")
+                .and_then(toml::Value::as_str)
+                .unwrap_or("?")
+                .to_string()
+        })
+        .collect();
+    if stale.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "group chat `{}` declares `[group_chat.hive]`, which no longer exists — the trace-grammar          hive (quorum, moves, aside, turn_budget) was replaced by completion-driven episodes.          Delete the block, and say how the desk routes and paces its rounds under          `[group_chat.routing]` (`round_width`, `max_rounds`, `turn_timeout_secs`) and          `[group_chat.routing.referral]` (`enabled`, `max_hops`, `reach`, `returns`); see          `docs/spec/runtime/hive.md`.",
+        stale.join("`, `")
+    ))
+}
 
