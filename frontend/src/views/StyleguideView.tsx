@@ -1394,9 +1394,9 @@ const FIXTURE_ROUTING_CLIENT = {
  * A small company's wiring: declared reach, plus what has actually happened.
  *
  * Deliberately mixed — two dashed structural edges an operator has never used,
- * one solid hand-off that has run four times, and a teammate the orchestrator
- * created at runtime — because the whole point of the drawing is telling those
- * three apart.
+ * one solid hand-off that has run four times, a teammate the orchestrator
+ * created at runtime, and two seats that spoke to each other inside an episode
+ * — because the whole point of the drawing is telling those apart.
  */
 const FIXTURE_COMMS = applyObservations(
   structuralGraph(
@@ -1416,6 +1416,8 @@ const FIXTURE_COMMS = applyObservations(
     { kind: "handed-off", from: "orchestrator", to: "solvers", via: "delegate_to_desk", atMillis: 3 },
     { kind: "handed-off", from: "planner", to: "records", via: "spawn_task", atMillis: 4 },
     { kind: "spawned", by: "orchestrator", agentId: "researcher", atMillis: 5 },
+    { kind: "spoke", from: "planner", to: "archivist", via: "dm", atMillis: 6 },
+    { kind: "spoke", from: "archivist", to: "solvers", via: "referral", atMillis: 7 },
     { kind: "speaking", agentId: "planner" },
   ],
 );
