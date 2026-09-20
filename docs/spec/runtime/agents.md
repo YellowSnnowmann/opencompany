@@ -405,9 +405,9 @@ that nothing errored, and that replying "continue" asks the agent to pick up
 from there. It is a separate bubble rather than an addition to the reply because
 the reply — and only the reply — is written back to the context store as memory;
 appending would file the platform's notice as something the agent said and
-recall it into later turns. See `src/harness/mod.rs`
-(`TurnOutcome::hit_iteration_cap`), `src/runtime/delegation.rs` for the fold, and
-`src/harness/brain.rs` for the notice.
+recall it into later turns. See `src/harness/built_in/mod.rs`
+(`TurnOutcome::hit_iteration_cap`), `src/hive/round.rs` for the fold across a
+round, and `src/harness/built_in/brain.rs` for the notice.
 
 ### In-turn spend — armed only for a teammate with a declared daily budget
 
