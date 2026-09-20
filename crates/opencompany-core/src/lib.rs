@@ -42,9 +42,10 @@ pub mod globals;
 pub mod harness;
 /// Hive desks (plan `hive-desks`): tinyhivemind's completion-driven episodes
 /// hosted over the embedded OpenHuman runtime, and the MCP server through
-/// which the agents speak and reach OpenCompany's own tools. Gated with the
-/// harness it drives.
-#[cfg(feature = "openhuman")]
+/// which the agents speak and reach OpenCompany's own tools. Ungated at the
+/// root because the routing block, the episode wire shapes and the journal
+/// folds are read by the default build (manifest, `ports::types`,
+/// `chat_history`); the modules that drive a runtime are gated inside it.
 pub mod hive;
 /// Hive-mind desks: a `[[group_chat]]` with two or more members answers an
 /// operator message as a bounded deliberation episode rather than as one

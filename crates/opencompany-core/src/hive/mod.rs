@@ -18,6 +18,8 @@ pub mod mcp_server;
 pub mod tools;
 /// Jev routing over the TinyHumans System One proxy: the host-owned
 /// `SystemOneTransport` and the `jev_router` constructor (plan Phase 7).
+/// Gated with the harness whose credential seam it reads.
+#[cfg(feature = "openhuman")]
 pub mod jev;
 /// The `[group_chat.routing]` block, its resolved `RoutingPolicy`, and the
 /// desk-routing wire shapes (plan Phase 4).
