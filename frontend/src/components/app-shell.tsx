@@ -842,6 +842,7 @@ export function AppShell({
   // Not a replacement: a frame with no `messageSeq` still keys by thread, which
   // is every turn answering no journaled message and every older host.
   const setLiveStepsByMessage = scopedRoomWriters.setLiveStepsByMessage;
+  const setLiveAgentByTurn = scopedRoomWriters.setLiveAgentByTurn;
   /**
    * Retires the live rows of every message that now has durable steps of its
    * own, and of every message named in `alsoDrop`.
@@ -2909,6 +2910,25 @@ export function AppShell({
       // previous object so React skips the re-render.
       if (!rows) return prev;
       return { ...prev, [rowKey]: rows };
+    });
+    // …and who is speaking, under the same key the rows went to.
+    //
+    // `openTurns` already carries an agent, but it is the one the host STARTED
+    // the turn on and it is never revised — right for a single responder, wrong
+    // the moment the floor moves. A desk hand-off runs the delegate under this
+    // same query, and a deliberating room passes the floor between seats for
+    // the length of the episode: `messageSeq` holds still while `agentId`
+    // changes with every turn. So the frames are the only thing that knows who
+    // is working *now*, and `receiptAgentAfter` is the rule for reading them —
+    // shared with the receipt rather than restated, since a second copy is how
+    // the two rows would come to name different people for one turn.
+    setLiveAgentByTurn((prev) => {
+      const frameAgentId = "agentId" in event ? event.agentId : undefined;
+      const next = receiptAgentAfter(prev[rowKey], frameAgentId);
+      // Unchanged is the common case — most frames in a run carry the same
+      // agent — so keep the object identity and let React bail out.
+      if (!next || next === prev[rowKey]) return prev;
+      return { ...prev, [rowKey]: next };
     });
     // Keep this thread's receipt alive off the same frame (issue #1934): a frame
     // arriving means the turn is advancing, so bump `lastFrameAt` (which clears

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { TurnStep } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { TeammateAvatar } from "@/components/teammate-avatar";
+import { StepTimeline } from "./StepTimeline";
 import { runningStepLabel } from "./WorkingIndicator";
 import type { Channel } from "./model";
 
@@ -250,6 +251,17 @@ export function ChatLiveReceipt({
             No update for 30s… still waiting.
           </p>
         )}
+        {/* What this turn has done so far, under the line that says who is
+            doing it — the pairing this component's own `steps` doc has
+            described since it was written, and did not render.
+
+            Collapsed to "N steps", as a finished reply's timeline is, and
+            auto-opening on a failed or parked step so a gated call is visible
+            while it can still be acted on rather than after the fact (#411).
+            These retire the instant the turn settles and the reply's durable
+            steps take over, which is why they are not the "what the agent saw"
+            claim Raw turns owns. */}
+        {steps.length > 0 && <StepTimeline steps={steps} />}
       </div>
     </div>
   );
