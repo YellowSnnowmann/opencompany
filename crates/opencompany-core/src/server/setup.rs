@@ -179,10 +179,23 @@ pub struct SetupDto {
     /// bind, where it would mean an unauthenticated admin console.
     ///
     /// Which modes are *legal*, not which are convenient: `email` is listed on
-    /// a host with no mail transport too, because hub OAuth and passwords sign
-    /// people in there perfectly well. Read [`mail`](Self::mail) for what the
-    /// magic-link path specifically can do today.
+    /// a host with no mail transport too, because a password signs people in
+    /// there perfectly well. Read [`mail`](Self::mail) for what the magic-link
+    /// path specifically can do today.
     pub auth_modes: Vec<&'static str>,
+    /// The mode the wizard should preselect when `config.toml` names none.
+    ///
+    /// `none` on the packaged desktop app, which boots with that mode already
+    /// in force as a host-wide override on a loopback bind
+    /// (`crates/opencompany-app/src/embedded.rs`): one machine, one person, no
+    /// mailbox, so the sign-in question is already answered and asking it
+    /// again — and then asking for an address to go with the wrong answer — is
+    /// the first-run confusion this field removes. Reported by the host rather
+    /// than sniffed from the webview so the same console opened in a browser
+    /// tab against a desktop host gets the same default. Absent everywhere
+    /// else, where `email` stays the default it always was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_auth_mode: Option<&'static str>,
     /// Which optional surfaces this build has.
     pub build: BuildDto,
     /// Company ids already registered on this host. A non-empty list means the
@@ -744,6 +757,7 @@ fn snapshot(state: &AppState, env: &dyn EnvSource) -> Result<SetupDto, OpenCompa
         fields,
         templates: templates(),
         auth_modes: auth_modes(state),
+        default_auth_mode: default_auth_mode(state),
         // Asked through the login route's own predicates rather than re-read
         // from the environment here: a second spelling of "can this host mail"
         // is exactly how the wizard's copy and the route's behaviour drift into
@@ -787,6 +801,18 @@ fn auth_modes(state: &AppState) -> Vec<&'static str> {
         modes.push(AuthMode::None.as_str());
     }
     modes
+}
+
+/// The mode a fresh wizard preselects — see [`SetupDto::default_auth_mode`].
+///
+/// `none` only where it is both in force and legal: the live override says
+/// this host already runs without a sign-in, and the bind is loopback so
+/// `auth_modes` offers it. A routable host with the override set could not
+/// have booted (`is_local_only` gates it), so the second check is belt and
+/// braces against a config nobody should be able to reach.
+fn default_auth_mode(state: &AppState) -> Option<&'static str> {
+    (state.auth_mode_override() == Some(AuthMode::None) && state.config().is_local_only())
+        .then_some(AuthMode::None.as_str())
 }
 
 /// Which optional surfaces this build carries.
