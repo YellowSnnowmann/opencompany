@@ -45,6 +45,9 @@ pub mod harness;
 /// teammate's turn. Ungated — the episode machine is pure and the routing
 /// decision is one the default build makes as readily as the harness one does.
 pub mod hivemind;
+/// Hive desks: one `OpenHumanHive` per `[[group_chat]]`, completion-driven
+/// episodes, Jev routing (`docs/spec/runtime/hive.md`).
+pub mod hive;
 /// Turning dropped files and links into memory: extraction, then chunking.
 /// The console's Brain drop zone is the caller; the ports are unchanged.
 pub mod ingest;
@@ -63,7 +66,6 @@ pub mod metering;
 /// Only the bodies that name a `sentry::` type sit behind the
 /// `crash-reporting` feature.
 pub mod observability;
-pub mod openhuman;
 /// PayPal wallet + transaction visibility (issue #789).
 #[cfg(feature = "paypal")]
 pub mod paypal;
