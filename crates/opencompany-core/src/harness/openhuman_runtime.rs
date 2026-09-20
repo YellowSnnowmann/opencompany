@@ -117,11 +117,11 @@ impl RuntimeBoot {
                 ..self
             };
         }
-        let root = tempfile::Builder::new()
-            .prefix("opencompany-openhuman-")
-            .tempdir()
-            .map(tempfile::TempDir::keep)
-            .unwrap_or_else(|_| std::env::temp_dir().join("opencompany-openhuman"));
+        let root = std::env::temp_dir().join(format!(
+            "opencompany-openhuman-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let _ = std::fs::create_dir_all(&root);
         // SAFETY: this runs once per process, on the boot of the single
         // OpenHuman runtime, before any turn exists to read the variable; the
         // same contract `app::journal::prepare` documents for the `serve`
