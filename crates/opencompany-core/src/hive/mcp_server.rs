@@ -366,23 +366,59 @@ impl McpHost {
 
     /// Binds `127.0.0.1:0` and serves the router on it. Idempotent: a second
     /// call returns the address the first bound.
+    ///
+    /// The listener runs on its own thread with its own tokio runtime rather
+    /// than on the caller's: the host is process-wide and outlives any one
+    /// runtime — a test binary boots one per `#[tokio::test]`, and a listener
+    /// spawned on the first would die with it and leave every later turn
+    /// dialling a closed port. The same reason the OpenHuman runtime is
+    /// booted the way it is.
     pub async fn serve_loopback(self: &Arc<Self>) -> std::io::Result<SocketAddr> {
+        self.serve_loopback_blocking()
+    }
+
+    /// [`serve_loopback`](Self::serve_loopback) for a caller with no runtime.
+    pub fn serve_loopback_blocking(self: &Arc<Self>) -> std::io::Result<SocketAddr> {
         if let Some(addr) = self.addr() {
             return Ok(addr);
         }
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        listener.set_nonblocking(true)?;
         let addr = listener.local_addr()?;
         if let Err(bound) = self.addr.set(addr) {
             // Lost a race with another caller; their listener serves.
             drop(listener);
             return Ok(bound);
         }
-        let app = self.clone().router();
-        tokio::spawn(async move {
-            if let Err(error) = axum::serve(listener, app).await {
-                tracing::error!("[hive::mcp] loopback MCP listener stopped: {error}");
-            }
-        });
+        let host = self.clone();
+        std::thread::Builder::new()
+            .name("opencompany-mcp".to_string())
+            .spawn(move || {
+                let runtime = match tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .thread_name("opencompany-mcp-worker")
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        tracing::error!("[hive::mcp] MCP listener runtime failed to build: {error}");
+                        return;
+                    }
+                };
+                runtime.block_on(async move {
+                    let listener = match tokio::net::TcpListener::from_std(listener) {
+                        Ok(listener) => listener,
+                        Err(error) => {
+                            tracing::error!("[hive::mcp] MCP listener failed to register: {error}");
+                            return;
+                        }
+                    };
+                    if let Err(error) = axum::serve(listener, host.router()).await {
+                        tracing::error!("[hive::mcp] loopback MCP listener stopped: {error}");
+                    }
+                });
+            })?;
         tracing::info!(%addr, "[hive::mcp] serving the opencompany MCP server on loopback");
         Ok(addr)
     }
