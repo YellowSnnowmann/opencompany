@@ -873,6 +873,74 @@ async fn verify_code(
     mint_session(&state, &runtime, &user, &headers).await
 }
 
+/// `POST …/auth/claim` — the first person in picks the admin login and sets
+/// its password, then is signed in.
+///
+/// The way into a company nobody has joined yet, from the screen the person is
+/// actually looking at. Every other first sign-in needed a credential the host
+/// might not be able to deliver — a mailed link with no transport, or a shell
+/// command on the host — and the console dead-ended on a form that could not
+/// work (issue #1718 was the CLI half of that; this is the console half).
+///
+/// Open **only while the company has no users**, and closed for good after.
+/// That is what keeps a first-come claim from being an open door: it admits
+/// exactly one person, and after them the only way in is the roster. Where the
+/// deployment already named its first admin — a manifest `[users].admins`
+/// entry or `OPENCOMPANY_ADMIN_EMAIL` — only that address may claim, so a
+/// stranger who reaches a provisioned tenant before its owner cannot take it.
+///
+/// The refusals are specific rather than the generic `invalid_login`. The
+/// generic-failure rule protects who is *on* the roster, and this route only
+/// answers while the roster is empty — the one fact it discloses, that nobody
+/// has joined, is the same one `auth/config` publishes as `claimable`.
+async fn claim_first_admin(
+    company: PublicCompany,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ClaimFirstAdmin>,
+) -> Result<Response, crate::server::Rejection> {
+    let runtime = company.runtime.clone();
+    if let Some(refusal) = wrong_mode_for_email(&runtime) {
+        return Err(refusal.into());
+    }
+    let standing = bootstrap_admins(state.config(), &runtime).await?;
+    let claimed = super::bootstrap::claim_first_admin(
+        runtime.users(),
+        runtime.id(),
+        &standing,
+        &body.email,
+        &body.password,
+    )
+    .await?;
+    let user = match claimed {
+        Ok(user) => user,
+        Err(super::bootstrap::ClaimRefusal::AlreadyClaimed) => {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "this company already has an admin — sign in instead",
+                    "code": "already_claimed",
+                })),
+            )
+                .into_response()
+                .into());
+        }
+        Err(super::bootstrap::ClaimRefusal::NotTheNamedAdmin) => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "this host already names its first admin — claim it with that address",
+                    "code": "not_the_named_admin",
+                })),
+            )
+                .into_response()
+                .into());
+        }
+    };
+    tracing::info!(company = %runtime.id(), "first admin claimed");
+    mint_session(&state, &runtime, &user, &headers).await
+}
+
 /// `POST …/auth/login` — exchange an email and password for a session.
 async fn login_password(
     company: PublicCompany,
@@ -1271,11 +1339,15 @@ struct AuthConfigResult {
     /// Whether a password may be offered alongside the magic-link form. Only
     /// ever true in `email` mode.
     passwords: bool,
-    /// Whether a magic link asked for here can actually reach the person: a
-    /// wired transport, or a loopback host that hands the code back in the
-    /// response. False means the link form is a dead end and the console must
-    /// say so rather than draw it.
+    /// Whether a magic link asked for here reaches a mailbox — this host has a
+    /// mail transport wired. False means the console draws no link form at
+    /// all: a password is the only sign-in, and the screen says so rather
+    /// than sending someone to wait for a message no process here will send.
     magic_link: bool,
+    /// Whether nobody has joined this company yet, so the first person in may
+    /// pick the admin login and its password (`POST …/auth/claim`). Only ever
+    /// true in `email` mode, and only until the first user exists.
+    claimable: bool,
 }
 
 /// `GET …/auth/config` — the sign-in mode this company uses.
@@ -1309,10 +1381,22 @@ async fn auth_config(
         // property of the deployment, exactly like `mode`.
         name: company.runtime.display_name().await,
         passwords: mode.uses_email(),
-        // The same two predicates `request_code` itself branches on, asked
+        // The same predicate `request_code` itself delivers through, asked
         // rather than restated: whether the console draws the form and whether
-        // the code goes anywhere must never be two separate opinions.
-        magic_link: mail_transport_wired(&state) || state.config().is_local_only(),
+        // the code goes anywhere must never be two separate opinions. The
+        // loopback echo (`dev_code`) is deliberately *not* counted: it is a
+        // developer convenience on the API, and a sign-in screen that offers
+        // "email me a link" on a host with no mail is the confusion this
+        // field exists to remove.
+        magic_link: mail_transport_wired(&state),
+        // A store read on an unauthenticated route, but a cold one: the
+        // console asks once per sign-in screen, and it is the difference
+        // between a first visitor being offered a way in and being offered a
+        // form nobody can pass.
+        claimable: mode.uses_email()
+            && super::bootstrap::is_unclaimed(company.runtime.users(), company.runtime.id())
+                .await
+                .unwrap_or(false),
     })
 }
 
