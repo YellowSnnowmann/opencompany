@@ -218,9 +218,9 @@ const storageState =
             ? "../target/e2e/euler-storage-state.json"
             : HIVE
               ? "../target/e2e/hive-storage-state.json"
-            : ANALYTICS
-              ? "../target/e2e/analytics-storage-state.json"
-              : "../target/e2e/storage-state.json",
+              : ANALYTICS
+                ? "../target/e2e/analytics-storage-state.json"
+                : "../target/e2e/storage-state.json",
       )
     : undefined);
 
