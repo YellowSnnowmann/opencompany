@@ -46,6 +46,54 @@ pub fn is_hive_author(agent_id: &str) -> bool {
     agent_id == HIVE_REFERRAL_AUTHOR
 }
 
+/// The reserved authors the trace-grammar hive wrote its closing report and
+/// its failure notices under, before plan hive-desks Phase 4 retired it.
+///
+/// Nothing writes them any more; the history projection still drops rows
+/// that carry them, because a journal written before the change keeps its
+/// rows and a tally the console never drew should not start appearing as a
+/// teammate now.
+#[must_use]
+pub fn is_legacy_report_author(agent_id: &str) -> bool {
+    matches!(agent_id, "hive-report" | "hive-failure")
+}
+
+/// The pair conversation two agents share (`dm:<a>+<b>`, ids sorted), the
+/// thread the Session tab lists for each teammate pair.
+#[must_use]
+pub fn pair_conversation(one: &str, two: &str) -> String {
+    let (first, second) = if one <= two { (one, two) } else { (two, one) };
+    format!("dm:{first}+{second}")
+}
+
+/// The head of a seeded question, as [`DeskReferral::seed_text`] writes it.
+const ASKS: &str = " asks: ";
+
+/// The question a seeded row carries, without the attribution head.
+#[must_use]
+pub fn asked_message(text: &str) -> String {
+    match text.split_once(ASKS) {
+        Some((head, rest)) if head.starts_with('@') => rest.trim().to_string(),
+        _ => text.trim().to_string(),
+    }
+}
+
+/// The row an answer comes home as: attributed to the seat that closed the
+/// far episode, on the desk it closed on.
+#[must_use]
+pub fn returned_note(target: &str, desk_name: &str, answer: &str) -> String {
+    format!("@{target} on #{desk_name} answered: {}", answer.trim())
+}
+
+/// An answer row with [`returned_note`]'s attribution removed — the fold
+/// that carries it already says who answered.
+#[must_use]
+pub fn unattributed(target: &str, desk_name: &str, text: &str) -> String {
+    let head = returned_note(target, desk_name, "");
+    text.strip_prefix(head.trim_end())
+        .map_or_else(|| text.to_string(), |rest| rest.trim_start().to_string())
+}
+
 /// Where an answering episode sends its answer home.
 ///
 /// Kept on the far episode's checkpoint (`EpisodeStateSaved.origin`) so a

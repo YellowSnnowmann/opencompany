@@ -113,29 +113,30 @@ falls back to the env credential rather than 401ing.
 ## Cost metering
 
 `harness::cost` maps a completed turn's usage onto the ledger and the
-`UsageMeter`. `HarnessPool::run` reads the real per-turn token/cost totals from
-openhuman's public `Agent::last_turn_usage()` accessor
-(tinyhumansai/openhuman#4940), so metering is **live**. Gating differs by
+`UsageMeter`. `HarnessPool::run` reads the per-turn token/cost totals from the
+runtime's `AgentProgress::ModelCallCompleted` / `TurnCostUpdated` frames
+(`progress_pump.rs`), cross-checked against what the model bridge saw the
+provider charge, so metering is **live**. Gating differs by
 surface: a usage sample is recorded whenever tokens moved (the `/openai/v1`
 passthrough reports tokens but bills backend-side, echoing no USD), while a
 ledger `inference.spend` entry is written only when the turn actually cost USD —
 so a token-bearing zero-cost turn meters usage without a `$0.00` spend line. An
 offline provider that reports no usage yields a zero turn, which writes nothing.
 
-## `src/openhuman/` — legacy JSON-RPC path (behind `openhuman-rpc`)
+## Desks
 
-The former out-of-process seam is retained for one release and then removed.
-`src/openhuman/` still hosts the launcher (`opencompany open-human
-[--mode core|desktop] [--release] [--dry-run]` — Core shells out through Cargo
-to `openhuman-core`, Desktop calls `cargo tauri dev`/`build` directly and ports
-OpenHuman's `dev:app`/`dev:wry`/`macos:build:release`/`tauri:build:ui` preflight
-into Rust: vendored CEF-aware `tauri-cli` install, `CEF_PATH`, `.env` load
-(seeded from `.env.example` only in Desktop mode when absent), and macOS
-keychain + signing) and the JSON-RPC adapters —
-`rpc.rs` (the `OpenHumanRpc` transport trait + `MockOpenHumanRpc`),
-`http_client.rs` (the `reqwest` client behind `openhuman-rpc`), `tools.rs`
-(`OpenHumanToolProvider`, catalog filtered by manifest grants, ungranted calls
-rejected), and `channel.rs` (`OpenHumanChannelAdapter`). It degrades to
-built-in tools and the operator channel with a boot warning when OpenHuman is
-unreachable — never a boot failure. New work targets the embedded library, not
-this path.
+A `[[group_chat]]` of two or more is one `tinyhivemind_openhuman::OpenHumanHive`
+over these same agent handles (a shared agent is one handle bound into every
+hive that lists it), driven by `src/hive/` as completion episodes: concurrent
+rounds, speech over the `opencompany` MCP server, Jev routing, cross-desk
+referral. See [`docs/modules/hive/README.md`](../hive/README.md) and
+[`docs/spec/runtime/hive.md`](../../spec/runtime/hive.md).
+
+## The removed JSON-RPC path
+
+`src/openhuman/` — the `opencompany open-human` launcher, the `OpenHumanRpc`
+transport, `OpenHumanToolProvider` and `OpenHumanChannelAdapter`, behind the
+`openhuman-rpc` feature — is gone. A manifest naming `provider = "openhuman"`
+on `[tools]` or on a channel builds on the built-in tool provider and the
+operator channel with a boot warning; `OPENCOMPANY_OPENHUMAN_URL` attaches to
+nothing.
