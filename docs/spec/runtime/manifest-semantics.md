@@ -253,21 +253,18 @@ each page under the 500-line cap.
       harness feature so CI's gated lane actually compiles and tests it.
 
   **`max_delegation_depth`** (issue #176) bounds how deep one operator
-  message's hand-off chain may run, counted in hand-offs: the orchestrator
-  handing work to a desk lead is level 1, that lead handing a slice on is
-  level 2. Default `2`; valid `1..=4`, where `1` is the "recursion off" setting
-  and reproduces the pre-#176 behaviour exactly.
+  message's chain of **board** hand-offs may run — `spawn_task` from a card's
+  turn opening another card — counted in hand-offs. Default `2`; valid
+  `1..=4`, where `1` is the "recursion off" setting. It does not bound a
+  room: the turns one desk message can buy are bounded by that desk's
+  `[group_chat.routing]` (`round_width × max_rounds`) and a crossing to
+  another desk by `referral.max_hops`.
 
   The depth in force is read from the **live company record** on every call, so
   lowering it takes effect on the next turn without a rebuild. A hand-off past
   the bound is refused in the model's own turn with the reason
-  `depth_capped` — while `spawn_task` still works at the bound, so a member that
-  has run out of chain leaves the remaining work tracked instead of doing it
-  silently.
-
-  The bound matters to every agent, since every agent can hand work on. It is
-  deliberately low: the fan-out cap applies per level, so each extra
-  level multiplies the turns one message can buy.
+  `depth_capped`, so a member that has run out of chain leaves the remaining
+  work tracked instead of doing it silently.
     The Usage view surfaces a `Web searches` KPI plus a search status row
     (active / paused at cap 0 / awaiting credential / not granted / not in this
     build).
