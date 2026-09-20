@@ -3038,6 +3038,7 @@ fn cycle_task_id(
             // either as a stimulus would make a turn re-trigger itself.
             | CompanyEvent::TurnStarted { .. }
             | CompanyEvent::TurnFailed { .. }
+            | CompanyEvent::TurnSettled { .. }
             // Issue #1015: an attempt row announcing its own move. The same
             // argument as `TaskCardChanged` directly above, and it matters more
             // here — the store appends it *after* the status write, and the
@@ -3270,6 +3271,7 @@ fn cycle_conversation(
             // either as a stimulus would make a turn re-trigger itself.
             | CompanyEvent::TurnStarted { .. }
             | CompanyEvent::TurnFailed { .. }
+            | CompanyEvent::TurnSettled { .. }
             // Issue #1015: an attempt row announcing its own move. The same
             // argument as `TaskCardChanged` directly above, and it matters more
             // here — the store appends it *after* the status write, and the
