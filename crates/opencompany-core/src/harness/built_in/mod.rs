@@ -4721,61 +4721,27 @@ impl HarnessPool {
         // cut on a byte boundary. `operator_words` for the reason its own docs
         // give — `message` here is the composed text and carries the cycle's
         // briefings, which are not what anybody asked for.
-        // Whether this turn said anything through a speech tool. Owned here so
-        // it outlives the task-local scope below: the tool sets it inside the
-        // turn, and the reply path reads it after.
-        // What this turn says through the speech tools. Owned here so it
-        // outlives the task-local scope below: the tools write it inside the
-        // turn, and the reply path reads it after.
-        let speech = crate::runtime::delegation::new_turn_speech();
+        // What a seat says through the `opencompany` MCP server's speech
+        // tools reaches the driver through the seat scope
+        // (`delegation::seat_turn`), never through the reply text: on a hive
+        // seat turn the reply is the seat's own thinking, and on every other
+        // turn there is no speech tool to call.
         let (outcome, turn_costs) = crate::runtime::delegation::with_task_hint(
             crate::runtime::delegation::operator_words(message).to_string(),
-            crate::runtime::delegation::with_turn_speech(
-                speech.clone(),
-                crate::runtime::delegation::with_turn_conversation(
-                    turn_chat,
-                    deps.approval_requests.turn_scoped(agent.run_with_steer(
-                        &augmented,
-                        steer,
-                        stream_ctx,
-                        run_sink.clone(),
-                        // The caller's own, not read off `live` (#1890 I). A turn can
-                        // have a conversation and stream nothing.
-                        chat,
-                    )),
-                ),
+            crate::runtime::delegation::with_turn_conversation(
+                turn_chat,
+                deps.approval_requests.turn_scoped(agent.run_with_steer(
+                    &augmented,
+                    steer,
+                    stream_ctx,
+                    run_sink.clone(),
+                    // The caller's own, not read off `live` (#1890 I). A turn can
+                    // have a conversation and stream nothing.
+                    chat,
+                )),
             ),
         )
         .await;
-        // What the turn said through `desk_post` / `desk_close` becomes its
-        // reply.
-        //
-        // This is the crate's rule applied literally: a tool call is a request
-        // to speak, and the host appends. The appending host is the reply path
-        // below, because it is the one that carries the folded steps, the live
-        // frame, the resolved mentions and the board-card correlation — so a
-        // post routed through it produces the same bubble a plain answer does,
-        // rather than a poorer one written by a tool that holds none of that.
-        //
-        // The return text is discarded when the turn spoke, because with
-        // `[speech]` on it is private thinking (the tool descriptions say so in
-        // as many words). It is kept when the turn did NOT speak: an agent that
-        // forgot to call the tool must still be heard, and going silent for a
-        // missing tool call is not an acceptable failure mode.
-        let mut outcome = outcome;
-        if let Ok(turn) = outcome.as_mut() {
-            let said = speech.utterances();
-            if !said.is_empty() {
-                turn.reply = said.join("\n\n");
-            } else if speech.spoke() {
-                // A `desk_dm`-only turn. The DM is journaled under its own
-                // narrowed audience, and the channel gets nothing — which is
-                // the honest record: the room is told an exchange happened by
-                // the elided row, not by a bubble reprinting private thinking.
-                turn.reply = String::new();
-            }
-        }
-        let outcome = outcome;
         // Issue B-120: bank what the turn spent BEFORE its result is unwrapped.
         //
         // Both consumers of `turn_costs` used to sit below a `?` on this very
