@@ -221,20 +221,23 @@ quickstart below uses `export` and `./scripts/launch-demo.sh`.
 git clone --recurse-submodules https://github.com/tinyhumansai/opencompany.git
 cd opencompany
 export TINYHUMANS_API_KEY="th-..."          # grab yours at tinyhumans.ai
-./scripts/init-demo-admin.sh marketing you@example.com
 ./scripts/launch-demo.sh marketing up
 ```
 
-There is no bundled username or password. The initializer prompts for a
-password without putting it in shell history and creates `you@example.com` as
-the demo administrator. The first run takes a few minutes while it downloads
-and builds. When it settles, open **<http://localhost:5173>** and sign in with
-that email and password. That's the console, where you watch your agents work
-and answer anything waiting on you.
+There is no bundled username or password. The first run takes a few minutes
+while it downloads and builds. When it settles, open
+**<http://localhost:5173>**: the sign-in screen of a company nobody has joined
+yet asks you to choose the admin login and a password (it suggests one — keep
+a copy), and signs you straight in. That's the console, where you watch your
+agents work and answer anything waiting on you. Whoever reaches a fresh host
+first becomes its admin, so do this before you expose the port to anyone else;
+the offer disappears the moment the first account exists.
 
-Run the initializer once per demo data volume. Removing that volume with
-`./scripts/launch-demo.sh marketing down -v` removes the account too, so run
-the initializer again before the next launch.
+Prefer to set the admin up from the shell — for a scripted deploy, or a host
+you will not be first to open? `./scripts/init-demo-admin.sh marketing
+you@example.com` prompts for a password and creates the account before the
+first launch. Removing the data volume with
+`./scripts/launch-demo.sh marketing down -v` removes the account too.
 
 `./scripts/list-demos.sh` lists the other businesses you can launch in place of
 `marketing`, and `./scripts/launch-demo.sh marketing down` shuts it all down.

@@ -943,16 +943,16 @@ fn attach_tinyhumans_feedback(builder: RuntimeBuilder, _config: &AppConfig) -> R
     builder
 }
 
-/// Wires the hub identity exchange, when this build can reach the hub.
+/// Wires the hub exchange behind the TinyHumans key grant, when this build can
+/// reach the hub.
 ///
 /// Rides the existing `tinyhumans` feature rather than earning one of its own:
 /// that flag already means "this instance talks to the hub about its
-/// credential's owner", and asking the hub whose sign-in token this is is the
-/// same conversation about the same owner.
+/// credential's owner", and asking the hub for a key is the same conversation.
 ///
-/// Unwired, `…/auth/hub` reports no providers and the console shows only the
-/// magic-link form — which is the right answer for a self-hosted host that has
-/// no ecosystem to sign in against.
+/// Unwired, the Connections Account page offers no "Connect TinyHumans" button
+/// — which is the right answer for a self-hosted host with no hub. Sign-in is
+/// never involved either way: a company's login is its own, not the hub's.
 #[cfg(not(feature = "tinyhumans"))]
 fn attach_hub_identity(state: AppState) -> AppState {
     state

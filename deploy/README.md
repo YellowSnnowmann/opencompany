@@ -33,9 +33,13 @@ either way.
 - Console → http://localhost:5173 (proxies the API, so it's same-origin).
 - Host API → http://localhost:8080 (e.g. `/healthz`, `/api/v1/companies`).
 
-There are no default credentials. From the repository root, create a demo user
-with administrator access, start the same demo, then open
-<http://localhost:5173> and sign in with the email and prompted password:
+There are no default credentials. Open <http://localhost:5173>: a company
+nobody has joined yet asks the first visitor to choose the admin login and a
+password, and signs them in. Do that before exposing the port to anyone else —
+the offer closes the moment the first account exists. Set
+`OPENCOMPANY_ADMIN_EMAIL` to restrict the claim to one address.
+
+To create the admin from the shell instead, from the repository root:
 
 ```sh
 ./scripts/init-demo-admin.sh marketing you@example.com
