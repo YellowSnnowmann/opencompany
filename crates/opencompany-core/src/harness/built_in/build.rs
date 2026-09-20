@@ -91,12 +91,10 @@
 //!   `openhuman::skills::ops_parse` depends on WS1's skill parsing; the seam is
 //!   the `.workflows(...)` setter.
 //!
-//! The tool dispatcher is the attribute-tolerant
-//! [`AttrTolerantXmlDispatcher`](crate::harness::tool_dispatcher::AttrTolerantXmlDispatcher),
-//! a thin wrapper over OpenHuman's text-based `XmlToolDispatcher` that first
-//! strips attributes off `tool_call`-family open tags (issue #105) so the
-//! vendored bare-literal parser matches them. It needs no global tool registry —
-//! the harness stays self-contained.
+//! Tool-call parsing is OpenHuman's: the embedded turn loop reads native
+//! `tool_calls` off the wire and falls back to its own text-tag parser, so the
+//! attribute-tolerant XML dispatcher this crate carried (issue #105) went with
+//! `AgentBuilder`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -131,8 +129,8 @@ use crate::runtime::tools::{NAMESPACE_SEPARATORS, extends_on_boundary};
 ///
 /// The harness cuts **every** tool result to this many bytes on its way into
 /// the model's context — `ToolOutputMiddleware`, fed from
-/// `ContextManager::tool_result_budget_bytes`, which [`build_agent`] threads in
-/// below via [`AgentBuilder::context_config`]. It is the real ceiling on what a
+/// `ContextManager::tool_result_budget_bytes`, the vendored default every
+/// embedded turn runs under. It is the real ceiling on what a
 /// model ever sees from a tool, and it is *smaller* than the caps individual
 /// tools tend to write for themselves.
 ///
