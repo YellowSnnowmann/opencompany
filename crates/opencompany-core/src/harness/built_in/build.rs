@@ -1465,7 +1465,7 @@ pub fn agent_spec_for(
         tags: Vec::new(),
         metadata: serde_json::Value::Null,
     };
-    AgentSpec::new(runtime_id)
+    let mut spec = AgentSpec::new(runtime_id)
         .definition(
             AgentDefinitionSpec::new()
                 .system_prompt(blueprint.system_prompt.clone())
@@ -1474,9 +1474,21 @@ pub fn agent_spec_for(
                 .max_iterations(MAX_TOOL_ITERATIONS),
         )
         .provider(provider)
-        .access(Access::full())
-        .action_dir(blueprint.workspace.clone())
-        .config(move |config| {
+        .access(Access::full());
+    // The runtime refuses an agent whose action dir it cannot create. A
+    // workspace root that cannot be provisioned is reported once per agent
+    // by the pool (issue #551) and must not stop dispatch — the file tools
+    // refuse relative paths there, which is the failure the operator sees —
+    // so the agent falls back to the runtime's own per-agent action dir.
+    if blueprint.workspace.is_dir() || std::fs::create_dir_all(&blueprint.workspace).is_ok() {
+        spec = spec.action_dir(blueprint.workspace.clone());
+    } else {
+        tracing::warn!(
+            workspace = %blueprint.workspace.display(),
+            "[build] agent workspace is not creatable; the runtime's default action dir stands in"
+        );
+    }
+    spec.config(move |config| {
             config
                 .agent_registry
                 .entries

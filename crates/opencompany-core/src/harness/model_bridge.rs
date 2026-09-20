@@ -64,6 +64,7 @@ const MODEL_PREFIX: &str = "oc/";
 struct Registration {
     model: Arc<dyn ChatModel<()>>,
     tap: Arc<Mutex<Vec<TurnUsage>>>,
+    errors: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Clone)]
@@ -87,6 +88,7 @@ pub struct BridgeHandle {
     base_url: String,
     model_name: String,
     tap: Arc<Mutex<Vec<TurnUsage>>>,
+    errors: Arc<Mutex<Vec<String>>>,
 }
 
 impl std::fmt::Debug for BridgeHandle {
@@ -120,6 +122,21 @@ impl BridgeHandle {
             .map(|mut tap| std::mem::take(&mut *tap))
             .unwrap_or_default()
     }
+
+    /// Drains the provider errors recorded since the previous drain, oldest
+    /// first, verbatim as the provider raised them.
+    ///
+    /// OpenHuman collapses a failed hosted invocation to a caller-safe
+    /// sentence before it reaches the turn's caller, so the wire-shape checks
+    /// this host classifies a failure with — budget exhausted (issue #1846),
+    /// a wall-clock ceiling — cannot read it off the error. The bridge saw
+    /// the provider's own error first; this is where it is kept.
+    pub fn take_errors(&self) -> Vec<String> {
+        self.errors
+            .lock()
+            .map(|mut errors| std::mem::take(&mut *errors))
+            .unwrap_or_default()
+    }
 }
 
 impl Drop for BridgeHandle {
@@ -142,6 +159,7 @@ pub fn register(model: Arc<dyn ChatModel<()>>, model_name: &str) -> crate::Resul
     let bridge = bridge()?;
     let token = format!("ocb_{}", uuid::Uuid::new_v4().simple());
     let tap = Arc::new(Mutex::new(Vec::new()));
+    let errors = Arc::new(Mutex::new(Vec::new()));
     bridge
         .state
         .models
@@ -152,6 +170,7 @@ pub fn register(model: Arc<dyn ChatModel<()>>, model_name: &str) -> crate::Resul
             Registration {
                 model,
                 tap: tap.clone(),
+                errors: errors.clone(),
             },
         );
     Ok(BridgeHandle {
@@ -159,6 +178,7 @@ pub fn register(model: Arc<dyn ChatModel<()>>, model_name: &str) -> crate::Resul
         base_url: format!("http://{}/v1", bridge.addr),
         model_name: format!("{MODEL_PREFIX}{}", model_name.trim()),
         tap,
+        errors,
     })
 }
 
@@ -221,6 +241,7 @@ async fn complete(
         models.get(&token).map(|reg| Registration {
             model: reg.model.clone(),
             tap: reg.tap.clone(),
+            errors: reg.errors.clone(),
         })
     });
     let Some(registration) = registration else {
@@ -248,6 +269,9 @@ async fn complete(
         }
         Err(err) => {
             let message = format!("{err:#}");
+            if let Ok(mut errors) = registration.errors.lock() {
+                errors.push(message.clone());
+            }
             let status = if is_budget_or_auth(&message) {
                 StatusCode::PAYMENT_REQUIRED
             } else {

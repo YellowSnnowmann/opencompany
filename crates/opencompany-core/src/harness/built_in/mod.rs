@@ -1384,8 +1384,9 @@ impl CompanyAgent {
         let budget_pause_summary: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
         let _turn = self.turn_lock.lock().await;
-        // Anything left on the tap belongs to no attempt of ours.
+        // Anything left on the taps belongs to no attempt of ours.
         let _ = self.bridge.take_usage();
+        let _ = self.bridge.take_errors();
         let send = |sender: tokio::sync::mpsc::Sender<oh::agent::progress::AgentProgress>| {
             self.agent
                 .turn(message)
@@ -1405,7 +1406,7 @@ impl CompanyAgent {
                     let first_elapsed = started.elapsed();
                     usages.push(self.tapped_usage());
                     let reply: crate::Result<String> = match self
-                        .classify_turn(first.map_err(anyhow::Error::from), first_elapsed)
+                        .classify_turn(self.unmask(first), first_elapsed)
                     {
                         AttemptOutcome::Reply(reply) => Ok(reply),
                         AttemptOutcome::Hard(err) => Err(err),
@@ -1428,10 +1429,7 @@ impl CompanyAgent {
                                     send(pump.sender()).await.map(|outcome| outcome.reply);
                                 let second_elapsed = retry_started.elapsed();
                                 usages.push(self.tapped_usage());
-                                match self.classify_turn(
-                                    second.map_err(anyhow::Error::from),
-                                    second_elapsed,
-                                ) {
+                                match self.classify_turn(self.unmask(second), second_elapsed) {
                                     AttemptOutcome::Reply(reply) => Ok(reply),
                                     AttemptOutcome::Empty => Ok(crate::harness::mcp_probe::scrub(
                                         GRACEFUL_EMPTY_REPLY,
@@ -1530,6 +1528,27 @@ impl CompanyAgent {
             budget_paused,
         });
         (outcome, usages)
+    }
+
+    /// Restores the provider's own words to a failed attempt.
+    ///
+    /// The embedded runtime reports a failed hosted invocation as a fixed,
+    /// caller-safe sentence; the provider error that actually happened —
+    /// which is what `classify_turn` reads for the budget-pause and
+    /// wall-clock classes — was seen by the bridge. The newest bridge error
+    /// of this attempt is appended to the error so the wire-shape checks see
+    /// it, and the runtime's sentence stays in front for the operator.
+    fn unmask(&self, result: Result<String, openhuman_embed::CoreError>) -> anyhow::Result<String> {
+        match result {
+            Ok(reply) => Ok(reply),
+            Err(err) => {
+                let seen = self.bridge.take_errors();
+                match seen.last() {
+                    Some(provider) => Err(anyhow::anyhow!("{err}: provider error: {provider}")),
+                    None => Err(anyhow::Error::from(err)),
+                }
+            }
+        }
     }
 
     /// Whether a turn runs on a session of its own rather than the agent's
