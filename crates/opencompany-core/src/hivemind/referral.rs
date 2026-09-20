@@ -951,6 +951,9 @@ impl<'a> EpisodeReferrals<'a> {
             answers,
             to_desk: referral.to.desk_id.clone(),
             target: referral.target_id.clone(),
+            episode_id: None,
+            to_episode_id: None,
+            hop: 0,
         };
         match self.events.append(&self.company, event).await {
             Ok(seq) if !returning => {

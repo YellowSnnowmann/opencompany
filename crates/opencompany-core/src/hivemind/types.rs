@@ -606,27 +606,12 @@ impl EpisodeOutcome {
 /// it.
 #[must_use]
 pub fn effective_hive_config(record: &CompanyRecord, desk_id: &str) -> HiveConfig {
-    // An operator-installed grammar is the newest, explicit override. Keep the
-    // older console-desk hive below as a compatibility rung for desks authored
-    // before the dedicated grammar overlay existed.
-    if record.desk_hive_is_installed(desk_id) {
-        return record.effective_desk_hive(desk_id);
-    }
-    record
-        .overlay_desks
-        .iter()
-        .find(|desk| desk.id == desk_id)
-        .filter(|desk| !desk.hive.is_default())
-        .map(|desk| desk.hive.clone())
-        .or_else(|| {
-            record
-                .manifest
-                .group_chats
-                .iter()
-                .find(|group| group.id == desk_id)
-                .map(|group| group.hive.clone())
-        })
-        .unwrap_or_default()
+    // Plan hive-desks, Phase 4: the manifest and the overlay now carry the
+    // `[group_chat.routing]` block (`crate::hive::routing`), so no record can
+    // declare a trace-grammar block any more. This module is deleted with the
+    // brain seam it still serves; until then every desk reads as the default.
+    let _ = (record, desk_id);
+    HiveConfig::default()
 }
 
 /// The desk a hive episode should answer `chat` on, or `None` to keep today's
