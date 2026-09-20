@@ -736,6 +736,12 @@ impl std::fmt::Debug for CompanyAgent {
 }
 
 
+/// The embedded runtime's deterministic summary for a turn whose model
+/// produced no result at all (`turn_checkpoint::build_deterministic_final_summary`).
+/// This host reads it as the transient empty class — or, when the bridge saw
+/// the provider fail behind it, as that failure.
+const NO_RESULT_SENTINEL: &str = "I finished this turn but produced no result to report.";
+
 /// The graceful reply returned when a turn yields the transient empty-response
 /// class twice — so chat never shows a bare "Couldn't send" for a model hiccup.
 const GRACEFUL_EMPTY_REPLY: &str = "Sorry — I hit a temporary model hiccup and couldn't produce a reply. Please resend your message.";
@@ -1557,6 +1563,21 @@ impl CompanyAgent {
     /// it, and the runtime's sentence stays in front for the operator.
     fn unmask(&self, result: Result<String, openhuman_embed::CoreError>) -> anyhow::Result<String> {
         match result {
+            // The runtime's deterministic summary for a turn whose model
+            // produced nothing. When the bridge saw the provider FAIL behind
+            // it, the turn did not finish empty — it failed, and the failure
+            // is the provider's own error (a budget wall, an outage), which
+            // `classify_turn` needs verbatim. With no provider error behind
+            // it, it is the transient empty class the one-shot retry covers.
+            Ok(reply) if reply.trim() == NO_RESULT_SENTINEL => {
+                let seen = self.bridge.take_errors();
+                match seen.last() {
+                    Some(provider) => Err(anyhow::anyhow!(
+                        "turn produced no result: provider error: {provider}"
+                    )),
+                    None => Ok(String::new()),
+                }
+            }
             Ok(reply) => Ok(reply),
             Err(err) => {
                 let seen = self.bridge.take_errors();

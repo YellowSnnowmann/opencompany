@@ -3631,12 +3631,24 @@ impl tinyhivemind::responder::Selector for TinyHiveSelector<'_> {
                 // point distribution, which is what a typed evaluation is
                 // for a picker that reports no probabilities of its own.
                 crate::harness::selector::SelectorVerdict::Member(id) => {
+                    // A complete distribution over the request's candidates,
+                    // which the vendored acceptance check requires: the pick
+                    // at one, every other candidate at zero.
+                    let probabilities = request
+                        .candidates
+                        .iter()
+                        .map(|candidate| tinyhivemind::responder::CandidateProbability {
+                            candidate_id: candidate.id.clone(),
+                            probability: if candidate.id == id {
+                                tinyhivemind::responder::Probability::ONE
+                            } else {
+                                tinyhivemind::responder::Probability::ZERO
+                            },
+                        })
+                        .collect();
                     Ok(tinyhivemind::responder::SelectionEvaluation {
-                        choice: id.clone(),
-                        probabilities: vec![tinyhivemind::responder::CandidateProbability {
-                            candidate_id: id,
-                            probability: tinyhivemind::responder::Probability::ONE,
-                        }],
+                        choice: id,
+                        probabilities,
                         confidence: tinyhivemind::responder::Probability::ONE,
                     })
                 }
