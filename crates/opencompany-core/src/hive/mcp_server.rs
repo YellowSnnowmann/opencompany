@@ -616,7 +616,20 @@ async fn call(host: &McpHost, agent: &McpAgent, name: &str, arguments: Value) ->
                 0,
             ),
         );
-        match policy.check(&request).await {
+        // Decide inside the turn's own approval scope, not the handler's
+        // task: see `within_turn`.
+        let (scope, pending) = turn.as_ref().map_or_else(
+            || (crate::harness::policy::ApprovalScope::default(), false),
+            |turn| (turn.approval_scope.clone(), turn.explicit_request_pending),
+        );
+        let (decision, pending_after) =
+            crate::harness::policy::within_turn(scope, pending, policy.check(&request)).await;
+        if pending_after != pending {
+            host.in_flight.with(&agent.runtime_agent_id, |turn| {
+                turn.explicit_request_pending = pending_after;
+            });
+        }
+        match decision {
             ToolPolicyDecision::Allow => {}
             ToolPolicyDecision::Deny { reason } => {
                 return tool_result(format!("refused: {reason}"), true);

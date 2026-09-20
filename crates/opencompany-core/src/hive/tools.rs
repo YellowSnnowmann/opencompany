@@ -42,6 +42,7 @@ use tinyhivemind::speech::{
 use tinyhivemind_embed::ConversationRef;
 use tinytools::{Tool, ToolCallOptions, ToolResult, ToolRunContext, WorkspaceDescriptor};
 
+use crate::harness::policy::{ApprovalRequestQueue, ApprovalScope};
 use crate::ports::types::CompanyId;
 
 /// The bare speech tool names, in the order [`speech::tool_specs`] presents
@@ -88,6 +89,14 @@ pub struct InFlight {
     pub hive: Option<HiveTurn>,
     /// What the seat said this turn — at most one utterance.
     pub outbox: Vec<Utterance>,
+    /// The approval scope the turn's parks file into, captured on the turn's
+    /// own task; the MCP handler decides a call back inside it
+    /// ([`within_turn`](crate::harness::policy::within_turn)).
+    pub approval_scope: ApprovalScope,
+    /// Whether this turn has already asked the operator for approval or an
+    /// answer — the explicit-request boundary, carried across the handler's
+    /// task the same way.
+    pub explicit_request_pending: bool,
 }
 
 /// What one speech call became.
@@ -121,6 +130,8 @@ impl InFlight {
             surface,
             hive: None,
             outbox: Vec::new(),
+            approval_scope: ApprovalScope::default(),
+            explicit_request_pending: false,
         }
     }
 
@@ -128,6 +139,15 @@ impl InFlight {
     #[must_use]
     pub fn with_hive(mut self, hive: HiveTurn) -> Self {
         self.hive = Some(hive);
+        self
+    }
+
+    /// Records the approval scope and explicit-request boundary of the task
+    /// the turn runs on, as they stand now.
+    #[must_use]
+    pub fn with_approval_context_now(mut self) -> Self {
+        self.approval_scope = ApprovalRequestQueue::scope_now();
+        self.explicit_request_pending = ApprovalRequestQueue::explicit_request_pending_now();
         self
     }
 

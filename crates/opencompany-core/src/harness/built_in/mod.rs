@@ -1517,12 +1517,15 @@ impl CompanyAgent {
         let _in_flight = self
             .mcp
             .in_flight()
-            .begin(crate::hive::tools::InFlight::new(
-                self.company.clone(),
-                self.runtime_id.clone(),
-                self.agent_id.clone(),
-                Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id),
-            ))
+            .begin(
+                crate::hive::tools::InFlight::new(
+                    self.company.clone(),
+                    self.runtime_id.clone(),
+                    self.agent_id.clone(),
+                    Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id),
+                )
+                .with_approval_context_now(),
+            )
             .ok();
         // Anything left on the taps belongs to no attempt of ours.
         let _ = self.bridge.take_usage();
