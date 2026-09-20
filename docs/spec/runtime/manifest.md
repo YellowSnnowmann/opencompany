@@ -115,10 +115,9 @@ max_rounds = 12                    # rounds before the host closes the episode
 turn_timeout_secs = 600            # one seat turn, from holding its turn_lock
                                    # Every key optional; omit the table for the
                                    # defaults. A zero is refused, not clamped.
-                                   # The retired `[group_chat.hive]` and
-                                   # `[speech]` blocks are refused at load with
-                                   # a migration hint: seats always speak
-                                   # through the speech tools. See runtime/hive.md
+                                   # The retired `[group_chat.hive]` block is
+                                   # refused at load with a migration hint.
+                                   # See runtime/hive.md
 
 [group_chat.routing.referral]      # may this desk ask ANOTHER desk?
 enabled = true                     # off unless this says so; the whole block
