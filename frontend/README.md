@@ -35,9 +35,8 @@ and survives a refresh.
 **Node 22 or newer** — `.nvmrc` pins it and `engines.node` declares it, so
 `nvm use` picks it up and `npm` warns if you are below it. CI and
 `frontend/Dockerfile` both build on 22; the floor exists because a version
-mismatch does not announce itself as one. It surfaces wherever the newer
-runtime happens to have moved a global, deep inside a dependency, and reads as
-a dependency bug (issues #852 and #858).
+mismatch surfaces deep inside a dependency and reads as a dependency bug
+(issues #852 and #858).
 
 The desktop build additionally needs **pnpm 10 or newer** — `tauri.conf.json`
 runs `pnpm dev` / `pnpm build`, and `pnpm-workspace.yaml` uses a key pnpm 9
