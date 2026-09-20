@@ -4690,29 +4690,6 @@ impl HarnessPool {
             }),
             LiveStream::Off => None,
         };
-        // Issue #1890 F: the conversation this turn answers, ambient for the
-        // duration of it, so `read_thread` can scope itself to the channel the
-        // turn is actually in. Set here rather than on the tool because a belt
-        // is built once per agent while a conversation changes every message.
-        //
-        // From the caller's `chat` since #1890 I, which is what the note F
-        // shipped with said would happen when the two met: identity no longer
-        // rides on the stream, so an approval's re-issued call — unstreamed,
-        // but raised in a conversation — can read that conversation's threads
-        // like any other turn.
-        // Route first, caller second — the same order `turn_chat_id` resolves
-        // in one frame down, and for the same reason: the live route has
-        // already folded an unaddressed message onto `DEFAULT_DESK`, so reading
-        // `chat.chat_id` alone yields `None` there, which `read_thread` treats
-        // as a refusal. A turn on the General desk could then not read its own
-        // channel's threads (coderabbit on #1972).
-        let turn_chat = stream_ctx
-            .as_ref()
-            .and_then(|ctx| match &ctx.route {
-                crate::turn_stream::LiveRoute::Chat { chat_id } => Some(chat_id.clone()),
-                crate::turn_stream::LiveRoute::Workflow { .. } => None,
-            })
-            .or_else(|| chat.chat_id.map(str::to_string));
         // Issue #6014: what this turn is for, in scope for its whole duration, so
         // an oversized tool result can be extracted against the task instead of
         // cut on a byte boundary. `operator_words` for the reason its own docs
@@ -4725,18 +4702,15 @@ impl HarnessPool {
         // turn there is no speech tool to call.
         let (outcome, turn_costs) = crate::runtime::delegation::with_task_hint(
             crate::runtime::delegation::operator_words(message).to_string(),
-            crate::runtime::delegation::with_turn_conversation(
-                turn_chat,
-                deps.approval_requests.turn_scoped(agent.run_with_steer(
-                    &augmented,
-                    steer,
-                    stream_ctx,
-                    run_sink.clone(),
-                    // The caller's own, not read off `live` (#1890 I). A turn can
-                    // have a conversation and stream nothing.
-                    chat,
-                )),
-            ),
+            deps.approval_requests.turn_scoped(agent.run_with_steer(
+                &augmented,
+                steer,
+                stream_ctx,
+                run_sink.clone(),
+                // The caller's own, not read off `live` (#1890 I). A turn can
+                // have a conversation and stream nothing.
+                chat,
+            )),
         )
         .await;
         // Issue B-120: bank what the turn spent BEFORE its result is unwrapped.

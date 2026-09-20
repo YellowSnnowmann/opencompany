@@ -3929,19 +3929,6 @@ pub(crate) async fn with_task_hint<F: std::future::Future>(task: String, fut: F)
 }
 
 tokio::task_local! {
-    /// The conversation the current turn is answering in (issue #1890 F).
-    ///
-    /// A task-local for the reason [`CHAT_ONLY_TURN`] is one: a tool's belt is
-    /// built once per agent and a turn's conversation changes every message, so
-    /// the tool cannot be handed it at construction. This is the ambient fact a
-    /// tool reads at call time.
-    ///
-    /// It carries the **channel**, which is what scopes `read_thread`: a tool
-    /// able to read any thread in any channel would reintroduce through the
-    /// back door the leak #1890 A closed at the seed.
-    static TURN_CONVERSATION: Option<String>;
-
-
     /// The hive seat the current turn runs as, when it is one (plan
     /// hive-desks, Phase 4).
     ///
@@ -4010,14 +3997,6 @@ pub async fn with_seat_turn<F: std::future::Future>(
 #[must_use]
 pub fn seat_turn() -> Option<std::sync::Arc<SeatTurnScope>> {
     SEAT_TURN.try_with(Clone::clone).ok()
-}
-
-/// Run `fut` with the current turn's channel set (issue #1890 F).
-pub(crate) async fn with_turn_conversation<F: std::future::Future>(
-    chat_id: Option<String>,
-    fut: F,
-) -> F::Output {
-    TURN_CONVERSATION.scope(chat_id, fut).await
 }
 
 /// Run `fut` with the [`CHAT_ONLY_TURN`] hint set to `chat_only`.

@@ -7,7 +7,6 @@
 
 use std::sync::Arc;
 
-
 use super::{EpisodeReport, EpisodeRun, HiveDispatcher, Trigger, episode_lock};
 use crate::error::Result;
 use crate::hive::episode_store;
