@@ -364,7 +364,8 @@ pub async fn latest_state(
     Ok(entries
         .iter()
         .rev()
-        .find_map(|stored| PersistedEpisode::from_event(&stored.event)))
+        .filter_map(|stored| PersistedEpisode::from_event(&stored.event))
+        .find(|persisted| persisted.episode_id == episode_id))
 }
 
 /// One reply row committed into an episode — what a resume replays through

@@ -159,7 +159,6 @@ name = "Acme"
 [[agent]]
 id = "ceo"
 role = "Chief Executive"
-name = "Cee"
 
 [[agent]]
 id = "engineer"

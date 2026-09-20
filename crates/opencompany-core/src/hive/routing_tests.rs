@@ -19,7 +19,6 @@ name = "Acme"
 [[agent]]
 id = "ceo"
 role = "Chief Executive"
-name = "Cee"
 
 [[agent]]
 id = "engineer"
@@ -212,7 +211,9 @@ fn the_desk_routing_dto_lists_candidates_with_the_desks_they_share() {
         .iter()
         .find(|candidate| candidate.agent_id == "ceo")
         .expect("ceo is a candidate");
-    assert_eq!(ceo.label, "Cee");
+    // `name` is an in-memory carrier the roster build fills, not a manifest
+    // key, so a manifest record labels a seat by id.
+    assert_eq!(ceo.label, "ceo");
     assert_eq!(ceo.role, "Chief Executive");
     assert_eq!(ceo.shared_with, vec!["content"]);
     let engineer = dto
