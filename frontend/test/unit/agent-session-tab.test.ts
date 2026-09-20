@@ -54,7 +54,7 @@ describe("the Session tab", () => {
 
   /**
    * `fromHistory` is the room's mapping and is reused whole. It is what carries
-   * `referralConversation` and `asideConversation` through untouched; a
+   * `referralConversation` and `episode` through untouched; a
    * hand-rolled map here would be a second answer to "what is a chat line".
    *
    * Called once per row (`fromHistory([row])`), not once for the whole array
@@ -71,11 +71,11 @@ describe("the Session tab", () => {
   });
 
   /**
-   * The agent-to-agent collapses are imported from the room, not reimplemented.
-   * An exchange between two teammates has to read the same way here as it does
-   * in the channel it happened in.
+   * The agent-to-agent collapses and chips are imported from the room, not
+   * reimplemented. An exchange between two teammates has to read the same way
+   * here as it does in the channel it happened in.
    */
-  it("reuses the room's referral and aside collapses", () => {
+  it("reuses the room's referral collapse and utterance chip", () => {
     expect(session).toContain('from "@/views/room/StepTimeline"');
     // `rowId` rides along so the chip can tell a crossing still being had from
     // one that is over — the same distinction the channel draws, which is the
@@ -83,7 +83,9 @@ describe("the Session tab", () => {
     expect(session).toContain(
       "<ReferralConversation crossing={message.referralConversation} rowId={message.id} />",
     );
-    expect(session).toContain("<AsideConversation aside={message.asideConversation} />");
+    expect(session).toContain('from "@/components/episode/UtteranceChip"');
+    expect(session).toContain("<UtteranceChip episode={message.episode} audience={message.audience} />");
+    expect(session).not.toContain("asideConversation");
     expect(session).toContain("<StepTimeline steps={message.steps} />");
   });
 
