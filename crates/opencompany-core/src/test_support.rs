@@ -128,6 +128,7 @@ impl Drop for EnvVarGuard {
 /// Per thread rather than per call because libtest runs each test on its own
 /// thread; a fixture that spawns a thread and calls this from it gets a
 /// different id, which is the one way to misuse it.
+#[cfg(feature = "openhuman")]
 pub(crate) fn per_test_company_id(prefix: &str) -> crate::ports::types::CompanyId {
     thread_local! {
         static ID: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };

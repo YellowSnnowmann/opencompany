@@ -242,7 +242,7 @@ impl CycleHost for NoopHost {
 }
 
 fn company() -> CompanyId {
-    CompanyId::new("acme")
+    crate::test_support::per_test_company_id("acme")
 }
 
 /// A one-agent company on `full` policy (an ordinary turn is not parked for

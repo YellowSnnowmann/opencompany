@@ -431,7 +431,7 @@ pub(crate) async fn mint_run(ops: &Arc<FsOps>, run_id: &str, task_id: &str) {
 }
 
 pub(crate) fn company() -> CompanyId {
-    CompanyId::new("acme")
+    crate::test_support::per_test_company_id("acme")
 }
 
 /// A dispatched card, already in the column dispatch happens from.
