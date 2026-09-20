@@ -1508,26 +1508,37 @@ impl CompanyAgent {
 
         let budget_pause_summary: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
+        // A hive seat turn (plan hive-desks, Phase 4): the driver's episode
+        // coordinates ride on the in-flight registration below so the MCP
+        // server attributes the seat's speech to its round, the timeout is
+        // counted from the moment the lock is held, and the outbox is handed
+        // back through the scope when the turn returns.
+        let seat = crate::runtime::delegation::seat_turn();
         let _turn = self.turn_lock.lock().await;
+        let deadline = seat
+            .as_ref()
+            .map(|seat| tokio::time::Instant::now() + seat.timeout);
         // Register the turn in flight so the `opencompany` MCP server can
         // attribute this agent's tool calls to it (plan hive-desks Phase 3),
         // and hand it the channel those calls come back on: the belt's tools
         // file into task-local queues (approval scope, publish and delegation
         // claims), so they must run on THIS task — `serve_jobs` below, joined
-        // with the turn. A caller that registered first — the hive driver,
-        // with its episode and round — keeps its own entry and takes the
-        // outbox back itself; this turn only lends it the executor.
+        // with the turn. The lock is held, so nothing else of this agent's
+        // should be registered; a caller that registered first regardless
+        // keeps its own entry and this turn only lends it the executor.
         let (job_tx, mut job_rx) = tokio::sync::mpsc::channel::<crate::hive::tools::ToolJob>(8);
         let in_flight = self.mcp.in_flight();
-        let _in_flight = match in_flight.begin(
-            crate::hive::tools::InFlight::new(
-                self.company.clone(),
-                self.runtime_id.clone(),
-                self.agent_id.clone(),
-                Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id),
-            )
-            .with_executor(job_tx.clone()),
-        ) {
+        let mut registration = crate::hive::tools::InFlight::new(
+            self.company.clone(),
+            self.runtime_id.clone(),
+            self.agent_id.clone(),
+            Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id),
+        )
+        .with_executor(job_tx.clone());
+        if let Some(seat) = seat.as_ref() {
+            registration = registration.with_hive(seat.hive.clone());
+        }
+        let _in_flight = match in_flight.begin(registration) {
             Ok(ticket) => Some(ticket),
             Err(_) => {
                 in_flight.with(&self.runtime_id, |turn| turn.executor = Some(job_tx.clone()));
@@ -1571,7 +1582,29 @@ impl CompanyAgent {
             if let Some(cwd) = cwd {
                 turn = turn.cwd(cwd);
             }
-            turn.send()
+            let fut = turn.send();
+            let seat = seat.clone();
+            async move {
+                match deadline {
+                    Some(deadline) => match tokio::time::timeout_at(deadline, fut).await {
+                        Ok(outcome) => outcome,
+                        Err(_) => {
+                            let secs = seat
+                                .as_ref()
+                                .map(|seat| seat.timeout.as_secs())
+                                .unwrap_or_default();
+                            if let Some(seat) = seat.as_ref() {
+                                seat.timed_out
+                                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            Err(oh::agent::AgentError::Invalid(format!(
+                                "the seat turn ran past its {secs}s timeout"
+                            )))
+                        }
+                    },
+                    None => fut.await,
+                }
+            }
         };
 
         let turn_body = oh::agent::stop_hooks::with_stop_hooks(
@@ -1632,8 +1665,17 @@ impl CompanyAgent {
             outcome = turn_body => outcome,
             () = serve_jobs => unreachable!("the tool-job loop never completes"),
         };
-        if _in_flight.is_none() {
-            in_flight.with(&self.runtime_id, |turn| turn.executor = None);
+        match _in_flight {
+            // What the seat said, back to the driver, before the lock goes.
+            Some(ticket) => {
+                let finished = ticket.finish();
+                if let Some(seat) = seat.as_ref()
+                    && let Ok(mut outbox) = seat.outbox.lock()
+                {
+                    *outbox = finished.outbox;
+                }
+            }
+            None => in_flight.with(&self.runtime_id, |turn| turn.executor = None),
         }
         drop(_turn);
 
