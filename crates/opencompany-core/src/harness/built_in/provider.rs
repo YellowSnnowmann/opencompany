@@ -1351,6 +1351,7 @@ fn model_response_from_payload_offering(
                     id: call.id,
                     name,
                     arguments,
+                    invalid: None,
                 }
             })
             .collect();
