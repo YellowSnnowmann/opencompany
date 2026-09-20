@@ -2432,7 +2432,9 @@ fn summarize_event(event: &CompanyEvent) -> String {
         // carry.
         CompanyEvent::TurnStarted { turn_id, .. } => format!("turn accepted: {turn_id}"),
         CompanyEvent::TurnFailed { turn_id, .. } => format!("turn unanswered: {turn_id}"),
-        CompanyEvent::TurnSettled { turn_id, agent_id } => match agent_id {
+        CompanyEvent::TurnSettled {
+            turn_id, agent_id, ..
+        } => match agent_id {
             Some(agent) => format!("turn answered by {agent}: {turn_id}"),
             None => format!("turn answered: {turn_id}"),
         },
@@ -2561,11 +2563,11 @@ fn summarize_event(event: &CompanyEvent) -> String {
             added.len(),
             removed.len()
         ),
-        CompanyEvent::DeskHiveConfigured { reset, .. } => {
+        CompanyEvent::DeskRoutingConfigured { reset, .. } => {
             if *reset {
-                "desk move grammar restored".into()
+                "desk routing restored".into()
             } else {
-                "desk move grammar installed".into()
+                "desk routing configured".into()
             }
         }
         // Issue #276. This one-liner is folded into the orchestrator's
