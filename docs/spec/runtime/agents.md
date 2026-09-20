@@ -186,7 +186,8 @@ An agent's system prompt is assembled in this order, and the order is a decision
 1. the generated **persona** — who this teammate is, at which company;
 2. its inline **`prompt`**;
 3. its **`prompt_files`** bodies;
-4. its **team** — the roster, the desks, and who it may hand work to;
+4. its **team** — the roster, the desks it sits on and who else does, and
+   the desks a referral from it may reach;
 5. tool briefs (workspace, ledgers, sandbox, publishing, skills catalogue,
    and the hand-off brief);
 6. its routed **`context`** documents.
@@ -201,20 +202,19 @@ Step 4 (`company::team_brief::team_section`) tells every agent who else is at
 the company: each other roster teammate by id, role and mandate (the
 orchestrator marked as such), each desk with its members and lead, the desks
 this agent sits on, and — only when its `delegates_to` narrows it — exactly
-which teammates it may hand work to, rendered from the same rule the tools
-enforce at call time so the prompt never names a target the tool would refuse.
-A roster of one gets no section.
+which desks a question from it may cross to, rendered from the same rule the
+referral policy enforces so the prompt never names a desk a referral would
+refuse. A roster of one gets no section.
 
 It exists because an agent that is not told it has colleagues does not use
-them. A non-orchestrator used to be told who *it* was and nothing else — no
-roster, and (unless it had opted in with `delegates_to`) no hand-off tool —
-so asked for something a teammate owned it declined, guessed, or said it could
-not contact a colleague sitting on the same desk. Every roster agent now
-carries `spawn_task`, `delegate_to_desk` and `delegate_to_teammate`, and the
-brief under them (`orchestrator::member_delegation_brief`) says when to hand
-a slice on and when to open a card. The orchestrator gets the same section
-ahead of its own brief, so it can delegate by id without a `query_company`
-call first.
+them. On a desk, colleagues are reached by **speaking**: `post` to the room,
+`dm` to named seats, `broadcast` when the room should decide who picks it up
+([hive.md](hive.md#speaking)); another desk is reached by a referral
+([hive.md](hive.md#referral)). Every roster agent also carries `spawn_task`,
+and the brief under it (`orchestrator::member_delegation_brief`) says when to
+leave a slice tracked on the board rather than in the conversation. The
+orchestrator gets the same section ahead of its own brief, so it can assign by
+id without a `query_company` call first.
 
 ### The board is a tool call
 
@@ -223,9 +223,8 @@ or a DM used to be carded by construction — the REST handler opened one for
 anything that led with an action verb, and the runtime opened one for anything
 "substantial" said to a desk lead — so every message became a work item nobody
 had asked for and the answering agent had no say. Both paths are gone. A card
-exists because an agent called `spawn_task`, because a hand-off
-(`delegate_to_desk` / `delegate_to_teammate`) opened the card that tracks it,
-or because a person opened one from the console or pressed the composer's
+exists because an agent called `spawn_task`, because the orchestrator called
+`assign_task`, or because a person opened one from the console or pressed the composer's
 "Build me the workflow" control. The lexical triage (`company::task_intent`)
 still runs, but only to narrow the model's board tools on a question and to
 take the cheap chat-only path on a greeting.
@@ -399,9 +398,8 @@ error to catch and no error to match on, which is precisely why a capped turn
 used to be invisible — the operator read a tidy plan with no deliverable behind
 it and no way to tell the agent had been cut off mid-task. So the harness reads
 the runtime's cap flag while the turn's agent lock is still held and carries it
-out on the turn's outcome, OR'd across every turn behind one operator bubble (the
-responder, any desk lead it handed work to, and the relay turn that folds their
-answers back together). When any of them paused, the operator gets a **second,
+out on the turn's outcome, OR'd across every seat turn of the round behind one
+operator message. When any of them paused, the operator gets a **second,
 unauthored bubble** after the reply saying the turn stopped at its step limit,
 that nothing errored, and that replying "continue" asks the agent to pick up
 from there. It is a separate bubble rather than an addition to the reply because
