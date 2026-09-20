@@ -261,9 +261,12 @@ host at them:
   carrying `__MOCK_PLAN__ [[…],[…]]` scripts a whole **turn** instead of a single
   call — several calls in one assistant message, and several steps across the
   turn's tool loop — which is what lets one goal fan out to two teammates and be
-  closed out afterwards. Set `MOCK_BRAIN_DEBUG=1` to have it dump each request
-  it receives, which is the fastest way to find out why an arm stopped matching.
-  Bind with `PW_MOCK_BRAIN_BIND` (default `127.0.0.1:8099`).
+  closed out afterwards. A turn opening with the host's seat sentinel (`Hive
+  turn: desk …, episode …, round N.`) ends in one speech act on the
+  `opencompany` MCP server — `post`, then `broadcast` (or `dm` to the agent
+  `__MOCK_DM__ <agent>` names), then `complete_episode`. Set
+  `MOCK_BRAIN_DEBUG=1` to have it dump each request it receives. Bind with
+  `PW_MOCK_BRAIN_BIND` (default `127.0.0.1:8099`).
 
 * [`test/e2e/mcp-server.mjs`](test/e2e/mcp-server.mjs) — an HTTP MCP server with
   two tools. HTTP, not stdio: this host rejects any MCP declaration carrying a
@@ -359,6 +362,27 @@ carries the claim.
 It uses the same real-model proxy and the same environment variables as the lane
 above, on a company and a data root of its own, and **CI does not run it** for
 the same reasons plus one more: it takes tens of minutes.
+
+### The lane where a desk answers as a room
+
+```sh
+cargo build --locked --features openhuman,mcp --bin opencompany
+npm --prefix frontend run e2e:hive        # PW_LIVE_BRAIN=1 PW_HIVE=1 npm run e2e
+scripts/measure-coordination.sh --mock    # the same company, measured, no browser
+```
+
+`desk-episode-live.spec.ts` serves [`companies/hive_demo`](../companies/hive_demo)
+— two desks of two seats sharing the CEO — behind the mock brain's hive arm,
+and asserts what the console *shows* of an episode: a `round-band` with two
+lanes working at once, the `dm` chip on the round the directive named, the
+`episode-complete` marker, and a `chat/history` row with `episode.kind ===
+"complete_episode"`; then that a reload rebuilds the bands from the transcript
+alone. A lane of its own for the reason the Euler lane is: the harness
+company's desks have one seat each, and a one-seat desk runs no round.
+`scripts/measure-coordination.mjs` reads the same `/events` frames without a
+browser and prints peak concurrent turns, same-agent overlaps, rounds per
+episode, dms, broadcasts and cross-desk referrals against the thresholds in
+`scripts/lib/coordination-metrics.mjs` (`node --test` covers it).
 
 ### The lane that compares pixels
 

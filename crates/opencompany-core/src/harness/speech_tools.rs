@@ -1071,7 +1071,7 @@ impl Tool for CloseTool {
             },
         );
         match call {
-            Ok(ToolCall::Speak(Utterance::Close { message })) => {
+            Ok(ToolCall::Speak(Utterance::CompleteEpisode { message })) => {
                 Ok(self.0.post_to_channel(channel, message).await)
             }
             Ok(_) => Ok(ToolResult::error(
