@@ -2851,7 +2851,48 @@ impl HarnessPool {
         // repair path if boot's create ever fail-softed, since the minter
         // creates the root it needs. A rebuild-time call would now be a tree
         // read that can only ever find its work already done.
-        let roster = build_roster(&fresh_company, &fresh_deps, &skill_deltas, &routed_context)?;
+        // One runtime per process; every company's agents are instantiated on
+        // it (plan hive-desks, Phase 2). Booted from the environment `serve`
+        // prepared — an ephemeral workspace in a test binary.
+        let runtime = crate::harness::openhuman_runtime::global(
+            crate::harness::openhuman_runtime::RuntimeBoot::from_env(),
+        )
+        .await?;
+
+        // Retire the previous roster before the new one registers: a runtime
+        // agent id stays reserved while any clone of it lives, so the old
+        // `CompanyAgent`s must be dropped first, and dropping one mid-turn
+        // would pull the handle out from under that turn. Take each old
+        // agent's turn lock (bounded — a wedged turn must not wedge every
+        // rebuild after it), then drop. A turn still holding its lock past
+        // the bound keeps its old handle alive; the new registration then
+        // lands on a numbered suffix (`CompanyAgent::register`) and the old
+        // one releases when the turn ends.
+        let previous = self.agents.write().await.remove(&company.id);
+        if let Some(previous) = previous {
+            let quiesce = std::time::Duration::from_secs(30);
+            for agent in &previous {
+                let lock = agent.turn_lock();
+                match tokio::time::timeout(quiesce, lock.lock()).await {
+                    Ok(guard) => drop(guard),
+                    Err(_) => tracing::warn!(
+                        company = %company.id,
+                        agent = %agent.agent_id,
+                        "[harness] a turn is still running past the rebuild quiesce bound; \
+                         the rebuilt agent registers beside it"
+                    ),
+                }
+            }
+            drop(previous);
+        }
+
+        let roster = build_roster(
+            &runtime,
+            &fresh_company,
+            &fresh_deps,
+            &skill_deltas,
+            &routed_context,
+        )?;
 
         // Keep the policy snapshot and the roster together for the entire turn.
         // `ensure_with_policy` pins the snapshot on the pool (above), so a
