@@ -12,6 +12,14 @@ use super::mode_test_support_1::*;
 
 const PASSWORD: &str = "correct horse battery staple";
 
+fn get_with_cookie(uri: &str, cookie: &str) -> axum::http::Request<axum::body::Body> {
+    axum::http::Request::builder()
+        .uri(uri)
+        .header("cookie", cookie)
+        .body(axum::body::Body::empty())
+        .unwrap()
+}
+
 fn claim(email: &str, password: &str) -> axum::http::Request<axum::body::Body> {
     post(
         "/api/v1/company/auth/claim",
