@@ -2287,6 +2287,18 @@ fn project_event_for_viewer(
         CompanyEvent::TurnFailed { turn_id, .. } => {
             let mut o = envelope("turn_settled");
             o["turnId"] = json!(turn_id);
+            o["outcome"] = json!("failed");
+            o
+        }
+        // The same bracket on success (plan hive-desks, Phase 2): `agentId`
+        // is what lets a console draw one seat's lane in a hive round.
+        CompanyEvent::TurnSettled { turn_id, agent_id } => {
+            let mut o = envelope("turn_settled");
+            o["turnId"] = json!(turn_id);
+            o["outcome"] = json!("committed");
+            if let Some(agent_id) = agent_id {
+                o["agentId"] = json!(agent_id);
+            }
             o
         }
         // Issue #1015: the push half of attempt status. Structural, and for the
@@ -3445,6 +3457,18 @@ async fn settle_chat_turn(
     turn_id: Option<&str>,
     failure: Option<&ApiError>,
 ) {
+    settle_chat_turn_by(runtime, id, turn_id, None, failure).await;
+}
+
+/// [`settle_chat_turn`] naming the agent that answered, for the success
+/// bracket (`TurnSettled`) the console draws a seat's lane from.
+async fn settle_chat_turn_by(
+    runtime: &Arc<CompanyRuntime>,
+    id: &CompanyId,
+    turn_id: Option<&str>,
+    agent_id: Option<&str>,
+    failure: Option<&ApiError>,
+) {
     let Some(turn_id) = turn_id else { return };
     let outcome = match failure {
         None => crate::ports::runs::RunOutcome::new(crate::ports::runs::RunStatus::Succeeded),
@@ -3479,6 +3503,25 @@ async fn settle_chat_turn(
             turn = %turn_id,
             error = %err,
             "could not journal a turn's failure; its row still records it"
+        );
+    }
+    if failure.is_none()
+        && let Err(err) = runtime
+            .events()
+            .append(
+                id,
+                CompanyEvent::TurnSettled {
+                    turn_id: turn_id.to_string(),
+                    agent_id: agent_id.map(str::to_string),
+                },
+            )
+            .await
+    {
+        tracing::warn!(
+            company = %id,
+            turn = %turn_id,
+            error = %err,
+            "could not journal a turn's settlement; its row still records it"
         );
     }
 }

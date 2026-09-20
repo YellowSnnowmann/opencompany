@@ -906,6 +906,21 @@ pub enum CompanyEvent {
         /// deliberately **not** projected onto the operator SSE stream.
         error: String,
     },
+    /// A turn that was accepted produced its answer (plan hive-desks, Phase 2).
+    ///
+    /// The closing bracket of [`TurnStarted`](Self::TurnStarted) on the
+    /// success path, so the console's `turn_started`/`turn_settled` pair
+    /// closes whichever way a turn ends and can say which agent answered —
+    /// the per-seat bracket the hive round band is drawn from. Prunable like
+    /// its opener: its meaning is spent once the answer is on the desk.
+    TurnSettled {
+        /// The turn this settles — the id its
+        /// [`TurnStarted`](Self::TurnStarted) carries.
+        turn_id: String,
+        /// The agent whose turn it was, when one answered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<String>,
+    },
     /// One task attempt changed status (issue #1015).
     ///
     /// **The whole status machine, from one seam.** Emitted by the store
@@ -2236,6 +2251,7 @@ impl CompanyEvent {
             Self::ReferralEnqueued { .. } => "ReferralEnqueued",
             Self::TurnStarted { .. } => "TurnStarted",
             Self::TurnFailed { .. } => "TurnFailed",
+            Self::TurnSettled { .. } => "TurnSettled",
             Self::RunStatusChanged { .. } => "RunStatusChanged",
             Self::WebhookReceived { .. } => "WebhookReceived",
             Self::ScheduleFired { .. } => "ScheduleFired",
@@ -2386,7 +2402,8 @@ impl CompanyEvent {
             // settles. `TurnFailed` is Permanent below for the opposite reason:
             // it is the only record that a question was accepted and never
             // answered.
-            | Self::TurnStarted { .. } => Prunable,
+            | Self::TurnStarted { .. }
+            | Self::TurnSettled { .. } => Prunable,
 
             Self::OperatorMessage { .. }
             | Self::TurnFailed { .. }
