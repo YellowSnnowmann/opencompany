@@ -1402,6 +1402,20 @@ jobs:
       - name: Test the MCP OAuth flow state
         run: scripts/ci/run-scoped-suite.sh "mcp oauth state" openhuman,mcp,media app::types
 
+      # Plan hive-desks, Phase 3. The `opencompany` MCP server the company
+      # agents speak and reach OpenCompany's tools on: `hive::mcp_server` boots
+      # it on a loopback port and drives it with `tinymcp::McpHttpClient` — the
+      # client OpenHuman itself uses — asserting the bearer gate, the one-action
+      # attribution rule, the refused `dm` wire shape the console's mock brain
+      # matches, and the approval park. `hive::tools` is the fold under it.
+      # Both are gated on `mcp` (an `AgentSpec::mcp` exists only there) and no
+      # other lane's filter reaches `hive::`, so each needs its own invocation.
+      - name: Test the hive MCP server
+        run: scripts/ci/run-scoped-suite.sh "hive mcp server" openhuman,mcp,media hive::mcp_server
+
+      - name: Test the hive MCP tool fold
+        run: scripts/ci/run-scoped-suite.sh "hive mcp tools" openhuman,mcp,media hive::tools
+
       # Issue #770. `composio` gated TWENTY-FOUR tests that ran nowhere — the
       # largest single pocket found. `src/harness/composio_catalog.rs` says so in
       # its own doc comment ("the live tools are behind `composio`, which CI

@@ -58,7 +58,7 @@ sqlite         | partial      | sqlite                          | store::sqlite
 mongodb        | partial      | mongodb                         | store::mongodb store::select
 acp            | partial      | acp,runner,tinymemory | server::acp harness::acp::run_turn
 runner         | partial      | acp,runner,tinymemory | runner
-mcp            | partial      | openhuman,mcp,media    | harness::built_in::build::tests app::types
+mcp            | partial      | openhuman,mcp,media    | harness::built_in::build::tests app::types hive::mcp_server hive::tools
 media          | partial      | openhuman,mcp,media    | harness::built_in::build::tests harness::built_in::toolbelt
 composio       | partial      | openhuman,chargebee,paypal,composio | composio
 export         | partial      | export                          | store::export
