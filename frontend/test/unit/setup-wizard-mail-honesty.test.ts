@@ -233,11 +233,11 @@ describe("the hand-off after setup applies", () => {
 
     // Generated up front, in the clear: the person has to *see* the password
     // they are about to be signed in with, or the next visit is a lockout.
-    const generated = (find("setup-field-password") as HTMLInputElement).value;
+    const generated = (find("new-password") as HTMLInputElement).value;
     expect(generated.length).toBeGreaterThanOrEqual(12);
 
     await fill("setup-field-email", "ada@example.com");
-    await fill("setup-field-password", "correct horse battery staple");
+    await fill("new-password", "correct horse battery staple");
     await next(); // -> review
     await settle();
     await click("setup-finish");
@@ -259,10 +259,10 @@ describe("the hand-off after setup applies", () => {
     await next(); // -> sign-in
     await next(); // -> account
     await fill("setup-field-email", "ada@example.com");
-    await fill("setup-field-password", "short");
+    await fill("new-password", "short");
     await next();
 
-    expect(find("setup-field-password"), "still on the account step").toBeTruthy();
+    expect(find("new-password"), "still on the account step").toBeTruthy();
     expect(find("new-password-problem")?.textContent).toMatch(/12/);
   });
 
