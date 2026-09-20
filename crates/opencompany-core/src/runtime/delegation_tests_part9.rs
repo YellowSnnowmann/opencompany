@@ -1,60 +1,6 @@
 use super::tests_core2::*;
 use super::*;
 
-#[async_trait]
-impl RunTurn for ConcurrentConversationTurns {
-    async fn run(
-        &self,
-        _company: &CompanyId,
-        agent_id: &str,
-        _message: &str,
-        _chat: ChatTarget<'_>,
-    ) -> Result<TurnOutcome> {
-        let active = self
-            .active
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1;
-        self.max_active
-            .fetch_max(active, std::sync::atomic::Ordering::SeqCst);
-        self.barrier.wait().await;
-        tokio::task::yield_now().await;
-        self.active
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(TurnOutcome {
-            reply: format!("{agent_id} answered"),
-            steps: Vec::new(),
-            hit_iteration_cap: false,
-            abnormal_stop: None,
-            halted_for_spend: None,
-            budget_paused: None,
-        })
-    }
-
-    async fn run_steered(
-        &self,
-        company: &CompanyId,
-        agent_id: &str,
-        message: &str,
-        _control: &SteerControl,
-        chat: ChatTarget<'_>,
-        _run_sink: Option<Arc<RunTraceSink>>,
-    ) -> Result<TurnOutcome> {
-        self.run(company, agent_id, message, chat).await
-    }
-
-    async fn run_steered_background(
-        &self,
-        company: &CompanyId,
-        agent_id: &str,
-        message: &str,
-        _control: &SteerControl,
-        chat: ChatTarget<'_>,
-        _run_sink: Option<Arc<RunTraceSink>>,
-    ) -> Result<TurnOutcome> {
-        self.run(company, agent_id, message, chat).await
-    }
-}
-
 /// Two assignments that read the same card revision admit one writer and
 /// explicitly refuse the stale one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

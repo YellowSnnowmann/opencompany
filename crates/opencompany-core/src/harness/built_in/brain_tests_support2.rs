@@ -1,7 +1,5 @@
 use super::*;
 use crate::ports::TaskStore;
-use tinyinference::Result as TaResult;
-use tinyinference::message::Message;
 use tinyinference::model::{ChatModel, ModelRequest, ModelResponse};
 
 // -- issue #552: the write ordering, proven by failure injection ---------
@@ -383,9 +381,6 @@ pub(super) fn logs_from(body: impl FnOnce()) -> String {
 
 // ── Issue #186 part b: orchestrator lifecycle authority ────────────────
 
-// --- MCP failure drain --------------------------------------------------
-
-#[async_trait]
 // --- Approval parking (issue #172) --------------------------------------
 
 /// A brain over `dir` whose deps carry `requests` as the shared
