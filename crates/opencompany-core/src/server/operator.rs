@@ -198,6 +198,27 @@ struct DeskDto {
     /// (defaults false) for manifest desks.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     overlay_created: bool,
+    /// How this desk paces the episodes it opens — the numbers in force, not
+    /// the editable block (plan hive-desks, Phase 4; the full payload is
+    /// `GET {scope}/desks/{id}/routing`). Omitted for a desk that runs no
+    /// rounds: one with fewer than two roster seats.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    routing: Option<crate::hive::routing::DeskRoutingSummaryDto>,
+}
+
+/// The compact routing summary a desk carries on the list, or `None` for a
+/// desk of one, which opens no episode.
+fn desk_routing_summary(
+    record: &CompanyRecord,
+    desk_id: &str,
+    router: crate::hive::routing::Router,
+) -> Option<crate::hive::routing::DeskRoutingSummaryDto> {
+    let seats = record
+        .effective_desk_members(desk_id)
+        .into_iter()
+        .filter(|id| record.is_roster_agent(id))
+        .count();
+    (seats >= 2).then(|| crate::hive::routing::desk_routing_summary(record, desk_id, router))
 }
 
 /// `GET {scope}/desks` — the company's desks, built from its manifest group
@@ -218,6 +239,7 @@ async fn list_desks(scope: ScopedCompany) -> Result<Json<Vec<DeskDto>>, crate::s
             // reasoning, and same `is_general_chat` shape, as the overlay-desk
             // exclusion below.
             let general_desk = record.manifest.company.general_desk.clone();
+            let router = crate::hive::routing::host_router();
             let manifest_desks = record
                 .manifest
                 .group_chats
@@ -242,6 +264,7 @@ async fn list_desks(scope: ScopedCompany) -> Result<Json<Vec<DeskDto>>, crate::s
                         // syntax carries no responder field (issue #1835).
                         responder: ResponderMode::Lead,
                         overlay_created: false,
+                        routing: desk_routing_summary(&record, &chat.id, router),
                     }
                 });
             // An overlay desk whose own **id** is a General spelling is not
@@ -279,6 +302,7 @@ async fn list_desks(scope: ScopedCompany) -> Result<Json<Vec<DeskDto>>, crate::s
                         overlay_members,
                         responder: desk.responder,
                         overlay_created: true,
+                        routing: desk_routing_summary(&record, &desk.id, router),
                     }
                 });
             manifest_desks.chain(overlay_desks).collect()
@@ -1113,6 +1137,7 @@ async fn create_desk(
             overlay_members: Vec::new(),
             responder: body.responder,
             overlay_created: true,
+            routing: desk_routing_summary(&record, &id, crate::hive::routing::host_router()),
         }),
     ))
 }
