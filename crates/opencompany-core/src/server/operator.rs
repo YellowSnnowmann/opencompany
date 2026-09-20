@@ -4019,7 +4019,18 @@ fn spawn_chat_turn(turn: ChatTurn) -> JoinHandle<Result<(CycleReport, Option<Str
         // Cross-desk referral of a committed reply is re-homed in the hive
         // driver (plan hive-desks, Phase 6: `hive::referral`); the P15 spike
         // that ran here read `runtime::hivemind`, which is gone.
-        settle_chat_turn(&runtime, &company, turn_id.as_deref(), None).await;
+        let answered_by: Option<String> = report
+            .responses
+            .iter()
+            .find_map(|response| response.agent.clone());
+        settle_chat_turn_by(
+            &runtime,
+            &company,
+            turn_id.as_deref(),
+            answered_by.as_deref(),
+            None,
+        )
+        .await;
         Ok((report, feedback_note))
     })
 }
