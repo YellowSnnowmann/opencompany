@@ -7,7 +7,6 @@ use crate::ports::workspace::WorkspaceOrigin;
 /// reads a note, and revises it — with the revision token making the full
 /// round trip through the model's own context.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_real_turn_lists_reads_and_revises_a_workspace_note() {
     let (base_url, script) = spawn_script(vec![
         Turn::Call {
@@ -94,7 +93,6 @@ async fn a_real_turn_lists_reads_and_revises_a_workspace_note() {
 /// a revision that is not current is refused, the note is untouched, and the
 /// refusal is fed back so the agent can recover rather than retry blindly.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_real_turn_is_refused_when_it_writes_with_a_stale_revision() {
     let (base_url, script) = spawn_script(vec![
         Turn::Call {
@@ -158,7 +156,6 @@ async fn a_real_turn_is_refused_when_it_writes_with_a_stale_revision() {
 /// is offered the read tools and NOT `workspace_write`, so it cannot revise
 /// operator-owned guidance even if it tries.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_wildcard_grant_turn_can_read_but_is_never_offered_the_write_tool() {
     let (base_url, script) = spawn_script(vec![
         Turn::Call {
@@ -218,7 +215,6 @@ async fn a_wildcard_grant_turn_can_read_but_is_never_offered_the_write_tool() {
 /// what the agent quotes next turn, with no agent rebuild. This is what the
 /// per-call store read buys over a session-cached snapshot.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn an_edit_between_turns_changes_what_the_next_turn_reads() {
     let (base_url, script) = spawn_script(vec![
         Turn::Call {
@@ -308,7 +304,6 @@ async fn an_edit_between_turns_changes_what_the_next_turn_reads() {
 /// idea of what it returned and the model's idea of what it received have come
 /// apart again.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn an_oversized_note_reaches_the_model_whole_and_read_only() {
     let (base_url, script) = spawn_script(vec![
         Turn::Call {

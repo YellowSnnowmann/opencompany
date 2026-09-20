@@ -207,7 +207,6 @@ fn ordinary_task_instructions_do_not_claim_they_are_public_research() {
 /// is a gateable Write effect, so refusing here would make an operator's own
 /// approval unspendable — approve, refuse, re-park.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_granted_redispatch_drains_the_board_work_its_turn_queued() {
     let dir = tempfile::tempdir().unwrap();
     let requests = crate::harness::policy::ApprovalRequestQueue::default();
@@ -262,7 +261,6 @@ async fn a_granted_redispatch_drains_the_board_work_its_turn_queued() {
 /// turn's already-spent window, or the second acquire would clear work the
 /// first had not drained yet.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn batched_resolutions_each_get_their_own_drain_window() {
     let dir = tempfile::tempdir().unwrap();
     let requests = crate::harness::policy::ApprovalRequestQueue::default();

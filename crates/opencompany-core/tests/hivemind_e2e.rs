@@ -540,7 +540,6 @@ fn converging_script() -> Responder {
 const UNANIMOUS: &str = "{ enabled = true, turn_budget = 12, quorum = 3, blind_round = true }";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "TODO(Phase 3): drives the `desk_dm` speech tool through a turn; the speech belt is served over MCP in Phase 3."]
 async fn one_agent_uses_speech_to_coordinate_multiple_dm_sessions_without_cards() {
     let script: Responder = Arc::new(|ask: &Ask| {
         let ask = HiveAsk::of(ask);

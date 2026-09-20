@@ -17,7 +17,6 @@ use crate::ports::tasks::{COLUMN_IN_PROGRESS, TaskStore};
 /// The headline: a run that published a file leaves the card pointing at that
 /// file **at the version this run wrote**, under the attempt that wrote it.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_published_card_links_to_the_version_its_run_wrote() {
     let (base_url, _script) = spawn_script(vec![
         write("launch.md", "# Launch spec\nShip on Friday."),
@@ -107,7 +106,6 @@ async fn a_task_that_produced_no_file_still_links_to_its_trace() {
 /// stamp moves wholesale to the second attempt and the second version — nothing
 /// merges, and no read-time query has to decide which attempt wins.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_re_run_repins_the_link_to_the_attempt_that_last_succeeded() {
     let (base_url, _script) = spawn_script(vec![
         write("launch.md", "# Launch spec\nDraft."),
@@ -219,7 +217,6 @@ async fn a_failed_retry_does_not_erase_the_link_to_the_success_before_it() {
 /// while the record grows past it. The console reads exactly this difference —
 /// pinned version versus latest — to say a human edited it since.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn an_operator_edit_leaves_the_pinned_link_naming_what_the_run_wrote() {
     use crate::ports::artifacts::ArtifactAuthor;
 
@@ -282,7 +279,6 @@ async fn an_operator_edit_leaves_the_pinned_link_naming_what_the_run_wrote() {
 /// card lands exactly as it did before #339, and the artifact is still
 /// recorded.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_dispatch_with_no_attempt_row_stamps_nothing() {
     let (base_url, _script) = spawn_script(vec![
         write("launch.md", "# Launch spec"),

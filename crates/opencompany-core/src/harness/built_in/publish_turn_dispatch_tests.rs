@@ -16,7 +16,6 @@ use crate::ports::tasks::{COLUMN_IN_PROGRESS, TaskStore};
 /// relative path it wrote to, which is what proves the two tools share one
 /// sandbox view.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_real_dispatch_publishes_a_file_the_agent_wrote() {
     let (base_url, script) = spawn_script(vec![
         write("launch.md", "# Launch spec\nShip on Friday."),
@@ -67,7 +66,6 @@ async fn a_real_dispatch_publishes_a_file_the_agent_wrote() {
 /// record rather than opening a second one — the identity contract, proven
 /// through two real dispatches.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_re_run_republishing_the_same_path_adds_a_version() {
     let (base_url, script) = spawn_script(vec![
         // Run 1.
@@ -155,7 +153,6 @@ async fn an_ungranted_agent_is_never_offered_the_publish_tool() {
 /// Also pins the two properties the design turns on: **exactly one** nudge, and
 /// both turns recorded against the one dispatch rather than a second attempt.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn the_nudge_recovers_a_deliverable_the_agent_forgot_to_publish() {
     let (base_url, script) = spawn_script(vec![
         // Turn 1: writes, does not publish.
@@ -328,7 +325,6 @@ async fn a_run_that_wrote_nothing_is_never_nudged() {
 /// No nudge when the agent published everything it wrote — the gate is
 /// `changed − staged`, not "did anything change".
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_run_that_published_everything_is_never_nudged() {
     let (base_url, script) = spawn_script(vec![
         write("a.md", "one"),

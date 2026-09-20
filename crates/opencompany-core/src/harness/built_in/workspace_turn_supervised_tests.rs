@@ -56,7 +56,6 @@ async fn supervised(deps: &HarnessDeps, grants: &str) -> (HarnessPool, CompanyRe
 /// carries no consequence word — and offered it for a week. This drives one real
 /// turn and asks both halves about the same call.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_supervised_turn_reads_and_writes_the_workspace_without_policy_hitl() {
     let dir = tempfile::tempdir().unwrap();
     let (base, script) = spawn_script(vec![

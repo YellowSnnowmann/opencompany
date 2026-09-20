@@ -192,7 +192,6 @@ async fn run_pipeline(
 /// The headline (issue #881). Four claims, and the third is the one that
 /// matters: the downstream node never ran.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_blocked_node_stops_the_branch_and_never_hands_its_apology_downstream() {
     let dir = tempfile::tempdir().unwrap();
     let (run, journal, transcript) = run_pipeline(
@@ -380,7 +379,6 @@ to = "done"
 /// #881 bug, just reachable only through `on_error = continue` instead of the
 /// default.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_blocked_node_under_on_error_continue_still_reports_blocked_and_lets_the_branch_run() {
     let dir = tempfile::tempdir().unwrap();
     let (run, _journal, transcript) = run_pipeline_over(
@@ -456,7 +454,6 @@ async fn a_blocked_node_under_on_error_continue_still_reports_blocked_and_lets_t
 /// `output`-node routing — and neither could answer the question. This pins that
 /// the receipt does.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_run_that_parked_a_card_says_so_even_though_it_paused_no_gate_and_routed_no_report() {
     let dir = tempfile::tempdir().unwrap();
     let (run, _journal, _transcript) = run_pipeline(
@@ -552,7 +549,6 @@ to = "done"
 /// node's output present. Before #1008 the blocked arm persisted NOTHING, so
 /// reopening the run showed "this run predates output capture".
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_blocked_run_persists_the_partial_output_it_reached() {
     use crate::ports::run_output::WorkflowRunOutputStore;
 

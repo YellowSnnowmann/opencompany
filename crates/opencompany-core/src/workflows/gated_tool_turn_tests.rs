@@ -357,7 +357,6 @@ async fn run_gated(dir: &std::path::Path) -> (Arc<RuntimeJournal>, HarnessDeps, 
 /// card on the Approvals page — which reads the journal, so "on the page" means
 /// "in `journal.pending()`".
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn an_explicit_approval_call_inside_a_workflow_node_parks() {
     let dir = tempfile::tempdir().unwrap();
     let (journal, _deps, run_id) = run_gated(dir.path()).await;
@@ -399,7 +398,6 @@ async fn an_explicit_approval_call_inside_a_workflow_node_parks() {
 /// reach the queue. It is that the journal is the durable record and the queue
 /// is not, which is what makes the card survive *any* queue lifecycle.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn the_explicit_request_survives_a_later_chat_cycle() {
     let dir = tempfile::tempdir().unwrap();
     let (journal, deps, _run_id) = run_gated(dir.path()).await;
@@ -452,7 +450,6 @@ async fn the_explicit_request_survives_a_later_chat_cycle() {
 /// that is where a tool result lands. Asserting on the tool's return value in
 /// isolation would prove the string, not the reachability.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_workflow_node_is_refused_in_turn_instead_of_having_its_verdict_destroyed() {
     let dir = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_recording(vec![

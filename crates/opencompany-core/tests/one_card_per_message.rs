@@ -690,7 +690,6 @@ fn delegate_then_publish(
 /// The ask is deliberately *not* a leading imperative, so `detect_task_intent`
 /// stays out of it and what is counted is #442's card against #445's.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO(Phase 3): the script answers with one of this crate's own tools (`delegate_to_desk`, `spawn_task`, `publish_artifact`). Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_substantial_ask_that_publishes_opens_one_card() {
     assert!(
         detect_task_intent("assemble the Q3 board pack").is_none(),
@@ -709,7 +708,6 @@ async fn a_substantial_ask_that_publishes_opens_one_card() {
 /// The same shape asked straight of a desk, where #442's *direct* path is what
 /// opens the card rather than the hand-off path.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO(Phase 3): the script answers with one of this crate's own tools (`delegate_to_desk`, `spawn_task`, `publish_artifact`). Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_substantial_ask_to_a_desk_that_publishes_opens_one_card() {
     let (model, _script) = spawn_model(vec![
         rule(
@@ -745,7 +743,6 @@ async fn a_substantial_ask_to_a_desk_that_publishes_opens_one_card() {
 /// works: the hand-off's card is settled by then (an earlier delete would be
 /// undone by that settle) and the publish queue has not yet been drained.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO(Phase 3): the script answers with one of this crate's own tools (`delegate_to_desk`, `spawn_task`, `publish_artifact`). Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_publish_onto_a_card_deleted_mid_turn_links_the_reply_to_the_replacement() {
     let (model, script) = spawn_model(vec![
         rule(
@@ -797,7 +794,6 @@ async fn a_publish_onto_a_card_deleted_mid_turn_links_the_reply_to_the_replaceme
 /// written against it would pass while proving nothing. The assertion below is
 /// the guard against writing that test by accident.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO(Phase 3): the script answers with one of this crate's own tools (`delegate_to_desk`, `spawn_task`, `publish_artifact`). Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_recognised_imperative_that_is_delegated_opens_one_card() {
     let imperative = "draft the quarterly close memo";
     assert!(
@@ -834,7 +830,6 @@ async fn a_recognised_imperative_that_is_delegated_opens_one_card() {
 /// All three carding paths in one turn: a recognised imperative, handed off, and
 /// published by the delegate. This is the case that used to produce three cards.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO(Phase 3): the script answers with one of this crate's own tools (`delegate_to_desk`, `spawn_task`, `publish_artifact`). Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_recognised_imperative_delegated_and_published_opens_one_card() {
     let imperative = "draft the quarterly close memo";
     assert!(detect_task_intent(imperative).is_some(), "fixture check");
@@ -866,7 +861,6 @@ async fn a_recognised_imperative_delegated_and_published_opens_one_card() {
 /// The **card** still takes one owner — a card has one — so only the artifact
 /// authors are per item.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO(Phase 3): the script answers with one of this crate's own tools (`delegate_to_desk`, `spawn_task`, `publish_artifact`). Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn two_agents_publishing_in_one_turn_each_keep_their_own_authorship() {
     let (model, _script) = spawn_model(vec![
         rule(
@@ -920,7 +914,6 @@ async fn two_agents_publishing_in_one_turn_each_keep_their_own_authorship() {
 /// A substantial ask with no publish still opens exactly one — the case #442
 /// already got right, kept here so a fix to the publish path cannot regress it.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO(Phase 3): the script answers with one of this crate's own tools (`delegate_to_desk`, `spawn_task`, `publish_artifact`). Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_substantial_ask_without_a_publish_opens_one_card() {
     let (model, _script) = spawn_model(vec![
         rule(
@@ -948,7 +941,6 @@ async fn a_substantial_ask_without_a_publish_opens_one_card() {
 /// "never mint": a chat deliverable with nothing tracking it would otherwise go
 /// back to being unreachable.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO(Phase 3): the script answers with one of this crate's own tools (`delegate_to_desk`, `spawn_task`, `publish_artifact`). Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_publish_with_no_card_in_scope_mints_one() {
     let (model, _script) = spawn_model(vec![
         rule(
@@ -1029,7 +1021,6 @@ async fn a_trivial_question_opens_no_card() {
 /// question is an instruction), so it still takes the annotated path this is
 /// about, and the bug shape is unchanged.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO(Phase 3): the script answers with one of this crate's own tools (`delegate_to_desk`, `spawn_task`, `publish_artifact`). Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn an_acknowledgement_in_a_desk_thread_with_open_work_opens_no_card() {
     let seed = "the nightly job keeps timing out — work out why and write up what you find";
     assert!(
@@ -1083,7 +1074,6 @@ async fn an_acknowledgement_in_a_desk_thread_with_open_work_opens_no_card() {
 /// The per-turn delegation cap still holds: three hand-offs open three cards and
 /// the fourth and fifth are refused in-turn rather than queued.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "TODO(Phase 3): the script answers with one of this crate's own tools (`delegate_to_desk`, `spawn_task`, `publish_artifact`). Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn five_delegations_in_one_turn_open_three_cards() {
     let (model, _script) = spawn_model(vec![
         rule(

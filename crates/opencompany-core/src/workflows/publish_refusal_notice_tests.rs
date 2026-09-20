@@ -285,7 +285,6 @@ async fn spawn_interleaved_publish_script() -> String {
 ///   halts the branch and is not auto-resumable, and there is no approval here
 ///   for anyone to give.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_workflow_node_whose_publish_was_refused_says_so_on_the_run() {
     let dir = tempfile::tempdir().expect("tempdir");
     let run = run_publishing(dir.path()).await;
@@ -338,7 +337,6 @@ async fn a_workflow_node_whose_publish_was_refused_says_so_on_the_run() {
 /// Concurrent runs keep their refused-publish notices separate even though both
 /// dispatch through one cached roster and its one queue handle.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn concurrent_workflow_runs_do_not_take_each_others_publish_refusals() {
     let dir = tempfile::tempdir().expect("tempdir");
     let base_url = spawn_interleaved_publish_script().await;

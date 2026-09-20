@@ -353,7 +353,6 @@ async fn harness(
 /// backend was never called, nothing was metered, and the raw JSON was shown to
 /// the operator as the agent's reply.
 #[tokio::test]
-#[ignore = "TODO(Phase 3): drives one of this crate's own tools (workspace/publish/tasks/search/approval/ledger) through a turn. Since plan hive-desks Phase 2 a turn runs on the embedded OpenHuman runtime, which has no seam for a host-built tool; the belt is served to the agent over MCP in Phase 3, where this test is re-homed."]
 async fn a_real_turn_executes_a_tool_call_the_model_wrote_as_text() {
     let (model_url, script) = spawn_script(vec![
         Turn::Text(
