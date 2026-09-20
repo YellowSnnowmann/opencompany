@@ -175,11 +175,6 @@ pub mod search_byo;
 /// responses are scripted. Test-only.
 #[cfg(test)]
 mod search_turn_tests;
-/// The per-message responder selection for `auto` channels (issue #1835): the
-/// tool-less model call that picks which member of a leadless channel answers
-/// an unmentioned message, falling back to the channel's first roster member
-/// wherever it cannot run.
-pub mod selector;
 pub mod skills;
 pub mod steer;
 pub mod steps;
