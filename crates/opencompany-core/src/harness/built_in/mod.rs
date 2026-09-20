@@ -4011,28 +4011,26 @@ impl HarnessPool {
             MonthlyBudgetGate::Refused(refusal) => return Ok(refusal),
         };
 
-        let confined = confine::build_confined_agent(company, company_name, confinement, deps)?;
-        let agent = CompanyAgent {
-            agent_id: confine::CONFINED_AGENT_ID.to_string(),
-            role: "Workflow copilot".to_string(),
-            session_key: crate::harness::session_key::openhuman_session_key(
-                company,
-                confine::CONFINED_AGENT_ID,
-            ),
-            // A confined turn carries no manifest teammate, so there is no
-            // per-agent daily cap to read; the company-wide ceiling above is the
-            // one that applies to it.
-            budget_usd_daily: None,
-            step_labels: steps::StepLabels::from_tools(confined.tools()),
-            agent: Mutex::new(confined),
-            bound_chat: Mutex::new(None),
-            session: Mutex::new(agent_session::AgentSessionState::default()),
-            // A confined turn carries no manifest teammate and therefore no
-            // pin — `build_confined_agent` wires `deps.provider` directly, so
-            // metering it from the same `Arc` is exactly the pre-#2306
-            // behaviour.
-            chat_model: deps.provider.clone(),
-        };
+        let runtime = crate::harness::openhuman_runtime::global(
+            crate::harness::openhuman_runtime::RuntimeBoot::from_env(),
+        )
+        .await?;
+        let blueprint = confine::build_confined_agent(company, company_name, confinement, deps)?;
+        // Registered under a per-turn id: the copilot is not on the roster,
+        // and two confined turns of one company may overlap.
+        let turn_id = format!(
+            "{}-{}",
+            confine::CONFINED_AGENT_ID,
+            uuid::Uuid::new_v4().simple()
+        );
+        let agent = CompanyAgent::register(
+            &runtime,
+            company,
+            &turn_id,
+            "Workflow copilot",
+            None,
+            blueprint,
+        )?;
 
         let stream_ctx = Some(crate::turn_stream::TurnStreamCtx {
             company: company.clone(),
@@ -4060,7 +4058,6 @@ impl HarnessPool {
                 message,
                 None,
                 stream_ctx,
-                None,
                 None,
                 crate::runtime::delegation::ChatTarget::default(),
             )
@@ -4328,16 +4325,6 @@ impl HarnessPool {
         // consumed by the `stream_ctx` match below. Only a chat turn (`On`) seeds
         // recent history; a background task or workflow node carries no chat
         // thread to bind history to (issue #1840).
-        let seed_chat: Option<Option<&str>> = match &live {
-            // Whether to seed is `chat.history_seed`, not a field of this
-            // variant: since #1890 I the stream carries only the stream key,
-            // and the seed is a fact about the conversation. False for a
-            // hive-mind episode turn, which arrives carrying its own
-            // attributed, visibility-filtered transcript — see
-            // [`ChatTarget::history_seed`](crate::runtime::delegation::ChatTarget::history_seed).
-            LiveStream::On { chat_id, .. } if chat.history_seed => Some(*chat_id),
-            _ => None,
-        };
         let stream_ctx = match live {
             LiveStream::On { chat_id, .. } => Some(crate::turn_stream::TurnStreamCtx {
                 company: company.clone(),
@@ -4375,33 +4362,6 @@ impl HarnessPool {
                 message_seq: None,
             }),
             LiveStream::Off => None,
-        };
-        // Recent-chat history seed (issue #1840): give a chat reply this desk's
-        // own recent turns so it isn't assembled blind on every switch. Only
-        // ever wanted for a chat turn with the company journal wired — never
-        // built here, though: `run_with_steer` projects it itself, and only
-        // once its `bound_chat`-locked switch check confirms this turn is
-        // actually a switch (a same-desk reply right after another one is not,
-        // and building it unconditionally on every chat turn made every
-        // ordinary reply pay for a journal scan whose result would just be
-        // thrown away — codex review finding). This is just the (cheap — two
-        // `Arc` clones, no I/O) request the projection needs when the switch
-        // check does land on `true`. The current operator message is ALREADY
-        // journaled at this point (the server appends it before dispatch), so
-        // it is the newest owning event the projector sees; `raw_message` is
-        // what `chat_seed::strip_current_message` matches to strip it —
-        // `run_single` re-appends the current message itself, so seeding it
-        // too would duplicate it on the wire.
-        let chat_seed_request = match (seed_chat, deps.events.as_ref()) {
-            (Some(_), Some(events)) => Some(chat_seed::ChatSeedRequest {
-                raw_message: message.to_string(),
-                events: events.clone(),
-                store: deps.store.clone(),
-                reader: agent_id.to_string(),
-                thread_root: chat.thread_root,
-                current_message_seq: chat.message_seq,
-            }),
-            _ => None,
         };
         // Issue #1890 F: the conversation this turn answers, ambient for the
         // duration of it, so `read_thread` can scope itself to the channel the
@@ -4449,7 +4409,6 @@ impl HarnessPool {
                         steer,
                         stream_ctx,
                         run_sink.clone(),
-                        chat_seed_request,
                         // The caller's own, not read off `live` (#1890 I). A turn can
                         // have a conversation and stream nothing.
                         chat,
@@ -5320,6 +5279,7 @@ fn serves(deps: &HarnessDeps, agent_id: &str) -> bool {
 }
 
 pub(crate) fn build_roster(
+    runtime: &openhuman_embed::Runtime,
     company: &CompanyRecord,
     deps: &HarnessDeps,
     skill_deltas: &[SkillState],
@@ -5431,7 +5391,7 @@ pub(crate) fn build_roster(
         {
             agent_policy = agent_policy.with_connected_composio_toolkits(config.toolkits.clone());
         }
-        let (agent, chat_model) = build::build_agent_with_model(
+        let blueprint = build::build_agent_with_model(
             &company.id,
             company_name,
             manifest_agent,
@@ -5448,24 +5408,14 @@ pub(crate) fn build_roster(
             &crate::company::team_brief::team_section(company, &manifest_agent.id),
             company.manifest.speech.is_enabled(),
         )?;
-        roster.push(Arc::new(CompanyAgent {
-            agent_id: manifest_agent.id.clone(),
-            role: manifest_agent.role.clone(),
-            session_key: crate::harness::session_key::openhuman_session_key(
-                &company.id,
-                &manifest_agent.id,
-            ),
-            budget_usd_daily: effective_budget,
-            step_labels: steps::StepLabels::from_tools(agent.tools()),
-            agent: Mutex::new(agent),
-            bound_chat: Mutex::new(None),
-            session: Mutex::new(agent_session::AgentSessionState::default()),
-            // Issue #2306 / Codex round 2, comment 4012457318: the same
-            // `TenantProvider` (pinned or the shared default) the `Agent`
-            // above was just built against, so metering reads the telemetry
-            // cells this agent's turns actually write.
-            chat_model,
-        }));
+        roster.push(Arc::new(CompanyAgent::register(
+            runtime,
+            &company.id,
+            &manifest_agent.id,
+            &manifest_agent.role,
+            effective_budget,
+            blueprint,
+        )?));
     }
 
     // Issue #71 — Active Runtime Teammates (minimal slice): promote every
@@ -5530,7 +5480,7 @@ pub(crate) fn build_roster(
         {
             agent_policy = agent_policy.with_connected_composio_toolkits(config.toolkits.clone());
         }
-        let (agent, chat_model) = build::build_agent_with_model(
+        let blueprint = build::build_agent_with_model(
             &company.id,
             company_name,
             &manifest_agent,
@@ -5547,23 +5497,14 @@ pub(crate) fn build_roster(
             &crate::company::team_brief::team_section(company, &manifest_agent.id),
             company.manifest.speech.is_enabled(),
         )?;
-        roster.push(Arc::new(CompanyAgent {
-            agent_id: manifest_agent.id.clone(),
-            role: manifest_agent.role.clone(),
-            session_key: crate::harness::session_key::openhuman_session_key(
-                &company.id,
-                &manifest_agent.id,
-            ),
-            budget_usd_daily: effective_budget,
-            step_labels: steps::StepLabels::from_tools(agent.tools()),
-            agent: Mutex::new(agent),
-            bound_chat: Mutex::new(None),
-            session: Mutex::new(agent_session::AgentSessionState::default()),
-            // Same reasoning as the manifest-agent loop above: an overlay
-            // teammate can carry its own pin too (`overlay_agent_to_manifest`
-            // copies `provider`/`model` straight through).
-            chat_model,
-        }));
+        roster.push(Arc::new(CompanyAgent::register(
+            runtime,
+            &company.id,
+            &manifest_agent.id,
+            &manifest_agent.role,
+            effective_budget,
+            blueprint,
+        )?));
     }
 
     Ok(roster)
