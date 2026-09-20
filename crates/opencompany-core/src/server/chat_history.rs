@@ -541,7 +541,7 @@ impl MessageView {
             referred_from: None,
             referral_conversation: None,
             aside_audience: audience,
-            aside_conversation: None,
+            episode: None,
             steps: Vec::new(),
             task_id: None,
             parent_id: None,
@@ -704,14 +704,15 @@ pub struct MessageView {
     pub referred_from: Option<ReferredFrom>,
     /// The crossing this report brought home, when it brought one.
     pub referral_conversation: Option<ReferralConversation>,
-    /// The addressees of this row when it is a private aside, else empty.
-    ///
-    /// Fold input, not output: `fold_asides` reads it to know which rows to
-    /// collect, and no DTO carries it — what the console renders is the folded
-    /// [`Self::aside_conversation`] on the row the aside rode under.
+    /// The addressees of this row when the host narrowed it — a seat's `dm`
+    /// inside a desk — else empty. Projected as `audience`; an operator reads
+    /// the row regardless, because audience is a coordination device between
+    /// agents and never access control.
     pub aside_audience: Vec<String>,
-    /// The private exchange this move carried, when it carried one.
-    pub aside_conversation: Option<AsideConversation>,
+    /// What this reply was inside the episode that produced it (plan
+    /// hive-desks, Phase 4): its round, its speech act, a `dm`'s recipients
+    /// and how a `broadcast` was routed on. `None` outside an episode.
+    pub episode: Option<crate::ports::types::ReplyEpisode>,
     /// Whether this row may reach only administrators (issue #1781 review,
     /// Codex P1).
     ///
@@ -983,6 +984,7 @@ impl MessageView {
                 parent,
                 mentions,
                 audience,
+                episode,
                 ..
             } => {
                 // Keys rework #2306, round-2 review KR-L2-03: re-classifies
@@ -1012,7 +1014,7 @@ impl MessageView {
                     referred_from: None,
                     referral_conversation: None,
                     aside_audience: audience,
-                    aside_conversation: None,
+                    episode,
                     steps,
                     task_id,
                     outputs,
@@ -1093,7 +1095,7 @@ impl MessageView {
                     referred_from: None,
                     referral_conversation: None,
                     aside_audience: Vec::new(),
-                    aside_conversation: None,
+                    episode: None,
                     id,
                     channel: voice,
                     admin_only: false,
@@ -1187,7 +1189,7 @@ impl MessageView {
                 referred_from: None,
                 referral_conversation: None,
                 aside_audience: Vec::new(),
-                aside_conversation: None,
+                episode: None,
                 steps: Vec::new(),
                 task_id: Some(task_id),
                 outputs: Vec::new(),
@@ -1224,7 +1226,7 @@ impl MessageView {
                 referred_from: None,
                 referral_conversation: None,
                 aside_audience: Vec::new(),
-                aside_conversation: None,
+                episode: None,
                 steps: Vec::new(),
                 task_id: None,
                 outputs: Vec::new(),
