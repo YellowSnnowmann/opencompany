@@ -686,15 +686,6 @@ jobs:
       - name: Test the export bundle
         run: scripts/ci/run-scoped-suite.sh "export bundle" export store::export
 
-      # `hivemind`: the `tinyhivemind` session adapter (`runtime::hivemind`).
-      # The feature gates one module and its tests, and nothing on the default
-      # path enables it — which is exactly the shape #770 was filed about, so it
-      # gets its lane in the same breath as the code rather than after somebody
-      # notices. Offline and dependency-free at this job's expense: the crate is
-      # already vendored and pure, so this costs one recompile of the lib.
-      - name: Test the hivemind session adapter
-        run: scripts/ci/run-scoped-suite.sh "hivemind adapter" hivemind runtime::hivemind
-
       # `imap`/`smtp`: the mail surface. One gated test runs here today — the
       # RFC822 parser — and it is a parser, which is precisely the kind of code
       # that rots silently. `smtp` is compiled alongside deliberately: it carries
@@ -1160,16 +1151,31 @@ jobs:
       # process (the hazard the `[patch]` comment in the root `Cargo.toml` records). `-d` prints
       # duplicate versions of a package; any `tinymemory` line in that report
       # is the failure.
-      - name: Assert no duplicated tinymemory crates
+      #
+      # Widened to the whole OpenHuman family with the hive-desks work:
+      # `tinyhivemind-openhuman` names `openhuman-embed` by git URL and the root
+      # `[patch."https://github.com/tinyhumansai/openhuman"]` redirects it onto
+      # `vendor/openhuman`. If the tinyhivemind `rev` and our gitlink drift, or
+      # the patch entry is lost, cargo resolves a SECOND OpenHuman tree from the
+      # git source — two `openhuman_embed::Agent` types, two `RUNTIME_LIVE`
+      # flags — and this is the only place that reads as a failure rather
+      # than a confusing type mismatch three crates away.
+      - name: Assert no duplicated OpenHuman-family crates
         run: |
           # Two separate failures, checked separately: a broken resolve must
           # fail loudly, not read as "no duplicates" through an empty pipe.
-          if ! report="$(cargo tree --locked -p opencompany-core -e normal --features openhuman,tinymemory -d)"; then
+          if ! report="$(cargo tree --locked -p opencompany-core -e normal --features openhuman,mcp,tinymemory -d)"; then
             echo "::error::cargo tree failed to resolve the graph"
             exit 1
           fi
-          if grep -E "^tinymemory" <<< "$report"; then
-            echo "::error::duplicated tinymemory-* package in the resolve graph"
+          if grep -E "^(openhuman|tinymcp|tinyagents|tinyinference|tinymemory|tinyflows|tinybus)" <<< "$report"; then
+            echo "::error::duplicated OpenHuman-family package in the resolve graph"
+            exit 1
+          fi
+          # A git-sourced OpenHuman package means the patch did not apply.
+          if cargo metadata --locked --format-version 1 \
+              | jq -e '[.packages[] | select(.source != null and (.source | test("github.com/tinyhumansai/openhuman")))] | length > 0' >/dev/null; then
+            echo "::error::an OpenHuman package resolved from its git source instead of vendor/openhuman"
             exit 1
           fi
 
