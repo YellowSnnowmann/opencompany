@@ -35,10 +35,6 @@
 //! offline [`MockProvider`](provider::MockProvider) does not, so test turns stay
 //! inert.
 
-/// One agent, one session: the watermark that replaced the per-chat
-/// clear-and-reseed, and the cue block that carries a channel's identity into a
-/// merged transcript. See [`agent_session`].
-pub mod agent_session;
 pub mod approval_tool;
 /// Issue #775: the fail-closed shell audit wrapper — one intent line appended
 /// (and fsynced) *before* a command runs, refusing the command outright when
@@ -58,7 +54,6 @@ pub mod chargebee;
 /// inert on this same turn shape — see [`chat_only_guard`]'s module docs for
 /// why the two do not overlap.
 mod chat_only_guard;
-pub mod chat_seed;
 mod checkpoint;
 pub mod composio;
 /// Issue #410: how a Composio action catalogue is narrowed and rendered for an
@@ -125,6 +120,9 @@ pub mod orchestrator;
 /// bounded model call that keeps what answers the turn, in place of a byte cut
 /// that keeps whatever happened to come first. See [`payload_extract`].
 pub mod payload_extract;
+/// The per-turn progress pump: OpenHuman's progress stream → live console
+/// frames, the run trace, and the event buffer steps and cost are read from.
+pub mod progress_pump;
 /// Chargebee billing tools (issue #788), wired per company from its own
 /// SecretStore. Always compiled so the credential resolution and the fail-closed
 /// decision are testable at default features; only the tools are gated.
@@ -180,7 +178,6 @@ pub mod skills;
 pub mod steer;
 pub mod steps;
 pub mod title;
-pub mod tool_dispatcher;
 pub mod tool_posture;
 pub mod toolbelt;
 pub mod triage;
@@ -229,9 +226,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openhuman_core as oh;
+use std::path::Path;
 use tokio::sync::{Mutex, RwLock};
-
-use oh::agent::Agent;
 
 use crate::harness::provider::HarnessModel;
 
@@ -656,7 +652,15 @@ pub struct HarnessDeps {
     pub workspace: Option<Arc<dyn crate::ports::WorkspaceStore>>,
 }
 
-/// One live openhuman agent, keyed by its manifest id.
+/// One live company agent: a handle on the process-wide OpenHuman runtime,
+/// keyed by its manifest id.
+///
+/// Since plan hive-desks Phase 2 the agent is an [`openhuman_embed::Agent`]
+/// — a cheap-clone handle whose `turn(&self)` takes a shared reference — so
+/// the pool no longer holds a `Mutex<Agent>`. What serialises one agent's
+/// turns is [`turn_lock`](Self::turn_lock): one agent runs at most one turn
+/// at a time, and *different* agents run concurrently. A hive that binds this
+/// agent into two desks clones the handle and queues on the same lock.
 pub struct CompanyAgent {
     /// The manifest agent id.
     pub agent_id: String,
@@ -669,22 +673,30 @@ pub struct CompanyAgent {
     /// `None` for an uncapped teammate — and for every overlay teammate, which
     /// carries no per-agent cap in v1.
     pub budget_usd_daily: Option<f64>,
-    /// The name that embedded session answers to on openhuman's event bus —
-    /// `{company}:{agent_id}`, minted by
-    /// [`openhuman_session_key`](crate::harness::session_key::openhuman_session_key)
-    /// and stamped onto the [`Agent`] at build time.
-    ///
-    /// Held here as well as on the session because openhuman keeps
-    /// `event_session_id` `pub(super)`: a session cannot be asked its own name
-    /// from outside the crate. The two consumers that need it — the speech
-    /// tools, which name the destination session when one teammate leaves a DM
-    /// in another's, and anything reporting a turn — would otherwise each
-    /// re-derive it, and a DM is only reportable as a hop between sessions if
-    /// both ends spell the session the same way.
+    /// The stable per-`(company, agent)` OpenHuman session — `{company}:{agent_id}`,
+    /// minted by [`openhuman_session_key`](crate::harness::session_key::openhuman_session_key)
+    /// and passed as [`Turn::session`](openhuman_embed::Turn::session) on
+    /// every conversational turn on every surface. OpenHuman owns the thread
+    /// transcript behind it; nothing is seeded from this side.
     pub session_key: String,
-    /// The embedded openhuman session. A [`Mutex`] because a `turn` takes
-    /// `&mut self` and one agent must serialise its own turns.
-    agent: Mutex<Agent>,
+    /// The id this agent is registered under on the runtime
+    /// (`{company}--{agent_id}`, see
+    /// [`runtime_agent_id`](crate::session_key::runtime_agent_id)), and the
+    /// key everything the runtime writes for it — transcripts, skills root,
+    /// action dir — lives under.
+    pub runtime_id: String,
+    /// The bearer the Phase 3 per-agent MCP server will authenticate this
+    /// agent's tool calls with. Minted at build so the attribution rule
+    /// (bearer → agent → in-flight turn) has a stable key from the first
+    /// turn; nothing reads it yet.
+    pub mcp_bearer: String,
+    /// The runtime agent. Shared, not locked: see the type docs.
+    agent: openhuman_embed::Agent,
+    /// Serialises this agent's turns.
+    turn_lock: Arc<Mutex<()>>,
+    /// The loopback route this agent's model is served on, and the usage tap
+    /// its attempts are metered from. See [`model_bridge`](crate::harness::model_bridge).
+    bridge: crate::harness::model_bridge::BridgeHandle,
     /// The curated step labels of this agent's tools, captured from the built
     /// tool set (see [`StepLabels`](steps::StepLabels) for why the turn loop
     /// cannot supply them).
@@ -693,51 +705,36 @@ pub struct CompanyAgent {
     /// for the life of a pooled agent, and a rebuild — the only thing that can
     /// change which search belt is wired — mints a new `CompanyAgent` anyway.
     step_labels: steps::StepLabels,
-    /// The chat/desk thread this pooled agent's in-memory history is currently
-    /// bound to (issue #1725).
-    ///
-    /// One `Agent` instance is reused for every chat of a `(company, agent_id)`
-    /// pair, so its `history` would otherwise carry one thread's transcript into
-    /// the next — the operator opens a new chat, types "hi", and the agent
-    /// replies against the prior task's transcript and goal. Before each turn
-    /// the pool compares the incoming `chat_id` to this value; on a switch it
-    /// clears the history and re-seeds it from the incoming thread's durable
-    /// transcript, so a thread only ever sees its own conversation. Guarded by
-    /// the same `agent` critical section (turns are already serialised), so the
-    /// pair cannot be read torn. `None` until the first bound turn.
-    ///
-    /// **The channel is not the finest conversation there is** (#1890). The
-    /// binding is `(chat id, thread root)`, because two threads of one channel
-    /// are two conversations: keyed on the channel alone, moving between them
-    /// was not a switch, so the clear-and-re-seed never ran and one thread
-    /// answered with the other's turns still loaded. A `None` root is the
-    /// channel-level conversation and needs no special case — it is simply the
-    /// thread every unparented line hangs in, which is every line in a company
-    /// that has never threaded.
-    bound_chat: Mutex<Option<(String, Option<EventSeq>)>>,
-    /// How far through the company journal this agent's session has been
-    /// carried — the watermark that replaced the per-chat clear-and-reseed.
-    ///
-    /// See [`agent_session`]. Held beside `bound_chat` rather than inside it
-    /// because it is deliberately **not** keyed on a conversation: surviving a
-    /// channel switch is the whole point of it.
-    session: Mutex<agent_session::AgentSessionState>,
+    /// The assembled toolbelt, **unattached** to the runtime agent in this
+    /// phase (OpenHuman has no seam for a host-built tool). Carried so Phase 3
+    /// can serve it as this agent's MCP catalogue, and so a test can still ask
+    /// which tools a grant wired.
+    tools: Arc<Vec<Box<dyn tinytools::Tool>>>,
+    /// The agent workspace: the file tools' sandbox and every turn's `cwd`.
+    workspace: PathBuf,
     /// The [`HarnessModel`] this agent's turns actually run against — the same
-    /// `Arc` [`build::build_agent_with_model`] wired onto the embedded `Agent`
-    /// above, not a fresh read of `deps.provider` (issue #2306 / Codex round 2,
-    /// comment 4012457318).
+    /// `Arc` [`build::build_agent_with_model`] resolved (the company default or
+    /// this agent's own pin), served to the runtime over the bridge (issue
+    /// #2306 / Codex round 2, comment 4012457318).
     ///
     /// `deps.provider` is the company **default**; an agent with its own
     /// `{provider, model}` pin runs against a distinct
     /// [`TenantProvider`](provider::TenantProvider) that carries its own
-    /// telemetry cells. Metering from `deps.provider` for such an agent read
-    /// the default's telemetry (or another pass's stale reading) rather than
-    /// what this agent's turn actually spent. Held here, alongside the `Agent`
-    /// it was built with, so `meter_turn_costs` reads the SAME instance the
-    /// turn ran through — re-resolving the pin at meter time would mint a
-    /// second `TenantProvider` with telemetry cells the turn never touched.
+    /// telemetry cells. Held here so `meter_turn_costs` reads the SAME
+    /// instance the turn ran through.
     chat_model: Arc<dyn HarnessModel>,
 }
+
+impl std::fmt::Debug for CompanyAgent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompanyAgent")
+            .field("agent_id", &self.agent_id)
+            .field("runtime_id", &self.runtime_id)
+            .field("tools", &self.tools.len())
+            .finish_non_exhaustive()
+    }
+}
+
 
 /// The graceful reply returned when a turn yields the transient empty-response
 /// class twice — so chat never shows a bare "Couldn't send" for a model hiccup.
@@ -1145,6 +1142,107 @@ pub struct BudgetPause {
 }
 
 impl CompanyAgent {
+    /// Registers one blueprint on the runtime and wraps the result.
+    ///
+    /// The blueprint's model is served over the loopback bridge; the spec is
+    /// [`build::agent_spec_for`] over it. A `DuplicateId` — the previous
+    /// roster's clone of this id is still alive, which a rebuild racing an
+    /// in-flight turn can produce, or two test pools naming one company at
+    /// once — is retried under a numbered suffix rather than failed: the
+    /// suffix changes only which transcripts directory the runtime writes,
+    /// never the session key a turn resumes.
+    pub(crate) fn register(
+        runtime: &openhuman_embed::Runtime,
+        company: &CompanyId,
+        agent_id: &str,
+        role: &str,
+        budget_usd_daily: Option<f64>,
+        blueprint: build::AgentBlueprint,
+    ) -> crate::Result<Self> {
+        let bridge = crate::harness::model_bridge::register(
+            blueprint.chat_model.clone() as Arc<dyn tinyinference::model::ChatModel<()>>,
+            &blueprint.model,
+        )?;
+        let base_id = crate::session_key::runtime_agent_id(company, agent_id);
+        let mut runtime_id = base_id.clone();
+        let mut attempt = 0u32;
+        let agent = loop {
+            let spec = build::agent_spec_for(&blueprint, &runtime_id, bridge.provider());
+            match runtime.agent(spec) {
+                Ok(agent) => break agent,
+                Err(openhuman_embed::AgentError::DuplicateId(_)) if attempt < 64 => {
+                    attempt += 1;
+                    let suffix = format!("-{attempt}");
+                    let head: String = base_id
+                        .chars()
+                        .take(64usize.saturating_sub(suffix.len()))
+                        .collect();
+                    runtime_id = format!("{}{suffix}", head.trim_end_matches('-'));
+                }
+                Err(err) => {
+                    return Err(OpenCompanyError::Harness(format!(
+                        "register agent '{agent_id}' on the OpenHuman runtime: {err}"
+                    )));
+                }
+            }
+        };
+        if attempt > 0 {
+            tracing::debug!(
+                company = %company,
+                agent = agent_id,
+                runtime_id = %runtime_id,
+                "[harness] runtime id was taken; registered under a numbered suffix"
+            );
+        }
+        let step_labels = steps::StepLabels::from_tools(&blueprint.tools);
+        Ok(Self {
+            agent_id: agent_id.to_string(),
+            role: role.to_string(),
+            budget_usd_daily,
+            session_key: crate::harness::session_key::openhuman_session_key(company, agent_id),
+            runtime_id,
+            mcp_bearer: format!("ocm_{}", uuid::Uuid::new_v4().simple()),
+            agent,
+            turn_lock: Arc::new(Mutex::new(())),
+            bridge,
+            step_labels,
+            tools: Arc::new(blueprint.tools),
+            workspace: blueprint.workspace,
+            chat_model: blueprint.chat_model,
+        })
+    }
+
+    /// The runtime agent handle, for a hive binding.
+    pub fn runtime_agent(&self) -> &openhuman_embed::Agent {
+        &self.agent
+    }
+
+    /// The lock one of this agent's turns must hold. Shared with every hive
+    /// this agent is bound into, so two desks cannot run it at once.
+    pub fn turn_lock(&self) -> Arc<Mutex<()>> {
+        self.turn_lock.clone()
+    }
+
+    /// The names of the tools this agent's belt wires, in belt order.
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools.iter().map(|tool| tool.name().to_string()).collect()
+    }
+
+    /// The assembled belt (unattached in this phase; the Phase 3 MCP catalogue).
+    pub fn tools(&self) -> &[Box<dyn tinytools::Tool>] {
+        &self.tools
+    }
+
+    /// The agent workspace directory.
+    pub fn workspace(&self) -> &Path {
+        &self.workspace
+    }
+
+    /// The model this agent's turns run against.
+    pub fn chat_model(&self) -> &Arc<dyn HarnessModel> {
+        &self.chat_model
+    }
+
     /// Runs one turn against this agent, returning its reply text and the
     /// per-attempt token/cost totals.
     ///
@@ -1170,26 +1268,12 @@ impl CompanyAgent {
     /// fix that the compiler enforces: a caller must handle the usage before it
     /// can even look at the outcome.
     ///
-    /// The usage is read from each just-completed turn via openhuman's public
-    /// [`Agent::last_turn_usage`](oh::agent::Agent::last_turn_usage) accessor
-    /// while the agent lock is still held. An offline provider that reports no
-    /// usage yields a zero [`TurnUsage`], which the cost hook treats as inert.
-    ///
-    /// **Activity-trace**: this is the one site holding `&mut Agent`, so it is
-    /// where the turn's [`AgentProgress`](oh::agent::progress::AgentProgress)
-    /// stream is captured. A per-turn `mpsc` channel is attached via
-    /// [`Agent::set_on_progress`](oh::agent::Agent::set_on_progress); an
-    /// always-draining collector task buffers every event so the turn loop never
-    /// blocks on a full channel; and after the turn (both attempts share the one
-    /// channel) the sink is detached, the collector joined, and the events folded
-    /// into the scrubbed [`TurnOutcome::steps`] by
-    /// [`steps::fold_steps`](crate::harness::steps::fold_steps). The sink is
-    /// per-turn *local* — deliberately not a [`HarnessDeps`] field — so parallel
-    /// turns never collide.
+    /// The usage is read from the bridge's tap — every model call the attempt
+    /// made, as the provider reported it — with the turn's own
+    /// `TurnCostUpdated` figure as the fallback when the tap saw nothing.
     pub async fn run(&self, message: &str) -> (crate::Result<TurnOutcome>, Vec<TurnUsage>) {
         self.run_with_steer(
             message,
-            None,
             None,
             None,
             None,
@@ -1206,88 +1290,43 @@ impl CompanyAgent {
     /// [`with_stop_hooks`](oh::agent::stop_hooks::with_stop_hooks). OpenHuman
     /// fires stop hooks **between** tool-loop iterations (never mid-tool-call),
     /// so an operator pause / cancel / redirect halts the turn gracefully at the
-    /// next iteration boundary. The control is `Box::pin`ned at the task-local
-    /// scope boundary to avoid the nested-scope stack-overflow trap.
+    /// next iteration boundary. The hooks are a task-local the embedded turn
+    /// reads when it builds its session, and `Turn::send` awaits in this task,
+    /// so they reach it.
     ///
     /// When a steer is pending after the first attempt yields the transient
     /// empty-response class, the one-shot retry is **skipped** — a cancel (or
     /// pause) issued before any text is produced must not silently restart the
     /// work. With no steer this is byte-identical to the pre-#111 `run`.
     ///
-    /// When `run_sink` is `Some`, the same collector also writes each step
+    /// When `run_sink` is `Some`, the progress pump also writes each step
     /// through to the [`RunStore`](crate::ports::RunStore) as it arrives, so a
     /// dispatched card's trace is durable *during* the run rather than only
-    /// after it (issue #242). The await lives in the collector task, never in
-    /// the model loop, so a slow store slows only trace persistence. `None`
-    /// (chat turns, workflow nodes, every test) is byte-identical to the prior
-    /// buffer-only behaviour.
+    /// after it (issue #242).
+    ///
+    /// # Which session a turn resumes
+    ///
+    /// A conversational turn — one on a chat, addressed by `chat` — resumes
+    /// this agent's one stable session ([`session_key`](Self::session_key)),
+    /// whatever chat it is on: OpenHuman owns the thread, and which
+    /// conversation a line belongs to is what the turn text says (the cue
+    /// below; the attributed desk delta in Phase 4). An **isolated** turn — a
+    /// dispatched card or a workflow node, which has a run sink and no chat —
+    /// runs on a fresh session of its own, so it neither drags the chat
+    /// transcript in nor leaves its working notes there; that is what the
+    /// previous builder's clear-and-suppress-autoload did.
     pub async fn run_with_steer(
         &self,
         message: &str,
         steer: Option<&SteerControl>,
         stream: Option<crate::turn_stream::TurnStreamCtx>,
         run_sink: Option<Arc<run_trace::RunTraceSink>>,
-        chat_seed: Option<chat_seed::ChatSeedRequest>,
         // The conversation this turn belongs to (#1890), carried in its own
-        // right rather than read off `chat_seed` or off `stream`.
-        //
-        // **Neither half may be inferred.** The root cannot come from
-        // `chat_seed`: that is `None` whenever no `EventLog` is wired, so
-        // reading it there made two threads of one channel compare equal on
-        // such a host — no clear, no re-seed, and the leak this epic exists to
-        // close, reopened in exactly the configuration that cannot re-seed its
-        // way out of it (coderabbit review on #1896). And the channel cannot
-        // come from `stream`, which is what #1890 I fixes: a turn that has a
-        // conversation but publishes no live frames — an approval's re-issued
-        // call — was indistinguishable from a turn that has none, so it ran
-        // against whatever history was last loaded and then answered into a
-        // thread it had never been bound to.
-        //
-        // One [`ChatTarget`] rather than two loose `Option`s, for the reason
-        // that type documents: a mis-paired channel and root compiles and then
-        // answers into the wrong conversation.
+        // right rather than read off `stream`: a turn that has a chat to
+        // resume on may still stream nowhere, and a workflow turn streams on
+        // a route that is not a chat.
         chat: crate::runtime::delegation::ChatTarget<'_>,
     ) -> (crate::Result<TurnOutcome>, Vec<TurnUsage>) {
-        // Per-turn progress sink + an always-draining collector, so a burst of
-        // events never blocks the turn loop on a full channel.
-        //
-        // When `stream` is `Some`, the collector *tees* each event live onto the
-        // transient [`turn_stream`](crate::turn_stream) bus as it arrives —
-        // mirroring OpenHuman's `spawn_progress_bridge` — so the console renders
-        // the tool timeline while the turn is still running. The same events are
-        // still buffered and folded into the durable `TurnStep`s below, so the
-        // live view and the final reply timeline are byte-identical. With `None`
-        // (background turns, non-`openhuman` build) this is exactly the prior
-        // buffer-only behaviour.
-        // The chat/desk thread this turn answers, captured before `stream` is
-        // moved into the collector task below — used for per-conversation history
-        // isolation (issue #1725). `None` for a background turn that streams
-        // nothing (a dispatched task card carries no operator chat to bind to),
-        // and also `None` for a workflow agent node (issue #1702) — it routes by
-        // run/node, not a chat thread, so there is nothing to bind history to.
-        // Issue #1890 I: the live route when there is one, the caller's `chat`
-        // otherwise.
-        //
-        // Streaming is about where transient frames are published; identity is
-        // about which conversation's history this turn may see. Deriving the
-        // second from the first made every *unstreamed* turn identity-less —
-        // which is the bug, since an approval's re-issued call streams nothing
-        // and still belongs to the conversation it was raised in.
-        //
-        // **The stream still wins when present**, and that is not laziness: the
-        // turn-stream route has already folded an unaddressed message onto
-        // `DEFAULT_DESK` (`mod.rs`'s chat route), so reading `chat.chat_id`
-        // there would hand back `None` and unbind a turn that today binds to
-        // General — the exact behaviour
-        // `an_unaddressed_message_still_binds_to_its_thread` exists to pin, and
-        // which #1896's review already established is correct rather than a
-        // gap. So this is a strict extension: nothing that streams changes.
-        //
-        // Residue, stated rather than discovered: an approval raised in an
-        // *unaddressed* message still has `origin_thread: None`, so its
-        // re-issued call binds to nothing exactly as before. Closing that means
-        // teaching `ChatTarget` to tell "unaddressed" from "no conversation at
-        // all", which is a wider change than this one.
         let turn_chat_id: Option<String> = stream
             .as_ref()
             .and_then(|ctx| match &ctx.route {
@@ -1295,673 +1334,106 @@ impl CompanyAgent {
                 crate::turn_stream::LiveRoute::Workflow { .. } => None,
             })
             .or_else(|| chat.chat_id.map(str::to_string));
-        let thread_root = chat.thread_root;
         let has_run_sink = run_sink.is_some();
-        // The company this turn's chat seed (if any) projects from — same
-        // "captured before `stream` moves" reasoning as `turn_chat_id` above.
-        // Only meaningful alongside `turn_chat_id`, so `None` for exactly the
-        // same turns.
-        let turn_company: Option<CompanyId> = stream.as_ref().map(|ctx| ctx.company.clone());
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<oh::agent::progress::AgentProgress>(1024);
-        // This agent's curated step labels, restored onto each tool-call start as
-        // it arrives. The turn loop labels a tool row from its *name* alone and
-        // never asks the tool what it calls itself, so a branded belt would
-        // otherwise render as the generic humanized name on every surface below
-        // (see `steps::StepLabels`). Applied here — once, at the single point the
-        // turn's events enter OpenCompany — so the live stream, the durable run
-        // trace, and the folded timeline cannot disagree about a step's name.
-        let step_labels = self.step_labels.clone();
-        let collector = tokio::spawn(async move {
-            let mut events = Vec::new();
-            let mut seq: u64 = 0;
-            // Mirrors `fold_steps`' thinking-run coalescing so the live timeline
-            // emits the same "Thinking" rows the final folded one does.
-            let mut thinking_open = false;
-            while let Some(event) = rx.recv().await {
-                let event = step_labels.apply(event);
-                if let Some(ctx) = &stream
-                    && let Some(frame) = steps::stream_event_from(&event, seq, &mut thinking_open)
-                {
-                    let frame = frame.with_agent(ctx.agent_id.clone());
-                    // Route by the turn's surface: a chat turn stamps `chatId`;
-                    // a workflow agent node stamps `workflowRunId`/`nodeId`
-                    // instead, since it has no chat thread and the console's
-                    // run-trace sheet keys the live timeline on the run (#1702).
-                    let frame = match &ctx.route {
-                        crate::turn_stream::LiveRoute::Chat { chat_id } => {
-                            frame.with_chat(chat_id.clone())
-                        }
-                        crate::turn_stream::LiveRoute::Workflow { run_id, node_id } => {
-                            frame.with_workflow(run_id.clone(), node_id.clone())
-                        }
-                    };
-                    // Which *query* inside that thread, so a console holding two
-                    // in-flight turns on one thread keeps their rows apart.
-                    // Absent on a turn answering no journaled message, where the
-                    // console falls back to keying by thread alone.
-                    let frame = frame.with_message_seq(ctx.message_seq);
-                    crate::turn_stream::publish(&ctx.company, frame);
-                    seq += 1;
-                }
-                // Durable half (#242): persist the step before moving on, so a
-                // process killed mid-run keeps every step written so far.
-                if let Some(sink) = &run_sink {
-                    sink.record(&event).await;
-                }
-                events.push(event);
-            }
-            // A turn that *ends* mid-thought has no closing `TextDelta` or tool
-            // call, so the reasoning tail below the interim flush threshold
-            // would otherwise sit in the trace unpersisted — exactly the
-            // failed/interrupted turns worth diagnosing. Flush on drain.
-            if let Some(sink) = &run_sink {
-                sink.flush().await;
-            }
-            events
-        });
-
-        let mut agent = self.agent.lock().await;
-        agent.set_on_progress(Some(tx));
-
-        // Per-turn overrides for this turn (issue #1725), built once and applied
-        // in a single `set_next_turn_overrides` call so the chat-binding and the
-        // chat-only reductions cannot clobber each other.
-        let mut overrides = oh::agent::harness::session::TurnOverrides::default();
-
-        // One agent, one session (see `agent_session`).
-        //
-        // This used to be per-conversation history isolation: one `Agent` is
-        // reused for every chat of this `(company, agent_id)` pair, and its
-        // in-memory `history` was CLEARED and re-seeded from the incoming
-        // desk's own transcript whenever the chat changed. That kept two
-        // conversations from bleeding into each other, and it also meant an
-        // agent had no continuous existence — it could not notice that the
-        // question just asked in a DM is the one it answered on a desk an hour
-        // ago, because between the two it had been emptied.
-        //
-        // The session is now continuous. Instead of clearing, the agent is
-        // handed the rows it has **not yet seen**, across every channel it can
-        // read, each cued with where it was said. `agent_session` owns the
-        // watermark and the cue rendering; this block is the seam that asks it.
-        //
-        // What is NOT given up is who may read what: `agent_session` applies
-        // the aside audience narrowing, so a private exchange this agent is not
-        // party to still never reaches it. Channel isolation is deliberately
-        // dropped; audience isolation is not.
-        //
-        // Runs inside the `agent` critical section, which already serialises
-        // this agent's turns.
-        let mut session_cues: Option<String> = None;
-        // A card attempt is one bounded work context, not the continuation of
-        // whatever this teammate last did on another card or in a channel.
-        // `run_sink` uniquely identifies the dispatched-card path here. Start
-        // it clean and clear it again below, while the card note carries the
-        // explicit prior-attempt history it is allowed to use. This also lets a
-        // rebuilt agent's current system prompt take effect instead of reviving
-        // a transcript whose frozen prompt predates newly wired tools.
-        let isolated_background_turn =
-            Self::isolates_background_history(turn_chat_id.as_deref(), has_run_sink);
-        let mut isolated_context_turn = isolated_background_turn;
-        if isolated_background_turn {
-            if !agent.history().is_empty() {
-                agent.clear_history();
-            }
-            overrides.suppress_transcript_autoload = true;
-        }
-        // Codex P1: a session delta's `next_state` must not land in
-        // `self.session` until the turn it was cued into actually succeeds.
-        // The rows it marks delivered are handed to the model as this turn's
-        // cue text — but if `agent.turn` never runs, or returns `Err`, the
-        // model never actually read them, and committing anyway would have
-        // the next turn's delta walk skip straight past rows nothing was ever
-        // shown. Held here and only written back once `reply` is `Ok`, well
-        // below.
-        let mut pending_session_commit: Option<agent_session::AgentSessionState> = None;
-        if let Some(incoming) = turn_chat_id.as_deref() {
-            let incoming_root = thread_root;
-            let mut bound = self.bound_chat.lock().await;
-            let switched = bound.as_ref().map(|(chat, root)| (chat.as_str(), *root))
-                != Some((incoming, incoming_root));
-            let mut session = self.session.lock().await;
-
-            // A chat-only turn keeps its reduction (#1725 / #1730).
-            //
-            // The fast path already runs a greeting with no tools, no memory
-            // retrieval and no prior task's goal, on the grounds that a bare
-            // "hi" should not inherit the machinery of the task before it. A
-            // continuous session must not quietly undo that: an agent's live
-            // history carries the **raw tool results** of whatever it was last
-            // doing, and replaying a fetched page into an unrelated greeting is
-            // the exact screenshot bug #1730 closed.
-            //
-            // So a chat-only turn re-seeds instead of continuing. It still
-            // remembers the conversation — the seed is this desk's own
-            // transcript, which is prose — it simply does not carry the agentic
-            // residue of an unrelated task. That is the same trade the three
-            // other reductions on this path already make.
-            let chat_only = crate::runtime::delegation::is_chat_only_turn();
-            // A turn that brings its own context carries nothing of its own.
-            //
-            // `history_seed: false` is the hive episode's flag, and its
-            // documented reason applies with more force to a continuous
-            // session than it did to a seed: a deliberating turn is handed an
-            // attributed, **visibility-filtered** transcript by the episode
-            // prompt, and live history would hand the same desk's lines back
-            // unattributed and in the assistant role. A blind opening round
-            // stops being blind, `^N` citations lose the attribution they are
-            // read against, and — the case that actually broke — a second
-            // episode in one cycle inherits the first one's already-carried
-            // vote, which is precisely what `EpisodeScope` exists to prevent.
-            //
-            // So the history is emptied and nothing is seeded in its place.
-            // The prompt is the context, entire.
-            let brings_own_context = !chat.history_seed;
-            //
-            // A session with no watermark is handled one level down:
-            // `prepare_delta` answers `ColdStart` for it, which lands on the
-            // same re-seed. Deliberately NOT folded into a `cold` flag here —
-            // an earlier revision did, and conflating "no watermark" with "no
-            // history" is what let an unrelated task's raw tool output survive
-            // a re-seed, because the clear below was skipped for an agent that
-            // had plenty of history and merely no watermark yet.
-            //
-            // A session with no watermark is a re-seed too, and is decided here
-            // rather than left to `prepare_delta`'s `ColdStart`: the delta is
-            // only asked for when the journal and the company record are both
-            // wired, and a host without them would otherwise never re-seed at
-            // all — leaving whatever was last in the live history to answer the
-            // next chat turn.
-            let mut reseed = !brings_own_context && (chat_only || session.watermark.is_none());
-            if brings_own_context {
-                isolated_context_turn = true;
-                if !agent.history().is_empty() {
-                    agent.clear_history();
-                }
-                overrides.suppress_transcript_autoload = true;
-                // The episode prompt already contains the triggering message,
-                // but it does not contain unrelated unseen channel/DM rows.
-                // Preserve the company-wide watermark and mark only the trigger
-                // seen; resetting the whole state here permanently skipped
-                // those unrelated rows on the next cold seed.
-                if let Some(seq) = chat.message_seq {
-                    session.accept_seen(seq);
-                }
-            }
-            if !reseed
-                && !brings_own_context
-                && let (Some(request), Some(company)) = (&chat_seed, turn_company.as_ref())
-            {
-                match request
-                    .session_delta(company, &self.agent_id, &session)
-                    .await
-                {
-                    Some(agent_session::SessionPlan::Delta {
-                        envelopes,
-                        next_state,
-                    }) => {
-                        // NOT committed here (Codex P1): writing `*session =
-                        // next_state` at this point marks every envelope's row
-                        // delivered before `agent.turn` has even been called,
-                        // let alone succeeded. Queued in
-                        // `pending_session_commit` instead, and only written
-                        // back once `reply` comes back `Ok`, far below — a
-                        // turn that fails after this never marks these rows
-                        // seen, so the next attempt's delta still hands them
-                        // over.
-                        session_cues = agent_session::render_cues(&envelopes);
-                        tracing::debug!(
-                            chat = incoming,
-                            delivered = envelopes.len(),
-                            cued = session_cues.is_some(),
-                            "[harness] session delta — continuing without clearing history"
-                        );
-                        pending_session_commit = Some(next_state);
-                    }
-                    Some(agent_session::SessionPlan::Reinitialize { reason }) => {
-                        tracing::debug!(
-                            chat = incoming,
-                            ?reason,
-                            "[harness] session delta unavailable — falling back to the recent-window seed"
-                        );
-                        reseed = true;
-                    }
-                    // No journal wired on this host: nothing to continue from,
-                    // and nothing to re-seed from either. Leave the session as
-                    // it is and let the turn run on its accumulated history.
-                    None => {}
-                }
-            }
-
-            if reseed {
-                // A re-seed is the one path that still empties the session. It
-                // happens on a chat-only turn, on a cold start, and when the
-                // agent has been away longer than the delta walk can bound
-                // (`GapTooLarge` / `TooManyUnseen`) — where a recent window is
-                // honestly better context than a partial replay of a history it
-                // can no longer reconstruct.
-                //
-                // Guarded on the history itself rather than on any derived
-                // "is this cold" flag: what makes the clear necessary is that
-                // there IS something to clear, and nothing else.
-                if !agent.history().is_empty() {
-                    agent.clear_history();
-                }
-                // OpenCompany's own EventLog-derived seed (issue #1840).
-                // OpenHuman never writes a file transcript for an OC `chat_id`,
-                // so `seed_resume_from_thread_transcript` always misses and the
-                // reply starts blind (the #1725/#1730 regression).
-                let seed = match (&chat_seed, turn_company.as_ref()) {
-                    // `self.agent_id` is the viewer the seed is attributed
-                    // against (issue #1956): this agent's own prior replies stay
-                    // assistant turns, and every teammate's — plus the runtime's
-                    // own notices — arrive as labelled user turns instead of
-                    // collapsing into its first person.
-                    (Some(request), Some(company)) => {
-                        request.build(company, incoming, &self.agent_id).await
-                    }
-                    _ => Vec::new(),
-                };
-                tracing::debug!(
-                    chat = incoming,
-                    seeded = seed.len(),
-                    "[harness] built recent-chat seed for the incoming desk"
-                );
-                // Fall back to the transcript lookup only when the seed is empty
-                // (a background/workflow turn, no `chat_seed` request, or a desk
-                // with no recent history).
-                let seeded = if seed.is_empty() {
-                    agent.seed_resume_from_thread_transcript(incoming)
-                } else {
-                    // `message` is the augmented turn text; `seed_resume_from_messages`
-                    // drops a trailing user line matching it. `ChatSeedRequest::build`
-                    // (above) already stripped the raw duplicate against
-                    // `raw_message` (see `chat_seed::strip_current_message`), so
-                    // this is a defensive no-op on the happy path and correct if
-                    // augmentation was off.
-                    match agent.seed_resume_from_messages(seed, message) {
-                        Ok(()) => true,
-                        Err(error) => {
-                            tracing::warn!(
-                                chat = incoming,
-                                %error,
-                                "[harness] chat-seed resume failed; turn starts without recent history"
-                            );
-                            false
-                        }
-                    }
-                };
-                // After a re-seed the agent-latest transcript is the WRONG
-                // thread, so never let the turn's fallback auto-resume run: our
-                // explicit correct-thread seed (or a transcript hit) has already
-                // set `cached_transcript_messages`; a miss must start fresh, NOT
-                // reload the previous chat's transcript and re-leak it (the exact
-                // screenshot bug). Keep this true regardless of which seed path ran.
-                overrides.suppress_transcript_autoload = true;
-                tracing::debug!(
-                    chat = incoming,
-                    seeded,
-                    "[harness] thread-transcript re-seed result"
-                );
-                // The seed just built only covers `incoming` — the turn's own
-                // channel — so only that channel's catch-up may be recorded.
-                // `reseeded` keeps this session's prior (company-wide)
-                // watermark exactly so an unseen row on some OTHER channel
-                // does not silently become "already delivered" underneath it;
-                // see its doc comment.
-                *session = session.reseeded(chat.message_seq);
-            }
-
-            let _ = switched;
-            *bound = Some((incoming.to_string(), incoming_root));
+        let isolated = Self::isolates_background_history(turn_chat_id.as_deref(), has_run_sink)
+            || !chat.history_seed;
+        let session_id = if isolated {
+            format!("{}:run:{}", self.session_key, uuid::Uuid::new_v4().simple())
         } else {
-            // Unthreaded turn (a dispatched background task or a workflow
-            // agent node): it still runs against this agent's shared,
-            // in-memory `history` — the same field a chat turn reads and
-            // extends — but carries no chat thread to bind that history to.
-            //
-            // Before the session was continuous this invalidated the binding so
-            // the next chat turn would always be treated as a switch and clear.
-            // There is no clear to arrange any more: a background turn is
-            // simply more session, and the next chat turn continues through the
-            // same watermark. The binding is still dropped so the ambient
-            // channel does not claim a conversation this turn was not in.
-            let mut bound = self.bound_chat.lock().await;
-            if bound.is_some() {
-                tracing::debug!("[harness] unthreaded turn — dropping the chat binding");
-                *bound = None;
-            }
-            // And the conversational session restarts after it.
-            //
-            // A background task is work this agent did, but it is not something
-            // it *said* — it names no conversation, journals no chat line, and
-            // what it leaves in the live history is the raw output of whatever
-            // tools it ran. Carrying that forward would put a fetched page into
-            // the next thing an operator types, which is the cross-context leak
-            // this branch was originally written to prevent.
-            //
-            // Dropping the watermark makes the next chat turn re-seed from the
-            // journal — prose, attributed, and including anything the task
-            // actually journaled. So the agent still knows what it did; it
-            // simply does not carry the residue of doing it.
-            let mut session = self.session.lock().await;
-            *session = agent_session::AgentSessionState::default();
-        }
-
-        // The text this turn actually runs on: the cue block, then the message.
-        //
-        // Inbound is a **cued turn, not a tool result** — deliberately, and
-        // matching the reference implementation this shape came from, where
-        // outbound is a tool call and inbound is a plain hidden turn carrying a
-        // text cue. It is also the cheaper half: OpenHuman's resume path
-        // already speaks `(role, content)`, so a cued turn needs no new
-        // plumbing, whereas a synthesised tool result would need a fabricated
-        // call id with no matching call and would confuse `fold_steps`.
-        //
-        // Borrowed when there are no cues, which is the ordinary same-channel
-        // reply — that turn pays nothing for this.
-        let turn_text: std::borrow::Cow<'_, str> = match &session_cues {
-            Some(cues) => std::borrow::Cow::Owned(format!("{cues}\n{message}")),
-            None => std::borrow::Cow::Borrowed(message),
+            self.session_key.clone()
         };
-        let message: &str = turn_text.as_ref();
 
-        // Reduced-scope chat turn. When the delegation runner marked this turn
-        // chat-only (an explicit "Just chatting" or a high-confidence greeting —
-        // see `delegation::with_chat_only_hint`), run it as a cheap conversational
-        // reply: no tools to loop on, no pre-turn memory retrieval, and no prior
-        // task's thread goal re-injected.
-        if crate::runtime::delegation::is_chat_only_turn() {
+        let pump = progress_pump::ProgressPump::start(self.step_labels.clone(), stream, run_sink);
+
+        // Where this line was said, for a session that hears every chat. A
+        // single line rather than the `agent_session` cue block it replaces:
+        // the attributed delta that names the other speakers is Phase 4's.
+        let cued: std::borrow::Cow<'_, str> = match turn_chat_id.as_deref() {
+            Some(chat_id) if !isolated => std::borrow::Cow::Owned(match chat.thread_root {
+                Some(root) => format!("[conversation: {chat_id}, thread {}]\n{message}", root.value()),
+                None => format!("[conversation: {chat_id}]\n{message}"),
+            }),
+            _ => std::borrow::Cow::Borrowed(message),
+        };
+        let message: &str = cued.as_ref();
+
+        let chat_only = crate::runtime::delegation::is_chat_only_turn();
+        if chat_only {
             tracing::debug!(
-                "[harness] chat-only turn — tool-less, memory-less, goal-less (fast path, #1725)"
+                "[harness] chat-only turn — the embedded turn keeps its tool scope; \
+                 the reply is guarded for tool markup (#2094)"
             );
-            overrides.suppress_active_goal = true;
-            overrides.suppress_tools = true;
-            overrides.suppress_memory_agent = true;
         }
 
-        // One-shot: openhuman resets it after this turn, so the next real turn
-        // gets its full agentic scope and normal transcript resume back.
-        if overrides != oh::agent::harness::session::TurnOverrides::default() {
-            agent.set_next_turn_overrides(overrides);
-        }
-
-        // Two hooks, both fired by openhuman between tool-loop iterations:
-        //
-        // * the **steer** hook, only when an operator control is provided (#111);
-        // * the **budget** hook, only when this teammate declares a
-        //   `budget_usd_daily` cap (#988) — the in-turn spend brake. A teammate
-        //   with no declared budget gets no hook, which matches the vendored
-        //   runtime's own posture: openhuman constructs `BudgetStopHook` nowhere
-        //   and explicitly "never hard-stops a user-present turn that isn't
-        //   actively burning a live budget". A turn that never outruns a real
-        //   budget has nothing to protect it from, and a blanket magic number no
-        //   operator can see or change would be worse than none.
-        //
-        // A budget halt and an iteration-cap pause are **different outcomes**, not
-        // two spellings of one: openhuman reports the cap through
-        // `Agent::last_turn_hit_cap`, which stays `false` for a hook-driven stop
-        // (the run paused below `max_tool_iterations`, so its cap predicate does
-        // not hold). Part 1 of #926 makes the cap pause operator-visible; it must
-        // not inherit budget halts.
         let mut hooks: Vec<Arc<dyn oh::agent::stop_hooks::StopHook>> = Vec::new();
         if let Some(control) = steer {
             hooks.push(Arc::new(crate::harness::steer::SteerStopHook::new(
                 control.clone(),
             )));
         }
-        // Issue #1032: the budget hook is *wrapped* rather than pushed bare, so
-        // the halt survives the boundary. Upstream's `StopDecision::Stop` is
-        // consumed inside openhuman's tool loop, which returns the run's text as
-        // an ordinary `Ok(reply)`; `with_stop_hooks` hands back only the
-        // future's value; and `last_turn_hit_cap()` is `false` here by design.
-        // Without the wrapper there is nothing left to read, and a turn stopped
-        // for spend is indistinguishable from one that finished.
-        //
-        // The predicate itself stays upstream's — the wrapper only observes it.
         let mut spend_brake: Option<(f64, Arc<std::sync::atomic::AtomicBool>)> = None;
         if let Some(cap) = self.turn_spend_cap_usd() {
             let hook = crate::harness::spend::SpendStopHook::new(cap);
-            // Taken before the hook is boxed into the task-local list; once it
-            // is an `Arc<dyn StopHook>` the concrete type is unreachable.
             spend_brake = Some((cap, hook.halted()));
             hooks.push(Arc::new(hook));
         }
 
-        // Issue #1846: set from inside the async block below (on either
-        // attempt) when `classify_turn` recognises the top-level budget-paused
-        // wire shape, and read back out after `with_stop_hooks` returns — the
-        // same "flag on a `Mutex`, set inside the turn body, read after the
-        // `.await`" idiom `spend_brake`'s `AtomicBool` uses just above,
-        // because the async block borrows rather than moves (it is `async {}`,
-        // not `async move {}`) so a plain local outlives it.
         let budget_pause_summary: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-        // `Box::pin` at the task-local scope boundary (the nested-scope
-        // stack-overflow trap). The turn body owns the retry classification and
-        // reports every attempt's usage.
+        let _turn = self.turn_lock.lock().await;
+        // Anything left on the tap belongs to no attempt of ours.
+        let _ = self.bridge.take_usage();
+        let send = |sender: tokio::sync::mpsc::Sender<oh::agent::progress::AgentProgress>| {
+            self.agent
+                .turn(message)
+                .session(session_id.clone())
+                .cwd(&self.workspace)
+                .on_progress(sender)
+                .send()
+        };
+
         let (reply, mut usages): (crate::Result<String>, Vec<TurnUsage>) =
             oh::agent::stop_hooks::with_stop_hooks(
                 hooks,
                 Box::pin(async {
                     let mut usages: Vec<TurnUsage> = Vec::new();
-                    // CodeRabbit review (PR #2053): `agent` is the ONE `Agent`
-                    // this pool reuses for every chat of this `(company,
-                    // agent_id)` pair (see `CompanyAgent::agent`'s doc), and
-                    // openhuman's `last_turn_usage_totals` is set only when a
-                    // turn finalizes normally — an attempt that ends in
-                    // `EmptyProviderResponse` returns before that write, so
-                    // `read_turn_usage` reads back whatever the PREVIOUS
-                    // finalized turn left there, not this attempt's (zero) own.
-                    // Left unguarded, that stale figure would ride home in
-                    // `usages` as if this attempt had spent it — for the
-                    // one-shot retry that is the previous ATTEMPT's total
-                    // double-counted; across two separate calls to this method
-                    // on the same reused agent, it is an unrelated PAST TURN's
-                    // total billed a second time onto a turn that made no
-                    // metered call at all.
-                    //
-                    // Codex review (PR #2053): an earlier version of this fix
-                    // compared each read against the value seen before the
-                    // attempt and treated an unchanged read as zero — which
-                    // wrongly zeroed a genuinely NEW finalized total on the
-                    // rare turn whose real spend happened to numerically equal
-                    // the immediately preceding one. `agent.turn()`'s own
-                    // `Result` already says, unambiguously, whether THIS
-                    // attempt finalized: `Ok` only ever returns non-empty text
-                    // (a blank `Ok` is retried inside openhuman's own loop
-                    // before it can reach here — see the `Empty` arm below),
-                    // and finalizing `last_turn_usage_totals` is part of what
-                    // makes a turn return `Ok` at all. So trust `read_turn_usage`
-                    // outright on `Ok`, regardless of its value, and never trust
-                    // it on `Err` (no comparison needed there either — an
-                    // `Err` never finalizes, so any read after one is
-                    // necessarily either `None`'s zero or a stale carry-over,
-                    // and either way is not this attempt's own). The fix does
-                    // not reset the field itself — openhuman does not expose a
-                    // way to from here (`take_last_turn_usage_totals` is
-                    // `pub(crate)` to that crate) — it reads the outcome
-                    // instead. See `last_observed_turn_cost` just below for the
-                    // fallback that still recovers a genuinely spent-and-failed
-                    // attempt's tokens from its own progress-stream segment.
-                    //
-                    // Issue #1680: timed PER ATTEMPT, not across the retry. Each
-                    // `agent.turn` opens a fresh harness run with a fresh
-                    // wall-clock budget, so a duration spanning both attempts
-                    // would be compared against a ceiling neither of them saw.
-                    // This is the only per-turn duration measured anywhere —
-                    // `WorkflowRunNodeRow::elapsed_ms` is per NODE, and a node
-                    // is not a turn.
                     let started = std::time::Instant::now();
-                    let first = agent.turn(message).await;
+                    let first = send(pump.sender()).await.map(|outcome| outcome.reply);
                     let first_elapsed = started.elapsed();
-                    let first_finalized = first.is_ok();
-                    usages.push(if first_finalized {
-                        read_turn_usage(&agent)
-                    } else {
-                        TurnUsage::default()
-                    });
+                    usages.push(self.tapped_usage());
                     let reply: crate::Result<String> = match self
-                        .classify_turn(first, first_elapsed)
+                        .classify_turn(first.map_err(anyhow::Error::from), first_elapsed)
                     {
                         AttemptOutcome::Reply(reply) => Ok(reply),
                         AttemptOutcome::Hard(err) => Err(err),
-                        // Issue #1846: terminal, like `Hard`, but graceful —
-                        // ends the turn with the actionable copy as an `Ok`
-                        // reply rather than propagating an `Err`, and is never
-                        // retried (retrying hits the identical wall). Recorded
-                        // into `budget_pause_summary` so the caller can build
-                        // `TurnOutcome::budget_paused` once this future
-                        // resolves — the same reason `spend_brake` exists.
-                        //
-                        // Issue #1846 review (Codex #3869193105): `summary`
-                        // embeds the provider's raw error chain
-                        // (`budget_paused_summary`'s `{err:#}`), which a
-                        // BYO/custom provider can return with a
-                        // credential-bearing URL or an echoed secret baked in.
-                        // Redact HERE, once, before the value is stored
-                        // anywhere — not just on the copy returned as the
-                        // authored reply — because `budget_pause_summary`'s
-                        // slot is what `TurnOutcome::budget_paused.summary`
-                        // carries onward into `BudgetPause`/`BudgetPauseMarker`,
-                        // which is durable and operator-visible (the parked
-                        // marker, the chat notice text via
-                        // `budget_pause_notice`, and a dispatched card's
-                        // settle note all read it straight through). A raw
-                        // copy in the mutex slot would have leaked the secret
-                        // to every one of those sinks even though the reply
-                        // itself was clean.
-                        //
-                        // `redact`, not the full `scrub` pipeline: `scrub`
-                        // additionally hard-truncates to
-                        // `mcp_probe::SCRUB_MAX_BYTES` (300 bytes), which is
-                        // the right ceiling for a transient reply bubble but
-                        // is shorter than `budget_paused_summary`'s own
-                        // `truncate_for_pause` cap (600 chars) already applied
-                        // to the error detail — stacking `scrub`'s cap on top
-                        // would silently chop the persisted marker/notice text
-                        // well short of the length `budget_paused_summary`
-                        // deliberately allows. `redact` does the same
-                        // secret-substring and URL-query stripping without the
-                        // second, shorter truncation.
                         AttemptOutcome::BudgetPaused { summary } => {
                             let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
                             if let Ok(mut slot) = budget_pause_summary.lock() {
                                 *slot = Some(redacted.clone());
                             }
-                            // The reply keeps the FULL `scrub` pipeline
-                            // (redact + the shorter 300-byte cap), unchanged
-                            // from before this fix — a chat bubble was always
-                            // meant to be terse.
                             Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
                         }
                         AttemptOutcome::Empty => {
-                            // Retry-guard edge: skip the one-shot retry when an
-                            // operator steer already pends, so a cancel/pause
-                            // before any text can't restart the work.
-                            //
-                            // Issue #1032 adds the second guard, on the same
-                            // reasoning: the work was stopped on purpose, and an
-                            // empty reply is not licence to restart it. The
-                            // retry is a fresh `agent.turn`, so openhuman builds
-                            // it a fresh `TurnCost` — the brake's accumulator
-                            // starts back at zero, and a teammate that had just
-                            // exhausted its cap could spend up to a whole cap
-                            // again before the hook fired a second time. The
-                            // brake is armed per turn, so nothing else here
-                            // would stop it.
-                            //
-                            // **Defence in depth, not a fix to an observed bug,
-                            // and the difference is recorded so nobody re-derives
-                            // it.** The `Empty` arm appears to be unreachable
-                            // after a halt: a halt implies at least one completed
-                            // tool iteration, and openhuman answers the post-halt
-                            // wrap-up with its own synthesised "here's what I did
-                            // this turn" summary — which it substitutes even when
-                            // the wrap-up call returns blank text OR no choices
-                            // at all. Both were scripted against the real turn
-                            // loop and neither reached this arm, so there is no
-                            // test here that would fail without this guard, and
-                            // one was deliberately not left behind pretending
-                            // otherwise. What the guard buys is that the
-                            // invariant stops depending on that substitution
-                            // staying true across a vendored bump.
-                            //
-                            // `halted_for_spend` below still reports the halt
-                            // either way, so the operator gets the notice that
-                            // explains a stub reply rather than silence.
                             let spend_halted = spend_brake.as_ref().is_some_and(|(_, halted)| {
                                 halted.load(std::sync::atomic::Ordering::SeqCst)
                             });
                             if steer.map(|c| c.requested()).unwrap_or(false) || spend_halted {
                                 Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
                             } else {
-                                // Issue #1725 review: `set_next_turn_overrides`
-                                // is one-shot — openhuman consumes it at the
-                                // top of the NEXT `Agent::turn` call and resets
-                                // to the default (`turn/core.rs`'s
-                                // `std::mem::take`). Applied only once, above,
-                                // a chat-only turn's suppression would cover
-                                // just the first attempt: were this retry ever
-                                // reached with the override already spent, it
-                                // would run with the agent's full,
-                                // un-suppressed scope — regaining the whole
-                                // tool belt, memory agent and active goal the
-                                // fast path exists to withhold. Reapply the
-                                // SAME overrides so every attempt in a
-                                // chat-only turn stays reduced, not just the
-                                // first.
-                                //
-                                // Defence in depth, like the guard above it:
-                                // an immediately-blank completion with no tool
-                                // call is retried INSIDE openhuman's own tool
-                                // loop under the SAME per-turn overrides
-                                // (verified by instrumenting a scripted blank
-                                // response — `first` came back
-                                // `Ok("...")` directly, never reaching this
-                                // arm at all), so this specific line is not
-                                // known to fire from any script this suite can
-                                // build. What it buys is that IF this arm ever
-                                // is reached — a terminal `EmptyProviderResponse`
-                                // openhuman raises after exhausting its own
-                                // internal budget — the retry does not silently
-                                // regress to full scope.
-                                if overrides
-                                    != oh::agent::harness::session::TurnOverrides::default()
-                                {
-                                    agent.set_next_turn_overrides(overrides);
-                                }
                                 let retry_started = std::time::Instant::now();
-                                let second = agent.turn(message).await;
+                                let second =
+                                    send(pump.sender()).await.map(|outcome| outcome.reply);
                                 let second_elapsed = retry_started.elapsed();
-                                // Same outcome-trusts-the-read rule as the first
-                                // attempt above: only `Ok` means openhuman
-                                // actually finalized a fresh total for THIS
-                                // attempt, so only `Ok` earns trusting
-                                // `read_turn_usage` — regardless of what value
-                                // it reads back.
-                                let second_finalized = second.is_ok();
-                                usages.push(if second_finalized {
-                                    read_turn_usage(&agent)
-                                } else {
-                                    TurnUsage::default()
-                                });
-                                match self.classify_turn(second, second_elapsed) {
+                                usages.push(self.tapped_usage());
+                                match self.classify_turn(
+                                    second.map_err(anyhow::Error::from),
+                                    second_elapsed,
+                                ) {
                                     AttemptOutcome::Reply(reply) => Ok(reply),
                                     AttemptOutcome::Empty => Ok(crate::harness::mcp_probe::scrub(
                                         GRACEFUL_EMPTY_REPLY,
                                         &[],
                                     )),
-                                    // Issue #1846: same terminal-not-retryable
-                                    // handling as the first attempt's arm above
-                                    // — this IS the retry, so there is no
-                                    // further attempt to skip.
-                                    //
-                                    // Issue #1846 review (Codex #3869193105):
-                                    // redacted before it reaches the mutex
-                                    // slot, same as the first attempt's arm —
-                                    // see that arm's doc comment for why this
-                                    // is `redact`, not the shorter-truncating
-                                    // `scrub`.
                                     AttemptOutcome::BudgetPaused { summary } => {
                                         let redacted =
                                             crate::harness::mcp_probe::redact(&summary, &[]);
@@ -1979,70 +1451,16 @@ impl CompanyAgent {
                 }),
             )
             .await;
+        drop(_turn);
 
-        // Detach the sink (drops the only remaining `Sender`, closing the
-        // channel), release the agent lock, then drain + fold. A `Hard` error
-        // still runs this cleanup before propagating, so the collector never
-        // leaks.
-        agent.set_on_progress(None);
-        // Issue #926: read the cap flag while the lock is still held, the same
-        // under-lock idiom `read_turn_usage` uses above. Not draining, so the
-        // retry path's second attempt simply overwrites the first's value —
-        // which is right: the outcome describes the attempt that produced the
-        // reply being returned.
-        let hit_iteration_cap = agent.last_turn_hit_cap();
-        // A Hive turn's attributed/visibility-filtered prompt must not become
-        // ordinary conversational history for the next channel. Its durable
-        // rows remain discoverable through the preserved session watermark.
-        if isolated_context_turn && !agent.history().is_empty() {
-            agent.clear_history();
-        }
-        drop(agent);
-        let events = collector.await.unwrap_or_default();
-        // A hard-failed ATTEMPT's spend, recovered from the progress stream —
-        // per attempt, not only when every attempt reported nothing.
-        //
-        // `read_turn_usage` above reads openhuman's `last_turn_usage_totals`,
-        // and `run_single` sets that only AFTER its own `let outcome = outcome?`
-        // — so an attempt that ended in an error publishes nothing at all, and
-        // `read_turn_usage` pushed a zero for it. That is precisely backwards
-        // for the attempts worth accounting for: a wall-clock ceiling fires
-        // *because* the agent did ten minutes of real work, and the run a
-        // founder most needs the cost of was the one reported as free.
-        //
-        // The live tally openhuman publishes as it goes — `TurnCostUpdated`,
-        // cumulative across ONE `agent.turn`, emitted after each provider
-        // response that carried a usage block — survives the error, because
-        // those frames were already sent down this shared channel before the
-        // attempt failed.
-        //
-        // Codex review (PR #2053): the original gate only fired when EVERY
-        // attempt was zero, which recovers at most one attempt — a metered
-        // first attempt that empties, followed by a retry that succeeds and
-        // publishes its OWN authoritative (small) total, left `usages` as
-        // `[zero, retry_total]`. That is not all-zero, so the first attempt's
-        // already-published spend was silently dropped rather than merely
-        // under-reported. Segmenting `events` on `TurnStarted` — emitted
-        // exactly once at the top of each `agent.turn()` call
-        // (`core_turn.rs`), never for a delegated sub-agent's turn, which
-        // uses `SubagentIterationStarted`/`SubagentToolCallStarted` instead —
-        // gives each attempt its own contiguous slice of the stream, so each
-        // zeroed attempt recovers its OWN tally independently.
-        //
-        // **A lower bound, stated rather than discovered.** `TurnCostUpdated`
-        // is suppressed for child scopes (openhuman's `observability`: a
-        // sub-agent's spend reaches the parent's `last_turn_usage_totals`
-        // instead), so an attempt that had delegated under-reports the
-        // delegates. Understating an attempt is a far smaller wrong than
-        // reporting it as free, and this seam cannot see more than the stream
-        // carries.
+        let events = pump.finish().await;
         if usages.iter().any(TurnUsage::is_zero) {
-            let segments = attempt_event_segments(&events, usages.len());
+            let segments = progress_pump::attempt_event_segments(&events, usages.len());
             for (usage, segment) in usages.iter_mut().zip(segments) {
                 if !usage.is_zero() {
                     continue;
                 }
-                if let Some(observed) = last_observed_turn_cost(segment) {
+                if let Some(observed) = progress_pump::last_observed_turn_cost(segment) {
                     tracing::info!(
                         agent = %self.agent_id,
                         input_tokens = observed.input_tokens,
@@ -2055,35 +1473,13 @@ impl CompanyAgent {
                 }
             }
         }
-        // The cap openhuman was actually enforcing, for the trace only. Taken
-        // from the last `IterationStarted` rather than from config, so the log
-        // reports the number the turn ran under instead of the one this crate
-        // believes it configured. Deliberately NOT plumbed into the operator
-        // notice: one notice can cover a responder turn, a desk turn and a
-        // relay turn, and naming one of their caps would be a number the
-        // operator cannot map back to anything.
-        let iteration_cap = events.iter().rev().find_map(|event| match event {
-            oh::agent::progress::AgentProgress::IterationStarted { max_iterations, .. } => {
-                Some(*max_iterations)
-            }
-            _ => None,
-        });
+        let hit_iteration_cap = progress_pump::hit_iteration_cap(&events);
         if hit_iteration_cap {
             tracing::info!(
                 agent = %self.agent_id,
-                iteration_cap,
                 "[turn] paused at the tool-iteration cap; the reply is a resumable checkpoint, not a finished answer"
             );
         }
-        // Issue #1032: read the spend brake the same way. Not under the agent
-        // lock — the flag lives on the hook, not on the vendored session, and
-        // the hook has already finished running by the time `with_stop_hooks`
-        // returns.
-        //
-        // The spend is summed over every attempt's usage rather than read from
-        // the hook, so the figure covers the retry path's second attempt too:
-        // both were paid for, and reporting only one would understate what the
-        // turn actually cost.
         let halted_for_spend = spend_brake.and_then(|(cap_usd, halted)| {
             halted
                 .load(std::sync::atomic::Ordering::SeqCst)
@@ -2101,9 +1497,6 @@ impl CompanyAgent {
                 "[turn] halted at the in-turn spend cap; the reply stops short of the work it was doing"
             );
         }
-        // Issue #1846: read the same way `halted_for_spend` is — the async
-        // block above only borrowed this local, so the borrow has ended by the
-        // time `with_stop_hooks` returned it.
         let budget_paused = budget_pause_summary
             .lock()
             .ok()
@@ -2121,48 +1514,32 @@ impl CompanyAgent {
         }
         let steps = steps::fold_steps(events);
 
-        // The usage is returned BESIDE the result, never inside it (issue
-        // B-120). `reply?` here would have discarded `usages` on every hard
-        // failure — a wall-clock ceiling, a provider fault, an auth error —
-        // and those attempts had already burned every token they read back.
-        //
-        // Issue #2094: this turn's frozen-at-turn-1 system prompt still
-        // advertises tool briefs a `suppress_tools` turn's own request no
-        // longer carries, so the model can write a tool call out as text
-        // instead of answering — and `native_salvage` deliberately does not
-        // catch it (its `authorized_tool_names` is empty on exactly this turn
-        // shape, on purpose: recovering here would execute a call this turn
-        // never authorized). Guard the reply text itself before it reaches
-        // the operator. `overrides` is `Copy`, so reading it here — after
-        // being handed to `agent.set_next_turn_overrides` well above — is the
-        // same suppression this turn actually ran with, not a stale copy.
-        //
-        // The deferred session-delta commit (Codex P1, above): only `Ok`
-        // means the model actually ran with the cued rows in its context, so
-        // only `Ok` may mark them delivered. An `Err` leaves
-        // `pending_session_commit` to drop here unwritten — `self.session`
-        // stays exactly where it was before this turn, and the next attempt's
-        // delta walk hands the same rows over again.
-        if reply.is_ok()
-            && let Some(next_state) = pending_session_commit.take()
-        {
-            *self.session.lock().await = next_state;
-        }
         let outcome = reply.map(|reply| TurnOutcome {
-            reply: if overrides.suppress_tools {
+            reply: if chat_only {
                 chat_only_guard::guard_suppressed_reply(reply)
             } else {
                 reply
             },
             steps,
             hit_iteration_cap,
-            // This is the built_in harness, not the ACP fold — the only
-            // path that produces an abnormal stop (PR #1880 review).
             abnormal_stop: None,
             halted_for_spend,
             budget_paused,
         });
         (outcome, usages)
+    }
+
+    /// Everything the bridge tapped since the previous attempt, summed.
+    fn tapped_usage(&self) -> TurnUsage {
+        self.bridge
+            .take_usage()
+            .into_iter()
+            .fold(TurnUsage::default(), |acc, call| TurnUsage {
+                input_tokens: acc.input_tokens + call.input_tokens,
+                output_tokens: acc.output_tokens + call.output_tokens,
+                cached_input_tokens: acc.cached_input_tokens + call.cached_input_tokens,
+                cost_usd: acc.cost_usd + call.cost_usd,
+            })
     }
 
     fn isolates_background_history(turn_chat_id: Option<&str>, has_run_sink: bool) -> bool {
@@ -2288,86 +1665,6 @@ fn budget_paused_summary(agent_id: &str, err: &anyhow::Error) -> String {
 }
 
 /// Reads the just-completed turn's usage (zero when the provider reported none).
-fn read_turn_usage(agent: &Agent) -> TurnUsage {
-    agent
-        .last_turn_usage()
-        .map(|u| TurnUsage {
-            input_tokens: u.input_tokens,
-            output_tokens: u.output_tokens,
-            cached_input_tokens: u.cached_input_tokens,
-            cost_usd: u.cost_usd,
-        })
-        .unwrap_or_default()
-}
-
-/// The last cumulative cost tally openhuman published on a turn's progress
-/// stream, or `None` when the turn made no metered model call.
-///
-/// [`TurnCostUpdated`](oh::agent::progress::AgentProgress::TurnCostUpdated) is
-/// cumulative across one `agent.turn`, so the **last** frame is the whole
-/// attempt's spend and earlier ones must never be summed with it.
-///
-/// This is the only figure a hard-failed attempt leaves behind — see the call
-/// site in [`CompanyAgent::run_with_steer`] for why `read_turn_usage` reads back
-/// nothing for one.
-fn last_observed_turn_cost(events: &[oh::agent::progress::AgentProgress]) -> Option<TurnUsage> {
-    events.iter().rev().find_map(|event| match event {
-        oh::agent::progress::AgentProgress::TurnCostUpdated {
-            input_tokens,
-            output_tokens,
-            cached_input_tokens,
-            total_usd,
-            ..
-        } => Some(TurnUsage {
-            input_tokens: *input_tokens,
-            output_tokens: *output_tokens,
-            cached_input_tokens: *cached_input_tokens,
-            cost_usd: *total_usd,
-        }),
-        _ => None,
-    })
-}
-
-/// Splits a turn's flat progress-event stream into one contiguous slice per
-/// attempt, so [`last_observed_turn_cost`] can read a zeroed attempt's own
-/// tally back without crediting it with a DIFFERENT attempt's spend (Codex
-/// review, PR #2053).
-///
-/// [`AgentProgress::TurnStarted`](oh::agent::progress::AgentProgress::TurnStarted)
-/// is emitted exactly once at the very top of every `agent.turn()` call
-/// (`core_turn.rs`, "about to enter the iteration loop") and never for a
-/// delegated sub-agent's turn — those use `SubagentIterationStarted`/
-/// `SubagentToolCallStarted` instead — so each attempt owns exactly one
-/// contiguous run of events starting at its own `TurnStarted` and ending
-/// where the next attempt's begins, or at the stream's end for the last.
-///
-/// `attempts` is `usages.len()` — the number of `agent.turn()` calls the
-/// wrapper actually made (one, or two across the one-shot retry). Always
-/// returns exactly that many slices; an attempt whose `TurnStarted` never
-/// reached this stream (openhuman's collector drops nothing observed in
-/// practice, but the channel is not literally unbounded) gets an empty one,
-/// which is the same "nothing to recover" outcome as before this fix.
-fn attempt_event_segments(
-    events: &[oh::agent::progress::AgentProgress],
-    attempts: usize,
-) -> Vec<&[oh::agent::progress::AgentProgress]> {
-    let starts: Vec<usize> = events
-        .iter()
-        .enumerate()
-        .filter_map(|(i, event)| {
-            matches!(event, oh::agent::progress::AgentProgress::TurnStarted).then_some(i)
-        })
-        .collect();
-    (0..attempts)
-        .map(|i| match starts.get(i) {
-            Some(&start) => {
-                let end = starts.get(i + 1).copied().unwrap_or(events.len());
-                &events[start..end]
-            }
-            None => &events[0..0],
-        })
-        .collect()
-}
 
 /// The [`HarnessModel`] a **per-agent auxiliary** model pass (today: payload
 /// extraction; any future one built inside [`build::build_agent_with_model`])
@@ -6416,13 +5713,6 @@ pub(crate) fn workflow_wiring_deps(
 }
 
 /// Issue #1840: chat-turn history seeding, first half.
-#[cfg(test)]
-#[path = "built_in_chat_seed_seed_tests.rs"]
-mod built_in_chat_seed_seed_tests;
-/// Issue #1840: chat-turn history seeding, thread-binding half.
-#[cfg(test)]
-#[path = "built_in_chat_seed_thread_binding_tests.rs"]
-mod built_in_chat_seed_thread_binding_tests;
 /// `routed_context` fingerprint/resolution coverage.
 #[cfg(test)]
 #[path = "built_in_routed_context_tests.rs"]
