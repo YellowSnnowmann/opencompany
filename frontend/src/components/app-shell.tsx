@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { OpenCompanyClient } from "@/api/client";
 import {
   ApiError,
@@ -65,9 +65,17 @@ import {
   type AgentReplyEvent,
   budgetProximityExpiresAt,
   type CompanyStreamEvent,
+  type EpisodeFrame,
   isBudgetProximityExpired,
+  type TurnBracketFrame,
   useEvents,
 } from "@/hooks/use-events";
+import { EMPTY_EPISODE_FRAMES, reduceEpisodeFrame } from "@/lib/episode-frames";
+import {
+  coordinationObservations,
+  EMPTY_TURN_LEDGER,
+  reduceTurnBracket,
+} from "@/lib/coordination";
 import { useLedgerNav } from "@/hooks/use-ledger-nav";
 import {
   mentionCountsByChannel,
@@ -2424,6 +2432,35 @@ export function AppShell({
    */
   const [referralWorking, setReferralWorking] = useState<Record<string, ReferralWorking>>({});
 
+  /**
+   * The live half of every desk's episodes (`lib/episode-frames.ts`), and the
+   * chat turn brackets behind them (`lib/coordination.ts`).
+   *
+   * Owned here rather than in `RoomView` for the reason `transcripts` is: a
+   * round keeps running while the operator is on Company or Flows, and the
+   * band has to be right the moment they come back. Two reducers rather than
+   * one because they answer different questions — which seats a round has and
+   * what each is doing, versus how many models are thinking at once across
+   * the whole company — and the Comms graph wants the second without the
+   * first. Both are bounded, so a console left open on a busy company holds a
+   * fixed amount of either.
+   */
+  const [episodeFrames, foldEpisodeFrame] = useReducer(reduceEpisodeFrame, EMPTY_EPISODE_FRAMES);
+  const [turnLedger, foldTurnBracket] = useReducer(reduceTurnBracket, EMPTY_TURN_LEDGER);
+  const onEpisodeEvent = useCallback((event: EpisodeFrame) => foldEpisodeFrame(event), []);
+  const onTurnBracket = useCallback((event: TurnBracketFrame) => {
+    foldTurnBracket(event);
+    // A seat's bracket inside an episode also drives its lane on the band.
+    if (event.episodeId) foldEpisodeFrame(event);
+  }, []);
+  /** Bumped on `desk_routing_configured`, so an open routing editor re-reads. */
+  const [deskRoutingTick, setDeskRoutingTick] = useState(0);
+  /** What the episode frames say for the Comms graph: who spoke to whom. */
+  const commsObservations = useMemo(
+    () => coordinationObservations(episodeFrames, turnLedger),
+    [episodeFrames, turnLedger],
+  );
+
   const injectAgentReply = useCallback(
     (event: AgentReplyEvent) => {
       // The desk speaking again is the end of any crossing it was waiting on.
@@ -3125,6 +3162,14 @@ export function AppShell({
       },
       [reReadSettledThread],
     ),
+    // The episode frames and the turn brackets fold into the shell's two
+    // ledgers; `RoomView` draws the band off the first, the Comms graph and
+    // the Observatory read both. Payloads, not counters: the band is a fold,
+    // not a re-read, and the transcript's `episode` field is what corrects a
+    // dropped frame on the next hydration.
+    onEpisodeEvent,
+    onTurnBracket,
+    onDeskRoutingConfigured: useCallback(() => setDeskRoutingTick((n) => n + 1), []),
     // Issue #377. Beside the board tick above, not instead of it: a settle both
     // moves a card between columns and needs saying in the conversation the
     // card came from.
@@ -3584,6 +3629,11 @@ export function AppShell({
               // Skipping setup must not be a dead end: an unstaffed company keeps
               // a visible way back in.
               onRunSetup={() => setSetupForced(true)}
+              // Who spoke to whom inside episodes, for `#/company/comms`, and
+              // the tick that re-reads a desk's routing editor when another
+              // session installs or resets a block.
+              commsObservations={commsObservations}
+              deskRoutingTick={deskRoutingTick}
             />
           )}
           {/* Mounted on EVERY route, not only on `#/chat` (issue #2130).
@@ -3673,6 +3723,7 @@ export function AppShell({
               failedApprovals={failedApprovals}
               budgetProximity={budgetProximity}
               onDismissBudgetProximity={() => setBudgetProximity(null)}
+              episodeFrames={episodeFrames}
             />
           </ReferralRunningProvider>
           {view === "inbox" && <InboxView client={client} company={company} />}
