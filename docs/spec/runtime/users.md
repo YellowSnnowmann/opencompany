@@ -272,9 +272,9 @@ the two decided the security of both, it briefly handed every tenant a
 credential carrying the person's whole ecosystem account, and on every
 self-hosted host it drew three buttons that led to a refusal on return.
 
-The hub is still asked for one thing, a **key** (`docs/modules/server/`
-`company_key`): the person approves that on the hub's own site, and this host
-never holds a credential belonging to them.
+The hub is still asked for one thing, a **key** (`src/server/ops/company_key.rs`
+and `src/server/hub_identity.rs`): the person approves that on the hub's own
+site, and this host never holds a credential belonging to them.
 
 ## Passwords
 
@@ -354,7 +354,8 @@ half as a third-party cookie that some browsers keep and others discard, so
 whether logging out actually ended the session would vary by browser.
 
 Every browser login path routes through one `mint_session`, so all four —
-magic link, password, hub sign-in and wallet — support this identically.
+magic link, password, the first-admin claim and wallet — support this
+identically.
 
 Opting in this way is safe for the same reason the header carrier itself is: a
 cross-site HTML form cannot set a request header, and a cross-site `fetch` that
