@@ -3816,10 +3816,10 @@ fn provider_failure_sentence(detail: &str) -> Option<&'static str> {
 /// transient and which mean an account needs topping up, and a second
 /// classifier here would drift from the one that decides whether to retry.
 ///
-/// [`classify_provider_failure`]: tinyagents_harness::retry::classify_provider_failure
+/// [`classify_provider_failure`]: tinyinference::failure::classify_provider_failure
 #[cfg(feature = "openhuman")]
 fn classified_provider_sentence(status: Option<u16>, detail: &str) -> Option<&'static str> {
-    use tinyagents_harness::retry::{
+    use tinyinference::failure::{
         ProviderFailureClass, classify_provider_failure, structured_http_status,
     };
 
