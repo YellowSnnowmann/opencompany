@@ -189,7 +189,6 @@ use std::path::Path;
 
 pub use credentials::{Credential, CredentialSource, TinyhumansTokenSource, TokenTier};
 pub use ledger_file::{LEDGERS_DIR, has_ledger_files, load_dir_ledgers};
-pub(crate) use manifest::hive_problems;
 /// The roster-id grammar check, shared with the runtime id minter so a slug and
 /// a hand-authored `[[agent]].id` are held to one rule (issue #686). Not `pub`:
 /// outside the crate the validator speaks through `CompanyManifest::validate`.
