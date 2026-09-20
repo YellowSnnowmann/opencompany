@@ -122,6 +122,30 @@ async fn none_is_offered_only_on_a_loopback_host() {
     );
 }
 
+/// The packaged desktop boots with `none` already in force, and the wizard
+/// must preselect it rather than ask an operator to re-derive a fact about
+/// their own computer. Reported by the host so a browser tab against the
+/// desktop's host gets the same answer as the webview. A plain `serve` on
+/// loopback has no override and gets no default — `email` stays what it was.
+#[tokio::test]
+async fn the_desktop_host_reports_none_as_the_default_sign_in() {
+    let home_dir = home();
+    let (_, plain) = get_setup(fresh_state(home_dir.path())).await;
+    assert!(
+        plain.get("default_auth_mode").is_none(),
+        "a plain loopback serve names no default: {plain}"
+    );
+
+    let desktop = AppState::new(AppConfig {
+        bind: "127.0.0.1:8080".to_string(),
+        auth_mode_override: Some(crate::app::config::AuthMode::None),
+        ..AppConfig::default()
+    })
+    .with_home(home_dir.path().to_path_buf());
+    let (_, dto) = get_setup(desktop).await;
+    assert_eq!(dto["default_auth_mode"], "none", "{dto}");
+}
+
 /// A laptop with no SMTP is not a broken host — it is the one shape where the
 /// honest hand-off is a link the operator opens themselves. The wizard has to
 /// be able to tell that apart from a host where a magic link simply goes
