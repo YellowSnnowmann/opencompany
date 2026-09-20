@@ -190,20 +190,19 @@ fn the_registry_holds_one_turn_per_agent() {
 }
 
 #[test]
-fn a_stale_ticket_drop_does_not_evict_a_newer_turn() {
+fn finishing_a_turn_frees_the_agent_for_the_next_one() {
     let registry = Arc::new(InFlightRegistry::new());
     let first = registry.begin(desk_turn("ceo", &["ceo"])).unwrap();
-    let _finished = first.finish();
-    let _second = registry.begin(desk_turn("ceo", &["ceo"])).unwrap();
-    // `first` was consumed by `finish`; simulate the stale-drop path with a
-    // ticket whose slot is no longer the registered one.
-    let stale = registry.begin(desk_turn("engineer", &["engineer"])).unwrap();
-    let _taken = stale.finish();
-    let live = registry.begin(desk_turn("engineer", &["engineer"])).unwrap();
-    assert!(registry.is_in_flight("engineer") || registry.is_in_flight("acme--engineer"));
-    drop(live);
-    assert!(!registry.is_in_flight("acme--engineer"));
+    let finished = first.finish();
+    assert!(finished.outbox.is_empty());
+    let second = registry
+        .begin(desk_turn("ceo", &["ceo"]))
+        .expect("the agent is free again");
     assert!(registry.is_in_flight("acme--ceo"));
+    assert_eq!(second.runtime_agent_id(), "acme--ceo");
+    assert_eq!(second.snapshot().agent_id, "ceo");
+    drop(second);
+    assert!(!registry.is_in_flight("acme--ceo"));
 }
 
 #[test]
