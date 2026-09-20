@@ -224,6 +224,17 @@ tinyinference = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/tinyin
 # module: `tinyhosts` is linked as a library, so nothing here loads a cdylib.
 openhuman_core = { package = "openhuman", path = "../../vendor/openhuman/crates/openhuman-core", optional = true, default-features = false, features = ["skills", "mcp", "hosting"] }
 
+# The host-facing embedding facade over the same core: ONE process-wide
+# `Runtime` and one `Agent` per company agent (plan "hive-desks", Phase 2).
+# `openhuman_core::agent::{Agent, AgentBuilder}` no longer exist at this pin,
+# so every company turn goes through `openhuman_embed::Agent::turn`. Same
+# vendored path `tinyhivemind-openhuman` is patched onto (root `Cargo.toml`,
+# `[patch."https://github.com/tinyhumansai/openhuman"]`), so a hive binding and
+# this crate hold one `Agent` type. `skills` for `AgentSpec::skills_dir`; `mcp`
+# for `AgentSpec::mcp`, which is how a company agent reaches this host's own
+# tools (Phase 3 serves them over MCP).
+openhuman-embed = { path = "../../vendor/openhuman/crates/openhuman-embed", optional = true, default-features = false, features = ["mcp", "skills"] }
+
 # Desks, rosters, mentions and shared session transcripts — the pure algebra
 # behind a group chat several teammates share (`vendor/tinyhivemind`). It is the
 # one place conversation identity is decided, so the history fold, thread
@@ -239,11 +250,10 @@ openhuman_core = { package = "openhuman", path = "../../vendor/openhuman/crates/
 tinyhivemind-core = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-core" }
 
 # The session-runtime half of the same vendored library: the `SessionLog` paging
-# port, and the **attributed** transcript projection over it. Optional, and off
-# by default, unlike `tinyhivemind-core` above — nothing on the default path
-# calls it yet. The adapter that implements the port lives in
-# `runtime::hivemind` behind the `hivemind` feature, and no turn is wired to it;
-# vendoring it enabled would claim a behavior change this build does not make.
+# port, the **attributed** transcript projection over it, and the `speech`
+# vocabulary (post / broadcast / dm / complete_episode) a desk turn ends with.
+# Unconditional like `tinyhivemind-core`: the speech tool specs are rendered on
+# the default build too.
 tinyhivemind = { path = "../../vendor/tinyhivemind/crates/tinyhivemind" }
 
 # The MCP client, extracted out of OpenHuman into its own crate. OpenHuman's
@@ -499,6 +509,23 @@ rand_core = { version = "0.6", default-features = false, features = ["getrandom"
 # types rather than structural twins.
 tinyhivemind-hive = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-hive" }
 
+# Host-neutral conversation surfaces (`ConversationRef`, `MessageRoute`,
+# `RoutingPolicy`) and the Jev-first `route_message`/`route_broadcast`
+# composition. Pure, `serde` + `thiserror` only, unconditional for the same
+# reason `tinyhivemind-core` is: conversation identity is decided on the default
+# build too.
+tinyhivemind-embed = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-embed" }
+# The Jev System One wire types and `JevRouter` behind a host transport port
+# (`SystemOneTransport`). Deliberately contains no HTTP client; this crate
+# supplies one over `reqwest` under `openhuman` (plan Phase 7). Unconditional
+# because it is pure and the routing policy types live beside it.
+tinyhivemind-typesafe = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-typesafe" }
+# The first-class OpenHuman adapter: `OpenHumanHive` (one per desk), each member
+# bound to an already-built `openhuman_embed::Agent`, and the
+# `CompletionDriver` that proposes concurrent rounds. Optional because it
+# links `openhuman-embed`; it comes in with the `openhuman` feature.
+tinyhivemind-openhuman = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-openhuman", optional = true }
+
 [features]
 # `oauth` ships in the standard build: the connection write routes
 # (authorize-url + server-side token exchange) are a first-class console
@@ -552,11 +579,11 @@ tiny = ["tinyagents-harness", "tinyinference"]
 # Enables `tiny` so the `tinyagents` crate is in scope: the harness's inference
 # models implement its `ChatModel<()>` trait (openhuman's old `Provider` trait
 # was deleted upstream); it is the same vendored crate `openhuman_core` uses.
-openhuman = ["tiny", "dep:openhuman_core", "dep:tinymcp", "dep:reqwest", "dep:anyhow", "dep:log", "dep:tinyflows", "dep:regex", "dep:uuid", "dep:swc_core"]
+openhuman = ["tiny", "dep:openhuman_core", "dep:openhuman-embed", "dep:tinyhivemind-openhuman", "dep:tinymcp", "dep:reqwest", "dep:anyhow", "dep:log", "dep:tinyflows", "dep:regex", "dep:uuid", "dep:swc_core"]
 # MCP server management and agent tools share OpenHuman's in-process registry.
 # Enabling it necessarily enables the embedded harness and OpenHuman MCP
 # domain, while the default build remains unchanged.
-mcp = ["openhuman", "openhuman_core/mcp", "dep:uuid", "dep:base64"]
+mcp = ["openhuman", "openhuman_core/mcp", "openhuman-embed/mcp", "dep:uuid", "dep:base64"]
 # Image/video generation tools (issue #109, epic #26 Cell B). Bridges
 # OpenHuman's `media_generation` tools (`media_generate_image`,
 # `media_generate_video`, `media_list_models`) into a company agent's toolbelt
@@ -607,10 +634,6 @@ medulla = ["dep:reqwest"]
 # key parsers, is how a signature check comes to differ between two callers.
 tinyplace = ["dep:reqwest"]
 
-# The `tinyhivemind` session adapter (`runtime::hivemind`). Off by default and
-# wired to nothing: it compiles the port implementation and runs its tests, so
-# the projection can be adopted by a later change that is only about adoption.
-hivemind = []
 # The Agent Client Protocol: the `/acp` endpoint's session/permission surface
 # and the `RunTurn` implementation over an ACP agent.
 #
