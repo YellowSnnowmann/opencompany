@@ -346,7 +346,7 @@ async fn company_agent(
 /// `last_turn_hit_cap`, and the flag the pool derives from the progress
 /// stream (`progress_pump::hit_iteration_cap`) IS the distinction Part 1 of
 /// #926 surfaces to operators.
-fn hit_cap(outcome: &TurnOutcome) -> bool {
+fn hit_cap(outcome: &crate::harness::built_in::TurnOutcome) -> bool {
     outcome.hit_iteration_cap
 }
 
