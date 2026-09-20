@@ -83,7 +83,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { EULER, FIRST_RUN } from "./capabilities";
+import { EULER, FIRST_RUN, HIVE } from "./capabilities";
 
 const ANALYTICS = process.env.PW_ANALYTICS === "1";
 
