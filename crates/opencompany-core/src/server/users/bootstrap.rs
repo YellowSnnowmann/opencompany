@@ -270,12 +270,15 @@ pub async fn claim_first_admin(
     email: &str,
     plaintext: &str,
 ) -> Result<Result<UserRecord, ClaimRefusal>, OpenCompanyError> {
-    let email = normalize_email(email);
-    if email.is_empty() {
+    // The same rule the manifest validator applies to `[users].admins`, so a
+    // login that could not have been written there cannot be claimed here
+    // either — in particular the `none`-mode owner's own `local:owner` key.
+    if !crate::ports::users::is_usable_admin_email(email) {
         return Err(OpenCompanyError::InvalidRequest(
-            "a login is required".into(),
+            "that is not a usable login — an email address or a single word".into(),
         ));
     }
+    let email = normalize_email(email);
     if !is_unclaimed(users, company).await? {
         return Ok(Err(ClaimRefusal::AlreadyClaimed));
     }
