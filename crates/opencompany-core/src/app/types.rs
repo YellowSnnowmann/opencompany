@@ -577,7 +577,7 @@ pub struct AppState {
     /// Injected network seams for the credential surfaces (DNS resolver, mail
     /// sender). Empty by default so the build stays offline.
     connections: crate::server::ops::ConnectionsRuntime,
-    /// The hub exchange backing `…/auth/hub`. `None` (the default, and every
+    /// The hub exchange backing the TinyHumans key grant. `None` (the default, and every
     /// self-hosted host) means the console offers no ecosystem sign-in at all,
     /// rather than offering a button that leads nowhere.
     hub_identity: Option<Arc<dyn crate::server::hub_identity::HubIdentityExchange>>,
@@ -1089,7 +1089,7 @@ impl AppState {
         &self.connections
     }
 
-    /// Installs the hub identity exchange backing `…/auth/hub`.
+    /// Installs the hub exchange backing the TinyHumans key grant and billing read.
     ///
     /// An injected seam rather than a client built per request, so the route's
     /// refusals — rejected token, unreachable hub, address not on this
