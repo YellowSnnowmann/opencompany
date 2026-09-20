@@ -1339,7 +1339,7 @@ impl CompanyAgent {
         // card, a workflow node, a background task), or one that brings its
         // own context (`history_seed == false`). Everything else is a line
         // in this agent's one conversation session.
-        let isolated = turn_chat_id.is_none() || !chat.history_seed;
+        let isolated = Self::isolated_session(turn_chat_id.as_deref(), chat.history_seed);
         let session_id = if isolated {
             format!("{}:run:{}", self.session_key, uuid::Uuid::new_v4().simple())
         } else {
@@ -1530,6 +1530,12 @@ impl CompanyAgent {
             budget_paused,
         });
         (outcome, usages)
+    }
+
+    /// Whether a turn runs on a session of its own rather than the agent's
+    /// conversation session: it names no chat, or brings its own context.
+    fn isolated_session(turn_chat_id: Option<&str>, history_seed: bool) -> bool {
+        turn_chat_id.is_none() || !history_seed
     }
 
     /// Everything the bridge tapped since the previous attempt, summed.

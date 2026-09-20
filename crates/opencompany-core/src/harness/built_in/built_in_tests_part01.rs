@@ -11,12 +11,13 @@ use crate::ports::types::ContextChunk;
 
 #[test]
 fn dispatched_cards_are_isolated_from_an_agents_other_conversations() {
-    assert!(CompanyAgent::isolates_background_history(None, true));
-    assert!(!CompanyAgent::isolates_background_history(
-        Some("general"),
-        true
-    ));
-    assert!(!CompanyAgent::isolates_background_history(None, false));
+    // A turn that names no conversation runs on its own session; one that
+    // does resumes the agent's conversation session; one that brings its own
+    // context is isolated whatever it names (plan hive-desks, Phase 2).
+    assert!(CompanyAgent::isolated_session(None, true));
+    assert!(!CompanyAgent::isolated_session(Some("general"), true));
+    assert!(CompanyAgent::isolated_session(Some("general"), false));
+    assert!(CompanyAgent::isolated_session(None, false));
 }
 
 /// The fingerprint moves when the tier moves (issue #562).
