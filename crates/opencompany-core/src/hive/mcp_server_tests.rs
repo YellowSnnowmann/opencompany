@@ -492,10 +492,16 @@ async fn the_policy_parks_or_denies_a_custom_tool_call() {
         .auth(ClientAuth::BearerToken { token: bearer })
         .build()
         .unwrap();
-    // `readonly` allows a tool that reaches nothing; the deny arms are
-    // exercised by `policy`'s own suite. What this pins is the wire shape.
-    let allowed = ro.call_tool("who_am_i", json!({})).await.unwrap();
-    assert!(!allowed.rendered.is_error, "{}", allowed.rendered.output());
+    // `readonly` fails closed on a tool it cannot classify: a deny, which
+    // reaches the seat as a tool error that says so. The finer deny arms are
+    // `policy`'s own suite's; what this pins is the wire shape.
+    let denied = ro.call_tool("who_am_i", json!({})).await.unwrap();
+    assert!(denied.rendered.is_error);
+    assert!(
+        denied.rendered.output().starts_with("refused: 'who_am_i'"),
+        "{}",
+        denied.rendered.output()
+    );
 }
 
 #[tokio::test]
