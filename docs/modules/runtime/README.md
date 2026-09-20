@@ -123,7 +123,7 @@ that was never the product. Email (IMAP/SMTP) and the console remain the ways in
 
 `src/harness/` embeds `openhuman_core` as a library (see
 [`docs/modules/openhuman/README.md`](../openhuman/README.md)). `HarnessPool`
-builds one openhuman `Agent` per manifest `[[agent]]` through `AgentBuilder`
+builds one `openhuman_embed::Agent` per manifest `[[agent]]` on the process-wide runtime
 (`build.rs`), wiring memory (`memory.rs`, an openhuman `Memory` over the
 `ContextStore`), the hosted-Medulla inference provider (`provider.rs`, with a
 `MockProvider` for tests), and the approval policy (`policy.rs`, `[policy].mode`
