@@ -4050,12 +4050,21 @@ impl HarnessBrain {
                     // its own turns back out of it to fold the next step, so a
                     // driver with nowhere to append could not deliberate at
                     // all, and falling through answers exactly as before.
-                    if crate::runtime::mentions::mention_responder(
-                        &self.record(),
-                        chat.as_deref(),
-                        mentions,
-                    )
-                    .is_none()
+                    // Plan hive-desks, Phase 2 interim: the trace-grammar
+                    // episode never opens. Every desk message takes the
+                    // single-turn path below until Phase 4 hosts a
+                    // `tinyhivemind_openhuman::OpenHumanHive` per desk in its
+                    // place. `src/hivemind/` stays compiled and tested until
+                    // then; only this gate is closed.
+                    // TODO(Phase 4): replace this arm with `hive::dispatch`.
+                    const HIVE_EPISODES_OPEN: bool = false;
+                    if HIVE_EPISODES_OPEN
+                        && crate::runtime::mentions::mention_responder(
+                            &self.record(),
+                            chat.as_deref(),
+                            mentions,
+                        )
+                        .is_none()
                         && let Some(events) = self.deps.events.clone()
                         && let Some(desk) =
                             crate::hivemind::desk_episode(&self.record(), chat.as_deref())
