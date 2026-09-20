@@ -52,3 +52,11 @@ pub mod driver;
 /// (Phase 4).
 #[cfg(feature = "openhuman")]
 pub mod round;
+/// The production `SeatRunner`: one seat turn over the harness pool
+/// (Phase 4).
+#[cfg(feature = "openhuman")]
+pub mod seats;
+/// The chat body of the brain's cycle: which surface a message is on, and
+/// the episode it opens on a desk with a room (Phase 5).
+#[cfg(feature = "openhuman")]
+pub mod dispatch;
