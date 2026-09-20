@@ -479,3 +479,12 @@ impl HarnessModel for ScriptedProvider {
         "scripted".to_string()
     }
 }
+
+/// The process-wide OpenHuman runtime, for a fixture that builds a roster
+/// synchronously (plan hive-desks, Phase 2). Ephemeral workspace, no key.
+pub(super) fn test_runtime() -> Arc<openhuman_embed::Runtime> {
+    crate::harness::openhuman_runtime::global_blocking(
+        crate::harness::openhuman_runtime::RuntimeBoot::ephemeral(),
+    )
+    .expect("the OpenHuman runtime boots")
+}
