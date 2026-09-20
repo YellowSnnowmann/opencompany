@@ -83,6 +83,7 @@ fn agent_says(seq: u64, chat: &str, agent: &str, text: &str, audience: &[&str]) 
             mentions: Vec::new(),
             mention_depth: 0,
             audience: audience.iter().map(|a| (*a).to_string()).collect(),
+            episode: None,
         },
     )
 }
