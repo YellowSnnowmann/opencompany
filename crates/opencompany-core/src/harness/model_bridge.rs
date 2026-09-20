@@ -322,7 +322,8 @@ fn request_from_wire(body: &Value) -> Result<ModelRequest, String> {
         Some(Value::String(choice)) if choice == "none" => ToolChoice::None,
         Some(Value::String(choice)) if choice == "required" => ToolChoice::Required,
         Some(Value::Object(object)) => object
-            .pointer("/function/name")
+            .get("function")
+            .and_then(|function| function.get("name"))
             .and_then(Value::as_str)
             .map(|name| ToolChoice::Tool(name.to_string()))
             .unwrap_or_default(),

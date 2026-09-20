@@ -170,16 +170,12 @@ below is for what is only true in a browser driving a live host: a disabled
 affordance explaining itself, a banner that must not be a toast, a redirect that
 survives a full-page navigation.
 
-The line matters because each is tempted into the other's territory. A browser
-walk *can* reach a pure helper — through six layers of render, in forty seconds,
-reporting the failure as "the board looked wrong". A unit test cannot reach a
-redirect at all. Put a helper here the moment it has a second caller or a branch
-worth naming.
-
-A test earns its place by being **seen failing** against the behaviour it
-guards. Every test in `test/unit/` was proven red by breaking its subject before
-it was trusted — a test that passes while asserting nothing is worse than no
-test, because it reports coverage.
+The line matters because each is tempted into the other's territory: a browser
+walk *can* reach a pure helper, through six layers of render, in forty seconds,
+reporting "the board looked wrong"; a unit test cannot reach a redirect at all.
+Put a helper here the moment it has a second caller or a branch worth naming,
+and see it **fail** against the behaviour it guards before trusting it — a
+test that passes while asserting nothing reports coverage it does not have.
 
 ## End-to-end suite
 
@@ -209,15 +205,11 @@ built by the `Rust` job and passed across as an artifact (issue #428).
 tinycortex)`, with the fixtures below behind it, and is the only thing that runs
 the four specs described next (issue #467).
 
-Neither existed for a long time: `typecheck:e2e` was the only automated coverage
-`test/e2e/` had, and type-checking proves a spec compiles, not that it holds.
-`workflow-edit-delete.spec.ts` spent months red against a fixture that was never
-committed; two further specs were found red against product changes that had
-been deliberate, one of which had been filed as a bug that did not exist.
-Nothing reported any of it, because nothing ran it.
-
-Run the suite before touching a view it covers — CI is a backstop, not a
-substitute for seeing your own change work.
+Neither existed for a long time: `typecheck:e2e` proves a spec compiles, not
+that it holds, and `workflow-edit-delete.spec.ts` spent months red against a
+fixture nobody committed while nothing ran it. Run the suite before touching a
+view it covers — CI is a backstop, not a substitute for seeing your own change
+work.
 
 ### The four specs a default-feature host cannot run
 
