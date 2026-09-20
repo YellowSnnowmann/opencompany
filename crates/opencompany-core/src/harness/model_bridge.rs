@@ -136,8 +136,8 @@ impl Drop for BridgeHandle {
 ///
 /// `model_name` is the name the provider will see on every request
 /// (`ModelRequest::model`), which is the same name the previous agent
-/// builder stamped onto its turns. Must be called from inside a tokio
-/// runtime: the listener is spawned on the current handle the first time.
+/// builder stamped onto its turns. The listener is spawned on the OpenHuman
+/// executor the first time, so this may be called from anywhere.
 pub fn register(model: Arc<dyn ChatModel<()>>, model_name: &str) -> crate::Result<BridgeHandle> {
     let bridge = bridge()?;
     let token = format!("ocb_{}", uuid::Uuid::new_v4().simple());
@@ -186,11 +186,9 @@ fn bridge() -> crate::Result<&'static Bridge> {
         .route("/v1/chat/completions", post(complete))
         .route("/chat/completions", post(complete))
         .with_state(state.clone());
-    let handle = tokio::runtime::Handle::try_current().map_err(|_| {
-        crate::error::OpenCompanyError::Harness(
-            "the model bridge must be started from inside a tokio runtime".to_string(),
-        )
-    })?;
+    // On the OpenHuman executor, not the caller's runtime: the listener has
+    // to outlive whichever test or request registered the first model.
+    let handle = crate::harness::openhuman_runtime::executor();
     let _enter = handle.enter();
     let listener = tokio::net::TcpListener::from_std(listener).map_err(|err| {
         crate::error::OpenCompanyError::Harness(format!("model bridge listener: {err}"))

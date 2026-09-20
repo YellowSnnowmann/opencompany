@@ -96,6 +96,38 @@ impl RuntimeBoot {
 
 static GLOBAL: OnceCell<Arc<Runtime>> = OnceCell::const_new();
 
+static EXECUTOR: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+
+/// The tokio runtime the OpenHuman runtime — and the loopback model bridge —
+/// live on: process-long, on its own threads, built with the stack and
+/// blocking-thread constants OpenHuman documents for a turn.
+///
+/// Its own runtime rather than "whichever one called first" because the
+/// OpenHuman core spawns background work (the harness-init service, bus
+/// subscribers) onto the runtime it is built on, and that work has to
+/// outlive the caller. In a test binary the caller's runtime is one
+/// `#[tokio::test]`'s, torn down when that test returns — the process-wide
+/// core would then be running on a dead executor for every later test. The
+/// `serve` binary builds its own big-stack runtime too; a second one here
+/// costs a few idle threads and keeps the core's lifetime the process's.
+///
+/// Turn futures are unaffected: `Agent::turn(..).send()` is an ordinary
+/// future the caller awaits on its own runtime.
+pub fn executor() -> &'static tokio::runtime::Handle {
+    EXECUTOR
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .worker_threads(2)
+                .thread_name("openhuman-core")
+                .thread_stack_size(openhuman_core::core::runtime::AGENT_WORKER_STACK_BYTES)
+                .max_blocking_threads(openhuman_core::core::runtime::MAX_BLOCKING_THREADS)
+                .build()
+                .expect("the OpenHuman executor builds")
+        })
+        .handle()
+}
+
 /// The process-wide runtime, built on first call with `boot`.
 ///
 /// Every later call returns the same `Arc` and ignores its `boot`. A build
@@ -105,9 +137,28 @@ static GLOBAL: OnceCell<Arc<Runtime>> = OnceCell::const_new();
 /// runtime handle to hand back in that case.
 pub async fn global(boot: RuntimeBoot) -> crate::Result<Arc<Runtime>> {
     GLOBAL
-        .get_or_try_init(|| async move { build(boot).await })
+        .get_or_try_init(|| async move {
+            executor()
+                .spawn(build(boot))
+                .await
+                .map_err(|err| OpenCompanyError::Harness(format!("build the OpenHuman runtime: {err}")))?
+        })
         .await
         .cloned()
+}
+
+/// [`global`] for a caller with no async context of its own (a synchronous
+/// test that builds a roster).
+///
+/// Refuses to run inside a tokio runtime: blocking a worker on the executor
+/// is how a test binary deadlocks itself.
+pub fn global_blocking(boot: RuntimeBoot) -> crate::Result<Arc<Runtime>> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        return Err(OpenCompanyError::Harness(
+            "global_blocking called inside a tokio runtime; await `global` instead".to_string(),
+        ));
+    }
+    executor().block_on(global(boot))
 }
 
 /// The runtime if it has already been built, without building one.
