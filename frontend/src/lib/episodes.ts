@@ -237,8 +237,11 @@ function layerFrames(bucket: Bucket, state: EpisodeState): void {
       bucket.seatByRound.set(liveRound.revision, new Map());
     }
     fresh.startedAt = Math.min(fresh.startedAt ?? liveRound.startedAtMillis, liveRound.startedAtMillis);
+    // The frame's word on the round wins over the rows': a seat's reply is
+    // journaled as it lands, before the driver commits the round, so a round
+    // with one row in the transcript is still open until `round_committed`.
+    fresh.status = liveRound.status;
     if (liveRound.status === "committed") {
-      fresh.status = "committed";
       fresh.committedAt = fresh.committedAt ?? liveRound.committedAtMillis;
     }
     // Lane order is the host's: the seats named by `round_started`, in that
