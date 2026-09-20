@@ -180,7 +180,11 @@ export function Login({ client, company, notice, onSignedIn }: Props) {
    * `sent: true` there exactly as it does where the mail went out, so the
    * form would send someone to wait for a message no process here will send.
    */
-  const effectiveMode: Mode = authConfig.magicLink && authConfig.passwords ? mode : authConfig.magicLink ? "link" : "password";
+  const effectiveMode: Mode = !authConfig.magicLink
+    ? "password"
+    : authConfig.passwords
+      ? mode
+      : "link";
 
   /**
    * Seconds before the host would mail another link to this address.
