@@ -817,6 +817,8 @@ fn parse_usage(payload: &serde_json::Value) -> Option<Usage> {
         cache_read_tokens,
         cache_creation_tokens: 0,
         reasoning_tokens: 0,
+        charged_amount: None,
+        context_window_tokens: None,
     })
 }
 
@@ -1352,6 +1354,7 @@ fn model_response_from_payload_offering(
         content: blocks,
         tool_calls,
         usage,
+        origin: None,
     };
     let mut response = ModelResponse {
         message,
@@ -1361,6 +1364,8 @@ fn model_response_from_payload_offering(
         resolved_model: None,
         continue_turn: None,
         served_from_cache: false,
+        correlation: None,
+        resolved_route: None,
     };
     // `with_usage` mirrors usage onto both slots; call it only when present so
     // the billing-free path leaves `usage: None` intact.
@@ -2133,6 +2138,8 @@ async fn send_body(
                 retryable: status == reqwest::StatusCode::TOO_MANY_REQUESTS
                     || status.is_server_error(),
                 retry_after_ms: None,
+                partial_message: None,
+                stop_reason: None,
                 raw: None,
             })))
         };

@@ -326,7 +326,9 @@ impl ShellTool {
 impl ToolGuard for HighRiskCommands {
     fn timeout_policy(&self, inner: ToolTimeout) -> ToolTimeout {
         match inner {
-            ToolTimeout::Secs(secs @ 1..=3600) => ToolTimeout::Secs(secs),
+            // The vocabulary moved from seconds to milliseconds at the 1ecf1b0
+            // pin; the bound is the same hour.
+            ToolTimeout::Millis(ms @ 1..=3_600_000) => ToolTimeout::Millis(ms),
             _ => ToolTimeout::Inherit,
         }
     }

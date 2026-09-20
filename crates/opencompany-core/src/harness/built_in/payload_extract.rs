@@ -254,7 +254,9 @@ fn system_prompt() -> &'static str {
 impl PayloadSummarizer for PayloadExtractor {
     async fn maybe_summarize_in_parent(
         &self,
-        _parent_ctx: &tinyagents_harness::context::RunContext<()>,
+        _parent_ctx: &tinyagents_harness::context::RunContext<
+            oh::agent::tinyagents::host::run_context::OpenHumanRunContext,
+        >,
         tool_name: &str,
         parent_task_hint: Option<&str>,
         raw: &str,
