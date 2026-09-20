@@ -429,7 +429,6 @@ fn projects_the_agents_own_body_beside_the_operators() {
         agent_id: "refunds".into(),
         text: "!support #kettle ^16 the swap is the customer's first preference".into(),
         steps: Vec::new(),
-        episode: None,
     });
     let value = super::project_event_for_viewer(
         &stored,
@@ -465,7 +464,6 @@ fn a_reply_with_no_move_carries_the_same_body_twice() {
         agent_id: "ceo".into(),
         text: "here is the summary you asked for".into(),
         steps: Vec::new(),
-        episode: None,
     });
     let value = super::project_event_for_viewer(
         &stored,
@@ -506,7 +504,6 @@ fn projects_agent_reply_with_viewer_mention_metadata() {
         agent_id: "ceo".into(),
         text: "@Ada @everyone".into(),
         steps: Vec::new(),
-        episode: None,
     });
     let authors = std::collections::HashMap::from([(String::from("u-1"), String::from("Ada"))]);
     let value =
@@ -539,7 +536,6 @@ fn drops_owner_fallback_report_from_a_non_admin_viewer() {
         agent_id: crate::runtime::OWNER_FALLBACK_REPORT_AUTHOR.to_string(),
         text: "no admin has a mailbox".into(),
         steps: Vec::new(),
-        episode: None,
     });
 
     let non_admin = super::project_event_for_viewer(
@@ -591,7 +587,6 @@ fn projects_agent_reply_with_its_thread_parent() {
         agent_id: "ceo".into(),
         text: "in the thread".into(),
         steps: Vec::new(),
-        episode: None,
     }))
     .expect("agent_reply is an attention signal");
     assert_eq!(v["parentId"], "4");
