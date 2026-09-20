@@ -235,7 +235,11 @@ export function Login({ client, company, notice, onSignedIn }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const result = await requestCode(
+      // `dev_code`, when the host echoes one, is deliberately not read: this
+      // form is only drawn where the host mails, and a code handed back to
+      // whoever asked is a developer convenience on the API, not a sign-in
+      // screen.
+      await requestCode(
         client,
         company,
         email,
@@ -247,11 +251,7 @@ export function Login({ client, company, notice, onSignedIn }: Props) {
         // any other sign-in, which lands wherever it always did.
         arrivedViaSetupHandoff() ? SETUP_HANDOFF_FRAGMENT : undefined,
       );
-      // Always the same acknowledgement, whoever they are. `dev_code`, when
-      // the host echoes one, is deliberately ignored here: this form is only
-      // drawn where the host mails, and a code handed back to whoever asked is
-      // a developer convenience on the API, not a sign-in screen.
-      void result;
+      // Always the same acknowledgement, whoever they are.
       setSent(true);
       setLinkSentAt(Date.now());
       return true;
