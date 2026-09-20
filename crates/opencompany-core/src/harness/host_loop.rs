@@ -109,7 +109,7 @@ pub async fn run(
         for call in calls {
             let result = match tools.iter().find(|tool| tool.name() == call.name) {
                 Some(tool) => match tool.execute(call.arguments.clone()).await {
-                    Ok(result) => result.output,
+                    Ok(result) => result.output(),
                     Err(err) => format!("error: {err:#}"),
                 },
                 None => format!("error: unknown tool `{}`", call.name),
