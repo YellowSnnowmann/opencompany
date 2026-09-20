@@ -553,7 +553,6 @@ async fn failed_backend_responses_cannot_reopen_the_daily_search_budget() {
             },
         );
         let first = tools[0].execute(json!({"query": "pricing"})).await.unwrap();
-        eprintln!("DEBUG first output: {}", first.output());
         assert!(first.is_error);
         assert!(
             !first.output().contains("managed-token"),

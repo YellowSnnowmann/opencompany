@@ -3901,6 +3901,7 @@ dependencies = [
  "mongodb",
  "openhuman",
  "openhuman-embed",
+ "openhuman-tinyhumans",
  "pdf-extract",
  "quick-xml",
  "rand_core 0.6.4",
@@ -4076,6 +4077,26 @@ version = "0.63.29"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "openhuman-tinyhumans"
+version = "0.63.29"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "log",
+ "openhuman",
+ "openhuman-embed",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tinyhumans-sdk",
+ "tokio",
+ "url",
+ "urlencoding",
 ]
 
 [[package]]
@@ -6733,6 +6754,21 @@ dependencies = [
  "serde_json",
  "sha1 0.11.0",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "tinyhumans-sdk"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "futures",
+ "percent-encoding",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "url",
 ]
 
 [[package]]

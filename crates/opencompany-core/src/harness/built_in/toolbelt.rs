@@ -964,6 +964,7 @@ pub fn media_tools(backend: &MediaBackend, workspace: &Path) -> Vec<Box<dyn Tool
 
     // The Config-free seam: `IntegrationClient::new(backend_url, auth_token)`
     // takes the managed credential directly, with no OpenHuman global `Config`.
+    crate::harness::backend_transport::ensure_installed();
     let client = Arc::new(IntegrationClient::new(
         backend.backend_url.clone(),
         backend.auth_token.clone(),

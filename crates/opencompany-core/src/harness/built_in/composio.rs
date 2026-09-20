@@ -681,6 +681,7 @@ mod live {
             .map_err(|e| anyhow::anyhow!("resolving this company's Composio credential: {e}"))?
             .ok_or_else(|| anyhow::anyhow!("no Composio credential is configured"))?;
         let mut secrets = vec![secret.clone()];
+        crate::harness::backend_transport::ensure_installed();
         let client = match config.mode() {
             ComposioMode::Managed => LiveClient::Managed(ComposioClient::new(Arc::new(
                 IntegrationClient::new(config.backend_url.clone(), secret.clone()),
