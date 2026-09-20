@@ -808,6 +808,12 @@ tinymemory-conformance = { path = "../../vendor/openhuman/vendor/tinymemory/crat
 # real child process. Dev-only: under resolver v2 this feature is not unified
 # into normal builds, so the shipped binary is unchanged.
 tokio = { version = "1", features = ["test-util"] }
+# The Jev transport's tests (`src/hive/jev_tests.rs`) stand up a fake
+# TinyHumans System One proxy and assert the bearer, the URL, the one retry
+# and the timeout against real HTTP rather than a scripted `SystemOneTransport`
+# — the transport IS the thing under test. Dev-only; the shipped binary keeps
+# `reqwest` alone.
+wiremock = "0.6"
 
 # Issue #392: measures what a per-append flush costs, so the per-record-kind
 # durability policy rests on a number rather than an intuition. Default features
