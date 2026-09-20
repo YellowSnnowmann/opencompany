@@ -336,8 +336,6 @@ export function ObservatoryView({ client, company, runId, eventTick }: Props) {
               </span>
             )}
             <span>
-            </span>
-            <span>
               <dt className="inline">tokens</dt>{" "}
               <dd className="text-foreground inline tabular-nums">
                 {summary.tokens.toLocaleString()}
