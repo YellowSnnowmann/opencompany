@@ -374,7 +374,9 @@ pub(crate) fn wire_event(seq: u64, event: &CompanyEvent) -> WireEvent {
             format!("Turn {turn_id} did not finish"),
             "turn.failed",
         ),
-        CompanyEvent::TurnSettled { turn_id, agent_id } => (
+        CompanyEvent::TurnSettled {
+            turn_id, agent_id, ..
+        } => (
             Role::System,
             agent_id.clone().unwrap_or_else(|| "operator".to_string()),
             format!("Turn {turn_id} finished"),
@@ -540,15 +542,109 @@ pub(crate) fn wire_event(seq: u64, event: &CompanyEvent) -> WireEvent {
             },
             "desk.members_changed",
         ),
-        CompanyEvent::DeskHiveConfigured { desk_id, reset, .. } => (
+        CompanyEvent::DeskRoutingConfigured { desk_id, reset, .. } => (
             Role::System,
             "company".to_string(),
             if *reset {
-                format!("Restored desk {desk_id}'s declared move grammar")
+                format!("Restored desk {desk_id}'s declared routing block")
             } else {
-                format!("Installed a move grammar on desk {desk_id}")
+                format!("Installed a routing block on desk {desk_id}")
             },
-            "desk.hive_configured",
+            "desk.routing_configured",
+        ),
+        // Plan hive-desks, Phase 4: the episode record. Structural only, like
+        // every arm here — ids, seats and the closed-vocabulary reason; the
+        // utterances themselves ride on the `AgentReply` rows they bracket.
+        CompanyEvent::EpisodeOpened {
+            chat_id,
+            episode_id,
+            participants,
+            ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            format!(
+                "Episode {episode_id} opened on desk {chat_id} with {}",
+                participants.join(", ")
+            ),
+            "episode.opened",
+        ),
+        CompanyEvent::RoundStarted {
+            episode_id,
+            revision,
+            agent_ids,
+            ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            format!(
+                "Episode {episode_id} round {revision} started: {}",
+                agent_ids.join(", ")
+            ),
+            "episode.round_started",
+        ),
+        CompanyEvent::RoundCommitted {
+            episode_id,
+            revision,
+            utterances,
+            ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            format!(
+                "Episode {episode_id} round {revision} committed {} utterances",
+                utterances.len()
+            ),
+            "episode.round_committed",
+        ),
+        CompanyEvent::BroadcastRouted {
+            episode_id,
+            agent_id,
+            plan,
+            ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            format!(
+                "Episode {episode_id}: {agent_id} broadcast to {}",
+                plan.agent_ids().join(", ")
+            ),
+            "episode.broadcast_routed",
+        ),
+        CompanyEvent::DmDelivered {
+            episode_id, from, to, ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            format!("Episode {episode_id}: {from} messaged {}", to.join(", ")),
+            "episode.dm_delivered",
+        ),
+        CompanyEvent::EpisodeCompleted {
+            episode_id,
+            reason,
+            rounds,
+            ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            format!(
+                "Episode {episode_id} completed after {rounds} rounds ({})",
+                serde_json::to_value(reason)
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_string))
+                    .unwrap_or_default()
+            ),
+            "episode.completed",
+        ),
+        CompanyEvent::EpisodeStateSaved {
+            episode_id,
+            revision,
+            ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            format!("Episode {episode_id} checkpointed at revision {revision}"),
+            "episode.state_saved",
         ),
         CompanyEvent::WorkflowDeleted {
             workflow_id, name, ..
