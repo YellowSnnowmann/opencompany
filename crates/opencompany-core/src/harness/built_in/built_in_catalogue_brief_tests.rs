@@ -40,8 +40,8 @@ async fn a_rebuild_that_moves_the_catalogue_owes_the_session_a_brief() {
         "a first roster owes nothing: its session opens cold on its own prompt"
     );
     assert!(
-        !first.served_catalogue().iter().any(|t| t == "workspace_list"),
-        "precondition: `*` confers no workspace namespace"
+        !first.served_catalogue().iter().any(|t| t == "workspace_create"),
+        "precondition: `*` confers no explicit workspace write"
     );
 
     // A redundant ensure keeps the entry and owes nothing new.
@@ -50,13 +50,13 @@ async fn a_rebuild_that_moves_the_catalogue_owes_the_session_a_brief() {
     assert!(Arc::ptr_eq(&first, &same), "an unchanged roster is not rebuilt");
 
     // A console grant rebuilds the roster with more on the belt.
-    let with_workspace = granting(&rec, "workspace");
+    let with_workspace = granting(&rec, "workspace.write");
     pool.ensure(&with_workspace, &deps).await.expect("post-grant ensure");
     let granted = pool.agent(&rec.id, "engineer").await.expect("engineer");
     assert!(!Arc::ptr_eq(&first, &granted), "the grant must rebuild");
     assert!(
-        granted.served_catalogue().iter().any(|t| t == "workspace_list"),
-        "precondition: the grant wired the workspace tools: {:?}",
+        granted.served_catalogue().iter().any(|t| t == "workspace_create"),
+        "precondition: the grant wired the workspace write tools: {:?}",
         granted.served_catalogue()
     );
     assert!(
