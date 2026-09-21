@@ -1171,22 +1171,27 @@ async fn a_cross_desk_referral_crosses_only_the_answer_back() {
     // driver does not await) and has not yet reached the model. Wait for
     // that reopened ask to actually land on the script too, or the
     // assertions below race it.
-    let rows = wait_for(&runtime, "both episodes, the answer, and the reopened turn", EPISODE, |rows| {
-        completed(2)(rows)
-            && rows.iter().any(|row| {
-                matches!(
-                    &row.event,
-                    CompanyEvent::ReferralEnqueued {
-                        returning: true,
-                        ..
-                    }
-                )
-            })
-            && script.asks().iter().filter_map(seat_of).any(|seat| {
-                seat.speaker == ENGINEER
-                    && seat.prompt.contains("answered the question you put to it")
-            })
-    })
+    let rows = wait_for(
+        &runtime,
+        "both episodes, the answer, and the reopened turn",
+        EPISODE,
+        |rows| {
+            completed(2)(rows)
+                && rows.iter().any(|row| {
+                    matches!(
+                        &row.event,
+                        CompanyEvent::ReferralEnqueued {
+                            returning: true,
+                            ..
+                        }
+                    )
+                })
+                && script.asks().iter().filter_map(seat_of).any(|seat| {
+                    seat.speaker == ENGINEER
+                        && seat.prompt.contains("answered the question you put to it")
+                })
+        },
+    )
     .await;
 
     // The forward marker, and the return: `(from_desk, to_desk, returning,
