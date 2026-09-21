@@ -16,7 +16,8 @@ module's own shape and the reasoning behind its boundaries.
 | `mod.rs` | the index |
 | `graph.rs` | `DeskHive{desk_id, hive: OpenHumanHive, roster_version}` — `HiveGraph` from `tinyhivemind_desks` / `tinyhivemind_roster`, one `AgentBinding` per effective member; held in `HarnessPool.hives` and rebuilt with the roster |
 | `driver.rs` | `hive::dispatch(company_rt, stored_event)` — surface → `ConversationRef`, the non-desk single turn, and the episode loop |
-| `round.rs` | one round: `tokio::spawn` per seat under its `turn_lock` and `turn_timeout_secs`, outbox drain, exactly-one enforcement, `apply_committed_round`, the `HostAction`s |
+| `round.rs` | one round: `tokio::spawn` per seat under its `turn_lock` and `turn_timeout_secs`, outbox drain, exactly-one enforcement, `apply_committed_round`, the `HostAction`s; `RoundBracket`, the `SeatBracket` the lock holder writes `TurnStarted` / `TurnSettled` and the seat's run row (`episodeId`, `roundRevision`) through |
+| `measure.rs` | the coordination fold behind `opencompany measure` — concurrency peak and same-agent overlaps from the brackets, episodes / rounds / reasons, contacts and pairs, the utterance histogram; the thresholds mirror `scripts/lib/coordination-metrics.mjs` |
 | `episode_store.rs` | `EpisodeStateSaved` — persisting `DriverState` + `SharingState`s, resume, replay of later `AgentReply` rows |
 | `routing.rs` | `RoutingConfig` (`[group_chat.routing]`), `EffectiveRouting` → `RoutingPolicy` / `ReferralPolicy`, the overlay, `RoutingPlanDto`, `DeskRoutingDto` |
 | `jev.rs` | `TinyHumansSystemOne: SystemOneTransport` over the TinyHumans System One proxy; `jev_router(env, key) -> Option<JevRouter<_>>` |
