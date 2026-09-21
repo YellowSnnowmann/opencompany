@@ -1622,8 +1622,8 @@ async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
     dump(&rows, &script);
     let cited = replies(&rows, ENGINEERING)
         .into_iter()
-        .filter(|row| row.agent == ENGINEER && row.kind == Some(UtteranceKind::Post))
-        .next_back()
+        .rev()
+        .find(|row| row.agent == ENGINEER && row.kind == Some(UtteranceKind::Post))
         .expect("the engineer's second-episode post");
     assert!(
         cited.text.contains(FACT_KEY),
