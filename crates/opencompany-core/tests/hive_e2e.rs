@@ -92,8 +92,11 @@ struct Seat {
     prompt: String,
 }
 
+/// The sentinel in `text` — the **last** one: the harness's memory loop
+/// prepends a `## Relevant prior work` preamble quoting earlier prompts,
+/// sentinel and all, and the turn's own sentinel follows it.
 fn parse_sentinel(text: &str) -> Option<(String, String, u64)> {
-    let at = text.find(SENTINEL)?;
+    let at = text.rfind(SENTINEL)?;
     let rest = &text[at + SENTINEL.len()..];
     let (desk, rest) = rest.split_once(", episode ")?;
     let (episode, rest) = rest.split_once(", round ")?;
@@ -304,8 +307,12 @@ summary = "Proves desks answer as rooms."
 provider = "ollama"
 base_url = "{base_url}"
 
+# Every tier the roster reaches: the CEO is an orchestrator and asks for
+# `agentic-v1`; an unmapped tier is refused, not passed through.
 [inference.models]
 chat-v1 = "llama3"
+reasoning-v1 = "llama3"
+agentic-v1 = "llama3"
 
 [policy]
 mode = "full"
@@ -424,10 +431,12 @@ async fn boot_demo(home: &Path, base_url: &str) -> (SocketAddr, Arc<CompanyRunti
     let mut manifest = CompanyManifest::from_path(&bundle).expect("companies/hive_demo parses");
     manifest.inference.provider = Some("ollama".into());
     manifest.inference.base_url = Some(base_url.into());
-    manifest
-        .inference
-        .models
-        .insert("chat-v1".into(), "llama3".into());
+    for tier in ["chat-v1", "reasoning-v1", "agentic-v1"] {
+        manifest
+            .inference
+            .models
+            .insert(tier.into(), "llama3".into());
+    }
     boot(home, &unique("hive-demo"), manifest).await
 }
 

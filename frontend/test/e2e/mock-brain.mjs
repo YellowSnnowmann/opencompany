@@ -297,9 +297,23 @@ const PLAN_DIRECTIVE = "__MOCK_PLAN__";
  *
  * Matched anywhere in the last user message rather than only at its start,
  * because a retry reminder may precede it — but on the LAST message only: an
- * older sentinel is a turn already taken.
+ * older sentinel is a turn already taken. Within a message the LAST match is
+ * the turn's own: the host's memory loop prepends a `## Relevant prior work`
+ * preamble quoting earlier prompts, sentinels included.
  */
-const HIVE_TURN_PATTERN = /Hive turn: desk (\S+?), episode (\S+?), round (\d+)\./;
+const HIVE_TURN_PATTERN = /Hive turn: desk (\S+?), episode (\S+?), round (\d+)\./g;
+
+/**
+ * The last sentinel in `text`, or null.
+ *
+ * @param {string} text
+ * @returns {RegExpExecArray | null}
+ */
+function lastSentinel(text) {
+  let last = null;
+  for (const match of text.matchAll(HIVE_TURN_PATTERN)) last = match;
+  return last;
+}
 
 /**
  * "DM this seat in round 1 instead of broadcasting", followed by an agent id
@@ -332,7 +346,7 @@ function findHiveTurn(messages) {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
     if (message?.role !== "user" || isToolOutput(message)) continue;
-    const match = HIVE_TURN_PATTERN.exec(textOf(message));
+    const match = lastSentinel(textOf(message));
     if (!match) return null;
     const turn = { desk: match[1], episode: match[2], round: Number.parseInt(match[3], 10), speaker: null, stage: 0 };
     const speaker = /You are @([a-z0-9_-]+)/i.exec(textOf(message));
@@ -366,7 +380,7 @@ function hiveStage(earlier, turn) {
   let any = false;
   for (const message of earlier) {
     if (message?.role !== "user" || isToolOutput(message)) continue;
-    const match = HIVE_TURN_PATTERN.exec(textOf(message));
+    const match = lastSentinel(textOf(message));
     if (!match || match[2] !== turn.episode) continue;
     any = true;
     const revision = Number.parseInt(match[3], 10);

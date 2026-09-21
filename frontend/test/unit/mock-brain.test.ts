@@ -568,6 +568,14 @@ describe("the mock inference backend", () => {
     // Another episode's sentinels do not count.
     const other = { role: "user", content: "Hive turn: desk content, episode ep-9, round 0.\n\nx" };
     expect(hiveCall(await chat([other, seat(0)], HIVE_TOOLS)).tool).toBe("post");
+    // The memory loop quotes an earlier prompt above the turn's own: the
+    // last sentinel in the message is the one that counts.
+    const quoted = {
+      role: "user",
+      content:
+        "## Relevant prior work\n- Task: Hive turn: desk engineering, episode ep-1, round 0. You are @engineer\n\n## Task\nHive turn: desk engineering, episode ep-1, round 4.\n\nx",
+    };
+    expect(hiveCall(await chat([...taken(0), ...taken(2), quoted], HIVE_TOOLS)).tool).toBe("complete_episode");
   });
 
   it("asks the desk a __MOCK_REFER__ directive names from the first post", async () => {
