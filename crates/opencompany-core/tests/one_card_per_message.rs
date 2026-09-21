@@ -526,7 +526,10 @@ impl Host {
             body["chat"] = json!(desk);
         }
         let res = reqwest::Client::new()
-            .post(format!("{}/api/v1/companies/{}/chat", self.base, self.company))
+            .post(format!(
+                "{}/api/v1/companies/{}/chat",
+                self.base, self.company
+            ))
             .bearer_auth(TOKEN)
             .json(&body)
             .send()
@@ -541,7 +544,10 @@ impl Host {
     /// The board plus the card the reply linked to — the two facts #463 is about.
     async fn board(&self, reply: &Value) -> Board {
         let cards: Vec<Value> = reqwest::Client::new()
-            .get(format!("{}/api/v1/companies/{}/tasks", self.base, self.company))
+            .get(format!(
+                "{}/api/v1/companies/{}/tasks",
+                self.base, self.company
+            ))
             .bearer_auth(TOKEN)
             .send()
             .await
