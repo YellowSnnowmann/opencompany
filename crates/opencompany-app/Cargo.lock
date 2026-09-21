@@ -3856,6 +3856,7 @@ dependencies = [
  "tinyhivemind-hive",
  "tinyhivemind-openhuman",
  "tinyhivemind-typesafe",
+ "tinyinference-core 0.3.0",
  "tinyinference-llm 0.3.0",
  "tinymcp 0.3.2",
  "tinymemory",
