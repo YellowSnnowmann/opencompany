@@ -18,7 +18,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use tinyhivemind::{Sequence, SharingState};
 use tinyhivemind_embed::{Router, RoutingPlan};
 use tinyhivemind_hive::{
@@ -34,7 +33,7 @@ use crate::hive::round::{self, RoundOutcome, SeatAssignment};
 use crate::hive::routing::{EffectiveRouting, RoutingPlanDto, router_of};
 use crate::ports::events::EventLog;
 use crate::ports::types::{
-    ChatOutput, CompanyEvent, CompanyId, CompanyRecord, EpisodeReason, EventSeq, Mention, TurnStep,
+    CompanyEvent, CompanyId, CompanyRecord, EpisodeReason, EventSeq, Mention,
 };
 
 /// The referral half of the host: deciding a crossing, opening the far
