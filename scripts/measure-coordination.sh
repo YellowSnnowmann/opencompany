@@ -100,9 +100,16 @@ if (( mock )); then
   node "$root/frontend/test/e2e/mock-brain.mjs" --bind "$brain_bind" &
   pids+=($!)
   wait_for "http://$brain_bind/healthz" "mock brain"
+  # The model too: an environment-routed provider maps each agent's tier
+  # through the company's `[inference].models` table, and `hive_demo` maps
+  # none (its inference block is the managed brain's). Without an explicit
+  # id every seat turn is refused with "No model is chosen for this company"
+  # and the room closes `failed` with two synthetic completions. The mock
+  # brain answers whatever id it is sent.
   host_env+=(
     "OPENCOMPANY_INFERENCE_KEY=mock-brain"
     "OPENCOMPANY_INFERENCE_URL=http://$brain_bind/v1"
+    "OPENCOMPANY_INFERENCE_MODEL=mock-brain"
   )
 else
   if [[ -z "${OPENCOMPANY_INFERENCE_KEY:-}${TINYHUMANS_API_KEY:-}" ]]; then
