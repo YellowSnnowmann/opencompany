@@ -138,6 +138,10 @@ pub(crate) fn grants_cover_server(grants: &[String], name: &str) -> bool {
 /// [`grants_cover_server`]. `grants` are the *effective* grants — resolve them
 /// with [`agent_effective_grants`](crate::runtime::builder::agent_effective_grants)
 /// first, never the raw per-agent `tools`.
+///
+/// Gated with the harness: every caller is behind `feature = "openhuman"`,
+/// unlike [`grants_cover_server`], which `server/ops/mcp.rs` also reads.
+#[cfg(feature = "openhuman")]
 pub(crate) fn grants_cover_registry_server(grants: &[String], server_id: &str) -> bool {
     let want = format!("mcp_registry.{server_id}");
     // As in `grants_cover_server`: the catch-all `*` never confers reach into
