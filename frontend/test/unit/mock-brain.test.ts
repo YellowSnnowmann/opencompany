@@ -581,7 +581,7 @@ describe("the mock inference backend", () => {
   it("asks the desk a __MOCK_REFER__ directive names from the first post", async () => {
     const everyone = hiveCall(await chat([seat(0, "__MOCK_REFER__ content plan it")], HIVE_TOOLS));
     expect(everyone.tool).toBe("post");
-    expect(everyone.arguments.message).toContain("#content");
+    expect(everyone.arguments.message).toContain("@#content");
     // Qualified with a seat: only that seat asks.
     const me = { role: "user", content: `Hive turn: desk engineering, episode ep-1, round 0.\n\nYou are @engineer on desk #engineering.\n__MOCK_REFER__ engineer:content` };
     expect(hiveCall(await chat([me], HIVE_TOOLS)).arguments.message).toContain("#content");

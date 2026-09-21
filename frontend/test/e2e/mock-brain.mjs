@@ -70,7 +70,7 @@
 //      `broadcast` on its second (or `dm` to the agent a `__MOCK_DM__ <agent>`
 //      directive names), `complete_episode` from its third on. A
 //      `__MOCK_REFER__ [<agent>:]<desk>` directive makes the first post ask
-//      that desk (`#<desk>`), which the host carries across as a referral. A
+//      that desk (`@#<desk>`), which the host carries across as a referral. A
 //      tool output as the last message is that utterance recorded, and ends
 //      the turn. `desk-episode-live.spec.ts` and
 //      `scripts/measure-coordination.sh` drive a two-desk company to
@@ -325,7 +325,7 @@ const DM_DIRECTIVE = "__MOCK_DM__";
 /**
  * "Ask this desk from your first post", followed by a desk id, optionally
  * qualified by the one seat that should ask — `__MOCK_REFER__ content` or
- * `__MOCK_REFER__ engineer:content`. The post then carries `#<desk>`, which
+ * `__MOCK_REFER__ engineer:content`. The post then carries `@#<desk>`, which
  * the host resolves as a desk mention and refers across (`src/hive/referral`).
  * What lets the measurement count a cross-desk referral without a model that
  * might decide otherwise.
@@ -463,7 +463,8 @@ function hiveCompletion(model, hive, dm, refused, refer = null) {
     // The first post asks the desk a `__MOCK_REFER__` names — from the seat
     // it names, or from every seat — unless this already is that desk.
     const asks = refer && refer.desk !== hive.desk && (!refer.asker || refer.asker === hive.speaker);
-    const message = asks ? `${stamp}: opening post. Asking #${refer.desk} for their half.` : `${stamp}: opening post.`;
+    // `@#<desk>` is the desk-mention spelling the host's resolver reads.
+    const message = asks ? `${stamp}: opening post. Asking @#${refer.desk} for their half.` : `${stamp}: opening post.`;
     act = { tool: "post", arguments: { message } };
   } else if (hive.stage === 1) {
     act =

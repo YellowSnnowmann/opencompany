@@ -1129,7 +1129,9 @@ async fn a_single_member_desk_answers_with_one_ordinary_turn() {
 // 5: a cross-desk referral crosses only the answer back
 // ---------------------------------------------------------------------------
 
-const QUESTION: &str = "Please ask #content for the release-note tagline.";
+/// `@#<desk>` is the desk-mention spelling the mention resolver reads
+/// (`tinyhivemind_core::mention`); a bare `#content` is prose.
+const QUESTION: &str = "Please ask @#content for the release-note tagline.";
 const TAGLINE: &str = "Checkout, now with fewer steps.";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
