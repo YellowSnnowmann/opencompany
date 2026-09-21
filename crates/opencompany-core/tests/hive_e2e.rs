@@ -1209,9 +1209,12 @@ async fn a_cross_desk_referral_crosses_only_the_answer_back() {
         .find(|(_, chat, _, _)| chat == CONTENT)
         .map(|(id, ..)| id.clone())
         .expect("the content episode completed");
+    // On both legs `episode_id` is the episode that ASKED and
+    // `to_episode_id` the one that answered — the pair a console keys the
+    // crossing on stays the same whichever way the frame is addressed.
     assert_eq!(markers[0].3.as_deref(), Some(engineering_episode.as_str()));
-    assert_eq!(markers[1].3.as_deref(), Some(content_episode.as_str()));
-    assert_eq!(markers[1].4.as_deref(), Some(engineering_episode.as_str()));
+    assert_eq!(markers[1].3.as_deref(), Some(engineering_episode.as_str()));
+    assert_eq!(markers[1].4.as_deref(), Some(content_episode.as_str()));
     let hops: Vec<(String, u32)> = rows
         .iter()
         .filter_map(|row| match &row.event {
