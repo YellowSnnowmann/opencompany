@@ -205,6 +205,16 @@ impl Seat {
             .any(|(call, output)| SPEECH.contains(&call.as_str()) && !is_refused(output))
     }
 
+    /// The operator's own words, when the assignment is an operator message:
+    /// the line under `The operator asked (^N):`. The assignment goes on to
+    /// index the channel's other threads, which quote earlier messages.
+    fn operator_asked(&self) -> &str {
+        self.assignment
+            .split_once("):\n")
+            .and_then(|(_, rest)| rest.lines().next())
+            .unwrap_or_default()
+    }
+
     /// The result of the last non-speech tool this turn called, when it
     /// answered.
     fn last_tool_result(&self) -> Option<&str> {
@@ -1511,7 +1521,7 @@ async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
                 return post_then_complete(seat);
             }
             let memory = seat.last_tool_result();
-            if seat.assignment.contains(ASK_ONE) {
+            if seat.operator_asked() == ASK_ONE {
                 return match memory {
                     None => Reply::Call {
                         tool: "mcp_call_tool",
@@ -1524,7 +1534,7 @@ async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
                     Some(_) => post("Window fixed and written down."),
                 };
             }
-            if seat.assignment.contains(ASK_TWO) {
+            if seat.operator_asked() == ASK_TWO {
                 return match memory {
                     None => Reply::Call {
                         tool: "mcp_call_tool",
@@ -1563,7 +1573,7 @@ async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
         .asks()
         .iter()
         .filter_map(seat_of)
-        .filter(|seat| seat.speaker == ENGINEER && seat.assignment.contains(ASK_ONE))
+        .filter(|seat| seat.speaker == ENGINEER && seat.operator_asked() == ASK_ONE)
         .flat_map(|seat| seat.turn_tools)
         .collect::<Vec<_>>();
     assert!(
@@ -1588,7 +1598,7 @@ async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
         .asks()
         .iter()
         .filter_map(seat_of)
-        .filter(|seat| seat.speaker == ENGINEER && seat.assignment.contains(ASK_TWO))
+        .filter(|seat| seat.speaker == ENGINEER && seat.operator_asked() == ASK_TWO)
         .flat_map(|seat| seat.turn_tools)
         .collect::<Vec<_>>();
     assert!(
