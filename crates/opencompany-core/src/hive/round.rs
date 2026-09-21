@@ -266,7 +266,7 @@ pub(crate) async fn run_round(
             // (`RoundBracket`); what is left here is the fold.
             match fold_seat(&agent_id, attempt, outcome, allowed) {
                 Fold::Retry => remaining.push((agent_id, attempt + 1)),
-                Fold::Done(done, _) => settled.push(done),
+                Fold::Done(done) => settled.push(done),
                 Fold::Failed(done, failure) => {
                     let error = match &failure {
                         SeatFailure::TimedOut => "the seat turn ran past its timeout".to_string(),
@@ -352,7 +352,7 @@ pub(crate) async fn run_round(
 
 enum Fold {
     Retry,
-    Done(Settled, TurnOutcome),
+    Done(Settled),
     Failed(Settled, SeatFailure),
 }
 
@@ -378,7 +378,6 @@ fn fold_seat(
                         outputs: turn.outputs,
                         forced: None,
                     },
-                    TurnOutcome::Committed,
                 );
             }
             let salvaged = fence::extract_post(&turn.reply);
