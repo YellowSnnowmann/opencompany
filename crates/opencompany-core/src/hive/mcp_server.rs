@@ -426,7 +426,6 @@ impl McpHost {
     }
 
     /// The router serving [`MCP_PATH_PREFIX`]`/{company}/{runtime_agent_id}`.
-    #[must_use]
     pub fn router(self: Arc<Self>) -> Router {
         Router::new()
             .route(
@@ -442,7 +441,6 @@ impl McpHost {
 /// Mounts the MCP routes on an existing router (a test or an operator app
 /// that serves everything on one listener). Production uses
 /// [`McpHost::serve_loopback`] instead.
-#[must_use]
 pub fn mount(router: Router, host: Arc<McpHost>) -> Router {
     router.merge(host.router())
 }
