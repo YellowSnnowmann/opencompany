@@ -24,10 +24,6 @@ import type { SetupHandoffScope } from "@/setup/state";
 
 const hash = () => window.location.hash;
 
-/** A landing, as the console's own routing sees it (pathname + search + hash). */
-const land = (pathname: string, search: string, hash = "") =>
-  window.history.replaceState({}, "", `${pathname}${search}${hash}`);
-
 describe("the setup hand-off marker", () => {
   it("is a fragment whose route the router ignores", () => {
     expect(SETUP_HANDOFF_FRAGMENT).toBe("#/company?from=setup");

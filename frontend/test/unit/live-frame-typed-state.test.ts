@@ -48,11 +48,11 @@ describe("a completion's typed state survives the fold", () => {
       type: "tool_result",
       toolCallId: "c1",
       status: "error",
-      failure: "denied",
+      failure: "declined",
     });
 
     expect(rows?.[0].status).toBe("error");
-    expect(rows?.[0].failure).toBe("denied");
+    expect(rows?.[0].failure).toBe("declined");
   });
 
   it("carries the cut marker", () => {
