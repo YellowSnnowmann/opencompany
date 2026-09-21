@@ -1273,6 +1273,8 @@ pub fn build_agent_with_model(
         system_prompt: persona,
         tools,
         native_tool_names,
+        #[cfg(feature = "mcp")]
+        company_mcp_servers,
         chat_model,
         model,
         workspace,
