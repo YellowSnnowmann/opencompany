@@ -120,7 +120,7 @@ async fn a_rebuild_keeps_a_console_rename_and_a_console_removal() {
 async fn a_desk_reorder_reaches_a_resident_runtime_without_a_rebuild() {
     use crate::harness::HarnessPool;
     use crate::ports::types::{CompanyEvent, OverlayDeskOrder};
-    use crate::store::{FsCompanyStore, FsContextStore};
+    use crate::store::FsCompanyStore;
 
     let home_dir = tmp_home("oc-707-order-");
     let home = home_dir.path().to_path_buf();
@@ -425,7 +425,7 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
 async fn build_seeds_desk_order_into_brain_routing() {
     use crate::harness::HarnessPool;
     use crate::ports::types::{CompanyEvent, OverlayDeskOrder};
-    use crate::store::{FsCompanyStore, FsContextStore};
+    use crate::store::FsCompanyStore;
 
     let home_dir = tmp_home("oc-seed-order-");
     let home = home_dir.path().to_path_buf();
