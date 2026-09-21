@@ -1192,7 +1192,7 @@ const OPERATOR_AUTHORITY_ROUTES: &[Route] = &[
         source: Source::Operator,
         access: Access::Scoped,
         features: &["openhuman"],
-        blast: Blast::Read,
+        blast: Blast::Ordinary,
         probe: Probe::Empty,
         note: "Members may list the episodes the company's desks ran or are running.",
         wait: Wait::None,
