@@ -15,7 +15,12 @@
 //!
 //! Every seat turn is bracketed on the journal — `TurnStarted` before, and
 //! `TurnSettled` or `TurnFailed` after, with the seat, the episode and the
-//! round on each — which is the per-seat lane the console draws.
+//! round on each — which is the per-seat lane the console draws. Both ends
+//! are written by whoever holds the agent's turn lock ([`RoundBracket`]
+//! through [`SeatBracket`]), so a shared seat's brackets on two desks never
+//! overlap on the journal, which is the invariant `opencompany measure`
+//! checks; the run row each bracket opens and settles carries the episode
+//! and round for `GET /runs` and the Observatory.
 
 use std::collections::HashMap;
 use std::sync::Arc;
