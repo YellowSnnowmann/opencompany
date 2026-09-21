@@ -2939,7 +2939,7 @@ impl HarnessPool {
         // fingerprint is stable — so that company never rebuilds on this axis.
         let composio_config = self.resolve_composio(company, deps).await;
         let composio_fp = composio::TenantComposio::fingerprint(&composio_config);
-        tracing::warn!(company = %company.id, composio_fp, some = composio_config.is_some(), stored = ?self.composio_fingerprints.read().await.get(&company.id), "[DBG] ensure composio axis");
+        { let stored = self.composio_fingerprints.read().await.get(&company.id).copied(); tracing::warn!(company = %company.id, composio_fp, some = composio_config.is_some(), ?stored, "[DBG] ensure composio axis"); }
 
         // Re-resolve + fingerprint the billing connections (#788, #789) for the
         // same reason as Composio above: both are set from the console, so a
