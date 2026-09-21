@@ -1023,7 +1023,7 @@ mod live {
                 openhuman_core::core::bus::BUS.publish(
                     openhuman_core::core::events::DomainEvent::SessionExpired {
                         source: format!("integrations.POST:{PATH}"),
-                        reason: oh::inference::provider::ops::sanitize_api_error(&message),
+                        reason: tinyinference_core::sanitize::sanitize_api_error(&message),
                     },
                 );
                 message
