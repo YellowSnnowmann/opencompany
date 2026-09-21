@@ -462,6 +462,30 @@ fn advertised_tools(script: &Script) -> Vec<String> {
                 .map(str::to_string)
         })
         .collect();
+    // Plan hive-desks Phase 3 (matching `search_turn_tests::advertised_tools`):
+    // this crate's own tools — `composio_list_tools`/`composio_execute` among
+    // them — no longer reach the model as direct function tools. They reach it
+    // as the `opencompany` MCP catalogue, named in the system prompt's MCP
+    // brief and called through `mcp_call_tool`/`mcp_list_tools`, so
+    // "advertised" has to read both halves or every non-native tool looks
+    // unreachable.
+    names.extend(
+        script
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|body| body.get("messages").and_then(Value::as_array).cloned())
+            .flatten()
+            .filter(|message| message.get("role").and_then(Value::as_str) == Some("system"))
+            .filter_map(|message| {
+                message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .flat_map(|prompt| crate::harness::build::tools_named_in_mcp_brief(&prompt)),
+    );
     names.sort();
     names.dedup();
     names
