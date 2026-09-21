@@ -34,6 +34,9 @@ pub mod jev;
 /// speech and OpenCompany tools on (plan Phase 3).
 #[cfg(feature = "openhuman")]
 pub mod mcp_server;
+/// Coordination metrics folded from the journal — concurrency, contacts,
+/// completion — behind `opencompany measure` (Phase 8).
+pub mod measure;
 /// What one seat is handed for one turn: sentinel, delta, assignment, fence
 /// (Phase 4).
 pub mod prompt;
