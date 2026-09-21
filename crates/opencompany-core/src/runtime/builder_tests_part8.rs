@@ -205,20 +205,19 @@ async fn a_desk_reorder_reaches_a_resident_runtime_without_a_rebuild() {
         attachments: Vec::new(),
     };
 
-    // Baseline: the blueprint lead answers. Asserted rather than assumed, so
-    // a later failure cannot be explained away as "the desk never routed".
+    // Baseline: the blueprint lead is the primary seat of the episode the
+    // desk message opens (plan hive-desks: a desk of two answers as a room;
+    // its opening plan puts the lead first). Asserted rather than assumed,
+    // so a later failure cannot be explained away as "the desk never routed".
     runtime
         .run_cycle(vec![desk_turn("who leads?")])
         .await
         .expect("first cycle");
-    let context: Arc<dyn ContextStore> = Arc::new(FsContextStore::new(home.clone()));
-    let labels = |outcomes: Vec<crate::ports::types::ChunkMeta>| -> Vec<String> {
-        outcomes.into_iter().map(|m| m.label).collect()
-    };
-    let before = labels(context.list(&id, "task-outcome/").await.unwrap());
-    assert!(
-        before.contains(&"task-outcome/eng1".to_string()),
-        "the blueprint lead must answer before the reorder; saw {before:?}"
+    let before = episode_participants(&runtime, &id, 1).await;
+    assert_eq!(
+        before.first().map(String::as_str),
+        Some("eng1"),
+        "the blueprint lead must lead before the reorder; saw {before:?}"
     );
 
     // The console write: load, mutate, save. Nothing rebuilds.
@@ -229,17 +228,50 @@ async fn a_desk_reorder_reaches_a_resident_runtime_without_a_rebuild() {
     });
     store.save(&record).await.unwrap();
 
-    // The same runtime, a second turn.
+    // The same runtime, a second turn — a new episode, whose primary is the
+    // reordered lead.
     runtime
         .run_cycle(vec![desk_turn("who leads now?")])
         .await
         .expect("second cycle");
-    let after = labels(context.list(&id, "task-outcome/").await.unwrap());
-    assert!(
-        after.contains(&"task-outcome/eng2".to_string()),
-        "the reordered lead eng2 never answered — the resident brain routed on a stale \
+    let after = episode_participants(&runtime, &id, 2).await;
+    assert_eq!(
+        after.first().map(String::as_str),
+        Some("eng2"),
+        "the reordered lead eng2 never led — the resident brain routed on a stale \
          record; saw {after:?}"
     );
+}
+
+/// The participants of the `nth` episode the runtime opened (1-based), in
+/// plan order, waiting for the journal row: the episode is driven on its own
+/// task once the cycle accepted the message.
+#[cfg(feature = "openhuman")]
+async fn episode_participants(
+    runtime: &crate::company::runtime::CompanyRuntime,
+    id: &CompanyId,
+    nth: usize,
+) -> Vec<String> {
+    use crate::ports::types::{CompanyEvent, EventSeq};
+    for _ in 0..400 {
+        let rows = runtime
+            .events()
+            .read_from(id, EventSeq::new(0), usize::MAX)
+            .await
+            .expect("read the journal");
+        let opened: Vec<Vec<String>> = rows
+            .into_iter()
+            .filter_map(|stored| match stored.event {
+                CompanyEvent::EpisodeOpened { participants, .. } => Some(participants),
+                _ => None,
+            })
+            .collect();
+        if opened.len() >= nth {
+            return opened[nth - 1].clone();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    Vec::new()
 }
 
 /// Issue #707, the same defect through `overlay_desks` + `overlay_desk_members`:
@@ -496,18 +528,18 @@ async fn build_seeds_desk_order_into_brain_routing() {
         .await
         .expect("cycle");
 
-    // The harness writes the turn under `task-outcome/{responder}`; the
-    // responder must be the reordered lead.
-    let context: Arc<dyn ContextStore> = Arc::new(FsContextStore::new(home.clone()));
-    let outcomes = context.list(&id, "task-outcome/").await.unwrap();
-    let labels: Vec<&str> = outcomes.iter().map(|m| m.label.as_str()).collect();
-    assert!(
-        labels.contains(&"task-outcome/eng2"),
-        "desk turn did not route to the reordered lead eng2; saw {labels:?}"
+    // The desk of two opens an episode whose primary seat is the reordered
+    // lead: the blueprint lead sits second.
+    let participants = episode_participants(&runtime, &id, 1).await;
+    assert_eq!(
+        participants.first().map(String::as_str),
+        Some("eng2"),
+        "desk turn did not route to the reordered lead eng2; saw {participants:?}"
     );
-    assert!(
-        !labels.contains(&"task-outcome/eng1"),
-        "desk turn routed to the blueprint lead eng1 — the builder dropped the operator desk order; saw {labels:?}"
+    assert_ne!(
+        participants.first().map(String::as_str),
+        Some("eng1"),
+        "desk turn routed to the blueprint lead eng1 — the builder dropped the operator desk order; saw {participants:?}"
     );
 }
 
