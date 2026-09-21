@@ -366,7 +366,6 @@ fn mcp_registry_tools_fail_closed_with_no_registry_home() {
         &[],
         None,
         false,
-        false,
     )
     .expect("agent builds");
     let names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
@@ -435,12 +434,11 @@ fn every_built_agent_states_a_raised_tool_iteration_cap() {
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
 
     assert_eq!(
-        agent.agent_config().max_tool_iterations,
+        agent.max_tool_iterations(),
         MAX_TOOL_ITERATIONS,
         "the built agent is not running on the cap this crate states"
     );

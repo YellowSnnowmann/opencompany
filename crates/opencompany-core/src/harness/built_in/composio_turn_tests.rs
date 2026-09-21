@@ -59,7 +59,7 @@ use crate::harness::orchestrator::{DelegationQueue, WorkflowRunnerHandle};
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{HarnessDeps, HarnessPool};
-use crate::ports::types::{CompanyId, CompanyRecord};
+use crate::ports::types::CompanyRecord;
 use crate::store::{FsCompanyStore, FsContextStore};
 
 /// The harness's shared per-tool-result byte budget
@@ -84,6 +84,12 @@ struct Script {
 }
 
 fn tool_call_message(tool: &str, args: &Value) -> Value {
+    // Plan hive-desks Phase 3: this crate's tools are served over the
+    // `opencompany` MCP server, so a scripted model reaches one exactly as a
+    // real one does — through `mcp_call_tool`. A native tool is unchanged.
+    let (tool, args) = crate::hive::tools::via_opencompany_mcp(tool, args.clone());
+    let tool = tool.as_str();
+    let args = &args;
     json!({
         "role": "assistant",
         "content": null,
@@ -392,7 +398,13 @@ async fn harness(
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
-        id: CompanyId::new("acme"),
+        // A fresh id per test, for the reason `workspace_turn_helpers_tests`
+        // gives: every turn test in this binary runs on the one process-wide
+        // OpenHuman runtime, which pins a session's system prompt at its
+        // first committed turn — two fixtures naming `acme`/`ceo` resume each
+        // other's session, and the second reads a prompt that never named
+        // the Composio route.
+        id: crate::test_support::per_test_company_id("acme"),
         manifest: manifest(),
         ledger: Vec::new(),
         lifecycle: "running".to_string(),
@@ -456,6 +468,30 @@ fn advertised_tools(script: &Script) -> Vec<String> {
                 .map(str::to_string)
         })
         .collect();
+    // Plan hive-desks Phase 3 (matching `search_turn_tests::advertised_tools`):
+    // this crate's own tools — `composio_list_tools`/`composio_execute` among
+    // them — no longer reach the model as direct function tools. They reach it
+    // as the `opencompany` MCP catalogue, named in the system prompt's MCP
+    // brief and called through `mcp_call_tool`/`mcp_list_tools`, so
+    // "advertised" has to read both halves or every non-native tool looks
+    // unreachable.
+    names.extend(
+        script
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|body| body.get("messages").and_then(Value::as_array).cloned())
+            .flatten()
+            .filter(|message| message.get("role").and_then(Value::as_str) == Some("system"))
+            .filter_map(|message| {
+                message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .flat_map(|prompt| crate::harness::build::tools_named_in_mcp_brief(&prompt)),
+    );
     names.sort();
     names.dedup();
     names

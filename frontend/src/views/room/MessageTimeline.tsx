@@ -6,10 +6,10 @@ import type { TaskStatus } from "@/api/tasks";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { EpisodeTurn } from "@/lib/hive/episode";
 import { ApprovalRow } from "./ApprovalRow";
 import { ChatLiveReceipt, type ChatReceipt } from "./ChatLiveReceipt";
-import { EpisodeBlock } from "./EpisodeBlock";
+import { EpisodeCompleteMarker } from "./EpisodeCompleteMarker";
+import { RoundBand } from "./RoundBand";
 import { MessageRow } from "./MessageRow";
 import { StepTimeline } from "./StepTimeline";
 import { WorkingIndicator } from "./WorkingIndicator";
@@ -144,16 +144,6 @@ interface Props {
   failedApprovals?: Record<string, string>;
   onDecideApproval?: DecideApproval;
   /**
-   * What each line did inside its room, keyed by message id.
-   *
-   * Absent for every ordinary reply — which is what keeps a DM, `#general` and a
-   * single-responder desk rendering exactly as they always have. A room's
-   * affordances are a question about the data, never about the channel.
-   */
-  episodeTurn?: Record<string, EpisodeTurn>;
-  /** Focus one option in the transcript. */
-  onSelectTopic?: (topic: string) => void;
-  /**
    * Whether this company's teammates can think (issue #1735). On either echo
    * state every company-side row below is a canned line rather than a
    * teammate's answer (issue #1734). Passed straight through to `MessageRow`,
@@ -240,8 +230,6 @@ export function MessageTimeline({
   decidingApprovals,
   failedApprovals,
   onDecideApproval,
-  episodeTurn,
-  onSelectTopic,
   cognition,
   onRedeemBudgetPause,
   redeemingBudgetPauseAgent,
@@ -441,26 +429,27 @@ export function MessageTimeline({
   /**
    * One timeline row.
    *
-   * Extracted from the `items.map` it used to be inlined in so an
-   * {@link EpisodeBlock} can render the very same rows inside itself. A room's
-   * turns are ordinary messages — same avatar gutter, same hover actions, same
-   * thread affordances — and a second renderer for them would be a second place
-   * for those to drift.
+   * Extracted from the `items.map` it used to be inlined in so a
+   * {@link RoundBand} can render the very same rows inside itself. A round's
+   * utterances are ordinary messages — same avatar gutter, same hover actions,
+   * same thread affordances — and a second renderer for them would be a second
+   * place for those to drift.
    */
   const renderRow = (item: TimelineItem): React.ReactNode => {
-    if (item.kind === "episode") {
+    if (item.kind === "round") {
       return (
-        <EpisodeBlock
-          agentNames={agentNames}
+        <RoundBand
           key={item.key}
-          item={item}
+          episode={item.episode}
+          round={item.round}
+          items={item.items}
           renderRow={renderRow}
-          onSelectTopic={onSelectTopic}
-          // A desk channel's id is the desk id, and only a desk ever holds a
-          // room — `#general` and a DM fold to no episodes at all.
-          deskId={channel.kind === "channel" && !channel.system ? channel.id : undefined}
+          agentNames={agentNames}
         />
       );
+    }
+    if (item.kind === "episode_complete") {
+      return <EpisodeCompleteMarker key={item.key} episode={item.episode} agentNames={agentNames} />;
     }
     if (item.kind === "message") {
       return (
@@ -492,10 +481,7 @@ export function MessageTimeline({
             // reaction) and what it deliberately leaves (reactions already
             // there, and the way into a thread).
             readOnly={Boolean(channel.system)}
-            // What this line did in the room, when it was a turn in one. Absent
-            // for every ordinary reply, which is what keeps a single-responder
-            // desk rendering exactly as it always has.
-            turn={episodeTurn?.[item.entry.message.id]}
+            agentNames={agentNames}
           />
         </div>
       );

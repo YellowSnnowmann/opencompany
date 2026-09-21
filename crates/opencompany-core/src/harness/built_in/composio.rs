@@ -590,8 +590,8 @@ mod live {
         ComposioAuthorizeResponse, ComposioConnectionsResponse, ComposioDeleteResponse,
         ComposioExecuteResponse, ComposioToolkitsResponse, ComposioToolsResponse,
     };
-    use oh::tools::traits::{PermissionLevel, Tool, ToolResult};
     use openhuman_core as oh;
+    use tinytools::{PermissionLevel, Tool, ToolResult};
 
     use crate::harness::built_in::composio_direct::DirectComposio;
 
@@ -681,6 +681,7 @@ mod live {
             .map_err(|e| anyhow::anyhow!("resolving this company's Composio credential: {e}"))?
             .ok_or_else(|| anyhow::anyhow!("no Composio credential is configured"))?;
         let mut secrets = vec![secret.clone()];
+        crate::harness::backend_transport::ensure_installed();
         let client = match config.mode() {
             ComposioMode::Managed => LiveClient::Managed(ComposioClient::new(Arc::new(
                 IntegrationClient::new(config.backend_url.clone(), secret.clone()),
@@ -1022,7 +1023,7 @@ mod live {
                 openhuman_core::core::bus::BUS.publish(
                     openhuman_core::core::events::DomainEvent::SessionExpired {
                         source: format!("integrations.POST:{PATH}"),
-                        reason: oh::inference::provider::ops::sanitize_api_error(&message),
+                        reason: tinyinference_core::sanitize::sanitize_api_error(&message),
                     },
                 );
                 message

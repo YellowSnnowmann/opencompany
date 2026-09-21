@@ -303,20 +303,38 @@ chart's desk level, since no desk can name a parent desk. See
 | | |
 |---|---|
 | `channels.ts` | What a channel is: desks, DMs, `#general`, the Operator feed, and the id grammar. Pure. |
-| `timeline.ts` | Senders, hydration, grouping, the timeline items (messages, approvals, episodes), reactions. Pure. |
+| `timeline.ts` | Senders, hydration, grouping, the timeline items (messages, approvals, rounds, completion markers), reactions. Pure. |
 | `review.ts` | A card's lifecycle inside a conversation: the settle pill a verdict hangs off, and the budget-pause markers. Pure. |
 | `model.ts` | A barrel re-exporting the three above, so one import address still reaches all of it. Declares nothing. |
-| `EpisodeBlock.tsx` | One deliberation: the blind round, the turns, the standings, the verdict. |
+| `RoundBand.tsx` | One round of a desk answering as a room: the seats that ran together, each lane's live state, and the rows they produced (`data-testid="round-band"`, `data-round-status`). |
+| `EpisodeCompleteMarker.tsx` | The centred pill that says an episode is over — how many rounds, who closed it, and whether the host cut it off. |
 | `ChannelRail.tsx` | The channel/DM list, with collapsible sections. |
 | `ChatHeader.tsx` | The bar above the timeline. |
 | `MessageTimeline.tsx` | The scroll body: day dividers, channel intro, loading skeleton, typing row. |
-| `MessageRow.tsx` | One line — avatar gutter, author, body, reactions, hover action bar, and the board-card chip (link plus its dismissal, issue #984). |
+| `MessageRow.tsx` | One line — avatar gutter, author, body, reactions, hover action bar, the board-card chip (link plus its dismissal, issue #984), and the utterance chip on a row an episode committed (`components/episode/UtteranceChip`). |
 | `MessageComposer.tsx` | The composer dock; also used compact in the thread panel. |
 | `ThreadPanel.tsx` | Replies to one message, with their own composer. |
 | `MembersPane.tsx` | Who is in this channel, then the rest of the roster. |
 | `AddMemberDialog.tsx` | Define a teammate. |
 
 `../RoomView.tsx` owns the state and composes them.
+
+## Rounds and episodes
+
+A desk of two or more answers as a room, and the transcript shows it as a
+**grouping strip, not a page**. The seats' replies are ordinary rows; what the
+band adds is that they were written *together*: `lib/episodes.ts` folds the
+rows carrying `episode: {id, revision, kind}` with the live frames the shell
+holds (`lib/episode-frames.ts`, fed by `episode_opened`, `round_started`, the
+turn bracket, `round_committed`, `dm_delivered`, `episode_completed`), and
+`timeline.ts` collapses each round's rows into one `round` item at the position
+of its first row — a round no row has reached yet takes the moment it opened —
+with an `episode_complete` item after the last round. After a reload the frames
+are empty and every completed episode is rebuilt from `chat/history` alone; the
+frames only ever add the present tense (a lane still working, a seat that timed
+out). A DM, `#general` and a one-seat desk carry no `episode` and render exactly
+as before: the affordance follows the data, never the channel kind. The
+styleguide's "Rounds" section renders every piece against a fixture.
 
 ## Grouping rules
 

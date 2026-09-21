@@ -53,7 +53,6 @@ async fn workspace_git_enabled_checkpoints_a_tool_write() {
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
 
@@ -182,11 +181,9 @@ fn the_tool_iteration_cap_is_uniform_and_not_manifest_configurable() {
             &[],
             None,
             is_orchestrator,
-            /* speech_enabled */ false,
         )
         .expect("agent builds")
-        .agent_config()
-        .max_tool_iterations
+        .max_tool_iterations()
     };
 
     for (label, got) in [

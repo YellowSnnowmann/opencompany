@@ -28,7 +28,7 @@ use oh::config::{Config, McpAuthConfig, McpServerConfig};
 use oh::mcp::config_servers::{McpRegistrySource, McpServerRegistry};
 use oh::mcp::registry::types::{ConnStatus, InstalledServer, McpTool};
 use oh::security::{SecurityPolicy, ToolOperation};
-use oh::tools::traits::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
+use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
 
 use crate::company::mcp::{AuthMaterial, McpServerDecl, stdio_install_refusal};
 use crate::error::OpenCompanyError;
@@ -115,6 +115,64 @@ pub fn granted_secrets(decls: &[McpServerDecl], grants: &[String]) -> Vec<String
 /// for stale answers lives in the Memory cell; this is the mitigation.
 pub fn capability_brief() -> String {
     " When you are asked what tools, integrations, or MCP servers you have — or whether you can do something that would use one — ALWAYS call `mcp_list_servers` (and `mcp_list_tools` for a specific server) to check what is available right now. Never answer such questions from memory: your available servers and tools can change between turns.".to_string()
+}
+
+/// The company's granted MCP servers, rendered as [`openhuman_embed::McpServer`]
+/// attachments an [`openhuman_embed::AgentSpec`] can carry directly (plan
+/// hive-desks, Phase 2 follow-up).
+///
+/// # Why this exists alongside [`registry_for_agent`]
+///
+/// [`host_loop`](crate::harness::host_loop)'s module doc says it plainly:
+/// "the company agents run on the embedded OpenHuman runtime, whose tool set
+/// is its own (plus MCP servers) — there is no seam for a `Tool` this crate
+/// built" for a company AGENT (as opposed to an in-process auxiliary pass).
+/// [`OcMcpCallTool`] / [`OcMcpListServersTool`] / upstream's
+/// `McpListToolsTool` are exactly such tools — pushed onto
+/// [`AgentBlueprint::tools`](crate::harness::built_in::build::AgentBlueprint::tools)
+/// under the reserved names `mcp_call_tool` / `mcp_list_servers` /
+/// `mcp_list_tools` so the OLD native-dispatch builder (`tool_dispatcher.rs`,
+/// removed when the runtime moved to the hosted pipeline) would run OC's
+/// decorator instead of OpenHuman's own implementation of those names.
+///
+/// That dispatch seam is gone. A name in
+/// [`OPENHUMAN_NATIVE_TOOLS`](crate::harness::built_in::build::OPENHUMAN_NATIVE_TOOLS)
+/// is now *always* OpenHuman's own implementation — reaching only whatever
+/// [`McpServer`](openhuman_embed::McpServer)s were attached to the spec via
+/// [`AgentSpec::mcp`](openhuman_embed::AgentSpec::mcp) — so `OcMcpCallTool`'s
+/// registry (built from these same `decls`/`grants`) was never being called at
+/// all: a company's own registered servers were unreachable, and
+/// `mcp_call_tool` only ever found the internal `opencompany` hive server
+/// (issue tracked alongside plan hive-desks Phase 3/4). This function is the
+/// other half of that fix: it hands the SAME granted servers to
+/// `agent_spec_for` so they reach the spec the way `AgentSpec::mcp` (plural —
+/// "call repeatedly to add several") is meant to be used, alongside the
+/// `opencompany` attachment.
+///
+/// **Known gap left open by this fix**: OpenHuman's own `mcp_call_tool` /
+/// `mcp_list_servers` do not scrub credentials the way `OcMcpCallTool`'s
+/// `handle_failure` and `OcMcpListServersTool` do (see this module's security
+/// note above) — a transport failure or a `mcp_list_servers` call can now
+/// surface a configured bearer/token verbatim to the agent for a
+/// directly-attached company server. Restoring that hardening needs a real
+/// seam into the hosted pipeline (a job for hive-desks Phase 4), not a
+/// band-aid here; it is called out rather than silently reintroduced.
+pub fn embed_servers_for_agent(
+    decls: &[McpServerDecl],
+    grants: &[String],
+) -> Vec<openhuman_embed::McpServer> {
+    decls
+        .iter()
+        .filter(|decl| decl.enabled && grants_cover_server(grants, &decl.name))
+        .map(|decl| {
+            openhuman_embed::McpServer::http(decl.name.clone(), decl.endpoint.clone())
+                .auth(auth_config(&decl.auth))
+                .allow_tools(decl.allowed_tools.clone())
+                .deny_tools(decl.disallowed_tools.clone())
+                .timeout_secs(decl.timeout_secs)
+                .description(decl.description.clone().unwrap_or_default())
+        })
+        .collect()
 }
 
 /// Projects a [`McpServerDecl`] onto an OpenHuman [`McpServerConfig`], mapping

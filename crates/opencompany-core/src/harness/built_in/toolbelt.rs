@@ -92,13 +92,14 @@ use oh::security::{
     AuditLogger, AutonomyLevel, SecurityPolicy, get_or_create_workspace_audit_logger,
 };
 use oh::tools::{
-    ApplyPatchTool, CurlTool, GitOperationsTool, HttpRequestTool, ImageInfoTool, Tool,
-    WebFetchTool, WorkspaceStateTool,
+    ApplyPatchTool, CurlTool, GitOperationsTool, HttpRequestTool, ImageInfoTool, WebFetchTool,
+    WorkspaceStateTool,
 };
+use tinytools::Tool;
 
 use crate::harness::policy::PolicyMode;
 
-use oh::tools::traits::{
+use tinytools::{
     PermissionLevel, ToolCallOptions, ToolCategory, ToolResult, ToolRunContext, ToolScope,
     ToolSpec, ToolTimeout,
 };
@@ -325,7 +326,9 @@ impl ShellTool {
 impl ToolGuard for HighRiskCommands {
     fn timeout_policy(&self, inner: ToolTimeout) -> ToolTimeout {
         match inner {
-            ToolTimeout::Secs(secs @ 1..=3600) => ToolTimeout::Secs(secs),
+            // The vocabulary moved from seconds to milliseconds at the 1ecf1b0
+            // pin; the bound is the same hour.
+            ToolTimeout::Millis(ms @ 1..=3_600_000) => ToolTimeout::Millis(ms),
             _ => ToolTimeout::Inherit,
         }
     }
@@ -961,6 +964,7 @@ pub fn media_tools(backend: &MediaBackend, workspace: &Path) -> Vec<Box<dyn Tool
 
     // The Config-free seam: `IntegrationClient::new(backend_url, auth_token)`
     // takes the managed credential directly, with no OpenHuman global `Config`.
+    crate::harness::backend_transport::ensure_installed();
     let client = Arc::new(IntegrationClient::new(
         backend.backend_url.clone(),
         backend.auth_token.clone(),

@@ -596,6 +596,7 @@ async fn chat_history_finds_agent_replies_under_general_and_main() {
                 agent_id: "maya".to_string(),
                 text: "canonical id".to_string(),
                 steps: Vec::new(),
+                episode: None,
             },
         )
         .await
@@ -615,6 +616,7 @@ async fn chat_history_finds_agent_replies_under_general_and_main() {
                 agent_id: "maya".to_string(),
                 text: "console default-thread id".to_string(),
                 steps: Vec::new(),
+                episode: None,
             },
         )
         .await
@@ -667,6 +669,7 @@ async fn chat_history_clamps_an_oversized_page_request() {
                     agent_id: "maya".to_string(),
                     text: format!("message {i}"),
                     steps: Vec::new(),
+                    episode: None,
                 },
             )
             .await

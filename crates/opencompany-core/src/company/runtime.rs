@@ -526,6 +526,7 @@ pub struct CompanyRuntime {
 fn continuation_failure_notice(thread: String, parent: Option<EventSeq>) -> CompanyEvent {
     CompanyEvent::AgentReply {
         audience: Vec::new(),
+        episode: None,
         parent,
         chat_id: thread,
         agent_id: crate::ports::SYSTEM_AUTHOR.to_string(),
@@ -1028,14 +1029,6 @@ impl CompanyRuntime {
     }
 
     /// This company's event log (append-only audit trail).
-    /// The gate a [`JournalReferralQueue`](crate::runtime::hivemind::JournalReferralQueue)
-    /// serialises its check-then-write under. One per company, so two referrals
-    /// decided at once cannot both find the marker absent.
-    #[cfg(feature = "hivemind")]
-    pub(crate) fn referral_gate(&self) -> Arc<tokio::sync::Mutex<()>> {
-        self.task_writes.clone()
-    }
-
     pub fn events(&self) -> &Arc<dyn EventLog> {
         &self.events
     }
@@ -1350,99 +1343,6 @@ impl CompanyRuntime {
             );
         }
         let _ = task;
-    }
-
-    /// SPIKE (tinyhivemind P15): run a referred child turn on the target desk.
-    ///
-    /// A referral arrives on the target's desk channel as a MESSAGE authored by
-    /// the agent that asked — which is what it is. That keeps one mechanism for
-    /// "a turn happens because something arrived on this conversation" instead
-    /// of a second, referral-only path, and it means the responder ladder picks
-    /// the target exactly as it would for any other addressed message.
-    ///
-    /// Detached, like every other turn this runtime starts: the enqueue
-    /// transaction has already committed its marker, and the caller must not
-    /// wait on a model.
-    #[cfg(feature = "hivemind")]
-    pub(crate) fn spawn_referred_turn(
-        self: Arc<Self>,
-        desk: String,
-        content: String,
-        asker: String,
-        // Where an answer goes home, on a crossing FORWARD. `None` on a return
-        // — an answer that has arrived does not need carrying further.
-        origin: Option<tinyhivemind_core::referral::ReferralOrigin>,
-        // The forward this child is answering, by the journal sequence of its
-        // marker — carried so the return can name it exactly. Two crossings
-        // between the same desks to the same agent write geometrically
-        // identical markers, so a return that searched for "the forward that
-        // looks like mine" would pair one question with the other's answer.
-        answers: Option<u64>,
-        // How deep in the chain this turn sits. Its own replies are offered to
-        // the referral pass at this depth, so a follow-up is one deeper than
-        // the answer it follows and `max_hops` finally counts something.
-        //
-        // This was a hardcoded `1`, which read as "a referred turn is depth 1"
-        // and is true only of the first one. Every later generation claimed
-        // depth 1 as well, so the counter reset on each hop: two desks could
-        // have passed a question back and forth forever without the policy ever
-        // reaching its limit. Nothing drove that loop at the time — the asker
-        // had no way to ask again — so it cost nothing until it would have cost
-        // everything.
-        hop: u32,
-    ) {
-        tokio::spawn(async move {
-            let desk_for_replies = desk.clone();
-            let event = CompanyEvent::OperatorMessage {
-                text: content,
-                // The asking AGENT, not the operator: a referral is a teammate
-                // asking, and recording it as an operator message would put
-                // words in a person's mouth.
-                by: Some(crate::ports::types::Actor {
-                    kind: crate::ports::types::ActorKind::Agent,
-                    id: asker,
-                }),
-                chat: Some(desk),
-                parent: None,
-                // Never a card: a referral asks a question, it does not hand
-                // work over. Ownership moving is the hand-off path's job.
-                deliverable: Some(crate::ports::types::MessageIntent::Chat),
-                mentions: Vec::new(),
-                attachments: Vec::new(),
-            };
-            // `run_cycle` journals its INPUT events and returns the replies —
-            // it does not write them down. The chat route journals its own
-            // (`journal_chat_replies`) and the dispatch cycle journals its own
-            // (`journal_dispatch_replies`); a third caller needs the same, or
-            // the referred agent answers into a transcript nobody can read.
-            match self.run_cycle(vec![event]).await {
-                Ok(mut report) => {
-                    let company = self.id.clone();
-                    crate::server::operator::journal_chat_replies(
-                        &self,
-                        &company,
-                        &desk_for_replies,
-                        None,
-                        &mut report,
-                    )
-                    .await;
-                    // The back edge. This turn's reply is the ANSWER to the
-                    // referral that caused it, so it is offered to the decision
-                    // carrying the origin it must return to, at its own depth.
-                    crate::server::operator::refer_committed_replies(
-                        &self,
-                        &company,
-                        &desk_for_replies,
-                        &report,
-                        origin,
-                        answers,
-                        hop,
-                    )
-                    .await;
-                }
-                Err(err) => tracing::warn!(error = %err, "[referral] the referred turn failed"),
-            }
-        });
     }
 
     /// The body of a dispatch's detached cycle (issue #242), split out of the
@@ -4786,6 +4686,7 @@ impl CompanyRuntime {
                     &self.id,
                     CompanyEvent::AgentReply {
                         audience: Vec::new(),
+                        episode: None,
                         parent,
                         chat_id: chat_id.to_string(),
                         // Issue #885: the author, falling back to the
@@ -5301,6 +5202,7 @@ impl CompanyRuntime {
                     &self.id,
                     CompanyEvent::AgentReply {
                         audience: Vec::new(),
+                        episode: None,
                         parent,
                         chat_id: chat_id.clone(),
                         // Issue #885: the author, not the destination. Same
@@ -7097,6 +6999,7 @@ impl CompanyRuntime {
                 &self.id,
                 CompanyEvent::AgentReply {
                     audience: Vec::new(),
+                    episode: None,
                     parent,
                     chat_id: thread.to_string(),
                     agent_id,
@@ -7165,6 +7068,7 @@ impl CompanyRuntime {
                     // notice is that everyone reading the channel — including
                     // whoever the ping failed to reach — can see it.
                     audience: Vec::new(),
+                    episode: None,
                 },
             )
             .await

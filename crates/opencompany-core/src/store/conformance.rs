@@ -1131,6 +1131,9 @@ pub async fn assert_event_retention(events: Arc<dyn EventLog>) {
                     chat_id: "general".to_string(),
                     parent: None,
                     by: None,
+                    agent_id: None,
+                    episode_id: None,
+                    round_revision: None,
                 },
             )
             .await
@@ -1142,6 +1145,11 @@ pub async fn assert_event_retention(events: Arc<dyn EventLog>) {
             CompanyEvent::TurnFailed {
                 turn_id: "turn-0".to_string(),
                 error: "the host restarted".to_string(),
+                agent_id: None,
+                chat_id: None,
+                episode_id: None,
+                round_revision: None,
+                outcome: None,
             },
         )
         .await

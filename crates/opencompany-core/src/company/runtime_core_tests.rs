@@ -279,6 +279,7 @@ fn a_workflow_parks_continuation_owns_no_desk_and_no_dm() {
         steps: Vec::new(),
         task_id: None,
         outputs: Vec::new(),
+        episode: None,
     };
     let origin = |task: Option<TaskLink>, run_id: Option<&str>| ApprovalOrigin {
         at_millis: 1,

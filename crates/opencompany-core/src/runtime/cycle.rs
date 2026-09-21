@@ -2999,7 +2999,17 @@ fn cycle_task_id(
             | CompanyEvent::DeskCreated { .. }
             | CompanyEvent::DeskDeleted { .. }
             | CompanyEvent::DeskMembersChanged { .. }
-            | CompanyEvent::DeskHiveConfigured { .. }
+            | CompanyEvent::DeskRoutingConfigured { .. }
+            // Plan hive-desks, Phase 4: the episode record — brackets around
+            // the `AgentReply` rows a room wrote, and the driver's checkpoint.
+            // Records of a round that already ran, not stimuli for a cycle.
+            | CompanyEvent::EpisodeOpened { .. }
+            | CompanyEvent::RoundStarted { .. }
+            | CompanyEvent::RoundCommitted { .. }
+            | CompanyEvent::BroadcastRouted { .. }
+            | CompanyEvent::DmDelivered { .. }
+            | CompanyEvent::EpisodeCompleted { .. }
+            | CompanyEvent::EpisodeStateSaved { .. }
             | CompanyEvent::WorkflowEnabledChanged { .. }
             | CompanyEvent::WorkflowRunFinished { .. }
             // Issue #371/#382: a run's start and its per-node start/finish
@@ -3038,6 +3048,7 @@ fn cycle_task_id(
             // either as a stimulus would make a turn re-trigger itself.
             | CompanyEvent::TurnStarted { .. }
             | CompanyEvent::TurnFailed { .. }
+            | CompanyEvent::TurnSettled { .. }
             // Issue #1015: an attempt row announcing its own move. The same
             // argument as `TaskCardChanged` directly above, and it matters more
             // here — the store appends it *after* the status write, and the
@@ -3239,7 +3250,17 @@ fn cycle_conversation(
             | CompanyEvent::DeskCreated { .. }
             | CompanyEvent::DeskDeleted { .. }
             | CompanyEvent::DeskMembersChanged { .. }
-            | CompanyEvent::DeskHiveConfigured { .. }
+            | CompanyEvent::DeskRoutingConfigured { .. }
+            // Plan hive-desks, Phase 4: the episode record — brackets around
+            // the `AgentReply` rows a room wrote, and the driver's checkpoint.
+            // Records of a round that already ran, not stimuli for a cycle.
+            | CompanyEvent::EpisodeOpened { .. }
+            | CompanyEvent::RoundStarted { .. }
+            | CompanyEvent::RoundCommitted { .. }
+            | CompanyEvent::BroadcastRouted { .. }
+            | CompanyEvent::DmDelivered { .. }
+            | CompanyEvent::EpisodeCompleted { .. }
+            | CompanyEvent::EpisodeStateSaved { .. }
             | CompanyEvent::WorkflowEnabledChanged { .. }
             | CompanyEvent::WorkflowRunFinished { .. }
             | CompanyEvent::WorkflowRunStarted { .. }
@@ -3270,6 +3291,7 @@ fn cycle_conversation(
             // either as a stimulus would make a turn re-trigger itself.
             | CompanyEvent::TurnStarted { .. }
             | CompanyEvent::TurnFailed { .. }
+            | CompanyEvent::TurnSettled { .. }
             // Issue #1015: an attempt row announcing its own move. The same
             // argument as `TaskCardChanged` directly above, and it matters more
             // here — the store appends it *after* the status write, and the

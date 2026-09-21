@@ -90,9 +90,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use openhuman_core as oh;
-
-use oh::tools::traits::{PermissionLevel, Tool, ToolResult};
+use tinytools::{PermissionLevel, Tool, ToolResult};
 
 use crate::ports::artifacts::ArtifactKind;
 

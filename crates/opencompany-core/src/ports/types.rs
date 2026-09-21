@@ -410,6 +410,135 @@ fn is_zero_depth(depth: &u8) -> bool {
     *depth == 0
 }
 
+/// `skip_serializing_if` for a defaulted hop counter.
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
+/// The one speech act a seat ended its turn with (plan hive-desks, Phase 4).
+/// Mirrors `tinyhivemind::speech::Utterance`'s four kinds; `read` is a query
+/// and never reaches the journal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UtteranceKind {
+    /// A message for the whole desk.
+    Post,
+    /// A message the host routed to the best-placed teammates.
+    Broadcast,
+    /// A message for named peers only.
+    Dm,
+    /// A message that also reports the author's assignment finished.
+    CompleteEpisode,
+}
+
+impl UtteranceKind {
+    /// The kind of a tinyhivemind utterance.
+    #[must_use]
+    pub fn of(utterance: &tinyhivemind::speech::Utterance) -> Self {
+        use tinyhivemind::speech::Utterance;
+        match utterance {
+            Utterance::Post { .. } => Self::Post,
+            Utterance::Broadcast { .. } => Self::Broadcast,
+            Utterance::Dm { .. } => Self::Dm,
+            Utterance::CompleteEpisode { .. } => Self::CompleteEpisode,
+        }
+    }
+}
+
+/// How a broadcast was routed onward, on the reply that carried it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutedBy {
+    /// The accepted plan.
+    pub plan: crate::hive::routing::RoutingPlanDto,
+    /// Which router chose.
+    pub router: crate::hive::routing::Router,
+}
+
+/// What a journaled reply was inside the episode that produced it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplyEpisode {
+    /// The episode the reply was committed into.
+    pub id: String,
+    /// The driver revision it was committed at (raw, 0-based).
+    pub revision: u64,
+    /// The speech act.
+    pub kind: UtteranceKind,
+    /// A `dm`'s recipients.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub to: Vec<String>,
+    /// How a `broadcast` was routed onward, once the host recorded it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routed_by: Option<RoutedBy>,
+}
+
+/// One seat's committed utterance inside a `RoundCommitted` event.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoundUtteranceRecord {
+    /// The seat.
+    pub agent_id: String,
+    /// The journal sequence the driver committed it at — the `AgentReply`
+    /// row's own sequence.
+    pub sequence: u64,
+    /// The speech act.
+    pub kind: UtteranceKind,
+    /// The `AgentReply` row it produced, when it produced one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_seq: Option<u64>,
+    /// A `dm`'s recipients.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub to: Vec<String>,
+}
+
+/// Why an episode closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EpisodeReason {
+    /// Every assigned seat called `complete_episode`.
+    CompleteEpisode,
+    /// The desk's `max_rounds` was reached.
+    RoundCap,
+    /// A seat ran past its turn timeout and the host closed the room.
+    Timeout,
+    /// A seat failed past its retries and the host closed the room.
+    Failed,
+    /// The desk's membership changed under the episode.
+    MembershipChanged,
+}
+
+/// How a seat turn ended, as `turn_settled` reports it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnOutcome {
+    /// The seat's utterance is on the desk.
+    #[default]
+    Committed,
+    /// The turn errored.
+    Failed,
+    /// The turn ran past its timeout.
+    TimedOut,
+    /// The turn returned without calling a speech tool.
+    NoUtterance,
+}
+
+impl TurnOutcome {
+    /// `skip_serializing_if` for the default.
+    #[must_use]
+    pub fn is_committed(&self) -> bool {
+        matches!(self, Self::Committed)
+    }
+
+    /// The wire word.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Committed => "committed",
+            Self::Failed => "failed",
+            Self::TimedOut => "timed_out",
+            Self::NoUtterance => "no_utterance",
+        }
+    }
+}
+
 /// One file attached to a chat message (issue #1682).
 ///
 /// A **reference**, not the bytes. The payload lives as an ordinary binary
@@ -746,6 +875,16 @@ pub enum CompanyEvent {
         to_desk: String,
         /// The agent the child turn runs as.
         target: String,
+        /// The episode on the asking desk that raised the crossing (plan
+        /// hive-desks, Phase 6). Absent on a pair DM and on older markers.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        episode_id: Option<String>,
+        /// The episode opened on the far desk to answer it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to_episode_id: Option<String>,
+        /// The hop the child turn runs at.
+        #[serde(default, skip_serializing_if = "is_zero_u32")]
+        hop: u32,
     },
     /// A human sent a chat message.
     OperatorMessage {
@@ -888,6 +1027,17 @@ pub enum CompanyEvent {
         /// [`OperatorMessage`](Self::OperatorMessage)'s `by`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         by: Option<Actor>,
+        /// The seat whose turn this is (plan hive-desks, Phase 4). `None` on
+        /// a turn opened before the seat was chosen — the chat route's
+        /// bracket — and on every row written before the field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<String>,
+        /// The episode this seat turn runs for, when it is a hive round's.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        episode_id: Option<String>,
+        /// The round revision inside that episode.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        round_revision: Option<u64>,
     },
     /// A turn that was accepted did not produce an answer (issue #983).
     ///
@@ -905,6 +1055,51 @@ pub enum CompanyEvent {
         /// [`WorkflowRunFinished::error`](Self::WorkflowRunFinished), and
         /// deliberately **not** projected onto the operator SSE stream.
         error: String,
+        /// The seat that failed, when the turn was a seat's (plan hive-desks).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<String>,
+        /// The desk the turn answered on.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chat_id: Option<String>,
+        /// The episode the seat turn ran for.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        episode_id: Option<String>,
+        /// The round revision inside that episode.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        round_revision: Option<u64>,
+        /// How the turn ended, when it is finer than "failed": `timed_out`
+        /// for a seat that ran past its turn timeout. Absent means `failed`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outcome: Option<TurnOutcome>,
+    },
+    /// A turn that was accepted produced its answer (plan hive-desks, Phase 2).
+    ///
+    /// The closing bracket of [`TurnStarted`](Self::TurnStarted) on the
+    /// success path, so the console's `turn_started`/`turn_settled` pair
+    /// closes whichever way a turn ends and can say which agent answered —
+    /// the per-seat bracket the hive round band is drawn from. Prunable like
+    /// its opener: its meaning is spent once the answer is on the desk.
+    TurnSettled {
+        /// The turn this settles — the id its
+        /// [`TurnStarted`](Self::TurnStarted) carries.
+        turn_id: String,
+        /// The agent whose turn it was, when one answered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<String>,
+        /// The desk the turn answered on (plan hive-desks, Phase 4).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chat_id: Option<String>,
+        /// The episode the seat turn ran for.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        episode_id: Option<String>,
+        /// The round revision inside that episode.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        round_revision: Option<u64>,
+        /// How the turn ended: `committed` (the default, and every row written
+        /// before the field existed) or `no_utterance` for a seat that
+        /// answered without calling a speech tool.
+        #[serde(default, skip_serializing_if = "TurnOutcome::is_committed")]
+        outcome: TurnOutcome,
     },
     /// One task attempt changed status (issue #1015).
     ///
@@ -1183,6 +1378,15 @@ pub enum CompanyEvent {
         /// stored record needs migrating.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         audience: Vec<String>,
+        /// What this reply was inside the episode that produced it — its
+        /// round, its speech act, a `dm`'s recipients, and how a `broadcast`
+        /// was routed onward (plan hive-desks, Phase 4).
+        ///
+        /// `None` for every reply outside an episode and every row written
+        /// before episodes existed; such a row renders exactly as before.
+        /// Additive on the terms `task_id`, `parent` and `audience` above are.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        episode: Option<ReplyEpisode>,
     },
     /// A reaction was set or cleared on one chat message (issue #364).
     ///
@@ -1457,22 +1661,167 @@ pub enum CompanyEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         by: Option<Actor>,
     },
-    /// A desk's move grammar was installed, replaced, or reset to the manifest's.
+    /// A desk's routing block was installed, replaced, or reset to the
+    /// manifest's (`PUT`/`DELETE {scope}/desks/{id}/routing`).
     ///
     /// Carries **no config body**, same rule as
     /// [`WorkflowUpdated`](Self::WorkflowUpdated): the row answers "who changed
-    /// how this desk thinks, and when", and the table itself is one read away.
+    /// how this desk routes, and when", and the block itself is one read away.
     ///
     /// Permanent under the retention rule — only the workflow-run kinds and
     /// `McpCallFailed` may ever be pruned — which is the right trade for an
     /// audit fact whose lifetime cardinality is "how often does an operator
-    /// re-author a grammar".
-    DeskHiveConfigured {
+    /// re-pace a desk".
+    DeskRoutingConfigured {
         desk_id: String,
         /// True when the override was dropped and the manifest restored.
         reset: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         by: Option<Actor>,
+    },
+    /// A desk opened an episode: a message on a desk of two or more was
+    /// routed to seats, and those seats will now run in rounds until every
+    /// assigned one calls `complete_episode` (plan hive-desks, Phase 4).
+    ///
+    /// Every episode frame below carries `chat_id` — the desk — and
+    /// `episode_id`, so a console keys its round band on the same id its
+    /// transcript is keyed on. All are permanent: together with the
+    /// `AgentReply` rows they bracket they **are** the record of what the
+    /// room did, and `GET {scope}/episodes` is folded from them.
+    EpisodeOpened {
+        /// The desk.
+        chat_id: String,
+        /// The episode's id.
+        episode_id: String,
+        /// The journal sequence of the message that opened it.
+        opened_by_seq: u64,
+        /// The thread root inside the desk, when the message was in one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<EventSeq>,
+        /// The seats assigned at opening, primary first.
+        participants: Vec<String>,
+        /// How the opening message was routed.
+        plan: crate::hive::routing::RoutingPlanDto,
+        /// The referral hop this episode runs at; zero for one an operator
+        /// opened. See [`ReferralEnqueued`](Self::ReferralEnqueued).
+        #[serde(default, skip_serializing_if = "is_zero_u32")]
+        hop: u32,
+    },
+    /// One round of an episode was proposed: these seats run now, at once.
+    RoundStarted {
+        /// The desk.
+        chat_id: String,
+        /// The episode.
+        episode_id: String,
+        /// The driver revision the round was proposed from (raw, 0-based).
+        revision: u64,
+        /// The seats running this round.
+        agent_ids: Vec<String>,
+    },
+    /// Every seat of a round has its one utterance on the desk and the driver
+    /// has folded them.
+    RoundCommitted {
+        /// The desk.
+        chat_id: String,
+        /// The episode.
+        episode_id: String,
+        /// The revision the round was proposed from; the driver's revision
+        /// afterwards is this plus the number of utterances.
+        revision: u64,
+        /// One entry per seat, in commit order.
+        utterances: Vec<RoundUtteranceRecord>,
+        /// The host actions the fold proposed (`run_agents`, `deliver_dm`),
+        /// kept loosely: the typed frames that follow them are what a console
+        /// renders.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        actions: Vec<serde_json::Value>,
+    },
+    /// A seat's `broadcast` was routed to the teammates best placed to take
+    /// it, reopening them in the episode.
+    BroadcastRouted {
+        /// The desk.
+        chat_id: String,
+        /// The episode.
+        episode_id: String,
+        /// The round the broadcast was committed in.
+        revision: u64,
+        /// The seat that broadcast.
+        agent_id: String,
+        /// The `AgentReply` row carrying the broadcast text.
+        message_seq: u64,
+        /// The accepted plan.
+        plan: crate::hive::routing::RoutingPlanDto,
+        /// Per-candidate Choice probabilities, when the System One router
+        /// answered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        probabilities: Option<std::collections::BTreeMap<String, f64>>,
+        /// Which router chose.
+        router: crate::hive::routing::Router,
+    },
+    /// A seat's `dm` reached its named peers: the row is on the desk with its
+    /// audience narrowed, and the peers see it on their next turn.
+    DmDelivered {
+        /// The desk.
+        chat_id: String,
+        /// The episode.
+        episode_id: String,
+        /// The seat that wrote it.
+        from: String,
+        /// The peers it named.
+        to: Vec<String>,
+        /// The `AgentReply` row carrying the text.
+        message_seq: u64,
+    },
+    /// An episode closed — because every assigned seat called
+    /// `complete_episode`, or because the host stopped it.
+    EpisodeCompleted {
+        /// The desk.
+        chat_id: String,
+        /// The episode.
+        episode_id: String,
+        /// The driver's final revision.
+        revision: u64,
+        /// The seat whose `complete_episode` closed it, when one did.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        completed_by: Option<String>,
+        /// Rounds run.
+        rounds: u32,
+        /// Why it closed.
+        reason: EpisodeReason,
+        /// The reply that closed it, when `complete_episode` carried one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary_seq: Option<u64>,
+    },
+    /// The driver's resumable state after a committed round (plan hive-desks,
+    /// Phase 4): what `hive::episode_store` reads back to resume an episode
+    /// the host died under.
+    ///
+    /// Not projected anywhere — it is the runtime's own checkpoint, not a
+    /// conversational line — and permanent, because an episode that cannot be
+    /// resumed is an operator question answered by silence.
+    EpisodeStateSaved {
+        /// The episode.
+        episode_id: String,
+        /// The desk.
+        desk: String,
+        /// The thread root the episode runs in.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_root: Option<EventSeq>,
+        /// The driver revision the state is at.
+        revision: u64,
+        /// `tinyhivemind_openhuman::DriverState`, as serde wrote it.
+        state: serde_json::Value,
+        /// Per-agent `tinyhivemind::SharingState` — where each seat's
+        /// transcript delivery had reached.
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        sharing: std::collections::BTreeMap<String, serde_json::Value>,
+        /// The referral hop the episode runs at.
+        #[serde(default, skip_serializing_if = "is_zero_u32")]
+        hop: u32,
+        /// The origin an answering episode returns its answer to, as serde
+        /// wrote `hive::referral::ReturnAddress`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<serde_json::Value>,
     },
     /// A workflow was switched on or off (issue #276) — from the console's
     /// `PUT …/workflows/{wid}/enabled` route, or from the disarm rule that
@@ -2236,6 +2585,7 @@ impl CompanyEvent {
             Self::ReferralEnqueued { .. } => "ReferralEnqueued",
             Self::TurnStarted { .. } => "TurnStarted",
             Self::TurnFailed { .. } => "TurnFailed",
+            Self::TurnSettled { .. } => "TurnSettled",
             Self::RunStatusChanged { .. } => "RunStatusChanged",
             Self::WebhookReceived { .. } => "WebhookReceived",
             Self::ScheduleFired { .. } => "ScheduleFired",
@@ -2259,7 +2609,14 @@ impl CompanyEvent {
             Self::DeskCreated { .. } => "DeskCreated",
             Self::DeskDeleted { .. } => "DeskDeleted",
             Self::DeskMembersChanged { .. } => "DeskMembersChanged",
-            Self::DeskHiveConfigured { .. } => "DeskHiveConfigured",
+            Self::DeskRoutingConfigured { .. } => "DeskRoutingConfigured",
+            Self::EpisodeOpened { .. } => "EpisodeOpened",
+            Self::RoundStarted { .. } => "RoundStarted",
+            Self::RoundCommitted { .. } => "RoundCommitted",
+            Self::BroadcastRouted { .. } => "BroadcastRouted",
+            Self::DmDelivered { .. } => "DmDelivered",
+            Self::EpisodeCompleted { .. } => "EpisodeCompleted",
+            Self::EpisodeStateSaved { .. } => "EpisodeStateSaved",
             Self::TaskSteered { .. } => "TaskSteered",
             Self::TaskCardChanged { .. } => "TaskCardChanged",
             Self::WorkspaceChanged { .. } => "WorkspaceChanged",
@@ -2386,7 +2743,8 @@ impl CompanyEvent {
             // settles. `TurnFailed` is Permanent below for the opposite reason:
             // it is the only record that a question was accepted and never
             // answered.
-            | Self::TurnStarted { .. } => Prunable,
+            | Self::TurnStarted { .. }
+            | Self::TurnSettled { .. } => Prunable,
 
             Self::OperatorMessage { .. }
             | Self::TurnFailed { .. }
@@ -2418,7 +2776,17 @@ impl CompanyEvent {
             | Self::DeskCreated { .. }
             | Self::DeskDeleted { .. }
             | Self::DeskMembersChanged { .. }
-            | Self::DeskHiveConfigured { .. }
+            | Self::DeskRoutingConfigured { .. }
+            // Plan hive-desks, Phase 4: the episode record. Together with the
+            // `AgentReply` rows they bracket these ARE what a room did, and
+            // `EpisodeStateSaved` is the checkpoint a resume reads.
+            | Self::EpisodeOpened { .. }
+            | Self::RoundStarted { .. }
+            | Self::RoundCommitted { .. }
+            | Self::BroadcastRouted { .. }
+            | Self::DmDelivered { .. }
+            | Self::EpisodeCompleted { .. }
+            | Self::EpisodeStateSaved { .. }
             | Self::TaskSteered { .. }
             | Self::TaskCardChanged { .. }
             | Self::DeskTaskCompleted { .. }
@@ -3743,32 +4111,42 @@ pub struct OverlayDeskOrder {
     pub ordered: Vec<String>,
 }
 
-/// The operator's runtime replacement for a desk's `hive` block — the console's
-/// "install a move grammar" write.
+/// The operator's runtime replacement for a desk's `[group_chat.routing]`
+/// block — the console's "install a routing block" write
+/// (`PUT {scope}/desks/{id}/routing`).
 ///
 /// A **sibling collection rather than a field on [`OverlayDesk`]**, and that is
 /// the whole design. `OverlayDesk` covers only console-*created* desks, so
-/// hanging the grammar off it would leave the interesting case — installing a
-/// table on a desk the manifest declared, without rewriting `company.toml` —
-/// needing a second mechanism. This mirrors [`AgentOverride`] instead, which is
-/// the layer that already exists for "the operator edited a manifest-declared
-/// thing".
+/// hanging the block off it would leave the interesting case — pacing a desk
+/// the manifest declared, without rewriting `company.toml` — needing a second
+/// mechanism. This mirrors [`AgentOverride`] instead, which is the layer that
+/// already exists for "the operator edited a manifest-declared thing".
 ///
-/// **Wholesale replacement, not a field-wise patch**, unlike `AgentOverride`. A
-/// `moves` table is a single artefact: merging one seat into a stored table is
-/// how a desk ends up running a grammar nobody authored. It also makes "clear
-/// `quorum` back to the derived default" expressible, which a merge cannot do —
-/// every field is an `Option` whose `None` already means something.
+/// **Wholesale replacement, not a field-wise patch**, unlike `AgentOverride`:
+/// merging one key into a stored block is how a desk ends up paced by numbers
+/// nobody authored, and "clear `round_width` back to the default" is only
+/// expressible when the whole block is replaced.
 ///
 /// Reset is therefore a `retain`, and nothing else: drop the row and
 /// [`CompanyRecord::effective_desk_hive`] falls through to the manifest.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The type and field names predate the routing block (they carried the
+/// trace-grammar `hive` block until plan `hive-desks`, Phase 4) and are kept
+/// because every persisted overlay blob and ~150 record fixtures spell them;
+/// the persisted key stays `desk_hive` for the same reason. An old blob's
+/// grammar keys are unknown to [`RoutingConfig`] and are dropped on read.
+///
+/// [`RoutingConfig`]: crate::hive::routing::RoutingConfig
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeskHiveOverride {
-    /// The desk (group-chat) id this grammar is installed on.
+    /// The desk (group-chat) id this block is installed on.
     pub desk_id: String,
     /// The block as authored, in the manifest's own shape.
-    pub hive: crate::hivemind::HiveConfig,
+    pub hive: crate::hive::routing::RoutingConfig,
 }
+
+/// The routing-block override, under the name the routes use.
+pub type DeskRoutingOverride = DeskHiveOverride;
 
 /// How a desk's unmentioned messages find their answerer (issue #1835).
 ///
@@ -3834,26 +4212,24 @@ pub struct OverlayDesk {
     /// no such field.
     #[serde(default, skip_serializing_if = "ResponderMode::is_lead")]
     pub responder: ResponderMode,
-    /// How this desk deliberates and whether it may refer across desks — the
-    /// overlay analogue of `[[group_chat]].hive`.
+    /// How this desk paces its episodes and whether it may refer across desks
+    /// — the overlay analogue of `[[group_chat]].routing`, persisted under the
+    /// key `routing`.
     ///
-    /// Without it a console-created desk could not answer either question. The
-    /// hive config was read from the manifest only, and the responder mode from
-    /// the overlay only, so the two surfaces each carried half the settings and
-    /// a desk could never hold both: an overlay desk deliberated because the
-    /// default says so and could not opt out, and could never opt IN to
-    /// referral, because there was no `[[group_chat]]` entry to hang the block
-    /// on. A company whose desks are all operator-created — which is every
-    /// company that builds its desks in the console — therefore had cross-desk
-    /// referral permanently unavailable.
+    /// Without it a console-created desk could not answer either question:
+    /// there is no `[[group_chat]]` entry to hang the block on, so a company
+    /// whose desks are all operator-created would have cross-desk referral
+    /// permanently unavailable.
     ///
     /// Defaulted and skipped when empty, so every record written before this
-    /// field existed deserializes and re-serializes unchanged.
+    /// field existed deserializes and re-serializes unchanged. The field name
+    /// predates the routing block; see [`DeskHiveOverride`] for why it stays.
     #[serde(
         default,
-        skip_serializing_if = "crate::hivemind::HiveConfig::is_default"
+        rename = "routing",
+        skip_serializing_if = "crate::hive::routing::RoutingConfig::is_default"
     )]
-    pub hive: crate::hivemind::HiveConfig,
+    pub hive: crate::hive::routing::RoutingConfig,
 }
 
 /// A workflow graph body authored at runtime (the console's create dialog or
@@ -5654,21 +6030,30 @@ impl CompanyRecord {
     /// The one way a write path should add to [`Self::overlay_agent_edits`], for
     /// the reason [`Self::upsert_budget_override`] gives: a second row for one
     /// teammate is not a harmless duplicate, it is a silently unreachable edit.
-    /// The `hive` block in force on `desk_id`.
+    /// The `[group_chat.routing]` block in force on `desk_id`.
     ///
-    /// The operator's installed grammar if there is one, else the manifest's
-    /// `[[group_chat]].hive`, else the default. **The one place this precedence
-    /// lives** — `desk_episode`, `desk_federation` and the console read through
-    /// here, so a desk cannot deliberate under one table while the console shows
-    /// another.
+    /// The operator's installed block if there is one, else the console-desk's
+    /// own, else the manifest's `[[group_chat]].routing`, else the default.
+    /// **The one place this precedence lives** — the driver and the console
+    /// read through [`crate::hive::routing::effective_routing`], which is a
+    /// thin wrapper over this, so a desk cannot run under one block while the
+    /// console shows another.
     #[must_use]
-    pub fn effective_desk_hive(&self, desk_id: &str) -> crate::hivemind::HiveConfig {
+    pub fn effective_desk_hive(&self, desk_id: &str) -> crate::hive::routing::RoutingConfig {
         if let Some(installed) = self
             .overlay_desk_hive
             .iter()
             .find(|held| held.desk_id == desk_id)
         {
             return installed.hive.clone();
+        }
+        if let Some(desk) = self
+            .overlay_desks
+            .iter()
+            .find(|desk| desk.id == desk_id)
+            .filter(|desk| !desk.hive.is_default())
+        {
+            return desk.hive.clone();
         }
         self.manifest
             .group_chats
@@ -5678,7 +6063,7 @@ impl CompanyRecord {
             .unwrap_or_default()
     }
 
-    /// Whether an operator-installed grammar is what `effective_desk_hive`
+    /// Whether an operator-installed block is what `effective_desk_hive`
     /// returned, as opposed to the manifest's own block or the default.
     ///
     /// The console needs the difference to offer "restore the manifest's
@@ -5690,7 +6075,7 @@ impl CompanyRecord {
             .any(|held| held.desk_id == desk_id)
     }
 
-    /// Install or replace a desk's move grammar.
+    /// Install or replace a desk's routing block.
     ///
     /// Wholesale, for the reason [`DeskHiveOverride`] gives. One row per desk,
     /// so a second install replaces the first rather than stacking behind it.
@@ -5700,7 +6085,7 @@ impl CompanyRecord {
         self.overlay_desk_hive.push(entry);
     }
 
-    /// Drop a desk's installed grammar, restoring whatever the manifest says.
+    /// Drop a desk's installed routing block, restoring whatever the manifest says.
     ///
     /// Returns whether anything was installed to drop, so a route can answer
     /// "there was nothing to reset" without a second read.

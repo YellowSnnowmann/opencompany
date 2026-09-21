@@ -98,6 +98,27 @@ async function mockApi(page: Page, mode: () => DesksMode) {
       }
     }
 
+    // GET .../desks/{id}/routing — the "Manage on the org chart" link lands on
+    // `#/company/<deskId>` (issue #485), which mounts `DeskRoutingPanel` under
+    // the focused desk. Unstubbed, that read fell through to the catch-all's
+    // `json([])`, so the panel destructured `effective` off an array and
+    // crashed the whole page — taking the org chart's tree down with it.
+    if (/\/desks\/[^/]+\/routing$/.test(path)) {
+      return json({
+        deskId: path.split("/").at(-2),
+        source: "default",
+        declared: {},
+        effective: {
+          roundWidth: 1,
+          choiceOptionLimit: 5,
+          maxRounds: 8,
+          turnTimeoutSecs: 120,
+          router: "fallback",
+        },
+        candidates: [],
+      });
+    }
+
     if (path.endsWith("/team")) return json(ROSTER);
     if (path.endsWith("/chat")) {
       const body = route.request().postDataJSON() as { text: string; chat?: string; detach?: boolean };

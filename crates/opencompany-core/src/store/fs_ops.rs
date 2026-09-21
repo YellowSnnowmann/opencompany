@@ -1042,6 +1042,8 @@ impl RunStore for FsOps {
             status: RunStatus::Pending,
             trigger_event_seq: None,
             thread_root: spec.thread_root,
+            episode_id: spec.episode_id,
+            round_revision: spec.round_revision,
             created_at_millis: now_millis(),
             started_at_millis: None,
             finished_at_millis: None,

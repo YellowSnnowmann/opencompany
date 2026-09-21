@@ -148,15 +148,20 @@ describe("the raw-turns renderer", () => {
   /**
    * Tool calls are unfolded, not named, and the collapses do not survive: a
    * referral rendered as "asked @copy · 2 msgs" is precisely the summary this
-   * view exists to open up.
+   * view exists to open up. An utterance chip becomes the episode and round
+   * it was committed in, spelled out — with a dm's recipients, since they are
+   * what narrowed its audience.
    */
-  it("unfolds steps and prints referral and aside lines in full", () => {
+  it("unfolds steps, prints referral lines in full, and spells out the episode", () => {
     expect(raw).toContain('data-testid="agent-session-raw-step"');
     expect(raw).toContain("{step.detail}");
     expect(raw).toContain("{step.result}");
     expect(raw).toContain("step.truncated");
     expect(raw).toMatch(/row\.referralConversation\?\.lines\.map/);
-    expect(raw).toMatch(/row\.asideConversation\?\.lines\.map/);
+    expect(raw).toContain('data-testid="agent-session-raw-episode"');
+    expect(raw).toContain("row.episode.kind");
+    expect(raw).toContain("row.episode.to");
+    expect(raw).not.toContain("asideConversation");
   });
 
   /**

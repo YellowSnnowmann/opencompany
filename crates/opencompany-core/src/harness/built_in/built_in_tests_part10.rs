@@ -349,7 +349,7 @@ fn every_registered_tool_is_declared() {
 /// `ReadOnly` claim is ignored.
 #[test]
 fn nothing_that_declares_itself_executable_is_internal_or_grantable() {
-    use oh::tools::traits::PermissionLevel;
+    use tinytools::PermissionLevel;
     let dir = tempfile::tempdir().expect("tempdir");
     let deps = deps_with_plan(dir.path(), Arc::new(MockContext::default()), None, None);
     let manifest_agent = ManifestAgent {
@@ -384,7 +384,6 @@ fn nothing_that_declares_itself_executable_is_internal_or_grantable() {
         &[],
         None,
         true,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let args = serde_json::json!({});

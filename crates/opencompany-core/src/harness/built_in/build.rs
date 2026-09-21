@@ -1,8 +1,23 @@
-//! Manifest `[[agent]]` → openhuman [`AgentBuilder`] wiring.
+//! Manifest `[[agent]]` → the [`AgentBlueprint`] one company agent is
+//! instantiated from on the process-wide OpenHuman runtime.
 //!
-//! [`build_agent`] turns one roster entry into a ready-to-run openhuman
-//! [`Agent`], injecting the harness's provider, the [`OcMemory`] adapter, the
-//! [`ApprovalPolicy`] tool policy, and a workspace directory.
+//! [`build_agent_with_model`] turns one roster entry into everything a turn
+//! needs: the system prompt (persona, bundle, team, briefs, skills catalogue,
+//! sandbox brief), the assembled toolbelt, the inference model the turn runs
+//! against, the [`ApprovalPolicy`] and the agent's workspace directory.
+//! [`agent_spec_for`] then renders that into an [`AgentSpec`] for
+//! [`Runtime::agent`](openhuman_embed::Runtime::agent) (plan hive-desks,
+//! Phase 2).
+//!
+//! **Which tools reach the model.** OpenHuman's embed facade takes its tool set
+//! from its own registry, scoped per agent by name (`ToolScopeSpec::Named`),
+//! plus MCP servers; there is no seam for an in-process `Tool` a host built.
+//! So of the belt assembled here, the OpenHuman-native tools (`shell`,
+//! `file_read`, `web_fetch`, …) are named in the spec's tool scope and reach
+//! the model directly, while this crate's own tools — ledger, tasks, pages,
+//! workspace, composio, hosting, memory, speech, approval — are carried on
+//! the blueprint **unattached**: they become the catalogue the per-agent MCP
+//! server serves in Phase 3. Until then a turn has exactly the native subset.
 //!
 //! * **Tools**: [`memory_tools`] (`memory_store` + `memory_recall`) is called
 //!   but currently returns nothing — see its doc comment for why openhuman's
@@ -76,43 +91,36 @@
 //!   `openhuman::skills::ops_parse` depends on WS1's skill parsing; the seam is
 //!   the `.workflows(...)` setter.
 //!
-//! The tool dispatcher is the attribute-tolerant
-//! [`AttrTolerantXmlDispatcher`](crate::harness::tool_dispatcher::AttrTolerantXmlDispatcher),
-//! a thin wrapper over OpenHuman's text-based `XmlToolDispatcher` that first
-//! strips attributes off `tool_call`-family open tags (issue #105) so the
-//! vendored bare-literal parser matches them. It needs no global tool registry —
-//! the harness stays self-contained.
+//! Tool-call parsing is OpenHuman's: the embedded turn loop reads native
+//! `tool_calls` off the wire and falls back to its own text-tag parser, so the
+//! attribute-tolerant XML dispatcher this crate carried (issue #105) went with
+//! `AgentBuilder`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use openhuman_core as oh;
 
-use oh::agent::prompts::SystemPromptBuilder;
-use oh::agent::{Agent, AgentBuilder};
-use oh::memory::Memory;
 use oh::security::SecurityPolicy;
 #[cfg(feature = "mcp")]
 use oh::tools::McpListToolsTool;
-use oh::tools::{
-    EditFileTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ListFilesTool, Tool,
-};
+use oh::tools::{EditFileTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ListFilesTool};
+use openhuman_embed::{Access, AgentDefinitionSpec, AgentSpec, ToolScopeSpec};
+use tinytools::Tool;
 
 use crate::company::Agent as ManifestAgent;
 use crate::company::inference::store as inference_store;
-use crate::error::OpenCompanyError;
 use crate::harness::HarnessDeps;
 use crate::harness::built_in::provider::HarnessModel;
 #[cfg(feature = "mcp")]
 use crate::harness::mcp::{
     OcMcpCallTool, OcMcpListServersTool, capability_brief, granted_secrets, registry_for_agent,
 };
-use crate::harness::memory::OcMemory;
 use crate::harness::orchestrator;
 use crate::harness::policy::ApprovalPolicy;
 use crate::harness::skills::EffectiveSkills;
-use crate::harness::tool_dispatcher::AttrTolerantXmlDispatcher;
 use crate::harness::toolbelt;
+use crate::hive::mcp_server::{McpAttach, attach_opencompany_mcp};
 use crate::ports::skills_state::SkillState;
 use crate::ports::types::CompanyId;
 use crate::runtime::tools::{NAMESPACE_SEPARATORS, extends_on_boundary};
@@ -121,8 +129,8 @@ use crate::runtime::tools::{NAMESPACE_SEPARATORS, extends_on_boundary};
 ///
 /// The harness cuts **every** tool result to this many bytes on its way into
 /// the model's context — `ToolOutputMiddleware`, fed from
-/// `ContextManager::tool_result_budget_bytes`, which [`build_agent`] threads in
-/// below via [`AgentBuilder::context_config`]. It is the real ceiling on what a
+/// `ContextManager::tool_result_budget_bytes`, the vendored default every
+/// embedded turn runs under. It is the real ceiling on what a
 /// model ever sees from a tool, and it is *smaller* than the caps individual
 /// tools tend to write for themselves.
 ///
@@ -319,21 +327,7 @@ pub fn build_agent_with_model(
     // `is_orchestrator` precedent: this function builds one agent from parts
     // the caller decided, and the roster is one of them.
     team_section: &str,
-    // Whether this company's `[speech]` block turns talking into a tool call.
-    //
-    // A `bool` resolved by the caller rather than a `&CompanyManifest` read
-    // here, on exactly the precedent `is_orchestrator` above sets: this
-    // function builds one agent from parts its caller has already decided, and
-    // handing it the whole manifest so it could re-derive one flag would give
-    // it a second, drifting opinion about the company.
-    speech_enabled: bool,
-) -> crate::Result<(Agent, Arc<dyn HarnessModel>)> {
-    let memory: Arc<dyn Memory> = Arc::new(OcMemory::new(
-        company.clone(),
-        manifest_agent.id.clone(),
-        deps.context.clone(),
-    ));
-
+) -> crate::Result<AgentBlueprint> {
     // Create the sandbox now, before any tool — or any `SecurityPolicy` — is
     // bound to it. See [`ensure_agent_workspace`] for why an absent directory
     // breaks relative writes outright, and why creating it late is not the same
@@ -361,6 +355,13 @@ pub fn build_agent_with_model(
         }
     };
 
+    // The company's own granted MCP servers, attached directly to the
+    // `AgentSpec` in `agent_spec_for` (plan hive-desks Phase 2 follow-up) —
+    // see `embed_servers_for_agent`'s doc comment for why this exists
+    // alongside (not instead of) `registry_for_agent` below.
+    #[cfg(feature = "mcp")]
+    let mut company_mcp_servers: Vec<openhuman_embed::McpServer> = Vec::new();
+
     // Deliberate-memory tools, oc-authored over this company's own context
     // port — see `memory_tools`'s doc comment for why not the vendored ones.
     let mut tools: Vec<Box<dyn Tool>> = memory_tools(deps, company, &manifest_agent.id);
@@ -372,49 +373,12 @@ pub fn build_agent_with_model(
             deps.approval_requests.clone(),
         ),
     ));
-    // Issue #1890 F: reading another thread of the channel this turn is in.
-    //
-    // On **every** roster agent's belt, not just the orchestrator's — the agent
-    // that needs it is the one answering in the channel, and gating it on
-    // delegation grants would leave a desk lead able to see #1890 E's thread
-    // index and unable to follow any of it.
-    //
-    // Intrinsic on the same terms as the approval tool above: it reads this
-    // company's own journal, scoped at call time to the conversation the turn
-    // is in, so there is no grant for it to be covered by.
-    if let Some(events) = deps.events.clone() {
-        tools.push(Box::new(crate::harness::thread_tools::ReadThreadTool::new(
-            company.clone(),
-            events,
-            deps.store.clone(),
-        )));
-    }
-    // Talking as a tool call (`[speech] enabled`). On unless the manifest opts
-    // out, and on every roster agent's belt when enabled — speaking is not a
-    // capability one teammate has and another does not, so there is no grant
-    // for it to be scoped by, exactly as with the two intrinsic tools above.
-    //
-    // Needs the journal: these tools ARE the append, so without an `EventLog`
-    // there is nothing for them to do and registering them would advertise a
-    // voice the host cannot give. A company in that configuration keeps the
-    // return-text path, which is the same fallback an un-called tool gets.
-    // `speech_enabled` is the resolved default-on/opt-out value; whether the
-    // tools actually got wired also needs a journal to append to (the comment
-    // above). The persona brief below must agree with THIS — the AND, not the
-    // flag alone — or a company with no `EventLog` gets a brief instructing it
-    // to call tools that were never registered.
-    let speech_wired = speech_enabled && deps.events.is_some();
-    if speech_wired && let Some(events) = deps.events.clone() {
-        tools.extend(crate::harness::speech_tools::speech_belt(
-            crate::harness::speech_tools::SpeechContext::new(
-                company.clone(),
-                manifest_agent.id.clone(),
-                events,
-                deps.store.clone(),
-            )
-            .with_dispatch(deps.delegations.clone()),
-        ));
-    }
+    // Speaking — `post`, `broadcast`, `dm`, `complete_episode`, `read` — and
+    // reading another thread are served to every agent by the `opencompany`
+    // MCP server (plan hive-desks, Phases 3-4), not by tools on this belt:
+    // `openhuman_embed::Agent` has no seam for an in-process host tool, and
+    // a seat's one utterance per turn is attributed to its round by the
+    // in-flight registry the server reads, which a belt tool cannot reach.
     // Installed-MCP-registry surface (`mcp_registry_list_tools` /
     // `mcp_registry_tool_call`) — distinct from the per-server `mcp:<name>`
     // bridge below, and reaching further: `mcp_registry_tool_call` invokes an
@@ -945,17 +909,6 @@ pub fn build_agent_with_model(
 
     // How this company talks, when it talks by calling a tool.
     //
-    // Placed high, beside the mention brief, because it is a rule about every
-    // reply rather than a note about one namespace — and because the failure it
-    // prevents is silent: an agent that never learns about `desk_post` just
-    // answers in text, the reply path journals it, and nothing reports that the
-    // feature did nothing. Gated on the same condition that wired the tools
-    // (`speech_wired`, not the bare `speech_enabled` flag — Codex/CodeRabbit),
-    // so the brief can never describe a voice this agent was not given.
-    if speech_wired {
-        persona.push_str(&crate::harness::speech_tools::speech_brief());
-    }
-
     // A short, STATIC brief — never a tree snapshot. A snapshot baked into the
     // system prompt would be stale the moment the operator edits a note, which
     // is exactly what hitting the store per call avoids.
@@ -1112,6 +1065,15 @@ pub fn build_agent_with_model(
     // per-call gate.
     #[cfg(feature = "mcp")]
     if let Some(registry) = registry_for_agent(&deps.mcp_servers, grants) {
+        // Reaches the model natively: `agent_spec_for` attaches each of these
+        // to the `AgentSpec` via `AgentSpec::mcp`, alongside the internal
+        // `opencompany` server, so OpenHuman's own `mcp_call_tool` /
+        // `mcp_list_servers` / `mcp_list_tools` — the only implementations of
+        // those names that actually run for a company agent now — can reach
+        // this company's own registered servers by name. See
+        // `embed_servers_for_agent`'s doc comment for the full story.
+        company_mcp_servers =
+            crate::harness::mcp::embed_servers_for_agent(&deps.mcp_servers, grants);
         let mcp_security = Arc::new(SecurityPolicy::default());
         // The known-secret set for the scrubber: every credential the agent's
         // granted servers carry, so no configured token can leak into an
@@ -1234,22 +1196,11 @@ pub fn build_agent_with_model(
     // every brief behind them on an edit that changed none of those briefs.
     persona.push_str(&crate::company::prompt::context_section(routed_context));
 
-    let prompt_builder = SystemPromptBuilder::for_subagent(
-        persona, /* omit_identity */ true, /* omit_safety_preamble */ false,
-    );
-
     let model = deps
         .model_override
         .clone()
         .unwrap_or_else(|| model_for_tier(manifest_agent.tier.as_deref()));
 
-    // Keys rework slice 3a (issue #2306): this agent's own `{provider, model}`
-    // pair, when it has one. Only `built_in` lanes reach `build_agent`, and
-    // `CompanyManifest::validate` refuses a pair on an `acp` agent, so no
-    // harness-kind check is needed here. `deps.provider.pinned` returns
-    // `None` for an implementation that cannot pin (test doubles) — falling
-    // back to the un-pinned provider rather than failing the whole roster
-    // build over a fixture that predates this field.
     let pin = match (
         manifest_agent.provider.as_deref(),
         manifest_agent.model.as_deref(),
@@ -1264,12 +1215,6 @@ pub fn build_agent_with_model(
         }
         _ => None,
     };
-    // `Some` only when `pin` names a pair AND `deps.provider` can actually
-    // mint a sibling for it — never a synthetic pin that turns out to be
-    // `deps.provider` itself. Auxiliary per-agent passes (issue #2306, X12;
-    // round-2 review comment 4012457329) key their own default-first
-    // fallback on this being a genuinely distinct provider — see
-    // [`crate::harness::built_in::pass_model`].
     let pinned_model: Option<Arc<dyn HarnessModel>> = pin.as_ref().and_then(|choice| {
         deps.provider.pinned(
             &manifest_agent.id,
@@ -1286,20 +1231,10 @@ pub fn build_agent_with_model(
             "this provider cannot pin; the agent pair is ignored"
         );
     }
-    // The primary chat model: the agent's own pin, fails closed on its own
-    // terms (X8/F6) rather than falling back to `deps.provider` — the
-    // `unwrap_or_else` below only covers the "this provider cannot pin"
-    // case above, never a *working* pin that later fails at turn time.
     let chat_model: Arc<dyn HarnessModel> = pinned_model
         .clone()
         .unwrap_or_else(|| deps.provider.clone());
 
-    // Capability-tier seam (Cell A): one filtering pass over the fully assembled
-    // tool vector, just before it is handed to the builder. Today `AllowAll` is
-    // the only production variant (identity); a future capability-tier cell only
-    // swaps how `deps.capabilities` is constructed. Intrinsic tools
-    // (memory/MCP/orchestrator/file/skill) have no mapped namespace and are
-    // always kept.
     let tools = toolbelt::filter_by_capabilities(tools, &deps.capabilities);
     let tools = if deps.workspace_git_enabled {
         match crate::harness::built_in::checkpoint::WorkspaceCheckpointer::initialize_off_worker(
@@ -1324,123 +1259,305 @@ pub fn build_agent_with_model(
         tools
     };
 
-    // Tool-calling transport follows the provider's advertised capability. A
-    // provider that advertises native tool calling (`profile().tool_calling`,
-    // e.g. the managed hosted/tenant surface) gets openhuman's
-    // [`NativeToolDispatcher`], so the harness sends structured `tools` and reads
-    // `message.tool_calls` back — the reliable multi-step path. A provider that
-    // does not (the offline `MockProvider`, a keyless local model with no profile)
-    // keeps the prompt-guided [`AttrTolerantXmlDispatcher`] fallback. Without this
-    // every turn is pinned to prompt-XML and a model that narrates prose instead
-    // of the exact `<tool_call>` tag silently runs no tools (bug #1).
-    use oh::agent::dispatcher::{NativeToolDispatcher, ToolDispatcher};
-    let native_tools = chat_model
-        .profile()
-        .map(|profile| profile.tool_calling)
-        .unwrap_or(false);
-    let tool_dispatcher: Box<dyn ToolDispatcher> = if native_tools {
-        Box::new(NativeToolDispatcher)
-    } else {
-        Box::new(AttrTolerantXmlDispatcher::default())
-    };
-
-    // OpenHuman's tool-pack table withholds `composio_*` schemas unless the
-    // session identifies as its integrations specialist. OpenCompany already
-    // narrows this agent's actual belt by the explicit company and agent grants
-    // above; once that grants Composio, use the supported specialist identity
-    // so the model can call the real tools rather than being offered an absent
-    // pack proxy.
     #[cfg(feature = "composio")]
-    let agent_definition_name = if composio_toolkits.is_some() {
-        "integrations_agent"
+    let definition_name = if composio_toolkits.is_some() {
+        "integrations_agent".to_string()
     } else {
-        manifest_agent.id.as_str()
+        manifest_agent.id.clone()
     };
     #[cfg(not(feature = "composio"))]
-    let agent_definition_name = manifest_agent.id.as_str();
+    let definition_name = manifest_agent.id.clone();
 
     super::tool_posture::declare();
-    let mut agent = AgentBuilder::default()
-        // `HarnessModel` upcasts to the tinyinference `ChatModel<()>` the builder's
-        // native injection seam takes (the old `Provider` adapter is gone).
-        .chat_model(chat_model.clone() as Arc<dyn tinyinference::model::ChatModel<()>>)
-        .memory(memory)
-        .tools(tools)
-        .tool_dispatcher(tool_dispatcher)
-        .tool_policy(Arc::new(policy))
-        .prompt_builder(prompt_builder)
-        // Stated, not inherited (issue #417). Omitting this call leaves the
-        // builder on `ContextConfig::default()`, which lands on the same number
-        // — so this is behaviour-identical today. What changes is that the
-        // number is now *chosen here*, where tools that must size their results
-        // against it can read it as [`TOOL_RESULT_BUDGET_BYTES`], instead of
-        // being a vendored default no OpenCompany source mentioned.
-        .context_config(oh::config::ContextConfig {
-            tool_result_budget_bytes: TOOL_RESULT_BUDGET_BYTES,
-            ..Default::default()
-        })
-        // Issue #6014: extract the answering content from an oversized tool
-        // result instead of cutting it on a byte boundary.
-        //
-        // `ContextConfig` has carried the threshold this fires at
-        // (`summarizer_payload_threshold_tokens`, 4000) since before this crate
-        // existed, and `ToolOutputMiddleware` has consulted it on every tool
-        // result — but the builder defaults the summarizer itself to `None`, so
-        // the whole path was inert here and the byte cut was the only thing
-        // bounding a large payload. That cut keeps whatever came first: a
-        // thirty-issue listing reached the model as two issues, and the agent
-        // reported two.
-        //
-        // The upstream implementation dispatches a sub-agent, which this crate
-        // cannot use (see `toolbelt`'s v1 note on spawn tools under
-        // multi-tenancy), so `PayloadExtractor` serves the same trait with one
-        // bounded model call — built `from_deps` like every other one-shot pass
-        // here, so it spends the company's own credential and meters against it.
-        // `pinned_model.clone()` (issue #2306, X12; round-2 review comment
-        // 4012457329) so this agent's own pair is reachable when the company
-        // default cannot serve the call, instead of always failing extraction
-        // for a company configured solely through agent pins.
-        .payload_summarizer(std::sync::Arc::new(
-            crate::harness::payload_extract::PayloadExtractor::from_deps(
-                deps,
-                company,
-                pinned_model.clone(),
-            ),
-        ))
-        .model_name(model)
-        .workspace_dir(workspace)
-        // One teammate, one *named* openhuman session.
-        //
-        // The builder defaults this pair to `("standalone", "internal")`, and
-        // this crate never set it — so every agent of every company on the
-        // process published `AgentTurnStarted`, `AgentTurnCompleted`,
-        // `AgentError` and its prompt-enforcement context under one shared
-        // session id. That was survivable only because one turn ran at a time.
-        // openhuman's library host now runs many sessions over one core
-        // concurrently, and an unlabelled event stream is exactly what stops
-        // being readable when turns overlap.
-        //
-        // See [`session_key`](crate::harness::session_key) for the shape and
-        // for why it must be a pure function of the two ids rather than
-        // anything a roster rebuild disturbs.
-        .event_context(
-            crate::harness::session_key::openhuman_session_key(company, &manifest_agent.id),
-            crate::harness::session_key::SESSION_CHANNEL,
-        )
-        .agent_definition_name(agent_definition_name)
-        .auto_save(false)
-        .build()
-        .map_err(|e| {
-            OpenCompanyError::Harness(format!("build agent '{}': {e}", manifest_agent.id))
-        })?;
+    let native_tool_names = native_tool_names(&tools);
+    Ok(AgentBlueprint {
+        system_prompt: persona,
+        tools,
+        native_tool_names,
+        #[cfg(feature = "mcp")]
+        company_mcp_servers,
+        chat_model,
+        model,
+        workspace,
+        policy,
+        definition_name,
+    })
+}
 
-    // Stated, not inherited (issue #988). The builder has no setter for this, so
-    // it is applied post-construction — the same seam openhuman's own task
-    // dispatcher and this crate's workflow copilot use. See
-    // [`MAX_TOOL_ITERATIONS`] for why 25, and why this is the only lever that
-    // works on this construction path.
-    agent.set_max_tool_iterations(MAX_TOOL_ITERATIONS);
-    Ok((agent, chat_model))
+/// Everything [`build_agent_with_model`] assembles for one company agent,
+/// before it is registered on the runtime.
+///
+/// Held apart from the [`AgentSpec`] because the spec is consumed by
+/// [`Runtime::agent`](openhuman_embed::Runtime::agent) while the pool keeps
+/// needing the rest: the model for metering and auxiliary passes, the belt
+/// for step labels and — in Phase 3 — the MCP catalogue, the policy for the
+/// approval decision that catalogue's handler makes.
+pub struct AgentBlueprint {
+    /// The full system prompt: persona, bundle, team, briefs, skills
+    /// catalogue, sandbox brief, routed context.
+    pub system_prompt: String,
+    /// The assembled toolbelt. Only the OpenHuman-native subset (see
+    /// [`native_tool_names`](Self::native_tool_names)) reaches the model in
+    /// this phase; the rest is the Phase 3 MCP catalogue.
+    pub tools: Vec<Box<dyn Tool>>,
+    /// The belt's OpenHuman-native tool names — the spec's `ToolScopeSpec`.
+    pub native_tool_names: Vec<String>,
+    /// This agent's own granted MCP servers (issue: company servers were
+    /// unreachable once the native-dispatch builder was removed — see
+    /// `embed_servers_for_agent`'s doc comment), attached directly to the
+    /// `AgentSpec` in [`agent_spec_for`] alongside the internal `opencompany`
+    /// server.
+    #[cfg(feature = "mcp")]
+    pub company_mcp_servers: Vec<openhuman_embed::McpServer>,
+    /// The inference model the turn runs against (the company default or
+    /// this agent's own pin).
+    pub chat_model: Arc<dyn HarnessModel>,
+    /// The model name every request carries (`chat-v1`, an override, …).
+    pub model: String,
+    /// The agent's own workspace directory (file tools sandbox / turn cwd).
+    pub workspace: PathBuf,
+    /// The approval policy the (Phase 3) tool handler decides under.
+    pub policy: ApprovalPolicy,
+    /// The definition name the agent runs under — its manifest id, or
+    /// `integrations_agent` when Composio toolkits are wired.
+    pub definition_name: String,
+}
+
+impl std::fmt::Debug for AgentBlueprint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentBlueprint")
+            .field("model", &self.model)
+            .field("tools", &self.tools.len())
+            .field("native_tool_names", &self.native_tool_names)
+            .field("workspace", &self.workspace)
+            .finish_non_exhaustive()
+    }
+}
+
+impl AgentBlueprint {
+    /// The assembled belt.
+    pub fn tools(&self) -> &[Box<dyn Tool>] {
+        &self.tools
+    }
+
+    /// The tool-iteration cap the spec is rendered with.
+    pub fn max_tool_iterations(&self) -> usize {
+        MAX_TOOL_ITERATIONS
+    }
+
+    /// The belt's tool names, in belt order — what the previous builder's
+    /// `Agent::tools()` listed, kept for the tests that pin a grant to the
+    /// tools it wires.
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect()
+    }
+}
+
+/// The OpenHuman-native tools a company agent's belt may name in its tool
+/// scope: the ones OpenHuman's own registry builds, which this crate wires
+/// per grant (`files`, `shell`, `code`, `web`) and, under `mcp`, the static
+/// MCP bridge tools.
+///
+/// The names are OpenHuman's; a belt entry outside this set is one of this
+/// crate's own tools and is never advertised to the runtime, which would not
+/// find it.
+pub const OPENHUMAN_NATIVE_TOOLS: &[&str] = &[
+    "shell",
+    "read_workspace_state",
+    "file_read",
+    "file_write",
+    "edit",
+    "list",
+    "grep",
+    "glob",
+    "apply_patch",
+    "git_operations",
+    "csv_export",
+    "web_fetch",
+    "http_request",
+    "curl",
+    "image_info",
+    "mcp_list_servers",
+    "mcp_list_tools",
+    "mcp_call_tool",
+];
+
+/// The native subset of a belt, in belt order.
+pub fn native_tool_names(tools: &[Box<dyn Tool>]) -> Vec<String> {
+    tools
+        .iter()
+        .map(|tool| tool.name())
+        .filter(|name| OPENHUMAN_NATIVE_TOOLS.contains(name))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Renders a blueprint into the [`AgentSpec`] the runtime instantiates.
+///
+/// * `runtime_id` is [`runtime_agent_id`](crate::session_key::runtime_agent_id);
+/// * `provider` is the route the turn runs on — the loopback
+///   [`model_bridge`](crate::harness::model_bridge) over the blueprint's
+///   [`chat_model`](AgentBlueprint::chat_model);
+/// * the tool scope is the belt's native subset (an empty belt is an empty
+///   scope, not a wildcard: a tool-less teammate must stay tool-less);
+/// * `Access::full()` because the approval decision is this crate's
+///   ([`ApprovalPolicy`]), enforced where its own tools run (Phase 3), not
+///   OpenHuman's process-wide gate;
+/// * `max_iterations` is [`MAX_TOOL_ITERATIONS`], unchanged;
+/// * `action_dir` is the agent workspace, so a relative path in a tool call
+///   resolves where the file tools were sandboxed;
+/// * the same definition is ALSO declared as a custom
+///   [`AgentRegistryEntry`](oh::agent::registry::AgentRegistryEntry) in the
+///   agent's own config. Since OpenHuman 33566d38 ("run sessions through
+///   TinyAgents runtime") every chat turn is a *hosted* invocation that
+///   resolves its agent by id through the host definition registry — the
+///   process-global registry plus the config's custom entries — and the
+///   session's own definition is not consulted for that lookup, so a spec
+///   without the entry fails every turn with "agent definition … was not
+///   found". The tinyhivemind reference host registers its seats the same
+///   way (`examples/openhuman/src/main.rs::registry_entry`).
+pub fn agent_spec_for(
+    blueprint: &AgentBlueprint,
+    runtime_id: &str,
+    provider: openhuman_embed::Provider,
+    mcp: Option<&McpAttach>,
+) -> AgentSpec {
+    // Plan hive-desks Phase 3: this crate's own tools reach the agent over
+    // the `opencompany` MCP server, which the model calls through OpenHuman's
+    // bridge tools — so those two join the native scope whenever the server
+    // is attached, and the prompt says where the belt went. Without an
+    // attachment (no listener yet: a roster built by a test that never
+    // dispatches) the spec is exactly the Phase 2 one.
+    let mut tool_names = blueprint.native_tool_names.clone();
+    let mut system_prompt = blueprint.system_prompt.clone();
+    if let Some(mcp) = mcp {
+        for bridge in ["mcp_list_tools", "mcp_call_tool"] {
+            if !tool_names.iter().any(|name| name == bridge) {
+                tool_names.push(bridge.to_string());
+            }
+        }
+        system_prompt.push_str(&opencompany_mcp_brief(&mcp.allow_tools));
+    }
+    let entry = oh::agent::registry::AgentRegistryEntry {
+        id: runtime_id.to_string(),
+        name: blueprint.definition_name.clone(),
+        description: format!("OpenCompany agent {}", blueprint.definition_name),
+        source: oh::agent::registry::AgentRegistrySource::Custom,
+        enabled: true,
+        model: None,
+        system_prompt: Some(system_prompt.clone()),
+        tool_allowlist: tool_names.clone(),
+        tool_denylist: Vec::new(),
+        subagents: oh::agent::registry::types::AgentSubagentPolicy::default(),
+        tags: Vec::new(),
+        metadata: serde_json::Value::Null,
+    };
+    let mut spec = AgentSpec::new(runtime_id)
+        .definition(
+            AgentDefinitionSpec::new()
+                .system_prompt(system_prompt)
+                .display_name(blueprint.definition_name.clone())
+                .tools(ToolScopeSpec::Named(tool_names))
+                .max_iterations(MAX_TOOL_ITERATIONS),
+        )
+        .provider(provider)
+        .access(Access::full());
+    if let Some(mcp) = mcp {
+        spec = attach_opencompany_mcp(spec, mcp);
+    }
+    // The company's own registered MCP servers — see `company_mcp_servers`'s
+    // doc comment. `AgentSpec::mcp` is additive ("call repeatedly to add
+    // several"), so each attaches beside the `opencompany` server above
+    // without displacing it.
+    #[cfg(feature = "mcp")]
+    for server in blueprint.company_mcp_servers.clone() {
+        spec = spec.mcp(server);
+    }
+    // The runtime refuses an agent whose action dir it cannot create. A
+    // workspace root that cannot be provisioned is reported once per agent
+    // by the pool (issue #551) and must not stop dispatch — the file tools
+    // refuse relative paths there, which is the failure the operator sees —
+    // so the agent falls back to the runtime's own per-agent action dir.
+    if blueprint.workspace.is_dir() || std::fs::create_dir_all(&blueprint.workspace).is_ok() {
+        spec = spec.action_dir(blueprint.workspace.clone());
+    } else {
+        tracing::warn!(
+            workspace = %blueprint.workspace.display(),
+            "[build] agent workspace is not creatable; the runtime's default action dir stands in"
+        );
+    }
+    spec.config(move |config| {
+        config
+            .agent_registry
+            .entries
+            .retain(|existing| existing.id != entry.id);
+        config.agent_registry.entries.push(entry);
+    })
+}
+
+/// The prompt section that tells an agent where this crate's tools went: on
+/// the `opencompany` MCP server, reached through `mcp_call_tool`. Without it
+/// the model calls `publish_artifact` by its bare name — the tool the belt
+/// brief describes — and OpenHuman answers that no such tool exists.
+fn opencompany_mcp_brief(tools: &[String]) -> String {
+    let mut brief = String::from(MCP_BRIEF_HEADING);
+    brief.push_str(
+        "\n\nEvery tool named below is served \
+         by the MCP server `opencompany`. Call one with `mcp_call_tool` and the arguments \
+         object the tool's schema describes — `{\"server\": \"opencompany\", \"tool\": \"<name>\", \
+         \"arguments\": {...}}` — never by its bare name; `mcp_list_tools` on that server shows \
+         each schema. A result whose text begins `refused:` or `awaiting approval:` is final \
+         for this turn: do not retry it.\n\n",
+    );
+    brief.push_str(MCP_BRIEF_TOOLS_PREFIX);
+    brief.push_str(&tools.join(", "));
+    brief.push('\n');
+    brief
+}
+
+/// The catalogue brief again, on a turn's text, for a session whose pinned
+/// system prompt may name an older one — the roster was rebuilt under it
+/// (see `CompanyAgent::catalogue_brief_stale`). The same block
+/// [`opencompany_mcp_brief`] wrote, so [`tools_named_in_mcp_brief`] reads it
+/// back from either place, headed by one line saying which list stands.
+#[must_use]
+pub(crate) fn opencompany_mcp_rebrief(tools: &[String], turn_text: &str) -> String {
+    let brief = opencompany_mcp_brief(tools);
+    format!(
+        "[Your company tools changed since this conversation began. The list below          replaces the `Company tools` section of your instructions.]{brief}
+{turn_text}"
+    )
+}
+
+/// The heading [`opencompany_mcp_brief`] opens with.
+const MCP_BRIEF_HEADING: &str = "\n\n## Company tools (MCP server `opencompany`)";
+/// The line of the brief that lists the served tools.
+const MCP_BRIEF_TOOLS_PREFIX: &str = "Tools: ";
+
+/// The tools a system prompt advertises on the `opencompany` MCP server —
+/// what [`opencompany_mcp_brief`] wrote, read back. Empty when the prompt
+/// carries no brief. A turn test that used to look for a tool in the wire's
+/// `tools` array looks here for the half of the belt that moved to MCP.
+#[must_use]
+pub fn tools_named_in_mcp_brief(system_prompt: &str) -> Vec<String> {
+    let Some(at) = system_prompt.find(MCP_BRIEF_HEADING.trim_start()) else {
+        return Vec::new();
+    };
+    let rest = &system_prompt[at..];
+    let Some(line) = rest
+        .lines()
+        .find_map(|line| line.strip_prefix(MCP_BRIEF_TOOLS_PREFIX))
+    else {
+        return Vec::new();
+    };
+    line.split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// [`build_agent_with_model`], discarding the [`HarnessModel`] it resolved.
@@ -1463,8 +1580,7 @@ pub fn build_agent(
     routed_context: &[(String, String)],
     instructions: Option<&str>,
     is_orchestrator: bool,
-    speech_enabled: bool,
-) -> crate::Result<Agent> {
+) -> crate::Result<AgentBlueprint> {
     build_agent_with_model(
         company,
         company_name,
@@ -1479,9 +1595,7 @@ pub fn build_agent(
         // Test-only wrapper; the roster section is the caller's to render, and
         // every caller of this wrapper is exercising something else.
         "",
-        speech_enabled,
     )
-    .map(|(agent, _chat_model)| agent)
 }
 
 /// The intrinsic deliberate-memory tools (`memory_store` / `memory_recall` /

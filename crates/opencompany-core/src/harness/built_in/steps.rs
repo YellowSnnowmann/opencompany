@@ -93,7 +93,7 @@ use serde_json::Value;
 
 use oh::agent::progress::AgentProgress;
 use oh::tools::status::{ClassifiedFailure, ToolFailureClass};
-use oh::tools::traits::humanize_tool_name;
+use tinytools::humanize_tool_name;
 
 use crate::harness::policy::POLICY_NAME;
 use crate::ports::deep_trace::TurnStepDetail;
@@ -665,7 +665,7 @@ pub(crate) fn stream_event_from(
 /// # Why this exists
 ///
 /// A tool states its own operator-facing step label through
-/// [`Tool::display_label`](oh::tools::traits::Tool::display_label): the managed
+/// [`Tool::display_label`](tinytools::Tool::display_label): the managed
 /// web search calls itself "Exa web search", and a BYO belt names the provider
 /// actually wired behind it ("Brave web search", "SearXNG web search").
 /// **Nothing asks it.** The crate-level `ToolStarted` event carries a call id
@@ -699,7 +699,7 @@ pub struct StepLabels(Arc<HashMap<String, String>>);
 
 impl StepLabels {
     /// Capture the curated labels of `tools`.
-    pub fn from_tools(tools: &[Box<dyn oh::tools::traits::Tool>]) -> Self {
+    pub fn from_tools(tools: &[Box<dyn tinytools::Tool>]) -> Self {
         let curated = tools
             .iter()
             .filter_map(|tool| {

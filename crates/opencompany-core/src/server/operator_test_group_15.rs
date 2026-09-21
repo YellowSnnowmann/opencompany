@@ -402,6 +402,7 @@ async fn is_admin_for_item_revalidates_only_the_owner_fallback_report() {
         agent_id: crate::runtime::OWNER_FALLBACK_REPORT_AUTHOR.to_string(),
         text: "no admin has a mailbox".into(),
         steps: Vec::new(),
+        episode: None,
     }));
     assert!(
         !super::is_admin_for_item(&owner_fallback_item, &runtime, Some(&actor), true).await,
@@ -421,6 +422,7 @@ async fn is_admin_for_item_revalidates_only_the_owner_fallback_report() {
         agent_id: "ceo".into(),
         text: "ordinary reply".into(),
         steps: Vec::new(),
+        episode: None,
     }));
     assert!(
         super::is_admin_for_item(&ordinary_item, &runtime, Some(&actor), true).await,

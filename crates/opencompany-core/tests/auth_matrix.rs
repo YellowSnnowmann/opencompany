@@ -1148,40 +1148,53 @@ const OPERATOR_AUTHORITY_ROUTES: &[Route] = &[
     },
     Route {
         method: Verb::Get,
-        path: "/desks/{desk_id}/hive",
+        path: "/desks/{desk_id}/routing",
         address: Address::Dual,
         source: Source::Operator,
         access: Access::Scoped,
         features: &["openhuman"],
         blast: Blast::Authority,
         probe: Probe::Empty,
-        note: "Members may read the move grammar in force on a desk.",
+        note: "Members may read the routing policy in force on a desk.",
         wait: Wait::None,
         red_cells: RedCells::None,
     },
     Route {
         method: Verb::Put,
-        path: "/desks/{desk_id}/hive",
+        path: "/desks/{desk_id}/routing",
         address: Address::Dual,
         source: Source::Operator,
         access: Access::Scoped,
         features: &["openhuman"],
         blast: Blast::Authority,
         probe: Probe::Json(r#"{}"#),
-        note: "Members may install or replace a desk's move grammar.",
+        note: "Members may install or replace a desk's routing overlay.",
         wait: Wait::None,
         red_cells: RedCells::None,
     },
     Route {
         method: Verb::Delete,
-        path: "/desks/{desk_id}/hive",
+        path: "/desks/{desk_id}/routing",
         address: Address::Dual,
         source: Source::Operator,
         access: Access::Scoped,
         features: &["openhuman"],
         blast: Blast::Authority,
         probe: Probe::Empty,
-        note: "Members may drop a desk's installed grammar and fall back to the manifest.",
+        note: "Members may drop a desk's routing overlay and fall back to the manifest.",
+        wait: Wait::None,
+        red_cells: RedCells::None,
+    },
+    Route {
+        method: Verb::Get,
+        path: "/episodes",
+        address: Address::Dual,
+        source: Source::Operator,
+        access: Access::Scoped,
+        features: &["openhuman"],
+        blast: Blast::Ordinary,
+        probe: Probe::Empty,
+        note: "Members may list the episodes the company's desks ran or are running.",
         wait: Wait::None,
         red_cells: RedCells::None,
     },
@@ -1779,13 +1792,13 @@ fn table_counts_and_intentional_widenings_are_explicit() {
     );
     assert_eq!(EXTERNAL_AUTHORITY_ROUTES.len(), 4);
     assert_eq!(OVERLAPPING_EXTERNAL_ROUTES.len(), 1);
-    assert_eq!(OPERATOR_AUTHORITY_ROUTES.len(), 16);
+    assert_eq!(OPERATOR_AUTHORITY_ROUTES.len(), 17);
     assert_eq!(OPERATOR_DIRECT_ROUTES.len(), 13);
     assert_eq!(
         all_routes()
             .map(|route| route_patterns(route).len())
             .sum::<usize>(),
-        473,
+        475,
         "concrete route-method rows",
     );
     assert_eq!(
@@ -1793,10 +1806,10 @@ fn table_counts_and_intentional_widenings_are_explicit() {
             .flat_map(route_patterns)
             .collect::<BTreeSet<_>>()
             .len(),
-        376,
+        378,
         "concrete paths",
     );
-    assert_eq!(render_snapshot().lines().count(), 3_311);
+    assert_eq!(render_snapshot().lines().count(), 3_325);
     assert_eq!(
         all_routes()
             .map(|route| {

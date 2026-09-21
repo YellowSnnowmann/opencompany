@@ -5,8 +5,7 @@ import type { TaskStatus } from "@/api/tasks";
 import type { CognitionState } from "@/api/types";
 import { AgentAvatarButton, useAgentProfileOpener } from "@/components/agent-profile-sheet";
 import { Markdown } from "@/components/markdown";
-import { MoveChip } from "@/components/hive/MoveChip";
-import type { EpisodeTurn } from "@/lib/hive/episode";
+import { UtteranceChip } from "@/components/episode/UtteranceChip";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Button } from "@/components/ui/button";
 import { consoleHref } from "@/lib/console-paths";
@@ -29,12 +28,7 @@ import {
   type TimelineEntry,
 } from "./model";
 import { EchoPlaceholder, echoMarkerFor } from "./EchoPlaceholder";
-import {
-  CardChip,
-  ReferralChip,
-  AsideConversation,
-  ReferralConversation,
-} from "./StepTimeline";
+import { CardChip, ReferralChip, ReferralConversation } from "./StepTimeline";
 import { WorkingIndicator } from "./WorkingIndicator";
 
 interface Props {
@@ -158,13 +152,10 @@ interface Props {
    */
   readOnly?: boolean;
   /**
-   * What this line did inside a desk's deliberation, when it was a turn in one.
-   *
-   * Absent for every ordinary reply, which is the whole of the rule: a room's
-   * affordances follow the data, never the channel kind, so a DM and a
-   * single-responder desk are untouched by this.
+   * Display names by agent id, for the utterance chip's `dm → @name`. Optional:
+   * without it the chip names the id, which is still the truth.
    */
-  turn?: EpisodeTurn;
+  agentNames?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -262,7 +253,7 @@ export function MessageRow({
   redeemingBudgetPauseAgent,
   latestBudgetPauseMessageIdByAgent,
   readOnly,
-  turn,
+  agentNames,
 }: Props) {
   const { message, sender, continuation, replies, isLatestSettlePill } = entry;
   const chips = reactionChips(message.reactions);
@@ -349,93 +340,38 @@ export function MessageRow({
             placeholder={echoMarkerFor(message, sender, cognition)}
           />
         )}
-        {turn?.move ? (
-          /*
-           * A deliberation turn renders as its move plus what the member
-           * actually said, rather than as the raw marker line.
-           *
-           * The host journals ONLY the marker line, so `!support #stage ^4
-           * agreed, staging first` is the entire message — and rendered
-           * verbatim it is punctuation an operator has to decode on every row.
-           * The chip carries the grammar and the prose carries the argument.
-           * The citations stay visible as chips because which message grounds a
-           * claim is the substance of the claim.
-           */
-          <div className="flex flex-wrap items-baseline gap-1.5 text-sm leading-6">
-            <MoveChip kind={turn.move.kind} />
-            {turn.move.topic ? (
-              <span className="font-mono text-2xs text-muted-foreground">
-                #{turn.move.topic}
-              </span>
-            ) : null}
-            {turn.move.target !== undefined ? (
-              /*
-               * Who the objection is aimed at. The substance of an objection is
-               * which line it answers — an objection with its target dropped
-               * reads as generic disagreement, and the room's cross-inhibition
-               * becomes invisible.
-               */
-              <span className="font-mono text-2xs text-muted-foreground">
-                &gt;{turn.move.target}
-              </span>
-            ) : null}
-            {turn.move.cites.map((cite) => (
-              <span key={cite} className="font-mono text-2xs text-muted-foreground">
-                ^{cite}
-              </span>
-            ))}
-            <span className="break-words">{turn.move.body}</span>
-          </div>
+        {message.turnFailure ? (
+          // KR-L2-03: the host computed its own exact, actionable X9
+          // sentence for this fail-closed turn — a switched-off or
+          // deleted pin, a broken company default, no model chosen at
+          // all. Rendered verbatim in place of the generic retry text
+          // `message.text` would otherwise carry, with the one action
+          // that actually fixes it.
+          <TurnFailureNotice failure={message.turnFailure} />
         ) : (
-          <>
-            {turn?.demoted ? (
-              /*
-               * A move this seat does not hold. The host records the line with
-               * its marker stripped so it deposits no trace, and showing that is
-               * the difference between a desk whose grammar is wrong and a desk
-               * whose members are unhelpful.
-               */
-              <div className="pb-1">
-                <MoveChip kind={turn.demoted} demoted />
-              </div>
-            ) : null}
-            {message.turnFailure ? (
-              // KR-L2-03: the host computed its own exact, actionable X9
-              // sentence for this fail-closed turn — a switched-off or
-              // deleted pin, a broken company default, no model chosen at
-              // all. Rendered verbatim in place of the generic retry text
-              // `message.text` would otherwise carry, with the one action
-              // that actually fixes it.
-              <TurnFailureNotice failure={message.turnFailure} />
-            ) : (
-              <Markdown
-                mentions={message.mentions}
-                className={cn(
-                  "text-sm leading-6 break-words prose-p:my-0 prose-pre:my-1.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1",
-                  // A line that never left the browser is dimmed, so the
-                  // difference between sent and not-sent is visible in the text
-                  // itself and not only in a note under it (B-099). Muted rather
-                  // than struck through: the words are still the operator's own
-                  // draft, and Retry means they may yet be delivered.
-                  //
-                  // `!== undefined` rather than truthy: an `ApiError` can carry
-                  // an empty `message` when the host's envelope sends
-                  // `error: ""` (`httpError`'s `envelope?.error ?? statusMessage(res)`
-                  // keeps an empty string as-is, since `??` only falls back on
-                  // nullish). A truthy check would silently hide the failed
-                  // styling, the notice, and the Retry control for exactly that
-                  // response (CodeRabbit review).
-                  //
-                  // Only this branch needs it: a deliberation move is a line the
-                  // host journalled, so it reached the server by definition and
-                  // can never carry `sendFailed`.
-                  message.sendFailed !== undefined && "text-muted-foreground",
-                )}
-              >
-                {message.text}
-              </Markdown>
+          <Markdown
+            mentions={message.mentions}
+            className={cn(
+              "text-sm leading-6 break-words prose-p:my-0 prose-pre:my-1.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1",
+              // A line that never left the browser is dimmed, so the
+              // difference between sent and not-sent is visible in the text
+              // itself and not only in a note under it (B-099). Muted rather
+              // than struck through: the words are still the operator's own
+              // draft, and Retry means they may yet be delivered.
+              //
+              // `!== undefined` rather than truthy: an `ApiError` can carry
+              // an empty `message` when the host's envelope sends
+              // `error: ""` (`httpError`'s `envelope?.error ?? statusMessage(res)`
+              // keeps an empty string as-is, since `??` only falls back on
+              // nullish). A truthy check would silently hide the failed
+              // styling, the notice, and the Retry control for exactly that
+              // response (CodeRabbit review).
+              //
+              message.sendFailed !== undefined && "text-muted-foreground",
             )}
-          </>
+          >
+            {message.text}
+          </Markdown>
         )}
         {message.sendFailed !== undefined && (
           <FailedSendNotice
@@ -475,8 +411,17 @@ export function MessageRow({
         {message.referralConversation && (
           <ReferralConversation crossing={message.referralConversation} rowId={message.id} />
         )}
-        {message.asideConversation && (
-          <AsideConversation aside={message.asideConversation} />
+        {/* What this line was inside its episode — its speech act and, for a
+            dm, who it went to. Absent for every ordinary reply, which is what
+            keeps a DM, `#general` and a single-responder desk rendering exactly
+            as they always have: the affordance follows the data, never the
+            channel kind. */}
+        {message.episode && (
+          <UtteranceChip
+            episode={message.episode}
+            audience={message.audience}
+            agentNames={agentNames}
+          />
         )}
         {message.taskId && (
           <div className="flex flex-wrap items-center gap-2">

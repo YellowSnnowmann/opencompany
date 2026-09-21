@@ -81,7 +81,8 @@ import { RawTurns } from "./room/RawTurns";
 import { ThreadPanel } from "./room/ThreadPanel";
 import { useLocalScope } from "@/connections/ConnectionContext";
 import * as room from "@/room/store";
-import { foldEpisodes, type EpisodeTurn } from "@/lib/hive/episode";
+import { useEpisodes } from "@/hooks/use-episodes";
+import type { EpisodeFrames } from "@/lib/episode-frames";
 import {
   buildChannels,
   buildTimeline,
@@ -398,6 +399,15 @@ interface Props {
   budgetProximity?: { message: string; atMillis: number } | null;
   /** Clears the banner above — the shell's own state, this view only asks. */
   onDismissBudgetProximity?: () => void;
+  /**
+   * The live half of every desk's episodes, folded by the shell off the SSE
+   * frames (`lib/episode-frames.ts`). Owned there for the reason
+   * `transcripts` is: a round keeps running while the operator is on another
+   * section, and the band has to be right the moment they come back. Absent
+   * — an older shell, a test — the rounds are rebuilt from the transcript
+   * alone, which is every completed episode and none of the live lanes.
+   */
+  episodeFrames?: EpisodeFrames;
 }
 
 const FIRST_TEAM_BRIEF =
@@ -468,6 +478,7 @@ export function RoomView({
   failedApprovals,
   budgetProximity,
   onDismissBudgetProximity,
+  episodeFrames,
 }: Props) {
   /*
    * Read straight from the Room store rather than taken as props.
@@ -632,10 +643,6 @@ export function RoomView({
     setRailOpenSections((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
   /** Your own avatar reference, once `loadViewer` has resolved who you are. */
   const [youAvatar, setYouAvatar] = useState<string | undefined>(undefined);
-  const [effectiveHive, setEffectiveHive] = useState<{
-    quorum: number;
-    turnBudget: number;
-  } | null>(null);
 
   /**
    * Ask the host whether this company can think (issues #1734, #1735).
@@ -1427,62 +1434,29 @@ export function RoomView({
   const askerNames = useAskerNames(client, company, channelApprovals);
 
   /**
-   * The rooms this channel held, folded out of its own transcript.
+   * The episodes this channel ran, folded out of its transcript and the live
+   * frames.
    *
-   * Derived rather than fetched: a deliberating desk journals nothing but its
-   * turns, so the transcript **is** the episode and there is no episode endpoint
-   * to ask. See `lib/hive/episode.ts`.
+   * Derived rather than fetched: every committed utterance is an ordinary
+   * reply row carrying `episode`, so the transcript **is** the durable record
+   * and there is no read to make. The frames layer the present tense on top —
+   * which seats a round opened with, which is still working. See
+   * `lib/episodes.ts`.
    *
    * `[]` for every DM, `#general`, the Operator feed and every desk that
-   * answered with one ordinary turn — the fold looks for marker lines and the
-   * reserved `hive-report` author and finds neither. Nothing here consults the
-   * channel's kind, which is what keeps the surface unchanged for every
-   * conversation that is not a room.
+   * answered with one ordinary turn — the fold looks for rows carrying
+   * `episode` and frames naming this desk, and finds neither. Nothing here
+   * consults the channel's kind, which is what keeps the surface unchanged
+   * for every conversation that is not a room.
    */
-  useEffect(() => {
-    let live = true;
-    setEffectiveHive(null);
-    // Lightweight room-test clients and older hosts do not expose this optional
-    // grammar read. The fold retains its derived policy in that case.
-    if (!channel?.memberIds || typeof client.getDeskHive !== "function") return () => {
-      live = false;
-    };
-    client
-      .getDeskHive(channel.id, company)
-      .then((hive) => {
-        if (live) {
-          setEffectiveHive({
-            quorum: hive.effective.quorum,
-            turnBudget: hive.effective.turnBudget,
-          });
-        }
-      })
-      // DMs and system channels have no desk grammar endpoint.
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [client, company, channel?.id, channel?.memberIds]);
-
-  const episodes = useMemo(
-    () =>
-      foldEpisodes(
-        // The complete transcript, not `entries` — `buildTimeline` folds
-        // thread replies out of the main timeline, but hive turns and
-        // `hive-report` messages can themselves be replies to the triggering
-        // operator message, and `entries` would then miss those rows and
-        // render no episode or an incomplete one.
-        messages,
-        // The seat count the host derives its quorum and turn budget from. Only
-        // a hint: with no membership the fold falls back to its own default and
-        // reports the number as derived rather than asserting one it cannot know.
-        {
-          members: channel?.memberIds?.length,
-          quorum: effectiveHive?.quorum,
-          turnBudget: effectiveHive?.turnBudget,
-        },
-      ),
-    [messages, channel?.memberIds, effectiveHive],
+  const episodes = useEpisodes(
+    // The complete transcript, not `entries` — `buildTimeline` folds thread
+    // replies out of the main timeline, but a seat's utterance can itself be
+    // a reply to the operator message that opened the episode, and `entries`
+    // would then miss those rows and render an incomplete round.
+    messages,
+    episodeFrames,
+    channel?.id,
   );
 
   const items = useMemo(
@@ -1495,15 +1469,6 @@ export function RoomView({
       ),
     [entries, channelApprovals, settledApprovals, decidedApprovals, episodes],
   );
-
-  /** Each deliberation turn by the message that carried it, for the rows. */
-  const episodeTurn = useMemo(() => {
-    const out: Record<string, EpisodeTurn> = {};
-    for (const episode of episodes)
-      for (const turn of [...episode.turns, ...episode.referrals])
-        out[turn.messageId] = turn;
-    return out;
-  }, [episodes]);
 
   // Company-wide, not scoped to the open channel — see the function's own
   // doc for why a per-channel version silently redeemed the wrong marker
@@ -2905,7 +2870,6 @@ export function RoomView({
                 <MessageTimeline
                   channel={channel}
                   items={items}
-                  episodeTurn={episodeTurn}
                   cognition={cognition}
                   historyPending={historyPending}
                   openThreadId={openThreadId}

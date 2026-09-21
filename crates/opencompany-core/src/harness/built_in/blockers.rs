@@ -299,7 +299,7 @@ impl EscalateToHumanTool {
 }
 
 #[async_trait::async_trait]
-impl openhuman_core::tools::traits::Tool for EscalateToHumanTool {
+impl tinytools::Tool for EscalateToHumanTool {
     fn name(&self) -> &str {
         ESCALATE_TO_HUMAN_TOOL
     }
@@ -332,15 +332,12 @@ impl openhuman_core::tools::traits::Tool for EscalateToHumanTool {
         })
     }
 
-    fn permission_level(&self) -> openhuman_core::tools::traits::PermissionLevel {
-        openhuman_core::tools::traits::PermissionLevel::Write
+    fn permission_level(&self) -> tinytools::PermissionLevel {
+        tinytools::PermissionLevel::Write
     }
 
-    async fn execute(
-        &self,
-        args: serde_json::Value,
-    ) -> anyhow::Result<openhuman_core::tools::traits::ToolResult> {
-        use openhuman_core::tools::traits::ToolResult;
+    async fn execute(&self, args: serde_json::Value) -> anyhow::Result<tinytools::ToolResult> {
+        use tinytools::ToolResult;
 
         let question = args
             .get("question")

@@ -22,7 +22,7 @@ use std::sync::Arc;
 use serde_json::json;
 
 use oh::security::SecurityPolicy;
-use oh::tools::{Tool, ToolResult};
+use tinytools::{Tool, ToolResult};
 
 use super::*;
 use crate::harness::build::{file_tools, workspace_security};

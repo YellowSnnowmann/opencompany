@@ -5,6 +5,7 @@
 //! reachable from a real model-driven turn is a different question, and it is
 
 use super::*;
+use openhuman_core as oh;
 
 /// A workspace with the given `path → contents` files written into it.
 pub(crate) fn workspace(files: &[(&str, &[u8])]) -> tempfile::TempDir {

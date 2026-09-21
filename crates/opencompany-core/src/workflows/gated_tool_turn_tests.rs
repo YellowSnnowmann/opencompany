@@ -41,7 +41,7 @@ use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{HarnessDeps, HarnessPool};
 use crate::ports::WorkflowRunContext;
-use crate::ports::types::{CompanyId, CompanyRecord};
+use crate::ports::types::CompanyRecord;
 use crate::runtime::journal::RuntimeJournal;
 use crate::store::{FsCompanyStore, FsContextStore, FsInboxStore, FsOps};
 use crate::workflows::delivery::{DeliveryParking, WorkflowDeliveryDeps};
@@ -132,15 +132,20 @@ pub(super) async fn spawn_script_recording(turns: Vec<Turn>) -> (String, Arc<Scr
                 // more times than expected; end the turn rather than hang.
                 let message = match next.unwrap_or(Turn::Say("done")) {
                     Turn::Say(text) => json!({ "role": "assistant", "content": text }),
-                    Turn::Call { tool, args } => json!({
-                        "role": "assistant",
-                        "content": null,
-                        "tool_calls": [{
-                            "id": format!("call-{tool}"),
-                            "type": "function",
-                            "function": { "name": tool, "arguments": args.to_string() }
-                        }]
-                    }),
+                    Turn::Call { tool, args } => {
+                        // Plan hive-desks Phase 3: a company tool is reached
+                        // through `mcp_call_tool` on the `opencompany` server.
+                        let (name, args) = crate::hive::tools::via_opencompany_mcp(tool, args);
+                        json!({
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "id": format!("call-{tool}"),
+                                "type": "function",
+                                "function": { "name": name, "arguments": args.to_string() }
+                            }]
+                        })
+                    }
                 };
                 Json(json!({
                     "choices": [{ "index": 0, "message": message }],
@@ -285,7 +290,7 @@ pub(super) fn record() -> CompanyRecord {
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
-        id: CompanyId::new("acme"),
+        id: crate::test_support::per_test_company_id("acme"),
         manifest: manifest(),
         ledger: Vec::new(),
         lifecycle: "running".to_string(),

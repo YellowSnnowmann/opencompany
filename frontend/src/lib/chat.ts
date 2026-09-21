@@ -185,16 +185,11 @@ export interface ChatMessage {
   text: string;
   /**
    * **The body as the model wrote it**, when the host sent one — `text` before
-   * `readable_moves` rewrote the room's grammar into operator-facing prose.
+   * the host rewrote it for a person to read (a referral's cue line).
    *
-   * Equal to {@link text} on every row that carries no move, which is every
-   * reply on every desk that does not deliberate, and absent from a host that
-   * predates the field.
-   *
-   * Read it wherever the *grammar* is the point rather than the prose: the
-   * episode fold counts `!propose`/`!support`/`^N`, and reading {@link text}
-   * there makes the deliberation panel depend on the host not having tidied
-   * the bubble.
+   * Equal to {@link text} on every row the rewrite did not touch, and absent
+   * from a host that predates the field. Only the raw view reads it, because
+   * only the raw view claims to show the string the model received.
    */
   cueText?: string;
   /** Wall-clock the line was added, for timestamps and grouping. */
@@ -243,13 +238,21 @@ export interface ChatMessage {
   /** The crossing this report brought home, rendered as one collapsed line. */
   referralConversation?: import("@/api/types").ReferralConversationDto;
   /**
-   * The private aside behind this line, rendered as one collapsed line.
-   *
-   * Carried the same way `referralConversation` is, and for the same reason:
-   * only the host knows an aside produced this message, so it rides the message
-   * rather than being inferred from the text here.
+   * What this line was inside the episode that produced it — its round, its
+   * speech act (`post` / `broadcast` / `dm` / `complete_episode`) and a `dm`'s
+   * recipients. Carried the same way `referralConversation` is, and for the
+   * same reason: only the host knows which round committed a reply, so it
+   * rides the message rather than being inferred from the text here. Absent
+   * for every reply outside an episode, which is what keeps a DM, `#general`
+   * and a single-responder desk rendering exactly as they always have.
    */
-  asideConversation?: import("@/api/types").AsideConversationDto;
+  episode?: import("@/api/types").MessageEpisodeDto;
+  /**
+   * Who may read this line, by agent id, when the host narrowed it — a desk
+   * `dm`. Absent means the whole desk. The operator reads every line either
+   * way; this is what the row's "→ @x" addressing is drawn from.
+   */
+  audience?: string[];
   /**
    * Who reacted to this line with what — one row per person per emoji, not a
    * count (issue #364).
@@ -482,9 +485,13 @@ export function makeMessage(
     /**
      * The body as the model wrote it, when the frame carried one — see
      * {@link ChatMessage.cueText}. Passed through untouched so a live row and
-     * the same row after a reload feed the episode fold identically.
+     * the same row after a reload read identically in the raw view.
      */
     cueText?: string;
+    /** The episode this reply was committed into — see {@link ChatMessage.episode}. */
+    episode?: import("@/api/types").MessageEpisodeDto;
+    /** Who may read it — see {@link ChatMessage.audience}. */
+    audience?: string[];
     /** The fail-closed reason (KR-L2-03), already narrowed by `toTurnFailure`. */
     turnFailure?: TurnFailure;
   } = {},
@@ -497,6 +504,8 @@ export function makeMessage(
     at: opts.at ?? Date.now(),
     channel: opts.channel,
     parentId: opts.parentId,
+    episode: opts.episode,
+    audience: opts.audience?.length ? opts.audience : undefined,
     steps: opts.steps,
     taskId: opts.taskId,
     turnFailure: opts.turnFailure,
@@ -682,7 +691,7 @@ export function fromHistory(entries: ChatHistoryMessageDto[]): ChatMessage[] {
       from,
       text: entry.text,
       // Straight through, like `byPerson`: the host is the only layer that
-      // still has the pre-rewrite body, and the episode fold needs it.
+      // still has the pre-rewrite body, and the raw view shows it.
       cueText: entry.cueText,
       at: entry.atMillis,
       // Straight through, never derived: see the field's own note, and
@@ -696,7 +705,10 @@ export function fromHistory(entries: ChatHistoryMessageDto[]): ChatMessage[] {
       // caused this line, and nothing here may infer it.
       referredFrom: entry.referredFrom,
       referralConversation: entry.referralConversation,
-      asideConversation: entry.asideConversation,
+      // The round and speech act behind a reply, and who may read it. Same
+      // rule again: only the host knows which round committed a line.
+      episode: entry.episode,
+      audience: entry.audience?.length ? entry.audience : undefined,
       // Reactions come through whoever the host said reacted; nothing is
       // inferred here, `mine` included.
       reactions: entry.reactions?.length ? entry.reactions : undefined,

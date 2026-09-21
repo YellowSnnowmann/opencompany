@@ -265,95 +265,189 @@ export interface DeskDto {
    * for these. Omitted (undefined/false) for blueprint desks.
    */
   overlayCreated?: boolean;
+  /**
+   * How this desk paces the episodes it opens — the numbers in force, not the
+   * editable block (see {@link DeskRoutingDto}). Absent on a host predating
+   * desk routing, and on a leadless or single-member desk that runs none.
+   */
+  routing?: DeskRoutingSummaryDto;
 }
 
 /**
- * `GET/PUT/DELETE {scope}/desks/{deskId}/hive` — a desk's move grammar.
+ * How a desk routes and paces the episodes it opens (`[group_chat.routing]`).
  *
- * Mirrors `DeskHiveDto` in `src/server/operator.rs`.
- *
- * The `declared` / `effective` split is the reason this is its own payload
- * rather than a field on {@link DeskDto}. A single `turnBudget: 9` on a
- * three-seat desk is either an operator's decision or the derived `3 x members`,
- * and the two behave differently the moment somebody joins — so one number
- * cannot tell the editor whether adding a seat will change it.
+ * Mirrors `DeskRoutingDto` in `src/server/operator.rs`. The `declared` /
+ * `effective` split is the reason this is its own payload rather than a field
+ * on {@link DeskDto}: a `roundWidth: 2` is either an operator's decision or the
+ * library default, and the two behave differently the moment the manifest
+ * changes — so one number cannot tell the editor which it is looking at.
  */
-export interface DeskHiveDto {
+export interface DeskRoutingDto {
   deskId: string;
   /** Where the block in force came from. */
-  source: "overlay" | "manifest" | "default";
-  /**
-   * Whether an episode would actually open right now.
-   *
-   * A one-member desk with `enabled: true` is still `false` — the flag says what
-   * the operator wants, not what the desk can do.
-   */
-  deliberates: boolean;
+  source: DeskRoutingSource;
   /** The block as authored. Snake_case: this field **is** the manifest block. */
-  declared: DeskHiveDeclared;
-  /** What the runtime will use, every default resolved against membership. */
-  effective: {
-    turnBudget: number;
-    quorum: number;
-    blindRound: boolean;
-    dominanceCap: number;
-    repetitionCap: number;
-    requireGrounded: boolean;
-    requireEvidential: boolean;
-    refutationCap?: number | null;
-  };
-  /** Every move a table may name, and the three no table can take away. */
-  moveKinds: string[];
-  ungatedKinds: string[];
-  seats: DeskHiveSeatDto[];
+  declared: DeskRoutingDeclared;
+  /** What the runtime will use, every default resolved. */
+  effective: DeskRoutingEffective;
   /**
-   * How many seats may deposit a distinct supporter, and whether that clears
-   * the effective quorum. `propose` counts — in the fold a proposal is already
-   * its own author's support.
+   * Every seat the router may pick, with the other desks each one also sits
+   * on — a shared seat is the one whose turn can be delayed by another desk's
+   * round, which is worth seeing before widening a round to include it.
    */
-  eligibleSupporters: number;
-  reachesQuorum: boolean;
+  candidates: DeskRoutingCandidateDto[];
 }
 
+/** Where a desk's routing block in force came from. */
+export type DeskRoutingSource = "overlay" | "manifest" | "default";
+
 /**
- * The `[[group_chat]].hive` block as authored — snake_case, because it is the
+ * The `[group_chat.routing]` block as authored — snake_case, because it is the
  * TOML block verbatim and a camelCase twin would be a second shape to keep in
  * step with it. Every key absent means "not said", which is distinct from any
  * value it could hold.
  */
-export interface DeskHiveDeclared {
-  enabled?: boolean;
-  turn_budget?: number;
-  quorum?: number;
-  blind_round?: boolean;
-  moves?: Record<string, string[]>;
-  require_evidential?: boolean;
-  refutation_cap?: number;
-  dominance_cap?: number;
-  repetition_cap?: number;
+export interface DeskRoutingDeclared {
+  round_width?: number;
+  choice_option_limit?: number;
+  minimum_confidence?: number;
+  high_impact_minimum_confidence?: number;
+  clarification_threshold?: number;
+  high_impact_threshold?: number;
+  max_rounds?: number;
+  turn_timeout_secs?: number;
   referral?: {
     enabled?: boolean;
     max_hops?: number;
     reach?: string;
     returns?: boolean;
-    peer_cap?: number;
   };
 }
 
-/** One seat, and the moves it may open a line with. */
-export interface DeskHiveSeatDto {
+/** The routing numbers the runtime will actually use, defaults resolved. */
+export interface DeskRoutingEffective {
+  roundWidth: number;
+  choiceOptionLimit: number;
+  maxRounds: number;
+  turnTimeoutSecs: number;
+  /** Which router picks the seats: the System One (`jev`) router, or the
+   *  lead/mention fallback the host uses without one. */
+  router: RoutingRouter;
+  minimumConfidence?: number;
+  highImpactMinimumConfidence?: number;
+  clarificationThreshold?: number;
+  highImpactThreshold?: number;
+  referral?: {
+    enabled: boolean;
+    maxHops: number;
+    reach?: string;
+    returns: boolean;
+  };
+}
+
+/** One seat the router may pick, and where else it sits. */
+export interface DeskRoutingCandidateDto {
   agentId: string;
   label: string;
   role: string;
-  /** Already ordered and already unioned with the ungated three. */
-  moves: string[];
-  /**
-   * Whether the table governs this seat at all — invisible from `moves` alone,
-   * since "named with every kind" and "not named" produce the same list and
-   * only one of them is a decision somebody made.
-   */
-  governed: boolean;
+  /** The other desks this agent is also a member of. Empty for a seat that is
+   *  this desk's alone. */
+  sharedWith: string[];
 }
+
+/**
+ * The compact routing summary a desk carries on the list (`GET {scope}/desks`),
+ * so the room can label a round without a second read. The full editable block
+ * is {@link DeskRoutingDto}. Optional on {@link DeskDto}: a host predating it
+ * omits it, and the room then labels nothing.
+ */
+export interface DeskRoutingSummaryDto {
+  source: DeskRoutingSource;
+  roundWidth: number;
+  choiceOptionLimit: number;
+  maxRounds: number;
+  turnTimeoutSecs: number;
+  router: RoutingRouter;
+}
+
+/** Which router chose the seats of a round. */
+export type RoutingRouter = "jev" | "fallback" | "explicit";
+
+/**
+ * How a message was routed to seats — the plan a round opened with, or the
+ * plan a broadcast resolved to. Mirrors `RoutingPlanDto` in
+ * `src/server/operator.rs`, which is tinyhivemind's `RoutingPlan` on the wire.
+ */
+export type RoutingPlanDto =
+  | { kind: "one"; primaryId: string }
+  | { kind: "hive"; primaryId: string; invitedIds: string[] }
+  | { kind: "clarify"; question?: string }
+  /**
+   * The deterministic destination and why the router did not decide. The
+   * host names the seat it fell back to (`primaryId`) beside the reason —
+   * the seat is what a comms edge or a round lane needs; optional only for
+   * a host predating the field.
+   */
+  | { kind: "fallback"; primaryId?: string; reason: string };
+
+/**
+ * The one speech act a seat ends its turn with. Mirrors
+ * `tinyhivemind::speech::Utterance`'s four kinds — `read` is a query, not an
+ * utterance, and never reaches the journal.
+ */
+export type UtteranceKind = "post" | "broadcast" | "dm" | "complete_episode";
+
+/**
+ * What a journaled reply was, inside the episode that produced it. Mirrors the
+ * `episode` field of `ChatHistoryMessageDto` in `src/server/operator.rs`.
+ *
+ * Optional everywhere it appears: a reply outside an episode — a DM, `#general`,
+ * a workflow relay, every row from a host predating episodes — carries none,
+ * and renders exactly as it always has.
+ */
+export interface MessageEpisodeDto {
+  /** The episode this reply was committed into. */
+  id: string;
+  /** The round it was committed in — the driver's revision when it landed. */
+  revision: number;
+  kind: UtteranceKind;
+  /** A `dm`'s recipients, by agent id. */
+  to?: string[];
+  /** How a `broadcast` was routed onward, when the host recorded it. */
+  routedBy?: { plan: RoutingPlanDto; router: RoutingRouter };
+}
+
+/**
+ * `GET {scope}/episodes?desk&status&limit` — one episode a desk ran or is
+ * running. Mirrors `EpisodeDto` in `src/server/operator.rs`.
+ */
+export interface EpisodeDto {
+  id: string;
+  /** The desk it ran on. */
+  chatId: string;
+  /** The journal sequence of the message that opened it. */
+  openedBySeq: number;
+  /** The thread root inside that desk, when the message was in a thread. */
+  parentId?: string;
+  participants: string[];
+  plan: RoutingPlanDto;
+  /** The driver's current revision — how many rounds have committed. */
+  revision: number;
+  status: "open" | "completed";
+  openedAtMillis: number;
+  completedAtMillis?: number;
+  completedBy?: string;
+  reason?: EpisodeCompletionReason;
+}
+
+/** Why an episode closed. Widened by the console to a string on read, so a
+ *  word from a newer host is not a type error. */
+export type EpisodeCompletionReason =
+  | "complete_episode"
+  | "round_cap"
+  | "timeout"
+  | "failed"
+  | "membership_changed";
 
 /**
  * `GET {scope}/operator-channel` — the identity of the company's
@@ -444,20 +538,6 @@ export interface ReferralConversationDto {
   lines: ReferralLineDto[];
 }
 
-export interface AsideLineDto {
-  authorId: string;
-  text: string;
-}
-
-/** A private exchange between members of one desk, folded onto the move it rode
- *  under. The operator reads it in full — collapsing is presentation, not
- *  access control. */
-export interface AsideConversationDto {
-  /** Everyone in it — the author first, then who they addressed. */
-  members: string[];
-  lines: AsideLineDto[];
-}
-
 /**
  * One line of an agent's session: a chat row plus where it was said.
  *
@@ -466,7 +546,7 @@ export interface AsideConversationDto {
  * two teammates answering in two desks would interleave with nothing to tell
  * them apart. Everything else is a plain {@link ChatHistoryMessageDto}, which
  * is what lets `fromHistory` map it and the room's own components render it,
- * referral and aside collapses included.
+ * referral collapses and utterance chips included.
  */
 export interface AgentSessionMessageDto extends ChatHistoryMessageDto {
   /** The channel as the rail names it — `#Brand`, `#general`, `dm`. */
@@ -569,7 +649,19 @@ export interface ChatHistoryMessageDto {
   cueText?: string;
   referredFrom?: ReferredFromDto;
   referralConversation?: ReferralConversationDto;
-  asideConversation?: AsideConversationDto;
+  /**
+   * What this reply was inside the episode that produced it — its round, its
+   * speech act, and for a `dm` who it went to. Absent for every reply outside
+   * an episode and on a host predating episodes; such a row renders exactly as
+   * before.
+   */
+  episode?: MessageEpisodeDto;
+  /**
+   * Who may read this line, by agent id, when the host narrowed it — a `dm`
+   * inside a desk. Absent means everyone on the desk. An operator reads every
+   * line regardless: audience is a coordination device, not access control.
+   */
+  audience?: string[];
   atMillis: number;
   mine: boolean;
   /**

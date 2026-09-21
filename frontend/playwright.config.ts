@@ -11,6 +11,8 @@ import {
   EULER_COMPANY,
   FIRST_RUN,
   FIRST_RUN_COMPANY,
+  HIVE,
+  HIVE_COMPANY,
   LIVE_BRAIN,
   LIVE_LLM,
   LIVE_LLM_BIND,
@@ -106,6 +108,14 @@ const LIVE_LLM_SPEC = /orchestration-live\.spec\.ts$/;
  * (`companies/math_lab`). See `EULER` in `test/e2e/capabilities.ts`.
  */
 const EULER_SPEC = /euler-live\.spec\.ts$/;
+
+/**
+ * The one spec that watches a desk answer as a **room** — two seats working
+ * at once, a dm, the episode completing — and which therefore needs a host
+ * serving a company whose desks have more than one member
+ * (`companies/hive_demo`). See `HIVE` in `test/e2e/capabilities.ts`.
+ */
+const HIVE_SPEC = /desk-episode-live\.spec\.ts$/;
 
 /**
  * The one spec that compares **pixels** rather than named quantities, and which
@@ -206,9 +216,11 @@ const storageState =
           ? "../target/e2e/first-run-storage-state.json"
           : EULER
             ? "../target/e2e/euler-storage-state.json"
-            : ANALYTICS
-              ? "../target/e2e/analytics-storage-state.json"
-              : "../target/e2e/storage-state.json",
+            : HIVE
+              ? "../target/e2e/hive-storage-state.json"
+              : ANALYTICS
+                ? "../target/e2e/analytics-storage-state.json"
+                : "../target/e2e/storage-state.json",
       )
     : undefined);
 
@@ -342,6 +354,20 @@ const eulerEnv: Record<string, string> =
       }
     : {};
 
+/**
+ * What a hive run tells `test/e2e/host.sh` to serve: `companies/hive_demo`,
+ * whose two desks share the CEO, on a data root of its own so the episodes a
+ * previous run left cannot pass for this run's.
+ */
+const hiveEnv: Record<string, string> =
+  // See `firstRunEnv` for why this is not `managesHost`.
+  MANAGED_HOST_HOME !== undefined && HIVE
+    ? {
+        PW_HOST_COMPANY: resolve(here, "..", HIVE_COMPANY),
+        PW_HOST_DATA_DIR: MANAGED_HOST_HOME,
+      }
+    : {};
+
 const passthrough = [
   ...Object.keys(inferenceEnv),
   ...Object.keys(composioEnv),
@@ -354,6 +380,7 @@ const hostEnv: Record<string, string> = {
   ...analyticsHostEnv,
   ...firstRunEnv,
   ...eulerEnv,
+  ...hiveEnv,
   ...(passthrough.length > 0
     ? { PW_HOST_PASSTHROUGH: passthrough.join(" ") }
     : {}),
@@ -435,7 +462,8 @@ export default defineConfig({
   //
   // Four disjoint selections now: the Project Euler lane is a live-LLM run
   // against a different company, so it is checked *before* `LIVE_LLM` — both
-  // flags are set for it, and the more specific lane wins.
+  // flags are set for it, and the more specific lane wins. The hive lane is
+  // the same shape one rung down: a live-brain run against `hive_demo`.
   //
   // Six now: the analytics lane is a second pass over one spec with an opted-in
   // host. The visual lane remains separate because a run that mixed pixel
@@ -447,18 +475,21 @@ export default defineConfig({
       ? { testMatch: FIRST_RUN_SPEC }
       : EULER
         ? { testMatch: EULER_SPEC }
-        : LIVE_LLM
-          ? { testMatch: LIVE_LLM_SPEC }
-          : VISUAL
-            ? { testMatch: VISUAL_SPEC }
-            : {
-                testIgnore: [
-                  FIRST_RUN_SPEC,
-                  LIVE_LLM_SPEC,
-                  EULER_SPEC,
-                  VISUAL_SPEC,
-                ],
-              }),
+        : HIVE
+          ? { testMatch: HIVE_SPEC }
+          : LIVE_LLM
+            ? { testMatch: LIVE_LLM_SPEC }
+            : VISUAL
+              ? { testMatch: VISUAL_SPEC }
+              : {
+                  testIgnore: [
+                    FIRST_RUN_SPEC,
+                    LIVE_LLM_SPEC,
+                    EULER_SPEC,
+                    HIVE_SPEC,
+                    VISUAL_SPEC,
+                  ],
+                }),
   // UNCONDITIONAL, and it was not always (issue #1773). `global-setup.ts` runs
   // after every `webServer` above has resolved, which makes it the only hook
   // that sees the server Playwright *adopted* rather than the one it was

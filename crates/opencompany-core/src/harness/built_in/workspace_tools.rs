@@ -201,8 +201,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use oh::tools::traits::{PermissionLevel, Tool, ToolResult};
 use openhuman_core as oh;
+use tinytools::{PermissionLevel, Tool, ToolResult};
 
 use crate::company::artifact_mirror::{MirrorOutcome, mirror_node_edit};
 // One rule for what a node's path is and what a caller may pass as one, shared

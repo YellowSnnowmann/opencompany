@@ -76,9 +76,7 @@ use async_trait::async_trait;
 use futures::future::FutureExt;
 use serde_json::{Value, json};
 
-use openhuman_core as oh;
-
-use oh::tools::traits::{PermissionLevel, Tool, ToolResult};
+use tinytools::{PermissionLevel, Tool, ToolResult};
 
 use crate::company::{
     Agent as ManifestAgent, RawEdge, RawNode, RawWorkflow, WorkflowDestinationDef, WorkflowFile,
@@ -374,17 +372,6 @@ pub enum Delegation {
         /// The instruction handed to that teammate.
         instruction: String,
     },
-    /// Deliver a committed chat message into one teammate's DM session and run
-    /// exactly one bounded reply turn. Unlike a work hand-off, this opens no
-    /// task card: conversation is not work merely because another agent speaks.
-    ConversationDispatch {
-        source: String,
-        target: String,
-        message: String,
-        chat_id: String,
-        trigger_sequence: u64,
-        child_hop: u32,
-    },
     /// Set (or change) who owns an existing board card (issue #186 part b).
     AssignTask {
         /// The card's id.
@@ -426,9 +413,7 @@ impl Delegation {
     pub fn answers(&self) -> bool {
         matches!(
             self,
-            Self::DelegateToDesk { .. }
-                | Self::DelegateToTeammate { .. }
-                | Self::ConversationDispatch { .. }
+            Self::DelegateToDesk { .. } | Self::DelegateToTeammate { .. }
         )
     }
 
@@ -867,9 +852,9 @@ impl DelegationQueue {
             // something false about what it may do next.
             DrainClaim::Board if !delegation.writes_board_only() => {
                 return Staged::NoDrain(match delegation {
-                    Delegation::DelegateToDesk { .. }
-                    | Delegation::DelegateToTeammate { .. }
-                    | Delegation::ConversationDispatch { .. } => NoDrainReason::WorkflowHandOff,
+                    Delegation::DelegateToDesk { .. } | Delegation::DelegateToTeammate { .. } => {
+                        NoDrainReason::WorkflowHandOff
+                    }
                     _ => NoDrainReason::WorkflowLifecycle,
                 });
             }
@@ -2434,6 +2419,12 @@ fn summarize_event(event: &CompanyEvent) -> String {
         // carry.
         CompanyEvent::TurnStarted { turn_id, .. } => format!("turn accepted: {turn_id}"),
         CompanyEvent::TurnFailed { turn_id, .. } => format!("turn unanswered: {turn_id}"),
+        CompanyEvent::TurnSettled {
+            turn_id, agent_id, ..
+        } => match agent_id {
+            Some(agent) => format!("turn answered by {agent}: {turn_id}"),
+            None => format!("turn answered: {turn_id}"),
+        },
         // Issue #1015. Structural only: the minted id and the status word, a
         // fixed vocabulary. The failure reason is our own prose about the host
         // and is tenant-scoped, so it stays off this surface exactly as
@@ -2559,13 +2550,22 @@ fn summarize_event(event: &CompanyEvent) -> String {
             added.len(),
             removed.len()
         ),
-        CompanyEvent::DeskHiveConfigured { reset, .. } => {
+        CompanyEvent::DeskRoutingConfigured { reset, .. } => {
             if *reset {
-                "desk move grammar restored".into()
+                "desk routing restored".into()
             } else {
-                "desk move grammar installed".into()
+                "desk routing configured".into()
             }
         }
+        // Plan hive-desks: the episode ledger. Structural only — ids and
+        // counts, never an utterance — for the same reason every arm here is.
+        CompanyEvent::EpisodeOpened { .. } => "episode opened".into(),
+        CompanyEvent::RoundStarted { .. } => "episode round started".into(),
+        CompanyEvent::RoundCommitted { .. } => "episode round committed".into(),
+        CompanyEvent::BroadcastRouted { .. } => "episode broadcast routed".into(),
+        CompanyEvent::DmDelivered { .. } => "episode dm delivered".into(),
+        CompanyEvent::EpisodeCompleted { .. } => "episode completed".into(),
+        CompanyEvent::EpisodeStateSaved { .. } => "episode state saved".into(),
         // Issue #276. This one-liner is folded into the orchestrator's
         // recent-activity context, so it is read by a model — and the arms
         // around it drop free text and actor ids for that reason. Name and id
