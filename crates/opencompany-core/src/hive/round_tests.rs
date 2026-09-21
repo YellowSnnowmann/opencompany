@@ -79,7 +79,7 @@ fn a_solo_seat_is_answered_by_its_bare_reply_and_never_broadcasts() {
     );
     assert!(matches!(
         bare,
-        Fold::Done(Settled { utterance: Utterance::CompleteEpisode { message }, forced: None, .. }, TurnOutcome::Committed) if message == "Just the answer."
+        Fold::Done(Settled { utterance: Utterance::CompleteEpisode { message }, forced: None, .. }) if message == "Just the answer."
     ));
     let widened = narrow(
         Utterance::Broadcast {
