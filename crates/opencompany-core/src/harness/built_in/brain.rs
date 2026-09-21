@@ -3794,6 +3794,7 @@ impl HarnessBrain {
                                 Arc::new(crate::hive::seats::HarnessSeatRunner {
                                     run_turn: self.run_turn(),
                                 }),
+                                self.deps.workflow_runs.clone(),
                             );
                             let trigger = crate::hive::dispatch::trigger_for(
                                 event_seq, &composed, *parent, mentions,

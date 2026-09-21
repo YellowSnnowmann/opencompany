@@ -220,6 +220,7 @@ pub(crate) async fn run_round(
             }
             .render();
             let turn_id = uuid::Uuid::new_v4().simple().to_string();
+            open_run(host, run, &turn_id, agent_id, revision).await;
             host.events
                 .append(
                     &host.record.id,
@@ -454,6 +455,59 @@ fn narrow(utterance: Utterance, allowed: &[&str]) -> Utterance {
     }
 }
 
+/// Mints and starts the seat turn's run row (plan hive-desks, Phase 8), so
+/// `GET /runs` and the Observatory see one attempt per seat turn with its
+/// episode and round — the durable twin of the `TurnStarted` bracket. A
+/// store that refuses is logged and the turn runs untracked, exactly as the
+/// chat route does for its own row.
+async fn open_run(
+    host: &HiveDispatcher,
+    run: &EpisodeRun,
+    turn_id: &str,
+    agent_id: &str,
+    revision: u64,
+) {
+    let Some(runs) = host.runs.as_ref() else { return };
+    let spec = crate::ports::runs::NewRun::for_chat(turn_id, run.desk.desk_id.clone(), agent_id)
+        .in_thread(Some(run.thread_root))
+        .in_episode(run.episode_id.clone(), revision);
+    let opened = match runs.create_run(&host.record.id, spec).await {
+        Ok(_) => runs.begin_run_untriggered(&host.record.id, turn_id).await,
+        Err(error) => Err(error),
+    };
+    if let Err(error) = opened {
+        tracing::warn!(
+            company = %host.record.id,
+            turn = turn_id,
+            %error,
+            "[hive] could not open a seat turn's run row; the turn runs untracked"
+        );
+    }
+}
+
+/// Settles the seat turn's run row with the bracket's outcome.
+async fn close_run(host: &HiveDispatcher, turn_id: &str, outcome: TurnOutcome, error: Option<&str>) {
+    use crate::ports::runs::{RunOutcome, RunStatus};
+    let Some(runs) = host.runs.as_ref() else { return };
+    let mut settled = match outcome {
+        TurnOutcome::Committed | TurnOutcome::NoUtterance => {
+            RunOutcome::new(RunStatus::Succeeded)
+        }
+        TurnOutcome::Failed | TurnOutcome::TimedOut => RunOutcome::new(RunStatus::Failed),
+    };
+    if let Some(error) = error {
+        settled = settled.with_error(error.to_string());
+    }
+    if let Err(error) = runs.finish_run(&host.record.id, turn_id, settled).await {
+        tracing::warn!(
+            company = %host.record.id,
+            turn = turn_id,
+            %error,
+            "[hive] could not settle a seat turn's run row; the next boot reaps it"
+        );
+    }
+}
+
 async fn settle(
     host: &HiveDispatcher,
     run: &EpisodeRun,
@@ -462,6 +516,7 @@ async fn settle(
     revision: u64,
     outcome: TurnOutcome,
 ) -> Result<()> {
+    close_run(host, turn_id, outcome, None).await;
     host.events
         .append(
             &host.record.id,
@@ -500,6 +555,7 @@ async fn fail(
         %error,
         "[hive] a seat turn did not answer; completed on its behalf"
     );
+    close_run(host, turn_id, outcome, Some(&error)).await;
     host.events
         .append(
             &host.record.id,
