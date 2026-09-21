@@ -122,6 +122,32 @@ pub(crate) fn grants_cover_server(grants: &[String], name: &str) -> bool {
         .any(|grant| grant_matches(grant, &want))
 }
 
+/// Whether an agent's effective tool `grants` cover the directory-installed MCP
+/// server identified by `server_id`, the registry-side sibling of
+/// [`grants_cover_server`].
+///
+/// `server_id` is the install's own identifier, not its display or qualified
+/// name: a scoped grant spells that identifier (`mcp_registry.<server_id>`).
+/// A bare `mcp_registry` grant covers every install, which is what the grant
+/// meant before scoping existed.
+///
+/// Serves two shapes of caller. A tool addressed by a `server_id` argument
+/// gates on this before dispatching; a tool that *enumerates* installs carries
+/// no such argument and must instead filter its rows through this, the way
+/// `registry_for_agent` filters declared servers with
+/// [`grants_cover_server`]. `grants` are the *effective* grants — resolve them
+/// with [`agent_effective_grants`](crate::runtime::builder::agent_effective_grants)
+/// first, never the raw per-agent `tools`.
+pub(crate) fn grants_cover_registry_server(grants: &[String], server_id: &str) -> bool {
+    let want = format!("mcp_registry.{server_id}");
+    // As in `grants_cover_server`: the catch-all `*` never confers reach into
+    // this namespace, matching `grants_mcp_registry_explicit`.
+    grants
+        .iter()
+        .filter(|grant| grant.as_str() != "*")
+        .any(|grant| grant.as_str() == "mcp_registry" || grant_matches(grant, &want))
+}
+
 #[async_trait]
 impl ToolProvider for StubToolProvider {
     async fn catalog(&self, _company: &CompanyId) -> Result<Vec<ToolSpec>> {
