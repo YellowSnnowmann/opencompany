@@ -407,14 +407,15 @@ impl Fold {
             } => {
                 let opened_at = self.opened_at.get(episode_id).copied();
                 let episode = self.episode(episode_id, chat_id);
-                if !episode.completed {
-                    episode.completed = true;
-                    self.report.episodes_completed += 1;
-                }
+                let first_completion = !episode.completed;
+                episode.completed = true;
                 episode.rounds = episode.rounds.max(*rounds);
                 episode.reason = Some(reason_word(*reason).to_string());
                 episode.time_to_complete_millis =
                     opened_at.map(|opened| stored.at_millis.saturating_sub(opened));
+                if first_completion {
+                    self.report.episodes_completed += 1;
+                }
             }
             CompanyEvent::AgentReply {
                 episode: Some(episode),
