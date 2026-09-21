@@ -47,7 +47,7 @@ use axum::Router;
 use axum::http::StatusCode;
 use axum::routing::post;
 use openhuman_embed::{AgentSpec, McpAuthConfig, McpServer};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tinytools::Tool;
 
 use super::tools::{InFlightRegistry, McpToolAdapter, SPEECH_TOOL_NAMES, speech_descriptor};
