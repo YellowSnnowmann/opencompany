@@ -2,7 +2,6 @@
 //! `tinymcp::McpHttpClient`, OpenHuman's own — over a real loopback socket.
 
 use super::*;
-use serde_json::json;
 use crate::company::Policy;
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::hive::tools::{HiveTurn, InFlight, InFlightContext};
@@ -10,6 +9,7 @@ use crate::ports::events::EventStreamItem;
 use crate::ports::types::{CompanyEvent, EventSeq, StoredEvent};
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
+use serde_json::json;
 use tinyhivemind_embed::{ConversationKind, ConversationRef};
 use tinymcp::McpHttpClient;
 use tinymcp::tinymcp_bus::McpAuthConfig as ClientAuth;
