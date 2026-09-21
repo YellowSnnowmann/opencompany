@@ -1266,10 +1266,17 @@ async fn a_cross_desk_referral_crosses_only_the_answer_back() {
             seat.speaker == ENGINEER && seat.prompt.contains("answered the question you put to it")
         })
         .expect("the engineer's reopened turn");
+    // The assignment cites the answer row; the row itself reaches the seat
+    // in the desk delta, attributed to the referral author.
+    let delta = reopened
+        .prompt
+        .rsplit_once("## New desk messages\n")
+        .map(|(_, rest)| rest.to_string())
+        .unwrap_or_default();
     assert!(
-        reopened.assignment.contains(TAGLINE),
+        delta.contains(TAGLINE) && delta.contains(HIVE_REFERRAL_AUTHOR),
         "{}",
-        reopened.assignment
+        reopened.prompt
     );
 
     let measured = report(&runtime).await;
