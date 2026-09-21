@@ -299,6 +299,8 @@ pub fn build_confined_agent(
         system_prompt: confined_persona(company_name, confinement),
         tools,
         native_tool_names: Vec::new(),
+        #[cfg(feature = "mcp")]
+        company_mcp_servers: Vec::new(),
         chat_model: deps.provider.clone(),
         model,
         workspace,
