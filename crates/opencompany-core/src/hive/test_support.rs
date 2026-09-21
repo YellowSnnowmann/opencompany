@@ -53,6 +53,9 @@ impl MemoryLog {
     }
 
     /// The `kind` of every journaled event, in order.
+    ///
+    /// Only `driver_tests.rs` (feature `openhuman`) calls this; see `replies`.
+    #[cfg(feature = "openhuman")]
     pub(crate) fn kinds(&self) -> Vec<&'static str> {
         self.rows()
             .iter()
