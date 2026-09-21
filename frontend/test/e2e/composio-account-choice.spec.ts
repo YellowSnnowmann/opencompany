@@ -212,6 +212,15 @@ test("an operator names the account, and the page says so", async ({ page }) => 
 test.describe("the agent acts as the chosen account", () => {
   test.skip(!LIVE_BRAIN, LIVE_BRAIN_REASON);
 
+  // Two real agent turns, each awaited to completion (see `runOneExecute`), and
+  // an account choice between them. The suite's 60s default (`playwright.config
+  // .ts`) expires inside the second turn on CI hardware and reports a timeout
+  // rather than the behaviour under test — the run for #2270 died at
+  // `waitForTurn` with both `composio_execute` calls already answered and the
+  // composer idle. `blocker-verdicts-live.spec.ts` raises its own budget for the
+  // same reason.
+  test.setTimeout(600_000);
+
   /**
    * Make the agent run one `composio_execute` and hand back what the fixture
    * received for it.
