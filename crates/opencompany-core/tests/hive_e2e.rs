@@ -1274,11 +1274,8 @@ async fn a_cross_desk_referral_crosses_only_the_answer_back() {
         .filter_map(seat_of)
         .find(|seat| {
             seat.speaker == ENGINEER && seat.prompt.contains("answered the question you put to it")
-        });
-    if reopened.is_none() {
-        dump(&rows, &script);
-    }
-    let reopened = reopened.expect("the engineer's reopened turn");
+        })
+        .expect("the engineer's reopened turn");
     // The assignment cites the answer row; the row itself reaches the seat
     // in the desk delta, attributed to the referral author.
     let delta = reopened
