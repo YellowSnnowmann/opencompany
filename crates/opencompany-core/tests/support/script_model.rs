@@ -151,6 +151,12 @@ pub struct Script {
     responder: Responder,
     /// Every request body the harness sent, in order.
     seen: Mutex<Vec<Value>>,
+    /// How long each completion takes to answer — zero unless a test needs
+    /// its turns to be long enough to overlap.
+    latency: std::time::Duration,
+    /// Requests being answered right now, and the most ever at once: the
+    /// model's own view of concurrency, independent of the journal.
+    in_flight: Mutex<(usize, usize)>,
 }
 
 impl Script {
@@ -163,14 +169,31 @@ impl Script {
     pub fn asks(&self) -> Vec<Ask> {
         self.bodies().iter().map(Ask::read).collect()
     }
+
+    /// The most completions the endpoint was answering at once.
+    pub fn peak_in_flight(&self) -> usize {
+        self.in_flight.lock().expect("script poisoned").1
+    }
 }
 
 /// Serves `responder` on a fresh loopback port and returns the base URL a
 /// company manifest points its `[inference] base_url` at.
 pub async fn spawn_script(responder: Responder) -> (String, Arc<Script>) {
+    spawn_script_with_latency(responder, std::time::Duration::ZERO).await
+}
+
+/// [`spawn_script`], with every completion held for `latency` before it
+/// answers — so two turns proposed together are still both running when the
+/// second one starts, and a test can assert they overlapped.
+pub async fn spawn_script_with_latency(
+    responder: Responder,
+    latency: std::time::Duration,
+) -> (String, Arc<Script>) {
     let script = Arc::new(Script {
         responder,
         seen: Mutex::new(Vec::new()),
+        latency,
+        in_flight: Mutex::new((0, 0)),
     });
     let chat = Arc::clone(&script);
     let app = axum::Router::new()
@@ -184,6 +207,14 @@ pub async fn spawn_script(responder: Responder) -> (String, Arc<Script>) {
                         .lock()
                         .expect("script poisoned")
                         .push(body.clone());
+                    {
+                        let mut live = script.in_flight.lock().expect("script poisoned");
+                        live.0 += 1;
+                        live.1 = live.1.max(live.0);
+                    }
+                    if !script.latency.is_zero() {
+                        tokio::time::sleep(script.latency).await;
+                    }
                     let ask = Ask::read(&body);
                     let (message, finish) = match (script.responder)(&ask) {
                         Reply::Say(text) => {
@@ -202,6 +233,7 @@ pub async fn spawn_script(responder: Responder) -> (String, Arc<Script>) {
                             "tool_calls",
                         ),
                     };
+                    script.in_flight.lock().expect("script poisoned").0 -= 1;
                     Json(json!({
                         "id": "scripted",
                         "object": "chat.completion",
