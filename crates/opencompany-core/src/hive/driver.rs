@@ -42,7 +42,7 @@ mod crossing;
 /// The seat-turn seam: what one seat is asked, what it produced, and the
 /// runner that runs it.
 mod seat;
-pub use seat::{SeatFailure, SeatOutcome, SeatRunner, SeatTurn};
+pub use seat::{SeatBracket, SeatFailure, SeatOutcome, SeatRunner, SeatTurn};
 
 /// The message that opens, joins or reopens an episode.
 #[derive(Clone, Debug)]

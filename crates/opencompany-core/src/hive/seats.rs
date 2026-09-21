@@ -27,7 +27,9 @@ pub struct HarnessSeatRunner {
 #[async_trait]
 impl SeatRunner for HarnessSeatRunner {
     async fn run_seat(&self, seat: SeatTurn) -> std::result::Result<SeatOutcome, SeatFailure> {
-        let scope = Arc::new(SeatTurnScope::new(seat.hive.clone(), seat.timeout));
+        let scope = Arc::new(
+            SeatTurnScope::new(seat.hive.clone(), seat.timeout).with_bracket(seat.bracket.clone()),
+        );
         let control = SteerControl::new();
         let chat = ChatTarget::in_thread(Some(seat.chat_id.as_str()), seat.thread_root)
             .answering(seat.message_seq);

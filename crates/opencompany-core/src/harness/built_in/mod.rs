@@ -1518,6 +1518,12 @@ impl CompanyAgent {
         // back through the scope when the turn returns.
         let seat = crate::runtime::delegation::seat_turn();
         let _turn = self.turn_lock.lock().await;
+        // The bracket opens under the lock and closes before it is released
+        // (`drop(_turn)` below), so one agent's brackets never overlap on the
+        // journal — the invariant `opencompany measure` checks (Phase 8).
+        if let Some(bracket) = seat.as_ref().and_then(|seat| seat.bracket.as_ref()) {
+            bracket.started().await;
+        }
         let deadline = seat
             .as_ref()
             .map(|seat| tokio::time::Instant::now() + seat.timeout);
@@ -1669,10 +1675,12 @@ impl CompanyAgent {
             outcome = turn_body => outcome,
             () = serve_jobs => unreachable!("the tool-job loop never completes"),
         };
+        let mut spoke = false;
         match _in_flight {
             // What the seat said, back to the driver, before the lock goes.
             Some(ticket) => {
                 let finished = ticket.finish();
+                spoke = !finished.outbox.is_empty();
                 if let Some(seat) = seat.as_ref()
                     && let Ok(mut outbox) = seat.outbox.lock()
                 {
@@ -1682,6 +1690,23 @@ impl CompanyAgent {
             None => {
                 in_flight.with(&self.runtime_id, |turn| turn.executor = None);
             }
+        }
+        if let Some(seat) = seat.as_ref()
+            && let Some(bracket) = seat.bracket.as_ref()
+        {
+            let (outcome, error) = match &reply {
+                Ok(_) if spoke => (crate::ports::types::TurnOutcome::Committed, None),
+                Ok(_) => (crate::ports::types::TurnOutcome::NoUtterance, None),
+                Err(_) if seat.timed_out() => (
+                    crate::ports::types::TurnOutcome::TimedOut,
+                    Some("the seat turn ran past its timeout".to_string()),
+                ),
+                Err(error) => (
+                    crate::ports::types::TurnOutcome::Failed,
+                    Some(error.to_string()),
+                ),
+            };
+            bracket.settled(outcome, error).await;
         }
         drop(_turn);
 
