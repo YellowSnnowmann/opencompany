@@ -2,6 +2,7 @@
 //! `tinymcp::McpHttpClient`, OpenHuman's own — over a real loopback socket.
 
 use super::*;
+use serde_json::json;
 use crate::company::Policy;
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::hive::tools::{HiveTurn, InFlight, InFlightContext};
