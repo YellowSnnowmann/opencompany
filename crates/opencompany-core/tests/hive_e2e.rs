@@ -223,7 +223,7 @@ impl Seat {
             .zip(self.turn_tools.iter())
             .filter(|(call, _)| !SPEECH.contains(&call.as_str()))
             .map(|(_, output)| output.as_str())
-            .last()
+            .next_back()
     }
 }
 
@@ -1069,7 +1069,7 @@ async fn a_dm_schedules_its_recipient_and_is_journaled_with_its_audience() {
         .expect("history rows");
     let row = messages
         .iter()
-        .find(|message| message["id"] == dm.seq.to_string())
+        .find(|message| message["id"].as_str() == Some(dm.seq.to_string().as_str()))
         .unwrap_or_else(|| panic!("the dm row is in history: {history}"));
     assert_eq!(row["audience"], json!([CEO]));
     assert_eq!(row["episode"]["kind"], "dm");
@@ -1176,8 +1176,10 @@ async fn a_cross_desk_referral_crosses_only_the_answer_back() {
     })
     .await;
 
-    // The forward marker, and the return.
-    let markers: Vec<(String, String, bool, Option<String>, Option<String>)> = rows
+    // The forward marker, and the return: `(from_desk, to_desk, returning,
+    // episode_id, to_episode_id)`.
+    type Marker = (String, String, bool, Option<String>, Option<String>);
+    let markers: Vec<Marker> = rows
         .iter()
         .filter_map(|row| match &row.event {
             CompanyEvent::ReferralEnqueued {
@@ -1621,7 +1623,7 @@ async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
     let cited = replies(&rows, ENGINEERING)
         .into_iter()
         .filter(|row| row.agent == ENGINEER && row.kind == Some(UtteranceKind::Post))
-        .last()
+        .next_back()
         .expect("the engineer's second-episode post");
     assert!(
         cited.text.contains(FACT_KEY),

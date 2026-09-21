@@ -256,9 +256,10 @@ enum Command {
         /// Print the report as JSON instead of an aligned table.
         #[arg(long)]
         json: bool,
-        /// Exit non-zero when a threshold is missed (max concurrent turns
-        /// >= 2, >= 1 cross-desk referral, >= 1 dm/broadcast, >= 2 distinct
-        /// pairs, no same-agent overlap, every episode completed).
+        /// Exit non-zero when a threshold is missed: max concurrent turns of
+        /// at least 2, at least one cross-desk referral, at least one
+        /// dm/broadcast, at least two distinct pairs, no same-agent overlap,
+        /// every episode completed.
         #[arg(long = "assert")]
         assert_thresholds: bool,
     },
