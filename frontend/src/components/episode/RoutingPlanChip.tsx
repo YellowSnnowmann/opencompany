@@ -40,7 +40,9 @@ export function describePlan(
     case "clarify":
       return plan.question ? `clarify: ${plan.question}` : "clarify";
     case "fallback":
-      return `fallback: ${plan.reason}`;
+      // The seat the host fell back to is the useful half; the reason is
+      // why nothing better chose it.
+      return plan.primaryId ? `→ ${name(plan.primaryId)} (fallback: ${plan.reason})` : `fallback: ${plan.reason}`;
   }
 }
 

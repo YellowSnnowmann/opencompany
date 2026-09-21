@@ -382,7 +382,13 @@ export type RoutingPlanDto =
   | { kind: "one"; primaryId: string }
   | { kind: "hive"; primaryId: string; invitedIds: string[] }
   | { kind: "clarify"; question?: string }
-  | { kind: "fallback"; reason: string };
+  /**
+   * The deterministic destination and why the router did not decide. The
+   * host names the seat it fell back to (`primaryId`) beside the reason —
+   * the seat is what a comms edge or a round lane needs; optional only for
+   * a host predating the field.
+   */
+  | { kind: "fallback"; primaryId?: string; reason: string };
 
 /**
  * The one speech act a seat ends its turn with. Mirrors

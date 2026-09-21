@@ -37,6 +37,10 @@ describe("RoutingPlanChip", () => {
     expect(describePlan({ kind: "clarify", question: "Which one?" })).toBe("clarify: Which one?");
     expect(describePlan({ kind: "clarify" })).toBe("clarify");
     expect(describePlan({ kind: "fallback", reason: "no router" })).toBe("fallback: no router");
+    // The host names the seat it fell back to (`RoutingPlanDto::Fallback.primary_id`).
+    expect(describePlan({ kind: "fallback", primaryId: "ceo", reason: "provider_unavailable" }, NAMES)).toBe(
+      "→ CEO (fallback: provider_unavailable)",
+    );
     // An unnamed agent falls back to its id — the truth, not a blank.
     expect(describePlan({ kind: "one", primaryId: "writer" }, NAMES)).toBe("→ writer");
   });
