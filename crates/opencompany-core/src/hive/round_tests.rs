@@ -18,14 +18,11 @@ fn a_spoken_turn_commits_and_a_silent_one_retries_then_salvages() {
     );
     assert!(matches!(
         spoke,
-        Fold::Done(
-            Settled {
-                utterance: Utterance::Post { .. },
-                forced: None,
-                ..
-            },
-            TurnOutcome::Committed
-        )
+        Fold::Done(Settled {
+            utterance: Utterance::Post { .. },
+            forced: None,
+            ..
+        })
     ));
     let silent = fold_seat(
         "ceo",
@@ -47,7 +44,7 @@ fn a_spoken_turn_commits_and_a_silent_one_retries_then_salvages() {
         prompt::DESK_KINDS,
     );
     match last {
-        Fold::Done(settled, TurnOutcome::NoUtterance) => {
+        Fold::Done(settled) => {
             assert_eq!(settled.utterance.message(), "here it is");
             assert!(matches!(
                 settled.utterance,
@@ -65,7 +62,7 @@ fn a_spoken_turn_commits_and_a_silent_one_retries_then_salvages() {
     );
     assert!(matches!(
         empty,
-        Fold::Done(Settled { utterance: Utterance::CompleteEpisode { message }, .. }, _) if message == "(no action)"
+        Fold::Done(Settled { utterance: Utterance::CompleteEpisode { message }, .. }) if message == "(no action)"
     ));
 }
 
