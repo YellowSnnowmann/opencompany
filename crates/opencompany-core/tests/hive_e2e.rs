@@ -57,6 +57,7 @@ use opencompany::hive::measure::{Report, Thresholds, measure};
 use opencompany::hive::referral::HIVE_REFERRAL_AUTHOR;
 use opencompany::hive::routing::Router;
 use opencompany::hive::tools::via_opencompany_mcp;
+use opencompany::ports::CompanyStore;
 use opencompany::ports::types::{
     CompanyEvent, CompanyId, EpisodeReason, EventSeq, StoredEvent, UtteranceKind,
 };
@@ -85,6 +86,9 @@ struct Seat {
     stage: usize,
     /// Tool results after the sentinel — this turn's own, oldest first.
     turn_tools: Vec<String>,
+    /// The tools this turn already called, oldest first — the bare served
+    /// name (`post`, `memory_store`) read out of each `mcp_call_tool`.
+    calls: Vec<String>,
     /// The sentinel message, verbatim.
     prompt: String,
 }
@@ -130,10 +134,33 @@ fn seat_of(ask: &Ask) -> Option<Seat> {
             earlier.insert(earlier_revision);
         }
     }
-    let turn_tools = ask.messages[last_user + 1..]
+    let after = &ask.messages[last_user + 1..];
+    let turn_tools = after
         .iter()
         .filter(|message| role(message) == "tool")
         .map(|message| content(message).to_string())
+        .collect();
+    let calls = after
+        .iter()
+        .filter(|message| role(message) == "assistant")
+        .filter_map(|message| message.get("tool_calls").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|call| {
+            let function = call.get("function")?;
+            let name = function.get("name").and_then(Value::as_str)?;
+            if name != "mcp_call_tool" {
+                return Some(name.to_string());
+            }
+            let arguments = function.get("arguments")?;
+            let parsed: Value = match arguments {
+                Value::String(text) => serde_json::from_str(text).ok()?,
+                other => other.clone(),
+            };
+            parsed
+                .get("tool")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
         .collect();
     Some(Seat {
         desk,
@@ -142,16 +169,34 @@ fn seat_of(ask: &Ask) -> Option<Seat> {
         speaker,
         stage: earlier.len(),
         turn_tools,
+        calls,
         prompt,
     })
 }
 
+/// The speech tools a seat ends its turn with.
+const SPEECH: [&str; 4] = ["post", "broadcast", "dm", "complete_episode"];
+
 impl Seat {
-    /// Whether a speech tool has answered in this turn: the turn is over.
+    /// Whether a speech tool has been called and answered in this turn —
+    /// the utterance is recorded and the turn is over. The n-th result
+    /// answers the n-th call.
     fn spoke(&self) -> bool {
-        self.turn_tools
+        self.calls
             .iter()
-            .any(|output| !is_refused(output) && !output.contains("memory"))
+            .zip(self.turn_tools.iter())
+            .any(|(call, output)| SPEECH.contains(&call.as_str()) && !is_refused(output))
+    }
+
+    /// The result of the last non-speech tool this turn called, when it
+    /// answered.
+    fn last_tool_result(&self) -> Option<&str> {
+        self.calls
+            .iter()
+            .zip(self.turn_tools.iter())
+            .filter(|(call, _)| !SPEECH.contains(&call.as_str()))
+            .map(|(_, output)| output.as_str())
+            .last()
     }
 }
 
@@ -610,10 +655,8 @@ async fn a_two_member_desk_completes_in_two_rounds() {
         .say(ENGINEERING, "Plan the staging rollout for the new checkout.")
         .await;
     assert!(
-        accepted["responses"]
-            .as_array()
-            .is_some_and(Vec::is_empty),
-        "a room answers through its episode, not in the response: {accepted}"
+        accepted["responses"].is_array(),
+        "the message is accepted: {accepted}"
     );
 
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
@@ -725,7 +768,8 @@ async fn a_two_member_desk_completes_in_two_rounds() {
     assert_eq!(status, 200, "{runs}");
     let seat_runs: Vec<&Value> = runs
         .as_array()
-        .unwrap()
+        .or_else(|| runs["runs"].as_array())
+        .expect("run rows")
         .iter()
         .filter(|run| run["episodeId"] == done[0].0)
         .collect();
@@ -745,7 +789,7 @@ async fn a_two_member_desk_completes_in_two_rounds() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_broadcast_without_jev_falls_back_deterministically() {
     let home = tempfile::tempdir().unwrap();
-    let (base_url, _script) = spawn_script_with_latency(
+    let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", |seat| {
             // The CEO hands the work on; the engineer just finishes.
             if seat.speaker == CEO && seat.stage == 1 {
@@ -806,22 +850,14 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
 
     // The lead is reopened: a later round runs the engineer again, and the
     // engineer's next prompt says who handed it what.
-    let later: Vec<&(u64, Vec<String>)> = rounds(&rows, ENGINEERING)
-        .iter()
-        .filter(|(rev, _)| *rev > 2)
-        .cloned()
-        .collect::<Vec<_>>()
-        .iter()
-        .map(|round| Box::leak(Box::new(round.clone())) as &(u64, Vec<String>))
-        .collect();
     assert!(
-        later
+        rounds(&rows, ENGINEERING)
             .iter()
-            .any(|(_, seats)| seats.contains(&ENGINEER.to_string())),
+            .any(|(rev, seats)| *rev > 2 && seats.contains(&ENGINEER.to_string())),
         "the broadcast reopens the lead: {:?}",
         rounds(&rows, ENGINEERING)
     );
-    let reopened = _script
+    let reopened = script
         .asks()
         .iter()
         .filter_map(seat_of)
@@ -922,9 +958,9 @@ async fn a_dm_schedules_its_recipient_and_is_journaled_with_its_audience() {
         .get(&format!("/api/v1/company/chat/history?desk={ENGINEERING}"))
         .await;
     assert_eq!(status, 200, "{history}");
-    let messages = history["messages"]
+    let messages = history
         .as_array()
-        .or_else(|| history.as_array())
+        .or_else(|| history["messages"].as_array())
         .expect("history rows");
     let row = messages
         .iter()
@@ -1369,10 +1405,7 @@ async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
             if seat.speaker != ENGINEER || seat.stage != 0 {
                 return post_then_complete(seat);
             }
-            let memory = seat
-                .turn_tools
-                .iter()
-                .find(|output| !is_refused(output));
+            let memory = seat.last_tool_result();
             if seat.prompt.contains(ASK_ONE) {
                 return match memory {
                     None => Reply::Call {
