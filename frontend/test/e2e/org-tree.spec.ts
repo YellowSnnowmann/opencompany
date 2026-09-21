@@ -179,7 +179,7 @@ async function mockApi(page: Page) {
           choiceOptionLimit: 5,
           maxRounds: 8,
           turnTimeoutSecs: 120,
-          router: "lead",
+          router: "fallback",
         },
         candidates: [],
       });
