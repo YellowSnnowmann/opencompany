@@ -1467,6 +1467,14 @@ pub fn agent_spec_for(
     if let Some(mcp) = mcp {
         spec = attach_opencompany_mcp(spec, mcp);
     }
+    // The company's own registered MCP servers — see `company_mcp_servers`'s
+    // doc comment. `AgentSpec::mcp` is additive ("call repeatedly to add
+    // several"), so each attaches beside the `opencompany` server above
+    // without displacing it.
+    #[cfg(feature = "mcp")]
+    for server in blueprint.company_mcp_servers.clone() {
+        spec = spec.mcp(server);
+    }
     // The runtime refuses an agent whose action dir it cannot create. A
     // workspace root that cannot be provisioned is reported once per agent
     // by the pool (issue #551) and must not stop dispatch — the file tools
