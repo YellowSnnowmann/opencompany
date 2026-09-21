@@ -250,11 +250,10 @@ host at them:
   turn's tool loop — which is what lets one goal fan out to two teammates and be
   closed out afterwards. A turn opening with the host's seat sentinel (`Hive
   turn: desk …, episode …, round N.`) ends in one speech act on the
-  `opencompany` MCP server — `post` (asking the desk `__MOCK_REFER__
-  [<agent>:]<desk>` names), then `broadcast` (or `dm` to the agent
-  `__MOCK_DM__ <agent>` names), then `complete_episode`. Set
-  `MOCK_BRAIN_DEBUG=1` to have it dump each request it receives. Bind with
-  `PW_MOCK_BRAIN_BIND` (default `127.0.0.1:8099`).
+  `opencompany` MCP server: `post` (asking the desk `__MOCK_REFER__
+  [<agent>:]<desk>` names), then `broadcast` (or `dm` to `__MOCK_DM__
+  <agent>`), then `complete_episode`. `MOCK_BRAIN_DEBUG=1` dumps each request
+  it receives. Bind with `PW_MOCK_BRAIN_BIND` (default `127.0.0.1:8099`).
 
 * [`test/e2e/mcp-server.mjs`](test/e2e/mcp-server.mjs) — an HTTP MCP server with
   two tools. HTTP, not stdio: this host rejects any MCP declaration carrying a
