@@ -40,22 +40,33 @@ async fn a_rebuild_that_moves_the_catalogue_owes_the_session_a_brief() {
         "a first roster owes nothing: its session opens cold on its own prompt"
     );
     assert!(
-        !first.served_catalogue().iter().any(|t| t == "workspace_create"),
+        !first
+            .served_catalogue()
+            .iter()
+            .any(|t| t == "workspace_create"),
         "precondition: `*` confers no explicit workspace write"
     );
 
     // A redundant ensure keeps the entry and owes nothing new.
     pool.ensure(&rec, &deps).await.expect("redundant ensure");
     let same = pool.agent(&rec.id, "engineer").await.expect("engineer");
-    assert!(Arc::ptr_eq(&first, &same), "an unchanged roster is not rebuilt");
+    assert!(
+        Arc::ptr_eq(&first, &same),
+        "an unchanged roster is not rebuilt"
+    );
 
     // A console grant rebuilds the roster with more on the belt.
     let with_workspace = granting(&rec, "workspace.write");
-    pool.ensure(&with_workspace, &deps).await.expect("post-grant ensure");
+    pool.ensure(&with_workspace, &deps)
+        .await
+        .expect("post-grant ensure");
     let granted = pool.agent(&rec.id, "engineer").await.expect("engineer");
     assert!(!Arc::ptr_eq(&first, &granted), "the grant must rebuild");
     assert!(
-        granted.served_catalogue().iter().any(|t| t == "workspace_create"),
+        granted
+            .served_catalogue()
+            .iter()
+            .any(|t| t == "workspace_create"),
         "precondition: the grant wired the workspace write tools: {:?}",
         granted.served_catalogue()
     );
@@ -68,7 +79,9 @@ async fn a_rebuild_that_moves_the_catalogue_owes_the_session_a_brief() {
     // debt carries, because the session is still on the first prompt.
     let mut renamed = with_workspace.clone();
     renamed.manifest.company.name = "Acme Renamed".to_string();
-    pool.ensure(&renamed, &deps).await.expect("post-rename ensure");
+    pool.ensure(&renamed, &deps)
+        .await
+        .expect("post-rename ensure");
     let carried = pool.agent(&rec.id, "engineer").await.expect("engineer");
     assert!(!Arc::ptr_eq(&granted, &carried), "the rename must rebuild");
     assert_eq!(carried.served_catalogue(), granted.served_catalogue());

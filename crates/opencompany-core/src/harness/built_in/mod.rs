@@ -6077,6 +6077,9 @@ pub(crate) fn workflow_wiring_deps(
     }
 }
 
+#[cfg(test)]
+#[path = "built_in_catalogue_brief_tests.rs"]
+mod built_in_catalogue_brief_tests;
 /// Issue #1840: chat-turn history seeding, first half.
 /// `routed_context` fingerprint/resolution coverage.
 #[cfg(test)]
@@ -6111,9 +6114,6 @@ mod built_in_tests_part05;
 #[cfg(test)]
 #[path = "built_in_tests_part06.rs"]
 mod built_in_tests_part06;
-#[cfg(test)]
-#[path = "built_in_catalogue_brief_tests.rs"]
-mod built_in_catalogue_brief_tests;
 #[cfg(test)]
 #[path = "built_in_tests_part07.rs"]
 mod built_in_tests_part07;
