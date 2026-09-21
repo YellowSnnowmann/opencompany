@@ -113,7 +113,10 @@ fn registry_wildcard_grant_covers_every_install() {
 /// `grants_mcp_registry_explicit`.
 #[test]
 fn wildcard_does_not_cover_registry_installs() {
-    assert!(!grants_cover_registry_server(&["*".into()], "notion-install"));
+    assert!(!grants_cover_registry_server(
+        &["*".into()],
+        "notion-install"
+    ));
     assert!(!grants_cover_registry_server(
         &["composio".into()],
         "notion-install"
