@@ -45,9 +45,18 @@ describe("a threaded query's rows have somewhere to render", () => {
     expect(threadPanel).not.toContain("liveSteps?: readonly TurnStep[];");
   });
 
-  it("names live activity without exposing raw calls in chat", () => {
+  it("names live activity, and shows the live rows behind it", () => {
     expect(threadPanel).toContain("<WorkingIndicator");
-    expect(threadPanel).not.toContain("<StepTimeline");
+    // Narrowed on the same terms as `raw-turns-toggle`'s own ban, and for the
+    // same reason: what that rule protects is one renderer for a **stored**
+    // message's steps, which chat must not restate. A running turn's rows are
+    // not that claim — they exist only while the turn is open, and the reply's
+    // durable steps replace them the instant it settles. Banning them outright
+    // left the panel able to say a turn was running and never what it had done.
+    expect(threadPanel).toContain("<StepTimeline steps={[...openTurnSteps]}");
+    // What stays banned: the panel reaching for a message's own steps.
+    expect(threadPanel).not.toContain("message.steps");
+    expect(threadPanel).not.toContain("reply.steps");
   });
 
   it("RoomView supplies it, so the panel is never handed an empty map", () => {

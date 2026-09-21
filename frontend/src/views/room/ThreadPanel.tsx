@@ -13,7 +13,7 @@ import { BudgetPauseNoticeCard } from "./BudgetPauseNoticeCard";
 import { EchoPlaceholder, echoMarkerFor } from "./EchoPlaceholder";
 import { FailedSendNotice, OutputLinkRow, TurnFailureNotice } from "./MessageRow";
 import { MessageAttachments } from "./MessageAttachments";
-import { AsideConversation, ReferralChip, ReferralConversation } from "./StepTimeline";
+import { AsideConversation, ReferralChip, ReferralConversation, StepTimeline } from "./StepTimeline";
 import { MessageComposer } from "./MessageComposer";
 import { TypingLine } from "./TypingLine";
 import { WorkingIndicator } from "./WorkingIndicator";
@@ -61,6 +61,10 @@ interface Props {
    * with no render path at all (Codex on #2069).
    */
   liveStepsByMessage?: Record<string, TurnStep[]>;
+  /** Live agent per turn bucket — see the resolution beside `openTurnSteps`. */
+  liveAgentByTurn?: Record<string, string>;
+  /** Roster agent id → display name, so no row ever shows a raw id. */
+  agentNames?: Record<string, string>;
   sending: boolean;
   /**
    * Everything an `@` can name here (issue #1645). Drawn from the parent
@@ -233,6 +237,8 @@ export function ThreadPanel({
   replies,
   inlineReplyIds,
   liveStepsByMessage,
+  liveAgentByTurn,
+  agentNames,
   sending,
   mentionables,
   channelMemberIds,
@@ -276,14 +282,26 @@ export function ThreadPanel({
    * message claims the work finished before every reply beneath it, which is
    * false the moment anything is journaled in between.
    */
-  const openTurnSteps = useMemo(() => {
+  const openTurn_ = useMemo(() => {
     if (!liveStepsByMessage) return undefined;
     for (let i = replies.length - 1; i >= 0; i -= 1) {
       const rows = liveStepsByMessage[replies[i].id];
-      if (rows?.length) return rows;
+      if (rows?.length) return { steps: rows, key: replies[i].id };
     }
-    return liveStepsByMessage[parent.id];
+    const rows = liveStepsByMessage[parent.id];
+    return rows?.length ? { steps: rows, key: parent.id } : undefined;
   }, [liveStepsByMessage, replies, parent.id]);
+  const openTurnSteps = openTurn_?.steps;
+  /**
+   * The teammate on the row, under the **same key the rows came from**.
+   *
+   * `turnAgentName` is resolved upstream from the host's open-turn record,
+   * which a turn the console never sent does not have — and the caller cannot
+   * do this lookup for us, because only this component knows which of the
+   * thread's messages owns the open bucket. Without it the row fell through to
+   * naming the running step, which is the channel's old bug one pane over.
+   */
+  const liveName = openTurn_?.key ? agentNames?.[liveAgentByTurn?.[openTurn_.key] ?? ""] : undefined;
   return (
     <aside className="flex w-96 shrink-0 flex-col border-l bg-background">
       <header className="flex h-13 shrink-0 items-center gap-2 border-b px-3">
@@ -368,9 +386,13 @@ export function ThreadPanel({
               <WorkingIndicator
                 srLabel={openTurn?.queued ? "Queued…" : "Replying…"}
                 steps={openTurnSteps}
-                name={turnAgentName}
+                name={liveName ?? turnAgentName}
                 queued={openTurn?.queued}
               />
+              {/* …and what it has done, the same pair the channel shows. The
+                  line names the teammate and stops; this names the call in
+                  flight in its own summary. */}
+              {!!openTurnSteps?.length && <StepTimeline steps={[...openTurnSteps]} />}
             </div>
           )}
           <TypingLine names={typingNames} />

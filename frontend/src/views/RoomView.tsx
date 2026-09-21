@@ -3274,6 +3274,11 @@ export function RoomView({
                   // messages never reach the channel timeline — so the panel needs
                   // the per-query rows too, or its turns show nothing at all.
                   liveStepsByMessage={liveStepsByMessage}
+                  // …and what it needs to name the seat working them. Resolved
+                  // in the panel rather than here because only it knows which
+                  // of the thread's messages owns the open bucket.
+                  liveAgentByTurn={liveAgentByTurn}
+                  agentNames={agentNames}
                   sending={sending}
                   mentionables={mentionables}
                   channelMemberIds={inChannel?.map((m) => m.id)}
