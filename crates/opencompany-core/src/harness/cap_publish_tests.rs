@@ -457,6 +457,14 @@ async fn the_nudge_can_recover_the_file_a_capped_turn_wrote() {
         .expect("cycle runs");
 
     assert_eq!(nudge_turns(&script), 1);
+    {
+        let seen = script.seen.lock().unwrap();
+        eprintln!("SEEN {} requests", seen.len());
+        for (i, req) in seen.iter().enumerate().skip(seen.len().saturating_sub(3)) {
+            let msgs = req["messages"].as_array().unwrap();
+            for m in msgs.iter().rev().take(2) { eprintln!("REQ{i} MSG: {}", serde_json::to_string(m).unwrap()); }
+        }
+    }
 
     let cards = TaskStore::list(&*ops, &company()).await.expect("list");
     assert_eq!(
