@@ -201,6 +201,15 @@ tinyinference-local = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/
 tinyinference-providers = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-providers" }
 tinyinference-voice = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-voice" }
 
+# `tinyhivemind-openhuman` names `openhuman-embed` by git URL; without this
+# entry Cargo resolves a second `openhuman_embed::Agent` beside the vendored
+# path copy this crate builds against, and `AgentBinding::new` (which takes
+# the git-sourced `Agent`) refuses the path-sourced one as a type mismatch.
+# Replicated from the root manifest's own `[patch."https://github.com/tinyhumansai/openhuman"]`
+# entry, path rebased the same `../../` as every other entry in this table.
+[patch."https://github.com/tinyhumansai/openhuman"]
+openhuman-embed = { path = "../../vendor/openhuman/crates/openhuman-embed" }
+
 [patch.crates-io]
 tinyflows = { path = "../../vendor/openhuman/vendor/tinyflows/crates/tinyflows" }
 # TinyCortex moved under TinyMemory at the openhuman pin — see the note on the
