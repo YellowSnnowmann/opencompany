@@ -301,15 +301,34 @@ impl CompanyScheduler {
             self.last_fired.insert(idx, minute);
             match store.claim_fire(runtime.id(), &schedule.id, minute).await {
                 // Won the claim: this is the one process/replica that fires.
-                Ok(true) => {
-                    runtime
-                        .run_cycle(vec![CompanyEvent::ScheduleFired {
-                            cron: schedule.cron.clone(),
-                            prompt: schedule.prompt.clone(),
-                        }])
-                        .await?;
-                    fired += 1;
-                }
+                // One schedule's cycle failing must not end the tick: every
+                // schedule after it in this minute would go unfired, and a
+                // permanently broken one would hold them there.
+                //
+                // `Quiescing` is the exception, and it is not a special case
+                // so much as the same rule: the runtime has stopped accepting
+                // cycles altogether, so every schedule behind this one would
+                // be refused for that reason too. Carrying on would turn one
+                // retryable refusal into a whole minute of them, each logged
+                // as a failure of its own schedule.
+                Ok(true) => match runtime
+                    .run_cycle(vec![CompanyEvent::ScheduleFired {
+                        cron: schedule.cron.clone(),
+                        prompt: schedule.prompt.clone(),
+                    }])
+                    .await
+                {
+                    Ok(_) => fired += 1,
+                    Err(err @ crate::error::OpenCompanyError::Quiescing(_)) => return Err(err),
+                    Err(err) => {
+                        tracing::warn!(
+                            company = %runtime.id(),
+                            schedule = %schedule.id,
+                            %err,
+                            "scheduler: a fired schedule's cycle failed; the rest of this minute still fires"
+                        );
+                    }
+                },
                 // A peer — another replica, or this process before a restart —
                 // already claimed this minute. Skip with ZERO side effects.
                 Ok(false) => {}
