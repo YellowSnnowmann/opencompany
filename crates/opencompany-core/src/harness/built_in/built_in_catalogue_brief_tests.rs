@@ -27,7 +27,10 @@ async fn a_rebuild_that_moves_the_catalogue_owes_the_session_a_brief() {
     let context = Arc::new(MockContext::default());
     let mut rec = capped_record();
     rec.manifest.tools.allow = vec!["*".to_string()];
-    let deps = deps_with_plan(dir.path(), context, None, None);
+    let mut deps = deps_with_plan(dir.path(), context, None, None);
+    // The workspace tools are what the `workspace` grant below wires; with no
+    // store they fail closed and the grant would move nothing.
+    deps.workspace = Some(Arc::new(crate::store::FsOps::new(dir.path().to_path_buf())));
 
     let pool = HarnessPool::new();
     pool.ensure(&rec, &deps).await.expect("first ensure");
