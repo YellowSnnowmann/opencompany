@@ -1,6 +1,9 @@
 import { useState } from "react";
 
 import { useCrossingRunning } from "./referral-running";
+// The one definition of "which step is in flight" — shared with the line
+// above this row so the two can never disagree about it.
+import { runningStepLabel } from "./WorkingIndicator";
 import {
   AlertTriangle,
   Brain,
@@ -141,6 +144,14 @@ export function StepTimeline({
   // collapsed summary either (#411).
   const parked = steps.filter((s) => s.status === "awaiting_approval").length;
   const hasError = failed > 0;
+  // The call in flight, named in the collapsed summary.
+  //
+  // This row is where "what is happening" lives — the line above it names the
+  // teammate and stops. Collapsed, the summary was a bare count, so between
+  // them the two rows said who was working and how many things had happened
+  // and never what was happening now. Naming it here keeps that visible at a
+  // glance without opening a list that grows by a row per tool call.
+  const running = runningStepLabel(steps);
   const [open, setOpen] = useState(defaultOpen || hasError || parked > 0);
 
   if (steps.length === 0) return null;
@@ -165,6 +176,7 @@ export function StepTimeline({
           {steps.length} step{steps.length === 1 ? "" : "s"}
           {failed > 0 && ` · ${failed} failed`}
           {parked > 0 && ` · ${parked} awaiting approval`}
+          {!open && running && ` · ${running}`}
         </span>
       </button>
       {open && (

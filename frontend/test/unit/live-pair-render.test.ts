@@ -127,8 +127,10 @@ describe("the live pair renders at the foot", () => {
 
     const live = liveRow()!;
     const steps = container.querySelector("ol");
+    // The summary now carries the running call after the count, so match the
+    // count rather than anchoring on the end of the line.
     const summary = [...container.querySelectorAll("button")].find((b) =>
-      /steps?$/.test(b.textContent?.trim() ?? ""),
+      /\d+ steps?\b/.test(b.textContent ?? ""),
     );
     // Either the collapsed summary or the open list — one of them must exist,
     // or chat can say a turn is running and never what it has done.
@@ -166,7 +168,7 @@ describe("the live pair names who is working", () => {
     expect(liveRow()!.textContent).toContain("Ada");
   });
 
-  it("names the running step over the agent, because it is more specific", () => {
+  it("leaves the running step to the steps row and keeps naming the agent", () => {
     mount({
       items: [messageItem("h101", "Should we ship on Friday?", 1_000, true)],
       liveStepsByMessage: { h101: RUNNING },
@@ -174,7 +176,10 @@ describe("the live pair names who is working", () => {
       agentNames: { "a-grace": "Grace" },
     });
 
-    expect(liveRow()!.textContent).toContain("changelog_read");
+    // The line stays on who; the collapsed steps summary names the call.
+    expect(liveRow()!.textContent).toContain("Grace is working…");
+    expect(liveRow()!.textContent).not.toContain("changelog_read");
+    expect(container.textContent).toContain("changelog_read");
   });
 });
 

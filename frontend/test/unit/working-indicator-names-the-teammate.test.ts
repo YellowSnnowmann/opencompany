@@ -79,14 +79,18 @@ describe("the working line names the teammate", () => {
    * it wins. The name is what fills the gaps — before the first step, and
    * between one settling and the next starting.
    */
-  it("lets a running step outrank the name", async () => {
-    const text = await render({
-      srLabel: "Replying…",
-      name: "Amendments",
-      steps: [step("running")],
-    });
-    expect(text).toContain("Reading the ledger");
-    expect(text).not.toContain("Amendments is working…");
+  it("keeps naming the teammate while a step runs", async () => {
+    // The steps row beneath names the call in flight in its own summary, so
+    // this line stays on the one question it answers: whose turn is it.
+    expect(
+      await render({ srLabel: "Replying…", name: "Amendments", steps: [step("running")] }),
+    ).toContain("Amendments is working…");
+  });
+
+  it("falls back to the running step when no agent has been named", async () => {
+    expect(await render({ srLabel: "Replying…", steps: [step("running")] })).toContain(
+      "Reading the ledger",
+    );
   });
 
   it("falls back to the name once every step has settled", async () => {
@@ -124,7 +128,7 @@ describe("the working line names the teammate", () => {
    * "Amendments is working…" while the visible line — and the live step
    * timeline beside it — are naming a specific step instead.
    */
-  it("gives the assistive line the same teammate and step the visible one shows", async () => {
+  it("gives the assistive line the same teammate the visible one shows", async () => {
     // It used to fall back to the generic `srLabel` whenever a step ran, so an
     // AT user lost the identity a sighted reader had — and now that the
     // visible line carries BOTH, mirroring it is the only way the two stay
@@ -135,8 +139,7 @@ describe("the working line names the teammate", () => {
       steps: [step("running")],
     });
     const srOnly = container.querySelector(".sr-only")?.textContent ?? "";
-    expect(srOnly).toContain("Amendments");
-    expect(srOnly).toContain("Reading the ledger");
+    expect(srOnly).toBe("Amendments is working…");
   });
 
   it("still falls back to the stable assistive line when nothing names the work", async () => {

@@ -100,19 +100,23 @@ export function WorkingIndicator({
   const running = runningStepLabel(steps);
   const idle = label ?? (name ? `${name} is working…` : GENERIC_LABEL);
   /**
-   * What the line says: the teammate **and** the step, not one or the other.
+   * What the line says: **who**, and nothing else when who is known.
    *
-   * A running step used to replace the name outright, on the reading that it
-   * is the more specific fact. It is — but they answer different questions,
-   * and a tool call is running for most of a turn, so in the common case the
-   * row named a step and never said who was doing it. That is the whole thing
-   * the live agent was plumbed through for, invisible exactly when it matters.
+   * One fact per surface. This line answers "is anything happening, and whose
+   * turn is it"; the steps row beneath answers "what has it done" and names
+   * the call in flight in its own summary. A step used to replace the name
+   * here, which meant the commonest state of a turn — a tool running — said
+   * what was happening and never who, and then said it a second time in the
+   * row below.
    *
-   * `label` still stands alone: it is a complete sentence for work a name
-   * cannot describe (a crossing is two seats talking, not one working), so
-   * prefixing it with a single teammate would contradict it.
+   * A running step is still the line when nothing has named an agent: better
+   * the specific thing than the generic one.
+   *
+   * `label` stands alone ahead of both. It is a complete sentence for work a
+   * name cannot describe — a crossing is two seats talking, not one working —
+   * so prefixing it with a single teammate would contradict it.
    */
-  const line = label ?? (running ? (name ? `${name} · ${running}` : running) : idle);
+  const line = label ?? (name ? idle : (running ?? idle));
 
   return (
     <span

@@ -171,12 +171,12 @@ export function receiptStateLine(
 ): string {
   const step = runningStepLabel(steps);
   const name = resolveReceiptAgentName(receipt, agentNames, channel);
-  // Both, when both are known. A running step used to replace the name, so a
-  // receipt that had reached "On step …" stopped saying who — for most of the
-  // turn, since a tool call is running for most of it. They answer different
-  // questions and the line has room for both.
-  if (step) return name ? `${name} · ${step}` : `On step ${step}`;
+  // Who outranks what, because the steps row beneath already names the call in
+  // flight. A step used to replace the name outright, so a receipt that
+  // reached "On step …" stopped saying who for the rest of the turn — and a
+  // tool call is running for most of one.
   if (name) return `Picked up by ${name}`;
+  if (step) return `On step ${step}`;
   return queued ? "Queued" : "Sent";
 }
 
