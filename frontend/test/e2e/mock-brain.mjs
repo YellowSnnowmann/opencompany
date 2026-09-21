@@ -1351,7 +1351,23 @@ function chatCompletion(body) {
   ) {
     const offered = offeredTools(body);
     const bridged = bridgedCompanyTools(messages);
-    const resolved = resolveCall(directive, offered, bridged);
+    // A single directive predates the belt-fidelity check `resolveCall` does
+    // for `__MOCK_PLAN__` (that arm's own doc comment: "most arms do not
+    // read [tools]"), and most callers of a bare `__MOCK_TOOL_CALL__` /
+    // SPAWNONE directive — the unit suite in particular — never populate
+    // `body.tools` or an `opencompany` MCP brief at all, because the
+    // directive mechanics under test have nothing to do with belt
+    // resolution. Gating those on `resolveCall` the same way a plan step is
+    // gated would refuse every one of them (`offered` and `bridged` both
+    // empty), which is not "this belt cannot serve it" — it is "this caller
+    // never said what the belt is". Only apply the bridging refusal when the
+    // request actually supplied belt evidence; otherwise serve the directive
+    // exactly as named, the pre-bridging contract every other test here
+    // still relies on.
+    const resolved =
+      offered.size === 0 && bridged.size === 0
+        ? { name: directive.name, arguments: directive.arguments ?? {} }
+        : resolveCall(directive, offered, bridged);
     if (resolved) {
       servedDirectives.add(directive.id);
       // The id, not just the name: when a directive fires more than once the
