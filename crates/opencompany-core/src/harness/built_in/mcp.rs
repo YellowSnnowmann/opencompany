@@ -76,20 +76,11 @@ pub fn registry_for_agent(
     decls: &[McpServerDecl],
     grants: &[String],
 ) -> Option<Arc<McpServerRegistry>> {
-    tracing::warn!(
-        "[DEBUG-INVESTIGATION] registry_for_agent decls={:?} grants={:?}",
-        decls.iter().map(|d| (&d.name, d.enabled)).collect::<Vec<_>>(),
-        grants
-    );
     let granted: Vec<McpServerDecl> = decls
         .iter()
         .filter(|decl| decl.enabled && grants_cover_server(grants, &decl.name))
         .cloned()
         .collect();
-    tracing::warn!(
-        "[DEBUG-INVESTIGATION] granted={:?}",
-        granted.iter().map(|d| &d.name).collect::<Vec<_>>()
-    );
     if granted.is_empty() {
         return None;
     }
