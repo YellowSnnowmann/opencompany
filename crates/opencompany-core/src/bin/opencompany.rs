@@ -227,6 +227,41 @@ enum Command {
         #[command(subcommand)]
         cmd: MemoryCmd,
     },
+    /// Measure how a company's desks coordinated, from its journal alone
+    /// (plan hive-desks, Phase 8).
+    ///
+    /// Reads the company's event log through the env-selected storage
+    /// backend — no host needs to be running — and folds the hive frames
+    /// into the numbers the plan asks for: the peak of seat turns open at
+    /// once and how often they overlapped, same-agent overlaps (which must
+    /// be zero: one agent runs one turn at a time), episodes opened and
+    /// completed with their reason and rounds, cross-desk referrals,
+    /// broadcasts and dms with the distinct agent pairs they made, the
+    /// utterance-kind histogram, and each episode's time to complete.
+    ///
+    /// `scripts/measure-coordination.mjs` is the HTTP/SSE twin: the same
+    /// numbers from a live `/events` stream, with the same thresholds.
+    Measure {
+        /// The company id, as `serve` registers it.
+        #[arg(long)]
+        company: String,
+        /// Data root the journal lives under. Falls back to
+        /// `OPENCOMPANY_DATA_DIR`, then `$HOME/.opencompany`.
+        #[arg(long = "data-dir", alias = "home", value_name = "DIR")]
+        data_dir: Option<PathBuf>,
+        /// Fold rows from this journal sequence on (inclusive); the whole
+        /// journal when omitted.
+        #[arg(long)]
+        since: Option<u64>,
+        /// Print the report as JSON instead of an aligned table.
+        #[arg(long)]
+        json: bool,
+        /// Exit non-zero when a threshold is missed (max concurrent turns
+        /// >= 2, >= 1 cross-desk referral, >= 1 dm/broadcast, >= 2 distinct
+        /// pairs, no same-agent overlap, every episode completed).
+        #[arg(long = "assert")]
+        assert_thresholds: bool,
+    },
 }
 
 /// The `memory` subcommands.
@@ -1357,6 +1392,58 @@ async fn run_issue_password(
 /// wanted — a health check or a deploy script that wants the *answer* — and
 /// "the query ran and found three" is a success, not a failure. The findings
 /// are on stdout for a human and behind `--json` for anything else.
+/// `opencompany measure`: fold the company's journal into the coordination
+/// report and print it (see `opencompany::hive::measure`).
+///
+/// Storage resolves the way `export` resolves it — the env-selected backend
+/// over the data root — minus the memory overlay, which the journal does not
+/// live in. The filesystem store takes no root lock here: this is a read,
+/// and a `serve` that holds the lock is exactly the process whose run is
+/// worth measuring.
+async fn run_measure(
+    company: String,
+    data_dir: Option<PathBuf>,
+    since: Option<u64>,
+    json: bool,
+    assert_thresholds: bool,
+) -> Result<()> {
+    use opencompany::hive::measure::{Thresholds, measure};
+    use opencompany::ports::types::EventSeq;
+    use opencompany::store::{FsEventLog, StorageSettings, open_storage};
+
+    let home = resolve_home_migrated(data_dir)?;
+    let settings = StorageSettings::from_env()?;
+    let events: Arc<dyn opencompany::ports::EventLog> = match open_storage(&settings, &home).await?
+    {
+        Some(handles) => handles.events,
+        None => Arc::new(FsEventLog::new(home.clone())),
+    };
+    let id = CompanyId::new(company);
+    let report = measure(events.as_ref(), &id, EventSeq::new(since.unwrap_or(0))).await?;
+    let thresholds = Thresholds::default();
+    if json {
+        let failures = report.failures(&thresholds);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "thresholds": thresholds,
+                "summary": report,
+                "failures": failures,
+            }))
+            .expect("the report serializes")
+        );
+    } else {
+        print!("{}", report.to_table(&thresholds));
+    }
+    if assert_thresholds {
+        let failures = report.failures(&thresholds);
+        if !failures.is_empty() {
+            std::process::exit(i32::try_from(failures.len()).unwrap_or(i32::MAX));
+        }
+    }
+    Ok(())
+}
+
 async fn run_orphans(home: Option<PathBuf>, json: bool) -> Result<()> {
     run_orphans_from(home, json, &ProcessEnv).await
 }
@@ -2658,6 +2745,13 @@ async fn async_main() -> Result<()> {
         }) => run_export(company, out, include_secrets, home).await,
         Some(Command::Import { path, home }) => run_import(path, home).await,
         Some(Command::Memory { cmd }) => run_memory_cmd(cmd).await,
+        Some(Command::Measure {
+            company,
+            data_dir,
+            since,
+            json,
+            assert_thresholds,
+        }) => run_measure(company, data_dir, since, json, assert_thresholds).await,
         None => {
             // The commit as well as the version: `0.1.0` has been thousands of
             // commits wide, so this line could not tell an operator which
