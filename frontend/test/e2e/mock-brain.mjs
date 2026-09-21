@@ -874,19 +874,30 @@ const COMPANY_MCP_BRIEF_HEADING = "## Company tools (MCP server `opencompany`)";
  * @returns {Set<string>}
  */
 function bridgedCompanyTools(messages) {
-  const system = messages.find((message) => message?.role === "system") ?? messages[0];
-  const text = textOf(system);
-  const headingAt = text.indexOf(COMPANY_MCP_BRIEF_HEADING);
-  if (headingAt < 0) return new Set();
-  const toolsAt = text.indexOf("Tools: ", headingAt);
-  if (toolsAt < 0) return new Set();
-  const line = text.slice(toolsAt + "Tools: ".length).split("\n")[0];
-  return new Set(
-    line
-      .split(",")
-      .map((name) => name.trim())
-      .filter(Boolean),
-  );
+  // The LAST brief on the wire, not the first: the system prompt's is pinned
+  // for the life of a resumed session, so a roster rebuilt under one (a
+  // Composio token set mid-conversation, say) re-announces the current
+  // catalogue on the turn text (`build::opencompany_mcp_rebrief`), as a user
+  // message that supersedes the prompt's list. A tool that arrived that way
+  // is served exactly like one the prompt named.
+  let tools = new Set();
+  for (const message of messages) {
+    const role = message?.role;
+    if (role !== "system" && role !== "user") continue;
+    const text = textOf(message);
+    const headingAt = text.indexOf(COMPANY_MCP_BRIEF_HEADING);
+    if (headingAt < 0) continue;
+    const toolsAt = text.indexOf("Tools: ", headingAt);
+    if (toolsAt < 0) continue;
+    const line = text.slice(toolsAt + "Tools: ".length).split("\n")[0];
+    tools = new Set(
+      line
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean),
+    );
+  }
+  return tools;
 }
 
 /**
