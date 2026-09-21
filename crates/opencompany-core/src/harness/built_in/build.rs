@@ -1518,6 +1518,20 @@ fn opencompany_mcp_brief(tools: &[String]) -> String {
     brief
 }
 
+/// The catalogue brief again, on a turn's text, for a session whose pinned
+/// system prompt may name an older one — the roster was rebuilt under it
+/// (see `CompanyAgent::catalogue_brief_stale`). The same block
+/// [`opencompany_mcp_brief`] wrote, so [`tools_named_in_mcp_brief`] reads it
+/// back from either place, headed by one line saying which list stands.
+#[must_use]
+pub(crate) fn opencompany_mcp_rebrief(tools: &[String], turn_text: &str) -> String {
+    let brief = opencompany_mcp_brief(tools);
+    format!(
+        "[Your company tools changed since this conversation began. The list below          replaces the `Company tools` section of your instructions.]{brief}
+{turn_text}"
+    )
+}
+
 /// The heading [`opencompany_mcp_brief`] opens with.
 const MCP_BRIEF_HEADING: &str = "\n\n## Company tools (MCP server `opencompany`)";
 /// The line of the brief that lists the served tools.

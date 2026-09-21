@@ -736,6 +736,30 @@ pub struct CompanyAgent {
     /// telemetry cells. Held here so `meter_turn_costs` reads the SAME
     /// instance the turn ran through.
     chat_model: Arc<dyn HarnessModel>,
+    /// The catalogue the `opencompany` MCP brief in this agent's system prompt
+    /// names (`build::agent_spec_for`'s `allow_tools`): the speech tools plus
+    /// every served tool. Kept so a roster rebuild can tell whether the
+    /// catalogue moved — see [`Self::catalogue_brief_stale`].
+    served_catalogue: Vec<String>,
+    /// Whether the session this agent resumes may still carry an OLDER brief
+    /// than [`Self::served_catalogue`].
+    ///
+    /// The embedded runtime pins a session's system prompt at its first
+    /// committed turn (`tinyagents_runtime::Session::apply_prefix` refuses a
+    /// changed prefix after one), and every conversational turn resumes this
+    /// agent's one stable [`session_key`](Self::session_key). So a roster
+    /// rebuild that changes the served catalogue — a Composio token set, a
+    /// tool grant, an MCP server added — reaches the MCP host (the rebuilt
+    /// [`McpAgent`] serves the new set at once) but never the prompt the
+    /// model reads the catalogue off. The previous builder rebuilt an
+    /// in-memory session per roster, so the prompt was always current; here
+    /// the fix is OpenHuman's own for a warm session (its
+    /// `refresh_dynamic_announcements`): say it on the turn text. Set by
+    /// [`HarnessPool::ensure`] when the rebuilt entry's catalogue differs
+    /// from the retired one's (or the retired one was itself still pending),
+    /// read by [`Self::run_with_steer`], which prepends the current brief to
+    /// the next conversational turn and clears it once that turn commits.
+    catalogue_brief_stale: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for CompanyAgent {
@@ -1214,6 +1238,7 @@ impl CompanyAgent {
             .map(|name| (*name).to_string())
             .collect();
         allow_tools.extend(served_names.iter().cloned());
+        let served_catalogue = allow_tools.clone();
         let base_id = crate::session_key::runtime_agent_id(company, agent_id);
         let mut runtime_id = base_id.clone();
         let mut attempt = 0u32;
@@ -1302,7 +1327,37 @@ impl CompanyAgent {
             mcp,
             workspace,
             chat_model,
+            served_catalogue,
+            catalogue_brief_stale: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// The catalogue this agent's prompt brief names — see
+    /// [`Self::catalogue_brief_stale`].
+    #[must_use]
+    pub(crate) fn served_catalogue(&self) -> &[String] {
+        &self.served_catalogue
+    }
+
+    /// Whether the next conversational turn re-announces the catalogue — see
+    /// [`Self::catalogue_brief_stale`].
+    #[must_use]
+    pub(crate) fn catalogue_brief_pending(&self) -> bool {
+        self.catalogue_brief_stale
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Marks the resumed session's brief as possibly older than this entry's
+    /// catalogue, given what the entry it replaces was briefed with and
+    /// whether that one had itself still to announce. Carried forward rather
+    /// than compared pairwise alone: a rebuild that changed the catalogue and
+    /// was rebuilt again (to the same set) before any turn ran still leaves
+    /// the session on the prefix the first roster committed.
+    pub(crate) fn inherit_catalogue_brief(&self, previous_catalogue: &[String], pending: bool) {
+        if pending || previous_catalogue != self.served_catalogue.as_slice() {
+            self.catalogue_brief_stale
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
     }
 
     /// The conversation a turn on `chat_id` answers in, as the in-flight
@@ -1485,6 +1540,18 @@ impl CompanyAgent {
                 None => format!("[conversation: {chat_id}]\n{message}"),
             }),
             _ => std::borrow::Cow::Borrowed(message),
+        };
+        // A resumed session whose pinned prompt may name an older catalogue
+        // hears the current one on this turn — see `catalogue_brief_stale`.
+        // An isolated turn runs cold on a fresh session and needs nothing.
+        let rebrief = !isolated && self.catalogue_brief_pending();
+        let cued: std::borrow::Cow<'_, str> = if rebrief {
+            std::borrow::Cow::Owned(build::opencompany_mcp_rebrief(
+                &self.served_catalogue,
+                cued.as_ref(),
+            ))
+        } else {
+            cued
         };
         let message: &str = cued.as_ref();
 
@@ -1675,6 +1742,12 @@ impl CompanyAgent {
             outcome = turn_body => outcome,
             () = serve_jobs => unreachable!("the tool-job loop never completes"),
         };
+        // The session heard the current catalogue; the next rebuild decides
+        // afresh. A failed turn commits nothing, so the brief stays owed.
+        if rebrief && reply.is_ok() {
+            self.catalogue_brief_stale
+                .store(false, std::sync::atomic::Ordering::Release);
+        }
         let mut spoke = false;
         match _in_flight {
             // What the seat said, back to the driver, before the lock goes.
@@ -3184,6 +3257,22 @@ impl HarnessPool {
         // lands on a numbered suffix (`CompanyAgent::register`) and the old
         // one releases when the turn ends.
         let previous = self.agents.write().await.remove(&company.id);
+        // What each retired entry's prompt brief named, and whether it still
+        // owed the session that brief — see `CompanyAgent::catalogue_brief_stale`.
+        // Read before the drop: the rebuilt entry inherits it below.
+        let retired_briefs: HashMap<String, (Vec<String>, bool)> = previous
+            .iter()
+            .flatten()
+            .map(|agent| {
+                (
+                    agent.agent_id.clone(),
+                    (
+                        agent.served_catalogue().to_vec(),
+                        agent.catalogue_brief_pending(),
+                    ),
+                )
+            })
+            .collect();
         if let Some(previous) = previous {
             let quiesce = std::time::Duration::from_secs(30);
             for agent in &previous {
@@ -3217,6 +3306,12 @@ impl HarnessPool {
         // serial lock already serializes cycle callers; the pin is what keeps a
         // direct caller from regressing a pinned roster before `run_inner` clones
         // its agent.
+        for agent in &roster {
+            if let Some((catalogue, pending)) = retired_briefs.get(&agent.agent_id) {
+                agent.inherit_catalogue_brief(catalogue, *pending);
+            }
+        }
+
         let mut agents = self.agents.write().await;
         agents.insert(company.id.clone(), roster);
         self.mcp_fingerprints
