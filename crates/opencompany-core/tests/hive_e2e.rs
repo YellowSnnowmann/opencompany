@@ -1161,8 +1161,17 @@ async fn a_cross_desk_referral_crosses_only_the_answer_back() {
         .await;
     // Both desks' episodes complete, and the answer has come home — the
     // return marker is journaled after the answer row, so it is the marker
-    // that says the crossing is over.
-    let rows = wait_for(&runtime, "both episodes and the answer", EPISODE, |rows| {
+    // that says the crossing is over. `completed(2)` counts the
+    // engineering desk's *first* completion (round 2, before the answer
+    // ever arrives — its own CEO and engineer both call `complete_episode`
+    // independently of the referral) together with the content desk's
+    // completion, so it and the return marker can both be true while
+    // `deliver_answer`'s reopened round for the engineer is still only
+    // spawned (`crossing.rs`'s `spawn_drive`, a bare `tokio::spawn` the
+    // driver does not await) and has not yet reached the model. Wait for
+    // that reopened ask to actually land on the script too, or the
+    // assertions below race it.
+    let rows = wait_for(&runtime, "both episodes, the answer, and the reopened turn", EPISODE, |rows| {
         completed(2)(rows)
             && rows.iter().any(|row| {
                 matches!(
@@ -1172,6 +1181,10 @@ async fn a_cross_desk_referral_crosses_only_the_answer_back() {
                         ..
                     }
                 )
+            })
+            && script.asks().iter().filter_map(seat_of).any(|seat| {
+                seat.speaker == ENGINEER
+                    && seat.prompt.contains("answered the question you put to it")
             })
     })
     .await;
