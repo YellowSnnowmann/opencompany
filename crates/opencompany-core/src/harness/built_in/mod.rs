@@ -6112,6 +6112,9 @@ mod built_in_tests_part05;
 #[path = "built_in_tests_part06.rs"]
 mod built_in_tests_part06;
 #[cfg(test)]
+#[path = "built_in_catalogue_brief_tests.rs"]
+mod built_in_catalogue_brief_tests;
+#[cfg(test)]
 #[path = "built_in_tests_part07.rs"]
 mod built_in_tests_part07;
 #[cfg(test)]
