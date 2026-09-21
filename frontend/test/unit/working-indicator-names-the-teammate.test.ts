@@ -124,13 +124,23 @@ describe("the working line names the teammate", () => {
    * "Amendments is working…" while the visible line — and the live step
    * timeline beside it — are naming a specific step instead.
    */
-  it("keeps the accessible label on the running step, not the name, while one runs", async () => {
+  it("gives the assistive line the same teammate and step the visible one shows", async () => {
+    // It used to fall back to the generic `srLabel` whenever a step ran, so an
+    // AT user lost the identity a sighted reader had — and now that the
+    // visible line carries BOTH, mirroring it is the only way the two stay
+    // one claim.
     await render({
       srLabel: "Replying…",
       name: "Amendments",
       steps: [step("running")],
     });
     const srOnly = container.querySelector(".sr-only")?.textContent ?? "";
-    expect(srOnly).toBe("Replying…");
+    expect(srOnly).toContain("Amendments");
+    expect(srOnly).toContain("Reading the ledger");
+  });
+
+  it("still falls back to the stable assistive line when nothing names the work", async () => {
+    await render({ srLabel: "Replying…", steps: [] });
+    expect(container.querySelector(".sr-only")?.textContent).toBe("Replying…");
   });
 });

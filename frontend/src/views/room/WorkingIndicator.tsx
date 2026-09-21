@@ -99,6 +99,20 @@ export function WorkingIndicator({
   const reduced = usePrefersReducedMotion();
   const running = runningStepLabel(steps);
   const idle = label ?? (name ? `${name} is working…` : GENERIC_LABEL);
+  /**
+   * What the line says: the teammate **and** the step, not one or the other.
+   *
+   * A running step used to replace the name outright, on the reading that it
+   * is the more specific fact. It is — but they answer different questions,
+   * and a tool call is running for most of a turn, so in the common case the
+   * row named a step and never said who was doing it. That is the whole thing
+   * the live agent was plumbed through for, invisible exactly when it matters.
+   *
+   * `label` still stands alone: it is a complete sentence for work a name
+   * cannot describe (a crossing is two seats talking, not one working), so
+   * prefixing it with a single teammate would contradict it.
+   */
+  const line = label ?? (running ? (name ? `${name} · ${running}` : running) : idle);
 
   return (
     <span
@@ -126,7 +140,7 @@ export function WorkingIndicator({
       />
       {/* `aria-hidden`, because the stable label below is what should be read. */}
       <span aria-hidden className="truncate">
-        {queued ? QUEUED_LABEL : (running ?? idle)}
+        {queued ? QUEUED_LABEL : line}
       </span>
       {/* CodeRabbit: the visible line already names the teammate (`idle`,
           above) once a step settles; the sr-only twin was still falling back
@@ -136,7 +150,7 @@ export function WorkingIndicator({
           this never announces "Amendments is working…" while the visible
           line (and the live step timeline beside it) is naming a step. */}
       <span className="sr-only">
-        {queued ? QUEUED_LABEL : !running && (name || label) ? idle : srLabel}
+        {queued ? QUEUED_LABEL : name || label ? line : srLabel}
       </span>
     </span>
   );

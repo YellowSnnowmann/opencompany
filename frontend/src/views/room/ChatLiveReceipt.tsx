@@ -170,8 +170,12 @@ export function receiptStateLine(
   queued?: boolean,
 ): string {
   const step = runningStepLabel(steps);
-  if (step) return `On step ${step}`;
   const name = resolveReceiptAgentName(receipt, agentNames, channel);
+  // Both, when both are known. A running step used to replace the name, so a
+  // receipt that had reached "On step …" stopped saying who — for most of the
+  // turn, since a tool call is running for most of it. They answer different
+  // questions and the line has room for both.
+  if (step) return name ? `${name} · ${step}` : `On step ${step}`;
   if (name) return `Picked up by ${name}`;
   return queued ? "Queued" : "Sent";
 }
