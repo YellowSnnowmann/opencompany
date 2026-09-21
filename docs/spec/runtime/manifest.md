@@ -187,6 +187,11 @@ persisted to the `CompanyStore`, not written back into the manifest file.
 
 - `opencompany check <dir>` — validate a manifest, print effective config,
   lint deprecations (e.g. `agents.toml` filename).
+- `opencompany measure --company <id> [--data-dir <dir>] [--since <seq>]
+  [--json] [--assert]` — fold a company's journal into the coordination
+  numbers the hive desks are measured by ([hive.md](hive.md#measuring)); no
+  host needs to be running. `--assert` exits with the number of missed
+  thresholds.
 - The 18 `examples/*` crates shrink to a manifest plus a two-line `main`
   calling `opencompany::run_company(manifest_path)`; they double as the
   [Template Gallery](../product/templates.md) source.

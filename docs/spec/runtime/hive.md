@@ -387,6 +387,31 @@ timeout. The console's side is `npm run e2e:hive` against the mock brain
 (`frontend/test/e2e/mock-brain.mjs`), and the numbers come from
 `scripts/measure-coordination.sh` on `companies/hive_demo`.
 
+## Measuring
+
+Two readers fold the same frames into the same numbers, so neither has to be
+trusted alone:
+
+- `opencompany measure --company <id> [--data-dir <dir>] [--since <seq>]
+  [--json] [--assert]` (`src/hive/measure.rs`) reads the journal through the
+  env-selected storage backend, with no host running: turn brackets keyed by
+  turn id give the peak of concurrent seat turns, the overlap count and the
+  same-agent overlaps (must be zero); `EpisodeOpened` / `RoundStarted` /
+  `EpisodeCompleted` give episodes opened and completed, rounds and time to
+  complete per episode and the reason each closed; `BroadcastRouted`,
+  `DmDelivered` and the forward `ReferralEnqueued` legs give broadcasts, dms,
+  cross-desk referrals and the distinct agent pairs; `AgentReply.episode.kind`
+  gives the utterance histogram. `--assert` exits with the number of missed
+  thresholds.
+- `scripts/measure-coordination.mjs` (thresholds and fold in
+  `scripts/lib/coordination-metrics.mjs`) tails a live host's `/events` and
+  cross-checks the peak against `GET /runs`, where every seat turn is a row
+  carrying `episodeId` and `roundRevision`.
+
+The thresholds are the plan's: max concurrent turns >= 2, >= 1 cross-desk
+referral, >= 1 agent-to-agent dm or broadcast, >= 2 distinct pairs, no
+same-agent overlap, every opened episode completed.
+
 See also [speech.md](speech.md), [harnesses.md](harnesses.md),
 [events.md](events.md#hive-episodes-and-rounds),
 [api.md](api.md#desk-routing-and-episodes) and
