@@ -1065,6 +1065,14 @@ pub fn build_agent_with_model(
     // per-call gate.
     #[cfg(feature = "mcp")]
     if let Some(registry) = registry_for_agent(&deps.mcp_servers, grants) {
+        // Reaches the model natively: `agent_spec_for` attaches each of these
+        // to the `AgentSpec` via `AgentSpec::mcp`, alongside the internal
+        // `opencompany` server, so OpenHuman's own `mcp_call_tool` /
+        // `mcp_list_servers` / `mcp_list_tools` — the only implementations of
+        // those names that actually run for a company agent now — can reach
+        // this company's own registered servers by name. See
+        // `embed_servers_for_agent`'s doc comment for the full story.
+        company_mcp_servers = crate::harness::mcp::embed_servers_for_agent(&deps.mcp_servers, grants);
         let mcp_security = Arc::new(SecurityPolicy::default());
         // The known-secret set for the scrubber: every credential the agent's
         // granted servers carry, so no configured token can leak into an
