@@ -446,7 +446,10 @@ async fn a_failed_or_timed_out_seat_is_settled_as_such_and_the_room_still_closes
         .await
         .expect("the episode runs");
     assert_eq!(report.reason, EpisodeReason::Failed);
-    let outcomes: Vec<(String, &'static str)> = log
+    // Each bracket is closed by its own seat as it returns (Phase 8: the
+    // lock holder writes it), so two seats settle in whichever order they
+    // finish; the set is what is pinned.
+    let mut outcomes: Vec<(String, &'static str)> = log
         .rows()
         .iter()
         .filter_map(|stored| match &stored.event {
@@ -458,11 +461,12 @@ async fn a_failed_or_timed_out_seat_is_settled_as_such_and_the_room_still_closes
             _ => None,
         })
         .collect();
+    outcomes.sort();
     assert_eq!(
         outcomes,
         vec![
-            ("engineer".to_string(), "failed"),
-            ("ceo".to_string(), "timed_out")
+            ("ceo".to_string(), "timed_out"),
+            ("engineer".to_string(), "failed")
         ]
     );
     assert!(log.rows().iter().any(|stored| matches!(
