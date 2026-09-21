@@ -72,6 +72,7 @@ impl SeatRunner for Script {
             live.1 = live.1.max(live.0);
         }
         self.seen.lock().unwrap().push(seat.clone());
+        seat.bracket_started().await;
         let next = self
             .lines
             .lock()
@@ -107,6 +108,7 @@ impl SeatRunner for Script {
             }
         };
         self.live.lock().unwrap().0 -= 1;
+        seat.bracket_settled(&outcome).await;
         outcome
     }
 }

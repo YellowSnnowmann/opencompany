@@ -28,7 +28,7 @@ use tinyhivemind_openhuman::{CommittedUtterance, PendingRound};
 
 use crate::error::Result;
 use crate::hive::driver::{
-    EpisodeRun, HiveDispatcher, SeatFailure, SeatOutcome, SeatTurn, Trigger,
+    EpisodeRun, HiveDispatcher, SeatBracket, SeatFailure, SeatOutcome, SeatTurn, Trigger,
 };
 use crate::hive::prompt::{self, SeatPrompt};
 use crate::hive::session_log::EventLogSessionLog;
@@ -220,21 +220,17 @@ pub(crate) async fn run_round(
             }
             .render();
             let turn_id = uuid::Uuid::new_v4().simple().to_string();
-            open_run(host, run, &turn_id, agent_id, revision).await;
-            host.events
-                .append(
-                    &host.record.id,
-                    CompanyEvent::TurnStarted {
-                        turn_id: turn_id.clone(),
-                        chat_id: run.desk.desk_id.clone(),
-                        parent: Some(run.thread_root),
-                        by: None,
-                        agent_id: Some(agent_id.clone()),
-                        episode_id: Some(run.episode_id.clone()),
-                        round_revision: Some(revision),
-                    },
-                )
-                .await?;
+            let bracket: Arc<dyn SeatBracket> = Arc::new(RoundBracket {
+                events: Arc::clone(&host.events),
+                runs: host.runs.clone(),
+                company: host.record.id.clone(),
+                desk_id: run.desk.desk_id.clone(),
+                thread_root: run.thread_root,
+                episode_id: run.episode_id.clone(),
+                revision,
+                agent_id: agent_id.clone(),
+                turn_id: turn_id.clone(),
+            });
             let seat = SeatTurn {
                 company: host.record.id.clone(),
                 agent_id: agent_id.clone(),
@@ -250,6 +246,7 @@ pub(crate) async fn run_round(
                     members: members.clone(),
                 },
                 timeout: routing.turn_timeout(),
+                bracket: Some(bracket),
             };
             let runner = Arc::clone(&host.seats);
             let attempt = *attempt;
@@ -265,25 +262,24 @@ pub(crate) async fn run_round(
         let outcomes = join_all(turns).await;
         remaining.clear();
         for (agent_id, turn_id, attempt, outcome) in outcomes {
+            // The bracket itself was written by the lock holder
+            // (`RoundBracket`); what is left here is the fold.
             match fold_seat(&agent_id, attempt, outcome, allowed) {
-                Fold::Retry => {
-                    settle(
-                        host,
-                        run,
-                        &turn_id,
-                        &agent_id,
-                        revision,
-                        TurnOutcome::NoUtterance,
-                    )
-                    .await?;
-                    remaining.push((agent_id, attempt + 1));
-                }
-                Fold::Done(done, outcome) => {
-                    settle(host, run, &turn_id, &agent_id, revision, outcome).await?;
-                    settled.push(done);
-                }
+                Fold::Retry => remaining.push((agent_id, attempt + 1)),
+                Fold::Done(done, _) => settled.push(done),
                 Fold::Failed(done, failure) => {
-                    fail(host, run, &turn_id, &agent_id, revision, &failure).await?;
+                    let error = match &failure {
+                        SeatFailure::TimedOut => "the seat turn ran past its timeout".to_string(),
+                        SeatFailure::Failed(error) => error.clone(),
+                    };
+                    tracing::warn!(
+                        desk = %run.desk.desk_id,
+                        episode = %run.episode_id,
+                        agent = agent_id,
+                        turn = turn_id,
+                        %error,
+                        "[hive] a seat turn did not answer; completed on its behalf"
+                    );
                     settled.push(done);
                 }
             }
@@ -455,122 +451,143 @@ fn narrow(utterance: Utterance, allowed: &[&str]) -> Utterance {
     }
 }
 
-/// Mints and starts the seat turn's run row (plan hive-desks, Phase 8), so
-/// `GET /runs` and the Observatory see one attempt per seat turn with its
-/// episode and round — the durable twin of the `TurnStarted` bracket. A
-/// store that refuses is logged and the turn runs untracked, exactly as the
-/// chat route does for its own row.
-async fn open_run(
-    host: &HiveDispatcher,
-    run: &EpisodeRun,
-    turn_id: &str,
-    agent_id: &str,
+/// The journal bracket of one seat turn, written by whoever holds the
+/// agent's lock: `TurnStarted` (and the run row) once the lock is held,
+/// `TurnSettled` / `TurnFailed` (and the row's settle) before it is released.
+/// See [`SeatBracket`].
+struct RoundBracket {
+    events: Arc<dyn crate::ports::events::EventLog>,
+    runs: Option<Arc<dyn crate::ports::RunStore>>,
+    company: crate::ports::types::CompanyId,
+    desk_id: String,
+    thread_root: EventSeq,
+    episode_id: String,
     revision: u64,
-) {
-    let Some(runs) = host.runs.as_ref() else { return };
-    let spec = crate::ports::runs::NewRun::for_chat(turn_id, run.desk.desk_id.clone(), agent_id)
-        .in_thread(Some(run.thread_root))
-        .in_episode(run.episode_id.clone(), revision);
-    let opened = match runs.create_run(&host.record.id, spec).await {
-        Ok(_) => runs.begin_run_untriggered(&host.record.id, turn_id).await,
-        Err(error) => Err(error),
-    };
-    if let Err(error) = opened {
-        tracing::warn!(
-            company = %host.record.id,
-            turn = turn_id,
-            %error,
-            "[hive] could not open a seat turn's run row; the turn runs untracked"
-        );
+    agent_id: String,
+    turn_id: String,
+}
+
+impl std::fmt::Debug for RoundBracket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RoundBracket")
+            .field("desk_id", &self.desk_id)
+            .field("episode_id", &self.episode_id)
+            .field("revision", &self.revision)
+            .field("agent_id", &self.agent_id)
+            .field("turn_id", &self.turn_id)
+            .finish_non_exhaustive()
     }
 }
 
-/// Settles the seat turn's run row with the bracket's outcome.
-async fn close_run(host: &HiveDispatcher, turn_id: &str, outcome: TurnOutcome, error: Option<&str>) {
-    use crate::ports::runs::{RunOutcome, RunStatus};
-    let Some(runs) = host.runs.as_ref() else { return };
-    let mut settled = match outcome {
-        TurnOutcome::Committed | TurnOutcome::NoUtterance => {
-            RunOutcome::new(RunStatus::Succeeded)
+#[async_trait::async_trait]
+impl SeatBracket for RoundBracket {
+    async fn started(&self) {
+        self.open_run().await;
+        if let Err(error) = self
+            .events
+            .append(
+                &self.company,
+                CompanyEvent::TurnStarted {
+                    turn_id: self.turn_id.clone(),
+                    chat_id: self.desk_id.clone(),
+                    parent: Some(self.thread_root),
+                    by: None,
+                    agent_id: Some(self.agent_id.clone()),
+                    episode_id: Some(self.episode_id.clone()),
+                    round_revision: Some(self.revision),
+                },
+            )
+            .await
+        {
+            tracing::warn!(
+                company = %self.company,
+                turn = %self.turn_id,
+                %error,
+                "[hive] could not journal a seat turn's start"
+            );
         }
-        TurnOutcome::Failed | TurnOutcome::TimedOut => RunOutcome::new(RunStatus::Failed),
-    };
-    if let Some(error) = error {
-        settled = settled.with_error(error.to_string());
     }
-    if let Err(error) = runs.finish_run(&host.record.id, turn_id, settled).await {
-        tracing::warn!(
-            company = %host.record.id,
-            turn = turn_id,
-            %error,
-            "[hive] could not settle a seat turn's run row; the next boot reaps it"
-        );
-    }
-}
 
-async fn settle(
-    host: &HiveDispatcher,
-    run: &EpisodeRun,
-    turn_id: &str,
-    agent_id: &str,
-    revision: u64,
-    outcome: TurnOutcome,
-) -> Result<()> {
-    close_run(host, turn_id, outcome, None).await;
-    host.events
-        .append(
-            &host.record.id,
-            CompanyEvent::TurnSettled {
-                turn_id: turn_id.to_string(),
-                agent_id: Some(agent_id.to_string()),
-                chat_id: Some(run.desk.desk_id.clone()),
-                episode_id: Some(run.episode_id.clone()),
-                round_revision: Some(revision),
+    async fn settled(&self, outcome: TurnOutcome, error: Option<String>) {
+        self.close_run(outcome, error.as_deref()).await;
+        let event = match outcome {
+            TurnOutcome::Committed | TurnOutcome::NoUtterance => CompanyEvent::TurnSettled {
+                turn_id: self.turn_id.clone(),
+                agent_id: Some(self.agent_id.clone()),
+                chat_id: Some(self.desk_id.clone()),
+                episode_id: Some(self.episode_id.clone()),
+                round_revision: Some(self.revision),
                 outcome,
             },
-        )
-        .await?;
-    Ok(())
-}
-
-async fn fail(
-    host: &HiveDispatcher,
-    run: &EpisodeRun,
-    turn_id: &str,
-    agent_id: &str,
-    revision: u64,
-    failure: &SeatFailure,
-) -> Result<()> {
-    let (error, outcome) = match failure {
-        SeatFailure::TimedOut => (
-            "the seat turn ran past its timeout".to_string(),
-            TurnOutcome::TimedOut,
-        ),
-        SeatFailure::Failed(error) => (error.clone(), TurnOutcome::Failed),
-    };
-    tracing::warn!(
-        desk = %run.desk.desk_id,
-        episode = %run.episode_id,
-        agent = agent_id,
-        %error,
-        "[hive] a seat turn did not answer; completed on its behalf"
-    );
-    close_run(host, turn_id, outcome, Some(&error)).await;
-    host.events
-        .append(
-            &host.record.id,
-            CompanyEvent::TurnFailed {
-                turn_id: turn_id.to_string(),
-                error,
-                agent_id: Some(agent_id.to_string()),
-                chat_id: Some(run.desk.desk_id.clone()),
-                episode_id: Some(run.episode_id.clone()),
-                round_revision: Some(revision),
+            TurnOutcome::Failed | TurnOutcome::TimedOut => CompanyEvent::TurnFailed {
+                turn_id: self.turn_id.clone(),
+                error: error.unwrap_or_else(|| "the seat turn failed".to_string()),
+                agent_id: Some(self.agent_id.clone()),
+                chat_id: Some(self.desk_id.clone()),
+                episode_id: Some(self.episode_id.clone()),
+                round_revision: Some(self.revision),
                 outcome: Some(outcome),
             },
-        )
-        .await?;
-    Ok(())
+        };
+        if let Err(error) = self.events.append(&self.company, event).await {
+            tracing::warn!(
+                company = %self.company,
+                turn = %self.turn_id,
+                %error,
+                "[hive] could not journal a seat turn's settlement"
+            );
+        }
+    }
+}
+
+impl RoundBracket {
+    /// Mints and starts the seat turn's run row (plan hive-desks, Phase 8),
+    /// so `GET /runs` and the Observatory see one attempt per seat turn with
+    /// its episode and round — the durable twin of the `TurnStarted`
+    /// bracket. A store that refuses is logged and the turn runs untracked,
+    /// exactly as the chat route does for its own row.
+    async fn open_run(&self) {
+        let Some(runs) = self.runs.as_ref() else { return };
+        let spec =
+            crate::ports::runs::NewRun::for_chat(&self.turn_id, self.desk_id.clone(), &self.agent_id)
+                .in_thread(Some(self.thread_root))
+                .in_episode(self.episode_id.clone(), self.revision);
+        let opened = match runs.create_run(&self.company, spec).await {
+            Ok(_) => runs.begin_run_untriggered(&self.company, &self.turn_id).await,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = opened {
+            tracing::warn!(
+                company = %self.company,
+                turn = %self.turn_id,
+                %error,
+                "[hive] could not open a seat turn's run row; the turn runs untracked"
+            );
+        }
+    }
+
+    /// Settles the seat turn's run row with the bracket's outcome.
+    async fn close_run(&self, outcome: TurnOutcome, error: Option<&str>) {
+        use crate::ports::runs::{RunOutcome, RunStatus};
+        let Some(runs) = self.runs.as_ref() else { return };
+        let mut settled = match outcome {
+            TurnOutcome::Committed | TurnOutcome::NoUtterance => {
+                RunOutcome::new(RunStatus::Succeeded)
+            }
+            TurnOutcome::Failed | TurnOutcome::TimedOut => RunOutcome::new(RunStatus::Failed),
+        };
+        if let Some(error) = error {
+            settled = settled.with_error(error.to_string());
+        }
+        if let Err(error) = runs.finish_run(&self.company, &self.turn_id, settled).await {
+            tracing::warn!(
+                company = %self.company,
+                turn = %self.turn_id,
+                %error,
+                "[hive] could not settle a seat turn's run row; the next boot reaps it"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
