@@ -90,6 +90,10 @@ struct Seat {
     calls: Vec<String>,
     /// The sentinel message, verbatim.
     prompt: String,
+    /// The `## This assignment` block of the turn's own prompt — the
+    /// operator's message, the broadcast that reopened the seat, or the
+    /// answer that came home — free of whatever the preamble quoted.
+    assignment: String,
 }
 
 /// The sentinel in `text` — the **last** one: the harness's memory loop
@@ -123,10 +127,16 @@ fn seat_of(ask: &Ask) -> Option<Seat> {
         .rposition(|message| role(message) == "user")?;
     let prompt = content(&ask.messages[last_user]).to_string();
     let (desk, episode, revision) = parse_sentinel(&prompt)?;
+    // The last `You are @…` for the reason the last sentinel is the turn's:
+    // the prior-work preamble may quote another seat's prompt.
     let speaker = prompt
-        .split_once("You are @")
+        .rsplit_once("You are @")
         .and_then(|(_, rest)| rest.split_once(' '))
         .map(|(id, _)| id.trim().to_string())
+        .unwrap_or_default();
+    let assignment = prompt
+        .rsplit_once("## This assignment\n")
+        .map(|(_, rest)| rest.split("\n\n## ").next().unwrap_or(rest).to_string())
         .unwrap_or_default();
     let mut earlier = std::collections::BTreeSet::new();
     for message in &ask.messages[..last_user] {
@@ -177,6 +187,7 @@ fn seat_of(ask: &Ask) -> Option<Seat> {
         turn_tools,
         calls,
         prompt,
+        assignment,
     })
 }
 
@@ -684,10 +695,23 @@ async fn a_two_member_desk_completes_in_two_rounds() {
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
     if std::env::var_os("HIVE_E2E_DUMP").is_some() {
         for row in &rows {
-            eprintln!("[journal] {} {}", row.seq.value(), serde_json::to_string(&row.event).unwrap_or_default().chars().take(400).collect::<String>());
+            eprintln!(
+                "[journal] {} {}",
+                row.seq.value(),
+                serde_json::to_string(&row.event)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(400)
+                    .collect::<String>()
+            );
         }
         for ask in script.asks() {
-            eprintln!("[ask] tools={:?} last_user={:?} pending={:?}", ask.tools, ask.last_user_text().chars().take(300).collect::<String>(), ask.pending_tool);
+            eprintln!(
+                "[ask] tools={:?} last_user={:?} pending={:?}",
+                ask.tools,
+                ask.last_user_text().chars().take(300).collect::<String>(),
+                ask.pending_tool
+            );
         }
     }
 
@@ -1201,7 +1225,11 @@ async fn a_cross_desk_referral_crosses_only_the_answer_back() {
             seat.speaker == ENGINEER && seat.prompt.contains("answered the question you put to it")
         })
         .expect("the engineer's reopened turn");
-    assert!(reopened.prompt.contains(TAGLINE), "{}", reopened.prompt);
+    assert!(
+        reopened.assignment.contains(TAGLINE),
+        "{}",
+        reopened.assignment
+    );
 
     let measured = report(&runtime).await;
     assert_eq!(measured.cross_desk_referrals, 1);
@@ -1471,7 +1499,7 @@ async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
                 return post_then_complete(seat);
             }
             let memory = seat.last_tool_result();
-            if seat.prompt.contains(ASK_ONE) {
+            if seat.assignment.contains(ASK_ONE) {
                 return match memory {
                     None => Reply::Call {
                         tool: "mcp_call_tool",
@@ -1484,7 +1512,7 @@ async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
                     Some(_) => post("Window fixed and written down."),
                 };
             }
-            if seat.prompt.contains(ASK_TWO) {
+            if seat.assignment.contains(ASK_TWO) {
                 return match memory {
                     None => Reply::Call {
                         tool: "mcp_call_tool",
@@ -1523,7 +1551,7 @@ async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
         .asks()
         .iter()
         .filter_map(seat_of)
-        .filter(|seat| seat.speaker == ENGINEER && seat.prompt.contains(ASK_ONE))
+        .filter(|seat| seat.speaker == ENGINEER && seat.assignment.contains(ASK_ONE))
         .flat_map(|seat| seat.turn_tools)
         .collect::<Vec<_>>();
     assert!(
@@ -1547,7 +1575,7 @@ async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
         .asks()
         .iter()
         .filter_map(seat_of)
-        .filter(|seat| seat.speaker == ENGINEER && seat.prompt.contains(ASK_TWO))
+        .filter(|seat| seat.speaker == ENGINEER && seat.assignment.contains(ASK_TWO))
         .flat_map(|seat| seat.turn_tools)
         .collect::<Vec<_>>();
     assert!(

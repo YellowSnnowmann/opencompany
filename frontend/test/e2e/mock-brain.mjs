@@ -349,8 +349,10 @@ function findHiveTurn(messages) {
     const match = lastSentinel(textOf(message));
     if (!match) return null;
     const turn = { desk: match[1], episode: match[2], round: Number.parseInt(match[3], 10), speaker: null, stage: 0 };
-    const speaker = /You are @([a-z0-9_-]+)/i.exec(textOf(message));
-    if (speaker) turn.speaker = speaker[1];
+    // The last `You are @…`, for the reason the last sentinel is the turn's.
+    let speaker = null;
+    for (const match of textOf(message).matchAll(/You are @([a-z0-9_-]+)/gi)) speaker = match[1];
+    turn.speaker = speaker;
     turn.stage = hiveStage(messages.slice(0, i), turn);
     return turn;
   }
