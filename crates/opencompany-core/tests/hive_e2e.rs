@@ -1,303 +1,249 @@
 #![cfg(feature = "openhuman")]
-//! **End-to-end scaffold for hive desks** (plan hive-desks, Phase 8 rewrites
-//! the suite on the per-desk `OpenHumanHive`; the boot/login/script scaffold
-//! below is what it reuses, exercised today by
-//! `a_single_member_desk_answers_with_one_ordinary_turn`).
+//! **End-to-end: hive desks over the embedded OpenHuman runtime** (plan
+//! hive-desks, Phase 8).
 //!
-//! The trace-grammar tests this file carried are `#[ignore]`d: they drove
-//! `src/hivemind/`, which Phase 4 deleted, and stay only as the shape Phase 8
-//! rewrites against episodes.
+//! The unit tests under `src/hive/` drive the episode host with a scripted
+//! `SeatRunner`; they pin the fold and cannot tell you whether a *company*
+//! runs a room: whether an operator message on a desk of two opens an
+//! episode, whether each seat's turn goes through the ordinary harness turn
+//! with its `opencompany` MCP server attached, whether the one speech tool
+//! the seat calls lands as exactly one `AgentReply` with its episode
+//! metadata, whether two desks sharing an agent run at once without that
+//! agent ever running twice, and whether the journal that results is the
+//! one `opencompany measure` and the console fold the same numbers from.
 //!
-//! The unit tests in [`hive::driver`](opencompany::hive::driver) drive the
-//! episode host with a scripted `SeatRunner`. They pin the fold, and
-//! they cannot tell you whether a *company* deliberates: whether the brain hook
-//! fires on an operator message, whether each authorized turn goes through the
-//! ordinary harness turn path with its tools and its memory loop, whether the
-//! transcript a member is handed is the one the prompt builder promised, or
-//! whether the journal ends up holding one row per turn plus one honest closing
-//! report.
-//!
-//! So this boots a **real company** — `RuntimeBuilder`, the embedded OpenHuman
-//! harness, the filesystem store, the HTTP surface, loopback magic-link
-//! sign-in — and drives it through `POST /api/v1/company/chat`, the same route
-//! the console posts to. Only the model is scripted, and the scripted endpoint
-//! is **content-aware**: it reads the prompt each agent was handed, works out
-//! who is speaking and what that agent can see, and answers accordingly. A
-//! member that cites `^N` has to find `N` in the transcript it was given, which
-//! is exactly the property a fixed reply queue cannot prove.
+//! So every test here boots a **real company** — `RuntimeBuilder`, the
+//! process-wide `openhuman_embed::Runtime`, the filesystem store, the HTTP
+//! surface, loopback magic-link sign-in — and drives it through
+//! `POST /api/v1/company/chat`, the route the console posts to. Only the
+//! model is scripted (`support::script_model`), and the script is the mock
+//! brain's hive arm in Rust (`frontend/test/e2e/mock-brain.mjs`): it keys on
+//! the seat sentinel `Hive turn: desk <deskId>, episode <episodeId>, round
+//! <revision>.` and on how many turns the seat has already taken in that
+//! episode, answers with one `mcp_call_tool{server: "opencompany", tool,
+//! arguments}`, and ends the turn with a plain `stop` once the tool result
+//! is back.
 //!
 //! # What each test proves
 //!
 //! | Test | Claim |
 //! | --- | --- |
-//! | `a_desk_deliberates_and_converges_through_the_fold` | three members, one turn each per model call, one `AgentReply` per turn under the right author, one `hive-report` naming the topic and its supporters |
-//! | `the_opening_round_is_blind_and_every_later_line_is_attributed` | the first round shows no peer marker line; later rounds render peers as `[seq] <id>: …` and never as the viewer's own words |
-//! | `an_objection_silences_an_advocate_and_a_second_topic_carries` | cross-inhibition end to end: the objected author is not among the winning topic's supporters |
-//! | `a_desk_reasons_with_what_it_stored_in_an_earlier_episode` | a `memory_store` tool call in episode one is readable by `memory_recall` in episode two, and the room's line cites it |
-//! | `a_desk_reasons_with_memory_held_in_a_remote_engine` | the same claim with the memory ports bound to a CortexDB mock: the write lands on `/v1/experience`, the read comes back from `/v1/recall` |
-//! | `a_room_that_settles_on_nothing_reports_itself_exhausted` | the budget is spent and the report says so |
-//! | `two_carrying_topics_and_no_objection_deadlock` | `Deadlocked`, named honestly |
-//! | `a_single_member_desk_answers_with_one_ordinary_turn` | the same company's desk of one is untouched: one reply, no `hive-report` |
+//! | `a_two_member_desk_completes_in_two_rounds` | `EpisodeOpened` with both seats, two rounds of two brackets, one reply per seat per round, `EpisodeCompleted{complete_episode}` |
+//! | `a_broadcast_without_jev_falls_back_deterministically` | `BroadcastRouted{router: fallback}` names the desk lead, who is reopened in the next round |
+//! | `a_dm_schedules_its_recipient_and_is_journaled_with_its_audience` | the `dm` row carries `audience` and `episode.to`; `DmDelivered` names the peer; the peer runs next |
+//! | `a_single_member_desk_answers_with_one_ordinary_turn` | a desk of one is one reply with no episode frames and no sentinel |
+//! | `a_cross_desk_referral_crosses_only_the_answer_back` | the question is seeded on the far desk under `hive-referral`, the answer alone comes home, neither desk's seats speak on the other |
+//! | `a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice` | `companies/hive_demo`: both episodes complete, brackets overlap across desks, never for the same agent |
+//! | `a_checkpoint_replays_the_rows_after_it_as_a_no_op` | the round-0 checkpoint plus the rows after it fold to the final state; folding them again changes nothing |
+//! | `a_desk_remembers_across_episodes_through_the_mcp_memory_tool` | `memory_store` over MCP in one episode, `memory_recall` in the next, the post cites what came back |
 //!
-//! # Why no shell
-//!
-//! Every scripted move is a marker line or a memory tool call. Nothing on this
-//! path asks for `shell`, so nothing parks for approval and no test depends on
-//! an approval policy that would make it hang.
+//! Every company gets a unique id: the runtime keeps one `Agent` per
+//! `(company, agent)` for the life of the process, so two tests naming the
+//! same company would share transcripts.
 
 mod support;
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use axum::Json;
-use axum::extract::Query;
-use axum::routing::{get, post};
 use serde_json::{Value, json};
-use support::script_model::{Ask, Reply, Responder, Script, spawn_script};
+use support::script_model::{Ask, Reply, Responder, Script, spawn_script_with_latency};
 
 use opencompany::CompanyRuntime;
 use opencompany::company::CompanyManifest;
+use opencompany::hive::measure::{Report, Thresholds, measure};
 use opencompany::hive::referral::HIVE_REFERRAL_AUTHOR;
-
-/// The retired trace-grammar report author, kept for the ignored tests.
-const HIVE_REPORT_AUTHOR: &str = "hive-report";
-use opencompany::ports::types::{CompanyEvent, EventSeq};
-use opencompany::runtime::{RuntimeBuilder, company_id_from_name};
+use opencompany::hive::routing::Router;
+use opencompany::hive::tools::via_opencompany_mcp;
+use opencompany::ports::types::{
+    CompanyEvent, CompanyId, EpisodeReason, EventSeq, StoredEvent, UtteranceKind,
+};
+use opencompany::runtime::RuntimeBuilder;
 use opencompany::{AppConfig, AppState};
 
 // ---------------------------------------------------------------------------
-// The content-aware scripted model
+// The seat as the scripted model sees it
 // ---------------------------------------------------------------------------
 
-/// One request as a hive script sees it: who is speaking, what they were
-/// shown, and what the turn loop has already handed back — the hive-prompt
-/// reading of the shared [`Ask`].
+/// The sentinel line every seat turn opens with.
+const SENTINEL: &str = "Hive turn: desk ";
+
+/// One seat turn, read off a request: the sentinel's coordinates, who is
+/// speaking, which of its turns in this episode the seat is on, and the
+/// tool results this turn has already collected.
 #[derive(Clone, Debug)]
-struct HiveAsk {
-    /// The teammate this turn belongs to, read out of the prompt's own
-    /// `You are @<id>` opening. `None` for a request that is not a hive turn.
-    speaker: Option<String>,
-    /// The episode prompt this turn was handed, verbatim.
+struct Seat {
+    desk: String,
+    episode: String,
+    revision: u64,
+    speaker: String,
+    /// 0 for the seat's first turn in the episode, 1 for its second, …: the
+    /// distinct earlier revisions below this one in the transcript. A retry
+    /// at the same revision is the same turn.
+    stage: usize,
+    /// Tool results after the sentinel — this turn's own, oldest first.
+    turn_tools: Vec<String>,
+    /// The sentinel message, verbatim.
     prompt: String,
-    /// Every `tool` message already in this conversation, oldest first.
-    tool_outputs: Vec<String>,
-    /// The tool result this request is the continuation of, when it is one.
-    pending_tool: Option<String>,
-    /// The whole message array, for assertions that need the roles.
-    messages: Vec<Value>,
 }
 
-impl HiveAsk {
-    fn of(ask: &Ask) -> Self {
-        let messages: Vec<Value> = ask.messages.clone();
-        // The hive prompt is a user message. The memory loop may prepend a
-        // "## Relevant prior work" preamble to it, so it is found by content
-        // rather than by position.
-        let prompt = messages
-            .iter()
-            .rev()
-            .filter(|message| message.get("role").and_then(Value::as_str) == Some("user"))
-            .filter_map(|message| message.get("content").and_then(Value::as_str))
-            .map(hive_core)
-            .find(|content| content.contains(TRANSCRIPT_HEADING))
-            .unwrap_or_default();
-        let speaker = prompt
-            .split_once("You are @")
-            .and_then(|(_, rest)| rest.split_once(','))
-            .map(|(id, _)| id.trim().to_owned());
-        let tool_outputs = messages
-            .iter()
-            .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
-            .filter_map(|message| message.get("content").and_then(Value::as_str))
-            .map(str::to_owned)
-            .collect();
-        // The result this request is a continuation OF, as opposed to every
-        // tool result still sitting in the agent's conversation. The pool keeps
-        // one live agent per teammate for the whole company's lifetime, so a
-        // second episode's opening request already carries the first episode's
-        // tool messages; "has this turn called a tool yet" has to be read off
-        // the tail, not off the pile.
-        let pending_tool = messages
-            .last()
-            .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
-            .and_then(|message| message.get("content").and_then(Value::as_str))
-            .map(str::to_owned);
-        Self {
-            speaker,
-            prompt,
-            tool_outputs,
-            pending_tool,
-            messages,
+fn parse_sentinel(text: &str) -> Option<(String, String, u64)> {
+    let at = text.find(SENTINEL)?;
+    let rest = &text[at + SENTINEL.len()..];
+    let (desk, rest) = rest.split_once(", episode ")?;
+    let (episode, rest) = rest.split_once(", round ")?;
+    let (revision, _) = rest.split_once('.')?;
+    Some((desk.to_string(), episode.to_string(), revision.parse().ok()?))
+}
+
+fn role(message: &Value) -> &str {
+    message.get("role").and_then(Value::as_str).unwrap_or("")
+}
+
+fn content(message: &Value) -> &str {
+    message.get("content").and_then(Value::as_str).unwrap_or("")
+}
+
+fn seat_of(ask: &Ask) -> Option<Seat> {
+    let last_user = ask
+        .messages
+        .iter()
+        .rposition(|message| role(message) == "user")?;
+    let prompt = content(&ask.messages[last_user]).to_string();
+    let (desk, episode, revision) = parse_sentinel(&prompt)?;
+    let speaker = prompt
+        .split_once("You are @")
+        .and_then(|(_, rest)| rest.split_once(' '))
+        .map(|(id, _)| id.trim().to_string())
+        .unwrap_or_default();
+    let mut earlier = std::collections::BTreeSet::new();
+    for message in &ask.messages[..last_user] {
+        if role(message) != "user" {
+            continue;
+        }
+        if let Some((_, other, earlier_revision)) = parse_sentinel(content(message))
+            && other == episode
+            && earlier_revision < revision
+        {
+            earlier.insert(earlier_revision);
         }
     }
+    let turn_tools = ask.messages[last_user + 1..]
+        .iter()
+        .filter(|message| role(message) == "tool")
+        .map(|message| content(message).to_string())
+        .collect();
+    Some(Seat {
+        desk,
+        episode,
+        revision,
+        speaker,
+        stage: earlier.len(),
+        turn_tools,
+        prompt,
+    })
+}
 
-    /// Who is speaking, or `"?"` — used only to key a script.
-    fn who(&self) -> &str {
-        self.speaker.as_deref().unwrap_or("?")
-    }
-
-    fn last_user_text(&self) -> &str {
-        self.messages
+impl Seat {
+    /// Whether a speech tool has answered in this turn: the turn is over.
+    fn spoke(&self) -> bool {
+        self.turn_tools
             .iter()
-            .rev()
-            .find(|message| message.get("role").and_then(Value::as_str) == Some("user"))
-            .and_then(|message| message.get("content").and_then(Value::as_str))
-            .unwrap_or_default()
+            .any(|output| !is_refused(output) && !output.contains("memory"))
     }
+}
 
-    /// What the operator actually asked, which is what identifies the episode.
-    ///
-    /// Read from the prompt's own `The operator asked the desk:` block rather
-    /// than by searching the whole prompt: the transcript window carries every
-    /// earlier operator message on the desk too, so "contains" matches the
-    /// *previous* episode's question as readily as this one's.
-    fn task(&self) -> String {
-        self.prompt
-            .split_once("The operator asked the desk:\n")
-            .and_then(|(_, rest)| rest.split_once('\n'))
-            .map_or_else(String::new, |(task, _)| task.trim().to_owned())
+/// Whether a tool result reads as the host refusing the call.
+fn is_refused(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    ["refused", "error", "rejected", "invalid", "not a member", "cannot"]
+        .iter()
+        .any(|word| lower.contains(word))
+}
+
+/// One speech act, as the `mcp_call_tool` the seat's belt carries it as.
+fn speech(tool: &str, arguments: Value) -> Reply {
+    let (name, args) = via_opencompany_mcp(tool, arguments);
+    assert_eq!(name, "mcp_call_tool", "speech is served over MCP");
+    Reply::Call {
+        tool: "mcp_call_tool",
+        args,
     }
+}
 
-    /// Whether this turn is under the blind projection.
-    fn blind(&self) -> bool {
-        self.prompt
-            .contains("You cannot yet see your peers' positions")
-    }
+fn post(message: impl Into<String>) -> Reply {
+    speech("post", json!({ "message": message.into() }))
+}
 
-    /// The attributed transcript this turn was handed, as
-    /// `(sequence, author, content)`.
-    fn transcript(&self) -> Vec<(u64, String, String)> {
-        let Some((_, block)) = self.prompt.split_once(TRANSCRIPT_HEADING) else {
-            return Vec::new();
+fn complete(message: impl Into<String>) -> Reply {
+    speech("complete_episode", json!({ "message": message.into() }))
+}
+
+/// The turn is over once the seat's one speech act is recorded.
+const DONE: &str = "done";
+
+/// A script over seats: `act` decides the speech act for a seat turn that
+/// has not spoken yet; a turn that has spoken stops; a request that is no
+/// seat turn at all is answered with `plain`.
+fn seat_script(
+    plain: &'static str,
+    act: impl Fn(&Seat) -> Reply + Send + Sync + 'static,
+) -> Responder {
+    Arc::new(move |ask: &Ask| {
+        let Some(seat) = seat_of(ask) else {
+            if ask.pending_tool.is_some() {
+                return Reply::Say(DONE.to_string());
+            }
+            return Reply::Say(plain.to_string());
         };
-        let block = block.split(YOUR_LINE).next().unwrap_or(block);
-        block.lines().filter_map(parse_transcript_line).collect()
-    }
-
-    /// The sequence of the first transcript line whose text contains `needle`,
-    /// which is how a scripted member grounds a citation: it has to read the
-    /// number out of what it was shown.
-    fn seq_of(&self, needle: &str) -> Option<u64> {
-        self.transcript()
-            .into_iter()
-            .find(|(_, _, content)| content.contains(needle))
-            .map(|(seq, _, _)| seq)
-    }
-
-    /// The sequence of the first line `author` wrote containing `needle`.
-    fn seq_by(&self, author: &str, needle: &str) -> Option<u64> {
-        self.transcript()
-            .into_iter()
-            .find(|(_, who, content)| who == author && content.contains(needle))
-            .map(|(seq, _, _)| seq)
-    }
-
-    /// Whether this speaker has already said something containing `needle`.
-    fn i_said(&self, needle: &str) -> bool {
-        let me = self.who().to_owned();
-        self.transcript()
-            .into_iter()
-            .any(|(_, who, content)| who == me && content.contains(needle))
-    }
+        if seat.spoke() {
+            return Reply::Say(DONE.to_string());
+        }
+        act(&seat)
+    })
 }
 
-/// The heading the prompt builder puts above the attributed transcript.
-const TRANSCRIPT_HEADING: &str = "Shared attributed transcript:\n";
-/// The closing line of every episode prompt.
-const YOUR_LINE: &str = "\n\nYour one line:";
-/// The block a member's own previous line is rendered under.
-const ALREADY_SAID: &str = "You already said this";
-
-/// The episode prompt inside one user message.
-///
-/// The memory loop prepends a `## Relevant prior work` preamble to every turn's
-/// message, and the outcomes it retrieves are previous turns — whole prompts
-/// included. So the episode prompt is what follows the LAST `## Task` heading;
-/// reading from the front of the message finds a *quoted* prompt belonging to
-/// somebody else's turn, which is a different agent and a staler transcript.
-fn hive_core(content: &str) -> String {
-    content
-        .rsplit_once("\n## Task\n")
-        .map_or(content, |(_, task)| task)
-        .to_owned()
-}
-
-/// `[7] planner: !propose #stage …` → `(7, "planner", "!propose #stage …")`.
-fn parse_transcript_line(line: &str) -> Option<(u64, String, String)> {
-    let rest = line.strip_prefix('[')?;
-    let (seq, rest) = rest.split_once("] ")?;
-    let (author, content) = rest.split_once(": ")?;
-    // The reader's own rows are attributed `<id> (you)` so a member can tell
-    // its own turns from a colleague's without losing the id colleagues cite
-    // it by. The id is what every assertion here matches on, so the marker is
-    // stripped back off.
-    let author = author.strip_suffix(" (you)").unwrap_or(author);
-    Some((
-        seq.parse().ok()?,
-        author.to_owned(),
-        content.trim().to_owned(),
-    ))
-}
-
-/// What the scripted model does with one request.
-/// Every request that OPENED a hive turn: its last message is the episode
-/// prompt itself, so a tool round trip inside one turn is not counted twice.
-fn turn_openers(script: &Script) -> Vec<HiveAsk> {
-    script
-        .asks()
-        .iter()
-        .filter(|ask| {
-            ask.messages.last().is_some_and(|last| {
-                last.get("role").and_then(Value::as_str) == Some("user")
-                    && last
-                        .get("content")
-                        .and_then(Value::as_str)
-                        .is_some_and(|content| hive_core(content).contains(TRANSCRIPT_HEADING))
-            })
-        })
-        .map(HiveAsk::of)
-        .collect()
-}
-
-/// Every request that carried a hive prompt at all, opener or follow-up.
-fn hive_asks(script: &Script) -> Vec<HiveAsk> {
-    script
-        .asks()
-        .iter()
-        .map(HiveAsk::of)
-        .filter(|ask| ask.speaker.is_some())
-        .collect()
+/// The mock brain's own hive arm: post, then complete.
+fn post_then_complete(seat: &Seat) -> Reply {
+    let stamp = format!(
+        "desk {} episode {} round {} by @{}",
+        seat.desk, seat.episode, seat.revision, seat.speaker
+    );
+    if seat.stage == 0 {
+        post(format!("{stamp}: opening post."))
+    } else {
+        complete(format!("{stamp}: done, nothing left open."))
+    }
 }
 
 // ---------------------------------------------------------------------------
 // The company
 // ---------------------------------------------------------------------------
 
-/// The three-member desk every deliberation test runs on.
-const DESK: &str = "lab";
-/// The one-member desk that proves the single-responder path is untouched.
-const SOLO_DESK: &str = "front";
-const THEORIST: &str = "theorist";
-const PROGRAMMER: &str = "programmer";
-const VERIFIER: &str = "verifier";
+const ENGINEERING: &str = "engineering";
+const CONTENT: &str = "content";
+const FRONT: &str = "front";
+const ENGINEER: &str = "engineer";
+const WRITER: &str = "writer";
+const CEO: &str = "ceo";
+const GREETER: &str = "greeter";
 const ADMIN: &str = "operator@opencompany.local";
+/// The admin `companies/hive_demo` grants.
+const DEMO_ADMIN: &str = "harness-e2e@tinyhumans.ai";
 
-/// A company with one deliberating desk of three and one desk of one.
+/// Two desks of two sharing the CEO — `companies/hive_demo`'s shape — plus a
+/// desk of one, so one company covers every surface these tests need.
 ///
-/// `[policy] mode = "full"` so no turn parks: this file is about the room, not
-/// the approval gate, and a parked turn would hang the episode rather than fail
-/// it. `[tools] allow` is empty on purpose — the memory belt is wired
-/// unconditionally by `build_agent`, and nothing else is needed, so no scripted
-/// move can reach `shell`.
-fn manifest(base_url: &str, hive: &str) -> String {
+/// `[policy] mode = "full"` so no tool call parks: this file is about the
+/// room, and a parked turn would hang an episode rather than fail it.
+fn manifest(name: &str, base_url: &str) -> String {
     format!(
         r#"
 [company]
-name = "Hive Lab"
-summary = "Proves a desk deliberates."
+name = "{name}"
+summary = "Proves desks answer as rooms."
 
 [inference]
 provider = "ollama"
@@ -316,72 +262,89 @@ allow = []
 admins = ["{ADMIN}"]
 
 [[agent]]
-id = "ceo"
+id = "{CEO}"
 role = "Chief Executive"
 tier = "orchestrator"
 
 [[agent]]
-id = "{THEORIST}"
-role = "Theorist"
+id = "{ENGINEER}"
+role = "Engineer"
 
 [[agent]]
-id = "{PROGRAMMER}"
-role = "Programmer"
+id = "{WRITER}"
+role = "Writer"
 
 [[agent]]
-id = "{VERIFIER}"
-role = "Verifier"
-
-[[agent]]
-id = "greeter"
+id = "{GREETER}"
 role = "Front desk"
 
 [[group_chat]]
-id = "{DESK}"
-name = "Lab"
-description = "Settle hard questions together"
-members = ["{THEORIST}", "{PROGRAMMER}", "{VERIFIER}"]
-hive = {hive}
+id = "{ENGINEERING}"
+name = "Engineering"
+description = "How things are built."
+members = ["{ENGINEER}", "{CEO}"]
+
+[group_chat.routing]
+round_width = 2
+
+[group_chat.routing.referral]
+enabled = true
+max_hops = 1
+returns = true
 
 [[group_chat]]
-id = "{SOLO_DESK}"
+id = "{CONTENT}"
+name = "Content"
+description = "Written drafts and copy."
+members = ["{WRITER}", "{CEO}"]
+
+[group_chat.routing]
+round_width = 2
+
+[group_chat.routing.referral]
+enabled = true
+max_hops = 1
+returns = true
+
+[[group_chat]]
+id = "{FRONT}"
 name = "Front"
-members = ["greeter"]
+members = ["{GREETER}"]
 "#
     )
 }
 
-/// Boots the company on loopback and returns its address and live runtime.
+/// A company id no other test in this process uses.
+fn unique(prefix: &str) -> String {
+    format!("{prefix}-{}", uuid::Uuid::new_v4().simple())
+}
+
+/// Boots `manifest` on loopback under a unique company id.
 async fn boot(
-    home: &std::path::Path,
-    base_url: &str,
-    hive: &str,
-    memory: Option<opencompany::store::MemoryOverlay>,
+    home: &Path,
+    company_id: &str,
+    mut manifest: CompanyManifest,
 ) -> (SocketAddr, Arc<CompanyRuntime>) {
-    let mut manifest = CompanyManifest::from_stored_toml(&manifest(base_url, hive))
-        .expect("the in-test manifest parses");
     manifest.apply_globals();
     let problems = manifest.validate();
-    assert!(
-        problems.is_empty(),
-        "the in-test manifest is valid: {problems:?}"
-    );
+    assert!(problems.is_empty(), "the manifest is valid: {problems:?}");
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let company_id = company_id_from_name(&manifest.company.name);
+    let company_id = CompanyId::new(company_id);
     let state = AppState::new(AppConfig {
         bind: address.to_string(),
         ..AppConfig::default()
     })
     .with_home(home.to_path_buf());
-    let mut builder = RuntimeBuilder::new(state.home().to_path_buf(), manifest)
-        .with_id(company_id.clone())
-        .with_harness(Arc::new(opencompany::harness::HarnessPool::new()));
-    if let Some(overlay) = memory {
-        builder = builder.with_memory_overlay(&overlay);
-    }
-    let runtime = Arc::new(builder.build().await.expect("the company builds"));
+    let runtime = Arc::new(
+        RuntimeBuilder::new(state.home().to_path_buf(), manifest)
+            .with_id(company_id.clone())
+            .with_harness(Arc::new(opencompany::harness::HarnessPool::new()))
+            .build()
+            .await
+            .expect("the company builds"),
+    );
     state
         .registry()
         .insert(company_id.clone(), Arc::clone(&runtime));
@@ -389,6 +352,28 @@ async fn boot(
         let _ = opencompany::server::serve_on(listener, state).await;
     });
     (address, runtime)
+}
+
+/// Boots the in-test company.
+async fn boot_lab(home: &Path, base_url: &str) -> (SocketAddr, Arc<CompanyRuntime>) {
+    let id = unique("hive-lab");
+    let manifest = CompanyManifest::from_stored_toml(&manifest(&id, base_url))
+        .expect("the in-test manifest parses");
+    boot(home, &id, manifest).await
+}
+
+/// Boots `companies/hive_demo` — the measurement's company — against the
+/// scripted model.
+async fn boot_demo(home: &Path, base_url: &str) -> (SocketAddr, Arc<CompanyRuntime>) {
+    let bundle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../companies/hive_demo");
+    let mut manifest = CompanyManifest::from_path(&bundle).expect("companies/hive_demo parses");
+    manifest.inference.provider = Some("ollama".into());
+    manifest.inference.base_url = Some(base_url.into());
+    manifest
+        .inference
+        .models
+        .insert("chat-v1".into(), "llama3".into());
+    boot(home, &unique("hive-demo"), manifest).await
 }
 
 // ---------------------------------------------------------------------------
@@ -433,10 +418,22 @@ impl Client {
         (status, json)
     }
 
+    async fn get(&self, path: &str) -> (u16, Value) {
+        let mut request = self.inner.get(format!("{}{path}", self.base));
+        if let Some(cookie) = self.cookie.lock().unwrap().clone() {
+            request = request.header(reqwest::header::COOKIE, cookie);
+        }
+        let response = request.send().await.expect("the loopback host answers");
+        let status = response.status().as_u16();
+        let text = response.text().await.unwrap_or_default();
+        let json = serde_json::from_str(&text).unwrap_or(Value::String(text));
+        (status, json)
+    }
+
     /// Signs in over the loopback magic-link flow, which echoes the code.
-    async fn sign_in(&self) {
+    async fn sign_in(&self, email: &str) {
         let (status, body) = self
-            .post("/api/v1/company/auth/request", json!({ "email": ADMIN }))
+            .post("/api/v1/company/auth/request", json!({ "email": email }))
             .await;
         assert_eq!(status, 200, "sign-in refused: {body}");
         let code = body["dev_code"]
@@ -449,7 +446,9 @@ impl Client {
         assert_eq!(status, 200, "the login code was refused: {body}");
     }
 
-    /// Posts one operator message to `desk` and waits for the turn to finish.
+    /// Posts one operator message to `desk`. A desk with a room answers
+    /// through its episode, so this returns as soon as the message is
+    /// journaled; a desk of one answers in the response.
     async fn say(&self, desk: &str, text: &str) -> Value {
         let (status, body) = self
             .post(
@@ -466,1250 +465,996 @@ impl Client {
 // Reading the journal back
 // ---------------------------------------------------------------------------
 
-/// Every `AgentReply` on `chat`, as `(seq, author, text)` in journal order.
-async fn replies(runtime: &Arc<CompanyRuntime>, chat: &str) -> Vec<(u64, String, String)> {
-    let rows = runtime
+async fn journal(runtime: &Arc<CompanyRuntime>) -> Vec<StoredEvent> {
+    runtime
         .events()
-        .read_from(runtime.id(), EventSeq::new(0), 10_000)
+        .read_from(runtime.id(), EventSeq::new(0), 100_000)
         .await
-        .expect("the journal reads back");
-    rows.into_iter()
-        .filter_map(|stored| match stored.event {
+        .expect("the journal reads back")
+}
+
+/// Polls the journal until `done` holds, or fails after `timeout`.
+async fn wait_for(
+    runtime: &Arc<CompanyRuntime>,
+    what: &str,
+    timeout: Duration,
+    done: impl Fn(&[StoredEvent]) -> bool,
+) -> Vec<StoredEvent> {
+    let started = Instant::now();
+    loop {
+        let rows = journal(runtime).await;
+        if done(&rows) {
+            return rows;
+        }
+        assert!(
+            started.elapsed() < timeout,
+            "timed out waiting for {what}; journal kinds: {:?}",
+            rows.iter().map(|row| row.event.kind()).collect::<Vec<_>>()
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Every `EpisodeCompleted`, as `(episode_id, chat_id, reason, rounds)`.
+fn completions(rows: &[StoredEvent]) -> Vec<(String, String, EpisodeReason, u32)> {
+    rows.iter()
+        .filter_map(|row| match &row.event {
+            CompanyEvent::EpisodeCompleted {
+                episode_id,
+                chat_id,
+                reason,
+                rounds,
+                ..
+            } => Some((episode_id.clone(), chat_id.clone(), *reason, *rounds)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `n` episodes have completed, and no seat bracket is still open.
+fn completed(n: usize) -> impl Fn(&[StoredEvent]) -> bool {
+    move |rows| {
+        completions(rows).len() >= n && {
+            let report = opencompany::hive::measure::measure_rows(
+                &CompanyId::new("x"),
+                EventSeq::new(0),
+                rows,
+            );
+            report.open_turns == 0
+        }
+    }
+}
+
+/// One journaled reply.
+#[derive(Clone, Debug)]
+struct ReplyRow {
+    seq: u64,
+    agent: String,
+    text: String,
+    audience: Vec<String>,
+    kind: Option<UtteranceKind>,
+    to: Vec<String>,
+    episode: Option<String>,
+}
+
+fn replies(rows: &[StoredEvent], chat: &str) -> Vec<ReplyRow> {
+    rows.iter()
+        .filter_map(|row| match &row.event {
             CompanyEvent::AgentReply {
                 chat_id,
                 agent_id,
                 text,
+                audience,
+                episode,
                 ..
-            } if chat_id == chat => Some((stored.seq.value(), agent_id, text)),
+            } if chat_id == chat => Some(ReplyRow {
+                seq: row.seq.value(),
+                agent: agent_id.clone(),
+                text: text.clone(),
+                audience: audience.clone(),
+                kind: episode.as_ref().map(|episode| episode.kind),
+                to: episode
+                    .as_ref()
+                    .map(|episode| episode.to.clone())
+                    .unwrap_or_default(),
+                episode: episode.as_ref().map(|episode| episode.id.clone()),
+            }),
             _ => None,
         })
         .collect()
 }
 
-/// The episode's own turns: every desk reply authored by a seated member.
-fn turns(rows: &[(u64, String, String)]) -> Vec<(String, String)> {
+/// Every `RoundStarted` on `chat`, as `(revision, seats)`.
+fn rounds(rows: &[StoredEvent], chat: &str) -> Vec<(u64, Vec<String>)> {
     rows.iter()
-        .filter(|(_, author, _)| [THEORIST, PROGRAMMER, VERIFIER].contains(&author.as_str()))
-        .map(|(_, author, text)| (author.clone(), text.clone()))
+        .filter_map(|row| match &row.event {
+            CompanyEvent::RoundStarted {
+                chat_id,
+                revision,
+                agent_ids,
+                ..
+            } if chat_id == chat => Some((*revision, agent_ids.clone())),
+            _ => None,
+        })
         .collect()
 }
 
-/// The closing `hive-report` rows, in order.
-fn reports(rows: &[(u64, String, String)]) -> Vec<String> {
-    rows.iter()
-        .filter(|(_, author, _)| author == HIVE_REPORT_AUTHOR)
-        .map(|(_, _, text)| text.clone())
-        .collect()
+/// The coordination report over the company's whole journal — what
+/// `opencompany measure --company <id>` prints.
+async fn report(runtime: &Arc<CompanyRuntime>) -> Report {
+    measure(runtime.events().as_ref(), runtime.id(), EventSeq::new(0))
+        .await
+        .expect("the journal measures")
 }
 
+/// A generous bound: every seat turn here is a couple of loopback calls.
+const EPISODE: Duration = Duration::from_secs(120);
+
 // ---------------------------------------------------------------------------
-// 1 + 2: deliberation converges through the fold, and attribution holds
+// 1: a two-member desk completes in two rounds
 // ---------------------------------------------------------------------------
-
-/// The topic the room settles on in the convergence tests.
-const TOPIC: &str = "answer42";
-
-/// The convergence script.
-///
-/// It is a state machine over what each speaker can *see*, not a queue: the
-/// theorist opens an option, and a peer backs it only once it can read the
-/// proposal's sequence number out of the transcript it was handed. A queue
-/// would pass whatever the prompt said; this cannot.
-fn converging_script() -> Responder {
-    Arc::new(|ask: &Ask| {
-        let ask = HiveAsk::of(ask);
-        let ask = &ask;
-        let propose = format!("!propose #{TOPIC} The closed form of the recurrence is 42.");
-        // A citation is only available once the proposal is visible. In the
-        // blind round it is not, which is exactly what the blind round means.
-        let grounds = ask.seq_of(&format!("!propose #{TOPIC}"));
-        let line = match (ask.who(), grounds) {
-            (THEORIST, None) => propose,
-            (who, None) => {
-                format!("!question {who} needs the opening position before it can back anything.")
-            }
-            (who, Some(seq)) if ask.prompt.contains("The room has reached quorum") => {
-                format!("!commit #{TOPIC} ^{seq} {who} records the room's decision.")
-            }
-            (THEORIST, Some(seq)) => format!(
-                "!evidence #{TOPIC} ^{seq} theorist checked base cases 1..5 and the recurrence \
-                 closes at 42 for each."
-            ),
-            (who, Some(seq)) if !ask.i_said("!support") => {
-                format!("!support #{TOPIC} ^{seq} {who} checked the derivation and it holds.")
-            }
-            (who, Some(_)) => {
-                format!("!question {who} has nothing further until somebody else moves.")
-            }
-        };
-        Reply::Say(line)
-    })
-}
-
-/// A desk of three that must all back a topic with grounds before it carries.
-const UNANIMOUS: &str = "{ enabled = true, turn_budget = 12, quorum = 3, blind_round = true }";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn one_agent_uses_speech_to_coordinate_multiple_dm_sessions_without_cards() {
-    let script: Responder = Arc::new(|ask: &Ask| {
-        let ask = HiveAsk::of(ask);
-        let ask = &ask;
-        let user = ask.last_user_text();
-        if user.contains("Coordinate the launch") {
-            return match ask.tool_outputs.len() {
-                0 => Reply::Call {
-                    tool: "desk_dm",
-                    args: json!({
-                        "to": [THEORIST],
-                        "message": "Check the launch argument and reply here."
-                    }),
-                },
-                1 => Reply::Call {
-                    tool: "desk_dm",
-                    args: json!({
-                        "to": [PROGRAMMER],
-                        "message": "Check the launch implementation and reply here."
-                    }),
-                },
-                2 => Reply::Call {
-                    tool: "desk_post",
-                    args: json!({ "message": "I asked both specialists." }),
-                },
-                _ => Reply::Say("done".to_string()),
-            };
-        }
-        if user.contains("Check the launch argument")
-            || user.contains("Check the launch implementation")
-        {
-            if ask.pending_tool.is_some() {
-                return Reply::Say("done".to_string());
-            }
-            return Reply::Call {
-                tool: "desk_post",
-                args: json!({ "message": "Checked and ready." }),
-            };
-        }
-        if ask.pending_tool.is_some() {
-            return Reply::Say("done".to_string());
-        }
-        Reply::Call {
-            tool: "desk_post",
-            args: json!({ "message": "Acknowledged." }),
-        }
-    });
-    let (base_url, _script) = spawn_script(script).await;
+async fn a_two_member_desk_completes_in_two_rounds() {
     let home = tempfile::tempdir().unwrap();
-    let (address, runtime) = boot(home.path(), &base_url, UNANIMOUS, None).await;
+    let (base_url, script) = spawn_script_with_latency(
+        seat_script("Noted.", post_then_complete),
+        Duration::from_millis(150),
+    )
+    .await;
+    let (address, runtime) = boot_lab(home.path(), &base_url).await;
     let client = Client::new(address);
-    client.sign_in().await;
+    client.sign_in(ADMIN).await;
 
-    let response = client.say(SOLO_DESK, "Coordinate the launch").await;
-    assert!(response["responses"].is_array(), "{response}");
-
-    for recipient in [THEORIST, PROGRAMMER] {
-        let conversation = opencompany::hive::referral::pair_conversation("greeter", recipient);
-        let dm = replies(&runtime, &conversation).await;
-        assert!(
-            dm.iter().any(|(_, author, _)| author == "greeter"),
-            "the outbound DM must be in the private {conversation} transcript: {dm:?}"
-        );
-        assert!(
-            dm.iter()
-                .any(|(_, author, text)| author == recipient && text == "Checked and ready."),
-            "the recipient's tool-call reply must return to the same DM: {dm:?}"
-        );
-    }
-    let cards = runtime.tasks().list(runtime.id()).await.unwrap();
+    let accepted = client
+        .say(ENGINEERING, "Plan the staging rollout for the new checkout.")
+        .await;
     assert!(
-        cards.is_empty(),
-        "conversation alone must create no task: {cards:?}"
+        accepted["responses"]
+            .as_array()
+            .is_some_and(Vec::is_empty),
+        "a room answers through its episode, not in the response: {accepted}"
     );
 
-    // The same greeter now handles its private chat as a second conversation;
-    // its per-agent session remains one continuous cross-channel session.
-    let _ = client
-        .say("dm:greeter", "What did the specialists say?")
-        .await;
-    let rows = runtime
-        .events()
-        .read_from(runtime.id(), EventSeq::new(0), 10_000)
-        .await
-        .unwrap();
-    let greeter_chats = rows
+    let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
+
+    let opened: Vec<(String, Vec<String>, Router)> = rows
         .iter()
         .filter_map(|row| match &row.event {
-            CompanyEvent::AgentReply {
-                agent_id, chat_id, ..
-            } if agent_id == "greeter" => Some(chat_id.as_str()),
+            CompanyEvent::EpisodeOpened {
+                chat_id,
+                participants,
+                plan,
+                ..
+            } => Some((chat_id.clone(), participants.clone(), plan.router())),
             _ => None,
         })
-        .collect::<std::collections::HashSet<_>>();
-    assert!(greeter_chats.contains(SOLO_DESK), "{greeter_chats:?}");
-    assert!(greeter_chats.contains("dm:greeter"), "{greeter_chats:?}");
+        .collect();
+    assert_eq!(
+        opened,
+        vec![(
+            ENGINEERING.to_string(),
+            vec![ENGINEER.to_string(), CEO.to_string()],
+            Router::Fallback
+        )],
+        "no Jev: the opening plan is the desk in order, up to the round width"
+    );
+    assert_eq!(
+        rounds(&rows, ENGINEERING),
+        vec![
+            (0, vec![ENGINEER.to_string(), CEO.to_string()]),
+            (2, vec![ENGINEER.to_string(), CEO.to_string()]),
+        ],
+        "two rounds of both seats; the revision counts committed utterances"
+    );
+    let done = completions(&rows);
+    assert_eq!(done.len(), 1, "{done:?}");
+    assert_eq!(done[0].1, ENGINEERING);
+    assert_eq!(done[0].2, EpisodeReason::CompleteEpisode);
+    assert_eq!(done[0].3, 2);
+
+    let desk = replies(&rows, ENGINEERING);
+    let kinds: Vec<(String, Option<UtteranceKind>)> = desk
+        .iter()
+        .map(|row| (row.agent.clone(), row.kind))
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            (ENGINEER.to_string(), Some(UtteranceKind::Post)),
+            (CEO.to_string(), Some(UtteranceKind::Post)),
+            (ENGINEER.to_string(), Some(UtteranceKind::CompleteEpisode)),
+            (CEO.to_string(), Some(UtteranceKind::CompleteEpisode)),
+        ],
+        "one reply per seat per round, in desk order: {desk:?}"
+    );
+    assert!(
+        desk.iter().all(|row| row.episode == Some(done[0].0.clone())),
+        "every row names the episode: {desk:?}"
+    );
+    assert!(
+        desk.iter().all(|row| row.text.contains("by @")),
+        "the row text is the tool's `message`, verbatim: {desk:?}"
+    );
+
+    // The seats saw the sentinel with the round's revision, and were handed
+    // the desk delta on their second turn.
+    let seats: Vec<Seat> = script.asks().iter().filter_map(seat_of).collect();
+    assert!(
+        seats.iter().any(|seat| seat.revision == 2 && seat.stage == 1),
+        "the second round's sentinel reads round 2: {:?}",
+        seats
+            .iter()
+            .map(|seat| (seat.speaker.clone(), seat.revision, seat.stage))
+            .collect::<Vec<_>>()
+    );
+    let second = seats
+        .iter()
+        .find(|seat| seat.speaker == CEO && seat.revision == 2 && seat.turn_tools.is_empty())
+        .expect("the CEO's second turn");
+    assert!(
+        second.prompt.contains("@engineer (^"),
+        "the second turn is handed the engineer's post as an attributed delta: {}",
+        second.prompt
+    );
+
+    let measured = report(&runtime).await;
+    assert_eq!(measured.episodes_completed, 1);
+    assert_eq!(measured.same_agent_overlaps, 0);
+    assert!(
+        measured.max_concurrent_turns >= 2,
+        "both seats of a round run at once: {measured:?}"
+    );
+    assert!(
+        script.peak_in_flight() >= 2,
+        "the model itself saw two completions in flight: {}",
+        script.peak_in_flight()
+    );
+    assert_eq!(measured.utterance_kinds["post"], 2);
+    assert_eq!(measured.utterance_kinds["complete_episode"], 2);
+
+    // The console's episode list agrees with the journal.
+    let (status, episodes) = client.get("/api/v1/company/episodes").await;
+    assert_eq!(status, 200, "{episodes}");
+    assert_eq!(episodes[0]["id"], done[0].0);
+    assert_eq!(episodes[0]["status"], "completed");
+    assert_eq!(episodes[0]["reason"], "complete_episode");
+
+    // Every seat turn is an attempt on `GET /runs`, with its episode.
+    let (status, runs) = client.get("/api/v1/company/runs?limit=50").await;
+    assert_eq!(status, 200, "{runs}");
+    let seat_runs: Vec<&Value> = runs
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|run| run["episodeId"] == done[0].0)
+        .collect();
+    assert_eq!(seat_runs.len(), 4, "{runs}");
+    assert!(
+        seat_runs
+            .iter()
+            .all(|run| run["status"] == "succeeded" && run["roundRevision"].is_u64()),
+        "{seat_runs:?}"
+    );
 }
 
-/// **Deliberation converges through the fold.**
-///
-/// One operator message, three teammates, and an outcome the room can name.
-#[tokio::test]
-#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
-async fn a_desk_deliberates_and_converges_through_the_fold() {
+// ---------------------------------------------------------------------------
+// 2: a broadcast without Jev falls back to the desk lead
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_broadcast_without_jev_falls_back_deterministically() {
     let home = tempfile::tempdir().unwrap();
-    let (base_url, script) = spawn_script(converging_script()).await;
-    let (address, runtime) = boot(home.path(), &base_url, UNANIMOUS, None).await;
+    let (base_url, _script) = spawn_script_with_latency(
+        seat_script("Noted.", |seat| {
+            // The CEO hands the work on; the engineer just finishes.
+            if seat.speaker == CEO && seat.stage == 1 {
+                return speech(
+                    "broadcast",
+                    json!({ "message": "Whoever is best placed: size the rollout." }),
+                );
+            }
+            post_then_complete(seat)
+        }),
+        Duration::from_millis(50),
+    )
+    .await;
+    let (address, runtime) = boot_lab(home.path(), &base_url).await;
     let client = Client::new(address);
-    client.sign_in().await;
+    client.sign_in(ADMIN).await;
 
-    let body = client
-        .say(DESK, "Settle the closed form of the recurrence.")
-        .await;
+    client.say(ENGINEERING, "Size the rollout.").await;
+    let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
 
-    let rows = replies(&runtime, DESK).await;
-    let turns = turns(&rows);
-    assert!(
-        turns.len() >= 3,
-        "a room of three takes at least one turn each: {rows:?}"
-    );
-    // Every deliberation row is authored by the teammate that took the turn,
-    // and carries the ONE line the room counts — never a paragraph.
-    for (author, text) in &turns {
-        assert!(
-            [THEORIST, PROGRAMMER, VERIFIER].contains(&author.as_str()),
-            "{rows:?}"
-        );
-        assert!(text.starts_with('!'), "not a marker line: {text}");
-        assert!(!text.contains('\n'), "more than one line: {text}");
-    }
-
-    // One closing row, under the reserved author, naming the topic and every
-    // member whose grounded support carried it.
-    let reports = reports(&rows);
-    assert_eq!(reports.len(), 1, "exactly one closing row: {rows:?}");
-    let report = &reports[0];
-    assert!(report.contains(&format!("#{TOPIC}")), "{report}");
-    assert!(report.contains("settled"), "{report}");
-    // The decision itself, not only the label the room filed it under: the
-    // report leads with what `!propose` actually said, so an operator reading
-    // it learns the answer without going back to the transcript for it.
-    assert!(
-        report.contains("The closed form of the recurrence is 42."),
-        "the report names the label but not the decision: {report}"
-    );
-    for member in [THEORIST, PROGRAMMER, VERIFIER] {
-        assert!(
-            report.contains(member),
-            "the room needed all three to carry #{TOPIC}, so all three are named: {report}"
-        );
-    }
-
-    // The chat POST's own response — what a synchronous chat-API caller and
-    // `emit_cycle_webhooks` both read — must carry the hive answer too. Before
-    // this, a hive desk journaled everything directly and pushed nothing into
-    // `CycleReport.responses`, so a synchronous caller saw an empty body and
-    // `emit_cycle_webhooks` never fired `work.completed`, even though the desk
-    // had just answered at length.
-    let responses = body["responses"]
-        .as_array()
-        .expect("the chat POST returns a responses array");
-    assert_eq!(
-        responses.len(),
-        1,
-        "the hive answer must reach the response body: {body}"
-    );
-    assert_eq!(
-        responses[0]["text"].as_str(),
-        Some(report.as_str()),
-        "the response carries the same closing report the journal holds: {body}"
-    );
-
-    // And it must not be a SECOND journal write: the response's durable id
-    // has to be the exact sequence the episode's own closing report was
-    // already journaled under, not a fresh one minted by the generic
-    // journal-on-return path every other chat reply goes through.
-    let report_seq = rows
+    let routed: Vec<(String, u64, Router, Vec<String>, u64)> = rows
         .iter()
-        .find(|(_, author, _)| author == HIVE_REPORT_AUTHOR)
-        .map(|(seq, _, _)| *seq)
-        .expect("the episode journals its own closing report");
-    let message_id: u64 = responses[0]["messageId"]
-        .as_str()
-        .expect("the response carries its durable id")
-        .parse()
-        .expect("the durable id is a sequence number");
-    assert_eq!(
-        message_id, report_seq,
-        "the response must carry the report's own sequence, not journal it a second time \
-         under a different one: {body}"
-    );
-
-    // No single-responder bubble: the desk's only authored rows are the
-    // episode's own turns and its report. In particular the orchestrator never
-    // answered on top of the room. Any author that is neither the report nor
-    // a seated member is a stray, whoever it is — narrowing this to only
-    // `ceo`/`greeter` would let a regression that journals under some OTHER
-    // non-member identity slip past silently.
-    let strays: Vec<_> = rows
-        .iter()
-        .filter(|(_, author, _)| {
-            author != HIVE_REPORT_AUTHOR
-                && ![THEORIST, PROGRAMMER, VERIFIER].contains(&author.as_str())
+        .filter_map(|row| match &row.event {
+            CompanyEvent::BroadcastRouted {
+                agent_id,
+                revision,
+                router,
+                plan,
+                message_seq,
+                ..
+            } => Some((
+                agent_id.clone(),
+                *revision,
+                *router,
+                plan.agent_ids(),
+                *message_seq,
+            )),
+            _ => None,
         })
         .collect();
-    assert!(
-        strays.is_empty(),
-        "a second responder answered too: {strays:?}"
+    assert_eq!(routed.len(), 1, "{routed:?}");
+    let (by, revision, router, targets, message_seq) = &routed[0];
+    assert_eq!(by, CEO);
+    assert_eq!(*revision, 2);
+    assert_eq!(*router, Router::Fallback, "no TinyHumans key, no Jev");
+    assert_eq!(
+        targets,
+        &vec![ENGINEER.to_string()],
+        "the deterministic fallback is the desk lead"
     );
+    let desk = replies(&rows, ENGINEERING);
+    let broadcast = desk
+        .iter()
+        .find(|row| row.seq == *message_seq)
+        .expect("the routed row is the broadcast's reply");
+    assert_eq!(broadcast.kind, Some(UtteranceKind::Broadcast));
+    assert_eq!(broadcast.agent, CEO);
 
-    // One model call per turn, and the calls are the turns: the speakers the
-    // endpoint was asked for are exactly the authors the journal recorded, in
-    // order.
-    let openers = turn_openers(&script);
-    let asked: Vec<String> = openers.iter().map(|ask| ask.who().to_owned()).collect();
-    let journaled: Vec<String> = turns.iter().map(|(author, _)| author.clone()).collect();
-    assert_eq!(
-        asked, journaled,
-        "one model call per journaled turn, in the same order"
+    // The lead is reopened: a later round runs the engineer again, and the
+    // engineer's next prompt says who handed it what.
+    let later: Vec<&(u64, Vec<String>)> = rounds(&rows, ENGINEERING)
+        .iter()
+        .filter(|(rev, _)| *rev > 2)
+        .cloned()
+        .collect::<Vec<_>>()
+        .iter()
+        .map(|round| Box::leak(Box::new(round.clone())) as &(u64, Vec<String>))
+        .collect();
+    assert!(
+        later
+            .iter()
+            .any(|(_, seats)| seats.contains(&ENGINEER.to_string())),
+        "the broadcast reopens the lead: {:?}",
+        rounds(&rows, ENGINEERING)
     );
-    assert_eq!(
-        hive_asks(&script).len(),
-        openers.len(),
-        "no hive turn needed a second model call: nothing on this path uses a tool"
+    let reopened = _script
+        .asks()
+        .iter()
+        .filter_map(seat_of)
+        .find(|seat| seat.speaker == ENGINEER && seat.revision > 2 && seat.turn_tools.is_empty())
+        .expect("the engineer's reopened turn");
+    assert!(
+        reopened.prompt.contains("@ceo handed you this by broadcast"),
+        "{}",
+        reopened.prompt
     );
+    let done = completions(&rows);
+    assert_eq!(done[0].2, EpisodeReason::CompleteEpisode, "{done:?}");
+    let measured = report(&runtime).await;
+    assert_eq!(measured.broadcasts, 1);
+    assert_eq!(measured.routers["fallback"], 1);
+    assert!(measured.distinct_pairs.contains("ceo→engineer"), "{measured:?}");
 }
 
-/// **Attribution and the blind round.**
-///
-/// Asserted from the captured request bodies, which is the only place the
-/// claim actually lives: the journal cannot tell you what a member was *shown*.
-#[tokio::test]
-#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
-async fn the_opening_round_is_blind_and_every_later_line_is_attributed() {
+// ---------------------------------------------------------------------------
+// 3: a dm schedules its recipient and is journaled with its audience
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dm_schedules_its_recipient_and_is_journaled_with_its_audience() {
     let home = tempfile::tempdir().unwrap();
-    let (base_url, script) = spawn_script(converging_script()).await;
-    let (address, _runtime) = boot(home.path(), &base_url, UNANIMOUS, None).await;
-    let client = Client::new(address);
-    client.sign_in().await;
-
-    client
-        .say(DESK, "Settle the closed form of the recurrence.")
-        .await;
-
-    let openers = turn_openers(&script);
-    assert!(
-        openers.len() >= 4,
-        "a blind round plus at least one open turn"
-    );
-
-    let blind: Vec<&HiveAsk> = openers.iter().filter(|ask| ask.blind()).collect();
-    assert_eq!(
-        blind.len(),
-        3,
-        "the opening round is one blind turn per member"
-    );
-    for ask in &blind {
-        let me = ask.who().to_owned();
-        let peers: Vec<_> = ask
-            .transcript()
-            .into_iter()
-            .filter(|(_, author, _)| {
-                author != &me && [THEORIST, PROGRAMMER, VERIFIER].contains(&author.as_str())
-            })
-            .collect();
-        assert!(
-            peers.is_empty(),
-            "a peer's position leaked into a blind turn for @{me}: {peers:?}"
-        );
-        // And not through any other door either. The turn's WHOLE request is
-        // checked, not just the episode prompt: the memory loop prepends a
-        // "## Relevant prior work" preamble to every turn's message, and a
-        // stored outcome carries the storing turn's own prompt and reply. A
-        // peer's opening position arriving that way would defeat the blind
-        // round without ever appearing in the transcript block.
-        let whole = ask
-            .messages
-            .iter()
-            .filter_map(|message| message.get("content").and_then(Value::as_str))
-            .collect::<Vec<_>>()
-            .join("\n");
-        for peer in [THEORIST, PROGRAMMER, VERIFIER] {
-            if peer == me {
-                continue;
-            }
-            assert!(
-                !whole.contains(&format!("!question {peer}")),
-                "@{peer}'s line reached blind turn @{me} outside the transcript"
-            );
-        }
-        if me != THEORIST {
-            assert!(
-                !whole.contains(&format!("!propose #{TOPIC}")),
-                "the theorist's opening position reached blind turn @{me}"
-            );
-        }
-    }
-
-    // Later turns see the room, attributed by id, with the sequence that makes
-    // the line citable.
-    let seeing: Vec<&HiveAsk> = openers.iter().filter(|ask| !ask.blind()).collect();
-    assert!(
-        !seeing.is_empty(),
-        "the blind round is not the whole episode"
-    );
-    let mut saw_attributed_peer = false;
-    let mut saw_own_line = false;
-    for ask in &seeing {
-        let me = ask.who().to_owned();
-        for (seq, author, content) in ask.transcript() {
-            if author == me || !["theorist", "programmer", "verifier"].contains(&author.as_str()) {
-                continue;
-            }
-            saw_attributed_peer = true;
-            // Rendered exactly as `[seq] <peer id>: …`.
-            assert!(
-                ask.prompt.contains(&format!("[{seq}] {author}: {content}")),
-                "a peer's line is not attributed the way the citation grammar needs: {content}"
-            );
-            // And never presented as this viewer's own words — not in the
-            // assistant role, and not under the "you already said this" block.
-            for message in &ask.messages {
-                if message.get("role").and_then(Value::as_str) == Some("assistant")
-                    && let Some(text) = message.get("content").and_then(Value::as_str)
-                {
-                    assert!(
-                        !text.contains(&content),
-                        "@{me} was handed @{author}'s line as its own assistant turn: {text}"
-                    );
-                }
-            }
-            if let Some((_, own)) = ask.prompt.split_once(ALREADY_SAID) {
-                let own = own.split(TRANSCRIPT_HEADING).next().unwrap_or(own);
-                assert!(
-                    !own.contains(&content),
-                    "@{author}'s line was rendered to @{me} as something @{me} had said"
+    let (base_url, _script) = spawn_script_with_latency(
+        seat_script("Noted.", |seat| {
+            if seat.speaker == ENGINEER && seat.stage == 1 {
+                return speech(
+                    "dm",
+                    json!({ "to": [CEO], "message": "Between us: the rollout needs a freeze." }),
                 );
             }
-        }
-        // A member that has spoken is shown its own last line, so it does not
-        // restate it.
-        if let Some((_, mine)) = ask
-            .transcript()
-            .into_iter()
-            .rev()
-            .find_map(|(_, a, c)| (a == me).then_some((a, c)))
-        {
-            saw_own_line = true;
-            let block = ask
-                .prompt
-                .split_once(ALREADY_SAID)
-                .map(|(_, rest)| {
-                    rest.split(TRANSCRIPT_HEADING)
-                        .next()
-                        .unwrap_or(rest)
-                        .to_owned()
-                })
-                .unwrap_or_default();
-            assert!(
-                block.contains(&mine),
-                "@{me} was not shown its own last line: {block}"
-            );
-        }
-    }
-    assert!(saw_attributed_peer, "no open turn ever saw a peer");
-    assert!(saw_own_line, "no open turn was shown its own previous line");
-}
-
-// ---------------------------------------------------------------------------
-// 3: cross-inhibition
-// ---------------------------------------------------------------------------
-
-const WRONG: &str = "wrongpath";
-const RIGHT: &str = "rightpath";
-
-/// A desk that reaches a decision on two grounded supporters and sees the whole
-/// room from the first turn.
-///
-/// The blind round is off here on purpose: cross-inhibition needs a member to
-/// back a *specific message* before another member can object to it, and a
-/// blind opening round is exactly the window in which no such message is
-/// visible. The blind round has its own test.
-const OPEN_PAIR: &str = "{ enabled = true, turn_budget = 12, quorum = 2, blind_round = false }";
-
-/// **Cross-inhibition, end to end.**
-///
-/// The theorist opens the wrong option, the programmer backs it — which is
-/// enough to carry it — the verifier objects to the programmer's *message*, and
-/// the option the room finally records is the other one, with the objected
-/// author nowhere in its supporters.
-#[tokio::test]
-#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
-async fn an_objection_silences_an_advocate_and_a_second_topic_carries() {
-    let home = tempfile::tempdir().unwrap();
-    let responder: Responder = Arc::new(|ask: &Ask| {
-        let ask = HiveAsk::of(ask);
-        let ask = &ask;
-        let wrong = ask.seq_of(&format!("!propose #{WRONG}"));
-        let backing = ask.seq_by(PROGRAMMER, &format!("!support #{WRONG}"));
-        let right = ask.seq_of(&format!("!propose #{RIGHT}"));
-        let line = match ask.who() {
-            // Opens the wrong option, then — once it has been objected to —
-            // opens the one the room actually records.
-            THEORIST => match (wrong, right) {
-                (None, _) => format!("!propose #{WRONG} Brute-force every case at run time."),
-                (Some(_), None) if backing.is_some() && ask.i_said("!propose") => {
-                    format!("!propose #{RIGHT} Precompute the table once and look it up.")
-                }
-                (Some(seq), None) => format!(
-                    "!evidence #{WRONG} ^{seq} theorist has nothing new while the floor is open."
-                ),
-                (_, Some(seq)) => {
-                    format!("!commit #{RIGHT} ^{seq} theorist records the option that carried.")
-                }
-            },
-            // Backs the wrong option once, and never backs anything again —
-            // its support is what the objection takes away.
-            PROGRAMMER => match wrong {
-                Some(seq) if !ask.i_said("!support") => format!(
-                    "!support #{WRONG} ^{seq} programmer measured it and brute force is fine."
-                ),
-                _ => "!question programmer is standing aside until the objection is settled."
-                    .to_owned(),
-            },
-            // Objects to the programmer's backing message, then backs the
-            // option that replaces it.
-            VERIFIER => match (backing, wrong, right) {
-                (Some(at), Some(seq), _) if !ask.i_said("!object") => format!(
-                    "!object >{at} ^{seq} verifier ran it at n=10^6 and brute force times out."
-                ),
-                (_, _, Some(seq)) if !ask.i_said("!support") => format!(
-                    "!support #{RIGHT} ^{seq} verifier checked the precomputed table against the \
-                     brute force for n<=10^4."
-                ),
-                (_, _, Some(seq)) => {
-                    format!("!commit #{RIGHT} ^{seq} verifier records the option that carried.")
-                }
-                _ => "!question verifier is waiting for a position to weigh.".to_owned(),
-            },
-            _ => "!question nothing to add.".to_owned(),
-        };
-        Reply::Say(line)
-    });
-    let (base_url, _script) = spawn_script(responder).await;
-    let (address, runtime) = boot(home.path(), &base_url, OPEN_PAIR, None).await;
+            post_then_complete(seat)
+        }),
+        Duration::from_millis(50),
+    )
+    .await;
+    let (address, runtime) = boot_lab(home.path(), &base_url).await;
     let client = Client::new(address);
-    client.sign_in().await;
+    client.sign_in(ADMIN).await;
 
-    client
-        .say(DESK, "Pick the approach for the table lookup.")
-        .await;
+    client.say(ENGINEERING, "Decide on the freeze.").await;
+    let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
 
-    let rows = replies(&runtime, DESK).await;
-    let turns = turns(&rows);
-    // The objection is really in the transcript, naming a message rather than a
-    // person — that is what makes it cross-inhibition and not a downvote.
-    let objection = turns
+    let delivered: Vec<(String, Vec<String>, u64)> = rows
         .iter()
-        .find(|(_, text)| text.starts_with("!object"))
-        .unwrap_or_else(|| panic!("nobody objected: {rows:?}"));
-    assert_eq!(objection.0, VERIFIER);
-    assert!(
-        objection.1.contains(" >"),
-        "an objection names a message: {objection:?}"
-    );
-
-    let reports = reports(&rows);
-    assert_eq!(reports.len(), 1, "{rows:?}");
-    let report = &reports[0];
-    assert!(
-        report.contains(&format!("#{RIGHT}")),
-        "the room recorded the wrong topic: {report}"
-    );
-    assert!(
-        !report.contains(&format!("#{WRONG}")),
-        "the objected-to option still carried: {report}"
-    );
-    // The whole claim: the author whose backing was objected to is not counted
-    // among the supporters of what finally carried.
-    assert!(
-        !report.contains(PROGRAMMER),
-        "the silenced advocate is still named as a supporter: {report}"
-    );
-    assert!(report.contains(VERIFIER), "{report}");
-}
-
-// ---------------------------------------------------------------------------
-// 5: terminal outcomes are honest
-// ---------------------------------------------------------------------------
-
-/// **A room that settles on nothing says so.**
-#[tokio::test]
-#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
-async fn a_room_that_settles_on_nothing_reports_itself_exhausted() {
-    let home = tempfile::tempdir().unwrap();
-    let responder: Responder = Arc::new(|ask: &Ask| {
-        let ask = HiveAsk::of(ask);
-        let ask = &ask;
-        Reply::Say(format!(
-            "!question {} cannot answer this without the benchmark nobody has run.",
-            ask.who()
-        ))
-    });
-    let (base_url, _script) = spawn_script(responder).await;
-    let hive = "{ enabled = true, turn_budget = 3, quorum = 2, blind_round = true }";
-    let (address, runtime) = boot(home.path(), &base_url, hive, None).await;
-    let client = Client::new(address);
-    client.sign_in().await;
-
-    client.say(DESK, "Which sort should we ship?").await;
-
-    let rows = replies(&runtime, DESK).await;
+        .filter_map(|row| match &row.event {
+            CompanyEvent::DmDelivered {
+                from,
+                to,
+                message_seq,
+                ..
+            } => Some((from.clone(), to.clone(), *message_seq)),
+            _ => None,
+        })
+        .collect();
     assert_eq!(
-        turns(&rows).len(),
-        3,
-        "the budget is the bound and nothing else is: {rows:?}"
+        delivered,
+        vec![(ENGINEER.to_string(), vec![CEO.to_string()], delivered[0].2)],
+        "{delivered:?}"
     );
-    let reports = reports(&rows);
-    assert_eq!(reports.len(), 1, "{rows:?}");
-    assert_eq!(
-        reports[0], "The desk spent its 3-turn budget without reaching a decision.",
-        "the report says what happened rather than inventing a decision"
-    );
-}
-
-const ALPHA: &str = "alpha";
-const BETA: &str = "beta";
-
-/// **Two carrying topics and nobody to break the tie is a deadlock.**
-///
-/// Every member ends up backing one of the two, so there is no free dissenter
-/// left — which is the library's own condition for calling it terminal rather
-/// than giving the floor to whoever could still settle it.
-#[tokio::test]
-#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
-async fn two_carrying_topics_and_no_objection_deadlock() {
-    let home = tempfile::tempdir().unwrap();
-    let responder: Responder = Arc::new(|ask: &Ask| {
-        let ask = HiveAsk::of(ask);
-        let ask = &ask;
-        let alpha = ask.seq_of(&format!("!propose #{ALPHA}"));
-        let beta = ask.seq_of(&format!("!propose #{BETA}"));
-        let line = match (ask.who(), alpha, beta) {
-            // Each opens its own option in the blind round, then crosses over:
-            // the theorist backs the programmer's, and everybody else backs the
-            // theorist's. Nobody objects to anything.
-            (THEORIST, None, _) => format!("!propose #{ALPHA} Ship the streaming rewrite."),
-            (PROGRAMMER, _, None) => format!("!propose #{BETA} Ship the batch rewrite."),
-            (THEORIST, _, Some(seq)) if !ask.i_said("!support") => {
-                format!("!support #{BETA} ^{seq} theorist agrees batch is defensible too.")
-            }
-            (who, Some(seq), _) if who != THEORIST && !ask.i_said("!support") => {
-                format!("!support #{ALPHA} ^{seq} {who} agrees streaming is defensible too.")
-            }
-            (who, _, _) => format!("!question {who} has nothing further; the room is split."),
-        };
-        Reply::Say(line)
-    });
-    let (base_url, _script) = spawn_script(responder).await;
-    let hive = "{ enabled = true, turn_budget = 12, quorum = 2, blind_round = true }";
-    let (address, runtime) = boot(home.path(), &base_url, hive, None).await;
-    let client = Client::new(address);
-    client.sign_in().await;
-
-    client.say(DESK, "Streaming or batch?").await;
-
-    let rows = replies(&runtime, DESK).await;
-    let reports = reports(&rows);
-    assert_eq!(reports.len(), 1, "{rows:?}");
-    let report = &reports[0];
-    assert!(report.contains("deadlocked"), "{report}");
-    assert!(report.contains(&format!("#{ALPHA}")), "{report}");
-    assert!(report.contains(&format!("#{BETA}")), "{report}");
+    let desk = replies(&rows, ENGINEERING);
+    let dm = desk
+        .iter()
+        .find(|row| row.seq == delivered[0].2)
+        .expect("the delivered row is the dm's reply");
+    assert_eq!(dm.kind, Some(UtteranceKind::Dm));
+    assert_eq!(dm.audience, vec![CEO.to_string()], "journaled with its audience");
+    assert_eq!(dm.to, vec![CEO.to_string()], "and on the episode metadata");
     assert!(
-        report.contains("nobody was left to break the tie"),
-        "a deadlock is reported as a deadlock, not as a decision: {report}"
+        desk.iter()
+            .filter(|row| row.seq != dm.seq)
+            .all(|row| row.audience.is_empty()),
+        "every other row is for the whole desk: {desk:?}"
     );
-    // And escalated rather than merely stated. `Deadlocked` is returned only
-    // when every member has taken a side, so the room cannot break this itself
-    // and cannot even pick who to ask — one side would be choosing its own
-    // referee. That leaves the operator, and the report has to say so.
+
+    // The recipient is scheduled: a round after the dm runs the CEO.
+    let dm_round = rounds(&rows, ENGINEERING)
+        .iter()
+        .find(|(_, seats)| seats.contains(&ENGINEER.to_string()))
+        .map(|(rev, _)| *rev)
+        .unwrap();
     assert!(
-        report.contains("It needs your call"),
-        "a deadlock the room cannot break is put to the operator: {report}"
+        rounds(&rows, ENGINEERING)
+            .iter()
+            .any(|(rev, seats)| *rev > dm_round + 1 && seats.contains(&CEO.to_string())),
+        "{:?}",
+        rounds(&rows, ENGINEERING)
     );
+    let measured = report(&runtime).await;
+    assert_eq!(measured.dms, 1);
+    assert!(measured.distinct_pairs.contains("engineer→ceo"), "{measured:?}");
+    assert_eq!(completions(&rows)[0].2, EpisodeReason::CompleteEpisode);
+
+    // The history projection carries the audience and the episode too.
+    let (status, history) = client
+        .get(&format!("/api/v1/company/chat/history?desk={ENGINEERING}"))
+        .await;
+    assert_eq!(status, 200, "{history}");
+    let messages = history["messages"]
+        .as_array()
+        .or_else(|| history.as_array())
+        .expect("history rows");
+    let row = messages
+        .iter()
+        .find(|message| message["id"] == dm.seq.to_string())
+        .unwrap_or_else(|| panic!("the dm row is in history: {history}"));
+    assert_eq!(row["audience"], json!([CEO]));
+    assert_eq!(row["episode"]["kind"], "dm");
+    assert_eq!(row["episode"]["to"], json!([CEO]));
+    assert!(row.get("asideConversation").is_none());
 }
 
 // ---------------------------------------------------------------------------
-// 6: a desk of one is untouched
+// 4: a desk of one is one ordinary reply
 // ---------------------------------------------------------------------------
 
-/// **A one-member desk answers exactly as it did before.**
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_single_member_desk_answers_with_one_ordinary_turn() {
     let home = tempfile::tempdir().unwrap();
-    let responder: Responder = Arc::new(|ask: &Ask| {
-        let ask = HiveAsk::of(ask);
-        let ask = &ask;
-        assert!(
-            ask.speaker.is_none(),
-            "a desk of one must never be handed an episode prompt: {}",
-            ask.prompt
-        );
-        Reply::Say("Noted — the front desk has it.".to_owned())
-    });
-    let (base_url, _script) = spawn_script(responder).await;
-    let (address, runtime) = boot(home.path(), &base_url, UNANIMOUS, None).await;
+    let (base_url, script) = spawn_script_with_latency(
+        seat_script("Noted — the front desk has it.", |seat| {
+            panic!("a desk of one must never be handed a seat turn: {seat:?}")
+        }),
+        Duration::ZERO,
+    )
+    .await;
+    let (address, runtime) = boot_lab(home.path(), &base_url).await;
     let client = Client::new(address);
-    client.sign_in().await;
+    client.sign_in(ADMIN).await;
+
+    let body = client.say(FRONT, "Anything waiting at the front?").await;
+    assert_eq!(body["responses"].as_array().map(Vec::len), Some(1), "{body}");
+
+    let rows = journal(&runtime).await;
+    let desk = replies(&rows, FRONT);
+    assert_eq!(desk.len(), 1, "one ordinary reply: {desk:?}");
+    assert_eq!(desk[0].agent, GREETER);
+    assert_eq!(desk[0].kind, None, "no episode metadata on a plain reply");
+    assert!(
+        !rows.iter().any(|row| matches!(
+            &row.event,
+            CompanyEvent::EpisodeOpened { .. }
+                | CompanyEvent::RoundStarted { .. }
+                | CompanyEvent::RoundCommitted { .. }
+                | CompanyEvent::EpisodeCompleted { .. }
+        )),
+        "no episode frames: {:?}",
+        rows.iter().map(|row| row.event.kind()).collect::<Vec<_>>()
+    );
+    assert!(
+        script.asks().iter().all(|ask| seat_of(ask).is_none()),
+        "no sentinel reached the model"
+    );
+    assert_eq!(report(&runtime).await.episodes_opened, 0);
+}
+
+// ---------------------------------------------------------------------------
+// 5: a cross-desk referral crosses only the answer back
+// ---------------------------------------------------------------------------
+
+const QUESTION: &str = "Please ask #content for the release-note tagline.";
+const TAGLINE: &str = "Checkout, now with fewer steps.";
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_cross_desk_referral_crosses_only_the_answer_back() {
+    let home = tempfile::tempdir().unwrap();
+    let (base_url, script) = spawn_script_with_latency(
+        seat_script("Noted.", |seat| match (seat.desk.as_str(), seat.speaker.as_str(), seat.stage) {
+            (ENGINEERING, ENGINEER, 0) => post(format!("Rollout plan drafted. {QUESTION}")),
+            (CONTENT, WRITER, 0) => post("Drafting the tagline."),
+            (CONTENT, WRITER, _) => complete(format!("Tagline: {TAGLINE}")),
+            _ => post_then_complete(seat),
+        }),
+        Duration::from_millis(50),
+    )
+    .await;
+    let (address, runtime) = boot_lab(home.path(), &base_url).await;
+    let client = Client::new(address);
+    client.sign_in(ADMIN).await;
 
     client
-        .say(SOLO_DESK, "Anything waiting at the front?")
+        .say(ENGINEERING, "Plan the rollout and get the release note written.")
         .await;
+    // Both desks' episodes complete, and the answer has come home.
+    let rows = wait_for(&runtime, "both episodes and the answer", EPISODE, |rows| {
+        completed(2)(rows)
+            && replies(rows, ENGINEERING)
+                .iter()
+                .any(|row| row.agent == HIVE_REFERRAL_AUTHOR && row.text.contains(TAGLINE))
+    })
+    .await;
 
-    let rows = replies(&runtime, SOLO_DESK).await;
-    let authored: Vec<_> = rows
+    // The forward marker, and the return.
+    let markers: Vec<(String, String, bool, Option<String>, Option<String>)> = rows
         .iter()
-        .filter(|(_, author, _)| author == "greeter")
+        .filter_map(|row| match &row.event {
+            CompanyEvent::ReferralEnqueued {
+                from_desk,
+                to_desk,
+                returning,
+                episode_id,
+                to_episode_id,
+                ..
+            } => Some((
+                from_desk.clone(),
+                to_desk.clone(),
+                *returning,
+                episode_id.clone(),
+                to_episode_id.clone(),
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(markers.len(), 2, "one crossing, one return: {markers:?}");
+    assert_eq!(
+        (markers[0].0.as_str(), markers[0].1.as_str(), markers[0].2),
+        (ENGINEERING, CONTENT, false)
+    );
+    assert_eq!(
+        (markers[1].0.as_str(), markers[1].1.as_str(), markers[1].2),
+        (CONTENT, ENGINEERING, true)
+    );
+    let done = completions(&rows);
+    let engineering_episode = done
+        .iter()
+        .find(|(_, chat, _, _)| chat == ENGINEERING)
+        .map(|(id, ..)| id.clone())
+        .expect("the engineering episode completed");
+    let content_episode = done
+        .iter()
+        .find(|(_, chat, _, _)| chat == CONTENT)
+        .map(|(id, ..)| id.clone())
+        .expect("the content episode completed");
+    assert_eq!(markers[0].3.as_deref(), Some(engineering_episode.as_str()));
+    assert_eq!(markers[1].3.as_deref(), Some(content_episode.as_str()));
+    assert_eq!(markers[1].4.as_deref(), Some(engineering_episode.as_str()));
+    let hops: Vec<(String, u32)> = rows
+        .iter()
+        .filter_map(|row| match &row.event {
+            CompanyEvent::EpisodeOpened { chat_id, hop, .. } => Some((chat_id.clone(), *hop)),
+            _ => None,
+        })
         .collect();
     assert_eq!(
-        authored.len(),
-        1,
-        "a desk of one answers with one ordinary turn: {rows:?}"
+        hops,
+        vec![(ENGINEERING.to_string(), 0), (CONTENT.to_string(), 1)]
     );
+
+    // Only the question crossed, under the referral author; only the answer
+    // came home, under the same author. No seat spoke on the other desk.
+    let content = replies(&rows, CONTENT);
+    let seed = content.first().expect("the far desk starts with the seed");
+    assert_eq!(seed.agent, HIVE_REFERRAL_AUTHOR);
+    assert!(seed.text.contains(QUESTION), "{}", seed.text);
     assert!(
-        reports(&rows).is_empty(),
-        "no room opened, so no room reported: {rows:?}"
+        content
+            .iter()
+            .all(|row| [WRITER, CEO, HIVE_REFERRAL_AUTHOR].contains(&row.agent.as_str())),
+        "{content:?}"
     );
+    let engineering = replies(&rows, ENGINEERING);
+    assert!(
+        engineering
+            .iter()
+            .all(|row| [ENGINEER, CEO, HIVE_REFERRAL_AUTHOR].contains(&row.agent.as_str())),
+        "{engineering:?}"
+    );
+    let answer = engineering
+        .iter()
+        .find(|row| row.agent == HIVE_REFERRAL_AUTHOR)
+        .unwrap();
+    assert!(answer.text.contains(TAGLINE), "{}", answer.text);
+    assert!(
+        !answer.text.contains("Drafting the tagline"),
+        "the far desk's working rows stay there: {}",
+        answer.text
+    );
+
+    // The asker was reopened with the answer.
+    let reopened = script
+        .asks()
+        .iter()
+        .filter_map(seat_of)
+        .find(|seat| seat.speaker == ENGINEER && seat.prompt.contains("answered the question you put to it"))
+        .expect("the engineer's reopened turn");
+    assert!(reopened.prompt.contains(TAGLINE), "{}", reopened.prompt);
+
+    let measured = report(&runtime).await;
+    assert_eq!(measured.cross_desk_referrals, 1);
+    assert_eq!(measured.referral_pairs, vec!["engineering→content"]);
+    assert_eq!(measured.episodes_completed, 2);
+    assert_eq!(measured.same_agent_overlaps, 0);
 }
 
 // ---------------------------------------------------------------------------
-// 4: the room reasons with memory
+// 6: a shared agent on two desks
 // ---------------------------------------------------------------------------
 
-/// What one episode deliberately remembers.
-const FACT: &str =
-    "The lab's small-case table for this recurrence is n=1 -> 1, n=2 -> 3, n=3 -> 7.";
-/// The half of it a later episode has to actually use.
-const FACT_KEY: &str = "n=3 -> 7";
-/// The operator's first message: the episode that stores.
-const ASK_ONE: &str = "Establish the small-case table for the recurrence.";
-/// The operator's second message: the episode that has to remember.
-const ASK_TWO: &str = "What does the small-case table give for n=3?";
-
-/// Two short episodes: the first stores a fact with `memory_store`, the second
-/// asks for it back with `memory_recall` and cites what it got.
-///
-/// Every turn of episode one stores, and every turn of episode two recalls, so
-/// the claim does not depend on which member the library hands the floor to.
-fn remembering_script() -> Responder {
-    Arc::new(|ask: &Ask| {
-        let ask = HiveAsk::of(ask);
-        let ask = &ask;
-        let grounds = ask.transcript().first().map_or(1, |(seq, _, _)| *seq);
-        if ask.task() == ASK_ONE {
-            if ask.pending_tool.is_none() {
-                return Reply::Call {
-                    tool: "memory_store",
-                    args: json!({ "title": "small-case table", "body": FACT }),
-                };
-            }
-            return Reply::Say(format!(
-                "!propose #table ^{grounds} Work the small cases out once and write them down."
-            ));
-        }
-        if ask.task() == ASK_TWO {
-            if ask.pending_tool.is_none() {
-                return Reply::Call {
-                    tool: "memory_recall",
-                    args: json!({ "query": "small-case table for the recurrence" }),
-                };
-            }
-            // Cite what memory actually handed back, not a constant: if the
-            // recall came back empty this line cannot be written.
-            let recalled = ask
-                .pending_tool
-                .as_deref()
-                .filter(|output| output.contains(FACT_KEY))
-                .map_or_else(
-                    || "nothing came back from memory".to_owned(),
-                    |_| FACT_KEY.to_owned(),
-                );
-            return Reply::Say(format!(
-                "!evidence #table ^{grounds} From the desk's own memory: {recalled}."
-            ));
-        }
-        Reply::Say(format!("!question {} has nothing to add.", ask.who()))
-    })
-}
-
-/// Short episodes, so two of them fit inside one test without a long run.
-const SHORT: &str = "{ enabled = true, turn_budget = 3, quorum = 2, blind_round = true }";
-
-/// Every tool result the endpoint was shown for the episode answering `task`.
-fn tool_results_for(script: &Script, task: &str) -> Vec<String> {
-    hive_asks(script)
-        .into_iter()
-        .filter(|ask| ask.task() == task)
-        .flat_map(|ask| ask.tool_outputs)
-        .collect()
-}
-
-/// **Agents reason with memory.**
-///
-/// The default `store` engine: what `memory_store` wrote in episode one is what
-/// `memory_recall` reads in episode two, and the line the room journals is
-/// written from what came back.
-#[tokio::test]
-#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
-async fn a_desk_reasons_with_what_it_stored_in_an_earlier_episode() {
-    let home = tempfile::tempdir().unwrap();
-    let (base_url, script) = spawn_script(remembering_script()).await;
-    let (address, runtime) = boot(home.path(), &base_url, SHORT, None).await;
-    let client = Client::new(address);
-    client.sign_in().await;
-
-    client.say(DESK, ASK_ONE).await;
-    client.say(DESK, ASK_TWO).await;
-
-    // Episode one really wrote: the tool's own success echo came back into the
-    // turn, which only happens once the chunk is in the store.
-    let stored = tool_results_for(&script, ASK_ONE);
-    assert!(
-        stored.iter().any(|result| result.contains("Remembered as")),
-        "no memory_store result reached a turn in episode one: {stored:?}"
-    );
-
-    // Episode two really read it back.
-    let recalled = tool_results_for(&script, ASK_TWO);
-    assert!(
-        recalled.iter().any(|result| result.contains(FACT_KEY)),
-        "memory_recall did not serve the fact episode one stored: {recalled:?}"
-    );
-
-    // The retrieve→inject half of the loop ran around these turns too: every
-    // deliberating turn carries the preamble, above the episode prompt.
-    //
-    // What it is NOT asserted to contain is the fact above. The loop's query is
-    // the whole incoming message — here, a multi-kilobyte episode prompt — and
-    // `store::lexical` ranks candidates by term rarity against it, so which
-    // memories surface is the ranker's business and it does not reliably pick
-    // this one out. That is why the deliberate `memory_recall` above is the
-    // load-bearing assertion: it is the path an agent controls.
-    let injected = script.bodies().iter().any(|body| {
-        body.get("messages")
-            .and_then(Value::as_array)
-            .map(|messages| {
-                messages.iter().any(|message| {
-                    message
-                        .get("content")
-                        .and_then(Value::as_str)
-                        .is_some_and(|content| content.contains("## Relevant prior work"))
-                })
-            })
-            .unwrap_or(false)
-    });
-    assert!(
-        injected,
-        "no deliberating turn ran through the retrieve→inject memory loop"
-    );
-
-    // And the room's own line used it. This is the part a store-level test
-    // cannot reach: the fact has to survive the tool, the turn, `marker_line`
-    // and the journal to end up here.
-    let rows = replies(&runtime, DESK).await;
-    let used: Vec<_> = turns(&rows)
-        .into_iter()
-        .filter(|(_, text)| text.contains(FACT_KEY))
-        .collect();
-    assert!(
-        !used.is_empty(),
-        "no journaled line cites what the desk remembered: {rows:?}"
-    );
-    assert!(used[0].1.starts_with("!evidence"), "{used:?}");
-}
-
-// ---------------------------------------------------------------------------
-// 4b: the same claim, with memory held in a remote engine
-// ---------------------------------------------------------------------------
-
-/// What the CortexDB mock was asked to do, so the test can say *when*.
-#[derive(Default)]
-struct CortexMock {
-    writes: AtomicUsize,
-    reads: AtomicUsize,
-    events: Mutex<Vec<Value>>,
-}
-
-/// A CortexDB instance, in process, speaking the wire shapes the driver relies
-/// on — the same shapes `src/store/memory/cortexdb_test.rs` pins.
-async fn spawn_cortexdb() -> (String, Arc<CortexMock>) {
-    /// The credential the driver is configured with. Not a JWT, so the actor
-    /// falls back to the driver's documented default.
-    const TOKEN: &str = "cortex-test-token";
-    /// `type:id`, which is the only shape CortexDB accepts.
-    const ACTOR: &str = "service:opencompany";
-
-    let state = Arc::new(CortexMock::default());
-    let authorized = |headers: &axum::http::HeaderMap| {
-        let bearer = headers
-            .get("authorization")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix("Bearer "));
-        let actor = headers
-            .get("x-cortex-actor")
-            .and_then(|value| value.to_str().ok());
-        bearer == Some(TOKEN) && actor == Some(ACTOR)
-    };
-
-    let write_state = Arc::clone(&state);
-    let read_state = Arc::clone(&state);
-    let events_state = Arc::clone(&state);
-    let scopes_state = Arc::clone(&state);
-    let app = axum::Router::new()
-        .route(
-            "/v1/admin/ready",
-            get(move |headers: axum::http::HeaderMap| async move {
-                if authorized(&headers) {
-                    axum::http::StatusCode::OK
-                } else {
-                    axum::http::StatusCode::UNAUTHORIZED
+/// Whether two open brackets on different desks ever coincided.
+fn cross_desk_overlap(rows: &[StoredEvent]) -> bool {
+    let mut open: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for row in rows {
+        match &row.event {
+            CompanyEvent::TurnStarted {
+                turn_id,
+                chat_id,
+                episode_id: Some(_),
+                ..
+            } => {
+                if open.values().any(|desk| desk != chat_id) {
+                    return true;
                 }
+                open.insert(turn_id.clone(), chat_id.clone());
+            }
+            CompanyEvent::TurnSettled { turn_id, .. } | CompanyEvent::TurnFailed { turn_id, .. } => {
+                open.remove(turn_id);
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice() {
+    let home = tempfile::tempdir().unwrap();
+    let (base_url, script) = spawn_script_with_latency(
+        seat_script("Noted.", post_then_complete),
+        Duration::from_millis(300),
+    )
+    .await;
+    let (address, runtime) = boot_demo(home.path(), &base_url).await;
+    let client = Client::new(address);
+    client.sign_in(DEMO_ADMIN).await;
+
+    // Both desks at once; the CEO sits on both.
+    let (first, second) = tokio::join!(
+        client.say(ENGINEERING, "Plan the staging rollout."),
+        client.say(CONTENT, "Draft the release note."),
+    );
+    assert!(first["responses"].is_array() && second["responses"].is_array());
+    let rows = wait_for(&runtime, "both episodes to complete", EPISODE, completed(2)).await;
+
+    let done = completions(&rows);
+    assert_eq!(done.len(), 2, "{done:?}");
+    assert!(
+        done.iter()
+            .all(|(_, _, reason, _)| *reason == EpisodeReason::CompleteEpisode),
+        "{done:?}"
+    );
+    let desks: std::collections::BTreeSet<&str> =
+        done.iter().map(|(_, chat, _, _)| chat.as_str()).collect();
+    assert_eq!(desks, [ENGINEERING, CONTENT].into_iter().collect());
+
+    // The brackets: overlap across desks, never for the CEO.
+    assert!(
+        cross_desk_overlap(&rows),
+        "two desks' brackets never coincided: {:?}",
+        rows.iter().map(|row| row.event.kind()).collect::<Vec<_>>()
+    );
+    let measured = report(&runtime).await;
+    assert_eq!(
+        measured.same_agent_overlaps, 0,
+        "the CEO ran on two desks and never twice at once: {measured:?}"
+    );
+    assert!(measured.max_concurrent_turns >= 2, "{measured:?}");
+    assert!(
+        script.peak_in_flight() >= 2,
+        "the model saw both desks at once: {}",
+        script.peak_in_flight()
+    );
+    assert_eq!(measured.episodes_completed, 2);
+    let ceo_turns = rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                &row.event,
+                CompanyEvent::TurnStarted { agent_id: Some(agent), .. } if agent == CEO
+            )
+        })
+        .count();
+    assert_eq!(ceo_turns, 4, "the CEO took two turns on each desk");
+    let failures = measured.failures(&Thresholds {
+        cross_desk_referrals: 0,
+        agent_contacts: 0,
+        distinct_pairs: 0,
+        ..Thresholds::default()
+    });
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
+// ---------------------------------------------------------------------------
+// 7: a checkpoint replays the rows after it as a no-op
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_checkpoint_replays_the_rows_after_it_as_a_no_op() {
+    use opencompany::hive::episode_store::{PersistedEpisode, latest_state, replies_after};
+    use opencompany::hive::round::utterance_of;
+    use tinyhivemind::Sequence;
+    use tinyhivemind_openhuman::{CommittedUtterance, CompletionDriver, DriverState};
+
+    let home = tempfile::tempdir().unwrap();
+    let (base_url, _script) = spawn_script_with_latency(
+        seat_script("Noted.", post_then_complete),
+        Duration::from_millis(30),
+    )
+    .await;
+    let (address, runtime) = boot_lab(home.path(), &base_url).await;
+    let client = Client::new(address);
+    client.sign_in(ADMIN).await;
+
+    client.say(ENGINEERING, "Settle the rollout window.").await;
+    let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
+    let episode_id = completions(&rows)[0].0.clone();
+
+    // Every checkpoint the host wrote, oldest first: one per committed round.
+    let checkpoints: Vec<PersistedEpisode> = rows
+        .iter()
+        .filter_map(|row| match &row.event {
+            CompanyEvent::EpisodeStateSaved {
+                episode_id: id,
+                desk,
+                thread_root,
+                revision,
+                state,
+                sharing,
+                hop,
+                origin,
+            } if id == &episode_id => Some(PersistedEpisode {
+                episode_id: id.clone(),
+                desk: desk.clone(),
+                thread_root: *thread_root,
+                revision: *revision,
+                state: state.clone(),
+                sharing: sharing
+                    .iter()
+                    .filter_map(|(agent, value)| {
+                        serde_json::from_value(value.clone())
+                            .ok()
+                            .map(|state| (agent.clone(), state))
+                    })
+                    .collect(),
+                hop: *hop,
+                origin: origin
+                    .clone()
+                    .and_then(|value| serde_json::from_value(value).ok()),
             }),
-        )
-        .route(
-            "/v1/experience",
-            post(
-                move |headers: axum::http::HeaderMap, Json(body): Json<Value>| {
-                    let state = Arc::clone(&write_state);
-                    async move {
-                        assert!(
-                            authorized(&headers),
-                            "the driver must carry both the bearer and the actor"
-                        );
-                        let id = format!("evt_{}", state.writes.fetch_add(1, Ordering::SeqCst) + 1);
-                        let observed_at = body
-                            .pointer("/context/observed_at")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default()
-                            .to_owned();
-                        state.events.lock().unwrap().push(json!({
-                            "id": id,
-                            "scope": body.get("scope").cloned().unwrap_or(Value::Null),
-                            "content": body.get("content").cloned().unwrap_or(Value::Null),
-                            "observed_at": observed_at,
-                        }));
-                        Json(json!({ "event_id": id, "duplicate": false }))
-                    }
-                },
-            ),
-        )
-        .route(
-            "/v1/recall",
-            post(
-                move |headers: axum::http::HeaderMap, Json(body): Json<Value>| {
-                    let state = Arc::clone(&read_state);
-                    async move {
-                        assert!(authorized(&headers), "recall must carry the actor too");
-                        state.reads.fetch_add(1, Ordering::SeqCst);
-                        let scope = body
-                            .get("scope")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default();
-                        // Ranked retrieval is the engine's job; the mock returns
-                        // everything filed under the asked-for scope and lets the
-                        // host's own ranking do the rest.
-                        let items: Vec<Value> = state
-                            .events
-                            .lock()
-                            .unwrap()
-                            .iter()
-                            .filter(|event| {
-                                event.get("scope").and_then(Value::as_str) == Some(scope)
-                            })
-                            .cloned()
-                            .collect();
-                        Json(json!({ "layers": { "events": items } }))
-                    }
-                },
-            ),
-        )
-        .route(
-            "/v1/forget",
-            post(|Json(_body): Json<Value>| async move {
-                Json(json!({ "deleted": { "events": 0 }, "matched": 0 }))
-            }),
-        )
-        .route(
-            // The driver's exhaustive reads (`get`/`list`/`namespace_summaries`,
-            // and `recall`'s stale-hit correction) walk this instead of
-            // `/v1/recall`, which cannot page a raw listing — see
-            // `src/store/memory/cortexdb.rs::scope_events`. Without this route
-            // every one of those calls 404s and the driver reports nothing, even
-            // though `/v1/experience` accepted the write.
-            "/v1/events",
-            get(
-                move |headers: axum::http::HeaderMap,
-                      Query(params): Query<std::collections::HashMap<String, String>>| {
-                    let state = Arc::clone(&events_state);
-                    async move {
-                        if !authorized(&headers) {
-                            return (
-                                axum::http::StatusCode::UNAUTHORIZED,
-                                Json(json!({ "error": "unauthorized" })),
-                            );
-                        }
-                        let scope = params.get("scope").cloned().unwrap_or_default();
-                        let items: Vec<Value> = state
-                            .events
-                            .lock()
-                            .unwrap()
-                            .iter()
-                            .filter(|event| {
-                                event.get("scope").and_then(Value::as_str) == Some(scope.as_str())
-                            })
-                            .cloned()
-                            .collect();
-                        // One page always covers this test's event volume, so
-                        // `has_more: false` and no `next_cursor` — the mock does
-                        // not need to exercise the driver's paging loop.
-                        (
-                            axum::http::StatusCode::OK,
-                            Json(json!({ "items": items, "has_more": false })),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(checkpoints.len(), 2, "one per round: {:?}", checkpoints.len());
+    assert_eq!(checkpoints[0].revision, 2);
+    assert_eq!(checkpoints[1].revision, 4);
+    let latest = latest_state(runtime.events().as_ref(), runtime.id(), &episode_id)
+        .await
+        .unwrap()
+        .expect("a checkpoint");
+    assert_eq!(latest.revision, 4, "the store hands back the newest");
+
+    // A host that died after the first round's commit finds the round-0
+    // checkpoint and the rows the second round committed. Folding those
+    // through the driver reaches the final state; folding them again
+    // changes nothing.
+    let record = runtime
+        .store()
+        .load(runtime.id())
+        .await
+        .unwrap()
+        .expect("the record");
+    let pool = runtime.harness().expect("the harness pool");
+    let mut agents = std::collections::HashMap::new();
+    for agent in [ENGINEER, CEO] {
+        let live = pool
+            .agent(runtime.id(), agent)
+            .await
+            .unwrap_or_else(|| panic!("{agent} is built"));
+        agents.insert(agent.to_string(), live.runtime_agent().clone());
+    }
+    let (hives, errors) =
+        opencompany::hive::graph::desk_hives(&record, 1, &|id| agents.get(id).cloned());
+    assert!(errors.is_empty(), "{errors:?}");
+    let desk = hives.get(ENGINEERING).expect("the engineering hive");
+    let driver = CompletionDriver::new(&desk.hive, 2).unwrap();
+    let mut state: DriverState = serde_json::from_value(checkpoints[0].state.clone()).unwrap();
+    state = driver.resume(state).unwrap();
+    assert_eq!(state.revision(), 2);
+    let later = replies_after(
+        runtime.events().as_ref(),
+        runtime.id(),
+        &episode_id,
+        checkpoints[0].revision,
+    )
+    .await
+    .unwrap();
+    assert_eq!(later.len(), 2, "the second round's two rows: {later:?}");
+    let committed: Vec<CommittedUtterance> = later
+        .iter()
+        .map(|reply| CommittedUtterance {
+            author_id: reply.agent_id.clone(),
+            sequence: Sequence(reply.seq.value()),
+            utterance: utterance_of(&reply.episode, reply.text.clone()),
+        })
+        .collect();
+    for event in &committed {
+        state = driver
+            .apply_committed(&state, event.clone(), None)
+            .await
+            .unwrap()
+            .state;
+    }
+    let final_state: DriverState = serde_json::from_value(checkpoints[1].state.clone()).unwrap();
+    assert_eq!(state, final_state, "the replay reaches the final checkpoint");
+    for event in &committed {
+        let again = driver
+            .apply_committed(&state, event.clone(), None)
+            .await
+            .unwrap();
+        assert_eq!(again.state, state, "an exact replay is a no-op");
+        assert!(again.actions.is_empty());
+    }
+    // And a checkpoint that already folded everything has nothing to replay.
+    let nothing = replies_after(runtime.events().as_ref(), runtime.id(), &episode_id, 4)
+        .await
+        .unwrap();
+    assert!(nothing.is_empty(), "{nothing:?}");
+}
+
+// ---------------------------------------------------------------------------
+// 8: memory over the MCP memory tool
+// ---------------------------------------------------------------------------
+
+const FACT: &str = "The rollout window is Tuesday 09:00 UTC, agreed with support.";
+const FACT_KEY: &str = "Tuesday 09:00 UTC";
+const ASK_ONE: &str = "Fix the rollout window.";
+const ASK_TWO: &str = "When is the rollout window?";
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_desk_remembers_across_episodes_through_the_mcp_memory_tool() {
+    let home = tempfile::tempdir().unwrap();
+    let (base_url, script) = spawn_script_with_latency(
+        seat_script("Noted.", |seat| {
+            if seat.speaker != ENGINEER || seat.stage != 0 {
+                return post_then_complete(seat);
+            }
+            let memory = seat
+                .turn_tools
+                .iter()
+                .find(|output| !is_refused(output));
+            if seat.prompt.contains(ASK_ONE) {
+                return match memory {
+                    None => Reply::Call {
+                        tool: "mcp_call_tool",
+                        args: via_opencompany_mcp(
+                            "memory_store",
+                            json!({ "title": "rollout window", "body": FACT }),
                         )
+                        .1,
+                    },
+                    Some(_) => post("Window fixed and written down."),
+                };
+            }
+            if seat.prompt.contains(ASK_TWO) {
+                return match memory {
+                    None => Reply::Call {
+                        tool: "mcp_call_tool",
+                        args: via_opencompany_mcp(
+                            "memory_recall",
+                            json!({ "query": "rollout window" }),
+                        )
+                        .1,
+                    },
+                    // Cite what memory handed back, never a constant.
+                    Some(recalled) if recalled.contains(FACT_KEY) => {
+                        post(format!("From the desk's memory: {FACT_KEY}."))
                     }
-                },
-            ),
-        )
-        .route(
-            "/v1/scopes/list",
-            get(move |headers: axum::http::HeaderMap| {
-                let state = Arc::clone(&scopes_state);
-                async move {
-                    if !authorized(&headers) {
-                        return (
-                            axum::http::StatusCode::UNAUTHORIZED,
-                            Json(json!({ "error": "unauthorized" })),
-                        );
-                    }
-                    let mut scopes: Vec<String> = state
-                        .events
-                        .lock()
-                        .unwrap()
-                        .iter()
-                        .filter_map(|event| {
-                            event.get("scope").and_then(Value::as_str).map(str::to_owned)
-                        })
-                        .collect();
-                    scopes.sort();
-                    scopes.dedup();
-                    let items: Vec<Value> = scopes
-                        .into_iter()
-                        .map(|scope| json!({ "path": scope }))
-                        .collect();
-                    (
-                        axum::http::StatusCode::OK,
-                        Json(json!({ "items": items, "has_more": false })),
-                    )
-                }
-            }),
-        );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
-    });
-    (format!("http://{addr}"), state)
-}
-
-/// **The same claim with the memory ports bound to a remote engine.**
-///
-/// The engine is selected exactly as a deployment selects it — through
-/// `StorageSettings`, which is what `OPENCOMPANY_MEMORY*` parses into — so the
-/// binding under test is the real one and no process environment is mutated.
-#[tokio::test]
-#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
-async fn a_desk_reasons_with_memory_held_in_a_remote_engine() {
-    use opencompany::store::{MemoryBackend, StorageSettings, open_memory_overlay};
-
-    let home = tempfile::tempdir().unwrap();
-    let (cortex_url, cortex) = spawn_cortexdb().await;
-    let overlay = open_memory_overlay(&StorageSettings {
-        memory_backend: MemoryBackend::Remote,
-        memory_driver: Some("cortexdb".to_owned()),
-        memory_url: Some(cortex_url),
-        memory_api_key: Some("cortex-test-token".to_owned()),
-        ..StorageSettings::default()
-    })
-    .expect("the cortexdb engine binds")
-    .expect("`remote` yields an overlay");
-
-    let (base_url, script) = spawn_script(remembering_script()).await;
-    let (address, runtime) = boot(home.path(), &base_url, SHORT, Some(overlay)).await;
+                    Some(recalled) => post(format!("Memory had nothing: {recalled}")),
+                };
+            }
+            post_then_complete(seat)
+        }),
+        Duration::from_millis(30),
+    )
+    .await;
+    let (address, runtime) = boot_lab(home.path(), &base_url).await;
     let client = Client::new(address);
-    client.sign_in().await;
+    client.sign_in(ADMIN).await;
 
-    client.say(DESK, ASK_ONE).await;
-    let wrote = cortex.writes.load(Ordering::SeqCst);
+    client.say(ENGINEERING, ASK_ONE).await;
+    let rows = wait_for(&runtime, "the first episode", EPISODE, completed(1)).await;
     assert!(
-        wrote > 0,
-        "episode one stored nothing through /v1/experience, so the engine was not on the path"
+        replies(&rows, ENGINEERING)
+            .iter()
+            .any(|row| row.agent == ENGINEER && row.text.contains("written down")),
+        "{:?}",
+        replies(&rows, ENGINEERING)
     );
-
-    client.say(DESK, ASK_TWO).await;
-    assert!(
-        cortex.reads.load(Ordering::SeqCst) > 0,
-        "episode two never read /v1/recall"
-    );
-
-    // The engine served the fact, and the room's line was written from it.
-    let recalled = tool_results_for(&script, ASK_TWO);
-    assert!(
-        recalled.iter().any(|result| result.contains(FACT_KEY)),
-        "the remote engine did not serve back what episode one wrote to it: {recalled:?}"
-    );
-    let rows = replies(&runtime, DESK).await;
-    assert!(
-        turns(&rows).iter().any(|(_, text)| text.contains(FACT_KEY)),
-        "no journaled line cites what the remote engine remembered: {rows:?}"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// 9: a desk asks another desk, and only the information crosses
-// ---------------------------------------------------------------------------
-
-/// A desk of three that may put one question to `front`.
-///
-/// `quorum = 2` rather than three: the point of this episode is the crossing,
-/// and a room that needs every seat spends its budget proving the earlier
-/// tests' claim again.
-const REFERRING: &str = "{ enabled = true, turn_budget = 12, quorum = 2, blind_round = false, \
-                         referral = { enabled = true } }";
-
-/// What the far desk says when it is asked.
-const FAR_ANSWER: &str = "The front desk's own log shows the recurrence closing at 42 twice.";
-
-/// The script for the referral episode.
-///
-/// Two shapes of request reach it now, and telling them apart is the whole
-/// fixture: a **hive turn** carries `You are @<id>` and the attributed
-/// transcript, and a **referred turn** carries neither, because the far
-/// teammate is answering a colleague rather than taking a seat in this room.
-fn referring_script() -> Responder {
-    Arc::new(|ask: &Ask| {
-        let ask = HiveAsk::of(ask);
-        let ask = &ask;
-        // The referred turn. Identified by the referral prompt's own opening,
-        // which no episode prompt contains.
-        if ask.speaker.is_none() {
-            let last = ask
-                .messages
-                .last()
-                .and_then(|message| message.get("content"))
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            if last.contains("has asked you a question") {
-                return Reply::Say(FAR_ANSWER.to_owned());
-            }
-            return Reply::Say("Acknowledged.".to_owned());
-        }
-        let propose = format!("!propose #{TOPIC} The closed form of the recurrence is 42.");
-        let grounds = ask.seq_of(&format!("!propose #{TOPIC}"));
-        // The theorist opens by asking the other desk — early, before anybody
-        // has backed anything, which is the timing the mechanism turns on.
-        let line = match (ask.who(), grounds) {
-            (THEORIST, None) if !ask.i_said("@#front") => format!(
-                "!question #{TOPIC} Has the front desk seen this recurrence before? @#front"
-            ),
-            (THEORIST, None) => propose,
-            (who, None) => format!("!question {who} is waiting for the opening position."),
-            (who, Some(seq)) if ask.prompt.contains("The room has reached quorum") => {
-                format!("!commit #{TOPIC} ^{seq} {who} records the room's decision.")
-            }
-            (THEORIST, Some(seq)) => format!(
-                "!evidence #{TOPIC} ^{seq} theorist checked base cases 1..5 and each closes at 42."
-            ),
-            (who, Some(seq)) if !ask.i_said("!support") => {
-                format!("!support #{TOPIC} ^{seq} {who} checked the derivation and it holds.")
-            }
-            (who, Some(_)) => format!("!question {who} has nothing further."),
-        };
-        Reply::Say(line)
-    })
-}
-
-/// **A desk asks another desk, and the answer comes home without a vote.**
-///
-/// The claim the unit tests cannot make: the far turn goes through the *real*
-/// harness turn path on the *far desk's* channel, its answer is journaled
-/// there under the teammate that took it, and what returns to the asking desk
-/// is a row the room authored — so a teammate on `front` can inform `lab`
-/// without ever being able to carry a topic on it.
-#[tokio::test]
-#[ignore = "TODO(Phase 8): drives the trace-grammar hive episode, which the brain no longer opens (plan hive-desks, Phase 2 interim). `tests/hive_e2e.rs` replaces this suite on the per-desk OpenHumanHive in Phase 8; the boot/login/script scaffold it reuses is exercised by `a_single_member_desk_answers_with_one_ordinary_turn` below."]
-async fn a_desk_asks_another_desk_and_only_the_information_crosses() {
-    let home = tempfile::tempdir().unwrap();
-    let (base_url, _script) = spawn_script(referring_script()).await;
-    let (address, runtime) = boot(home.path(), &base_url, REFERRING, None).await;
-    let client = Client::new(address);
-    client.sign_in().await;
-
-    client
-        .say(DESK, "Settle the closed form of the recurrence.")
-        .await;
-
-    // The far desk ran a real turn, journaled under its own member.
-    let far = replies(&runtime, SOLO_DESK).await;
-    let answered: Vec<_> = far
+    let stored = script
+        .asks()
         .iter()
-        .filter(|(_, _, text)| text.contains(FAR_ANSWER))
-        .collect();
-    assert_eq!(
-        answered.len(),
-        1,
-        "exactly one turn ran on the far desk — a desk mention is not a fan-out: {far:?}"
-    );
-    assert_eq!(
-        answered[0].1, "greeter",
-        "and it is authored by the teammate that took it, on its own desk: {far:?}"
+        .filter_map(seat_of)
+        .filter(|seat| seat.speaker == ENGINEER && seat.prompt.contains(ASK_ONE))
+        .flat_map(|seat| seat.turn_tools)
+        .collect::<Vec<_>>();
+    assert!(
+        stored.iter().any(|output| !is_refused(output)),
+        "memory_store answered over MCP: {stored:?}"
     );
 
-    // The answer came home, under the room and not under the answerer. This is
-    // the property the whole design turns on: a row authored by a roster id
-    // folds as a trace and can be counted as a supporter, so an answer that
-    // crossed under `@greeter` would let one supporter count on two desks.
-    let rows = replies(&runtime, DESK).await;
-    let carried: Vec<_> = rows
+    client.say(ENGINEERING, ASK_TWO).await;
+    let rows = wait_for(&runtime, "the second episode", EPISODE, completed(2)).await;
+    let cited = replies(&rows, ENGINEERING)
+        .into_iter()
+        .filter(|row| row.agent == ENGINEER && row.kind == Some(UtteranceKind::Post))
+        .last()
+        .expect("the engineer's second-episode post");
+    assert!(
+        cited.text.contains(FACT_KEY),
+        "the post cites what memory_recall returned: {}",
+        cited.text
+    );
+    let recalled = script
+        .asks()
         .iter()
-        .filter(|(_, _, text)| text.contains(FAR_ANSWER))
-        .collect();
-    assert_eq!(carried.len(), 1, "the answer came home once: {rows:?}");
-    assert_eq!(
-        carried[0].1, HIVE_REFERRAL_AUTHOR,
-        "carried by the room, never by the far teammate: {rows:?}"
-    );
+        .filter_map(seat_of)
+        .filter(|seat| seat.speaker == ENGINEER && seat.prompt.contains(ASK_TWO))
+        .flat_map(|seat| seat.turn_tools)
+        .collect::<Vec<_>>();
     assert!(
-        carried[0].2.contains("@greeter") && carried[0].2.contains("Front"),
-        "and it says who answered and where: {}",
-        carried[0].2
+        recalled.iter().any(|output| output.contains(FACT_KEY)),
+        "memory_recall came back with the fact: {recalled:?}"
     );
-
-    // `greeter` never becomes a member of this desk's fold. Asserted over the
-    // raw rows rather than over `turns`, which already filters to the three
-    // seats and so could not fail: the claim is that nothing on this desk is
-    // authored by the far teammate at all.
-    assert!(
-        rows.iter().all(|(_, author, _)| author != "greeter"),
-        "a far teammate authored a row in the asking room: {rows:?}"
-    );
-
-    // The room still settles, and the closing report tells the operator it
-    // went outside — which is the one thing an operator reading this desk
-    // cannot otherwise see, because the far turn happened somewhere else.
-    let reports = reports(&rows);
-    assert_eq!(reports.len(), 1, "{rows:?}");
-    assert!(
-        reports[0].contains("asked 1 question of another desk"),
-        "{}",
-        reports[0]
-    );
-    assert!(reports[0].contains("@greeter on front"), "{}", reports[0]);
+    assert_eq!(report(&runtime).await.episodes_completed, 2);
 }
