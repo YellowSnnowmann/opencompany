@@ -49,7 +49,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use support::script_model::{Ask, Reply, Responder, Script, spawn_script_with_latency};
+use support::script_model::{Ask, Reply, Responder, spawn_script_with_latency};
 
 use opencompany::CompanyRuntime;
 use opencompany::company::CompanyManifest;
@@ -57,7 +57,6 @@ use opencompany::hive::measure::{Report, Thresholds, measure};
 use opencompany::hive::referral::HIVE_REFERRAL_AUTHOR;
 use opencompany::hive::routing::Router;
 use opencompany::hive::tools::via_opencompany_mcp;
-use opencompany::ports::CompanyStore;
 use opencompany::ports::types::{
     CompanyEvent, CompanyId, EpisodeReason, EventSeq, StoredEvent, UtteranceKind,
 };
@@ -99,7 +98,11 @@ fn parse_sentinel(text: &str) -> Option<(String, String, u64)> {
     let (desk, rest) = rest.split_once(", episode ")?;
     let (episode, rest) = rest.split_once(", round ")?;
     let (revision, _) = rest.split_once('.')?;
-    Some((desk.to_string(), episode.to_string(), revision.parse().ok()?))
+    Some((
+        desk.to_string(),
+        episode.to_string(),
+        revision.parse().ok()?,
+    ))
 }
 
 fn role(message: &Value) -> &str {
@@ -203,9 +206,16 @@ impl Seat {
 /// Whether a tool result reads as the host refusing the call.
 fn is_refused(output: &str) -> bool {
     let lower = output.to_ascii_lowercase();
-    ["refused", "error", "rejected", "invalid", "not a member", "cannot"]
-        .iter()
-        .any(|word| lower.contains(word))
+    [
+        "refused",
+        "error",
+        "rejected",
+        "invalid",
+        "not a member",
+        "cannot",
+    ]
+    .iter()
+    .any(|word| lower.contains(word))
 }
 
 /// One speech act, as the `mcp_call_tool` the seat's belt carries it as.
@@ -652,7 +662,10 @@ async fn a_two_member_desk_completes_in_two_rounds() {
     client.sign_in(ADMIN).await;
 
     let accepted = client
-        .say(ENGINEERING, "Plan the staging rollout for the new checkout.")
+        .say(
+            ENGINEERING,
+            "Plan the staging rollout for the new checkout.",
+        )
         .await;
     assert!(
         accepted["responses"].is_array(),
@@ -712,7 +725,8 @@ async fn a_two_member_desk_completes_in_two_rounds() {
         "one reply per seat per round, in desk order: {desk:?}"
     );
     assert!(
-        desk.iter().all(|row| row.episode == Some(done[0].0.clone())),
+        desk.iter()
+            .all(|row| row.episode == Some(done[0].0.clone())),
         "every row names the episode: {desk:?}"
     );
     assert!(
@@ -724,7 +738,9 @@ async fn a_two_member_desk_completes_in_two_rounds() {
     // the desk delta on their second turn.
     let seats: Vec<Seat> = script.asks().iter().filter_map(seat_of).collect();
     assert!(
-        seats.iter().any(|seat| seat.revision == 2 && seat.stage == 1),
+        seats
+            .iter()
+            .any(|seat| seat.revision == 2 && seat.stage == 1),
         "the second round's sentinel reads round 2: {:?}",
         seats
             .iter()
@@ -864,7 +880,9 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
         .find(|seat| seat.speaker == ENGINEER && seat.revision > 2 && seat.turn_tools.is_empty())
         .expect("the engineer's reopened turn");
     assert!(
-        reopened.prompt.contains("@ceo handed you this by broadcast"),
+        reopened
+            .prompt
+            .contains("@ceo handed you this by broadcast"),
         "{}",
         reopened.prompt
     );
@@ -873,7 +891,10 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
     let measured = report(&runtime).await;
     assert_eq!(measured.broadcasts, 1);
     assert_eq!(measured.routers["fallback"], 1);
-    assert!(measured.distinct_pairs.contains("ceo→engineer"), "{measured:?}");
+    assert!(
+        measured.distinct_pairs.contains("ceo→engineer"),
+        "{measured:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -926,7 +947,11 @@ async fn a_dm_schedules_its_recipient_and_is_journaled_with_its_audience() {
         .find(|row| row.seq == delivered[0].2)
         .expect("the delivered row is the dm's reply");
     assert_eq!(dm.kind, Some(UtteranceKind::Dm));
-    assert_eq!(dm.audience, vec![CEO.to_string()], "journaled with its audience");
+    assert_eq!(
+        dm.audience,
+        vec![CEO.to_string()],
+        "journaled with its audience"
+    );
     assert_eq!(dm.to, vec![CEO.to_string()], "and on the episode metadata");
     assert!(
         desk.iter()
@@ -950,7 +975,10 @@ async fn a_dm_schedules_its_recipient_and_is_journaled_with_its_audience() {
     );
     let measured = report(&runtime).await;
     assert_eq!(measured.dms, 1);
-    assert!(measured.distinct_pairs.contains("engineer→ceo"), "{measured:?}");
+    assert!(
+        measured.distinct_pairs.contains("engineer→ceo"),
+        "{measured:?}"
+    );
     assert_eq!(completions(&rows)[0].2, EpisodeReason::CompleteEpisode);
 
     // The history projection carries the audience and the episode too.
@@ -991,7 +1019,11 @@ async fn a_single_member_desk_answers_with_one_ordinary_turn() {
     client.sign_in(ADMIN).await;
 
     let body = client.say(FRONT, "Anything waiting at the front?").await;
-    assert_eq!(body["responses"].as_array().map(Vec::len), Some(1), "{body}");
+    assert_eq!(
+        body["responses"].as_array().map(Vec::len),
+        Some(1),
+        "{body}"
+    );
 
     let rows = journal(&runtime).await;
     let desk = replies(&rows, FRONT);
@@ -1027,11 +1059,13 @@ const TAGLINE: &str = "Checkout, now with fewer steps.";
 async fn a_cross_desk_referral_crosses_only_the_answer_back() {
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
-        seat_script("Noted.", |seat| match (seat.desk.as_str(), seat.speaker.as_str(), seat.stage) {
-            (ENGINEERING, ENGINEER, 0) => post(format!("Rollout plan drafted. {QUESTION}")),
-            (CONTENT, WRITER, 0) => post("Drafting the tagline."),
-            (CONTENT, WRITER, _) => complete(format!("Tagline: {TAGLINE}")),
-            _ => post_then_complete(seat),
+        seat_script("Noted.", |seat| {
+            match (seat.desk.as_str(), seat.speaker.as_str(), seat.stage) {
+                (ENGINEERING, ENGINEER, 0) => post(format!("Rollout plan drafted. {QUESTION}")),
+                (CONTENT, WRITER, 0) => post("Drafting the tagline."),
+                (CONTENT, WRITER, _) => complete(format!("Tagline: {TAGLINE}")),
+                _ => post_then_complete(seat),
+            }
         }),
         Duration::from_millis(50),
     )
@@ -1041,7 +1075,10 @@ async fn a_cross_desk_referral_crosses_only_the_answer_back() {
     client.sign_in(ADMIN).await;
 
     client
-        .say(ENGINEERING, "Plan the rollout and get the release note written.")
+        .say(
+            ENGINEERING,
+            "Plan the rollout and get the release note written.",
+        )
         .await;
     // Both desks' episodes complete, and the answer has come home.
     let rows = wait_for(&runtime, "both episodes and the answer", EPISODE, |rows| {
@@ -1143,7 +1180,9 @@ async fn a_cross_desk_referral_crosses_only_the_answer_back() {
         .asks()
         .iter()
         .filter_map(seat_of)
-        .find(|seat| seat.speaker == ENGINEER && seat.prompt.contains("answered the question you put to it"))
+        .find(|seat| {
+            seat.speaker == ENGINEER && seat.prompt.contains("answered the question you put to it")
+        })
         .expect("the engineer's reopened turn");
     assert!(reopened.prompt.contains(TAGLINE), "{}", reopened.prompt);
 
@@ -1174,7 +1213,8 @@ fn cross_desk_overlap(rows: &[StoredEvent]) -> bool {
                 }
                 open.insert(turn_id.clone(), chat_id.clone());
             }
-            CompanyEvent::TurnSettled { turn_id, .. } | CompanyEvent::TurnFailed { turn_id, .. } => {
+            CompanyEvent::TurnSettled { turn_id, .. }
+            | CompanyEvent::TurnFailed { turn_id, .. } => {
                 open.remove(turn_id);
             }
             _ => {}
@@ -1311,7 +1351,12 @@ async fn a_checkpoint_replays_the_rows_after_it_as_a_no_op() {
             _ => None,
         })
         .collect();
-    assert_eq!(checkpoints.len(), 2, "one per round: {:?}", checkpoints.len());
+    assert_eq!(
+        checkpoints.len(),
+        2,
+        "one per round: {:?}",
+        checkpoints.len()
+    );
     assert_eq!(checkpoints[0].revision, 2);
     assert_eq!(checkpoints[1].revision, 4);
     let latest = latest_state(runtime.events().as_ref(), runtime.id(), &episode_id)
@@ -1372,7 +1417,10 @@ async fn a_checkpoint_replays_the_rows_after_it_as_a_no_op() {
             .state;
     }
     let final_state: DriverState = serde_json::from_value(checkpoints[1].state.clone()).unwrap();
-    assert_eq!(state, final_state, "the replay reaches the final checkpoint");
+    assert_eq!(
+        state, final_state,
+        "the replay reaches the final checkpoint"
+    );
     for event in &committed {
         let again = driver
             .apply_committed(&state, event.clone(), None)
