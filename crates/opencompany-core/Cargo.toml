@@ -471,6 +471,17 @@ tinymemory = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemor
 tinymemory-api = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory-api", optional = true }
 tinymemory-remote = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory-remote", optional = true }
 
+# `sanitize_api_error` — scrubs bearer tokens and other secrets out of a raw
+# provider error string before it's logged or surfaced on the event bus. At
+# the 1ecf1b0 openhuman pin this moved out of `openhuman_core`'s own
+# `inference::provider::ops` and into `tinyinference_core::sanitize`, which
+# openhuman itself now calls it through; this crate's own call site
+# (`harness/built_in/composio.rs`) needs the same path dependency for the same
+# reason the `tinymemory*` entries above do — no registry version exists to
+# patch onto. Byte-identical path to `vendor/openhuman/Cargo.toml`'s own entry
+# so Cargo unifies the two rather than resolving a second `tinyinference-core`.
+tinyinference-core = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-core", optional = true }
+
 # Single-file `.tar` packing/unpacking for `opencompany export`/`import`. Pure
 # Rust, no system libs, no network. Only links under the `export` feature; the
 # port-driven bundle core works on an unpacked directory without it.
