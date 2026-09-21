@@ -7,8 +7,10 @@
 //       [--desk engineering] [--text "…"] [--seconds 600] [--mock] [--json]
 //
 // `--mock` prefixes the message with the mock brain's directives
-// (`__MOCK_SLOW_MS__ 2000 __MOCK_DM__ ceo`) so the scripted run is slow enough
-// to overlap and deterministic enough to assert on. `--seconds` bounds the
+// (`__MOCK_SLOW_MS__ 2000 __MOCK_DM__ ceo __MOCK_REFER__ engineer:content`) so
+// the scripted run is slow enough to overlap and deterministic enough to
+// assert on: the engineer's first post asks the content desk, which the host
+// carries across as the referral the thresholds count. `--seconds` bounds the
 // tail; a run that times out reports what it saw and fails the completion
 // threshold. The exit code is the number of failed thresholds.
 //
@@ -191,7 +193,9 @@ function describe(frame) {
 async function main() {
   await signIn();
   const ledger = createLedger();
-  const text = args.mock ? `__MOCK_SLOW_MS__ 2000 __MOCK_DM__ ceo ${args.text}` : args.text;
+  const text = args.mock
+    ? `__MOCK_SLOW_MS__ 2000 __MOCK_DM__ ceo __MOCK_REFER__ ${args.desk === "content" ? "writer:engineering" : "engineer:content"} ${args.text}`
+    : args.text;
 
   // Open the tail first, then post: a frame emitted before the stream is
   // attached is a frame nobody counts, and `episode_opened` is the first one.

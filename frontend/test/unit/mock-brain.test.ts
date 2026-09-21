@@ -547,6 +547,43 @@ describe("the mock inference backend", () => {
     expect(hiveCall(await chat([seat(7)], HIVE_TOOLS)).tool).toBe("complete_episode");
   });
 
+  /**
+   * The sentinel's round is the driver's revision — the utterances committed
+   * so far — so on a desk of two a seat's second turn says `round 2`. With
+   * its earlier sentinels in the transcript the arm counts the seat's own
+   * turns instead: second turn broadcasts, third completes, whatever the
+   * revision reads; a retry at the same revision is still the same turn.
+   */
+  it("stages a seat by its own earlier turns in the episode, not the raw revision", async () => {
+    const taken = (round: number) => [
+      seat(round),
+      { role: "assistant", content: null, tool_calls: [{ id: `c${round}` }] },
+      { role: "tool", tool_call_id: `c${round}`, content: "recorded" },
+      { role: "assistant", content: "__MOCK_LLM__ hive turn done." },
+    ];
+    expect(hiveCall(await chat([...taken(0), seat(2)], HIVE_TOOLS)).tool).toBe("broadcast");
+    expect(hiveCall(await chat([...taken(0), ...taken(2), seat(4)], HIVE_TOOLS)).tool).toBe("complete_episode");
+    // A retry reminder keeps the sentinel at the same revision: same turn.
+    expect(hiveCall(await chat([seat(0), seat(0, "## Reminder\nsay it again")], HIVE_TOOLS)).tool).toBe("post");
+    // Another episode's sentinels do not count.
+    const other = { role: "user", content: "Hive turn: desk content, episode ep-9, round 0.\n\nx" };
+    expect(hiveCall(await chat([other, seat(0)], HIVE_TOOLS)).tool).toBe("post");
+  });
+
+  it("asks the desk a __MOCK_REFER__ directive names from the first post", async () => {
+    const everyone = hiveCall(await chat([seat(0, "__MOCK_REFER__ content plan it")], HIVE_TOOLS));
+    expect(everyone.tool).toBe("post");
+    expect(everyone.arguments.message).toContain("#content");
+    // Qualified with a seat: only that seat asks.
+    const me = { role: "user", content: `Hive turn: desk engineering, episode ep-1, round 0.\n\nYou are @engineer on desk #engineering.\n__MOCK_REFER__ engineer:content` };
+    expect(hiveCall(await chat([me], HIVE_TOOLS)).arguments.message).toContain("#content");
+    const notMe = { role: "user", content: `Hive turn: desk engineering, episode ep-1, round 0.\n\nYou are @ceo on desk #engineering.\n__MOCK_REFER__ engineer:content` };
+    expect(hiveCall(await chat([notMe], HIVE_TOOLS)).arguments.message).not.toContain("#content");
+    // The desk asked never asks itself.
+    const there = { role: "user", content: `Hive turn: desk content, episode ep-2, round 0.\n\n__MOCK_REFER__ content` };
+    expect(hiveCall(await chat([there], HIVE_TOOLS)).arguments.message).not.toContain("#content");
+  });
+
   it("ends the turn once the utterance is recorded, and retries a refused act", async () => {
     const recorded = await chat(
       [

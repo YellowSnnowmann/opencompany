@@ -433,9 +433,10 @@ function isRefusedToolOutput(message) {
  * The one speech act for a hive turn, as an OpenHuman `mcp_call_tool` call.
  *
  * @param {string} model
- * @param {{desk: string, episode: string, round: number}} hive
+ * @param {{desk: string, episode: string, round: number, speaker: string | null, stage: number}} hive
  * @param {string | null} dm
  * @param {boolean} refused whether the previous act in this turn was refused
+ * @param {{desk: string, asker: string | null} | null} [refer] a `__MOCK_REFER__` directive
  * @returns {any}
  */
 function hiveCompletion(model, hive, dm, refused, refer = null) {
