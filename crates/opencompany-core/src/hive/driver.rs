@@ -93,6 +93,12 @@ pub struct HiveDispatcher {
     pub router: Option<Arc<dyn Router>>,
     /// Runs the seat turns.
     pub seats: Arc<dyn SeatRunner>,
+    /// Where each seat turn is recorded as a first-class attempt (plan
+    /// hive-desks, Phase 8): a `pending` row minted with the turn's id and
+    /// its episode and round, `running` while the seat holds the floor,
+    /// settled with the bracket. `None` records nothing — the driver tests,
+    /// and a host whose deps carry no store.
+    pub runs: Option<Arc<dyn crate::ports::RunStore>>,
 }
 
 /// The state of one episode while it is being driven.
@@ -631,6 +637,7 @@ impl HiveDispatcher {
             hives: self.hives.clone(),
             router: self.router.clone(),
             seats: Arc::clone(&self.seats),
+            runs: self.runs.clone(),
         })
     }
 }
