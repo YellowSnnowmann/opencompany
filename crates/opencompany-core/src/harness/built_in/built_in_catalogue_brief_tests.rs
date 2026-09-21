@@ -12,19 +12,12 @@ use super::built_in_test_fixtures::*;
 use super::built_in_test_fixtures_2::*;
 use super::*;
 use crate::harness::build::{opencompany_mcp_rebrief, tools_named_in_mcp_brief};
-use crate::ports::types::{Actor, ActorKind, ToolGrantsOverride};
 
+/// `rec` with `namespace` on the company allow-list — a seed edit, which the
+/// grant axis reads off the record `ensure` is handed.
 fn granting(rec: &CompanyRecord, namespace: &str) -> CompanyRecord {
     let mut granted = rec.clone();
-    granted.overlay_tool_grants = Some(ToolGrantsOverride {
-        added: vec![namespace.to_string()],
-        set_by: Actor {
-            kind: ActorKind::User,
-            id: "user-admin".to_string(),
-        },
-        at_millis: crate::ports::now_millis(),
-    });
-    granted.manifest.tools.allow = granted.effective_tool_allow();
+    granted.manifest.tools.allow.push(namespace.to_string());
     granted
 }
 
@@ -34,10 +27,7 @@ async fn a_rebuild_that_moves_the_catalogue_owes_the_session_a_brief() {
     let context = Arc::new(MockContext::default());
     let mut rec = capped_record();
     rec.manifest.tools.allow = vec!["*".to_string()];
-    let live_store = Arc::new(LiveStore::default());
-    live_store.save(&rec).await.unwrap();
-    let mut deps = deps_with_plan(dir.path(), context, None, None);
-    deps.store = live_store.clone();
+    let deps = deps_with_plan(dir.path(), context, None, None);
 
     let pool = HarnessPool::new();
     pool.ensure(&rec, &deps).await.expect("first ensure");
@@ -57,8 +47,8 @@ async fn a_rebuild_that_moves_the_catalogue_owes_the_session_a_brief() {
     assert!(Arc::ptr_eq(&first, &same), "an unchanged roster is not rebuilt");
 
     // A console grant rebuilds the roster with more on the belt.
-    live_store.save(&granting(&rec, "workspace")).await.unwrap();
-    pool.ensure(&rec, &deps).await.expect("post-grant ensure");
+    let with_workspace = granting(&rec, "workspace");
+    pool.ensure(&with_workspace, &deps).await.expect("post-grant ensure");
     let granted = pool.agent(&rec.id, "engineer").await.expect("engineer");
     assert!(!Arc::ptr_eq(&first, &granted), "the grant must rebuild");
     assert!(
@@ -73,9 +63,8 @@ async fn a_rebuild_that_moves_the_catalogue_owes_the_session_a_brief() {
 
     // Rebuilt again on an unrelated axis before any turn said the brief: the
     // debt carries, because the session is still on the first prompt.
-    let mut renamed = granting(&rec, "workspace");
+    let mut renamed = with_workspace.clone();
     renamed.manifest.company.name = "Acme Renamed".to_string();
-    live_store.save(&renamed).await.unwrap();
     pool.ensure(&renamed, &deps).await.expect("post-rename ensure");
     let carried = pool.agent(&rec.id, "engineer").await.expect("engineer");
     assert!(!Arc::ptr_eq(&granted, &carried), "the rename must rebuild");
