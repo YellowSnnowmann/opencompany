@@ -1338,25 +1338,39 @@ function chatCompletion(body) {
     !servedDirectives.has(directive.id) &&
     !alreadyServed(messages, directive.index)
   ) {
-    servedDirectives.add(directive.id);
-    // The id, not just the name: when a directive fires more than once the
-    // question is always "which key differed", and this is the line that
-    // answers it from a CI log alone.
-    process.stderr.write(`[mock brain] tool call: ${directive.name} <${directive.id}>\n`);
-    return completion(model, {
-      role: "assistant",
-      content: null,
-      tool_calls: [
-        {
-          id: `mock-call-${directive.index}`,
-          type: "function",
-          function: {
-            name: directive.name,
-            arguments: JSON.stringify(directive.arguments),
+    const offered = offeredTools(body);
+    const bridged = bridgedCompanyTools(messages);
+    const resolved = resolveCall(directive, offered, bridged);
+    if (resolved) {
+      servedDirectives.add(directive.id);
+      // The id, not just the name: when a directive fires more than once the
+      // question is always "which key differed", and this is the line that
+      // answers it from a CI log alone.
+      process.stderr.write(`[mock brain] tool call: ${directive.name} <${directive.id}>\n`);
+      return completion(model, {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: `mock-call-${directive.index}`,
+            type: "function",
+            function: {
+              name: resolved.name,
+              arguments: JSON.stringify(resolved.arguments),
+            },
           },
-        },
-      ],
-    }, "tool_calls");
+        ],
+      }, "tool_calls");
+    }
+    // NOT consumed, for the same reason an unservable plan step is not: a
+    // directive naming a tool this seat's belt has no way to reach (directly
+    // or through its own `opencompany` catalogue) reaches nobody by falling
+    // through to prose, exactly like a real model offered no such tool would.
+    process.stderr.write(
+      `[mock brain] directive ${directive.name} <${directive.id}> left unserved; this belt ` +
+        `has no ${directive.name} — it carries [${[...offered].join(", ")}], bridges ` +
+        `[${[...bridged].join(", ")}]\n`,
+    );
   }
 
   const last = messages[messages.length - 1];

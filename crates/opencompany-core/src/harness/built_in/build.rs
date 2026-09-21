@@ -1301,6 +1301,13 @@ pub struct AgentBlueprint {
     pub tools: Vec<Box<dyn Tool>>,
     /// The belt's OpenHuman-native tool names — the spec's `ToolScopeSpec`.
     pub native_tool_names: Vec<String>,
+    /// This agent's own granted MCP servers (issue: company servers were
+    /// unreachable once the native-dispatch builder was removed — see
+    /// `embed_servers_for_agent`'s doc comment), attached directly to the
+    /// `AgentSpec` in [`agent_spec_for`] alongside the internal `opencompany`
+    /// server.
+    #[cfg(feature = "mcp")]
+    pub company_mcp_servers: Vec<openhuman_embed::McpServer>,
     /// The inference model the turn runs against (the company default or
     /// this agent's own pin).
     pub chat_model: Arc<dyn HarnessModel>,
