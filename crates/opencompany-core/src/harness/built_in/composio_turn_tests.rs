@@ -398,7 +398,13 @@ async fn harness(
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
-        id: CompanyId::new("acme"),
+        // A fresh id per test, for the reason `workspace_turn_helpers_tests`
+        // gives: every turn test in this binary runs on the one process-wide
+        // OpenHuman runtime, which pins a session's system prompt at its
+        // first committed turn — two fixtures naming `acme`/`ceo` resume each
+        // other's session, and the second reads a prompt that never named
+        // the Composio route.
+        id: crate::test_support::per_test_company_id("acme"),
         manifest: manifest(),
         ledger: Vec::new(),
         lifecycle: "running".to_string(),
