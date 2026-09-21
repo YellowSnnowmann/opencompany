@@ -716,6 +716,9 @@ pub struct CompanyAgent {
     /// Shared with the host's [`McpAgent`] entry; kept here so a test can
     /// still ask which tools a grant wired.
     tools: Arc<Vec<Arc<dyn tinytools::Tool>>>,
+    /// Every belt tool's name in belt order, native and served — what a grant
+    /// wired, which is what the roster tests ask.
+    belt_names: Vec<String>,
     /// The process-wide MCP host this agent is registered on, held so a
     /// dropped roster entry revokes its bearer and a turn can register itself
     /// in flight.
@@ -1251,6 +1254,11 @@ impl CompanyAgent {
             );
         }
         let step_labels = steps::StepLabels::from_tools(&blueprint.tools);
+        let belt_names: Vec<String> = blueprint
+            .tools
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect();
         let build::AgentBlueprint {
             tools,
             policy,
@@ -1290,6 +1298,7 @@ impl CompanyAgent {
             bridge,
             step_labels,
             tools: Arc::new(served),
+            belt_names,
             mcp,
             workspace,
             chat_model,
@@ -1331,12 +1340,11 @@ impl CompanyAgent {
         self.turn_lock.clone()
     }
 
-    /// The names of the tools this agent's belt wires, in belt order.
+    /// The names of every tool this agent's belt wires, in belt order — the
+    /// OpenHuman-native ones the spec scopes and the ones the `opencompany`
+    /// MCP server serves alike.
     pub fn tool_names(&self) -> Vec<String> {
-        self.tools
-            .iter()
-            .map(|tool| tool.name().to_string())
-            .collect()
+        self.belt_names.clone()
     }
 
     /// This crate's own tools on the belt — the `opencompany` MCP catalogue
