@@ -33,6 +33,10 @@ impl MemoryLog {
     }
 
     /// Every `AgentReply` on `chat`, as `(author, text)` in journal order.
+    ///
+    /// Only `driver_tests.rs` (feature `openhuman`) calls this; without that
+    /// feature it would be dead code under a plain `cargo clippy --all-targets`.
+    #[cfg(feature = "openhuman")]
     pub(crate) fn replies(&self, chat: &str) -> Vec<(String, String)> {
         self.rows()
             .into_iter()
