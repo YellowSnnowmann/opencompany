@@ -684,11 +684,17 @@ async fn a_seat_turn_attempt_carries_its_episode_and_round() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = json_body(response).await;
     let rows = body.as_array().expect("array");
-    let seat = rows.iter().find(|row| row["id"] == "seat-1").expect("the seat turn");
+    let seat = rows
+        .iter()
+        .find(|row| row["id"] == "seat-1")
+        .expect("the seat turn");
     assert_eq!(seat["episodeId"], "ep-1");
     assert_eq!(seat["roundRevision"], 0);
     assert_eq!(seat["threadRoot"], 4);
-    let card = rows.iter().find(|row| row["id"] == "run-1").expect("the dispatch");
+    let card = rows
+        .iter()
+        .find(|row| row["id"] == "run-1")
+        .expect("the dispatch");
     assert!(card.get("episodeId").is_none(), "{card}");
     assert!(card.get("roundRevision").is_none(), "{card}");
 }

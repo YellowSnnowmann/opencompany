@@ -206,7 +206,13 @@ impl Report {
             })
             .collect::<Vec<_>>()
             .join(" ");
-        let dash = |value: String| if value.is_empty() { "-".to_string() } else { value };
+        let dash = |value: String| {
+            if value.is_empty() {
+                "-".to_string()
+            } else {
+                value
+            }
+        };
         let histogram = |map: &BTreeMap<String, usize>| {
             dash(
                 map.iter()
@@ -231,28 +237,48 @@ impl Report {
         };
         line(
             "company",
-            format!("{} (since seq {}, {} rows)", self.company, self.since_seq, self.rows),
+            format!(
+                "{} (since seq {}, {} rows)",
+                self.company, self.since_seq, self.rows
+            ),
         );
-        line("max concurrent turns", self.max_concurrent_turns.to_string());
+        line(
+            "max concurrent turns",
+            self.max_concurrent_turns.to_string(),
+        );
         line("turn overlaps", self.overlaps.to_string());
         line("same-agent overlaps", self.same_agent_overlaps.to_string());
         line("open turns", self.open_turns.to_string());
         line(
             "episodes",
-            format!("{}/{} completed", self.episodes_completed, self.episodes_opened),
+            format!(
+                "{}/{} completed",
+                self.episodes_completed, self.episodes_opened
+            ),
         );
         line("rounds per episode", dash(rounds));
-        line("broadcasts / dms", format!("{} / {}", self.broadcasts, self.dms));
+        line(
+            "broadcasts / dms",
+            format!("{} / {}", self.broadcasts, self.dms),
+        );
         line(
             "cross-desk referrals",
-            format!("{} {}", self.cross_desk_referrals, self.referral_pairs.join(" ")),
+            format!(
+                "{} {}",
+                self.cross_desk_referrals,
+                self.referral_pairs.join(" ")
+            ),
         );
         line(
             "distinct pairs",
             format!(
                 "{} {}",
                 self.distinct_pairs.len(),
-                self.distinct_pairs.iter().cloned().collect::<Vec<_>>().join(" ")
+                self.distinct_pairs
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" ")
             ),
         );
         line("plan kinds", histogram(&self.plan_kinds));
@@ -287,9 +313,7 @@ impl Fold {
 
     fn pair(&mut self, from: &str, to: &str) {
         if from != to {
-            self.report
-                .distinct_pairs
-                .insert(format!("{from}→{to}"));
+            self.report.distinct_pairs.insert(format!("{from}→{to}"));
         }
     }
 
@@ -327,7 +351,8 @@ impl Fold {
                 self.report.max_concurrent_turns =
                     self.report.max_concurrent_turns.max(self.open.len());
             }
-            CompanyEvent::TurnSettled { turn_id, .. } | CompanyEvent::TurnFailed { turn_id, .. } => {
+            CompanyEvent::TurnSettled { turn_id, .. }
+            | CompanyEvent::TurnFailed { turn_id, .. } => {
                 self.open.remove(turn_id);
             }
             CompanyEvent::EpisodeOpened {
@@ -338,8 +363,7 @@ impl Fold {
             } => {
                 self.report.episodes_opened += 1;
                 self.episode(episode_id, chat_id);
-                self.opened_at
-                    .insert(episode_id.clone(), stored.at_millis);
+                self.opened_at.insert(episode_id.clone(), stored.at_millis);
                 Self::count(&mut self.report.plan_kinds, plan_kind(plan));
             }
             CompanyEvent::RoundStarted {

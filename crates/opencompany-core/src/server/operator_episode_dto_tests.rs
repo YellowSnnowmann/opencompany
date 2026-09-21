@@ -226,14 +226,22 @@ async fn the_episodes_route_answers_episode_dtos_newest_first() {
     assert_eq!(done["openedBySeq"], 5);
     assert!(done.get("parentId").is_none(), "{done}");
     assert_eq!(done["participants"], serde_json::json!(["ceo"]));
-    assert_eq!(done["plan"], serde_json::json!({"kind": "one", "primaryId": "ceo"}));
+    assert_eq!(
+        done["plan"],
+        serde_json::json!({"kind": "one", "primaryId": "ceo"})
+    );
     assert_eq!(done["revision"], 2);
     assert_eq!(done["status"], "completed");
     assert!(done["openedAtMillis"].is_u64(), "{done}");
     assert!(done["completedAtMillis"].is_u64(), "{done}");
     assert_eq!(done["completedBy"], "ceo");
     assert_eq!(done["reason"], "complete_episode");
-    let keys: Vec<&str> = done.as_object().unwrap().keys().map(String::as_str).collect();
+    let keys: Vec<&str> = done
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
     assert_eq!(
         keys,
         [
@@ -258,7 +266,10 @@ async fn the_episodes_route_answers_episode_dtos_newest_first() {
     assert_eq!(open["parentId"], "3");
     assert_eq!(open["plan"]["invitedIds"], serde_json::json!(["eng"]));
     for absent in ["completedAtMillis", "completedBy", "reason"] {
-        assert!(open.get(absent).is_none(), "{absent} on an open episode: {open}");
+        assert!(
+            open.get(absent).is_none(),
+            "{absent} on an open episode: {open}"
+        );
     }
 }
 

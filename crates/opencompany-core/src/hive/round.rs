@@ -370,29 +370,24 @@ fn fold_seat(
                 // speech call, so a longer outbox is a host bug — the first
                 // is the one that was recorded.
                 let utterance = narrow(turn.utterances.remove(0), allowed);
-                return Fold::Done(
-                    Settled {
-                        agent_id: agent_id.to_string(),
-                        utterance,
-                        steps: turn.steps,
-                        outputs: turn.outputs,
-                        forced: None,
-                    },
-                );
+                return Fold::Done(Settled {
+                    agent_id: agent_id.to_string(),
+                    utterance,
+                    steps: turn.steps,
+                    outputs: turn.outputs,
+                    forced: None,
+                });
             }
             let salvaged = fence::extract_post(&turn.reply);
             if allowed == prompt::SOLO_KINDS && !salvaged.is_empty() {
                 // Nobody else in the room: a bare reply is the answer.
-                return Fold::Done(
-                    Settled {
-                        agent_id: agent_id.to_string(),
-                        utterance: Utterance::CompleteEpisode { message: salvaged },
-                        steps: turn.steps,
-                        outputs: turn.outputs,
-                        forced: None,
-                    },
-                    TurnOutcome::Committed,
-                );
+                return Fold::Done(Settled {
+                    agent_id: agent_id.to_string(),
+                    utterance: Utterance::CompleteEpisode { message: salvaged },
+                    steps: turn.steps,
+                    outputs: turn.outputs,
+                    forced: None,
+                });
             }
             if attempt < MAX_ATTEMPTS {
                 return Fold::Retry;
@@ -402,16 +397,13 @@ fn fold_seat(
             } else {
                 salvaged
             };
-            Fold::Done(
-                Settled {
-                    agent_id: agent_id.to_string(),
-                    utterance: Utterance::CompleteEpisode { message },
-                    steps: turn.steps,
-                    outputs: turn.outputs,
-                    forced: Some(EpisodeReason::Failed),
-                },
-                TurnOutcome::NoUtterance,
-            )
+            Fold::Done(Settled {
+                agent_id: agent_id.to_string(),
+                utterance: Utterance::CompleteEpisode { message },
+                steps: turn.steps,
+                outputs: turn.outputs,
+                forced: Some(EpisodeReason::Failed),
+            })
         }
         Err(failure) => {
             let (message, reason) = match &failure {
@@ -546,13 +538,21 @@ impl RoundBracket {
     /// bracket. A store that refuses is logged and the turn runs untracked,
     /// exactly as the chat route does for its own row.
     async fn open_run(&self) {
-        let Some(runs) = self.runs.as_ref() else { return };
-        let spec =
-            crate::ports::runs::NewRun::for_chat(&self.turn_id, self.desk_id.clone(), &self.agent_id)
-                .in_thread(Some(self.thread_root))
-                .in_episode(self.episode_id.clone(), self.revision);
+        let Some(runs) = self.runs.as_ref() else {
+            return;
+        };
+        let spec = crate::ports::runs::NewRun::for_chat(
+            &self.turn_id,
+            self.desk_id.clone(),
+            &self.agent_id,
+        )
+        .in_thread(Some(self.thread_root))
+        .in_episode(self.episode_id.clone(), self.revision);
         let opened = match runs.create_run(&self.company, spec).await {
-            Ok(_) => runs.begin_run_untriggered(&self.company, &self.turn_id).await,
+            Ok(_) => {
+                runs.begin_run_untriggered(&self.company, &self.turn_id)
+                    .await
+            }
             Err(error) => Err(error),
         };
         if let Err(error) = opened {
@@ -568,7 +568,9 @@ impl RoundBracket {
     /// Settles the seat turn's run row with the bracket's outcome.
     async fn close_run(&self, outcome: TurnOutcome, error: Option<&str>) {
         use crate::ports::runs::{RunOutcome, RunStatus};
-        let Some(runs) = self.runs.as_ref() else { return };
+        let Some(runs) = self.runs.as_ref() else {
+            return;
+        };
         let mut settled = match outcome {
             TurnOutcome::Committed | TurnOutcome::NoUtterance => {
                 RunOutcome::new(RunStatus::Succeeded)

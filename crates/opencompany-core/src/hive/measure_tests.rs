@@ -231,13 +231,19 @@ fn the_fold_mirrors_the_node_twin_frame_for_frame() {
     assert_eq!(report.episodes_completed, 2);
     let ep1 = &report.episodes["ep1"];
     assert_eq!(ep1.chat_id, "engineering");
-    assert_eq!(ep1.rounds, 3, "the completion's count outranks two proposals");
+    assert_eq!(
+        ep1.rounds, 3,
+        "the completion's count outranks two proposals"
+    );
     assert_eq!(ep1.reason.as_deref(), Some("round_cap"));
     assert_eq!(ep1.time_to_complete_millis, Some(13));
     assert_eq!(report.episodes["ep2"].time_to_complete_millis, Some(1));
     assert_eq!(report.broadcasts, 1);
     assert_eq!(report.dms, 1);
-    assert_eq!(report.cross_desk_referrals, 1, "the return leg does not count");
+    assert_eq!(
+        report.cross_desk_referrals, 1,
+        "the return leg does not count"
+    );
     assert_eq!(report.referral_pairs, vec!["engineering→content"]);
     assert_eq!(
         report.distinct_pairs.iter().cloned().collect::<Vec<_>>(),
@@ -265,13 +271,19 @@ fn the_fold_mirrors_the_node_twin_frame_for_frame() {
 fn the_verdict_names_what_is_missing() {
     let empty = measure_rows(&company(), EventSeq::new(0), &[]);
     let failures = empty.failures(&Thresholds::default());
-    assert!(failures.contains(&"no episode opened".to_string()), "{failures:?}");
+    assert!(
+        failures.contains(&"no episode opened".to_string()),
+        "{failures:?}"
+    );
     assert!(empty.to_table(&Thresholds::default()).contains("FAIL ("));
 
     let dangling = measure_rows(
         &company(),
         EventSeq::new(0),
-        &rows(vec![opened("ep1", "engineering"), round("ep1", "engineering")]),
+        &rows(vec![
+            opened("ep1", "engineering"),
+            round("ep1", "engineering"),
+        ]),
     );
     let failures = dangling.failures(&Thresholds::default());
     assert!(
@@ -279,7 +291,10 @@ fn the_verdict_names_what_is_missing() {
         "{failures:?}"
     );
     let table = dangling.to_table(&Thresholds::default());
-    assert!(table.contains("episodes                  0/1 completed"), "{table}");
+    assert!(
+        table.contains("episodes                  0/1 completed"),
+        "{table}"
+    );
     assert!(table.contains("rounds per episode        ep1=1"), "{table}");
 }
 
