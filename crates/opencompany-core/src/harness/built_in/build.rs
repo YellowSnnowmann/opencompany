@@ -355,6 +355,13 @@ pub fn build_agent_with_model(
         }
     };
 
+    // The company's own granted MCP servers, attached directly to the
+    // `AgentSpec` in `agent_spec_for` (plan hive-desks Phase 2 follow-up) —
+    // see `embed_servers_for_agent`'s doc comment for why this exists
+    // alongside (not instead of) `registry_for_agent` below.
+    #[cfg(feature = "mcp")]
+    let mut company_mcp_servers: Vec<openhuman_embed::McpServer> = Vec::new();
+
     // Deliberate-memory tools, oc-authored over this company's own context
     // port — see `memory_tools`'s doc comment for why not the vendored ones.
     let mut tools: Vec<Box<dyn Tool>> = memory_tools(deps, company, &manifest_agent.id);
