@@ -62,12 +62,38 @@ describe("the raw-turns renderer", () => {
     expect(session).toContain("if (!quiet) setLoad(\"loading\")");
   });
 
-  it("owns the detailed tool calls instead of duplicating them in chat", () => {
+  /**
+   * Narrowed, deliberately, from "chat renders no `<StepTimeline>` at all".
+   *
+   * What this guard protects is named in the header above: ONE renderer for
+   * "what the agent saw", because a claim that reads differently depending on
+   * which screen you are on is two claims. That claim is about a **stored**
+   * turn's rows — the durable record, which Raw turns owns and chat must not
+   * restate.
+   *
+   * A running turn's rows are not that claim. They exist only while the turn
+   * is open, they are replaced by the reply's own durable steps the instant it
+   * settles, and nothing else in the product can show them. Forbidding them
+   * outright left chat able to say a turn was running and never what it had
+   * done — including, until #411's states reached the live fold, that a call
+   * was parked on a sign-off the operator could have granted.
+   *
+   * So the ban keeps its teeth where they matter: no chat surface may render a
+   * **stored message's** steps. `MessageRow` is the surface that holds stored
+   * messages, and it stays forbidden outright.
+   */
+  it("owns a stored turn's detailed calls; chat may show only a running one's", () => {
     expect(raw).toContain('data-testid="agent-session-raw-steps"');
     expect(raw).toContain("row.steps.map");
+    // The surface that renders stored messages renders no timeline at all.
+    expect(messageRow).not.toContain("<StepTimeline");
+    // Nor may any chat surface reach for a message's own durable steps.
     for (const chatSurface of [messageRow, threadPanel, messageTimeline, liveReceipt]) {
-      expect(chatSurface).not.toContain("<StepTimeline");
+      expect(chatSurface).not.toContain("steps={message.steps}");
     }
+    // The live rows that ARE allowed come from the open turn, never a message.
+    expect(messageTimeline).toContain("<StepTimeline steps={steps} />");
+    expect(liveReceipt).toContain("<StepTimeline steps={steps} />");
   });
 
   /**

@@ -129,7 +129,7 @@ import { CompanyView } from "@/views/company/CompanyView";
 import { ManageListsView } from "@/views/company/ManageListsView";
 import { readLastChannel } from "@/lib/last-channel";
 import { RoomView } from "@/views/RoomView";
-import { shouldClearReceipt } from "@/views/room/ChatLiveReceipt";
+import { receiptAgentAfter, shouldClearReceipt } from "@/views/room/ChatLiveReceipt";
 import {
   buildChannels,
   channelForThread,
@@ -842,6 +842,7 @@ export function AppShell({
   // Not a replacement: a frame with no `messageSeq` still keys by thread, which
   // is every turn answering no journaled message and every older host.
   const setLiveStepsByMessage = scopedRoomWriters.setLiveStepsByMessage;
+  const setLiveAgentByTurn = scopedRoomWriters.setLiveAgentByTurn;
   /**
    * Retires the live rows of every message that now has durable steps of its
    * own, and of every message named in `alsoDrop`.
@@ -2364,9 +2365,7 @@ export function AppShell({
       // racing it, still running. Only the actual reply — never an advisory
       // interleaved before it — is a completion signal.
       if (from !== "system" && !hasOtherOpenTurns(room.readRoom().openTurns, event.chatId)) {
-        setLiveStepsByThread((prev) =>
-          prev[event.chatId]?.length ? { ...prev, [event.chatId]: [] } : prev,
-        );
+        clearLiveThread(event.chatId);
       }
     },
     // `useEvents` holds its callbacks in refs, so this identity churning as the
@@ -2511,10 +2510,37 @@ export function AppShell({
   // value handed back to the caller and threaded through to whichever
   // terminal callback eventually clears the receipt it stamped.
   const receiptGenRef = useRef(0);
+  /**
+   * Retires a thread bucket's live rows **and** the agent they named.
+   *
+   * The two are one fact — "this is what the turn on this thread is doing, and
+   * who is doing it" — and a thread key is reused by every turn a conversation
+   * ever runs. Clearing only the rows leaves the previous turn's agent on the
+   * key, so the next turn's row names whoever answered last until a frame
+   * happens to carry a new id. On a turn that never reports one, that is the
+   * whole turn (CodeRabbit on #2423).
+   *
+   * Per-query buckets do not need this: their key is the message, which is
+   * never reused, and `clearLiveRowsSettledBy` already retires them together.
+   */
+  const clearLiveThread = useCallback(
+    (threadId: string, force = false) => {
+      setLiveStepsByThread((prev) =>
+        force || prev[threadId]?.length ? { ...prev, [threadId]: [] } : prev,
+      );
+      setLiveAgentByTurn((prev) => {
+        if (!(threadId in prev)) return prev;
+        const next = { ...prev };
+        delete next[threadId];
+        return next;
+      });
+    },
+    [setLiveStepsByThread, setLiveAgentByTurn],
+  );
   const onSendStart = useCallback((threadId: string) => {
     pendingPostThreadsRef.current.started(threadId);
     activeTurnThreadRef.current = threadId;
-    setLiveStepsByThread((prev) => ({ ...prev, [threadId]: [] }));
+    clearLiveThread(threadId, true);
     // `lastFrameAt` seeds to `startedAt` so the stall check is "no frame for
     // 30s" from the send, not an instant stall.
     const now = Date.now();
@@ -2524,7 +2550,7 @@ export function AppShell({
       [threadId]: { startedAt: now, lastFrameAt: now, gen },
     }));
     return gen;
-  }, []);
+  }, [clearLiveThread]);
   const onSendEnd = useCallback(
     (threadId: string, gen?: number, responseTexts?: readonly string[]) => {
       // `ended` hands back any held system-attributed frame the settled
@@ -2536,13 +2562,10 @@ export function AppShell({
       const released = pendingPostThreadsRef.current.ended(threadId, responseTexts);
       released.forEach((frame) => renderAgentReply(frame));
       if (activeTurnThreadRef.current === threadId) activeTurnThreadRef.current = null;
-      setLiveStepsByThread((prev) => {
-        if (!prev[threadId]?.length) return prev;
-        return { ...prev, [threadId]: [] };
-      });
+      clearLiveThread(threadId);
       clearReceipt(threadId, gen);
     },
-    [clearReceipt, renderAgentReply],
+    [clearLiveThread, clearReceipt, renderAgentReply],
   );
   /**
    * A chat POST that resolved for a company the operator has since left
@@ -2910,16 +2933,38 @@ export function AppShell({
       if (!rows) return prev;
       return { ...prev, [rowKey]: rows };
     });
+    // …and who is speaking, under the same key the rows went to.
+    //
+    // `openTurns` already carries an agent, but it is the one the host STARTED
+    // the turn on and it is never revised — right for a single responder, wrong
+    // the moment the floor moves. A desk hand-off runs the delegate under this
+    // same query, and a deliberating room passes the floor between seats for
+    // the length of the episode: `messageSeq` holds still while `agentId`
+    // changes with every turn. So the frames are the only thing that knows who
+    // is working *now*, and `receiptAgentAfter` is the rule for reading them —
+    // shared with the receipt rather than restated, since a second copy is how
+    // the two rows would come to name different people for one turn.
+    setLiveAgentByTurn((prev) => {
+      const frameAgentId = "agentId" in event ? event.agentId : undefined;
+      const next = receiptAgentAfter(prev[rowKey], frameAgentId);
+      // Unchanged is the common case — most frames in a run carry the same
+      // agent — so keep the object identity and let React bail out.
+      if (!next || next === prev[rowKey]) return prev;
+      return { ...prev, [rowKey]: next };
+    });
     // Keep this thread's receipt alive off the same frame (issue #1934): a frame
     // arriving means the turn is advancing, so bump `lastFrameAt` (which clears
-    // any stall) and capture the first agent id we see. Guarded on an existing
+    // any stall) and name whoever is working right now. Guarded on an existing
     // receipt — a stray background frame for a thread we never sent on must not
     // conjure one, mirroring the `if (!threadId) return` guard above.
+    //
+    // Who is named is `receiptAgentAfter`'s rule, not this callback's — see it
+    // for why the newest frame's agent wins over the first one seen.
     setReceiptByThread((prev) => {
       const existing = prev[threadId];
       if (!existing) return prev;
       const frameAgentId = "agentId" in event ? event.agentId : undefined;
-      const agentId = existing.agentId ?? (frameAgentId || undefined);
+      const agentId = receiptAgentAfter(existing.agentId, frameAgentId);
       return { ...prev, [threadId]: { ...existing, lastFrameAt: Date.now(), agentId } };
     });
   }, []);

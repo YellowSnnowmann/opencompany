@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { TriangleAlert, X } from "lucide-react";
 
 import { Markdown } from "@/components/markdown";
@@ -12,7 +13,7 @@ import { BudgetPauseNoticeCard } from "./BudgetPauseNoticeCard";
 import { EchoPlaceholder, echoMarkerFor } from "./EchoPlaceholder";
 import { FailedSendNotice, OutputLinkRow, TurnFailureNotice } from "./MessageRow";
 import { MessageAttachments } from "./MessageAttachments";
-import { AsideConversation, ReferralChip, ReferralConversation } from "./StepTimeline";
+import { AsideConversation, ReferralChip, ReferralConversation, StepTimeline } from "./StepTimeline";
 import { MessageComposer } from "./MessageComposer";
 import { TypingLine } from "./TypingLine";
 import { WorkingIndicator } from "./WorkingIndicator";
@@ -60,6 +61,10 @@ interface Props {
    * with no render path at all (Codex on #2069).
    */
   liveStepsByMessage?: Record<string, TurnStep[]>;
+  /** Live agent per turn bucket — see the resolution beside `openTurnSteps`. */
+  liveAgentByTurn?: Record<string, string>;
+  /** Roster agent id → display name, so no row ever shows a raw id. */
+  agentNames?: Record<string, string>;
   sending: boolean;
   /**
    * Everything an `@` can name here (issue #1645). Drawn from the parent
@@ -175,7 +180,12 @@ interface Props {
    * the shell keyed its open turns per thread rather than per channel; before
    * that there was no way to ask "is *this* thread working".
    */
-  openTurn?: { queued: boolean };
+  openTurn?: { queued: boolean; agentId?: string };
+  /**
+   * The open turn's teammate, already resolved to a display name — never a raw
+   * id, on the same terms as the channel pane's own rule.
+   */
+  turnAgentName?: string;
   /** This console is typing here. Distinct from the main composer's callback
    * so the ping this thread sends carries the thread's own `parentId`. */
   onTyping?: () => void;
@@ -227,6 +237,8 @@ export function ThreadPanel({
   replies,
   inlineReplyIds,
   liveStepsByMessage,
+  liveAgentByTurn,
+  agentNames,
   sending,
   mentionables,
   channelMemberIds,
@@ -243,6 +255,7 @@ export function ThreadPanel({
   onClose,
   typingNames = [],
   openTurn,
+  turnAgentName,
   onTyping,
   cognition,
   onRedeemBudgetPause,
@@ -256,6 +269,39 @@ export function ThreadPanel({
   const countedReplies = inlineReplyIds
     ? replies.reduce((n, r) => (inlineReplyIds.has(r.id) ? n : n + 1), 0)
     : replies.length;
+  /**
+   * The open turn's rows, for the one indicator at the foot of this panel.
+   *
+   * Newest first over this thread's own lines, so a second question asked in
+   * the thread owns the row while an earlier one keeps its rows bucketed rather
+   * than losing them — the same rule the channel pane applies, over the subset
+   * of messages this panel actually renders.
+   *
+   * Resolved here rather than handed to each line, because position in a
+   * transcript is chronology: a "happening now" row placed back at the asking
+   * message claims the work finished before every reply beneath it, which is
+   * false the moment anything is journaled in between.
+   */
+  const openTurn_ = useMemo(() => {
+    if (!liveStepsByMessage) return undefined;
+    for (let i = replies.length - 1; i >= 0; i -= 1) {
+      const rows = liveStepsByMessage[replies[i].id];
+      if (rows?.length) return { steps: rows, key: replies[i].id };
+    }
+    const rows = liveStepsByMessage[parent.id];
+    return rows?.length ? { steps: rows, key: parent.id } : undefined;
+  }, [liveStepsByMessage, replies, parent.id]);
+  const openTurnSteps = openTurn_?.steps;
+  /**
+   * The teammate on the row, under the **same key the rows came from**.
+   *
+   * `turnAgentName` is resolved upstream from the host's open-turn record,
+   * which a turn the console never sent does not have — and the caller cannot
+   * do this lookup for us, because only this component knows which of the
+   * thread's messages owns the open bucket. Without it the row fell through to
+   * naming the running step, which is the channel's old bug one pane over.
+   */
+  const liveName = openTurn_?.key ? agentNames?.[liveAgentByTurn?.[openTurn_.key] ?? ""] : undefined;
   return (
     <aside className="flex w-96 shrink-0 flex-col border-l bg-background">
       <header className="flex h-13 shrink-0 items-center gap-2 border-b px-3">
@@ -273,7 +319,6 @@ export function ThreadPanel({
           channel={channel}
           members={members}
           message={parent}
-          liveSteps={liveStepsByMessage?.[parent.id]}
           youAvatar={youAvatar}
           resolveAttachmentUrl={resolveAttachmentUrl}
           cognition={cognition}
@@ -294,7 +339,6 @@ export function ThreadPanel({
             channel={channel}
             members={members}
             message={r}
-            liveSteps={liveStepsByMessage?.[r.id]}
             youAvatar={youAvatar}
             resolveAttachmentUrl={resolveAttachmentUrl}
             cognition={cognition}
@@ -332,12 +376,23 @@ export function ThreadPanel({
         </p>
       ) : (
         <>
-          {openTurn && (
+          {(openTurn || !!openTurnSteps?.length) && (
             <div className="px-4 py-2">
+              {/* Named, not blind. The rows used to render against each line
+                  in the body while this row said only "Replying…" — so the
+                  panel showed the work in the past tense of its position and
+                  the presence in the present tense of its wording. One row,
+                  at the foot, carrying both. */}
               <WorkingIndicator
-                srLabel={openTurn.queued ? "Queued…" : "Replying…"}
-                queued={openTurn.queued}
+                srLabel={openTurn?.queued ? "Queued…" : "Replying…"}
+                steps={openTurnSteps}
+                name={liveName ?? turnAgentName}
+                queued={openTurn?.queued}
               />
+              {/* …and what it has done, the same pair the channel shows. The
+                  line names the teammate and stops; this names the call in
+                  flight in its own summary. */}
+              {!!openTurnSteps?.length && <StepTimeline steps={[...openTurnSteps]} />}
             </div>
           )}
           <TypingLine names={typingNames} />
@@ -400,7 +455,6 @@ function Line({
   channel,
   members,
   message,
-  liveSteps,
   youAvatar,
   resolveAttachmentUrl,
   cognition,
@@ -412,8 +466,6 @@ function Line({
   channel: Channel;
   members: TeamMember[];
   message: ChatMessage;
-  /** This message's in-flight turn rows, if one is running (see `MessageRow`). */
-  liveSteps?: readonly TurnStep[];
   youAvatar?: string;
   resolveAttachmentUrl?: (nodeId: string) => Promise<string>;
   cognition?: CognitionState | null;
@@ -518,9 +570,6 @@ function Line({
         )}
         {message.outputs && message.outputs.length > 0 && (
           <OutputLinkRow outputs={message.outputs} />
-        )}
-        {!!liveSteps?.length && (
-          <WorkingIndicator srLabel="Working…" steps={liveSteps} />
         )}
         {/* And the crossings, for the same reason the steps are here: a room's
             turns are threaded, so this panel is the only surface a deliberating

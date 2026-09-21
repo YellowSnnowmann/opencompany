@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Bot, CircleDot, Hash, Lock, Send, UserPlus } from "lucide-react";
 
 import type { ApprovalSummary, CognitionState, DecideApproval, TurnStep, Verdict } from "@/api/types";
@@ -11,6 +11,7 @@ import { ApprovalRow } from "./ApprovalRow";
 import { ChatLiveReceipt, type ChatReceipt } from "./ChatLiveReceipt";
 import { EpisodeBlock } from "./EpisodeBlock";
 import { MessageRow } from "./MessageRow";
+import { StepTimeline } from "./StepTimeline";
 import { WorkingIndicator } from "./WorkingIndicator";
 import {
   channelIntroSentence,
@@ -55,11 +56,28 @@ interface Props {
    * per-turn half of `liveSteps` above, which is the per-thread strip.
    *
    * Both exist because a frame only knows which query it belongs to when the
-   * host stamps `messageSeq` on it. One that does renders under its own
-   * message; one that does not (a relay, a dispatched card, an older host)
-   * falls back to the strip.
+   * host stamps `messageSeq` on it. One that does files under its query; one
+   * that does not (a relay, a dispatched card, an older host) falls back to
+   * the thread. They are filled exclusively — never both.
+   *
+   * The query decides which **bucket** the rows land in, never where they
+   * render: the live pair is pinned to the foot of the pane either way. A
+   * "happening now" row placed back at the asking message claims the work
+   * finished before every line beneath it, which is false the moment anything
+   * is journaled in between — a hive episode posts a seat's line per turn, so
+   * by convergence the pulsing row sits several messages up while everything
+   * below it has already happened.
    */
   liveStepsByMessage?: Record<string, TurnStep[]>;
+  /**
+   * Who last reported on each open turn, keyed exactly as its rows are.
+   *
+   * The live answer to "who is working", read in preference to
+   * {@link turnAgentId} — which names whoever the host started the turn on and
+   * never revises, so it cannot follow a desk hand-off or a room passing the
+   * floor between seats.
+   */
+  liveAgentByTurn?: Record<string, string>;
   /**
    * The live receipt for a synchronous chat turn this console just sent (issue
    * #1934). When present it supersedes {@link TypingRow} — it says "Sent →
@@ -201,6 +219,7 @@ export function MessageTimeline({
   queued,
   liveSteps,
   liveStepsByMessage,
+  liveAgentByTurn,
   receipt,
   turnAgentId,
   agentNames,
@@ -231,11 +250,49 @@ export function MessageTimeline({
   const scroller = useRef<HTMLDivElement>(null);
   /** The inner column whose own height rule 2b's `ResizeObserver` watches. */
   const content = useRef<HTMLDivElement>(null);
-  const liveStepCount = liveSteps?.length ?? 0;
+  /**
+   * The open turn's rows, whichever bucket the host's stamping filed them in.
+   *
+   * `liveStepsByMessage` and `liveStepsByThread` are filled **exclusively** — a
+   * frame carrying `messageSeq` files under its query, one without files under
+   * the thread (`AppShell.onTurnEvent`, whose own comment is "never both") — so
+   * one turn's rows live in exactly one of them and reading the union cannot
+   * double-count.
+   *
+   * Only half of it was reaching the live rows. `ChatLiveReceipt` reads these
+   * to reach its third state, "On step <label>"; given the thread half alone, a
+   * turn the host stamped left its bucket empty, so the receipt sat on "Picked
+   * up by <name>" for the whole turn while the steps surfaced somewhere else
+   * entirely.
+   *
+   * Newest first: a channel can hold rows for more than one query, and the open
+   * turn is the most recent that has any. Walking `items` rather than the map's
+   * own key order because only the timeline knows which question came last.
+   */
+  const openTurn = useMemo(() => {
+    if (liveSteps?.length) return { steps: liveSteps, key: undefined as string | undefined };
+    if (!liveStepsByMessage) return undefined;
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const item = items[i];
+      if (item.kind !== "message") continue;
+      const id = item.entry.message.id;
+      const rows = liveStepsByMessage[id];
+      if (rows?.length) return { steps: rows, key: id };
+    }
+    return undefined;
+  }, [liveSteps, liveStepsByMessage, items]);
+  const openTurnSteps = openTurn?.steps;
+  const liveStepCount = openTurnSteps?.length ?? 0;
   // Resolved once, for both live rows below. Kept here rather than inside them
   // so the receipt's "never a raw id" rule holds in one place: an id this map
   // does not know yields no name, and the row says "Working…" as it always did.
-  const turnAgentName = turnAgentId ? agentNames?.[turnAgentId] : undefined;
+  // The live agent wins: `turnAgentId` names whoever the host started the turn
+  // on and is never revised, so on its own the row kept naming the opening
+  // responder through a hand-off and through every seat of a room. The
+  // fallback still covers the reload leg, whose re-armed row has no frames yet.
+  const liveAgentId = openTurn?.key ? liveAgentByTurn?.[openTurn.key] : undefined;
+  const resolvedTurnAgentId = liveAgentId ?? turnAgentId;
+  const turnAgentName = resolvedTurnAgentId ? agentNames?.[resolvedTurnAgentId] : undefined;
   // Rows that arrived locally — a message sent before hydration landed — are
   // still worth showing while the rest of the history is in flight. It is only
   // the *claim of emptiness* that has to wait.
@@ -411,11 +468,6 @@ export function MessageTimeline({
           {item.entry.dayLabel && <DayDivider label={item.entry.dayLabel} />}
           <MessageRow
             entry={item.entry}
-            // The turn this message asked for, while it runs. Keyed by the
-            // message's own id, so two questions in one channel each get their
-            // own timeline instead of sharing the foot-of-channel strip (and
-            // clearing each other's rows).
-            liveSteps={liveStepsByMessage?.[item.entry.message.id]}
             threadOpen={item.entry.message.id === openThreadId}
             onOpenThread={onOpenThread}
             onReact={onReact}
@@ -522,13 +574,13 @@ export function MessageTimeline({
             channel={channel}
             receipt={receipt}
             agentNames={agentNames}
-            steps={liveSteps ?? []}
+            steps={openTurnSteps ?? []}
             queued={queued}
           />
         ) : liveStepCount > 0 && !queued ? (
           <LiveTurnRow
             channel={channel}
-            steps={liveSteps ?? []}
+            steps={openTurnSteps ?? []}
             name={turnAgentName}
           />
         ) : (
@@ -857,8 +909,19 @@ function LiveTurnRow({
         className="size-9 shrink-0"
       />
       <div className="min-w-0 flex-1 space-y-1.5">
-        {/* Chat names the current activity; Raw turns owns the detailed calls. */}
+        {/* The line says who and what; the timeline below says how far. */}
         <WorkingIndicator srLabel="Working…" steps={steps} name={name} label={label} />
+        {/* The steps of a turn **still running**, collapsed to "N steps" the
+            way a finished reply's are, and auto-opening on a failed or parked
+            one so a silent MCP failure is visible rather than buried (#411).
+
+            Raw turns still owns "what the agent saw" — the stored rows of a
+            settled turn, in one renderer, because a claim that reads
+            differently per screen is two claims. These are not that claim:
+            they exist only while the turn is open and they are gone the moment
+            it settles, replaced by the reply's own durable steps. Without them
+            chat could say a turn was running and never what it had done. */}
+        {!!steps.length && <StepTimeline steps={steps} />}
       </div>
     </div>
   );
