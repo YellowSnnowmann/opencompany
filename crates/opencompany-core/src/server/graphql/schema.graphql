@@ -38,8 +38,8 @@ type AgentRun {
 	"""
 	nodeId: ID
 	"""
-	The desk episode this attempt is a seat turn of (plan hive-desks), or null
-	for a card dispatch, a workflow node and an ordinary chat turn.
+	The desk episode this attempt is a seat turn of (plan hive-desks), or
+	null for a card dispatch, a workflow node and an ordinary chat turn.
 	"""
 	episodeId: ID
 	"""
