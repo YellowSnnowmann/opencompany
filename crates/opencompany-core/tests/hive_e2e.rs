@@ -673,6 +673,14 @@ async fn a_two_member_desk_completes_in_two_rounds() {
     );
 
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
+    if std::env::var_os("HIVE_E2E_DUMP").is_some() {
+        for row in &rows {
+            eprintln!("[journal] {} {}", row.seq.value(), serde_json::to_string(&row.event).unwrap_or_default().chars().take(400).collect::<String>());
+        }
+        for ask in script.asks() {
+            eprintln!("[ask] tools={:?} last_user={:?} pending={:?}", ask.tools, ask.last_user_text().chars().take(300).collect::<String>(), ask.pending_tool);
+        }
+    }
 
     let opened: Vec<(String, Vec<String>, Router)> = rows
         .iter()
