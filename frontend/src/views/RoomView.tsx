@@ -495,6 +495,7 @@ export function RoomView({
    * `HISTORY_UNSTARTED`, which spins forever.
    */
   const openTurns = room.useOpenTurns();
+  const liveAgentByTurn = room.useLiveAgentByTurn();
   const liveStepsByThread = room.useLiveStepsByThread();
   const liveStepsByMessage = room.useLiveStepsByMessage();
   const receiptByThread = room.useReceiptByThread();
@@ -2889,10 +2890,32 @@ export function RoomView({
                   // Thread-panel receipts are out of v1 (issue #1934): excluded here
                   // the same way `liveSteps` is when a thread is open.
                   receipt={openThreadId ? undefined : receipt}
-                  // Who the host expects to answer, for the leg that has no
-                  // receipt to read: a reload keeps the open-turn row and
-                  // nothing else, and the row is what carries this.
-                  turnAgentId={openTurn?.agentId}
+                  // Who is answering, for the leg that has no receipt to read.
+                  //
+                  // The LIVE agent first, falling back to the one the host
+                  // started the turn on. `openTurn.agentId` is set once and
+                  // never revised, so on its own this row named the opening
+                  // responder for the whole turn — through a desk hand-off,
+                  // and through every seat of a deliberating room. The frames
+                  // are what know the floor has moved; `liveAgentByTurn` is
+                  // where they say so. The fallback still covers the reload
+                  // leg, where a re-armed row has no frames of its own yet.
+                  // The thread-keyed half of the live answer — a turn the host
+                  // did not stamp with a `messageSeq` files its rows and its
+                  // agent under the thread, and this is the only place that
+                  // knows the thread id. The query-keyed half is resolved in
+                  // the timeline, beside the rows it belongs to, and overrides
+                  // this: only the timeline knows which bucket is the open
+                  // turn's, and two copies of that precedence is how the name
+                  // and the steps would come to disagree.
+                  //
+                  // `openTurn.agentId` remains the last fallback, for the
+                  // reload leg whose re-armed row has seen no frames yet.
+                  turnAgentId={
+                    (activeThreadId ? liveAgentByTurn?.[activeThreadId] : undefined) ??
+                    openTurn?.agentId
+                  }
+                  liveAgentByTurn={liveAgentByTurn}
                   agentNames={agentNames}
                   onOpenThread={setOpenThreadId}
                   onReact={react}
@@ -3215,6 +3238,11 @@ export function RoomView({
                   // messages never reach the channel timeline — so the panel needs
                   // the per-query rows too, or its turns show nothing at all.
                   liveStepsByMessage={liveStepsByMessage}
+                  // …and what it needs to name the seat working them. Resolved
+                  // in the panel rather than here because only it knows which
+                  // of the thread's messages owns the open bucket.
+                  liveAgentByTurn={liveAgentByTurn}
+                  agentNames={agentNames}
                   sending={sending}
                   mentionables={mentionables}
                   channelMemberIds={inChannel?.map((m) => m.id)}
@@ -3240,6 +3268,23 @@ export function RoomView({
                   onClose={() => setOpenThreadId(null)}
                   typingNames={resolveTypingNames?.(active.id, parent.id) ?? []}
                   openTurn={threadTurn}
+                  // Resolved here, never in the panel: "never a raw id" is one
+                  // rule in one place, the same way the channel pane resolves
+                  // its own row's name.
+                  //
+                  // The live agent first, on the same precedence the channel
+                  // uses. `threadTurn.agentId` is the responder the host
+                  // recorded when the turn started and is never revised, so
+                  // alone it left an open thread naming the opening teammate
+                  // through a hand-off while the channel beside it named the
+                  // current one (tinysweeper on #2423). The recorded responder
+                  // stays the fallback, for the reload leg with no frames yet.
+                  turnAgentName={(() => {
+                    const id =
+                      (threadTurnKey ? liveAgentByTurn?.[threadTurnKey] : undefined) ??
+                      threadTurn?.agentId;
+                    return id ? agentNames?.[id] : undefined;
+                  })()}
                   onTyping={() => onTyping?.(active.id, parent.id)}
                   onRetrySend={retrySend}
                   // A thread is not a lesser transcript (issue #1734): an echoed

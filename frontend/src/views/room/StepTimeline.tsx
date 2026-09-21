@@ -1,6 +1,9 @@
 import { useState } from "react";
 
 import { useCrossingRunning } from "./referral-running";
+// The one definition of "which step is in flight" — shared with the line
+// above this row so the two can never disagree about it.
+import { runningStepLabel } from "./WorkingIndicator";
 import {
   AlertTriangle,
   Brain,
@@ -50,11 +53,20 @@ import { cn } from "@/lib/utils";
  * reply). Ported from the retired Conversation page (issue #246) so the chat
  * workspace keeps the same tool-call visibility it had.
  *
- * `defaultOpen` is for the *live* timeline of a turn still running (issue
- * #367): there the rows are the content — they are what says the company is
- * working and on what — so they start open rather than behind a count. A
- * finished reply's steps stay collapsed, where they are supporting detail.
- * Either way the operator's own toggle wins from the first click.
+ * `defaultOpen` was written for the *live* timeline of a turn still running
+ * (issue #367), on the reading that its rows are the content. Chat no longer
+ * takes it, deliberately: the live pair pins a **line** to the foot of the
+ * pane saying what is happening and who is doing it, and the timeline beneath
+ * it is the detail behind that line — the same relationship a finished reply's
+ * steps have to its text. An always-open list under every running turn also
+ * grows the foot of the transcript by a row per tool call, pushing the very
+ * line it supports off-screen on a long turn.
+ *
+ * What still opens by itself is what the operator can *act* on: a failed step,
+ * or one parked on a sign-off. Those force the list open wherever it renders,
+ * live or settled, because a silent MCP failure behind a count is the thing
+ * #411 exists to prevent. The prop stays for callers outside chat, and the
+ * operator's own toggle wins from the first click either way.
  */
 export function StepTimeline({
   steps,
@@ -69,6 +81,14 @@ export function StepTimeline({
   // collapsed summary either (#411).
   const parked = steps.filter((s) => s.status === "awaiting_approval").length;
   const hasError = failed > 0;
+  // The call in flight, named in the collapsed summary.
+  //
+  // This row is where "what is happening" lives — the line above it names the
+  // teammate and stops. Collapsed, the summary was a bare count, so between
+  // them the two rows said who was working and how many things had happened
+  // and never what was happening now. Naming it here keeps that visible at a
+  // glance without opening a list that grows by a row per tool call.
+  const running = runningStepLabel(steps);
   const [open, setOpen] = useState(defaultOpen || hasError || parked > 0);
 
   if (steps.length === 0) return null;
@@ -93,6 +113,7 @@ export function StepTimeline({
           {steps.length} step{steps.length === 1 ? "" : "s"}
           {failed > 0 && ` · ${failed} failed`}
           {parked > 0 && ` · ${parked} awaiting approval`}
+          {!open && running && ` · ${running}`}
         </span>
       </button>
       {open && (

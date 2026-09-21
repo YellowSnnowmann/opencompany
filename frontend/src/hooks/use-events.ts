@@ -6,6 +6,7 @@ import type {
   EpisodeCompletionReason,
   RoutingPlanDto,
   RoutingRouter,
+  TurnStepFailure,
   UtteranceKind,
 } from "@/api/types";
 import type { OpenCompanyClient } from "@/api/client";
@@ -647,6 +648,23 @@ export type CompanyStreamEvent =
        * only this.
        */
       result?: string;
+      /**
+       * The typed reason the call did not succeed (issue #411). On the wire
+       * since #411 (`TurnStreamEvent.failure`) and undeclared here until now,
+       * so the live row could not wear the chip the folded step does.
+       */
+      failure?: TurnStepFailure;
+      /**
+       * The result was cut before the agent could read all of it (issue #410).
+       * Carried for the same reason `failure` is.
+       */
+      truncated?: boolean;
+      /**
+       * `"ok"`, `"error"` or `"awaiting_approval"` — the host's own
+       * `TurnStepStatus::wire_word`, so the live word and the persisted one
+       * cannot drift. A parked call reports the third, which is why a reader
+       * must not treat this as a two-way `error`/`ok` flag.
+       */
       status?: string;
       elapsedMs?: number;
       /** See {@link CompanyStreamEvent} `tool_call.messageSeq`. */

@@ -1284,18 +1284,16 @@ impl CompanyManifest {
         // An admin entry is bootstrapped by comparing its normalized form
         // against the identity a login route resolves — the same normalization
         // `LoginIdentity::parse` has to disambiguate from the `wallet:` and
-        // `local:` schemes sharing this column. An entry that does not survive
-        // normalization as a real mailbox (missing `@`) is not merely useless,
-        // it can normalize to `local:owner` — `normalize_email` only lowercases
-        // and trims — and a bootstrapped user stored under that exact key would
-        // misparse as the `none`-mode local owner identity rather than the
-        // email admin it was meant to be. Caught here so it never reaches a
-        // running company.
+        // `local:` schemes sharing this column. An entry that normalizes to
+        // `local:owner` — `normalize_email` only lowercases and trims — would
+        // be stored under the `none`-mode local owner's own key and misparse
+        // as that identity rather than the email admin it was meant to be.
+        // Caught here so it never reaches a running company. An `@` is not
+        // demanded: a login on a host with no mail is a username.
         for admin in &self.users.admins {
             if !crate::ports::users::is_usable_admin_email(admin) {
                 problems.push(format!(
-                    "`[users].admins` has an invalid entry: `{admin}` does not look like an \
-                     email address"
+                    "`[users].admins` has an invalid entry: `{admin}` is not a usable login"
                 ));
             }
         }

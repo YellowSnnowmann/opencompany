@@ -2,7 +2,7 @@ import { useState } from "react";
 import { FileText, MessageSquareReply, Paperclip, TriangleAlert } from "lucide-react";
 
 import type { TaskStatus } from "@/api/tasks";
-import type { CognitionState, TurnStep } from "@/api/types";
+import type { CognitionState } from "@/api/types";
 import { AgentAvatarButton, useAgentProfileOpener } from "@/components/agent-profile-sheet";
 import { Markdown } from "@/components/markdown";
 import { UtteranceChip } from "@/components/episode/UtteranceChip";
@@ -33,11 +33,6 @@ import { WorkingIndicator } from "./WorkingIndicator";
 
 interface Props {
   entry: TimelineEntry;
-  /**
-   * Live steps are used only to name the current activity while it runs. The
-   * raw calls and results belong in Raw turns, not in the chat transcript.
-   */
-  liveSteps?: readonly TurnStep[];
   /** True when the thread panel is showing this row's replies. */
   threadOpen: boolean;
   onOpenThread: (messageId: string) => void;
@@ -242,7 +237,6 @@ function actionsUnavailableFor(message: ChatMessage): string | undefined {
  */
 export function MessageRow({
   entry,
-  liveSteps,
   threadOpen,
   onOpenThread,
   onReact,
@@ -395,9 +389,6 @@ export function MessageRow({
 
         {message.outputs && message.outputs.length > 0 && (
           <OutputLinkRow outputs={message.outputs} />
-        )}
-        {!!liveSteps?.length && (
-          <WorkingIndicator srLabel="Working…" steps={liveSteps} />
         )}
         {/* Provenance for a crossing referral: this turn exists because another
             desk asked, and the reader of THIS desk cannot tell otherwise. */}
