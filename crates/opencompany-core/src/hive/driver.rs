@@ -43,57 +43,10 @@ use crate::ports::types::{
 /// The referral half of the host: deciding a crossing, opening the far
 /// desk's episode, and carrying the answer home.
 mod crossing;
-
-/// One seat turn as the driver asks for it.
-#[derive(Clone, Debug)]
-pub struct SeatTurn {
-    /// The company.
-    pub company: CompanyId,
-    /// The seat.
-    pub agent_id: String,
-    /// The rendered prompt (`hive::prompt`), sentinel first.
-    pub message: String,
-    /// The desk the turn answers on.
-    pub chat_id: String,
-    /// The thread root the episode runs in.
-    pub thread_root: Option<EventSeq>,
-    /// The message the turn answers, for the live turn stream.
-    pub message_seq: Option<EventSeq>,
-    /// The episode coordinates the MCP server attributes the seat's speech to.
-    pub hive: HiveTurn,
-    /// How long the turn may run once it holds its lock.
-    pub timeout: Duration,
-}
-
-/// What one seat turn produced.
-#[derive(Clone, Debug, Default)]
-pub struct SeatOutcome {
-    /// The reply text, used only to salvage a turn that called no tool.
-    pub reply: String,
-    /// The speech the seat made through the MCP server — at most one.
-    pub utterances: Vec<Utterance>,
-    /// The scrubbed step timeline, carried onto the reply row.
-    pub steps: Vec<TurnStep>,
-    /// Outputs the turn produced, carried onto the reply row.
-    pub outputs: Vec<ChatOutput>,
-}
-
-/// Why a seat turn produced nothing.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SeatFailure {
-    /// The turn ran past its timeout, counted from lock acquisition.
-    TimedOut,
-    /// The turn errored.
-    Failed(String),
-}
-
-/// Runs one seat turn. The production implementation binds to the harness
-/// pool; tests script one.
-#[async_trait]
-pub trait SeatRunner: Send + Sync {
-    /// Runs the turn and hands back what the seat said.
-    async fn run_seat(&self, seat: SeatTurn) -> std::result::Result<SeatOutcome, SeatFailure>;
-}
+/// The seat-turn seam: what one seat is asked, what it produced, and the
+/// runner that runs it.
+mod seat;
+pub use seat::{SeatFailure, SeatOutcome, SeatRunner, SeatTurn};
 
 /// The message that opens, joins or reopens an episode.
 #[derive(Clone, Debug)]
