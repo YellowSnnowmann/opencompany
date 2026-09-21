@@ -1159,12 +1159,20 @@ async fn a_cross_desk_referral_crosses_only_the_answer_back() {
             "Plan the rollout and get the release note written.",
         )
         .await;
-    // Both desks' episodes complete, and the answer has come home.
+    // Both desks' episodes complete, and the answer has come home — the
+    // return marker is journaled after the answer row, so it is the marker
+    // that says the crossing is over.
     let rows = wait_for(&runtime, "both episodes and the answer", EPISODE, |rows| {
         completed(2)(rows)
-            && replies(rows, ENGINEERING)
-                .iter()
-                .any(|row| row.agent == HIVE_REFERRAL_AUTHOR && row.text.contains(TAGLINE))
+            && rows.iter().any(|row| {
+                matches!(
+                    &row.event,
+                    CompanyEvent::ReferralEnqueued {
+                        returning: true,
+                        ..
+                    }
+                )
+            })
     })
     .await;
 
