@@ -289,11 +289,41 @@ half is what governs what the agents reach, so it is the half that must survive.
 when its effective grants explicitly include `mcp_registry` (or a
 `mcp_registry.<sub>` grant) — see
 [`grants_mcp_registry_explicit`](../../src/company/types.rs). A catch-all `*`
-does **not** confer it, the same rule as `composio`/`media`/`search`: the
-registry pair reaches any server the company has installed and connected,
-addressed at call time by a bare `server_id`, with none of the declared
-bridge's per-server scoping. Granted but no registry home configured wires
-nothing (fail-closed) rather than erroring.
+does **not** confer it, the same rule as `composio`/`media`/`search`. Granted
+but no registry home configured wires nothing (fail-closed) rather than
+erroring.
+
+Both tools address an install by a `server_id` argument at call time, so being
+wired is not the whole gate. Each is wrapped in `OcMcpRegistryScopedTool`
+(`harness::mcp`), which resolves that argument against the agent's effective
+grants through `grants_cover_registry_server`
+([`runtime/tools.rs`](../../src/runtime/tools.rs)) before delegating:
+
+| Grant | Reaches |
+|---|---|
+| `mcp_registry` | every install (what the grant has always meant) |
+| `mcp_registry.*` | every install |
+| `mcp_registry.<server_id>` | that install only |
+| `*` alone | nothing — MCP stays an explicit opt-in |
+
+A call naming an install the grants do not cover is refused with an error
+result naming the grant that would allow it; the inner tool is never reached
+and nothing is dialled. A call whose `server_id` is missing or blank is refused
+separately, so a malformed argument does not read to the agent as a missing
+grant.
+
+**`<server_id>` is the install's own identifier — a UUID minted when the server
+is installed — not its qualified or display name.** A scoped grant spells that
+UUID, and reinstalling the same directory server mints a new one, which
+silently retires a grant that named the old install. Resolving a friendlier
+alias was considered and rejected: two installs can normalise to the same slug,
+which would widen a permission boundary without anyone seeing it, and display
+names are operator-mutable.
+
+A tool that *enumerates* installs rather than addressing one carries no
+`server_id` to gate on; such a tool must filter its rows through the same
+predicate, the way `registry_for_agent` filters declared servers with
+`grants_cover_server`. Nothing wired today enumerates.
 
 A registry row's `reachableBy` has not caught up to this gate yet: it still
 lists the whole roster (and nobody when the install is disabled), the shape it
