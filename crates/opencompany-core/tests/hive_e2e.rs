@@ -604,11 +604,25 @@ async fn wait_for(
         if done(&rows) {
             return rows;
         }
-        assert!(
-            started.elapsed() < timeout,
-            "timed out waiting for {what}; journal kinds: {:?}",
-            rows.iter().map(|row| row.event.kind()).collect::<Vec<_>>()
-        );
+        if started.elapsed() >= timeout {
+            if std::env::var_os("HIVE_E2E_DUMP").is_some() {
+                for row in &rows {
+                    eprintln!(
+                        "[journal] {} {}",
+                        row.seq.value(),
+                        serde_json::to_string(&row.event)
+                            .unwrap_or_default()
+                            .chars()
+                            .take(600)
+                            .collect::<String>()
+                    );
+                }
+            }
+            panic!(
+                "timed out waiting for {what}; journal kinds: {:?}",
+                rows.iter().map(|row| row.event.kind()).collect::<Vec<_>>()
+            );
+        }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -706,7 +720,7 @@ async fn report(runtime: &Arc<CompanyRuntime>) -> Report {
 }
 
 /// A generous bound: every seat turn here is a couple of loopback calls.
-const EPISODE: Duration = Duration::from_secs(120);
+const EPISODE: Duration = Duration::from_secs(60);
 
 // ---------------------------------------------------------------------------
 // 1: a two-member desk completes in two rounds
