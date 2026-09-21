@@ -1215,7 +1215,6 @@ impl CompanyAgent {
             .collect();
         allow_tools.extend(served_names.iter().cloned());
         let base_id = crate::session_key::runtime_agent_id(company, agent_id);
-        tracing::warn!(agent = agent_id, ?served_names, "[DBG] register");
         let mut runtime_id = base_id.clone();
         let mut attempt = 0u32;
         let agent = loop {
@@ -2940,7 +2939,6 @@ impl HarnessPool {
         // fingerprint is stable — so that company never rebuilds on this axis.
         let composio_config = self.resolve_composio(company, deps).await;
         let composio_fp = composio::TenantComposio::fingerprint(&composio_config);
-        { let stored = self.composio_fingerprints.read().await.get(&company.id).copied(); tracing::warn!(company = %company.id, composio_fp, some = composio_config.is_some(), ?stored, "[DBG] ensure composio axis"); }
 
         // Re-resolve + fingerprint the billing connections (#788, #789) for the
         // same reason as Composio above: both are set from the console, so a
@@ -3219,7 +3217,6 @@ impl HarnessPool {
         // serial lock already serializes cycle callers; the pin is what keeps a
         // direct caller from regressing a pinned roster before `run_inner` clones
         // its agent.
-        tracing::warn!(company = %company.id, n = roster.len(), "[DBG] roster rebuilt");
         let mut agents = self.agents.write().await;
         agents.insert(company.id.clone(), roster);
         self.mcp_fingerprints
