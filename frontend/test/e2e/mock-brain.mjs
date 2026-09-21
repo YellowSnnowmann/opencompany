@@ -850,6 +850,80 @@ function offeredTools(body) {
 }
 
 /**
+ * The heading `opencompany_mcp_brief` (`src/harness/built_in/build.rs`) opens
+ * with, ahead of the "Tools: " line this reads.
+ */
+const COMPANY_MCP_BRIEF_HEADING = "## Company tools (MCP server `opencompany`)";
+
+/**
+ * The names on THIS seat's own `opencompany` MCP catalogue — this crate's own
+ * tools (`spawn_task`, `review_task`, `composio_execute`, the hand-off trio,
+ * …), which plan hive-desks Phase 3 moved off the belt and behind
+ * `mcp_call_tool` (`crate::harness::built_in::mod::CompanyAgent::register`,
+ * `build::agent_spec_for`'s `opencompany_mcp_brief`).
+ *
+ * Read off the system prompt rather than off `body.tools`, because that is
+ * the ONLY place a served catalogue is named on the wire once it moved off
+ * the belt — the belt now advertises `mcp_call_tool`/`mcp_list_tools` and
+ * nothing more specific. Scoped per seat: a teammate's brief lists its own
+ * (narrower) catalogue, so this still falls through to prose for a plan step
+ * written for a tool the answering seat does not carry — the same "wrong
+ * recipient" signal a missing native tool always was.
+ *
+ * @param {any[]} messages
+ * @returns {Set<string>}
+ */
+function bridgedCompanyTools(messages) {
+  const system = messages.find((message) => message?.role === "system") ?? messages[0];
+  const text = textOf(system);
+  const headingAt = text.indexOf(COMPANY_MCP_BRIEF_HEADING);
+  if (headingAt < 0) return new Set();
+  const toolsAt = text.indexOf("Tools: ", headingAt);
+  if (toolsAt < 0) return new Set();
+  const line = text.slice(toolsAt + "Tools: ".length).split("\n")[0];
+  return new Set(
+    line
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean),
+  );
+}
+
+/**
+ * Resolves one scripted call — `{name, arguments}`, as every `__MOCK_PLAN__`
+ * step and `__MOCK_TOOL_CALL__` directive spells one — to the wire shape the
+ * answering seat's belt can actually serve, or `null` when it cannot serve it
+ * at all.
+ *
+ * A scripted call still names the tool the test is about (`spawn_task`,
+ * `composio_execute`, …), which is the readable half; the belt may or may not
+ * still offer that name directly. When it does (an OpenHuman-native tool, or
+ * a host that predates the MCP move), the call goes out as written. When it
+ * does not but the name is on THIS seat's own `opencompany` catalogue (see
+ * {@link bridgedCompanyTools}), it is wrapped in `mcp_call_tool` — exactly the
+ * indirection `mcp-agent.spec.ts`'s directive already spells out by hand for
+ * an external server. Anything else resolves to `null`, so the caller can
+ * report the gap honestly rather than send a call the belt has no way to
+ * answer.
+ *
+ * @param {{name?: string, arguments?: any}} call
+ * @param {Set<string>} offered
+ * @param {Set<string>} bridged
+ * @returns {{name: string, arguments: any} | null}
+ */
+function resolveCall(call, offered, bridged) {
+  if (typeof call?.name !== "string") return null;
+  if (offered.has(call.name)) return { name: call.name, arguments: call.arguments ?? {} };
+  if (offered.has("mcp_call_tool") && bridged.has(call.name)) {
+    return {
+      name: "mcp_call_tool",
+      arguments: { server: "opencompany", tool: call.name, arguments: call.arguments ?? {} },
+    };
+  }
+  return null;
+}
+
+/**
  * The host's re-issue instruction in the last message, or null.
  *
  * Only the last message is considered. An instruction further back was already
