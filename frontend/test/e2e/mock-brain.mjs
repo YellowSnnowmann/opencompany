@@ -65,12 +65,16 @@
 //   2b. a **hive turn** — the last user message opens with the host's seat
 //      sentinel `Hive turn: desk <deskId>, episode <episodeId>, round <n>.` and
 //      the belt offers `mcp_call_tool` — end the turn with exactly one speech
-//      act on the `opencompany` MCP server, chosen by round: `post` in round 0,
-//      `broadcast` in round 1 (or `dm` to the agent a `__MOCK_DM__ <agent>`
-//      directive names), `complete_episode` from round 2 on. A tool output as
-//      the last message is that utterance recorded, and ends the turn.
-//      `desk-episode-live.spec.ts` and `scripts/measure-coordination.sh` drive
-//      a two-desk company to completion with it.
+//      act on the `opencompany` MCP server, chosen by how many turns this seat
+//      has already taken in the episode (`hiveStage`): `post` on its first,
+//      `broadcast` on its second (or `dm` to the agent a `__MOCK_DM__ <agent>`
+//      directive names), `complete_episode` from its third on. A
+//      `__MOCK_REFER__ [<agent>:]<desk>` directive makes the first post ask
+//      that desk (`#<desk>`), which the host carries across as a referral. A
+//      tool output as the last message is that utterance recorded, and ends
+//      the turn. `desk-episode-live.spec.ts` and
+//      `scripts/measure-coordination.sh` drive a two-desk company to
+//      completion with it.
 //   3. a message carrying `__MOCK_PLAN__ [[{…},{…}],[…]]` — a whole scripted
 //      turn: several calls in one assistant message, and several steps across
 //      one turn's tool loop. `orchestration-simulation.spec.ts` drives a goal
@@ -304,6 +308,16 @@ const HIVE_TURN_PATTERN = /Hive turn: desk (\S+?), episode (\S+?), round (\d+)\.
  */
 const DM_DIRECTIVE = "__MOCK_DM__";
 
+/**
+ * "Ask this desk from your first post", followed by a desk id, optionally
+ * qualified by the one seat that should ask — `__MOCK_REFER__ content` or
+ * `__MOCK_REFER__ engineer:content`. The post then carries `#<desk>`, which
+ * the host resolves as a desk mention and refers across (`src/hive/referral`).
+ * What lets the measurement count a cross-desk referral without a model that
+ * might decide otherwise.
+ */
+const REFER_DIRECTIVE = "__MOCK_REFER__";
+
 /** The MCP server slug the host mounts the speech tools on. */
 const HIVE_SERVER = "opencompany";
 
@@ -320,7 +334,64 @@ function findHiveTurn(messages) {
     if (message?.role !== "user" || isToolOutput(message)) continue;
     const match = HIVE_TURN_PATTERN.exec(textOf(message));
     if (!match) return null;
-    return { desk: match[1], episode: match[2], round: Number.parseInt(match[3], 10) };
+    const turn = { desk: match[1], episode: match[2], round: Number.parseInt(match[3], 10), speaker: null, stage: 0 };
+    const speaker = /You are @([a-z0-9_-]+)/i.exec(textOf(message));
+    if (speaker) turn.speaker = speaker[1];
+    turn.stage = hiveStage(messages.slice(0, i), turn);
+    return turn;
+  }
+  return null;
+}
+
+/**
+ * Which of its turns in this episode the seat is on — 0 for its first, 1 for
+ * its second, and so on — read off the earlier sentinels in the transcript,
+ * which the host keeps per seat across every turn it runs.
+ *
+ * The sentinel's `round` is the driver's **revision**: the count of
+ * utterances the episode has committed, not a turn ordinal. On a desk of two
+ * seats a seat's second turn carries `round 2`, its third `round 4`, so a
+ * script keyed on the raw number would never broadcast at all. With earlier
+ * sentinels in hand the stage is the number of distinct earlier revisions
+ * below this one (a retry at the same revision is the same turn); on a fresh
+ * transcript, where nothing earlier can be read, the raw round stands in,
+ * capped at the completing stage.
+ *
+ * @param {any[]} earlier the messages before the sentinel's own
+ * @param {{episode: string, round: number}} turn
+ * @returns {number}
+ */
+function hiveStage(earlier, turn) {
+  const seen = new Set();
+  let any = false;
+  for (const message of earlier) {
+    if (message?.role !== "user" || isToolOutput(message)) continue;
+    const match = HIVE_TURN_PATTERN.exec(textOf(message));
+    if (!match || match[2] !== turn.episode) continue;
+    any = true;
+    const revision = Number.parseInt(match[3], 10);
+    if (revision < turn.round) seen.add(revision);
+  }
+  return any ? seen.size : Math.min(turn.round, 2);
+}
+
+/**
+ * The desk a `__MOCK_REFER__` directive names, and the one seat it names to
+ * ask (or null for every seat), anywhere in the transcript — or null.
+ *
+ * @param {any[]} messages
+ * @returns {{desk: string, asker: string | null} | null}
+ */
+function findReferDirective(messages) {
+  for (const message of messages) {
+    const text = textOf(message);
+    const at = text.indexOf(REFER_DIRECTIVE);
+    if (at === -1) continue;
+    const word = text.slice(at + REFER_DIRECTIVE.length).trim().split(/\s+/)[0] ?? "";
+    const [head, tail] = word.includes(":") ? word.split(":", 2) : [null, word];
+    const desk = (tail ?? "").replace(/^#/, "").replace(/[^a-z0-9_-]/gi, "");
+    const asker = head ? head.replace(/^@/, "").replace(/[^a-z0-9_-]/gi, "") : null;
+    if (desk) return { desk, asker: asker || null };
   }
   return null;
 }
@@ -367,13 +438,17 @@ function isRefusedToolOutput(message) {
  * @param {boolean} refused whether the previous act in this turn was refused
  * @returns {any}
  */
-function hiveCompletion(model, hive, dm, refused) {
+function hiveCompletion(model, hive, dm, refused, refer = null) {
   const stamp = `${MARKER} desk ${hive.desk} episode ${hive.episode} round ${hive.round}`;
   /** @type {{tool: string, arguments: Record<string, unknown>}} */
   let act;
-  if (hive.round === 0) {
-    act = { tool: "post", arguments: { message: `${stamp}: opening post.` } };
-  } else if (hive.round === 1) {
+  if (hive.stage === 0) {
+    // The first post asks the desk a `__MOCK_REFER__` names — from the seat
+    // it names, or from every seat — unless this already is that desk.
+    const asks = refer && refer.desk !== hive.desk && (!refer.asker || refer.asker === hive.speaker);
+    const message = asks ? `${stamp}: opening post. Asking #${refer.desk} for their half.` : `${stamp}: opening post.`;
+    act = { tool: "post", arguments: { message } };
+  } else if (hive.stage === 1) {
     act =
       dm && !refused
         ? { tool: "dm", arguments: { to: [dm], message: `${stamp}: a word for @${dm}.` } }
@@ -381,7 +456,7 @@ function hiveCompletion(model, hive, dm, refused) {
   } else {
     act = { tool: "complete_episode", arguments: { message: `${stamp}: done, nothing left open.` } };
   }
-  process.stderr.write(`[mock brain] hive turn: ${act.tool} (${hive.desk}/${hive.episode}/r${hive.round})\n`);
+  process.stderr.write(`[mock brain] hive turn: ${act.tool} (${hive.desk}/${hive.episode}/r${hive.round} stage ${hive.stage})\n`);
   return completion(
     model,
     {
@@ -1105,7 +1180,7 @@ function chatCompletion(body) {
       process.stderr.write("[mock brain] hive turn: utterance recorded, ending the turn\n");
       return completion(model, { role: "assistant", content: `${MARKER} hive turn done.` }, "stop");
     }
-    return hiveCompletion(model, hive, findDmDirective(messages), isToolOutput(last));
+    return hiveCompletion(model, hive, findDmDirective(messages), isToolOutput(last), findReferDirective(messages));
   }
 
   // The scripted-turn arm, ahead of the single-call directives: a plan is the
