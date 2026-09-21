@@ -1215,6 +1215,7 @@ impl CompanyAgent {
             .collect();
         allow_tools.extend(served_names.iter().cloned());
         let base_id = crate::session_key::runtime_agent_id(company, agent_id);
+        tracing::warn!(agent = agent_id, ?served_names, "[DBG] register");
         let mut runtime_id = base_id.clone();
         let mut attempt = 0u32;
         let agent = loop {
@@ -3218,6 +3219,7 @@ impl HarnessPool {
         // serial lock already serializes cycle callers; the pin is what keeps a
         // direct caller from regressing a pinned roster before `run_inner` clones
         // its agent.
+        tracing::warn!(company = %company.id, n = roster.len(), "[DBG] roster rebuilt");
         let mut agents = self.agents.write().await;
         agents.insert(company.id.clone(), roster);
         self.mcp_fingerprints
