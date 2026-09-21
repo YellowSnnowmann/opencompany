@@ -105,3 +105,36 @@ describe("cleanup is addressed by the message that was answered", () => {
     expect(block).toContain("clearLiveRowsSettledBy(hydrated, hydrated.map((m) => m.id))");
   });
 });
+
+describe("a thread's live agent retires with its rows", () => {
+  /**
+   * A thread key is reused by every turn a conversation ever runs, and
+   * `liveAgentByTurn` is keyed by it for any frame the host did not stamp with
+   * a `messageSeq`. Clearing the rows without the agent leaves the previous
+   * turn's teammate on the key, so the next turn's row names whoever answered
+   * last until a frame happens to carry a new id — and on a turn that never
+   * reports one, that is the whole turn (CodeRabbit on #2423).
+   *
+   * Pinned as one helper rather than as three call sites, because the failure
+   * mode is a *fourth* clear site added later that forgets the second half.
+   */
+  it("clears both halves through one helper", () => {
+    expect(appShell).toContain("const clearLiveThread = useCallback(");
+    const helper = appShell.slice(
+      appShell.indexOf("const clearLiveThread = useCallback("),
+      appShell.indexOf("const onSendStart = useCallback("),
+    );
+    expect(helper).toContain("setLiveStepsByThread(");
+    expect(helper).toContain("setLiveAgentByTurn(");
+  });
+
+  it("is what every thread-bucket clear goes through", () => {
+    // The three terminal paths: a send arming, a send settling, and a reply
+    // landing for a turn this console did not start.
+    expect(appShell).toContain("clearLiveThread(threadId, true)");
+    expect(appShell).toContain("clearLiveThread(threadId)");
+    expect(appShell).toContain("clearLiveThread(event.chatId)");
+    // And no path left writing the rows directly, which would skip the agent.
+    expect(appShell).not.toContain("setLiveStepsByThread((prev) => ({ ...prev, [threadId]: [] }))");
+  });
+});

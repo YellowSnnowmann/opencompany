@@ -199,3 +199,32 @@ describe("a parked call reads as parked while it waits", () => {
     expect(text).toContain("didn't run");
   });
 });
+
+describe("the live agent does not outlive its turn", () => {
+  it("drops the thread's agent when its rows are retired", () => {
+    // A thread key is reused by every turn a conversation ever runs. Clearing
+    // only the rows leaves the previous turn's agent on the key, so the next
+    // turn names whoever answered last until a frame happens to carry a new
+    // id — and on a turn that never reports one, that is the whole turn
+    // (CodeRabbit on #2423). The two are one fact and retire together.
+    const agents: Record<string, string> = { thread: "a-ada" };
+    const steps: Record<string, TurnStep[]> = { thread: [...RUNNING] };
+
+    // What `clearLiveThread` does, as the shell does it.
+    delete agents.thread;
+    steps.thread = [];
+
+    mount({
+      items: [messageItem("h101", "Anything else?", 1_000, true)],
+      liveSteps: steps.thread,
+      liveAgentByTurn: agents,
+      turnAgentId: undefined,
+      agentNames: { "a-ada": "Ada" },
+      typing: true,
+    });
+
+    // The next turn opens with no name of its own, so the row must say nothing
+    // about who — never the previous turn's teammate.
+    expect(container.textContent).not.toContain("Ada");
+  });
+});

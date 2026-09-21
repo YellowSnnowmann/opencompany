@@ -113,11 +113,20 @@ export function AsideConversation({ aside }: { aside: AsideConversationDto }) {
  * reply). Ported from the retired Conversation page (issue #246) so the chat
  * workspace keeps the same tool-call visibility it had.
  *
- * `defaultOpen` is for the *live* timeline of a turn still running (issue
- * #367): there the rows are the content — they are what says the company is
- * working and on what — so they start open rather than behind a count. A
- * finished reply's steps stay collapsed, where they are supporting detail.
- * Either way the operator's own toggle wins from the first click.
+ * `defaultOpen` was written for the *live* timeline of a turn still running
+ * (issue #367), on the reading that its rows are the content. Chat no longer
+ * takes it, deliberately: the live pair pins a **line** to the foot of the
+ * pane saying what is happening and who is doing it, and the timeline beneath
+ * it is the detail behind that line — the same relationship a finished reply's
+ * steps have to its text. An always-open list under every running turn also
+ * grows the foot of the transcript by a row per tool call, pushing the very
+ * line it supports off-screen on a long turn.
+ *
+ * What still opens by itself is what the operator can *act* on: a failed step,
+ * or one parked on a sign-off. Those force the list open wherever it renders,
+ * live or settled, because a silent MCP failure behind a count is the thing
+ * #411 exists to prevent. The prop stays for callers outside chat, and the
+ * operator's own toggle wins from the first click either way.
  */
 export function StepTimeline({
   steps,

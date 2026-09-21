@@ -3302,7 +3302,20 @@ export function RoomView({
                   // Resolved here, never in the panel: "never a raw id" is one
                   // rule in one place, the same way the channel pane resolves
                   // its own row's name.
-                  turnAgentName={threadTurn?.agentId ? agentNames?.[threadTurn.agentId] : undefined}
+                  //
+                  // The live agent first, on the same precedence the channel
+                  // uses. `threadTurn.agentId` is the responder the host
+                  // recorded when the turn started and is never revised, so
+                  // alone it left an open thread naming the opening teammate
+                  // through a hand-off while the channel beside it named the
+                  // current one (tinysweeper on #2423). The recorded responder
+                  // stays the fallback, for the reload leg with no frames yet.
+                  turnAgentName={(() => {
+                    const id =
+                      (threadTurnKey ? liveAgentByTurn?.[threadTurnKey] : undefined) ??
+                      threadTurn?.agentId;
+                    return id ? agentNames?.[id] : undefined;
+                  })()}
                   onTyping={() => onTyping?.(active.id, parent.id)}
                   onRetrySend={retrySend}
                   // A thread is not a lesser transcript (issue #1734): an echoed
