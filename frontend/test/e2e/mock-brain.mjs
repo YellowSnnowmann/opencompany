@@ -1284,7 +1284,11 @@ function chatCompletion(body) {
     const calls = Array.isArray(step) ? step : [];
     if (calls.length > 0) {
       const offered = offeredTools(body);
-      const missing = calls.map((call) => call?.name).filter((name) => !offered.has(name));
+      const bridged = bridgedCompanyTools(messages);
+      const resolved = calls.map((call) => resolveCall(call, offered, bridged));
+      const missing = calls
+        .map((call) => call?.name)
+        .filter((_, index) => !resolved[index]);
       if (missing.length > 0) {
         // NOT consumed: this is a teammate reading the operator's message
         // second-hand, not the orchestrator. Answering with prose is the same
@@ -1294,7 +1298,8 @@ function chatCompletion(body) {
         // the same line otherwise, and they are opposite bugs.
         process.stderr.write(
           `[mock brain] plan step ${served} left unserved; this belt has no ` +
-            `${missing.join(", ")} — it carries [${[...offered].join(", ")}]\n`,
+            `${missing.join(", ")} — it carries [${[...offered].join(", ")}], bridges ` +
+            `[${[...bridged].join(", ")}]\n`,
         );
       } else {
         servedPlans.set(plan.id, served + 1);
@@ -1306,12 +1311,12 @@ function chatCompletion(body) {
           {
             role: "assistant",
             content: null,
-            tool_calls: calls.map((call, index) => ({
+            tool_calls: resolved.map((call, index) => ({
               id: `mock-plan-${served}-${index}`,
               type: "function",
               function: {
                 name: call.name,
-                arguments: JSON.stringify(call.arguments ?? {}),
+                arguments: JSON.stringify(call.arguments),
               },
             })),
           },
