@@ -250,8 +250,10 @@ host at them:
   turn's tool loop — which is what lets one goal fan out to two teammates and be
   closed out afterwards. A turn opening with the host's seat sentinel (`Hive
   turn: desk …, episode …, round N.`) ends in one speech act on the
-  `opencompany` MCP server — `post`, then `broadcast` (or `dm` to the agent
-  `__MOCK_DM__ <agent>` names), then `complete_episode`. Set
+  `opencompany` MCP server — `post` on the seat's first turn in the episode
+  (asking the desk a `__MOCK_REFER__ [<agent>:]<desk>` names, so the host
+  refers across), then `broadcast` (or `dm` to the agent `__MOCK_DM__ <agent>`
+  names), then `complete_episode`. Set
   `MOCK_BRAIN_DEBUG=1` to have it dump each request it receives. Bind with
   `PW_MOCK_BRAIN_BIND` (default `127.0.0.1:8099`).
 

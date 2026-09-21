@@ -8,10 +8,10 @@ import { openChannel, say, silenceTour, SCOPE } from "./orchestration";
  *
  * The company under test is `companies/hive_demo`: two desks of two seats
  * each, sharing the CEO. The brain is the scripted mock, whose hive arm ends a
- * seat's turn with `post` in round 0, `broadcast` (or a `dm`, when the message
- * carries `__MOCK_DM__ <agent>`) in round 1, and `complete_episode` from round
- * 2 — so the shape of the episode is known before it runs, and what this spec
- * asserts is that the console **shows** it:
+ * seat's turn with `post` on its first turn in the episode, `broadcast` (or a
+ * `dm`, when the message carries `__MOCK_DM__ <agent>`) on its second, and
+ * `complete_episode` from its third — so the shape of the episode is known
+ * before it runs, and what this spec asserts is that the console **shows** it:
  *
  * 1. the round band appears with **two lanes working at once** — the one
  *    claim a relay race cannot satisfy, and the reason the band exists;
