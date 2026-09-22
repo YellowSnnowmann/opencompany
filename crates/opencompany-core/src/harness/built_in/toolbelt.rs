@@ -720,7 +720,9 @@ pub fn sandbox_brief(files: bool, shell: bool, code: bool) -> String {
         brief.push_str(
             "Read and write it with `file_read`, `file_write`, `edit`, `list`, `glob` and \
              `grep`. Subdirectories are created for you on write, and an absolute path or a \
-             `../` escape is refused by these tools.\n",
+             `../` escape is refused by these tools. A file you write or edit this way also \
+             lands in the company workspace under your own `agents/` folder, so your reply can \
+             point at it and anyone can open it.\n",
         );
     }
     if shell {
