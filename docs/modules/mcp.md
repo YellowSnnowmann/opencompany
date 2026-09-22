@@ -305,6 +305,14 @@ grants through `grants_cover_registry_server`
 | `mcp_registry.*` | every install |
 | `mcp_registry.<server_id>` | that install only |
 | `*` alone | nothing — MCP stays an explicit opt-in |
+| `mcp*` | nothing — that grant is written for the `mcp:<server>` bridge |
+
+`mcp*` is worth its own row because the shared grant matcher treats `_` as a
+namespace boundary, so it would otherwise span from the bridge namespace into
+this one and reach every third-party install. `grants_mcp_registry_explicit` —
+which decides whether these tools are wired at all — accepts only a grant rooted
+at `mcp_registry`, and the scoping predicate matches it, so the two gates cannot
+come to disagree about what confers the namespace.
 
 A call naming an install the grants do not cover is refused with an error
 result naming the grant that would allow it; the inner tool is never reached

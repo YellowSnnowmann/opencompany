@@ -144,12 +144,18 @@ pub(crate) fn grants_cover_server(grants: &[String], name: &str) -> bool {
 #[cfg(feature = "openhuman")]
 pub(crate) fn grants_cover_registry_server(grants: &[String], server_id: &str) -> bool {
     let want = format!("mcp_registry.{server_id}");
-    // As in `grants_cover_server`: the catch-all `*` never confers reach into
-    // this namespace, matching `grants_mcp_registry_explicit`.
-    grants
-        .iter()
-        .filter(|grant| grant.as_str() != "*")
-        .any(|grant| grant.as_str() == "mcp_registry" || grant_matches(grant, &want))
+    // Only a grant rooted at this namespace reaches it. The catch-all `*` never
+    // confers it, and neither does a prefix wildcard that merely spans into it:
+    // `_` is a boundary for the shared matcher, so `mcp*` — a grant written for
+    // the `mcp:<server>` bridge — would otherwise reach every third-party
+    // install. `grants_mcp_registry_explicit`, which decides whether the tools
+    // are wired at all, accepts neither, and two gates disagreeing about what
+    // confers a namespace is how a boundary widens without anyone seeing it.
+    grants.iter().any(|grant| {
+        let grant = grant.as_str();
+        grant == "mcp_registry"
+            || (grant.starts_with("mcp_registry.") && grant_matches(grant, &want))
+    })
 }
 
 #[async_trait]

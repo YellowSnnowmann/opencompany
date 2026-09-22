@@ -147,15 +147,23 @@ mod registry_installs {
         ));
     }
 
-    /// `mcp*` reaches into this namespace, because `_` is a namespace boundary for
-    /// the shared matcher. Pinned so the behaviour is a decision rather than a
-    /// surprise: it matches how `mcp*` already covers `mcp:notion`.
+    /// `mcp*` is a grant written for the `mcp:<server>` bridge, and it does NOT
+    /// reach a directory install — even though `_` is a namespace boundary for
+    /// the shared matcher, which would otherwise let it span into
+    /// `mcp_registry.<id>`.
+    ///
+    /// `grants_mcp_registry_explicit` decides whether these tools are wired at
+    /// all and accepts only a grant rooted at `mcp_registry`, so honouring a
+    /// spanning wildcard here would leave the two gates disagreeing about what
+    /// confers the namespace — which is how a permission boundary widens
+    /// without anyone seeing it.
     #[test]
-    fn mcp_prefix_grant_reaches_registry_namespace() {
-        assert!(grants_cover_registry_server(
+    fn a_bridge_prefix_grant_does_not_reach_an_install() {
+        assert!(!grants_cover_registry_server(
             &["mcp*".into()],
             "notion-install"
         ));
+        // Unchanged for the bridge namespace it was written for.
         assert!(grants_cover_server(&["mcp*".into()], "notion"));
     }
 }
