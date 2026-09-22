@@ -8,8 +8,6 @@ use std::sync::Mutex as StdMutex;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use openhuman_core as oh;
-
 use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
 
 use super::OcMcpRegistryScopedTool;
