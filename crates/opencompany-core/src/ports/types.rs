@@ -1329,12 +1329,17 @@ pub enum CompanyEvent {
         parent: Option<EventSeq>,
         /// Who this reply names, extracted host-side from its text.
         ///
-        /// Rendered as chips exactly like an operator message's, and — unlike
-        /// an operator message's — **never consulted by dispatch**. That
-        /// asymmetry is the mention-loop fuse: there is no code path from a
-        /// reply's mentions to a turn, so an agent naming another agent draws a
-        /// chip and files nothing to run. The edge does not exist, which is a
-        /// stronger guarantee than an edge that is disabled.
+        /// Rendered as chips exactly like an operator message's, and notified
+        /// on the same terms: a person named here is badged, a teammate named
+        /// here is not, because an agent has no inbox.
+        ///
+        /// Consulted by dispatch in exactly one way: these mentions may open a
+        /// **cross-desk referral**, bounded by the episode's `hop` budget. They
+        /// can never open a same-desk turn — the round already seats every
+        /// member every round, so the named teammate is holding the whole
+        /// conversation already, and a second turn would break the
+        /// one-settle-per-seat order the round commits in. `hop` is the live
+        /// bound on that edge.
         ///
         /// Additive on the same terms as `task_id` and `parent` above.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
