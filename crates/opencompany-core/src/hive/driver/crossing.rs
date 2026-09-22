@@ -37,15 +37,16 @@ impl HiveDispatcher {
             let Some(text) = outcome.texts.get(&record.agent_id) else {
                 continue;
             };
-            let mentions = tinyhivemind_core::mention::resolve(
-                text,
-                None,
-                &tinyhivemind_core::mention::MentionAuthor::Agent {
-                    id: record.agent_id.clone(),
-                },
-                &roster,
-                &desks,
-            );
+            let mentions: Vec<_> = outcome
+                .mentions
+                .get(&record.agent_id)
+                .map(|resolved| {
+                    resolved
+                        .iter()
+                        .map(crate::hive::dispatch::tinyhivemind_mention)
+                        .collect()
+                })
+                .unwrap_or_default();
             if mentions.is_empty() {
                 continue;
             }
@@ -148,6 +149,16 @@ impl HiveDispatcher {
             .clone()
             .unwrap_or_else(|| format!("(the desk closed without an answer: {:?})", report.reason));
         let text = crate::hive::referral::returned_note(&answered_by, &run.desk.desk_name, &answer);
+        // No sender: this row's author is the referral author, not the
+        // teammate whose answer it quotes, so the note's own `@{answered_by}`
+        // attribution has to survive normalization as a chip.
+        let mentions = match &self.mentions {
+            Some(seam) => {
+                seam.resolve_mentions(&self.record.id, &text, None, None)
+                    .await
+            }
+            None => Vec::new(),
+        };
         let answer_seq = self
             .events
             .append(
@@ -160,13 +171,19 @@ impl HiveDispatcher {
                     outputs: Vec::new(),
                     task_id: None,
                     parent: origin.thread_root,
-                    mentions: Vec::new(),
+                    mentions: mentions.clone(),
                     mention_depth: 0,
                     audience: Vec::new(),
                     episode: None,
                 },
             )
             .await?;
+        if let Some(seam) = &self.mentions
+            && !mentions.is_empty()
+        {
+            seam.notify_mentions(&self.record.id, &mentions, &answer_seq, None, &origin.desk)
+                .await;
+        }
         self.events
             .append(
                 &self.record.id,

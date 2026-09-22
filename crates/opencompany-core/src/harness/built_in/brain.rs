@@ -2999,8 +2999,10 @@ impl HarnessBrain {
         let members = crate::runtime::delegation_tools::tinyhivemind_roster(&record);
         let retired = record.overlay_retired_agents.clone();
         let roster = tinyhivemind_core::roster::Roster::new(&members, &[], &retired);
-        let mentions: Vec<tinyhivemind_core::mention::Mention> =
-            mentions.iter().map(tinyhivemind_mention).collect();
+        let mentions: Vec<tinyhivemind_core::mention::Mention> = mentions
+            .iter()
+            .map(crate::hive::dispatch::tinyhivemind_mention)
+            .collect();
         tinyhivemind_core::mention::direct_responder(&mentions, &roster).map(str::to_string)
     }
 
@@ -3022,8 +3024,10 @@ impl HarnessBrain {
         let roster = tinyhivemind_core::roster::Roster::new(&members, &[], &retired);
         let snapshots = crate::runtime::delegation_tools::tinyhivemind_desks(&record);
         let desks = snapshots.set();
-        let mentions: Vec<tinyhivemind_core::mention::Mention> =
-            mentions.iter().map(tinyhivemind_mention).collect();
+        let mentions: Vec<tinyhivemind_core::mention::Mention> = mentions
+            .iter()
+            .map(crate::hive::dispatch::tinyhivemind_mention)
+            .collect();
         tinyhivemind_core::mention::mentioned_members(
             &mentions,
             Some(addressed_desk),
@@ -3446,26 +3450,6 @@ impl HarnessBrain {
             })
             .map(|card| card.id)
             .next_back()
-    }
-}
-
-fn tinyhivemind_mention(
-    mention: &crate::ports::types::Mention,
-) -> tinyhivemind_core::mention::Mention {
-    use crate::ports::types::MentionTarget as HostTarget;
-    use tinyhivemind_core::mention::MentionTarget;
-
-    let target = match &mention.target {
-        HostTarget::Agent { id } => MentionTarget::Agent { id: id.clone() },
-        HostTarget::User { id } => MentionTarget::Person { id: id.clone() },
-        HostTarget::Desk { id } => MentionTarget::Desk { id: id.clone() },
-        HostTarget::Everyone => MentionTarget::Everyone,
-    };
-    tinyhivemind_core::mention::Mention {
-        target,
-        text: mention.text.clone(),
-        offset: mention.offset,
-        quiet: mention.quiet,
     }
 }
 
