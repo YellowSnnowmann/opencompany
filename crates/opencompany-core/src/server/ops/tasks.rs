@@ -2661,6 +2661,10 @@ async fn steer_task(
 #[path = "tasks_durations_tests.rs"]
 mod durations_test;
 
+#[cfg(test)]
+#[path = "tasks_card_timeline_tests.rs"]
+mod card_timeline_test;
+
 /// The redirect bound at the route boundary: an operator who typed too much is
 /// told so, and one who typed exactly the limit gets every character through.
 #[cfg(test)]
