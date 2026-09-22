@@ -320,11 +320,11 @@ async fn a_same_desk_mention_records_but_mints_no_turn_and_no_child_cycle() {
 
     let kinds: Vec<&'static str> = log.rows().iter().map(|row| row.event.kind()).collect();
     assert!(
-        !kinds.iter().any(|kind| *kind == "ReferralEnqueued"),
+        !kinds.contains(&"ReferralEnqueued"),
         "a same-desk mention must enqueue no referral: {kinds:?}"
     );
     assert!(
-        !kinds.iter().any(|kind| *kind == "TaskDispatched"),
+        !kinds.contains(&"TaskDispatched"),
         "a same-desk mention must mint no child cycle: {kinds:?}"
     );
 
