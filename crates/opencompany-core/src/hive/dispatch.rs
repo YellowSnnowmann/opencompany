@@ -117,6 +117,7 @@ pub fn dispatcher(
     hives: HashMap<String, Arc<crate::hive::graph::DeskHive>>,
     seats: Arc<dyn SeatRunner>,
     runs: Option<Arc<dyn crate::ports::RunStore>>,
+    mentions: Option<crate::runtime::mention_seam::MentionSeam>,
 ) -> Arc<HiveDispatcher> {
     Arc::new(HiveDispatcher {
         record,
@@ -125,6 +126,7 @@ pub fn dispatcher(
         router: host_router(),
         seats,
         runs,
+        mentions,
     })
 }
 

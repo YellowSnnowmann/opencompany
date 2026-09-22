@@ -164,6 +164,7 @@ async fn dispatcher(script: Arc<Script>) -> (HiveDispatcher, Arc<MemoryLog>) {
             router: None,
             seats: script,
             runs: None,
+            mentions: None,
         },
         log,
     )

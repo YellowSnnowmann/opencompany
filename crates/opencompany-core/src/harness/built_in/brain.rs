@@ -322,6 +322,12 @@ pub struct HarnessBrain {
     /// missing. That is the right direction for a purely observational store —
     /// and it is why every test construction can leave it unset.
     runs: Option<Arc<dyn crate::ports::RunStore>>,
+    /// The mention seam a desk reply's `@names` are resolved and notified
+    /// through.
+    ///
+    /// `None` leaves a reply's `mentions` empty and badges nobody — the state
+    /// every test construction and every pre-seam caller is in.
+    mentions: Option<crate::runtime::mention_seam::MentionSeam>,
 }
 
 /// A bubble the **runtime** wrote, not an agent (issue #966).
@@ -493,6 +499,7 @@ impl HarnessBrain {
             record: std::sync::RwLock::new(Arc::new(record)),
             responder,
             runs: None,
+            mentions: None,
             triage: std::sync::OnceLock::new(),
             titler: std::sync::OnceLock::new(),
         }
@@ -634,6 +641,14 @@ impl HarnessBrain {
     /// Wires the run store a dispatched card records its attempt into (#242).
     pub fn with_runs(mut self, runs: Arc<dyn crate::ports::RunStore>) -> Self {
         self.runs = Some(runs);
+        self
+    }
+
+    /// Attaches the mention seam, so a reply this brain's desks journal
+    /// resolves its `@names` through the same path an operator message does.
+    #[must_use]
+    pub fn with_mentions(mut self, mentions: crate::runtime::mention_seam::MentionSeam) -> Self {
+        self.mentions = Some(mentions);
         self
     }
 
@@ -3795,6 +3810,7 @@ impl HarnessBrain {
                                     run_turn: self.run_turn(),
                                 }),
                                 self.deps.workflow_runs.clone(),
+                                self.mentions.clone(),
                             );
                             let trigger = crate::hive::dispatch::trigger_for(
                                 event_seq, &composed, *parent, mentions,
