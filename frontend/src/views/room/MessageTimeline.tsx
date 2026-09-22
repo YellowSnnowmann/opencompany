@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { Bot, CircleDot, Hash, Lock, Send, UserPlus } from "lucide-react";
 
 import type { ApprovalSummary, CognitionState, DecideApproval, TurnStep, Verdict } from "@/api/types";
@@ -20,6 +20,7 @@ import {
   type Channel,
   type TimelineItem,
 } from "./model";
+import { useBottomAnchor } from "./useBottomAnchor";
 
 interface Props {
   channel: Channel;
@@ -173,14 +174,6 @@ interface Props {
 }
 
 /**
- * How close to the bottom still counts as "parked at the bottom", in CSS
- * pixels. Sub-pixel layout and a fractional `clientHeight` mean the arithmetic
- * rarely lands on exactly zero, so a strict test would read a view that is
- * visibly at the bottom as scrolled away and stop following.
- */
-const BOTTOM_SLACK_PX = 32;
-
-/**
  * The scrolling body of a channel.
  *
  * Rows are bottom-anchored: the view sticks to the newest message, which is
@@ -235,9 +228,6 @@ export function MessageTimeline({
   redeemingBudgetPauseAgent,
   latestBudgetPauseMessageIdByAgent,
 }: Props) {
-  const scroller = useRef<HTMLDivElement>(null);
-  /** The inner column whose own height rule 2b's `ResizeObserver` watches. */
-  const content = useRef<HTMLDivElement>(null);
   /**
    * The open turn's rows, whichever bucket the host's stamping filed them in.
    *
@@ -293,138 +283,11 @@ export function MessageTimeline({
    * since #1323 — which end of the pane the whole block settles against.
    */
   const empty = items.length === 0 && !loading;
-  /**
-   * Is the view parked at the bottom, and therefore still following?
-   *
-   * A ref rather than state on purpose: it is read inside effects and written
-   * from a scroll handler that fires at frame rate. Making it state would
-   * re-render the whole transcript on every wheel tick to compute a value no
-   * rendered output depends on.
-   */
-  const following = useRef(true);
-  /** The channel the growth effect has already settled on. See rule 2. */
-  const settledOn = useRef<string | null>(null);
-
-  const trackFollowing = useCallback(() => {
-    const el = scroller.current;
-    if (!el) return;
-    const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    following.current = fromBottom <= BOTTOM_SLACK_PX;
-  }, []);
-
-  // Rule 1 — arriving at a channel. `useLayoutEffect` so the jump happens
-  // before paint: with `useEffect` the browser paints the un-anchored position
-  // first, which is the flash this issue is about. `channel.id` is the
-  // dependency, not `items.length` — two channels can hold the same number of
-  // rows, and an effect keyed on the count would not fire for that switch at
-  // all, leaving the new channel wearing the old one's scroll offset.
-  //
-  // `historyPending` is the second dependency, and it is what makes the rule
-  // true rather than merely well-intentioned (issue #1224). A cold load mounts
-  // this component *before* the transcript exists: history is still on the wire
-  // (`historyPending`), the box is one screen tall, and "scroll to the bottom"
-  // is a no-op against content that has not arrived. Keyed on the channel
-  // alone, this effect then never ran again, and the operator was left at the
-  // top of a transcript that appeared under them a hundred milliseconds later.
-  // Re-anchoring as the history lands is the same jump, against the real
-  // transcript this time.
-  useLayoutEffect(() => {
-    const el = scroller.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    following.current = true;
-  }, [channel.id, historyPending]);
-
-  // Rule 2 — growth while the channel is open. Each new tool row grows the
-  // block at the bottom, so the scroll has to follow it as the turn works, not
-  // only when the reply lands. A card arriving counts too — it is the thing the
-  // operator has to act on. Skipped entirely when they have scrolled away.
-  //
-  // `channel.id` is a dependency so the first pass after a switch can *defer*:
-  // the layout effect above has already anchored this channel, and animating on
-  // top of that is the very travel rule 1 removes.
-  useEffect(() => {
-    const el = scroller.current;
-    if (!el) return;
-    if (settledOn.current !== channel.id) {
-      settledOn.current = channel.id;
-      return;
-    }
-    // Nothing to follow while the transcript is still on the wire (#1224).
-    // `scrollTo` captures a **pixel offset**, not the idea of "the bottom", so
-    // an animation started against a one-screen box eases to a number the
-    // arriving history makes meaningless — and the scroll events it emits on
-    // the way there are indistinguishable from a person scrolling, so
-    // `trackFollowing` reads the grown transcript as "they scrolled away" and
-    // the channel stops following for the rest of the session. Rule 1 above
-    // owns the anchor until the history has landed.
-    if (historyPending) return;
-    if (!following.current) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [channel.id, historyPending, items.length, typing, liveStepCount]);
-
-  // Rule 3 — the *viewport* shrinking underneath (issue #1325).
-  //
-  // Rules 1 and 2 both watch the content. Neither watches the box, and the box
-  // moves: the composer below this pane grows with the draft (`field-sizing-
-  // content`, up to `max-h-48`), which takes its height out of this scroller's
-  // `clientHeight`. `scrollTop` is untouched by that, so the transcript slides
-  // up behind the composer — measured at 96px on a two-line draft and up to
-  // ~150px at the cap, which is often the very message being replied to,
-  // hidden for exactly as long as the draft is long.
-  //
-  // It could not be fixed by adding a dependency to rule 2: the composer is a
-  // sibling component and its height is not a value this one is given. The
-  // element's own size is, through `ResizeObserver` — and observing the box
-  // covers the window resizing and the thread panel opening as well, which want
-  // the same answer.
-  //
-  // `following.current` is the same gate rule 2 uses, so a reader who has
-  // deliberately scrolled up is left alone. Instant rather than smooth,
-  // unlike rule 2: this fires as the composer grows a line at a time, and an
-  // animation per keystroke would be a permanent wobble rather than a glide.
-  // Setting `scrollTop` does not resize anything, so there is no feedback loop.
-  useEffect(() => {
-    const el = scroller.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (!following.current) return;
-      el.scrollTop = el.scrollHeight;
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  // Rule 2b — content that grows without moving any of rule 2's dependencies
-  // (issue #1935 review, coderabbit 3892517543). `ChatLiveReceipt`'s 30s
-  // "still waiting" note is timed by a clock entirely internal to that
-  // component: nothing here re-renders when it appears, so rule 2 never fires
-  // and the note can land under the fold with no follow-scroll to reveal it.
-  // A live receipt is the concrete case, but the same gap exists for any
-  // in-place child growth this component was not told about.
-  //
-  // Rule 3's `ResizeObserver` cannot double as this one — it watches the
-  // *scroller's own border box*, which content overflowing inside an
-  // `overflow-y-auto` container never changes; that is the whole reason the
-  // container scrolls instead of growing. This one watches the *content*
-  // column instead — the inner wrapper whose height the rows and receipt
-  // actually determine — so it fires on exactly the growth rule 3 cannot see,
-  // and stays silent on the box-only resizes (composer growing, window
-  // resizing) rule 3 exists for, which do not move this column's own height.
-  useEffect(() => {
-    const contentEl = content.current;
-    const scrollerEl = scroller.current;
-    if (!contentEl || !scrollerEl || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      // Nothing to follow while the transcript is still on the wire, same as
-      // rule 2 — a cold load's content grows repeatedly as history lands, and
-      // rule 1 owns the anchor until it has.
-      if (historyPending || !following.current) return;
-      scrollerEl.scrollTo({ top: scrollerEl.scrollHeight, behavior: "smooth" });
-    });
-    observer.observe(contentEl);
-    return () => observer.disconnect();
-  }, [historyPending]);
+  const { scroller, content, onScroll } = useBottomAnchor({
+    key: channel.id,
+    pending: historyPending,
+    growth: [items.length, typing, liveStepCount],
+  });
 
   /**
    * One timeline row.
@@ -511,7 +374,7 @@ export function MessageTimeline({
   };
 
   return (
-    <div ref={scroller} onScroll={trackFollowing} className="flex-1 overflow-y-auto">
+    <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto">
       {/*
        * Which end short content settles against (issue #1323).
        *
