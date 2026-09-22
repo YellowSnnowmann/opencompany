@@ -623,3 +623,7 @@ impl RoundBracket {
 #[cfg(test)]
 #[path = "round_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "round_mentions_tests.rs"]
+mod mentions_tests;

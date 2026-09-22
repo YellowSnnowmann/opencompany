@@ -636,8 +636,8 @@ impl HiveDispatcher {
         })
     }
 
-    /// A handle for a spawned task: the same journal, hives, router and
-    /// runner.
+    /// A handle for a spawned task: the same journal, hives, router, runner
+    /// and mention seam.
     fn clone_for_task(&self) -> Arc<Self> {
         Arc::new(Self {
             record: Arc::clone(&self.record),
@@ -646,6 +646,7 @@ impl HiveDispatcher {
             router: self.router.clone(),
             seats: Arc::clone(&self.seats),
             runs: self.runs.clone(),
+            mentions: self.mentions.clone(),
         })
     }
 }
