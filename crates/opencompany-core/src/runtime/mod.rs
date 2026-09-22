@@ -91,6 +91,10 @@ pub mod mailbox_poller;
 /// expired approvals, expired grants and stale fire claims for EVERY registered
 /// company, not only those with a manifest `[[schedule]]`. See [`maintenance`].
 pub mod maintenance;
+/// The company store, user directory and notification store the mention
+/// pipeline reads and writes, bundled so every journaling surface shares one.
+/// See [`mention_seam`].
+pub mod mention_seam;
 /// Resolving `@name` in chat to a teammate, a person, a desk, or the whole
 /// room — and deciding what that addresses. Pure and brain-agnostic, for the
 /// same reason [`delegation_tools`] is. See [`mentions`].
