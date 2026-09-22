@@ -112,6 +112,7 @@ use crate::company::Agent as ManifestAgent;
 use crate::company::inference::store as inference_store;
 use crate::harness::HarnessDeps;
 use crate::harness::built_in::provider::HarnessModel;
+use crate::harness::file_tool_outputs::WritePromotion;
 #[cfg(feature = "mcp")]
 use crate::harness::mcp::{
     OcMcpCallTool, OcMcpListServersTool, capability_brief, granted_secrets, registry_for_agent,
@@ -441,7 +442,16 @@ pub fn build_agent_with_model(
     // well as publishing.
     let wants_files = crate::company::grants_files_or_docs(grants);
     if wants_files {
-        tools.extend(file_tools(&workspace));
+        let promotion = deps.workspace.as_ref().map(|store| {
+            Arc::new(WritePromotion::new(
+                store.clone(),
+                company.clone(),
+                manifest_agent.id.clone(),
+                deps.pending_publishes.output_collector(),
+                workspace.clone(),
+            ))
+        });
+        tools.extend(file_tools(&workspace, promotion));
     }
 
     // `publish_artifact` (issue #244) — the only way a file the agent wrote
@@ -1813,16 +1823,30 @@ pub(crate) fn workspace_security(workspace: &Path) -> SecurityPolicy {
 /// The file tools granted under the `files`/`docs` namespace, each sandboxed to
 /// the agent's `workspace` by a shared [`workspace_security`] policy: read,
 /// write, edit, list, grep, and glob within the workspace only.
-pub(crate) fn file_tools(workspace: &Path) -> Vec<Box<dyn Tool>> {
+///
+/// `promotion`, when wired, additionally copies what `file_write` and `edit`
+/// wrote into the company workspace under `agents/<agent id>/`, so the reply
+/// can address it. Only those two are wrapped — the four readers produce
+/// nothing to address, and wrapping them would buy a tree read per read-only
+/// call. `None` leaves the belt byte-for-byte what it was. See
+/// [`WritePromotion`].
+pub(crate) fn file_tools(
+    workspace: &Path,
+    promotion: Option<Arc<WritePromotion>>,
+) -> Vec<Box<dyn Tool>> {
     let security = Arc::new(workspace_security(workspace));
-    vec![
+    let tools: Vec<Box<dyn Tool>> = vec![
         Box::new(FileReadTool::new(security.clone())),
         Box::new(FileWriteTool::new(security.clone())),
         Box::new(EditFileTool::new(security.clone())),
         Box::new(ListFilesTool::new(security.clone())),
         Box::new(GrepTool::new(security.clone())),
         Box::new(GlobTool::new(security)),
-    ]
+    ];
+    match promotion {
+        Some(promotion) => promotion.wrap_writers(tools),
+        None => tools,
+    }
 }
 
 #[cfg(test)]
