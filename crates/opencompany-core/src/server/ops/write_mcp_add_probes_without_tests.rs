@@ -308,7 +308,7 @@ async fn task_detail_assembles_timeline_and_lineage() {
         .iter()
         .map(|e| e["kind"].as_str().unwrap())
         .collect();
-    assert_eq!(kinds, vec!["dispatched", "reply", "completed"]);
+    assert_eq!(kinds, vec!["card", "dispatched", "reply", "completed"]);
 
     let raw = serde_json::to_string(&body["timeline"]).unwrap();
     assert!(

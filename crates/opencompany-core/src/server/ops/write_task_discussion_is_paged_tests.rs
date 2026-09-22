@@ -442,7 +442,7 @@ async fn task_timeline_scopes_approvals_to_the_run_window() {
         .collect();
     assert_eq!(
         kinds,
-        vec!["dispatched", "approval", "tool_failed", "completed"],
+        vec!["card", "dispatched", "approval", "tool_failed", "completed"],
         "exactly one approval — the one inside the run window"
     );
 
