@@ -100,6 +100,22 @@ pub struct DeskHost {
     /// marker and belongs to the room -- routing on it would file public
     /// work as private.
     conversations: Mutex<BTreeMap<u64, String>>,
+    /// The wave each seat's current turn started in.
+    ///
+    /// A committed row names the round it belongs to, and the round a seat
+    /// spoke in is the one its **turn** opened in -- which is what the
+    /// bracket writes as `round_revision`. Read from `wave` at commit time
+    /// instead, the two disagree: that counter advances on every checkpoint,
+    /// and a wave that only ran a conversation checkpoints like any other, so
+    /// rows of one desk wave come back stamped with two or three different
+    /// numbers. The console keys its round band on that stamp, so a desk that
+    /// ran four waves drew six bands and a completion marker to match.
+    ///
+    /// Written by the bracket, which is the one thing that knows when a turn
+    /// began. A host with no pool writes no brackets, so this stays empty and
+    /// commits fall back to the live counter -- the behaviour such a host had
+    /// before this existed.
+    turn_waves: Mutex<BTreeMap<String, u64>>,
     /// Each seat's standing prompt, kept from when it was built.
     ///
     /// Read back on every turn after a seat's first: those turns are seeded
@@ -163,6 +179,7 @@ impl DeskHost {
             parking: None,
             mentions: None,
             conversations: Mutex::new(BTreeMap::new()),
+            turn_waves: Mutex::new(BTreeMap::new()),
             personas: Mutex::new(BTreeMap::new()),
         }
     }
@@ -378,6 +395,17 @@ impl DeskHost {
         }
     }
 
+    /// The wave `seat`'s current turn opened in, or the live counter for a
+    /// seat this host never bracketed (see `turn_waves`).
+    fn wave_of(&self, seat: &str) -> u64 {
+        self.turn_waves
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(seat)
+            .copied()
+            .unwrap_or_else(|| self.wave.load(Ordering::SeqCst))
+    }
+
     /// One row as this company stores it.
     ///
     /// A row written to a pair channel is addressed to that pair, whether or
@@ -549,7 +577,7 @@ impl Journal for DeskHost {
         if let CompanyEvent::AgentReply { episode, .. } = &mut event {
             *episode = Some(crate::ports::types::ReplyEpisode {
                 id: self.episode_id.clone(),
-                revision: self.wave.load(Ordering::SeqCst),
+                revision: self.wave_of(&commit.author),
                 kind: crate::ports::types::UtteranceKind::of(&commit.utterance),
                 to: recipients(&commit.utterance),
                 // Filled in by whoever records the routing, not here: the
@@ -933,6 +961,14 @@ fn concluded_conversation(commit: &Commit) -> Option<Sequence> {
 
 impl Bracket<'_> {
     async fn started(&self) {
+        // The round every row this turn commits will name. Recorded before
+        // the bracket is journaled, so a commit can never read a wave the
+        // turn it belongs to had not reached.
+        self.host
+            .turn_waves
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(self.seat.clone(), self.wave);
         self.write(CompanyEvent::TurnStarted {
             turn_id: self.turn_id.clone(),
             chat_id: self.host.desk_id.clone(),

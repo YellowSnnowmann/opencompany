@@ -284,3 +284,61 @@ async fn a_row_written_to_a_pair_channel_is_addressed_to_that_pair() {
         audience(broadcast)
     );
 }
+
+/// **A row names the wave its turn opened in, not the counter at commit.**
+///
+/// The wave counter advances on every checkpoint, and the loop checkpoints
+/// once an iteration -- including an iteration that only ran a conversation.
+/// Read at commit time, rows of one desk wave came back stamped with two or
+/// three different numbers, and the console keys its round band on that
+/// stamp: a live episode that ran four waves drew six bands, and the
+/// completion marker printed six against the journal's four.
+///
+/// The bracket is the one thing that knows when a turn began, so it records
+/// the wave and every row that turn commits takes it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_committed_row_names_the_wave_its_turn_opened_in() {
+    let log = Arc::new(MemoryLog::default());
+    let host = host(Arc::clone(&log) as Arc<dyn EventLog>).episode("ep-1");
+    // The seat's turn opened in wave 0.
+    host.turn_waves
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert("ada".to_owned(), 0);
+    // Two checkpoints land while the turn is still running -- a conversation
+    // settling twice, which is what moves this counter without the desk
+    // having run a wave.
+    host.wave.store(2, std::sync::atomic::Ordering::SeqCst);
+
+    let seq = host
+        .commit(&commit(serde_json::json!({
+            "author": "ada",
+            "utterance": { "kind": "complete_episode", "message": "done" },
+            "thread": null,
+            "only_for": null,
+            "conversation": null,
+            "purpose": { "kind": "desk" },
+        })))
+        .expect("the journal takes the row");
+
+    let rows = log
+        .read_from(&MemoryLog::company(), EventSeq::new(1), 8)
+        .await
+        .unwrap();
+    let revision = rows
+        .iter()
+        .find(|stored| stored.seq.value() == seq.0)
+        .and_then(|stored| match &stored.event {
+            CompanyEvent::AgentReply { episode, .. } => episode.as_ref().map(|one| one.revision),
+            _ => None,
+        })
+        .expect("journaled with its episode");
+    assert_eq!(
+        revision, 0,
+        "the row belongs to the wave its turn opened in, not the counter at commit"
+    );
+
+    // A seat this host never bracketed -- no pool, so no turn was recorded --
+    // still gets a number rather than nothing: the live counter, as before.
+    assert_eq!(host.wave_of("grace"), 2);
+}
