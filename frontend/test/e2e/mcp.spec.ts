@@ -166,6 +166,14 @@ test("an admin adds and removes a runtime MCP server", async ({ page }) => {
     expect((body as { name: string }[]).map((server) => server.name)).toContain(name);
 
     await row.getByRole("button", { name: `Remove ${name}` }).click();
+
+    // Removing takes the stored credential with it, so the trash asks first.
+    // The row has to survive the question, or the confirmation is decorative.
+    const confirm = page.getByRole("alertdialog");
+    await expect(confirm).toContainText(`Remove ${name}?`);
+    await expect(row).toHaveCount(1);
+    await confirm.getByRole("button", { name: "Remove", exact: true }).click();
+
     await expect(row).toHaveCount(0, { timeout: 15_000 });
 
     expect(pageErrors, `the page threw: ${pageErrors.join(" | ")}`).toEqual([]);
