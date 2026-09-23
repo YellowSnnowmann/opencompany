@@ -59,6 +59,10 @@ pub struct EventLogSessionLog {
     company: CompanyId,
     desk_id: String,
     desk_name: String,
+    /// The seats at this desk, for deciding whose pair channels belong to
+    /// its transcript. Empty admits none, which is what every caller that
+    /// does not seat a room should pass.
+    seats: Vec<String>,
 }
 
 impl std::fmt::Debug for EventLogSessionLog {
@@ -79,12 +83,14 @@ impl EventLogSessionLog {
         company: CompanyId,
         desk_id: String,
         desk_name: String,
+        seats: Vec<String>,
     ) -> Self {
         Self {
             events,
             company,
             desk_id,
             desk_name,
+            seats,
         }
     }
 
@@ -110,15 +116,39 @@ impl EventLogSessionLog {
         }
     }
 
-    /// Whether a stored chat key addresses this desk.
+    /// Whether a stored chat key addresses this desk, or one of the private
+    /// conversations its seats hold.
     ///
     /// Case-insensitive against both the id and the display name, which is the
     /// same latitude `CompanyRecord::resolve_desk_id` gives an operator
     /// addressing the desk in the first place.
+    ///
+    /// A conversation two seats open with `ask` is written to their own pair
+    /// channel, so that the room's timeline stays the room's. It is still
+    /// part of this desk's transcript: the seat that asked cannot finish
+    /// until it is answered, and the seat asked is turned inside it. Admitted
+    /// rows are reported under the desk id like every other, and the library
+    /// narrows them by thread root and audience exactly as it already does —
+    /// which is why a desk turn still cannot read them.
+    ///
+    /// **Both seats must sit at this desk.** A pair channel is minted from
+    /// two roster ids and says nothing about where they were talking, so
+    /// admitting one on the strength of its name alone would pull another
+    /// desk's private exchange into this transcript.
     fn addresses_desk(&self, chat: Option<&str>) -> bool {
         chat.is_some_and(|chat| {
-            chat.eq_ignore_ascii_case(&self.desk_id) || chat.eq_ignore_ascii_case(&self.desk_name)
+            chat.eq_ignore_ascii_case(&self.desk_id)
+                || chat.eq_ignore_ascii_case(&self.desk_name)
+                || self.addresses_a_seat_pair(chat)
         })
+    }
+
+    /// Whether `chat` is the pair channel of two seats of this desk.
+    fn addresses_a_seat_pair(&self, chat: &str) -> bool {
+        let Some((one, two)) = super::referral::pair_seats(chat) else {
+            return false;
+        };
+        self.seats.iter().any(|seat| seat == one) && self.seats.iter().any(|seat| seat == two)
     }
 
     /// One journal entry as a session row, or `None` when it is not desk chat.

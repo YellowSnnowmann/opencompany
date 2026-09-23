@@ -121,12 +121,17 @@ impl DeskHost {
         desk_id: String,
         desk_name: String,
         events: Arc<dyn EventLog>,
+        seats: Vec<String>,
     ) -> Self {
+        // The seats reach the log because a conversation two of them open is
+        // written to their own pair channel, and the log has to know which of
+        // those belong to this desk's transcript.
         let log = EventLogSessionLog::new(
             Arc::clone(&events),
             company.clone(),
             desk_id.clone(),
             desk_name,
+            seats,
         );
         Self {
             company,

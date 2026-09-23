@@ -174,6 +174,7 @@ async fn the_sharing_walk_hands_a_window_first_and_only_the_delta_afterwards() {
         company.clone(),
         "engineering".into(),
         "Engineering desk".into(),
+        Vec::new(),
     );
     let conversation = adapter.conversation(None);
     let viewer = Viewer::Agent {

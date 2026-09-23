@@ -27,6 +27,7 @@ fn host(events: Arc<dyn EventLog>) -> DeskHost {
         "engineering".to_owned(),
         "Engineering".to_owned(),
         events,
+        Vec::new(),
     )
 }
 

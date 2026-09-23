@@ -59,7 +59,6 @@ use opencompany::company::CompanyManifest;
 use opencompany::hive::measure::{Report, Thresholds, measure};
 use opencompany::hive::referral::HIVE_REFERRAL_AUTHOR;
 use opencompany::hive::routing::Router;
-use opencompany::hive::tools::via_opencompany_mcp;
 use opencompany::ports::types::{
     CompanyEvent, CompanyId, EpisodeReason, EventSeq, StoredEvent, UtteranceKind,
 };

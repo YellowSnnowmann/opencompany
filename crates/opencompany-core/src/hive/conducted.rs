@@ -92,6 +92,7 @@ pub async fn run(episode: Episode<'_>) -> Result<Report> {
             episode.desk.desk_id.clone(),
             episode.desk.desk_name.clone(),
             Arc::clone(&episode.events),
+            members.clone(),
         )
         .in_thread(episode.thread_root)
         .episode(episode.episode_id.clone())
