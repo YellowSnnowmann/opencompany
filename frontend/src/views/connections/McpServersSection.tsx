@@ -299,6 +299,8 @@ export function McpServersSection({
   const [addError, setAddError] = useState<{
     message: string;
     added: boolean;
+    /** Which server it is about, on the outcomes that left one behind. */
+    server?: string;
   } | null>(null);
   // Removal is irreversible and takes the server's stored credential with it,
   // so it is asked rather than done on the press.
@@ -410,9 +412,13 @@ export function McpServersSection({
         res.test.authHint !== "oauth_required" &&
         res.test.authHint !== "static_token_required"
       ) {
-        setAddError({ message: res.test.message, added: true });
+        setAddError({
+          message: res.test.message,
+          added: true,
+          server: res.server.name,
+        });
       } else if (res.warning) {
-        setAddError({ message: res.warning, added: true });
+        setAddError({ message: res.warning, added: true, server: res.server.name });
       } else {
         // The success path has to agree with the banner (issue #567): a toast
         // promising pickup, fired at the moment the operator acts, undoes a
@@ -617,7 +623,13 @@ export function McpServersSection({
       toast.success(`Removed ${server.name}.`);
       // The add banner outlives its subject otherwise: it is the only thing on
       // screen still asserting something about a server that no longer exists.
-      setAddError(null);
+      // Only the banner about THIS server, though — one about a different
+      // server it left saved and unreachable still has a subject.
+      setAddError((current) =>
+        current && (!current.added || current.server === server.name)
+          ? null
+          : current,
+      );
       await refresh();
     } catch (err) {
       if (err instanceof ApiError && err.code === "not_wired") {

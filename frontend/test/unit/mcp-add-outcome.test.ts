@@ -253,3 +253,41 @@ describe("the banner about a server that was removed", () => {
     expect(container.textContent).not.toContain("Added, but it could not be reached");
   });
 });
+
+describe("the banner about a server that was NOT removed", () => {
+  it("stays, because that server is still saved and still unreachable", async () => {
+    const other = row({ source: "runtime", name: "livesrv" });
+    await mount([other]);
+    api.addMcpServer.mockResolvedValue({
+      server: row({ source: "runtime" }),
+      note: "Agents pick up this change on their next turn.",
+      test: UNREACHABLE,
+    });
+    api.listMcpServers.mockResolvedValue([other, row({ source: "runtime" })]);
+    await type(field("mcp-name"), "deadsrv");
+    await type(field("mcp-endpoint"), "https://mcp.example.com/mcp");
+    await submitAdd();
+    expect(container.textContent).toContain("Added, but it could not be reached");
+
+    api.removeMcpServer.mockResolvedValue(undefined);
+    api.listMcpServers.mockResolvedValue([row({ source: "runtime" })]);
+    const trash = [...container.querySelectorAll<HTMLElement>('[data-testid="mcp-remove"]')].find(
+      (b) => b.getAttribute("aria-label")?.includes("livesrv"),
+    );
+    expect(trash).toBeDefined();
+    await act(async () => {
+      trash?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const confirm = [...document.body.querySelectorAll("button")].find(
+      (b) => b.textContent?.trim() === "Remove",
+    );
+    await act(async () => {
+      confirm?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(api.removeMcpServer).toHaveBeenCalledWith(client, "acme", "livesrv");
+    // deadsrv is still there and still unreachable; the banner is the only
+    // thing on screen saying so.
+    expect(container.textContent).toContain("Added, but it could not be reached");
+  });
+});
