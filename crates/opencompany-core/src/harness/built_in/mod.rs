@@ -5755,8 +5755,7 @@ pub(crate) fn build_episode_seat(
     company: &CompanyRecord,
     deps: &HarnessDeps,
     seat: &str,
-    episode_tools: Vec<Box<dyn tinytools::Tool>>,
-    gate: Arc<dyn oh::agent::tool_policy::ToolPolicy>,
+    belt: tinyhivemind_openhuman::EpisodeBelt,
 ) -> crate::Result<oh::agent::OpenHumanSessionHost> {
     let effective = company.effective_policy();
     let live_roster = company.effective_agents();
@@ -5769,15 +5768,26 @@ pub(crate) fn build_episode_seat(
             ))
         })?;
     let grants = grants_for_policy(company, &company.manifest.tools.allow, manifest_agent);
-    let policy = agent_policy_for(
-        company,
-        deps,
-        manifest_agent,
-        &effective,
-        &crate::company::mcp::mcp_read_set(&deps.mcp_servers),
-        company.effective_budget(&manifest_agent.id),
-        &grants,
-    );
+    let mcp_read = crate::company::mcp::mcp_read_set(&deps.mcp_servers);
+    let budget = company.effective_budget(&manifest_agent.id);
+    let approval = || {
+        agent_policy_for(
+            company,
+            deps,
+            manifest_agent,
+            &effective,
+            &mcp_read,
+            budget,
+            &grants,
+        )
+    };
+    // Built twice, from the same inputs, because the two consumers own their
+    // copy: the session's own policy rides the blueprint, and the episode's
+    // admission holds the one it falls back to. `ApprovalPolicy` carries a
+    // gate handle and a spend meter rather than state of its own, so the two
+    // decide alike.
+    let policy = approval();
+    let behind = approval();
     let instructions = company.effective_instructions(&manifest_agent.id);
     let blueprint = build::build_agent_with_model(
         &company.id,
@@ -5794,7 +5804,14 @@ pub(crate) fn build_episode_seat(
         orchestrator::orchestrator_id(&live_roster).as_deref() == Some(manifest_agent.id.as_str()),
         &crate::company::team_brief::team_section(company, &manifest_agent.id),
     )?;
-    build::episode_seat(&company.id, seat, blueprint, episode_tools, gate)
+    // The episode's own tools are admitted by name; everything else is this
+    // company's policy to decide, and can still park for the operator.
+    //
+    // Passing `None` here instead would deny every call the episode does not
+    // serve -- the teammate's whole belt, memory, ledgers, skills -- and the
+    // seat would be told its own tools are "not on this seat's belt".
+    let gate = belt.admit(Some(Arc::new(behind)));
+    build::episode_seat(&company.id, seat, blueprint, belt.tools, gate)
 }
 
 pub(crate) fn build_roster(

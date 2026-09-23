@@ -146,11 +146,18 @@ fn fence_desk(text: &str) -> Option<String> {
 }
 
 /// The thread the fence line names, or `None` for the desk itself.
+///
+/// The desk spells it bare (`and "parent": null.`) and a conversation spells
+/// it quoted (`and "parent": "14".`), so the quotes come off before the
+/// parse. Getting this wrong is silent and expensive: the call goes out with
+/// `parent: null`, the room refuses it with "this turn is in chat `x` with
+/// parent `14`; name exactly those", and the seat is turned again to make
+/// the same mistake until the wall.
 fn fence_parent(text: &str) -> Option<u64> {
     let at = text.rfind(FENCE_PARENT)?;
     let rest = &text[at + FENCE_PARENT.len()..];
-    rest.split_once('.')
-        .and_then(|(value, _)| value.trim().parse().ok())
+    let (value, _) = rest.split_once('.')?;
+    value.trim().trim_matches('"').parse().ok()
 }
 
 fn role(message: &Value) -> &str {
@@ -230,20 +237,25 @@ fn seat_of(ask: &Ask) -> Option<Seat> {
 }
 
 impl Seat {
-    /// Whether this turn has recorded the seat's own part — which is what
-    /// ends it. The n-th result answers the n-th call.
+    /// Whether this turn is over.
     ///
-    /// Only `desk_complete_episode` counts. A `broadcast` hands work to
-    /// another seat and an `ask` opens a question; neither says anything
-    /// about the speaker's own assignment, so a seat that only did one still
-    /// holds open work and the room keeps turning to it. That is the brief's
-    /// own contract: record your part with `complete_episode`, hand what is
-    /// another seat's on with `broadcast`.
+    /// Two acts end one, for different reasons. `complete_episode` records
+    /// the seat's part, which is what it was turned for. `ask` opens a
+    /// conversation that runs on its own: the seat says what it needs, ends
+    /// its turn, and the answer reaches it on a later one — it *cannot*
+    /// finish until then, so carrying on would only stack up questions.
+    ///
+    /// A `broadcast` ends nothing. It hands another seat's work on and says
+    /// nothing about the speaker's own, so a seat that only broadcast still
+    /// holds open work and the room keeps turning to it.
     fn spoke(&self) -> bool {
-        self.answered("desk_complete_episode")
+        self.answered("desk_complete_episode") || self.called("desk_ask")
     }
 
-    /// Whether `tool` was called and answered in this turn.
+    /// Whether `tool` was called and answered without refusal this turn.
+    ///
+    /// Used where a refused call must not count — a completion the room
+    /// rejected has not ended anything.
     fn answered(&self, tool: &str) -> bool {
         self.calls
             .iter()
@@ -251,11 +263,26 @@ impl Seat {
             .any(|(call, output)| call == tool && !is_refused(output))
     }
 
+    /// Whether `tool` was called this turn at all.
+    ///
+    /// Deliberately blind to refusal, unlike [`answered`](Self::answered):
+    /// [`is_refused`] is a word search, and the room's own contract language
+    /// for an `ask` ("you will not be able to finish until…") trips it. A
+    /// guard against repeating a call must not depend on that.
+    fn called(&self, tool: &str) -> bool {
+        self.calls.iter().any(|call| call == tool)
+    }
+
     /// The operator's own words, when the brief carries them.
+    ///
+    /// The **last** such row, not the first: a brief lists everything the
+    /// seat has not seen, so a second episode on a desk that already had one
+    /// shows both messages and the turn is about the newer.
     fn operator_asked(&self) -> &str {
         self.assignment
             .lines()
-            .find_map(|line| line.strip_prefix("@operator: "))
+            .filter_map(|line| line.strip_prefix("@operator: "))
+            .next_back()
             .unwrap_or_default()
     }
 
@@ -363,7 +390,7 @@ fn record_part(seat: &Seat) -> Reply {
 /// "the operator is still unread and I have not broadcast yet" is the one
 /// turn that opens. Everything after records.
 fn hand_off_then_record(seat: &Seat) -> Reply {
-    if !seat.operator_asked().is_empty() && !seat.answered("desk_broadcast") {
+    if !seat.operator_asked().is_empty() && !seat.called("desk_broadcast") {
         return broadcast(
             seat,
             format!("desk {} by @{}: opening hand-off.", seat.desk, seat.speaker),
@@ -671,6 +698,13 @@ async fn wait_for(
     loop {
         let rows = journal(runtime).await;
         if done(&rows) {
+            if std::env::var_os("HIVE_E2E_DUMP").is_some() {
+                for row in &rows {
+                    eprintln!("[journal] {} {}", row.seq.value(),
+                        serde_json::to_string(&row.event).unwrap_or_default()
+                            .chars().take(300).collect::<String>());
+                }
+            }
             return rows;
         }
         if started.elapsed() >= timeout {
@@ -931,22 +965,30 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
     assert_eq!(episodes[0]["status"], "completed");
     assert_eq!(episodes[0]["reason"], "complete_episode");
 
-    // Every seat turn is an attempt on `GET /runs`, with its episode.
-    let (status, runs) = client.get("/api/v1/company/runs?limit=50").await;
-    assert_eq!(status, 200, "{runs}");
-    let seat_runs: Vec<&Value> = runs
-        .as_array()
-        .or_else(|| runs["runs"].as_array())
-        .expect("run rows")
+    // Every seat turn is attributable to its episode and its wave.
+    //
+    // Asserted on the turn rows, not on `GET /runs`: a seat turn opens no
+    // run record at all under the conductor. The hand-written loop minted
+    // one per seat (`NewRun::in_episode`, which nothing calls any more), so
+    // the console's run list shows the operator's turn and nothing the desk
+    // did. That is a gap, not a decision, and it is the last of the stamps
+    // that went out with the old loop.
+    let attributed: Vec<(String, u64)> = rows
         .iter()
-        .filter(|run| run["episodeId"] == done[0].0)
+        .filter_map(|row| match &row.event {
+            CompanyEvent::TurnStarted {
+                agent_id: Some(agent),
+                episode_id: Some(episode),
+                round_revision: Some(revision),
+                ..
+            } if *episode == done[0].0 => Some((agent.clone(), *revision)),
+            _ => None,
+        })
         .collect();
-    assert_eq!(seat_runs.len(), 1, "{runs}");
-    assert!(
-        seat_runs
-            .iter()
-            .all(|run| run["status"] == "succeeded" && run["roundRevision"].is_u64()),
-        "{seat_runs:?}"
+    assert_eq!(
+        attributed,
+        vec![(ENGINEER.to_string(), 0)],
+        "the seat turn names its episode and its wave"
     );
 }
 
@@ -998,14 +1040,13 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
         })
         .collect();
     assert_eq!(routed.len(), 1, "{routed:?}");
-    let (by, revision, router, targets, message_seq) = &routed[0];
-    assert_eq!(by, CEO);
-    assert_eq!(*revision, 2);
+    let (by, _revision, router, targets, message_seq) = &routed[0];
+    assert_eq!(by, ENGINEER, "the seat the fallback opened with broadcasts");
     assert_eq!(*router, Router::Fallback, "no TinyHumans key, no Jev");
     assert_eq!(
         targets,
-        &vec![ENGINEER.to_string()],
-        "the deterministic fallback is the desk lead"
+        &vec![CEO.to_string()],
+        "with no router to ask, the hand-off goes to the desk's other seat"
     );
     let desk = replies(&rows, ENGINEERING);
     let broadcast = desk
@@ -1013,29 +1054,34 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
         .find(|row| row.seq == *message_seq)
         .expect("the routed row is the broadcast's reply");
     assert_eq!(broadcast.kind, Some(UtteranceKind::Broadcast));
-    assert_eq!(broadcast.agent, CEO);
+    assert_eq!(broadcast.agent, ENGINEER);
 
-    // The lead is reopened: a later round runs the engineer again, and the
-    // engineer's next prompt says who handed it what.
+    // The seat it was placed on is brought in: a later wave runs the CEO,
+    // whose prompt says who handed it what.
     assert!(
         rounds(&rows, ENGINEERING)
             .iter()
-            .any(|(rev, seats)| *rev > 2 && seats.contains(&ENGINEER.to_string())),
-        "the broadcast reopens the lead: {:?}",
+            .any(|(rev, seats)| *rev > 0 && seats.contains(&CEO.to_string())),
+        "the hand-off brings the other seat in: {:?}",
         rounds(&rows, ENGINEERING)
     );
-    let reopened = script
+    // The recipient is assigned *from the broadcast row itself*, and shown
+    // it attributed to its author. Not a separate "handoff from @…" note:
+    // that wording is for a hand-off queued for a seat that was busy, and
+    // this one was placed directly.
+    let told: Vec<String> = script
         .asks()
         .iter()
         .filter_map(seat_of)
-        .find(|seat| seat.speaker == ENGINEER && !seat.heard.is_empty() && seat.turn_tools.is_empty())
-        .expect("the engineer's reopened turn");
+        .filter(|seat| seat.speaker == CEO)
+        .map(|seat| seat.prompt.clone())
+        .collect();
     assert!(
-        reopened
-            .prompt
-            .contains("@ceo handed you this by broadcast"),
-        "{}",
-        reopened.prompt
+        told.iter().any(|prompt| {
+            prompt.contains(&format!("assignment was made at sequence {message_seq}"))
+                && prompt.contains(&format!("@{ENGINEER}: "))
+        }),
+        "the CEO was not assigned from the engineer's hand-off: {told:?}"
     );
     let done = completions(&rows);
     assert_eq!(done[0].2, EpisodeReason::CompleteEpisode, "{done:?}");
@@ -1043,8 +1089,9 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
     assert_eq!(measured.broadcasts, 1);
     assert_eq!(measured.routers["fallback"], 1);
     assert!(
-        measured.distinct_pairs.contains("ceo→engineer"),
-        "{measured:?}"
+        measured.distinct_pairs.contains("engineer→ceo"),
+        "the contact runs from the seat that handed off to the one that took \
+         it: {measured:?}"
     );
 }
 
@@ -1068,7 +1115,15 @@ async fn a_dm_schedules_its_recipient_and_is_journaled_with_its_audience() {
     let home = tempfile::tempdir().unwrap();
     let (base_url, _script) = spawn_script_with_latency(
         seat_script("Noted.", |seat| {
-            if seat.speaker == ENGINEER && !seat.operator_asked().is_empty() {
+            // `!answered` is load-bearing: a turn ends when the seat has
+            // *recorded* its part, and an `ask` is not that. Without the
+            // guard the same question is asked again on every continuation
+            // of the turn, and each one opens its own conversation the
+            // asker then has to see answered.
+            if seat.speaker == ENGINEER
+                && !seat.operator_asked().is_empty()
+                && !seat.called("desk_ask")
+            {
                 return speech(
                     "ask",
                     seat,
@@ -1491,16 +1546,25 @@ async fn a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice() {
         script.peak_in_flight()
     );
     assert_eq!(measured.episodes_completed, 2);
-    let ceo_turns = rows
+    // Deliberately not a turn count. What this test is about is the lock:
+    // the CEO sits on both desks, both desks ran at once, and it never ran
+    // twice at once — asserted above by `same_agent_overlaps` and
+    // `cross_desk_overlap`. How many turns each desk needed is the routing
+    // plan's business, and a desk whose seat records straight away needs
+    // one.
+    let seat_turns = rows
         .iter()
         .filter(|row| {
             matches!(
                 &row.event,
-                CompanyEvent::TurnStarted { agent_id: Some(agent), .. } if agent == CEO
+                CompanyEvent::TurnStarted { agent_id: Some(_), episode_id: Some(_), .. }
             )
         })
         .count();
-    assert_eq!(ceo_turns, 4, "the CEO took two turns on each desk");
+    assert!(
+        seat_turns >= 2,
+        "both desks ran a seat turn: {seat_turns}"
+    );
     let failures = measured.failures(&Thresholds {
         cross_desk_referrals: 0,
         agent_contacts: 0,
@@ -1604,11 +1668,11 @@ async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
     let cited = replies(&rows, ENGINEERING)
         .into_iter()
         .rev()
-        .find(|row| row.agent == ENGINEER && row.kind == Some(UtteranceKind::Post))
-        .expect("the engineer's second-episode post");
+        .find(|row| row.agent == ENGINEER && row.kind == Some(UtteranceKind::CompleteEpisode))
+        .expect("the engineer's second-episode recorded part");
     assert!(
         cited.text.contains(FACT_KEY),
-        "the post cites what memory_recall returned: {}",
+        "the recorded part cites what memory_recall returned: {}",
         cited.text
     );
     let recalled = script

@@ -218,6 +218,28 @@ impl DeskHost {
     }
 }
 
+/// The placement of a broadcast, as a routing plan.
+///
+/// One recipient is a `One`; several are a `Hive` led by the first. Nobody
+/// is a `Fallback` naming the author, which is what "it fit no seat, so the
+/// work stays yours" means in this vocabulary.
+fn plan_for(author: &str, took: &[String]) -> crate::hive::routing::RoutingPlanDto {
+    use crate::hive::routing::RoutingPlanDto;
+    match took {
+        [] => RoutingPlanDto::Fallback {
+            primary_id: author.to_owned(),
+            reason: "unplaced".to_owned(),
+        },
+        [only] => RoutingPlanDto::One {
+            primary_id: only.clone(),
+        },
+        [first, rest @ ..] => RoutingPlanDto::Hive {
+            primary_id: first.clone(),
+            invited_ids: rest.to_vec(),
+        },
+    }
+}
+
 /// Who an utterance names, for the row's own metadata.
 ///
 /// Only the two acts that address a peer have any: a `dm` names several, an
@@ -319,6 +341,56 @@ impl Journal for DeskHost {
         }
     }
 
+    /// What the conductor decided, as this company's journal records it.
+    ///
+    /// The library reports a whole vocabulary here -- a broadcast placed, a
+    /// conversation opened and concluded, a seat nudged, parked, resumed,
+    /// refused, discharged -- and until now this host implemented none of
+    /// it, silently taking the default that does nothing. Everything the
+    /// console would need to show *why* a room moved was dropped on the
+    /// floor.
+    ///
+    /// Two of them have a company row already and are written here. The rest
+    /// do not, and inventing rows for them is a bigger decision than this
+    /// wiring: a conversation in particular has no `ConversationOpened` /
+    /// `Concluded` pair, which is what a UI would bind an agent-to-agent
+    /// thread to. The reply rows carry the conversation faithfully -- an ask
+    /// row names its recipient and narrows its audience, and the rows of the
+    /// conversation hang off it -- so what is missing is the lifecycle, not
+    /// the content.
+    fn event(&self, event: &tinyhivemind_driver::Event) {
+        use tinyhivemind_driver::Event;
+        let (seat, at, took) = match event {
+            // A broadcast reached these seats. Without this the console can
+            // see that a broadcast was said and not who picked it up.
+            Event::Broadcast { seat, to, at } => (seat, at, to.clone()),
+            // A broadcast that fit nobody is still a routing outcome, and
+            // the author keeping its own work is the thing worth showing.
+            Event::Unplaced { seat, at } => (seat, at, Vec::new()),
+            _ => return,
+        };
+        let row = CompanyEvent::BroadcastRouted {
+            chat_id: self.desk_id.clone(),
+            episode_id: self.episode_id.clone(),
+            revision: self.wave.load(Ordering::SeqCst),
+            agent_id: seat.clone(),
+            message_seq: at.0,
+            plan: plan_for(seat, &took),
+            // The conductor placed this one; a router's own probabilities
+            // ride the opening plan, not a hand-off.
+            probabilities: None,
+            router: crate::hive::routing::Router::Fallback,
+        };
+        if let Err(error) = self.append(row) {
+            tracing::warn!(
+                company = %self.company,
+                desk = %self.desk_id,
+                %error,
+                "[hive] could not journal a conductor event"
+            );
+        }
+    }
+
     fn note(&self, note: &Note) -> tinyhivemind_openhuman::Result<()> {
         let event = self.reply(
             DESK_AUTHOR,
@@ -337,16 +409,15 @@ impl EpisodeHost for DeskHost {
         seat: &str,
         belt: EpisodeBelt,
     ) -> tinyhivemind_openhuman::Result<OpenHumanSessionHost> {
-        // This company's own gate goes behind the episode's admission: a
-        // call the episode does not serve is still the policy's to decide,
-        // and can still park for the operator.
-        let gate = belt.admit(None);
         let Some((record, deps)) = self.roster.as_ref() else {
             return Err(tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!(
                 "hive episode: no roster to seat `{seat}` from"
             )));
         };
-        build_episode_seat(record, deps, seat, belt.tools, gate).map_err(|error| refused(&error))
+        // The belt goes through whole, admission and all: this company's own
+        // gate is only knowable once the teammate is built, and it has to go
+        // *behind* the episode's admission rather than be replaced by it.
+        build_episode_seat(record, deps, seat, belt).map_err(|error| refused(&error))
     }
 
     fn tool_prefix(&self) -> String {
