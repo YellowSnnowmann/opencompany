@@ -20,15 +20,16 @@
 //! episode does not serve still reaches that policy and can still park.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use openhuman_core::agent::OpenHumanSessionHost;
 use tinyhivemind::{Sequence, SessionLog};
 use tinyhivemind_driver::{Commit, Note};
-use tinyhivemind_openhuman::{EpisodeBelt, EpisodeHost, Journal};
+use tinyhivemind_openhuman::{EpisodeBelt, EpisodeHost, HostedTurn, Journal};
 
-use crate::harness::built_in::{HarnessDeps, build_episode_seat};
+use crate::harness::built_in::{HarnessDeps, HarnessPool, build_episode_seat};
 use crate::ports::events::EventLog;
-use crate::ports::types::{CompanyEvent, CompanyId, CompanyRecord, EventSeq};
+use crate::ports::types::{CompanyEvent, CompanyId, CompanyRecord, EventSeq, TurnOutcome};
 
 use super::session_log::EventLogSessionLog;
 
@@ -57,6 +58,20 @@ pub struct DeskHost {
     /// A host that only journals -- a test over the commit path, say --
     /// names neither and is asked for no seat.
     roster: Option<(Arc<CompanyRecord>, Arc<HarnessDeps>)>,
+    /// The pool this desk's teammates live in, for the lock a turn holds.
+    ///
+    /// A seat of this episode is a session of its own, so two desks running
+    /// the same teammate no longer share its conversation -- but they do
+    /// share the teammate: its spend cap, its workspace, its memory, and the
+    /// one lane the console draws for it. The lock is what keeps those from
+    /// being written by two turns at once.
+    pool: Option<Arc<HarnessPool>>,
+    /// This episode's id, carried on every bracket so the console can draw
+    /// one seat's lane within one meeting.
+    episode_id: String,
+    /// Which wave is running, for the same reason. Bumped as each wave
+    /// settles, which is the one moment the loop tells a host a wave ended.
+    wave: AtomicU64,
 }
 
 impl std::fmt::Debug for DeskHost {
@@ -91,6 +106,9 @@ impl DeskHost {
             events,
             log,
             roster: None,
+            pool: None,
+            episode_id: String::new(),
+            wave: AtomicU64::new(0),
         }
     }
 
@@ -99,6 +117,23 @@ impl DeskHost {
     #[must_use]
     pub fn seating(mut self, record: Arc<CompanyRecord>, deps: Arc<HarnessDeps>) -> Self {
         self.roster = Some((record, deps));
+        self
+    }
+
+    /// The episode these turns belong to, as the console names it.
+    #[must_use]
+    pub fn episode(mut self, episode_id: impl Into<String>) -> Self {
+        self.episode_id = episode_id.into();
+        self
+    }
+
+    /// The pool whose per-teammate lock a seat's turn takes.
+    ///
+    /// Without one a turn runs unserialised, which is only safe for a host
+    /// whose teammates sit on exactly one desk.
+    #[must_use]
+    pub fn locking(mut self, pool: Arc<HarnessPool>) -> Self {
+        self.pool = Some(pool);
         self
     }
 
@@ -175,6 +210,16 @@ impl Journal for DeskHost {
         Ok(Sequence(seq.value()))
     }
 
+    /// A wave settled. The snapshot is the host's to keep; this one counts
+    /// waves so a bracket can name the round it belongs to.
+    fn checkpoint(
+        &self,
+        _state: &tinyhivemind_driver::ConductorState,
+    ) -> tinyhivemind_openhuman::Result<()> {
+        self.wave.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
     fn note(&self, note: &Note) -> tinyhivemind_openhuman::Result<()> {
         let event = self.reply(
             DESK_AUTHOR,
@@ -207,6 +252,104 @@ impl EpisodeHost for DeskHost {
 
     fn tool_prefix(&self) -> String {
         TOOL_PREFIX.to_owned()
+    }
+
+    /// Run the seat's turn under this company's own machinery.
+    ///
+    /// The library builds the turn and does not start it; everything here
+    /// wraps it, and the order is the whole point. The teammate's lock is
+    /// taken first and released last, so a second desk wanting the same
+    /// teammate waits at the door rather than running beside this one. Both
+    /// bracket rows are written *inside* that lock: a bracket opened before
+    /// it, or closed after it is released, overlaps its sibling on the
+    /// journal exactly where the runtime did not, and overlap is the one
+    /// invariant `opencompany measure` checks.
+    ///
+    /// A host with no pool runs unserialised and writes no brackets, which
+    /// is what a test over the journal alone wants.
+    fn wrap_turn<'a>(&'a self, seat: &'a str, turn: HostedTurn<'a>) -> HostedTurn<'a> {
+        Box::pin(async move {
+            let Some(pool) = self.pool.as_ref() else {
+                return turn.await;
+            };
+            let Some(agent) = pool.agent(&self.company, seat).await else {
+                return turn.await;
+            };
+            let bracket = Bracket {
+                host: self,
+                seat: seat.to_owned(),
+                turn_id: crate::ports::generate_id(),
+                wave: self.wave.load(Ordering::SeqCst),
+            };
+            let lock = agent.turn_lock();
+            let held = lock.lock().await;
+            bracket.started().await;
+            let outcome = turn.await;
+            bracket.settled(&outcome).await;
+            drop(held);
+            outcome
+        })
+    }
+}
+
+/// One seat turn's pair of journal rows, written while the lock is held.
+struct Bracket<'a> {
+    host: &'a DeskHost,
+    seat: String,
+    turn_id: String,
+    wave: u64,
+}
+
+impl Bracket<'_> {
+    async fn started(&self) {
+        self.write(CompanyEvent::TurnStarted {
+            turn_id: self.turn_id.clone(),
+            chat_id: self.host.desk_id.clone(),
+            parent: self.host.thread_root,
+            by: None,
+            agent_id: Some(self.seat.clone()),
+            episode_id: Some(self.host.episode_id.clone()),
+            round_revision: Some(self.wave),
+        })
+        .await;
+    }
+
+    async fn settled(&self, outcome: &tinyhivemind_openhuman::Result<String>) {
+        let event = match outcome {
+            Ok(_) => CompanyEvent::TurnSettled {
+                turn_id: self.turn_id.clone(),
+                agent_id: Some(self.seat.clone()),
+                chat_id: Some(self.host.desk_id.clone()),
+                episode_id: Some(self.host.episode_id.clone()),
+                round_revision: Some(self.wave),
+                outcome: TurnOutcome::Committed,
+            },
+            Err(error) => CompanyEvent::TurnFailed {
+                turn_id: self.turn_id.clone(),
+                error: error.to_string(),
+                agent_id: Some(self.seat.clone()),
+                chat_id: Some(self.host.desk_id.clone()),
+                episode_id: Some(self.host.episode_id.clone()),
+                round_revision: Some(self.wave),
+                // The library reports a timeout as an ordinary failure, so
+                // this host does not claim to tell the two apart.
+                outcome: Some(TurnOutcome::Failed),
+            },
+        };
+        self.write(event).await;
+    }
+
+    /// A bracket that cannot be written is logged, never fatal: losing the
+    /// console's lane is not worth losing the turn that ran.
+    async fn write(&self, event: CompanyEvent) {
+        if let Err(error) = self.host.events.append(&self.host.company, event).await {
+            tracing::warn!(
+                company = %self.host.company,
+                seat = %self.seat,
+                %error,
+                "[hive] could not journal a seat turn's bracket"
+            );
+        }
     }
 }
 
