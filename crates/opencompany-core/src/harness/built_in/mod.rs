@@ -5705,6 +5705,120 @@ fn serves(deps: &HarnessDeps, agent_id: &str) -> bool {
     }
 }
 
+/// The tool grants one teammate is scoped to: company-wide, narrowed by the
+/// desks it sits on, then by its own declaration.
+///
+/// Split out of [`build_roster`] so a seat of a running episode resolves the
+/// same grants the roster agent of the same name does.
+pub(crate) fn grants_for_policy(
+    company: &CompanyRecord,
+    allow: &[String],
+    manifest_agent: &ManifestAgent,
+) -> Vec<String> {
+    let desk_tools = company.agent_desk_tools(&manifest_agent.id);
+    let desk_allows: Vec<&[String]> = desk_tools.iter().map(Vec::as_slice).collect();
+    agent_scoped_grants(allow, &desk_allows, manifest_agent.tools.as_deref())
+}
+
+/// The approval policy one teammate is built with.
+///
+/// Extracted from [`build_roster`] so an episode seat is gated exactly as
+/// the roster agent of the same name is: the same budget, emergency gate,
+/// workspace, meter, read-only MCP declaration and Composio deflection.
+pub(crate) fn agent_policy_for(
+    company: &CompanyRecord,
+    deps: &HarnessDeps,
+    manifest_agent: &ManifestAgent,
+    policy: &Policy,
+    mcp_reads: &crate::policy::McpReadSet,
+    effective_budget: Option<f64>,
+    #[cfg_attr(not(feature = "composio"), allow(unused_variables))] grants: &[String],
+) -> ApprovalPolicy {
+    let mut agent_policy = ApprovalPolicy::new(policy, effective_budget)
+        .with_policy_hitl_disabled()
+        .with_requests(deps.approval_requests.clone())
+        // Issue #243: stamp who the parked effect belongs to, so approving it
+        // can hand the grant back to this agent rather than to nobody.
+        .with_agent(manifest_agent.id.clone())
+        // Issue #1124: the per-server read-only MCP declaration, so a
+        // server-declared read-only bridge call does not park under `auto`.
+        .with_mcp_reads(mcp_reads.clone());
+    if let Some(gate) = deps.emergency_gate.as_ref() {
+        agent_policy = agent_policy.with_emergency_gate(gate.clone());
+    }
+    if let Some(workspace) = deps.workspace.as_ref() {
+        agent_policy = agent_policy.with_workspace(workspace.clone(), company.id.clone());
+    }
+    // Issue #304: give the policy something to measure `budget_usd_daily`
+    // against. Only wired when the host has a meter — without one the cap
+    // arm stays inert and warns once, rather than parking every priced call
+    // on a host that can never answer the question.
+    if let Some(meter) = deps.meter.as_ref() {
+        agent_policy = agent_policy.with_spend(meter.clone(), company.id.clone());
+    }
+    agent_policy
+}
+
+/// Build one teammate as a seat of a running completion episode.
+///
+/// The same teammate [`build_roster`] would build -- same persona, same
+/// belt, same policy, same model -- as a session host rather than a spec,
+/// with the episode's tools added to that belt and its gate in front of
+/// the policy. A spec cannot take them: it names its tools from the
+/// runtime's registry, and an episode's tools are bound to one seat of one
+/// episode.
+///
+/// # Errors
+///
+/// [`OpenCompanyError::Config`] when the company seats no teammate by that
+/// name, or whatever stops the session being built.
+#[cfg(feature = "openhuman")]
+pub(crate) fn build_episode_seat(
+    company: &CompanyRecord,
+    deps: &HarnessDeps,
+    seat: &str,
+    episode_tools: Vec<Box<dyn tinytools::Tool>>,
+    gate: Arc<dyn oh::agent::tool_policy::ToolPolicy>,
+) -> crate::Result<oh::agent::OpenHumanSessionHost> {
+    let effective = company.effective_policy();
+    let live_roster = company.effective_agents();
+    let manifest_agent = live_roster
+        .iter()
+        .find(|agent| agent.id == seat)
+        .ok_or_else(|| {
+            crate::error::OpenCompanyError::Config(format!(
+                "hive episode: `{seat}` is seated at the desk but not on the roster"
+            ))
+        })?;
+    let grants = grants_for_policy(company, &company.manifest.tools.allow, manifest_agent);
+    let policy = agent_policy_for(
+        company,
+        deps,
+        manifest_agent,
+        &effective,
+        &crate::company::mcp::mcp_read_set(&deps.mcp_servers),
+        company.effective_budget(&manifest_agent.id),
+        &grants,
+    );
+    let instructions = company.effective_instructions(&manifest_agent.id);
+    let blueprint = build::build_agent_with_model(
+        &company.id,
+        &company.manifest.company.name,
+        manifest_agent,
+        policy,
+        deps,
+        &grants,
+        // An episode seat carries no skill deltas and no routed context: it
+        // is built for one episode and torn down with it.
+        &[],
+        &[],
+        instructions.as_deref(),
+        orchestrator::orchestrator_id(&live_roster).as_deref() == Some(manifest_agent.id.as_str()),
+        &crate::company::team_brief::team_section(company, &manifest_agent.id),
+    )?;
+    build::episode_seat(seat, blueprint, episode_tools, gate)
+}
+
 pub(crate) fn build_roster(
     runtime: &openhuman_embed::Runtime,
     company: &CompanyRecord,
@@ -5766,28 +5880,16 @@ pub(crate) fn build_roster(
         // reaches the system prompt this agent is built with — and it wins over
         // the blueprint without cloning the borrowed `&ManifestAgent`.
         let effective_instructions = company.effective_instructions(&manifest_agent.id);
-        let mut agent_policy = ApprovalPolicy::new(policy, effective_budget)
-            .with_policy_hitl_disabled()
-            .with_requests(deps.approval_requests.clone())
-            // Issue #243: stamp who the parked effect belongs to, so approving it
-            // can hand the grant back to this agent rather than to nobody.
-            .with_agent(manifest_agent.id.clone())
-            // Issue #1124: the per-server read-only MCP declaration, so a
-            // server-declared read-only bridge call does not park under `auto`.
-            .with_mcp_reads(mcp_reads.clone());
-        if let Some(gate) = deps.emergency_gate.as_ref() {
-            agent_policy = agent_policy.with_emergency_gate(gate.clone());
-        }
-        if let Some(workspace) = deps.workspace.as_ref() {
-            agent_policy = agent_policy.with_workspace(workspace.clone(), company.id.clone());
-        }
-        // Issue #304: give the policy something to measure `budget_usd_daily`
-        // against. Only wired when the host has a meter — without one the cap
-        // arm stays inert and warns once, rather than parking every priced call
-        // on a host that can never answer the question.
-        if let Some(meter) = deps.meter.as_ref() {
-            agent_policy = agent_policy.with_spend(meter.clone(), company.id.clone());
-        }
+        let grants = grants_for_policy(company, allow, manifest_agent);
+        let agent_policy = agent_policy_for(
+            company,
+            deps,
+            manifest_agent,
+            policy,
+            &mcp_reads,
+            effective_budget,
+            &grants,
+        );
         let is_orchestrator = orchestrator.as_deref() == Some(manifest_agent.id.as_str());
         // Three-level narrowing: company → the desks this teammate sits on →
         // the teammate itself. `agent_desk_tools` resolves through the record's

@@ -25,6 +25,12 @@ pub mod episode_store;
 /// One `OpenHumanHive` per desk over the company's live agents (Phase 4).
 #[cfg(feature = "openhuman")]
 pub mod graph;
+/// The company journal read as a tinyhivemind `SessionLog`, one desk at a
+/// time (ex `hivemind/log.rs`).
+/// This company as the host of one completion episode: the journal
+/// `tinyhivemind` commits through, and how a teammate is built as a seat.
+#[cfg(feature = "openhuman")]
+pub mod host;
 /// Jev routing over the TinyHumans System One proxy: the host-owned
 /// `SystemOneTransport` and the `jev_router` constructor (plan Phase 7).
 /// Gated with the harness whose credential seam it reads.
@@ -54,8 +60,6 @@ pub mod routing;
 /// (Phase 4).
 #[cfg(feature = "openhuman")]
 pub mod seats;
-/// The company journal read as a tinyhivemind `SessionLog`, one desk at a
-/// time (ex `hivemind/log.rs`).
 pub mod session_log;
 #[cfg(test)]
 pub(crate) mod test_support;

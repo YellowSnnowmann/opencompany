@@ -1635,6 +1635,51 @@ pub fn build_agent(
     )
 }
 
+/// One teammate as a seat of a running completion episode: a session host
+/// carrying this company's own prompt, belt, model and policy, with the
+/// episode's tools added and its gate in front.
+///
+/// A session host rather than an `AgentSpec` because a spec names its tools
+/// from the runtime's registry, which is fixed when the agent is built. An
+/// episode's tools are neither: they are bound to one seat of one episode
+/// and drain into that episode's record. That is the whole reason this path
+/// exists beside the spec one.
+///
+/// # Errors
+///
+/// The builder refusing the session.
+#[cfg(feature = "openhuman")]
+pub fn episode_seat(
+    seat: &str,
+    blueprint: AgentBlueprint,
+    episode_tools: Vec<Box<dyn Tool>>,
+    gate: Arc<dyn oh::agent::tool_policy::ToolPolicy>,
+) -> crate::Result<oh::agent::OpenHumanSessionHost> {
+    let mut tools = blueprint.tools;
+    tools.extend(episode_tools);
+    oh::agent::OpenHumanSessionHost::builder()
+        .chat_model(blueprint.chat_model.clone() as Arc<dyn tinyinference::model::ChatModel<()>>)
+        .model_name(blueprint.model.clone())
+        .tools(tools)
+        .tool_policy(gate)
+        .prompt_builder(oh::agent::prompts::SystemPromptBuilder::from_final_body(
+            blueprint.system_prompt.clone(),
+        ))
+        .config(oh::config::AgentConfig {
+            max_tool_iterations: MAX_TOOL_ITERATIONS,
+            ..oh::config::AgentConfig::default()
+        })
+        .workspace_dir(blueprint.workspace.clone())
+        .action_dir(blueprint.workspace.clone())
+        // The company journal is the only log. A session that also wrote
+        // OpenHuman's own transcript would be a second one, and the episode
+        // reads its history back out of the journal every turn.
+        .auto_save(false)
+        .agent_definition_name(seat.to_owned())
+        .build()
+        .map_err(|error| crate::error::OpenCompanyError::Harness(error.to_string()))
+}
+
 /// The intrinsic deliberate-memory tools (`memory_store` / `memory_recall` /
 /// `memory_forget`) — **oc-authored**, over the company's own `ContextStore`
 /// (issue #1113 / G11).

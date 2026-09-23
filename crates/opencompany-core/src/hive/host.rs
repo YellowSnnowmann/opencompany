@@ -1,0 +1,215 @@
+//! This company as the host of one completion episode.
+//!
+//! `tinyhivemind` owns the episode -- who runs next, what a committed row
+//! means, the conversations a seat opens, the nudges, the walls, the
+//! completion fold, parking on an approval, and the checkpoint a restart
+//! resumes from. It owns no storage and names no type of this host, so it
+//! asks for two things:
+//!
+//! - a **journal** ([`Journal`]): this company's event log to read a seat's
+//!   rows from, and somewhere to append what the episode commits;
+//! - a **host** ([`EpisodeHost`]): how this company builds one teammate as a
+//!   seat, with the episode's tools on its belt.
+//!
+//! The seat is a **session host**, not an `AgentSpec`. A spec names its
+//! tools from the runtime's registry, fixed when the agent is built; an
+//! episode's tools are bound to one seat of one episode and drain into that
+//! episode's record. Inheritance is the point of the hosted runner: the belt
+//! is this company's belt plus the episode's, and the gate is the episode's
+//! admission in front of this company's own `ApprovalPolicy`, so a call the
+//! episode does not serve still reaches that policy and can still park.
+
+use std::sync::Arc;
+
+use openhuman_core::agent::OpenHumanSessionHost;
+use tinyhivemind::{Sequence, SessionLog};
+use tinyhivemind_driver::{Commit, Note};
+use tinyhivemind_openhuman::{EpisodeBelt, EpisodeHost, Journal};
+
+use crate::harness::built_in::{HarnessDeps, build_episode_seat};
+use crate::ports::events::EventLog;
+use crate::ports::types::{CompanyEvent, CompanyId, CompanyRecord, EventSeq};
+
+use super::session_log::EventLogSessionLog;
+
+/// What a seat calls the episode's tools, in front of their served names.
+///
+/// This company already gives every teammate a `desk_`-prefixed speech belt,
+/// so the episode's bare `post` and `complete_episode` would collide at the
+/// gate: admission is by name, and a host tool sharing a bare name would be
+/// admitted past this company's own policy.
+const TOOL_PREFIX: &str = "desk_";
+
+/// The author a desk note is written under: the episode speaking, not a
+/// teammate. The session log reads a reserved id as a system row, which is
+/// what keeps it out of the completion fold.
+const DESK_AUTHOR: &str = crate::ports::SYSTEM_AUTHOR;
+
+/// One company, hosting one episode on one of its desks.
+pub struct DeskHost {
+    company: CompanyId,
+    desk_id: String,
+    /// The thread this episode's rows are parented to.
+    thread_root: Option<EventSeq>,
+    events: Arc<dyn EventLog>,
+    log: EventLogSessionLog,
+    /// The company and what its agents are built from, for building a seat.
+    /// A host that only journals -- a test over the commit path, say --
+    /// names neither and is asked for no seat.
+    roster: Option<(Arc<CompanyRecord>, Arc<HarnessDeps>)>,
+}
+
+impl std::fmt::Debug for DeskHost {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DeskHost")
+            .field("company", &self.company)
+            .field("desk_id", &self.desk_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DeskHost {
+    /// Open this company's journal as one desk's episode host.
+    #[must_use]
+    pub fn new(
+        company: CompanyId,
+        desk_id: String,
+        desk_name: String,
+        events: Arc<dyn EventLog>,
+    ) -> Self {
+        let log = EventLogSessionLog::new(
+            Arc::clone(&events),
+            company.clone(),
+            desk_id.clone(),
+            desk_name,
+        );
+        Self {
+            company,
+            desk_id,
+            thread_root: None,
+            events,
+            log,
+            roster: None,
+        }
+    }
+
+    /// Where a seat is built from: the company as it effectively stands,
+    /// and what every one of its agents is built with.
+    #[must_use]
+    pub fn seating(mut self, record: Arc<CompanyRecord>, deps: Arc<HarnessDeps>) -> Self {
+        self.roster = Some((record, deps));
+        self
+    }
+
+    /// Thread every row this episode commits under `root`.
+    #[must_use]
+    pub const fn in_thread(mut self, root: Option<EventSeq>) -> Self {
+        self.thread_root = root;
+        self
+    }
+
+    /// Append one row to the company's journal, blocking the episode's task
+    /// on the write.
+    ///
+    /// The port is async and the journal's seam is not, because the
+    /// conductor hands the host one row at a time and takes its sequence
+    /// straight back: there is never a second row in flight to interleave
+    /// with. Run on the episode's own runtime.
+    fn append(&self, event: CompanyEvent) -> crate::Result<EventSeq> {
+        let events = Arc::clone(&self.events);
+        let company = self.company.clone();
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(events.append(&company, event))
+        })
+    }
+
+    /// One row as this company stores it.
+    fn reply(
+        &self,
+        author: &str,
+        text: String,
+        thread: Option<Sequence>,
+        only_for: Option<&str>,
+    ) -> CompanyEvent {
+        CompanyEvent::AgentReply {
+            chat_id: self.desk_id.clone(),
+            agent_id: author.to_owned(),
+            text,
+            steps: Vec::new(),
+            outputs: Vec::new(),
+            task_id: None,
+            episode: None,
+            // A row of a conversation hangs off the ask that rooted it;
+            // otherwise off the thread the episode itself was opened in.
+            parent: thread
+                .map(|root| EventSeq::new(root.0))
+                .or(self.thread_root),
+            mentions: Vec::new(),
+            mention_depth: 0,
+            audience: only_for
+                .map(|seat| vec![seat.to_owned()])
+                .unwrap_or_default(),
+        }
+    }
+}
+
+/// The failure an episode reports when this company's journal refuses a row.
+fn refused(error: &crate::error::OpenCompanyError) -> tinyhivemind_openhuman::Error {
+    tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!("{error}"))
+}
+
+impl Journal for DeskHost {
+    fn log(&self) -> &dyn SessionLog {
+        &self.log
+    }
+
+    fn commit(&self, commit: &Commit) -> tinyhivemind_openhuman::Result<Sequence> {
+        let event = self.reply(
+            &commit.author,
+            commit.utterance.message().to_owned(),
+            commit.thread,
+            commit.only_for.as_deref(),
+        );
+        let seq = self.append(event).map_err(|error| refused(&error))?;
+        Ok(Sequence(seq.value()))
+    }
+
+    fn note(&self, note: &Note) -> tinyhivemind_openhuman::Result<()> {
+        let event = self.reply(
+            DESK_AUTHOR,
+            note.body.clone(),
+            note.thread,
+            note.only_for.as_deref(),
+        );
+        self.append(event).map_err(|error| refused(&error))?;
+        Ok(())
+    }
+}
+
+impl EpisodeHost for DeskHost {
+    fn build_seat(
+        &self,
+        seat: &str,
+        belt: EpisodeBelt,
+    ) -> tinyhivemind_openhuman::Result<OpenHumanSessionHost> {
+        // This company's own gate goes behind the episode's admission: a
+        // call the episode does not serve is still the policy's to decide,
+        // and can still park for the operator.
+        let gate = belt.admit(None);
+        let Some((record, deps)) = self.roster.as_ref() else {
+            return Err(tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!(
+                "hive episode: no roster to seat `{seat}` from"
+            )));
+        };
+        build_episode_seat(record, deps, seat, belt.tools, gate).map_err(|error| refused(&error))
+    }
+
+    fn tool_prefix(&self) -> String {
+        TOOL_PREFIX.to_owned()
+    }
+}
+
+#[cfg(test)]
+#[path = "host_tests.rs"]
+mod tests;
