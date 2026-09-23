@@ -616,3 +616,73 @@ async fn the_conclusion_of_a_conversation_is_journaled_and_not_projected() {
         "the conclusion is still in the journal"
     );
 }
+
+/// **A party reads the whole of its own conversation on its desk turn.**
+///
+/// The library's channel-level rule is each root and its *first* reply, so a
+/// conversation with more than one exchange left everything past the first
+/// answer out of a seat's desk read -- and for a hosted seat, which clears
+/// its session and rebuilds from this log every turn, out of its memory
+/// entirely. `tinyhivemind` cd23c7fe lifts that for a seat the thread was
+/// confided to.
+///
+/// Confided means [`Audience::Aside`] admitting that seat, which is why this
+/// belongs here rather than upstream: an answer inside a conversation is a
+/// `complete_episode` and names nobody, so what makes it an aside at all is
+/// this adapter (`audience_of`) -- a pair channel is private to the two
+/// seats it names whether or not its author wrote that down. Report those
+/// rows as desk-visible and the exception stops applying to the one kind of
+/// row it exists for.
+#[tokio::test]
+async fn a_party_reads_every_reply_of_its_own_conversation() {
+    use crate::ports::types::UtteranceKind;
+    let log = Arc::new(MemoryLog::default());
+    let company = MemoryLog::company();
+    let pair = crate::hive::referral::pair_conversation("planner", "strategist");
+    log.append(&company, operator_message("eng", "Settle the date.", None))
+        .await
+        .unwrap();
+    log.append(
+        &company,
+        episode_row(
+            &pair,
+            "strategist",
+            "what constraints?",
+            vec!["planner".into()],
+            1,
+            UtteranceKind::Ask,
+        ),
+    )
+    .await
+    .unwrap();
+    // Three replies under the one ask: today only the first would be read.
+    for (who, text) in [
+        ("planner", "none on file"),
+        ("strategist", "then we are blocked"),
+        ("planner", "agreed, blocked"),
+    ] {
+        log.append(
+            &company,
+            episode_row(&pair, who, text, vec![], 2, UtteranceKind::CompleteEpisode),
+        )
+        .await
+        .unwrap();
+    }
+    let adapter = seated(
+        &log,
+        vec!["strategist".into(), "planner".into(), "researcher".into()],
+    );
+
+    for seat in ["strategist", "planner"] {
+        let (readable, _) = read_as(&adapter, seat, None).await;
+        assert_eq!(
+            readable,
+            vec![1, 2, 3, 4, 5],
+            "{seat} reads its whole exchange"
+        );
+    }
+    // And a seat it was not confided to reads none of it, still.
+    let (readable, elided) = read_as(&adapter, "researcher", None).await;
+    assert_eq!(readable, vec![1], "the researcher reads only the desk");
+    assert!(!elided.is_empty(), "the aside is a stub, not absent");
+}
