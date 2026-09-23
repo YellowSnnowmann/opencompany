@@ -1236,7 +1236,7 @@ impl CompanyAgent {
             .map(|tool| tool.name().to_string())
             .filter(|name| !build::OPENHUMAN_NATIVE_TOOLS.contains(&name.as_str()))
             .collect();
-        let mut allow_tools: Vec<String> = crate::hive::tools::SPEECH_TOOL_NAMES
+        let mut allow_tools: Vec<String> = crate::hive::tools::speech_tool_names()
             .iter()
             .map(|name| (*name).to_string())
             .collect();

@@ -1,6 +1,6 @@
 //! The episode host: one desk message in, one completion-driven episode out.
 //!
-//! `tinyhivemind_openhuman::CompletionDriver` proposes rounds and folds
+//! `tinyhivemind_driver::CompletionDriver` proposes rounds and folds
 //! committed utterances; it never runs a turn, appends a row, or persists
 //! anything. This module is the host around it: it routes the opening message
 //! (Jev when a router is configured, the desk lead otherwise), opens or
@@ -19,11 +19,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use tinyhivemind::{Sequence, SharingState};
+use tinyhivemind_driver::{BroadcastRouting, CompletionDriver, DriverState, HostAction};
 use tinyhivemind_embed::{Router, RoutingPlan};
 use tinyhivemind_hive::{
     CompletionEpisodeState, CompletionStep, apply_assignment, completion_status,
 };
-use tinyhivemind_openhuman::{BroadcastRouting, CompletionDriver, DriverState, HostAction};
 
 use crate::error::{OpenCompanyError, Result};
 use crate::hive::episode_store::{self, PersistedEpisode};
@@ -361,7 +361,7 @@ impl HiveDispatcher {
         .await?;
         for reply in later {
             let utterance = round::utterance_of(&reply.episode, reply.text);
-            let event = tinyhivemind_openhuman::CommittedUtterance {
+            let event = tinyhivemind_driver::CommittedUtterance {
                 author_id: reply.agent_id.clone(),
                 sequence: Sequence(reply.seq.value()),
                 utterance,
@@ -477,6 +477,13 @@ impl HiveDispatcher {
                         "route": route,
                         "messageChars": message.chars().count(),
                     }),
+                    // New upstream: work held for a seat that is busy, handed
+                    // over when it completes. The console draws it like a
+                    // routed broadcast, because that is what it is.
+                    HostAction::DeliverHandoff { agent_id, .. } => serde_json::json!({
+                        "kind": "deliver_handoff",
+                        "agentId": agent_id,
+                    }),
                 })
                 .collect();
             self.events
@@ -550,6 +557,10 @@ impl HiveDispatcher {
                         )
                         .await?;
                 }
+                // A handoff is delivered inside the driver's own fold; this
+                // host has no row to write for it that the broadcast it came
+                // from has not already written.
+                HostAction::DeliverHandoff { .. } => {}
                 HostAction::DeliverDm { .. } => {
                     self.events
                         .append(
@@ -600,7 +611,16 @@ impl HiveDispatcher {
                     .participants
                     .iter()
                     .find(|participant| &participant.agent_id == agent)
-                    .and_then(|participant| participant.completed_at)
+                    // Upstream moved a participant's slot into a list of
+                    // assignment records; the newest completion is the one
+                    // this reports.
+                    .and_then(|participant| {
+                        participant
+                            .assignments
+                            .iter()
+                            .filter_map(|record| record.completed_at)
+                            .next_back()
+                    })
                     .map(|sequence| sequence.0),
             ),
             None => (None, None, None),

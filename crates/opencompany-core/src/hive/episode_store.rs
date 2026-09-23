@@ -265,7 +265,7 @@ pub struct PersistedEpisode {
     pub thread_root: Option<EventSeq>,
     /// The driver revision.
     pub revision: u64,
-    /// `tinyhivemind_openhuman::DriverState`, as serde wrote it.
+    /// `tinyhivemind_driver::DriverState`, as serde wrote it.
     pub state: serde_json::Value,
     /// Per-seat transcript delivery progress.
     pub sharing: BTreeMap<String, SharingState>,

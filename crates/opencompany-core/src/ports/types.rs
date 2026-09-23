@@ -429,6 +429,10 @@ pub enum UtteranceKind {
     Dm,
     /// A message that also reports the author's assignment finished.
     CompleteEpisode,
+    /// A private question to one seat, which opens a conversation only those
+    /// two read. New with the conductor; a desk without conversations never
+    /// writes one.
+    Ask,
 }
 
 impl UtteranceKind {
@@ -441,6 +445,7 @@ impl UtteranceKind {
             Utterance::Broadcast { .. } => Self::Broadcast,
             Utterance::Dm { .. } => Self::Dm,
             Utterance::CompleteEpisode { .. } => Self::CompleteEpisode,
+            Utterance::Ask { .. } => Self::Ask,
         }
     }
 }
@@ -1814,7 +1819,7 @@ pub enum CompanyEvent {
         thread_root: Option<EventSeq>,
         /// The driver revision the state is at.
         revision: u64,
-        /// `tinyhivemind_openhuman::DriverState`, as serde wrote it.
+        /// `tinyhivemind_driver::DriverState`, as serde wrote it.
         state: serde_json::Value,
         /// Per-agent `tinyhivemind::SharingState` — where each seat's
         /// transcript delivery had reached.

@@ -50,7 +50,7 @@ use openhuman_embed::{AgentSpec, McpAuthConfig, McpServer};
 use serde_json::Value;
 use tinytools::Tool;
 
-use super::tools::{InFlightRegistry, McpToolAdapter, SPEECH_TOOL_NAMES, speech_descriptor};
+use super::tools::{InFlightRegistry, McpToolAdapter, speech_descriptor, speech_tool_names};
 use crate::harness::policy::ApprovalPolicy;
 use crate::ports::events::EventLog;
 use crate::ports::types::CompanyId;
@@ -115,7 +115,10 @@ impl McpAgent {
             agent_id: agent_id.into(),
             runtime_agent_id: runtime_agent_id.into(),
             bearer: bearer.into(),
-            speech_tools: SPEECH_TOOL_NAMES.iter().map(|s| (*s).to_string()).collect(),
+            speech_tools: speech_tool_names()
+                .iter()
+                .map(|name| (*name).to_string())
+                .collect(),
             tools: Vec::new(),
             policy: None,
             workspace: None,

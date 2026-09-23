@@ -556,6 +556,13 @@ tinyhivemind-typesafe = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-
 # bound to an already-built `openhuman_embed::Agent`, and the
 # `CompletionDriver` that proposes concurrent rounds. Optional because it
 # links `openhuman-embed`; it comes in with the `openhuman` feature.
+# The completion driver and the episode's tool record, both pure: the
+# conductor, the wire forms, and the record every tool call lands in. Split
+# out of `tinyhivemind-openhuman` upstream, which now holds only the crates
+# that link a harness.
+tinyhivemind-driver = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-driver" }
+tinyhivemind-tools = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-tools" }
+
 tinyhivemind-openhuman = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-openhuman", optional = true }
 
 [features]

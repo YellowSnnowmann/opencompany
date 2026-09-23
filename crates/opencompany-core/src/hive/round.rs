@@ -29,7 +29,8 @@ use futures::future::join_all;
 use tinyhivemind::Sequence;
 use tinyhivemind::aside::Viewer;
 use tinyhivemind::speech::{Utterance, fence};
-use tinyhivemind_openhuman::{CommittedUtterance, PendingRound};
+use tinyhivemind_driver::{CommittedUtterance, PendingRound};
+use tinyhivemind_openhuman::EmbedSeat;
 
 use crate::error::Result;
 use crate::hive::driver::{
@@ -143,6 +144,12 @@ pub fn utterance_of(episode: &ReplyEpisode, text: String) -> Utterance {
             message: text,
         },
         UtteranceKind::CompleteEpisode => Utterance::CompleteEpisode { message: text },
+        // An ask addresses exactly one seat where a dm may address several,
+        // so the replay takes the first and nothing else.
+        UtteranceKind::Ask => Utterance::Ask {
+            to: episode.to.first().cloned().unwrap_or_default(),
+            message: text,
+        },
     }
 }
 
@@ -159,7 +166,7 @@ struct Settled {
 pub(crate) async fn run_round(
     host: &HiveDispatcher,
     run: &mut EpisodeRun,
-    pending: &PendingRound<'_>,
+    pending: &PendingRound<'_, EmbedSeat>,
     routing: &crate::hive::routing::EffectiveRouting,
 ) -> Result<RoundOutcome> {
     let revision = run.revision();

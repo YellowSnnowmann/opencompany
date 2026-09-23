@@ -1421,7 +1421,7 @@ async fn a_checkpoint_replays_the_rows_after_it_as_a_no_op() {
     use opencompany::hive::episode_store::{PersistedEpisode, latest_state, replies_after};
     use opencompany::hive::round::utterance_of;
     use tinyhivemind::Sequence;
-    use tinyhivemind_openhuman::{CommittedUtterance, CompletionDriver, DriverState};
+    use tinyhivemind_driver::{CommittedUtterance, CompletionDriver, DriverState};
 
     let home = tempfile::tempdir().unwrap();
     let (base_url, _script) = spawn_script_with_latency(

@@ -16,8 +16,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use tinyhivemind_driver::{AgentBinding, BoundHive, HiveGraph};
 use tinyhivemind_embed::RouteCandidate;
-use tinyhivemind_openhuman::{AgentBinding, HiveGraph, OpenHumanHive};
+use tinyhivemind_openhuman::EmbedSeat;
 
 use crate::ports::types::CompanyRecord;
 
@@ -29,7 +30,7 @@ pub struct DeskHive {
     /// The desk's display name, for the session log and the prompt.
     pub desk_name: String,
     /// The validated graph and bindings.
-    pub hive: OpenHumanHive,
+    pub hive: BoundHive<EmbedSeat>,
     /// The candidate snapshot version a Jev evaluation must echo.
     pub roster_version: u64,
 }
@@ -58,7 +59,7 @@ pub enum HiveBuildError {
         desk_id: String,
         /// The refusal.
         #[source]
-        source: tinyhivemind_openhuman::Error,
+        source: tinyhivemind_driver::Error,
     },
 }
 
@@ -110,7 +111,7 @@ pub fn desk_hives(
                 learned_topics: Vec::new(),
                 available: true,
             });
-            bindings.push(AgentBinding::new(member, agent));
+            bindings.push(AgentBinding::new(member, EmbedSeat(agent)));
             bound_members.push(member.to_string());
         }
         if bound_members.len() < 2 {
@@ -126,7 +127,7 @@ pub fn desk_hives(
             },
             candidates,
         );
-        match OpenHumanHive::new(graph, bindings) {
+        match BoundHive::new(graph, bindings) {
             Ok(hive) => {
                 hives.insert(
                     desk.id.clone(),

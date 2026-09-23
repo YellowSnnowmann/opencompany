@@ -66,7 +66,10 @@ fn a_solo_seat_is_offered_post_and_complete_only_and_a_retry_keeps_the_sentinel(
     assert!(prompt.contains("## Reminder\nYour previous answer (attempt 2)"));
     assert!(prompt.contains("(none)"));
     assert!(prompt.contains("tool `post` | `complete_episode`,"));
-    assert!(!prompt.contains("`broadcast`"));
+    // Not offered. The word still appears inside `post`'s own description,
+    // which contrasts the two, so this checks the catalogue line rather than
+    // the whole prompt.
+    assert!(!prompt.contains("- `broadcast`:"));
 }
 
 #[test]
