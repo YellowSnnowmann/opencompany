@@ -26,11 +26,10 @@
 import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Clock, Loader2, MinusCircle } from "lucide-react";
 
-import { ConversationChip } from "@/components/episode/ConversationChip";
 import { RoutingPlanChip } from "@/components/episode/RoutingPlanChip";
 import { UTTERANCE_LABEL } from "@/components/episode/UtteranceChip";
 import { TeammateAvatar } from "@/components/teammate-avatar";
-import type { Episode, EpisodeRound, EpisodeSeat, SeatStatus } from "@/lib/episodes";
+import { deskRounds, type Episode, type EpisodeRound, type EpisodeSeat, type SeatStatus } from "@/lib/episodes";
 import { cn } from "@/lib/utils";
 import type { TimelineItem } from "@/views/room/timeline";
 
@@ -98,6 +97,7 @@ function SeatLane({ seat, agentNames }: { seat: EpisodeSeat; agentNames?: Readon
 export function RoundBand({ episode, round, items, renderRow, agentNames }: Props) {
   const done = round.seats.filter((seat) => seat.status !== "waiting" && seat.status !== "working").length;
   const first = episode.rounds[0]?.revision === round.revision;
+  const rounds = deskRounds(episode);
   return (
     <section
       className={cn(
@@ -108,10 +108,12 @@ export function RoundBand({ episode, round, items, renderRow, agentNames }: Prop
       data-episode-id={episode.id}
       data-round-revision={round.revision}
       data-round-status={round.status}
-      aria-label={`Round ${round.revision + 1}${round.status === "open" ? ", running" : ""}`}
+      aria-label={`${rounds} round${rounds === 1 ? "" : "s"}${round.status === "open" ? ", running" : ""}`}
     >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5 text-2xs text-muted-foreground">
-        <span className="font-medium text-foreground">Round {round.revision + 1}</span>
+        <span className="font-medium text-foreground" data-testid="round-count">
+          {rounds} round{rounds === 1 ? "" : "s"}
+        </span>
         <span>
           {done}/{round.seats.length} seat{round.seats.length === 1 ? "" : "s"}
         </span>
@@ -124,17 +126,6 @@ export function RoundBand({ episode, round, items, renderRow, agentNames }: Prop
           <span>committed</span>
         )}
         {first && episode.plan && <RoutingPlanChip plan={episode.plan} agentNames={agentNames} />}
-        {/* The private exchanges this episode opened. On the first band only:
-            a conversation belongs to the episode rather than to a round, and
-            repeating it under every round would read as several. */}
-        {first &&
-          episode.conversations.map((conversation) => (
-            <ConversationChip
-              key={conversation.root}
-              conversation={conversation}
-              agentNames={agentNames}
-            />
-          ))}
         {episode.referrals.filter((r) => !r.returning).map((referral) => (
           <span
             key={`${referral.toDesk}:${referral.sequence}`}

@@ -87,7 +87,9 @@ describe("RoundBand", () => {
     expect(band.dataset.roundRevision).toBe("0");
     expect(band.querySelector('[data-testid="round-running"]')).not.toBeNull();
     expect(seats(band)).toEqual(["engineer:working", "ceo:working"]);
-    expect(band.textContent).toContain("Round 1");
+    // A count of the desk's own waves, not a revision number: conversation
+    // waves take revisions of their own, so the raw number is not a count.
+    expect(band.textContent).toContain("1 round");
     expect(band.textContent).toContain("0/2 seats");
   });
 

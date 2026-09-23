@@ -100,6 +100,25 @@ export interface ConversationRecord {
   endedAtMillis?: number;
   /** Ended without an answer. */
   forced?: boolean;
+  /**
+   * The desk row this exchange hangs off: the ask's own parent.
+   *
+   * Derived here rather than carried on the frame, because the console has
+   * already seen the ask -- it is an ordinary reply row in the pair channel,
+   * and the stream is company-wide -- so the parent it names is in hand by
+   * the time the exchange opens. The host anchors a running exchange the same
+   * way, so live and reloaded agree on where it sits.
+   */
+  anchorId?: number;
+  /**
+   * The exchange so far, as it lands.
+   *
+   * The rows are in the pair channel and the desk never shows them, so
+   * without this the widget has nothing to say until a reload fetches the
+   * host's fold -- which is exactly how it behaved: silent for the whole
+   * exchange, complete only once it was over.
+   */
+  lines: { authorId: string; text: string; outbound: boolean }[];
 }
 
 /** A crossing raised from inside this episode. */
@@ -138,6 +157,14 @@ export interface EpisodeState {
   /** Keyed by the ask row that roots each one, so the concluding frame
    *  finds the record the opening frame made. */
   conversations: Record<number, ConversationRecord>;
+  /**
+   * Pair-channel rows seen before the exchange that owns them opened.
+   *
+   * The `ask` is journaled before `conversation_opened`, so its row arrives
+   * first and there is nothing yet to file it under. Held by sequence until
+   * an exchange claims it, and dropped with the episode.
+   */
+  pending: Record<number, { chatId: string; authorId: string; text: string; parentId?: number }>;
   referrals: EpisodeReferral[];
   /** The newest frame sequence folded, for eviction order and tests. */
   lastSeq: number;
@@ -183,6 +210,7 @@ function mintEpisode(id: string, chatId: string, seq: number): EpisodeState {
     broadcasts: [],
     dms: [],
     conversations: {},
+    pending: {},
     referrals: [],
     lastSeq: seq,
   };
@@ -349,7 +377,12 @@ export function reduceEpisodeFrame(
         ],
       };
       break;
-    case "conversation_opened":
+    case "conversation_opened": {
+      // The ask is already in hand: it was journaled to the pair channel
+      // before this reference, so it arrived as an ordinary reply row and is
+      // waiting in `pending`. It is both the exchange's first line and the
+      // thing that names the desk row to hang it on.
+      const ask = episode.pending[frame.root];
       episode = {
         ...episode,
         conversations: {
@@ -360,10 +393,61 @@ export function reduceEpisodeFrame(
             askee: frame.askee,
             conversationId: frame.conversationId,
             openedAtMillis: frame.atMillis,
+            anchorId: ask?.parentId,
+            lines: ask ? [{ authorId: ask.authorId, text: ask.text, outbound: true }] : [],
           },
         },
       };
       break;
+    }
+    case "agent_reply": {
+      // Only the pair channels matter here; a desk row is the transcript's
+      // own business and the fold has never read one.
+      if (!frame.chatId.startsWith("dm:")) break;
+      // The conclusion is threaded under the ask so a seat's thread read
+      // reaches it; as a line it would be the askee's last one said twice.
+      if (frame.utteranceKind === "dm") break;
+      const parentId = frame.parentId === undefined ? undefined : Number(frame.parentId);
+      const root = Object.keys(episode.conversations)
+        .map(Number)
+        .find((candidate) => candidate === parentId);
+      if (root === undefined) {
+        // Not claimed yet -- most often the `ask` itself, which lands before
+        // the reference that opens its exchange.
+        episode = {
+          ...episode,
+          pending: {
+            ...episode.pending,
+            [frame.seq]: {
+              chatId: frame.chatId,
+              authorId: frame.agentId,
+              text: frame.text,
+              parentId,
+            },
+          },
+        };
+        break;
+      }
+      const held = episode.conversations[root];
+      episode = {
+        ...episode,
+        conversations: {
+          ...episode.conversations,
+          [root]: {
+            ...held,
+            lines: [
+              ...held.lines,
+              {
+                authorId: frame.agentId,
+                text: frame.text,
+                outbound: frame.agentId === held.asker,
+              },
+            ],
+          },
+        },
+      };
+      break;
+    }
     case "conversation_concluded": {
       // Merge rather than replace: the concluding frame carries the pair and
       // the channel too, so a fold that started mid-episode and never saw
@@ -397,6 +481,36 @@ export function reduceEpisodeFrame(
         reason: frame.reason,
         roundCount: frame.rounds,
         summarySeq: frame.summarySeq,
+        // **Settle whatever was still open.** The wave a seat completes the
+        // episode from never gets a `round_committed` of its own — the
+        // episode ends under it — so without this its seats stay `working`
+        // and its status stays `open` for good. The band then reads
+        // "running together" beside a completion marker, and its lanes spin
+        // forever: a finished episode that looks like a live one, which is
+        // the one thing a live indicator must never say.
+        //
+        // `no_utterance` rather than a status of its own: these seats
+        // committed nothing, which is exactly what the word means. It makes
+        // no claim about why.
+        rounds: Object.fromEntries(
+          Object.entries(episode.rounds).map(([revision, round]) => [
+            revision,
+            round.status === "open"
+              ? {
+                  ...round,
+                  status: "committed" as const,
+                  seats: Object.fromEntries(
+                    Object.entries(round.seats).map(([id, seat]) => [
+                      id,
+                      seat.status === "working" || seat.status === "waiting"
+                        ? { ...seat, status: "no_utterance" as const, settledAtMillis: seat.settledAtMillis ?? frame.atMillis }
+                        : seat,
+                    ]),
+                  ),
+                }
+              : round,
+          ]),
+        ),
       };
       break;
     case "referral":

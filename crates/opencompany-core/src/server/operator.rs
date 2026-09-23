@@ -1643,6 +1643,22 @@ fn project_event_for_viewer(
             if let Some(parent) = parent {
                 o["parentId"] = json!(parent.value().to_string());
             }
+            // **The episode this row belongs to**, when it belongs to one.
+            //
+            // The episode fold drops any frame that does not name an episode.
+            // That is right for an ordinary chat reply and wrong for this
+            // one: a row in a pair channel is a line of an exchange two seats
+            // are having inside an episode, and this frame is the only
+            // carrier those lines have -- the desk never shows them, so a
+            // reload was the only way to see what had been said. Without it
+            // the indicator can say an exchange opened and never that
+            // anything was said in it.
+            if let Some(episode) = episode.as_ref() {
+                o["episodeId"] = json!(episode.id);
+                // What the row committed, for the fold to tell a line of an
+                // exchange from the conclusion that restates its last one.
+                o["utteranceKind"] = json!(episode.kind);
+            }
             // Scrubbed timeline (same shape the POST body carries); omitted
             // when empty so a tool-less reply's wire form is unchanged.
             if !steps.is_empty() {
@@ -4581,6 +4597,26 @@ pub(crate) struct ReferralLineDto {
     outbound: bool,
 }
 
+/// One agent-to-agent exchange, as the console renders it.
+///
+/// Mirrors [`ReferralConversationDto`] below, and carries the same
+/// `ReferralLineDto` rows: to a reader the two are the same thing — an
+/// exchange somebody on this desk had that the desk itself cannot show — and
+/// a second line shape would be a second thing to keep in step.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentConversationDto {
+    /// The `ask` row it is rooted at: its identity, and the only thing that
+    /// tells two exchanges between the same pair apart.
+    root: u64,
+    asker_id: String,
+    askee_id: String,
+    conversation_id: String,
+    concluded: bool,
+    forced: bool,
+    lines: Vec<ReferralLineDto>,
+}
+
 /// A crossing folded onto the report that brought it home, so the console can
 /// render it as one collapsed line naming both parties and counting the
 /// messages.
@@ -4712,6 +4748,11 @@ struct ChatHistoryMessageDto {
     /// every ordinary message, so the wire shape is unchanged for them.
     #[serde(skip_serializing_if = "Option::is_none")]
     referral_conversation: Option<ReferralConversationDto>,
+    /// The agent-to-agent exchanges this row reported, oldest first. Empty on
+    /// every ordinary message, and skipped then, so the wire shape is
+    /// unchanged for them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    agent_conversations: Vec<AgentConversationDto>,
     /// What this reply was inside the episode that produced it (plan
     /// hive-desks, Phase 4). Absent for every reply outside an episode.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -4903,6 +4944,28 @@ impl From<MessageView> for ChatHistoryMessageDto {
             cue_text,
             episode: view.episode.map(MessageEpisodeDto::from),
             audience: view.aside_audience,
+            agent_conversations: view
+                .agent_conversations
+                .into_iter()
+                .map(|exchange| AgentConversationDto {
+                    root: exchange.root,
+                    asker_id: exchange.asker_id,
+                    askee_id: exchange.askee_id,
+                    conversation_id: exchange.conversation_id,
+                    concluded: exchange.concluded,
+                    forced: exchange.forced,
+                    lines: exchange
+                        .lines
+                        .into_iter()
+                        .map(|line| ReferralLineDto {
+                            author_id: line.author_id,
+                            author_label: line.author_label,
+                            text: line.text,
+                            outbound: line.outbound,
+                        })
+                        .collect(),
+                })
+                .collect(),
             referral_conversation: view.referral_conversation.map(|crossing| {
                 ReferralConversationDto {
                     asker_id: crossing.asker_id,

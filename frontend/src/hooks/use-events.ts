@@ -38,6 +38,21 @@ export type CompanyStreamEvent =
       agentId: string;
       text: string;
       /**
+       * The episode this row belongs to, when it belongs to one.
+       *
+       * The episode fold drops a frame that names no episode, so without this
+       * a row in a pair channel — a line of an exchange two seats are having —
+       * never reaches it, and the indicator can only ever say that an
+       * exchange opened.
+       */
+      episodeId?: string;
+      /**
+       * What the row committed (`ask`, `complete_episode`, `dm`, ...), on an
+       * episode row. The fold skips a `dm`: it is the conductor concluding an
+       * exchange, threaded under the ask, and restates the askee's last line.
+       */
+      utteranceKind?: string;
+      /**
        * The body as the model wrote it — see {@link AgentReplyEvent.cueText}.
        * Declared here as well as on the callback payload because this arm
        * rebuilds that payload field by field: a field the host sends and this
@@ -797,6 +812,11 @@ export type EpisodeFrame = Extract<
       | "conversation_opened"
       | "conversation_concluded"
       | "episode_completed"
+      // Not an episode frame as such -- it is the transcript's own row, and
+      // the fold ignores every one on a desk. It is here for the pair
+      // channels: an a2a exchange is written there, the desk never shows it,
+      // and this is the only way its lines reach the indicator while it runs.
+      | "agent_reply"
       | "referral";
   }
 >;
@@ -1619,6 +1639,13 @@ export function handleEvent(
     case "round_committed":
     case "broadcast_routed":
     case "dm_delivered":
+    // The a2a pair. Easy to miss because the conversation's own rows are in
+    // the pair channel and never reach this desk's stream: these two
+    // references are the ONLY thing that tells the desk an exchange happened,
+    // so without an arm here the indicator has no input at all and the fold
+    // sees an episode that never talked to itself.
+    case "conversation_opened":
+    case "conversation_concluded":
     case "episode_completed":
       onEpisodeEvent?.(event);
       break;
@@ -1661,6 +1688,10 @@ export function handleEvent(
       onWorkspaceEvent?.(event);
       break;
     case "agent_reply":
+      // Also to the episode fold: a row in a pair channel is a line of an
+      // exchange two seats are having, and nothing else on this stream
+      // carries one. The fold drops every desk row it sees.
+      onEpisodeEvent?.(event);
       onAgentReply?.({
         chatId: event.chatId,
         agentId: event.agentId,

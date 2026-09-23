@@ -33,7 +33,7 @@ import {
 
 import { TeammateAvatar } from "@/components/teammate-avatar";
 
-import type { ReferralConversationDto } from "@/api/types";
+import type { AgentConversationDto, ReferralConversationDto } from "@/api/types";
 
 import {
   AWAITING_APPROVAL_LABEL,
@@ -221,6 +221,74 @@ export function ReferralConversation({
                       a person or a desk, and repeating the answerer's desk on
                       their line was what made a `@name` crossing read as though
                       the desk had been asked. */}
+                  <span className="text-2xs leading-none font-semibold">{who}</span>
+                  <span className="text-2xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+                    {line.text}
+                  </span>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One agent-to-agent exchange, as one collapsed line on the row that opened it.
+ *
+ * Same idiom as {@link ReferralConversation} above, and deliberately so: to a
+ * reader these are the same act — somebody on this desk stepped aside to ask
+ * somebody else, and the desk's own transcript cannot show it. What differs is
+ * only where the rows live. A crossing's relayed rows are dropped host-side;
+ * these are kept, in the pair channel the two seats wrote to, and the host
+ * folds them here because a desk reads its own channel and they are not in it.
+ *
+ * Closed by default, for the reason a crossing is: the count says how much was
+ * said without saying it, and the desk still reads as its own conversation.
+ *
+ * `concluded` comes from the host rather than from a running-turn lookup — the
+ * conclusion is journaled, so there is no need to infer it from whether a turn
+ * happens to be open.
+ */
+export function AgentConversation({ exchange }: { exchange: AgentConversationDto }) {
+  const [open, setOpen] = useState(false);
+  const count = exchange.lines.length;
+  if (count === 0) return null;
+  const running = !exchange.concluded;
+
+  return (
+    <div className="mt-1 w-full max-w-[85%] sm:max-w-[75%]" data-testid="agent-conversation">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        data-conversation-state={running ? "live" : exchange.forced ? "unanswered" : "answered"}
+        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium text-muted-foreground transition-colors hover:bg-accent/60"
+      >
+        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        <span>
+          {/* Present tense while it is still happening, for the reason the
+              crossing above words it that way: past tense is a claim that
+              something is over, and this one says so from the journal. */}
+          {running
+            ? `${exchange.askerId} is talking to @${exchange.askeeId}`
+            : exchange.forced
+              ? `asked @${exchange.askeeId}, unanswered`
+              : `asked @${exchange.askeeId}`}{" "}
+          · {count} message{count === 1 ? "" : "s"}
+          {running ? " so far" : ""}
+        </span>
+      </button>
+      {open && (
+        <ol className="mt-0.5 flex flex-col gap-2 rounded-lg border bg-card/60 px-2.5 py-2">
+          {exchange.lines.map((line, i) => {
+            const who = line.outbound ? exchange.askerId : line.authorLabel || line.authorId;
+            return (
+              <li key={i} className="flex gap-2">
+                <TeammateAvatar name={who} className="mt-0.5 size-5 shrink-0" />
+                <div className="flex min-w-0 flex-col gap-0.5">
                   <span className="text-2xs leading-none font-semibold">{who}</span>
                   <span className="text-2xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
                     {line.text}
