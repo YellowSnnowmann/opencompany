@@ -1432,6 +1432,49 @@ pub fn native_tool_names(tools: &[Box<dyn Tool>]) -> Vec<String> {
         .collect()
 }
 
+/// One teammate as a custom agent definition, for whichever hosted authority
+/// is about to resolve it.
+///
+/// Every turn OpenHuman runs is a *hosted root invocation*: before composing
+/// a message it resolves the agent's id against the host catalogue and
+/// refuses the turn when the id is not there. This entry is how a teammate
+/// declares itself, and both of this crate's agent shapes need one -- the
+/// pooled [`AgentSpec`] agent, which carries the entry on the config the
+/// embedded runtime threads through, and the
+/// [`episode_seat`](episode_seat) session host, which projects it to an
+/// `AgentDefinition` the session carries itself. One constructor so the two
+/// cannot describe the same teammate differently.
+///
+/// `tools` is the authority, not a hint: the resolved definition's tool list
+/// becomes the turn's allow-list, intersected with the belt the agent was
+/// actually built with. Naming nothing denies everything rather than
+/// allowing everything -- the hosted allow-list is fail-closed -- so this
+/// always takes the whole belt.
+#[cfg(feature = "openhuman")]
+fn registry_entry(
+    runtime_id: &str,
+    definition_name: &str,
+    system_prompt: &str,
+    tools: Vec<String>,
+) -> oh::agent::registry::AgentRegistryEntry {
+    oh::agent::registry::AgentRegistryEntry {
+        id: runtime_id.to_string(),
+        name: definition_name.to_string(),
+        description: format!("OpenCompany agent {definition_name}"),
+        source: oh::agent::registry::AgentRegistrySource::Custom,
+        enabled: true,
+        // The blueprint's own model is already on the session or the spec;
+        // a pin here would be a second opinion about the same turn.
+        model: None,
+        system_prompt: Some(system_prompt.to_string()),
+        tool_allowlist: tools,
+        tool_denylist: Vec::new(),
+        subagents: oh::agent::registry::types::AgentSubagentPolicy::default(),
+        tags: Vec::new(),
+        metadata: serde_json::Value::Null,
+    }
+}
+
 /// Renders a blueprint into the [`AgentSpec`] the runtime instantiates.
 ///
 /// * `runtime_id` is [`runtime_agent_id`](crate::session_key::runtime_agent_id);
@@ -1478,20 +1521,12 @@ pub fn agent_spec_for(
         }
         system_prompt.push_str(&opencompany_mcp_brief(&mcp.allow_tools));
     }
-    let entry = oh::agent::registry::AgentRegistryEntry {
-        id: runtime_id.to_string(),
-        name: blueprint.definition_name.clone(),
-        description: format!("OpenCompany agent {}", blueprint.definition_name),
-        source: oh::agent::registry::AgentRegistrySource::Custom,
-        enabled: true,
-        model: None,
-        system_prompt: Some(system_prompt.clone()),
-        tool_allowlist: tool_names.clone(),
-        tool_denylist: Vec::new(),
-        subagents: oh::agent::registry::types::AgentSubagentPolicy::default(),
-        tags: Vec::new(),
-        metadata: serde_json::Value::Null,
-    };
+    let entry = registry_entry(
+        runtime_id,
+        &blueprint.definition_name,
+        &system_prompt,
+        tool_names.clone(),
+    );
     let mut spec = AgentSpec::new(runtime_id)
         .definition(
             AgentDefinitionSpec::new()
@@ -1734,8 +1769,13 @@ pub fn episode_seat(
     // The provider-visible allowlist *is* this belt. A seat is built with the
     // tools it may call and no others, so the two cannot drift; leaving it
     // unset makes the model visible nothing and every call is refused.
-    let visible: std::collections::HashSet<String> =
-        tools.iter().map(|tool| tool.name().to_string()).collect();
+    //
+    // The same list is what the seat's own definition declares below, so the
+    // belt and the authority that admits it are computed once, here, from the
+    // tools actually in hand.
+    let belt: Vec<String> = tools.iter().map(|tool| tool.name().to_string()).collect();
+    let visible: std::collections::HashSet<String> = belt.iter().cloned().collect();
+    let runtime_id = crate::session_key::runtime_agent_id(company, seat);
     oh::agent::OpenHumanSessionHost::builder()
         .chat_model(blueprint.chat_model.clone() as Arc<dyn tinyinference::model::ChatModel<()>>)
         .model_name(blueprint.model.clone())
@@ -1760,13 +1800,30 @@ pub fn episode_seat(
         // OpenHuman's own transcript would be a second one, and the episode
         // reads its history back out of the journal every turn.
         .auto_save(false)
-        // The runtime id this teammate is registered under. A hosted root
-        // invocation resolves its seat against the process registry, so an
-        // unnamed session falls back to `main` and is refused for want of a
-        // definition. The definition's own tool allowlist does not narrow
-        // this seat: `visible_tool_names` above is set from the belt it was
-        // actually built with.
-        .agent_definition_name(crate::session_key::runtime_agent_id(company, seat))
+        // The runtime id this seat's turns are resolved under, and the
+        // definition they resolve to. A hosted root invocation looks the id
+        // up before it composes a message and refuses the turn when nothing
+        // answers, so a seat has to declare itself. `agent_definition` is
+        // the seat's own declaration and outranks any registry, which is
+        // what makes a seat independent of process-wide boot order.
+        //
+        // It is the same declaration the pooled agent carries on its spec,
+        // from the same constructor, projected: one description of a
+        // teammate, whichever shape is about to run it.
+        //
+        // It names the whole belt because the resolved definition's tool
+        // list *is* the turn's allow-list, intersected with the tools the
+        // seat was built with. Naming nothing would deny every call rather
+        // than allow them all.
+        .agent_definition_name(runtime_id.clone())
+        .agent_definition(Arc::new(
+            oh::agent::registry::definition_from_registry_entry(&registry_entry(
+                &runtime_id,
+                &blueprint.definition_name,
+                &blueprint.system_prompt,
+                belt.clone(),
+            )),
+        ))
         .build()
         .map_err(|error| crate::error::OpenCompanyError::Harness(error.to_string()))
 }
