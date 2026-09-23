@@ -29,7 +29,7 @@ use tinyhivemind::{LogMessage, Sequence, SessionAuthor, SessionFuture, SessionLo
 use tinyhivemind_core::aside::Audience;
 
 use crate::ports::events::EventLog;
-use crate::ports::types::{CompanyEvent, CompanyId, EventSeq, StoredEvent};
+use crate::ports::types::{CompanyEvent, CompanyId, EventSeq, StoredEvent, UtteranceKind};
 
 /// Raw journal entries read per underlying page.
 ///
@@ -63,6 +63,14 @@ pub struct EventLogSessionLog {
     /// its transcript. Empty admits none, which is what every caller that
     /// does not seat a room should pass.
     seats: Vec<String>,
+    /// Other desks these seats also sit at, as `(id, name)`.
+    ///
+    /// Read, never canonicalised: a row from one of these is reported under
+    /// its **own** chat id, because the only caller asks per conversation
+    /// (`gather_elsewhere`) and folding them into this desk's id would make
+    /// every one of them look like a row of this room. Empty by default, so
+    /// a log that is not told about them behaves exactly as it always did.
+    elsewhere: Vec<(String, String)>,
 }
 
 impl std::fmt::Debug for EventLogSessionLog {
@@ -91,7 +99,28 @@ impl EventLogSessionLog {
             desk_id,
             desk_name,
             seats,
+            elsewhere: Vec::new(),
         }
+    }
+
+    /// Also read these desks, as `(id, name)`, without folding them into
+    /// this one.
+    ///
+    /// The library asks for them by conversation when it builds a seat's
+    /// brief (`EpisodeBrief::elsewhere`): a seat that sits at two desks is
+    /// shown the newest rows of the other as context. It reads them through
+    /// this log, so a log that admits only its own desk answers nothing and
+    /// the seat is told it is in nothing else -- which is what every seat
+    /// was told before this existed.
+    pub fn also_read(&mut self, desks: Vec<(String, String)>) {
+        self.elsewhere = desks;
+    }
+
+    /// The seats this log serves, for a caller deciding which other desks
+    /// they sit at.
+    #[must_use]
+    pub fn seats(&self) -> &[String] {
+        &self.seats
     }
 
     /// The desk this log is scoped to.
@@ -140,7 +169,24 @@ impl EventLogSessionLog {
             chat.eq_ignore_ascii_case(&self.desk_id)
                 || chat.eq_ignore_ascii_case(&self.desk_name)
                 || self.addresses_a_seat_pair(chat)
+                || self.addresses_elsewhere(chat)
         })
+    }
+
+    /// The id a row is reported under: its own when it came from a desk this
+    /// log merely reads, and this desk's otherwise.
+    fn reported_chat(&self, chat: &str) -> String {
+        self.elsewhere
+            .iter()
+            .find(|(id, name)| chat.eq_ignore_ascii_case(id) || chat.eq_ignore_ascii_case(name))
+            .map_or_else(|| self.desk_id.clone(), |(id, _)| id.clone())
+    }
+
+    /// Whether `chat` is one of the other desks these seats sit at.
+    fn addresses_elsewhere(&self, chat: &str) -> bool {
+        self.elsewhere
+            .iter()
+            .any(|(id, name)| chat.eq_ignore_ascii_case(id) || chat.eq_ignore_ascii_case(name))
     }
 
     /// Whether `chat` is the pair channel of two seats of this desk.
@@ -165,46 +211,124 @@ impl EventLogSessionLog {
     ///   workflow report, an owner-fallback report — is
     ///   [`SessionAuthor::System`]: a seat reads "the content desk answered"
     ///   rather than a teammate that never sat here.
+    ///
+    /// One committed row is deliberately not chat: the conclusion the
+    /// conductor mints when a conversation ends (see [`is_conclusion`]).
     fn row(&self, stored: StoredEvent) -> Option<LogMessage> {
         let sequence = Sequence(stored.seq.value());
         match stored.event {
-            CompanyEvent::OperatorMessage {
-                text, chat, parent, ..
-            } if self.addresses_desk(chat.as_deref()) => Some(LogMessage {
-                sequence,
-                chat_id: Some(self.desk_id.clone()),
-                parent: parent.map(|seq| Sequence(seq.value())),
-                author: SessionAuthor::Operator,
-                content: text,
-                audience: Audience::Desk,
-            }),
+            CompanyEvent::OperatorMessage { text, chat, .. }
+                if self.addresses_desk(chat.as_deref()) =>
+            {
+                Some(LogMessage {
+                    sequence,
+                    chat_id: Some(self.reported_chat(chat.as_deref().unwrap_or(&self.desk_id))),
+                    // An operator's thread is the console's, never a
+                    // conversation the library models (`conversation_root`).
+                    parent: None,
+                    author: SessionAuthor::Operator,
+                    content: text,
+                    audience: Audience::Desk,
+                })
+            }
             CompanyEvent::AgentReply {
                 chat_id,
                 agent_id,
                 text,
                 parent,
                 audience,
+                episode,
                 ..
-            } if self.addresses_desk(Some(&chat_id)) => Some(LogMessage {
-                sequence,
-                chat_id: Some(self.desk_id.clone()),
-                parent: parent.map(|seq| Sequence(seq.value())),
-                author: author_of(&agent_id),
-                content: text,
-                // Empty is desk-visible, which is what every row written before
-                // asides existed means and what every ordinary turn means now.
-                // The stored list is the addressees only; the author's own
-                // admission to its row is the library's rule, not a member of
-                // the set (`Audience::admits`).
-                audience: if audience.is_empty() {
-                    Audience::Desk
-                } else {
-                    Audience::Aside { members: audience }
-                },
-            }),
+            } if self.addresses_desk(Some(&chat_id)) && !is_conclusion(episode.as_ref()) => {
+                Some(LogMessage {
+                    sequence,
+                    chat_id: Some(self.reported_chat(&chat_id)),
+                    parent: self.conversation_root(&chat_id, parent, episode.map(|e| e.kind)),
+                    author: author_of(&agent_id),
+                    content: text,
+                    audience: self.audience_of(&chat_id, &agent_id, audience),
+                })
+            }
             _ => None,
         }
     }
+
+    /// The root a row is reported under: the ask that opened the conversation
+    /// it was said in, or none.
+    ///
+    /// This host threads every row an episode writes under the operator
+    /// message that opened it -- the console's shape, where an episode is one
+    /// thread of the room. The library reads a desk at channel level as each
+    /// root and its **first** reply, a rule written for a desk where a thread
+    /// is a conversation; read through it, a busy episode is the operator's
+    /// ask and one reply, with every later row of every seat withheld from
+    /// every seat. The conversations the library models are the pair
+    /// channels, rooted at an ask. So a desk row is reported as a root, an
+    /// ask as the root of its own conversation, and only a row said inside
+    /// one keeps its parent -- the answers, and the conclusion the host
+    /// threads under the ask (`DeskHost::commit`).
+    fn conversation_root(
+        &self,
+        chat: &str,
+        parent: Option<EventSeq>,
+        kind: Option<UtteranceKind>,
+    ) -> Option<Sequence> {
+        if !self.addresses_a_seat_pair(chat) || matches!(kind, Some(UtteranceKind::Ask)) {
+            return None;
+        }
+        parent.map(|seq| Sequence(seq.value()))
+    }
+
+    /// Who a row is addressed to.
+    ///
+    /// Empty is desk-visible, which is what every row written before asides
+    /// existed means and what every ordinary turn means now. The stored list
+    /// is the addressees only; the author's own admission to its row is the
+    /// library's rule, not a member of the set (`Audience::admits`).
+    ///
+    /// A pair channel is private to the two seats it names, so a row in one
+    /// is an aside to the other seat whether or not its author wrote that
+    /// down. The answer inside a conversation carries no audience of its own;
+    /// reported as desk-visible it is one promotion away from a third seat's
+    /// transcript, and once the ask is a root its first reply is promoted.
+    fn audience_of(&self, chat: &str, author: &str, stored: Vec<String>) -> Audience {
+        let mut members = stored;
+        if let Some((one, two)) = super::referral::pair_seats(chat) {
+            for seat in [one, two] {
+                if seat != author && !members.iter().any(|member| member == seat) {
+                    members.push(seat.to_owned());
+                }
+            }
+        }
+        if members.is_empty() {
+            Audience::Desk
+        } else {
+            Audience::Aside { members }
+        }
+    }
+}
+
+/// Whether this row is the conductor concluding a conversation.
+///
+/// The conductor mints one when an exchange ends: a `Dm` to the asker whose
+/// message **restates the askee's own last line**, verbatim. Both rows are in
+/// the same thread now (`DeskHost::commit`), so every reader that gets one
+/// gets the other directly above it, and a live run measured the paragraph
+/// three times in one 6.4k-character prompt -- once in the desk delta, once
+/// in the conversation transcript, and once as this restatement of it.
+///
+/// So it is journaled and not projected. The row is the ledger's proof that
+/// the asker was answered (`ledger.answered`), and the console reads the
+/// journal directly, so neither loses anything; what it stops being is a
+/// second copy in every brief and every rebuilt seat history that carries
+/// the conversation.
+///
+/// Safe to key on the kind: `dm` is unserved in the speech vocabulary, so no
+/// seat can call it and a `Dm` commit has exactly one author -- this
+/// conductor, concluding. A row from before episodes carries no kind at all
+/// and is chat like any other.
+fn is_conclusion(episode: Option<&crate::ports::types::ReplyEpisode>) -> bool {
+    episode.is_some_and(|episode| matches!(episode.kind, UtteranceKind::Dm))
 }
 
 /// Reserved reply authors this host journals under, which no roster id can
