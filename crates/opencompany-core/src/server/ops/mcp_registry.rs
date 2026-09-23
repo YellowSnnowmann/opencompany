@@ -234,6 +234,11 @@ fn slugify(raw: &str) -> Option<String> {
 /// Tool lists are left empty — the directory says nothing about which of a
 /// server's tools this company wants, and an empty pair means "all of them",
 /// which is what an install has always meant.
+///
+/// Its only caller is the route in `wired`, which is `#[cfg(feature = "mcp")]`
+/// — so on a build without that feature the rule is exercised by the tests
+/// below and by nothing else, which is the shape this module is for.
+#[cfg_attr(not(feature = "mcp"), allow(dead_code))]
 pub(super) fn declaration_from_directory(
     qualified_name: &str,
     endpoint: &str,
