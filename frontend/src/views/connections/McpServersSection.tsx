@@ -623,12 +623,12 @@ export function McpServersSection({
       toast.success(`Removed ${server.name}.`);
       // The add banner outlives its subject otherwise: it is the only thing on
       // screen still asserting something about a server that no longer exists.
-      // Only the banner about THIS server, though — one about a different
-      // server it left saved and unreachable still has a subject.
+      // Only that one, though. A banner naming a different server still has a
+      // subject, and a refusal never named one — it reports an add that left
+      // nothing behind, which removing something else does not answer. Both
+      // clear on the next add attempt.
       setAddError((current) =>
-        current && (!current.added || current.server === server.name)
-          ? null
-          : current,
+        current?.added && current.server === server.name ? null : current,
       );
       await refresh();
     } catch (err) {

@@ -291,3 +291,55 @@ describe("the banner about a server that was NOT removed", () => {
     expect(container.textContent).toContain("Added, but it could not be reached");
   });
 });
+
+describe("a banner about an add that was refused", () => {
+  it("survives an unrelated removal, because nothing about it was answered", async () => {
+    const other = row({ source: "runtime", name: "livesrv" });
+    await mount([other]);
+    api.addMcpServer.mockRejectedValue(
+      new ApiError(409, "conflict", "an MCP server named `deadsrv` already exists.", true),
+    );
+    await type(field("mcp-name"), "deadsrv");
+    await type(field("mcp-endpoint"), "https://mcp.example.com/mcp");
+    await submitAdd();
+    expect(container.textContent).toContain("Couldn't add the server");
+
+    api.removeMcpServer.mockResolvedValue(undefined);
+    api.listMcpServers.mockResolvedValue([]);
+    const trash = container.querySelector<HTMLElement>('[data-testid="mcp-remove"]');
+    await act(async () => {
+      trash?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const confirm = [...document.body.querySelectorAll("button")].find(
+      (b) => b.textContent?.trim() === "Remove",
+    );
+    await act(async () => {
+      confirm?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(api.removeMcpServer).toHaveBeenCalledWith(client, "acme", "livesrv");
+    expect(container.textContent).toContain("Couldn't add the server");
+  });
+
+  it("clears on the next add attempt, which is what answers it", async () => {
+    await mount([]);
+    api.addMcpServer.mockRejectedValue(
+      new ApiError(409, "conflict", "an MCP server named `deadsrv` already exists.", true),
+    );
+    await type(field("mcp-name"), "deadsrv");
+    await type(field("mcp-endpoint"), "https://mcp.example.com/mcp");
+    await submitAdd();
+    expect(container.textContent).toContain("Couldn't add the server");
+
+    api.addMcpServer.mockResolvedValue({
+      server: row({ source: "runtime", name: "goodsrv" }),
+      note: "Agents pick up this change on their next turn.",
+    });
+    api.listMcpServers.mockResolvedValue([row({ source: "runtime", name: "goodsrv" })]);
+    await type(field("mcp-name"), "goodsrv");
+    await type(field("mcp-endpoint"), "https://mcp.example.com/ok");
+    await submitAdd();
+
+    expect(container.textContent).not.toContain("Couldn't add the server");
+  });
+});
