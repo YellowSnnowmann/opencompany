@@ -218,6 +218,20 @@ impl DeskHost {
     }
 }
 
+/// Who an utterance names, for the row's own metadata.
+///
+/// Only the two acts that address a peer have any: a `dm` names several, an
+/// `ask` names the one it opens a conversation with. Everything else is the
+/// whole desk's, and an empty list is how this crate spells that.
+fn recipients(utterance: &tinyhivemind::speech::Utterance) -> Vec<String> {
+    use tinyhivemind::speech::Utterance;
+    match utterance {
+        Utterance::Dm { to, .. } => to.clone(),
+        Utterance::Ask { to, .. } => vec![to.clone()],
+        _ => Vec::new(),
+    }
+}
+
 /// The failure an episode reports when this company's journal refuses a row.
 fn refused(error: &crate::error::OpenCompanyError) -> tinyhivemind_openhuman::Error {
     tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!("{error}"))
@@ -229,12 +243,28 @@ impl Journal for DeskHost {
     }
 
     fn commit(&self, commit: &Commit) -> tinyhivemind_openhuman::Result<Sequence> {
-        let event = self.reply(
+        let mut event = self.reply(
             &commit.author,
             commit.utterance.message().to_owned(),
             commit.thread,
             commit.only_for.as_deref(),
         );
+        // A committed row is an episode's row, and says so. Without this the
+        // console cannot tell one from an ordinary chat reply, the
+        // utterance-kind histogram reads nothing, and the chat history has no
+        // way to group a desk's episode rows. The note rows this host also
+        // writes are the conductor speaking, not a seat, and carry none.
+        if let CompanyEvent::AgentReply { episode, .. } = &mut event {
+            *episode = Some(crate::ports::types::ReplyEpisode {
+                id: self.episode_id.clone(),
+                revision: self.wave.load(Ordering::SeqCst),
+                kind: crate::ports::types::UtteranceKind::of(&commit.utterance),
+                to: recipients(&commit.utterance),
+                // Filled in by whoever records the routing, not here: the
+                // conductor places a broadcast after the row is committed.
+                routed_by: None,
+            });
+        }
         let seq = self.append(event).map_err(|error| refused(&error))?;
         Ok(Sequence(seq.value()))
     }

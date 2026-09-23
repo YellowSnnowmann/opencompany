@@ -260,6 +260,30 @@ impl HiveDispatcher {
             parking: None,
         })
         .await?;
+        // The episode's closing row. `run_episode` returns only once every
+        // seat has recorded its part -- a wall, a stall or a fold it could
+        // not explain comes back as an error instead, and is journaled by
+        // whoever handles it -- so a return here *is* `complete_episode`.
+        //
+        // Without this the console sees an episode that opened and never
+        // closed: `EpisodeOpened` was written above, `episode_store` folds
+        // the pair, and the operator's list would hold it open forever.
+        self.events
+            .append(
+                &self.record.id,
+                CompanyEvent::EpisodeCompleted {
+                    chat_id: desk.desk_id.clone(),
+                    episode_id: episode_id.clone(),
+                    revision: report.waves,
+                    // The library reports what happened, not who spoke last:
+                    // every seat completed, so no one seat closed it.
+                    completed_by: None,
+                    rounds: u32::try_from(report.waves).unwrap_or(u32::MAX),
+                    reason: crate::ports::types::EpisodeReason::CompleteEpisode,
+                    summary_seq: None,
+                },
+            )
+            .await?;
         tracing::info!(
             desk = %desk_id,
             episode = %episode_id,
@@ -317,6 +341,11 @@ impl HiveDispatcher {
             // the lead answers, and asks if it must.
             starters.push(lead);
         }
+        // Deliberately *not* padded to the desk's `round_width`. That width
+        // bounds how many recipients a broadcast may be placed to and how
+        // many queued handoffs a seat may hold; it does not size a wave. A
+        // wave is whoever is due, and who opens is the routing plan's answer,
+        // not a number this host applies to it.
         Ok((starters, dto))
     }
 }
