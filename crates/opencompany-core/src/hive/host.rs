@@ -171,6 +171,26 @@ impl DeskHost {
     /// and what every one of its agents is built with.
     #[must_use]
     pub fn seating(mut self, record: Arc<CompanyRecord>, deps: Arc<HarnessDeps>) -> Self {
+        // The log learns the other desks now, because only the roster knows
+        // them: without it the library asks for a seat's other conversations
+        // and reads them through a log that refuses every one, so naming
+        // them in `channels` would light nothing up.
+        let snapshots = crate::runtime::delegation_tools::tinyhivemind_desks(&record);
+        let desks = snapshots.set();
+        let elsewhere: Vec<(String, String)> = desks
+            .iter()
+            .filter(|desk| desk.id != self.desk_id)
+            .filter(|desk| !crate::server::chat_history::is_general_chat(Some(&desk.id)))
+            .filter(|desk| {
+                desks.members(&desk.id).is_ok_and(|members| {
+                    members
+                        .iter()
+                        .any(|member| self.log.seats().iter().any(|seat| seat == member))
+                })
+            })
+            .map(|desk| (desk.id.clone(), desk.name.clone()))
+            .collect();
+        self.log.also_read(elsewhere);
         self.roster = Some((record, deps));
         self
     }
@@ -258,6 +278,30 @@ impl DeskHost {
     fn channel_for(&self, commit: &Commit) -> Result<String, String> {
         if let tinyhivemind::speech::Utterance::Ask { to, .. } = &commit.utterance {
             return Ok(crate::hive::referral::pair_conversation(&commit.author, to));
+        }
+        // **A conclusion belongs to the conversation it concludes.**
+        //
+        // The conductor mints one when a conversation ends: a `Dm` to the
+        // asker, carrying the conversation it is about but no thread, so it
+        // would otherwise land on the open desk -- where it is not desk
+        // conversation. It restates the askee's own last line, and the asker
+        // is handed the whole exchange in its next brief
+        // (`EpisodeBrief::conversations`) regardless, so on the desk it is a
+        // paraphrase of something nobody there needed.
+        //
+        // Safe to key on the utterance: `dm` is UNSERVED in the speech
+        // vocabulary, so no seat can call it. A `Dm` commit has exactly one
+        // author -- this conductor, concluding.
+        if matches!(commit.utterance, tinyhivemind::speech::Utterance::Dm { .. })
+            && let Some(conversation) = commit.conversation
+            && let Some(chat) = self
+                .conversations
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&conversation.0)
+                .cloned()
+        {
+            return Ok(chat);
         }
         let Some(root) = commit.thread else {
             return Ok(self.desk_id.clone());
@@ -411,6 +455,53 @@ impl Journal for DeskHost {
         &self.log
     }
 
+    /// The other desks this seat sits at, for its brief's context.
+    ///
+    /// The library asks so it can put the newest rows of each in front of a
+    /// seat as context -- "not work: nothing in it is addressed here". The
+    /// default answers none, and a host that leaves it there tells every
+    /// seat it is in nothing else: an agent seated at two desks runs both
+    /// and, on either turn, has no idea the other exists. This company knows
+    /// otherwise, so it says so.
+    ///
+    /// The turn's own conversation is skipped by the library, so this may
+    /// name this desk without showing a seat itself. `#general` is left out
+    /// for the reason the graph leaves it out of hives: it is everybody's
+    /// channel, so carrying it as *other* context would put the whole
+    /// company's chatter in front of every seat, every turn.
+    ///
+    /// Naming the desks is one half; the log admitting them is the other,
+    /// and `seating` does that (`EventLogSessionLog::also_read`) from the
+    /// same roster read. Both halves are needed: the library reads the rows
+    /// it names through [`Journal::log`], so a desk this log refuses is
+    /// named and then renders nothing.
+    ///
+    /// **Untested end to end.** No fixture here seats one agent at two
+    /// desks and runs a turn on both, so what is proven is which desks this
+    /// answers, not that their rows reach a seat.
+    fn channels(&self, seat: &str) -> Vec<tinyhivemind::Conversation> {
+        let Some((record, _)) = self.roster.as_ref() else {
+            return Vec::new();
+        };
+        let snapshots = crate::runtime::delegation_tools::tinyhivemind_desks(record);
+        let desks = snapshots.set();
+        desks
+            .iter()
+            .filter(|desk| desk.id != self.desk_id)
+            .filter(|desk| !crate::server::chat_history::is_general_chat(Some(&desk.id)))
+            .filter(|desk| {
+                desks
+                    .members(&desk.id)
+                    .is_ok_and(|members| members.contains(&seat))
+            })
+            .map(|desk| tinyhivemind::Conversation {
+                desk_id: desk.id.clone(),
+                desk_name: desk.name.clone(),
+                thread_root: None,
+            })
+            .collect()
+    }
+
     fn commit(&self, commit: &Commit) -> tinyhivemind_openhuman::Result<Sequence> {
         // The error is built here rather than inside, so the miss stays a
         // small `String` on a private signature (`clippy::result_large_err`).
@@ -421,7 +512,7 @@ impl Journal for DeskHost {
             &chat,
             &commit.author,
             commit.utterance.message().to_owned(),
-            commit.thread,
+            commit.thread.or_else(|| concluded_conversation(commit)),
             commit.only_for.as_deref(),
         );
         // A committed row is an episode's row, and says so. Without this the
@@ -753,6 +844,26 @@ struct Bracket<'a> {
     seat: String,
     turn_id: String,
     wave: u64,
+}
+
+/// The conversation a conclusion closes, as the thread its row belongs in.
+///
+/// The conductor mints a conclusion with the conversation it is about and no
+/// thread (`Commit::conversation`), so left alone the row hangs off the
+/// episode's own root like a desk row -- and is then reachable from no
+/// projection: on the desk it is a later reply under that root, which the
+/// channel-level read drops, and in the conversation it is not a reply at
+/// all. Threaded under the ask, it is the exchange's closing line and the
+/// asker's thread read carries it.
+///
+/// Keyed on the `Dm` utterance rather than on `conversation` alone: that
+/// field is also set on desk work a seat does from inside a conversation (a
+/// broadcast made while talking), which belongs on the desk. `dm` is
+/// unserved, so a `Dm` commit is the conductor's, concluding.
+fn concluded_conversation(commit: &Commit) -> Option<Sequence> {
+    matches!(commit.utterance, tinyhivemind::speech::Utterance::Dm { .. })
+        .then_some(commit.conversation)
+        .flatten()
 }
 
 impl Bracket<'_> {

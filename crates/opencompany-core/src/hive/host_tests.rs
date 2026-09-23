@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use tinyhivemind::aside::Viewer;
 use tinyhivemind::{Conversation, SESSION_WINDOW, SessionQuery, project_session};
-use tinyhivemind_driver::Note;
+use tinyhivemind_driver::{Commit, Note};
 use tinyhivemind_openhuman::{EpisodeHost, Journal};
 
 use super::DeskHost;
 use crate::hive::test_support::MemoryLog;
 use crate::ports::events::EventLog;
-use crate::ports::types::CompanyId;
+use crate::ports::types::{CompanyEvent, CompanyId, EventSeq};
 
 fn desk() -> Conversation {
     Conversation {
@@ -126,5 +126,89 @@ async fn a_host_that_parks_nothing_never_holds_a_seat() {
     assert_eq!(
         host.after_turn("one", None).expect("the hook runs"),
         tinyhivemind_openhuman::Disposition::Done
+    );
+}
+
+/// A commit as the conductor makes it, on this side of the wire.
+fn commit(json: serde_json::Value) -> Commit {
+    serde_json::from_value(json).expect("a commit the driver would make")
+}
+
+/// **A conclusion is threaded under the conversation it concludes.**
+///
+/// The conductor mints it with the conversation it is about and no thread,
+/// so journaled as a desk row it hangs off the episode's root: a later reply
+/// there, which the channel-level read drops, and no reply at all in the
+/// conversation. Threaded under the ask it is the exchange's closing line.
+///
+/// Keyed on the utterance, not the field: desk work a seat does from inside a
+/// conversation carries `conversation` too, and belongs on the desk.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_conclusion_is_threaded_under_the_conversation_it_concludes() {
+    let log = Arc::new(MemoryLog::default());
+    let company = MemoryLog::company();
+    let host = host(Arc::clone(&log) as Arc<dyn EventLog>);
+    let pair = crate::hive::referral::pair_conversation("ada", "grace");
+    let ask = log
+        .append(
+            &company,
+            crate::hive::test_support::agent_reply_in(
+                &pair,
+                "ada",
+                "does the rollout need a freeze?",
+                vec!["grace".into()],
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+    host.event(&tinyhivemind_driver::Event::Asked {
+        seat: "ada".into(),
+        askee: "grace".into(),
+        root: tinyhivemind::Sequence(ask.value()),
+    });
+
+    let conclusion = host
+        .commit(&commit(serde_json::json!({
+            "author": "grace",
+            "utterance": { "kind": "dm", "to": ["ada"], "message": "concluded our conversation: no, ship it" },
+            "thread": null,
+            "only_for": "ada",
+            "conversation": ask.value(),
+            "purpose": { "kind": "desk" },
+        })))
+        .expect("the journal takes the conclusion");
+    let lifted = host
+        .commit(&commit(serde_json::json!({
+            "author": "grace",
+            "utterance": { "kind": "broadcast", "message": "freeze policy: none on file" },
+            "thread": null,
+            "only_for": null,
+            "conversation": ask.value(),
+            "purpose": { "kind": "desk" },
+        })))
+        .expect("the journal takes the broadcast");
+
+    let rows = log.read_from(&company, EventSeq::new(1), 16).await.unwrap();
+    let row = |seq: tinyhivemind::Sequence| {
+        rows.iter()
+            .find(|stored| stored.seq.value() == seq.0)
+            .map(|stored| match &stored.event {
+                CompanyEvent::AgentReply {
+                    chat_id, parent, ..
+                } => (chat_id.clone(), *parent),
+                other => panic!("not a reply: {other:?}"),
+            })
+            .expect("journaled")
+    };
+    assert_eq!(
+        row(conclusion),
+        (pair.clone(), Some(ask)),
+        "the conclusion is a row of the conversation, under its ask"
+    );
+    assert_eq!(
+        row(lifted),
+        ("engineering".to_string(), None),
+        "desk work said from inside a conversation stays on the desk"
     );
 }
