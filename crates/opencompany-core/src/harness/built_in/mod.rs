@@ -2176,7 +2176,7 @@ impl HarnessModel for DefaultFirstModel {
 /// they unwrap the turn's own result — see
 /// [`turn_result_after_metering`] for why that ordering is the fix and not an
 /// accident of layout.
-async fn meter_turn_costs(
+pub(crate) async fn meter_turn_costs(
     turn_costs: &[TurnUsage],
     agent_id: &str,
     company: &CompanyId,

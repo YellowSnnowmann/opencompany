@@ -23,11 +23,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use openhuman_core::agent::OpenHumanSessionHost;
+use openhuman_core::agent::tinyagents::host::LastTurnUsage;
 use tinyhivemind::{Sequence, SessionLog};
 use tinyhivemind_driver::{Commit, Note};
-use tinyhivemind_openhuman::{EpisodeBelt, EpisodeHost, HostedTurn, Journal};
+use tinyhivemind_openhuman::{Disposition, EpisodeBelt, EpisodeHost, HostedTurn, Journal};
 
-use crate::harness::built_in::{HarnessDeps, HarnessPool, build_episode_seat};
+use crate::harness::built_in::cost::TurnUsage;
+use crate::harness::built_in::{HarnessDeps, HarnessPool, build_episode_seat, meter_turn_costs};
 use crate::ports::events::EventLog;
 use crate::ports::types::{CompanyEvent, CompanyId, CompanyRecord, EventSeq, TurnOutcome};
 
@@ -72,6 +74,23 @@ pub struct DeskHost {
     /// Which wave is running, for the same reason. Bumped as each wave
     /// settles, which is the one moment the loop tells a host a wave ended.
     wave: AtomicU64,
+    /// What this company does with whatever a turn left waiting on a human.
+    ///
+    /// Parking belongs to the cycle that opened the episode -- it drains the
+    /// approval queue into the operator's inbox -- so it arrives as a hook
+    /// rather than as something this type reaches for itself.
+    parking: Option<Arc<dyn SeatParking>>,
+}
+
+/// What a host does with the approvals one seat's turn raised.
+///
+/// `true` when the seat is now waiting on a human and the episode must hold
+/// it: the library stops proposing that seat, stops nudging it for silence,
+/// and waits rather than treating the pause as an answer.
+#[async_trait::async_trait]
+pub trait SeatParking: Send + Sync {
+    /// Park what `seat`'s turn left outstanding, and say whether it is held.
+    async fn park(&self, seat: &str) -> bool;
 }
 
 impl std::fmt::Debug for DeskHost {
@@ -109,6 +128,7 @@ impl DeskHost {
             pool: None,
             episode_id: String::new(),
             wave: AtomicU64::new(0),
+            parking: None,
         }
     }
 
@@ -117,6 +137,13 @@ impl DeskHost {
     #[must_use]
     pub fn seating(mut self, record: Arc<CompanyRecord>, deps: Arc<HarnessDeps>) -> Self {
         self.roster = Some((record, deps));
+        self
+    }
+
+    /// What to do with the approvals a seat's turn raised.
+    #[must_use]
+    pub fn parking(mut self, parking: Arc<dyn SeatParking>) -> Self {
+        self.parking = Some(parking);
         self
     }
 
@@ -254,6 +281,40 @@ impl EpisodeHost for DeskHost {
         TOOL_PREFIX.to_owned()
     }
 
+    /// Bill the turn, then park whatever it left waiting on a human.
+    ///
+    /// Metering first, and unconditionally: a turn that ended by parking
+    /// still spent tokens, and a seat the operator never gets back to would
+    /// otherwise be free. The disposition then says whether the episode
+    /// holds the seat -- which is the difference between a seat waiting on
+    /// an approval and a seat that simply said nothing.
+    fn after_turn(
+        &self,
+        seat: &str,
+        usage: Option<&LastTurnUsage>,
+    ) -> tinyhivemind_openhuman::Result<Disposition> {
+        // Nothing here fails the turn: a spend this host could not record and
+        // an approval it could not park are both worth a warning, not the
+        // loss of work that already ran. So the block answers a disposition
+        // rather than a result.
+        let held = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                if let Some(usage) = usage {
+                    self.meter(seat, usage).await;
+                }
+                match self.parking.as_ref() {
+                    Some(parking) => parking.park(seat).await,
+                    None => false,
+                }
+            })
+        });
+        Ok(if held {
+            Disposition::Parked
+        } else {
+            Disposition::Done
+        })
+    }
+
     /// Run the seat's turn under this company's own machinery.
     ///
     /// The library builds the turn and does not start it; everything here
@@ -289,6 +350,42 @@ impl EpisodeHost for DeskHost {
             drop(held);
             outcome
         })
+    }
+}
+
+impl DeskHost {
+    /// Bill what one turn spent, against the same ledger and meter an
+    /// ordinary turn bills. A seat's tokens are the company's tokens.
+    async fn meter(&self, seat: &str, usage: &LastTurnUsage) {
+        let (Some(pool), Some((_, deps))) = (self.pool.as_ref(), self.roster.as_ref()) else {
+            return;
+        };
+        let Some(agent) = pool.agent(&self.company, seat).await else {
+            return;
+        };
+        let spent = [TurnUsage {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cached_input_tokens: usage.cached_input_tokens,
+            cost_usd: usage.cost_usd,
+        }];
+        if let Err(error) = meter_turn_costs(
+            &spent,
+            seat,
+            &self.company,
+            deps,
+            agent.chat_model().as_ref(),
+            None,
+        )
+        .await
+        {
+            tracing::warn!(
+                company = %self.company,
+                %seat,
+                %error,
+                "[hive] could not meter a seat turn"
+            );
+        }
     }
 }
 

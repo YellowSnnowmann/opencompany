@@ -90,3 +90,40 @@ async fn each_settled_wave_moves_the_round_a_bracket_names() {
     let _ = driver_state;
     assert_eq!(host.episode_id, "ep-1");
 }
+
+/// A parking hook that holds whichever seats it was told to.
+#[derive(Debug)]
+struct Holds(Vec<String>);
+
+#[async_trait::async_trait]
+impl super::SeatParking for Holds {
+    async fn park(&self, seat: &str) -> bool {
+        self.0.iter().any(|held| held == seat)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_seat_with_an_approval_waiting_is_held_and_one_without_is_not() {
+    let events: Arc<dyn EventLog> = Arc::new(MemoryLog::default());
+    let host = host(Arc::clone(&events)).parking(Arc::new(Holds(vec!["one".to_owned()])));
+    assert_eq!(
+        host.after_turn("one", None).expect("the hook runs"),
+        tinyhivemind_openhuman::Disposition::Parked,
+        "one raised an approval, so the episode holds it"
+    );
+    assert_eq!(
+        host.after_turn("two", None).expect("the hook runs"),
+        tinyhivemind_openhuman::Disposition::Done,
+        "two raised nothing, so its turn simply stands"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_that_parks_nothing_never_holds_a_seat() {
+    let events: Arc<dyn EventLog> = Arc::new(MemoryLog::default());
+    let host = host(Arc::clone(&events));
+    assert_eq!(
+        host.after_turn("one", None).expect("the hook runs"),
+        tinyhivemind_openhuman::Disposition::Done
+    );
+}
