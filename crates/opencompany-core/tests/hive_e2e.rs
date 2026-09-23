@@ -1316,6 +1316,54 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
         .any(|seat| seat.speaker == CEO && seat.parent == Some(ask.seq));
     assert!(answered, "the CEO was turned inside the conversation");
 
+    // **A seat is never offered a hand-off tool it cannot use here.**
+    //
+    // `spawn_task`, `delegate_to_desk` and `delegate_to_teammate` are wired
+    // onto every roster agent and queue work the brain drains; no brain
+    // drains inside an episode, so the orchestrator refuses them outright
+    // (`drain_unwired`). On a live run a seat reached for one, took the
+    // refusal as proof that delegating was impossible, and told the operator
+    // to go and make "the board" available -- while `ask`, the tool that
+    // does work here, was on the same belt. The refusal was handled; the
+    // misdiagnosis it invited was not, so the names come off the belt.
+    let offered: Vec<String> = script
+        .asks()
+        .iter()
+        .flat_map(|ask| ask.tools.clone())
+        .collect();
+    assert!(
+        !offered.is_empty(),
+        "the fixture saw no tool schemas at all, so this asserts nothing",
+    );
+    for withheld in ["spawn_task", "delegate_to_desk", "delegate_to_teammate"] {
+        assert!(
+            !offered.iter().any(|name| name == withheld),
+            "`{withheld}` was offered to an episode seat: {offered:?}",
+        );
+    }
+
+    // **And the prose that describes them goes too.**
+    //
+    // Taking the tools without the briefs is worse than taking neither: the
+    // persona still spends a paragraph on handing work on and on the board
+    // tracking it, and a seat that goes looking for either finds nothing and
+    // reports the capability as withdrawn rather than reaching for `ask`.
+    // `tinyhivemind` runs this room; the orchestrator runtime's prose
+    // describes a different one.
+    let prompts = script
+        .asks()
+        .iter()
+        .filter_map(seat_of)
+        .map(|seat| seat.prompt)
+        .collect::<Vec<_>>();
+    assert!(!prompts.is_empty(), "no seat prompts were captured");
+    for phrase in ["delegate_to_teammate", "Handing work on"] {
+        assert!(
+            !prompts.iter().any(|prompt| prompt.contains(phrase)),
+            "an episode seat's prompt still describes the orchestrator runtime ({phrase:?})",
+        );
+    }
+
     assert_eq!(completions(&rows)[0].2, EpisodeReason::CompleteEpisode);
 }
 
@@ -1667,6 +1715,7 @@ async fn a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice() {
         })
         .count();
     assert!(seat_turns >= 2, "both desks ran a seat turn: {seat_turns}");
+
     let failures = measured.failures(&Thresholds {
         cross_desk_referrals: 0,
         agent_contacts: 0,

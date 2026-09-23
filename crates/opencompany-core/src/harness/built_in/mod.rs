@@ -5804,6 +5804,64 @@ pub(crate) fn build_episode_seat(
         orchestrator::orchestrator_id(&live_roster).as_deref() == Some(manifest_agent.id.as_str()),
         &crate::company::team_brief::team_section(company, &manifest_agent.id),
     )?;
+    // **The hand-off tools come off an episode seat's belt.**
+    //
+    // `spawn_task`, `delegate_to_desk` and `delegate_to_teammate` are wired
+    // onto every roster agent (`build.rs`), and each queues work the
+    // [`HarnessBrain`] drains. Inside an episode nothing drains that queue,
+    // so the orchestrator refuses the call in the model's own turn rather
+    // than parking it forever (`drain_unwired`).
+    //
+    // The refusal is handled; what it invites is not. A seat that reaches for
+    // one concludes delegation is impossible here and reports that to the
+    // operator -- "board actions are unavailable, so delegation is blocked",
+    // asking them to go and fix a board that was never the problem -- while
+    // the hive's own `ask` sat on the same belt the whole time. Offering a
+    // tool that cannot work in this context is worse than withholding it: it
+    // does not just fail, it argues the seat out of the tool that would have
+    // worked.
+    //
+    // Removed from the belt AND from the provider-visible names, because
+    // `episode_seat` builds the allowlist from these and a name the model can
+    // see is a name it will reach for.
+    let mut blueprint = blueprint;
+    blueprint
+        .tools
+        .retain(|tool| !EPISODE_WITHHELD_TOOLS.contains(&tool.name()));
+    blueprint
+        .native_tool_names
+        .retain(|name| !EPISODE_WITHHELD_TOOLS.contains(&name.as_str()));
+
+    // **And the briefs that describe them.**
+    //
+    // A seat is built by the same builder as an ordinary roster agent, so it
+    // inherits the orchestrator runtime's prose wholesale: how to hand work
+    // on, and how the board tracks it. Inside an episode there is no drain
+    // and no board, and `tinyhivemind` is the thing running the room -- a
+    // seat reaches a teammate with `ask`, which the episode's own belt
+    // serves.
+    //
+    // Taking the tools without the prose is the worst of both: the persona
+    // spends a paragraph on `delegate_to_teammate`, the belt does not have
+    // it, and a seat that goes looking concludes the capability was
+    // withdrawn. On a live run one did exactly that and told the operator to
+    // go and make "the board" available -- reporting, accurately, an
+    // affordance its prompt had promised and its belt could not honour.
+    //
+    // Removed by exact match on what was appended, so a brief that is
+    // reworded upstream is either removed whole or left whole, never
+    // half-cut.
+    for brief in [
+        orchestrator::orchestrator_brief(),
+        orchestrator::member_delegation_brief(),
+    ] {
+        if let Some(at) = blueprint.system_prompt.find(&brief) {
+            blueprint
+                .system_prompt
+                .replace_range(at..at + brief.len(), "");
+        }
+    }
+
     // The episode's own tools are admitted by name; everything else is this
     // company's policy to decide, and can still park for the operator.
     //
@@ -5819,6 +5877,14 @@ pub(crate) fn build_episode_seat(
     let session = build::episode_seat(&company.id, seat, blueprint, belt.tools, gate)?;
     Ok((session, persona))
 }
+
+/// The roster tools an episode seat is **not** built with.
+///
+/// Every one of these queues work for the [`HarnessBrain`] to drain, and no
+/// brain drains inside an episode. See `build_episode_seat` for why they are
+/// withheld rather than left to refuse.
+const EPISODE_WITHHELD_TOOLS: [&str; 3] =
+    ["spawn_task", "delegate_to_desk", "delegate_to_teammate"];
 
 pub(crate) fn build_roster(
     runtime: &openhuman_embed::Runtime,
