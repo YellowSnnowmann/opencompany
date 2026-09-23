@@ -12,6 +12,7 @@
 //! teammate's lock and writes its brackets. Those reach the loop through
 //! [`DeskHost`].
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tinyhivemind::SESSION_WINDOW;
@@ -22,11 +23,13 @@ use tinyhivemind_tools::EpisodeTools;
 
 use crate::error::{OpenCompanyError, Result};
 use crate::harness::built_in::{HarnessDeps, HarnessPool};
+use crate::hive::episode_store;
 use crate::hive::graph::DeskHive;
 use crate::hive::host::{DeskHost, SeatParking};
-use crate::hive::routing::EffectiveRouting;
+use crate::hive::routing::{EffectiveRouting, RoutingPlanDto, desk_routing, router_of};
 use crate::ports::events::EventLog;
-use crate::ports::types::{CompanyRecord, EventSeq};
+use crate::ports::types::CompanyEvent;
+use crate::ports::types::{CompanyRecord, EventSeq, Mention};
 
 /// Everything this company brings to one episode.
 ///
@@ -148,3 +151,175 @@ pub async fn run(episode: Episode<'_>) -> Result<Report> {
     .await
     .map_err(|error| OpenCompanyError::Harness(error.to_string()))
 }
+
+/// What opened an episode: the operator's row and what it said.
+#[derive(Clone, Debug)]
+pub struct Trigger {
+    /// The row the message was journaled at.
+    pub seq: EventSeq,
+    /// What it said.
+    pub text: String,
+    /// The thread it was sent in, when it was sent in one.
+    pub parent: Option<EventSeq>,
+    /// Who it named.
+    pub mentions: Vec<Mention>,
+}
+
+/// What one episode came to, in this host's words.
+#[derive(Clone, Copy, Debug)]
+pub struct EpisodeReport {
+    /// Seat turns run.
+    pub turns: u64,
+    /// Waves proposed.
+    pub waves: u64,
+    /// Conversations concluded between seats.
+    pub conversations: usize,
+    /// Seats that reported their work finished.
+    pub settled: usize,
+}
+
+impl From<Report> for EpisodeReport {
+    fn from(report: Report) -> Self {
+        Self {
+            turns: report.turns,
+            waves: report.waves,
+            conversations: report.conversations,
+            settled: report.settled,
+        }
+    }
+}
+
+/// One company's desks, and what it takes to run an episode on any of them.
+pub struct HiveDispatcher {
+    /// The company as it effectively stands.
+    pub record: Arc<CompanyRecord>,
+    /// Its durable journal.
+    pub events: Arc<dyn EventLog>,
+    /// Its bound desks, by id.
+    pub hives: HashMap<String, Arc<DeskHive>>,
+    /// The semantic router, when a credential resolved one.
+    pub router: Option<Arc<dyn Router>>,
+    /// What its agents are built from.
+    pub deps: Arc<HarnessDeps>,
+    /// The pool they live in, for the lock a turn holds.
+    pub pool: Arc<HarnessPool>,
+}
+
+impl HiveDispatcher {
+    /// The hive bound to `desk_id`, when that desk runs one.
+    #[must_use]
+    pub fn hive(&self, desk_id: &str) -> Option<Arc<DeskHive>> {
+        self.hives.get(desk_id).cloned()
+    }
+
+    /// Whether `desk_id` runs episodes at all.
+    #[must_use]
+    pub fn runs_episodes(&self, desk_id: &str) -> bool {
+        self.hives.contains_key(desk_id)
+    }
+
+    /// Open one episode for an operator message and run it to quiescence.
+    ///
+    /// # Errors
+    ///
+    /// A desk that runs no hive, and whatever stops the episode.
+    pub async fn run_desk_message(&self, desk_id: &str, trigger: Trigger) -> Result<EpisodeReport> {
+        let desk = self.hive(desk_id).ok_or_else(|| {
+            OpenCompanyError::InvalidRequest(format!("desk `{desk_id}` runs no hive"))
+        })?;
+        let thread_root = trigger.parent.unwrap_or(trigger.seq);
+        let routing = desk_routing(&self.record, desk_id);
+        let (starters, plan_dto) = self.opening(&desk, &routing, &trigger, thread_root).await?;
+        let episode_id = uuid::Uuid::new_v4().simple().to_string();
+        self.events
+            .append(
+                &self.record.id,
+                CompanyEvent::EpisodeOpened {
+                    chat_id: desk.desk_id.clone(),
+                    episode_id: episode_id.clone(),
+                    opened_by_seq: trigger.seq.value(),
+                    parent: Some(thread_root),
+                    participants: starters.clone(),
+                    plan: plan_dto.clone(),
+                    hop: 0,
+                },
+            )
+            .await?;
+        let report = run(Episode {
+            record: Arc::clone(&self.record),
+            deps: Arc::clone(&self.deps),
+            pool: Arc::clone(&self.pool),
+            events: Arc::clone(&self.events),
+            desk: &desk,
+            routing: &routing,
+            router: self.router.as_deref(),
+            episode_id: episode_id.clone(),
+            thread_root: Some(thread_root),
+            opened_at: trigger.seq,
+            starters,
+            parking: None,
+        })
+        .await?;
+        tracing::info!(
+            desk = %desk_id,
+            episode = %episode_id,
+            turns = report.turns,
+            waves = report.waves,
+            "[hive] episode finished"
+        );
+        Ok(report.into())
+    }
+
+    /// Who the opening routing plan starts, or the desk in order when no
+    /// router answered.
+    async fn opening(
+        &self,
+        desk: &DeskHive,
+        routing: &EffectiveRouting,
+        trigger: &Trigger,
+        thread_root: EventSeq,
+    ) -> Result<(Vec<String>, RoutingPlanDto)> {
+        let lead = desk.lead().ok_or_else(|| {
+            OpenCompanyError::Harness(format!("desk `{}` has no seats", desk.desk_id))
+        })?;
+        let explicit = trigger.mentions.iter().find_map(|mention| {
+            desk.hive
+                .members()
+                .find(|member| match &mention.target {
+                    crate::ports::types::MentionTarget::Agent { id } => *member == id,
+                    _ => false,
+                })
+                .map(str::to_owned)
+        });
+        let request = desk.hive.desk_request(
+            trigger.text.clone(),
+            Vec::new(),
+            Some(tinyhivemind::Sequence(thread_root.value())),
+            desk.roster_version,
+            routing.policy(),
+        );
+        let plan = desk
+            .hive
+            .route_desk(
+                self.router.as_deref(),
+                None,
+                &request,
+                explicit.as_deref(),
+                &lead,
+            )
+            .await
+            .map_err(|error| OpenCompanyError::Harness(error.to_string()))?;
+        tracing::debug!(desk = %desk.desk_id, router = ?router_of(&plan), "[hive] opening routed");
+        let dto = RoutingPlanDto::from(&plan);
+        let mut starters = dto.agent_ids();
+        if starters.is_empty() {
+            // A clarification is a routing answer the room cannot act on:
+            // the lead answers, and asks if it must.
+            starters.push(lead);
+        }
+        Ok((starters, dto))
+    }
+}
+
+/// The journal as the episode store, for a follow-up that joins an open one.
+pub use episode_store::open_episode_for;

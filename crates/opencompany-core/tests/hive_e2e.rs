@@ -1413,149 +1413,15 @@ async fn a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice() {
 }
 
 // ---------------------------------------------------------------------------
-// 7: a checkpoint replays the rows after it as a no-op
+// 7: (removed) a checkpoint replays the rows after it as a no-op
 // ---------------------------------------------------------------------------
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_checkpoint_replays_the_rows_after_it_as_a_no_op() {
-    use opencompany::hive::episode_store::{PersistedEpisode, latest_state, replies_after};
-    use opencompany::hive::round::utterance_of;
-    use tinyhivemind::Sequence;
-    use tinyhivemind_driver::{CommittedUtterance, CompletionDriver, DriverState};
-
-    let home = tempfile::tempdir().unwrap();
-    let (base_url, _script) = spawn_script_with_latency(
-        seat_script("Noted.", post_then_complete),
-        Duration::from_millis(30),
-    )
-    .await;
-    let (address, runtime) = boot_lab(home.path(), &base_url).await;
-    let client = Client::new(address);
-    client.sign_in(ADMIN).await;
-
-    client.say(ENGINEERING, "Settle the rollout window.").await;
-    let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
-    let episode_id = completions(&rows)[0].0.clone();
-
-    // Every checkpoint the host wrote, oldest first: one per committed round.
-    let checkpoints: Vec<PersistedEpisode> = rows
-        .iter()
-        .filter_map(|row| match &row.event {
-            CompanyEvent::EpisodeStateSaved {
-                episode_id: id,
-                desk,
-                thread_root,
-                revision,
-                state,
-                sharing,
-                hop,
-                origin,
-            } if id == &episode_id => Some(PersistedEpisode {
-                episode_id: id.clone(),
-                desk: desk.clone(),
-                thread_root: *thread_root,
-                revision: *revision,
-                state: state.clone(),
-                sharing: sharing
-                    .iter()
-                    .filter_map(|(agent, value)| {
-                        serde_json::from_value(value.clone())
-                            .ok()
-                            .map(|state| (agent.clone(), state))
-                    })
-                    .collect(),
-                hop: *hop,
-                origin: origin
-                    .clone()
-                    .and_then(|value| serde_json::from_value(value).ok()),
-            }),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        checkpoints.len(),
-        2,
-        "one per round: {:?}",
-        checkpoints.len()
-    );
-    assert_eq!(checkpoints[0].revision, 2);
-    assert_eq!(checkpoints[1].revision, 4);
-    let latest = latest_state(runtime.events().as_ref(), runtime.id(), &episode_id)
-        .await
-        .unwrap()
-        .expect("a checkpoint");
-    assert_eq!(latest.revision, 4, "the store hands back the newest");
-
-    // A host that died after the first round's commit finds the round-0
-    // checkpoint and the rows the second round committed. Folding those
-    // through the driver reaches the final state; folding them again
-    // changes nothing.
-    let record = runtime
-        .store()
-        .load(runtime.id())
-        .await
-        .unwrap()
-        .expect("the record");
-    let pool = runtime.harness().expect("the harness pool");
-    let mut agents = std::collections::HashMap::new();
-    for agent in [ENGINEER, CEO] {
-        let live = pool
-            .agent(runtime.id(), agent)
-            .await
-            .unwrap_or_else(|| panic!("{agent} is built"));
-        agents.insert(agent.to_string(), live.runtime_agent().clone());
-    }
-    let (hives, errors) =
-        opencompany::hive::graph::desk_hives(&record, 1, &|id| agents.get(id).cloned());
-    assert!(errors.is_empty(), "{errors:?}");
-    let desk = hives.get(ENGINEERING).expect("the engineering hive");
-    let driver = CompletionDriver::new(&desk.hive, 2).unwrap();
-    let mut state: DriverState = serde_json::from_value(checkpoints[0].state.clone()).unwrap();
-    state = driver.resume(state).unwrap();
-    assert_eq!(state.revision(), 2);
-    let later = replies_after(
-        runtime.events().as_ref(),
-        runtime.id(),
-        &episode_id,
-        checkpoints[0].revision,
-    )
-    .await
-    .unwrap();
-    assert_eq!(later.len(), 2, "the second round's two rows: {later:?}");
-    let committed: Vec<CommittedUtterance> = later
-        .iter()
-        .map(|reply| CommittedUtterance {
-            author_id: reply.agent_id.clone(),
-            sequence: Sequence(reply.seq.value()),
-            utterance: utterance_of(&reply.episode, reply.text.clone()),
-        })
-        .collect();
-    for event in &committed {
-        state = driver
-            .apply_committed(&state, event.clone(), None)
-            .await
-            .unwrap()
-            .state;
-    }
-    let final_state: DriverState = serde_json::from_value(checkpoints[1].state.clone()).unwrap();
-    assert_eq!(
-        state, final_state,
-        "the replay reaches the final checkpoint"
-    );
-    for event in &committed {
-        let again = driver
-            .apply_committed(&state, event.clone(), None)
-            .await
-            .unwrap();
-        assert_eq!(again.state, state, "an exact replay is a no-op");
-        assert!(again.actions.is_empty());
-    }
-    // And a checkpoint that already folded everything has nothing to replay.
-    let nothing = replies_after(runtime.events().as_ref(), runtime.id(), &episode_id, 4)
-        .await
-        .unwrap();
-    assert!(nothing.is_empty(), "{nothing:?}");
-}
+//
+// The mechanism this covered is gone. The old loop checkpointed the driver's
+// state and, on resume, replayed the journal rows written after it to catch
+// the driver up. `run_episode` checkpoints the conductor's whole state --
+// open conversations, watermarks, nudges, who is parked -- and resumes from
+// that, so there are no rows to replay. `tinyhivemind`'s own suite covers
+// snapshot and resume; there is nothing left here for this test to assert.
 
 // ---------------------------------------------------------------------------
 // 8: memory over the MCP memory tool

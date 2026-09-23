@@ -23,9 +23,6 @@ pub mod conducted;
 /// the episode it opens on a desk with a room (Phase 5).
 #[cfg(feature = "openhuman")]
 pub mod dispatch;
-/// The episode host: routing, the round loop, checkpoints, referral (Phase 4).
-#[cfg(feature = "openhuman")]
-pub mod driver;
 /// The journal as the episode store: the `GET {scope}/episodes` fold, the
 /// driver checkpoint a resume reads, and the open-episode lookup (Phase 4).
 pub mod episode_store;
@@ -52,17 +49,9 @@ pub mod prompt;
 /// Cross-desk referral: the journal-backed `ReferralQueue`, the crossing
 /// record, and the return address an answer comes home to (Phase 6).
 pub mod referral;
-/// One round of seat turns, run at once and folded to one utterance each
-/// (Phase 4).
-#[cfg(feature = "openhuman")]
-pub mod round;
 /// The `[group_chat.routing]` block, its resolved `RoutingPolicy`, and the
 /// desk-routing wire shapes (plan Phase 4).
 pub mod routing;
-/// The production `SeatRunner`: one seat turn over the harness pool
-/// (Phase 4).
-#[cfg(feature = "openhuman")]
-pub mod seats;
 pub mod session_log;
 #[cfg(test)]
 pub(crate) mod test_support;
