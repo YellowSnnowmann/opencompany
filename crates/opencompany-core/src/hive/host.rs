@@ -83,6 +83,14 @@ pub struct DeskHost {
     /// approval queue into the operator's inbox -- so it arrives as a hook
     /// rather than as something this type reaches for itself.
     parking: Option<Arc<dyn SeatParking>>,
+    /// How a desk reply's mentions are resolved and notified (#2441).
+    ///
+    /// A reply that names `@someone` is resolved against the company's own
+    /// directory and the people it names are told. Journaled on the row, so
+    /// a later reader takes the mentions that were stored rather than
+    /// resolving the same text a second time -- which is how two answers to
+    /// "who is `@ada`" arise.
+    mentions: Option<crate::runtime::mention_seam::MentionSeam>,
     /// The channel each open conversation's rows are written to, by the ask
     /// row that roots it.
     ///
@@ -153,6 +161,7 @@ impl DeskHost {
             episode_id: String::new(),
             wave: AtomicU64::new(0),
             parking: None,
+            mentions: None,
             conversations: Mutex::new(BTreeMap::new()),
             personas: Mutex::new(BTreeMap::new()),
         }
@@ -170,6 +179,16 @@ impl DeskHost {
     #[must_use]
     pub fn parking(mut self, parking: Arc<dyn SeatParking>) -> Self {
         self.parking = Some(parking);
+        self
+    }
+
+    /// Resolve and notify the mentions a seat's reply carries (#2441).
+    #[must_use]
+    pub fn resolving_mentions(
+        mut self,
+        mentions: crate::runtime::mention_seam::MentionSeam,
+    ) -> Self {
+        self.mentions = Some(mentions);
         self
     }
 
@@ -254,6 +273,47 @@ impl DeskHost {
                     root.0
                 )
             })
+    }
+
+    /// The mentions `text` names, resolved against this company (#2441).
+    ///
+    /// Empty without a seam, which is what a host built with no user
+    /// directory to resolve against should journal.
+    fn resolve(&self, author: &str, text: &str) -> Vec<crate::ports::types::Mention> {
+        let Some(seam) = self.mentions.as_ref() else {
+            return Vec::new();
+        };
+        let by = crate::ports::types::Actor {
+            kind: crate::ports::types::ActorKind::Agent,
+            id: author.to_owned(),
+        };
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(seam.resolve_mentions(
+                &self.company,
+                text,
+                None,
+                Some(&by),
+            ))
+        })
+    }
+
+    /// Tell the people a stored row named.
+    fn notify(&self, mentions: &[crate::ports::types::Mention], at: EventSeq) {
+        let Some(seam) = self.mentions.as_ref() else {
+            return;
+        };
+        if mentions.is_empty() {
+            return;
+        }
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(seam.notify_mentions(
+                &self.company,
+                mentions,
+                &at,
+                None,
+                &self.desk_id,
+            ));
+        });
     }
 
     /// Append a row the episode reports, or say why it could not be.
@@ -380,7 +440,19 @@ impl Journal for DeskHost {
                 routed_by: None,
             });
         }
+        // A reply that names somebody resolves those names against this
+        // company's directory before it is stored, and the people it names
+        // are told after -- the notification needs the row's sequence, which
+        // only exists once it is appended (#2441).
+        let mentions = self.resolve(&commit.author, commit.utterance.message());
+        if let CompanyEvent::AgentReply {
+            mentions: stored, ..
+        } = &mut event
+        {
+            stored.clone_from(&mentions);
+        }
         let seq = self.append(event).map_err(|error| refused(&error))?;
+        self.notify(&mentions, seq);
         Ok(Sequence(seq.value()))
     }
 
@@ -739,3 +811,7 @@ impl Bracket<'_> {
 #[cfg(test)]
 #[path = "host_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "host_mentions_tests.rs"]
+mod mentions_tests;

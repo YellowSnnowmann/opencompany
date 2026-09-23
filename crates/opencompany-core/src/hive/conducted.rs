@@ -63,6 +63,8 @@ pub struct Episode<'a> {
     pub starters: Vec<String>,
     /// What this company does with the approvals a turn raised.
     pub parking: Option<Arc<dyn SeatParking>>,
+    /// How a desk reply's mentions are resolved and notified (#2441).
+    pub mentions: Option<crate::runtime::mention_seam::MentionSeam>,
 }
 
 /// Run one completion episode to quiescence.
@@ -100,6 +102,9 @@ pub async fn run(episode: Episode<'_>) -> Result<Report> {
         .locking(Arc::clone(&episode.pool));
         if let Some(parking) = episode.parking.clone() {
             host = host.parking(parking);
+        }
+        if let Some(mentions) = episode.mentions.clone() {
+            host = host.resolving_mentions(mentions);
         }
         host
     });
@@ -204,6 +209,12 @@ pub struct HiveDispatcher {
     pub deps: Arc<HarnessDeps>,
     /// The pool they live in, for the lock a turn holds.
     pub pool: Arc<HarnessPool>,
+    /// How a desk reply's mentions are resolved and notified (#2441).
+    ///
+    /// `None` journals a reply exactly as a host without one would: the
+    /// mentions are simply not resolved, which is what every construction
+    /// that has no user directory to resolve against should get.
+    pub mentions: Option<crate::runtime::mention_seam::MentionSeam>,
 }
 
 impl HiveDispatcher {
@@ -259,6 +270,7 @@ impl HiveDispatcher {
             opened_at: trigger.seq,
             starters,
             parking: None,
+            mentions: self.mentions.clone(),
         })
         .await?;
         // The episode's closing row. `run_episode` returns only once every
