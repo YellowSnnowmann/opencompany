@@ -33,7 +33,7 @@
 //! | --- | --- |
 //! | `a_desk_answers_through_the_seat_its_routing_named` | the fallback plan names one seat, it records its part in one wave, and `EpisodeCompleted{complete_episode}` closes it |
 //! | `a_broadcast_without_jev_falls_back_deterministically` | `BroadcastRouted{router: fallback}` names the desk lead, who is reopened in the next round |
-//! | `a_dm_schedules_its_recipient_and_is_journaled_with_its_audience` | **ignored**: `dm` is not served to a seat — the conductor's private act is `ask` |
+//! | `an_ask_opens_a_conversation_the_desk_only_references` | the desk keeps `ConversationOpened` / `Concluded` naming the pair and its channel; the exchange itself is the ask row and what hangs off it |
 //! | `a_single_member_desk_answers_with_one_ordinary_turn` | a desk of one is one reply with no episode frames |
 //! | `a_cross_desk_referral_crosses_only_the_answer_back` | **ignored**: referral is not reconnected to the conductor |
 //! | `a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice` | `companies/hive_demo`: both episodes complete, brackets overlap across desks, never for the same agent |
@@ -1153,30 +1153,24 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
 }
 
 // ---------------------------------------------------------------------------
-// 3: a dm schedules its recipient and is journaled with its audience
+// 3: an ask opens a conversation the desk only references
 // ---------------------------------------------------------------------------
 
-/// Parked with the vocabulary: `dm` is not served to a seat.
+/// The conductor's private act: one seat asks another, the exchange runs on
+/// its own, and the desk keeps a reference to it rather than the exchange.
 ///
-/// The library serves `broadcast`, `ask`, `complete_episode` and `read`;
-/// `dm` and `post` are explicitly unserved, so no `desk_dm` reaches a belt
-/// and no episode can deliver one. Nothing in the episode path writes a
-/// `DmDelivered` row either.
-///
-/// The conductor's private act is `ask`, which opens a conversation only two
-/// seats read — a different shape, journaled differently, and worth its own
-/// test rather than this one bent to fit.
-#[ignore = "`dm` is not served to a seat; the conductor's private act is `ask`"]
+/// `dm` is not served to a seat at all — the library serves `broadcast`,
+/// `ask`, `complete_episode` and `read` — so this is the shape a private
+/// message actually takes on a desk now.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_dm_schedules_its_recipient_and_is_journaled_with_its_audience() {
+async fn an_ask_opens_a_conversation_the_desk_only_references() {
     let home = tempfile::tempdir().unwrap();
-    let (base_url, _script) = spawn_script_with_latency(
+    let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", |seat| {
-            // `!answered` is load-bearing: a turn ends when the seat has
+            // `!called` is load-bearing: a turn ends when the seat has
             // *recorded* its part, and an `ask` is not that. Without the
             // guard the same question is asked again on every continuation
-            // of the turn, and each one opens its own conversation the
-            // asker then has to see answered.
+            // of the turn, each opening its own conversation.
             if seat.speaker == ENGINEER
                 && !seat.operator_asked().is_empty()
                 && !seat.called("desk_ask")
@@ -1199,80 +1193,85 @@ async fn a_dm_schedules_its_recipient_and_is_journaled_with_its_audience() {
     client.say(ENGINEERING, "Decide on the freeze.").await;
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
 
-    let delivered: Vec<(String, Vec<String>, u64)> = rows
+    // The reference rows: opened and concluded, both on the desk, both
+    // naming the pair and the channel the exchange itself went to.
+    let opened: Vec<(String, String, String, u64)> = rows
         .iter()
         .filter_map(|row| match &row.event {
-            CompanyEvent::DmDelivered {
-                from,
-                to,
-                message_seq,
+            CompanyEvent::ConversationOpened {
+                chat_id,
+                conversation_id,
+                asker,
+                askee,
+                root,
                 ..
-            } => Some((from.clone(), to.clone(), *message_seq)),
+            } => Some((
+                chat_id.clone(),
+                conversation_id.clone(),
+                format!("{asker}->{askee}"),
+                *root,
+            )),
             _ => None,
         })
         .collect();
     assert_eq!(
-        delivered,
-        vec![(ENGINEER.to_string(), vec![CEO.to_string()], delivered[0].2)],
-        "{delivered:?}"
+        opened.len(),
+        1,
+        "one conversation, one reference: {opened:?}"
     );
-    let desk = replies(&rows, ENGINEERING);
-    let dm = desk
-        .iter()
-        .find(|row| row.seq == delivered[0].2)
-        .expect("the delivered row is the dm's reply");
-    assert_eq!(dm.kind, Some(UtteranceKind::Dm));
+    let (desk, conversation_id, pair, root) = &opened[0];
+    assert_eq!(desk, ENGINEERING, "the reference sits on the desk");
+    assert_eq!(pair, &format!("{ENGINEER}->{CEO}"));
     assert_eq!(
-        dm.audience,
+        conversation_id,
+        &opencompany::hive::referral::pair_conversation(ENGINEER, CEO),
+        "and points at the pair's own channel"
+    );
+
+    let concluded: Vec<(String, u64, bool)> = rows
+        .iter()
+        .filter_map(|row| match &row.event {
+            CompanyEvent::ConversationConcluded {
+                conversation_id,
+                root,
+                forced,
+                ..
+            } => Some((conversation_id.clone(), *root, *forced)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        concluded,
+        vec![(conversation_id.clone(), *root, false)],
+        "it concluded on the same root, with an answer"
+    );
+
+    // The ask itself is a reply naming its recipient, and the answer hangs
+    // off it. That pair is what a reader reassembles the exchange from.
+    let desk_rows = replies(&rows, ENGINEERING);
+    let ask = desk_rows
+        .iter()
+        .find(|row| row.kind == Some(UtteranceKind::Ask))
+        .expect("the ask row");
+    assert_eq!(ask.agent, ENGINEER);
+    assert_eq!(ask.to, vec![CEO.to_string()], "it names who it asked");
+    assert_eq!(
+        ask.audience,
         vec![CEO.to_string()],
-        "journaled with its audience"
+        "and only the two of them read it"
     );
-    assert_eq!(dm.to, vec![CEO.to_string()], "and on the episode metadata");
-    assert!(
-        desk.iter()
-            .filter(|row| row.seq != dm.seq)
-            .all(|row| row.audience.is_empty()),
-        "every other row is for the whole desk: {desk:?}"
-    );
+    assert_eq!(*root, ask.seq, "the reference is rooted at the ask row");
 
-    // The recipient is scheduled: a round after the dm runs the CEO.
-    let dm_round = rounds(&rows, ENGINEERING)
+    // The askee answered inside the conversation: an ordinary turn, on the
+    // thread the fence named, not on the desk.
+    let answered = script
+        .asks()
         .iter()
-        .find(|(_, seats)| seats.contains(&ENGINEER.to_string()))
-        .map(|(rev, _)| *rev)
-        .unwrap();
-    assert!(
-        rounds(&rows, ENGINEERING)
-            .iter()
-            .any(|(rev, seats)| *rev > dm_round + 1 && seats.contains(&CEO.to_string())),
-        "{:?}",
-        rounds(&rows, ENGINEERING)
-    );
-    let measured = report(&runtime).await;
-    assert_eq!(measured.dms, 1);
-    assert!(
-        measured.distinct_pairs.contains("engineer→ceo"),
-        "{measured:?}"
-    );
+        .filter_map(seat_of)
+        .any(|seat| seat.speaker == CEO && seat.parent == Some(ask.seq));
+    assert!(answered, "the CEO was turned inside the conversation");
+
     assert_eq!(completions(&rows)[0].2, EpisodeReason::CompleteEpisode);
-
-    // The history projection carries the audience and the episode too.
-    let (status, history) = client
-        .get(&format!("/api/v1/company/chat/history?desk={ENGINEERING}"))
-        .await;
-    assert_eq!(status, 200, "{history}");
-    let messages = history
-        .as_array()
-        .or_else(|| history["messages"].as_array())
-        .expect("history rows");
-    let row = messages
-        .iter()
-        .find(|message| message["id"].as_str() == Some(dm.seq.to_string().as_str()))
-        .unwrap_or_else(|| panic!("the dm row is in history: {history}"));
-    assert_eq!(row["audience"], json!([CEO]));
-    assert_eq!(row["episode"]["kind"], "dm");
-    assert_eq!(row["episode"]["to"], json!([CEO]));
-    assert!(row.get("asideConversation").is_none());
 }
 
 // ---------------------------------------------------------------------------

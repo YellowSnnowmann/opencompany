@@ -1802,6 +1802,53 @@ pub enum CompanyEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         summary_seq: Option<u64>,
     },
+    /// One seat opened a private conversation with another (`ask`).
+    ///
+    /// The **reference** row: it sits on the desk, names both seats, and
+    /// points at the exchange, which lives in the pair's own channel. An
+    /// operator reading the desk sees that two teammates are talking without
+    /// their conversation threaded through the room's own timeline, and the
+    /// console has a desk-channel frame to raise the live indicator from —
+    /// it is already subscribed to that stream, and would otherwise have to
+    /// watch every pair channel to notice one had started.
+    ConversationOpened {
+        /// The desk it was opened from.
+        chat_id: String,
+        /// The episode it belongs to.
+        episode_id: String,
+        /// The channel the exchange itself is written to.
+        conversation_id: String,
+        /// The `ask` row it is rooted at — the exchange is this row and
+        /// everything rooted at it.
+        root: u64,
+        /// The seat that asked.
+        asker: String,
+        /// The seat asked.
+        askee: String,
+    },
+    /// A private conversation ended, answered or not.
+    ///
+    /// The other half of the reference: what turns the indicator off. A
+    /// conversation that runs out of turns concludes `forced`, without an
+    /// answer, and an indicator that only watched for an answer would hang
+    /// on exactly that case.
+    ConversationConcluded {
+        /// The desk it was opened from.
+        chat_id: String,
+        /// The episode it belongs to.
+        episode_id: String,
+        /// The channel the exchange was written to.
+        conversation_id: String,
+        /// The `ask` row it was rooted at.
+        root: u64,
+        /// The seat that asked.
+        asker: String,
+        /// The seat asked.
+        askee: String,
+        /// Concluded without an answer: nothing was due, or it ran out of
+        /// turns.
+        forced: bool,
+    },
     /// The driver's resumable state after a committed round (plan hive-desks,
     /// Phase 4): what `hive::episode_store` reads back to resume an episode
     /// the host died under.
@@ -2626,6 +2673,8 @@ impl CompanyEvent {
             Self::BroadcastRouted { .. } => "BroadcastRouted",
             Self::DmDelivered { .. } => "DmDelivered",
             Self::EpisodeCompleted { .. } => "EpisodeCompleted",
+            Self::ConversationOpened { .. } => "ConversationOpened",
+            Self::ConversationConcluded { .. } => "ConversationConcluded",
             Self::EpisodeStateSaved { .. } => "EpisodeStateSaved",
             Self::TaskSteered { .. } => "TaskSteered",
             Self::TaskCardChanged { .. } => "TaskCardChanged",
@@ -2796,6 +2845,11 @@ impl CompanyEvent {
             | Self::BroadcastRouted { .. }
             | Self::DmDelivered { .. }
             | Self::EpisodeCompleted { .. }
+            // The desk's record that two seats talked, and where the
+            // exchange itself is. Without it the desk cannot say a private
+            // conversation happened at all.
+            | Self::ConversationOpened { .. }
+            | Self::ConversationConcluded { .. }
             | Self::EpisodeStateSaved { .. }
             | Self::TaskSteered { .. }
             | Self::TaskCardChanged { .. }

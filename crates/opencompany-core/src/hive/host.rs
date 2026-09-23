@@ -197,6 +197,24 @@ impl DeskHost {
         })
     }
 
+    /// Append a row the episode reports, or say why it could not be.
+    ///
+    /// These rows describe what the conductor decided rather than what a
+    /// seat said, so a journal that refuses one must not stop the episode:
+    /// the room carries on, and the console is the poorer for it.
+    fn journal_or_warn(&self, row: CompanyEvent) {
+        let kind = row.kind();
+        if let Err(error) = self.append(row) {
+            tracing::warn!(
+                company = %self.company,
+                desk = %self.desk_id,
+                %kind,
+                %error,
+                "[hive] could not journal a conductor event"
+            );
+        }
+    }
+
     /// One row as this company stores it.
     fn reply(
         &self,
@@ -369,6 +387,43 @@ impl Journal for DeskHost {
     /// the content.
     fn event(&self, event: &tinyhivemind_driver::Event) {
         use tinyhivemind_driver::Event;
+        // The conversation reference rows. They sit on the desk and point at
+        // the exchange rather than carrying it, so the room's own timeline
+        // stays the room's, and the console -- already subscribed to this
+        // desk -- can raise the "two seats are talking" indicator without
+        // watching every pair channel for one to start.
+        if let Event::Asked { seat, askee, root } = event {
+            let row = CompanyEvent::ConversationOpened {
+                chat_id: self.desk_id.clone(),
+                episode_id: self.episode_id.clone(),
+                conversation_id: crate::hive::referral::pair_conversation(seat, askee),
+                root: root.0,
+                asker: seat.clone(),
+                askee: askee.clone(),
+            };
+            self.journal_or_warn(row);
+            return;
+        }
+        if let Event::Concluded {
+            root,
+            asker,
+            askee,
+            forced,
+            ..
+        } = event
+        {
+            let row = CompanyEvent::ConversationConcluded {
+                chat_id: self.desk_id.clone(),
+                episode_id: self.episode_id.clone(),
+                conversation_id: crate::hive::referral::pair_conversation(asker, askee),
+                root: root.0,
+                asker: asker.clone(),
+                askee: askee.clone(),
+                forced: *forced,
+            };
+            self.journal_or_warn(row);
+            return;
+        }
         let (seat, at, took) = match event {
             // A broadcast reached these seats. Without this the console can
             // see that a broadcast was said and not who picked it up.
@@ -390,14 +445,7 @@ impl Journal for DeskHost {
             probabilities: None,
             router: crate::hive::routing::Router::Fallback,
         };
-        if let Err(error) = self.append(row) {
-            tracing::warn!(
-                company = %self.company,
-                desk = %self.desk_id,
-                %error,
-                "[hive] could not journal a conductor event"
-            );
-        }
+        self.journal_or_warn(row);
     }
 
     fn note(&self, note: &Note) -> tinyhivemind_openhuman::Result<()> {

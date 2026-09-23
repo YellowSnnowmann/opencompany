@@ -2140,6 +2140,49 @@ fn project_event_for_viewer(
             o["messageSeq"] = json!(message_seq);
             o
         }
+        // The desk's reference to a private exchange. Deliberately carries
+        // no text: the question and the answer live in the pair channel, and
+        // this row exists so the desk can say two seats are talking and
+        // where, not so it can quote them.
+        CompanyEvent::ConversationOpened {
+            chat_id,
+            episode_id,
+            conversation_id,
+            root,
+            asker,
+            askee,
+        } => {
+            let mut o = envelope("conversation_opened");
+            o["chatId"] = json!(chat_id);
+            o["episodeId"] = json!(episode_id);
+            o["conversationId"] = json!(conversation_id);
+            o["root"] = json!(root);
+            o["asker"] = json!(asker);
+            o["askee"] = json!(askee);
+            o
+        }
+        CompanyEvent::ConversationConcluded {
+            chat_id,
+            episode_id,
+            conversation_id,
+            root,
+            asker,
+            askee,
+            forced,
+        } => {
+            let mut o = envelope("conversation_concluded");
+            o["chatId"] = json!(chat_id);
+            o["episodeId"] = json!(episode_id);
+            o["conversationId"] = json!(conversation_id);
+            o["root"] = json!(root);
+            o["asker"] = json!(asker);
+            o["askee"] = json!(askee);
+            // A conversation that ran out of turns concluded without an
+            // answer. An indicator that only watched for one would hang on
+            // exactly this case.
+            o["forced"] = json!(forced);
+            o
+        }
         CompanyEvent::EpisodeCompleted {
             chat_id,
             episode_id,
