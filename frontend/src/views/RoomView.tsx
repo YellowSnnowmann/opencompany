@@ -3242,6 +3242,10 @@ export function RoomView({
                   // in the panel rather than here because only it knows which
                   // of the thread's messages owns the open bucket.
                   liveAgentByTurn={liveAgentByTurn}
+                  // The channel's own flag: `threadReplies` is derived from
+                  // `messages` synchronously, so a thread has no fetch of its
+                  // own to be pending on.
+                  historyPending={historyPending}
                   agentNames={agentNames}
                   sending={sending}
                   mentionables={mentionables}
