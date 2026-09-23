@@ -5794,7 +5794,7 @@ pub(crate) fn build_episode_seat(
         orchestrator::orchestrator_id(&live_roster).as_deref() == Some(manifest_agent.id.as_str()),
         &crate::company::team_brief::team_section(company, &manifest_agent.id),
     )?;
-    build::episode_seat(seat, blueprint, episode_tools, gate)
+    build::episode_seat(&company.id, seat, blueprint, episode_tools, gate)
 }
 
 pub(crate) fn build_roster(

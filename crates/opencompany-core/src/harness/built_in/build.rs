@@ -1723,7 +1723,8 @@ impl oh::memory::Memory for SeatMemory {
 /// The builder refusing the session.
 #[cfg(feature = "openhuman")]
 pub fn episode_seat(
-    _seat: &str,
+    company: &CompanyId,
+    seat: &str,
     blueprint: AgentBlueprint,
     episode_tools: Vec<Box<dyn Tool>>,
     gate: Arc<dyn oh::agent::tool_policy::ToolPolicy>,
@@ -1759,11 +1760,13 @@ pub fn episode_seat(
         // OpenHuman's own transcript would be a second one, and the episode
         // reads its history back out of the journal every turn.
         .auto_save(false)
-        // Deliberately unnamed against `OpenHuman`'s definition registry.
-        // A named seat is validated as a hosted root invocation, which takes
-        // the model's tool allowlist from that definition -- and an episode's
-        // tools are bound to this seat of this episode, so no definition can
-        // name them.
+        // The runtime id this teammate is registered under. A hosted root
+        // invocation resolves its seat against the process registry, so an
+        // unnamed session falls back to `main` and is refused for want of a
+        // definition. The definition's own tool allowlist does not narrow
+        // this seat: `visible_tool_names` above is set from the belt it was
+        // actually built with.
+        .agent_definition_name(crate::session_key::runtime_agent_id(company, seat))
         .build()
         .map_err(|error| crate::error::OpenCompanyError::Harness(error.to_string()))
 }
