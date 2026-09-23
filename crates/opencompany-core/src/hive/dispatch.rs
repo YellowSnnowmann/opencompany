@@ -109,6 +109,31 @@ pub fn trigger_for(
     }
 }
 
+/// One host mention in the library's shape.
+///
+/// The host's `User` is the library's `Person`; everything else is the same
+/// target under another name.
+#[must_use]
+pub fn tinyhivemind_mention(
+    mention: &crate::ports::types::Mention,
+) -> tinyhivemind_core::mention::Mention {
+    use crate::ports::types::MentionTarget as HostTarget;
+    use tinyhivemind_core::mention::MentionTarget;
+
+    let target = match &mention.target {
+        HostTarget::Agent { id } => MentionTarget::Agent { id: id.clone() },
+        HostTarget::User { id } => MentionTarget::Person { id: id.clone() },
+        HostTarget::Desk { id } => MentionTarget::Desk { id: id.clone() },
+        HostTarget::Everyone => MentionTarget::Everyone,
+    };
+    tinyhivemind_core::mention::Mention {
+        target,
+        text: mention.text.clone(),
+        offset: mention.offset,
+        quiet: mention.quiet,
+    }
+}
+
 /// Assembles a dispatcher for one company.
 #[must_use]
 pub fn dispatcher(
@@ -117,6 +142,7 @@ pub fn dispatcher(
     hives: HashMap<String, Arc<crate::hive::graph::DeskHive>>,
     seats: Arc<dyn SeatRunner>,
     runs: Option<Arc<dyn crate::ports::RunStore>>,
+    mentions: Option<crate::runtime::mention_seam::MentionSeam>,
 ) -> Arc<HiveDispatcher> {
     Arc::new(HiveDispatcher {
         record,
@@ -125,6 +151,7 @@ pub fn dispatcher(
         router: host_router(),
         seats,
         runs,
+        mentions,
     })
 }
 

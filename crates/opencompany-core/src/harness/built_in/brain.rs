@@ -322,6 +322,12 @@ pub struct HarnessBrain {
     /// missing. That is the right direction for a purely observational store —
     /// and it is why every test construction can leave it unset.
     runs: Option<Arc<dyn crate::ports::RunStore>>,
+    /// The mention seam a desk reply's `@names` are resolved and notified
+    /// through.
+    ///
+    /// `None` leaves a reply's `mentions` empty and badges nobody — the state
+    /// every test construction and every pre-seam caller is in.
+    mentions: Option<crate::runtime::mention_seam::MentionSeam>,
 }
 
 /// A bubble the **runtime** wrote, not an agent (issue #966).
@@ -493,6 +499,7 @@ impl HarnessBrain {
             record: std::sync::RwLock::new(Arc::new(record)),
             responder,
             runs: None,
+            mentions: None,
             triage: std::sync::OnceLock::new(),
             titler: std::sync::OnceLock::new(),
         }
@@ -634,6 +641,14 @@ impl HarnessBrain {
     /// Wires the run store a dispatched card records its attempt into (#242).
     pub fn with_runs(mut self, runs: Arc<dyn crate::ports::RunStore>) -> Self {
         self.runs = Some(runs);
+        self
+    }
+
+    /// Attaches the mention seam, so a reply this brain's desks journal
+    /// resolves its `@names` through the same path an operator message does.
+    #[must_use]
+    pub fn with_mentions(mut self, mentions: crate::runtime::mention_seam::MentionSeam) -> Self {
+        self.mentions = Some(mentions);
         self
     }
 
@@ -2984,8 +2999,10 @@ impl HarnessBrain {
         let members = crate::runtime::delegation_tools::tinyhivemind_roster(&record);
         let retired = record.overlay_retired_agents.clone();
         let roster = tinyhivemind_core::roster::Roster::new(&members, &[], &retired);
-        let mentions: Vec<tinyhivemind_core::mention::Mention> =
-            mentions.iter().map(tinyhivemind_mention).collect();
+        let mentions: Vec<tinyhivemind_core::mention::Mention> = mentions
+            .iter()
+            .map(crate::hive::dispatch::tinyhivemind_mention)
+            .collect();
         tinyhivemind_core::mention::direct_responder(&mentions, &roster).map(str::to_string)
     }
 
@@ -3007,8 +3024,10 @@ impl HarnessBrain {
         let roster = tinyhivemind_core::roster::Roster::new(&members, &[], &retired);
         let snapshots = crate::runtime::delegation_tools::tinyhivemind_desks(&record);
         let desks = snapshots.set();
-        let mentions: Vec<tinyhivemind_core::mention::Mention> =
-            mentions.iter().map(tinyhivemind_mention).collect();
+        let mentions: Vec<tinyhivemind_core::mention::Mention> = mentions
+            .iter()
+            .map(crate::hive::dispatch::tinyhivemind_mention)
+            .collect();
         tinyhivemind_core::mention::mentioned_members(
             &mentions,
             Some(addressed_desk),
@@ -3434,26 +3453,6 @@ impl HarnessBrain {
     }
 }
 
-fn tinyhivemind_mention(
-    mention: &crate::ports::types::Mention,
-) -> tinyhivemind_core::mention::Mention {
-    use crate::ports::types::MentionTarget as HostTarget;
-    use tinyhivemind_core::mention::MentionTarget;
-
-    let target = match &mention.target {
-        HostTarget::Agent { id } => MentionTarget::Agent { id: id.clone() },
-        HostTarget::User { id } => MentionTarget::Person { id: id.clone() },
-        HostTarget::Desk { id } => MentionTarget::Desk { id: id.clone() },
-        HostTarget::Everyone => MentionTarget::Everyone,
-    };
-    tinyhivemind_core::mention::Mention {
-        target,
-        text: mention.text.clone(),
-        offset: mention.offset,
-        quiet: mention.quiet,
-    }
-}
-
 /// The turn instruction for a dispatched card: its title, plus its note when it
 /// carries one, framed as a work item to act on.
 fn task_instruction(card: &TaskRecord) -> String {
@@ -3795,6 +3794,7 @@ impl HarnessBrain {
                                     run_turn: self.run_turn(),
                                 }),
                                 self.deps.workflow_runs.clone(),
+                                self.mentions.clone(),
                             );
                             let trigger = crate::hive::dispatch::trigger_for(
                                 event_seq, &composed, *parent, mentions,

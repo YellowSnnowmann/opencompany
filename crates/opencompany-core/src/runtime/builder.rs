@@ -3809,7 +3809,12 @@ impl RuntimeBuilder {
                                     .with_lanes(lanes.lanes)
                                     .with_unavailable_lanes(lanes.unavailable)
                                     .with_default_engine(default_engine)
-                                    .with_runs(ops.runs.clone()),
+                                    .with_runs(ops.runs.clone())
+                                    .with_mentions(crate::runtime::mention_seam::MentionSeam::new(
+                                        store.clone(),
+                                        ops.users.clone(),
+                                        ops.notifications.clone(),
+                                    )),
                             ) as Arc<dyn Brain>)
                         } else {
                             // Do not degrade silently (issue #174): an openhuman

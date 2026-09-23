@@ -139,9 +139,27 @@ fn broadcast(text: &str) -> Say {
 }
 
 /// A dispatcher over `TWO_DESKS` with agents on the ephemeral runtime.
-async fn dispatcher(script: Arc<Script>) -> (HiveDispatcher, Arc<MemoryLog>) {
+///
+/// Carries a real mention seam over a temp home, because a seat's `@#content`
+/// is what raises a crossing and the referral decision reads the mentions the
+/// round resolved. The returned `TempDir` has to outlive the dispatcher.
+async fn dispatcher(script: Arc<Script>) -> (HiveDispatcher, Arc<MemoryLog>, tempfile::TempDir) {
     let runtime = global(RuntimeBoot::ephemeral()).await.expect("runtime");
     let record = Arc::new(record(TWO_DESKS));
+    let home = tempfile::Builder::new()
+        .prefix("opencompany-hive-driver-")
+        .tempdir()
+        .expect("tempdir");
+    let company = Arc::new(
+        crate::runtime::RuntimeBuilder::new(
+            home.path().to_path_buf(),
+            toml::from_str(TWO_DESKS).expect("test manifest parses"),
+        )
+        .with_id(MemoryLog::company())
+        .build()
+        .await
+        .expect("runtime"),
+    );
     let salt = uuid::Uuid::new_v4().simple().to_string();
     let agents: HashMap<String, openhuman_embed::Agent> = ["ceo", "engineer", "writer"]
         .into_iter()
@@ -164,8 +182,10 @@ async fn dispatcher(script: Arc<Script>) -> (HiveDispatcher, Arc<MemoryLog>) {
             router: None,
             seats: script,
             runs: None,
+            mentions: Some(company.mention_seam()),
         },
         log,
+        home,
     )
 }
 
@@ -190,7 +210,7 @@ async fn a_two_seat_desk_completes_in_two_rounds_with_both_seats_running_at_once
         ),
         ("ceo", vec![post("Budget is fine."), complete("Approved.")]),
     ]);
-    let (host, log) = dispatcher(script.clone()).await;
+    let (host, log, _home) = dispatcher(script.clone()).await;
     let seq = log
         .append(
             &MemoryLog::company(),
@@ -312,7 +332,7 @@ async fn a_dm_narrows_its_row_and_a_broadcast_without_jev_falls_back_to_the_othe
             vec![broadcast("Someone take the copy."), complete("Fine.")],
         ),
     ]);
-    let (host, log) = dispatcher(script).await;
+    let (host, log, _home) = dispatcher(script).await;
     let seq = log
         .append(
             &MemoryLog::company(),
@@ -373,7 +393,7 @@ async fn a_seat_that_never_speaks_is_retried_then_completed_on_its_behalf() {
         ),
         ("ceo", vec![complete("ok")]),
     ]);
-    let (host, log) = dispatcher(script.clone()).await;
+    let (host, log, _home) = dispatcher(script.clone()).await;
     let seq = log
         .append(
             &MemoryLog::company(),
@@ -433,7 +453,7 @@ async fn a_failed_or_timed_out_seat_is_settled_as_such_and_the_room_still_closes
             )],
         ),
     ]);
-    let (host, log) = dispatcher(script).await;
+    let (host, log, _home) = dispatcher(script).await;
     let seq = log
         .append(
             &MemoryLog::company(),
@@ -484,7 +504,7 @@ async fn a_follow_up_in_the_thread_joins_the_open_episode_and_a_resume_replays_a
         ("engineer", vec![post("first"), complete("done")]),
         ("ceo", vec![complete("fine"), complete("still fine")]),
     ]);
-    let (host, log) = dispatcher(script.clone()).await;
+    let (host, log, _home) = dispatcher(script.clone()).await;
     let company = MemoryLog::company();
     let seq = log
         .append(&company, operator_message("engineering", "Go.", None))
@@ -558,7 +578,7 @@ async fn a_desk_mention_refers_the_question_and_the_answer_comes_home() {
         ("ceo", vec![complete("fine"), complete("fine again")]),
         ("writer", vec![complete("Here is the copy: Sign in.")]),
     ]);
-    let (host, log) = dispatcher(script.clone()).await;
+    let (host, log, _home) = dispatcher(script.clone()).await;
     let company = MemoryLog::company();
     let seq = log
         .append(

@@ -99,6 +99,14 @@ pub struct HiveDispatcher {
     /// settled with the bracket. `None` records nothing — the driver tests,
     /// and a host whose deps carry no store.
     pub runs: Option<Arc<dyn crate::ports::RunStore>>,
+    /// How a committed utterance's `@names` are resolved and notified.
+    ///
+    /// The same seam the operator path goes through, so a desk reply and an
+    /// operator message cannot end up obeying different rules about who `@ada`
+    /// is. `None` — the driver tests and any host built without one — journals
+    /// a reply with no mentions and badges nobody, which is what every reply
+    /// written before this existed did.
+    pub mentions: Option<crate::runtime::mention_seam::MentionSeam>,
 }
 
 /// The state of one episode while it is being driven.
@@ -628,8 +636,8 @@ impl HiveDispatcher {
         })
     }
 
-    /// A handle for a spawned task: the same journal, hives, router and
-    /// runner.
+    /// A handle for a spawned task: the same journal, hives, router, runner
+    /// and mention seam.
     fn clone_for_task(&self) -> Arc<Self> {
         Arc::new(Self {
             record: Arc::clone(&self.record),
@@ -638,6 +646,7 @@ impl HiveDispatcher {
             router: self.router.clone(),
             seats: Arc::clone(&self.seats),
             runs: self.runs.clone(),
+            mentions: self.mentions.clone(),
         })
     }
 }

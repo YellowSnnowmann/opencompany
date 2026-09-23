@@ -39,8 +39,8 @@ use crate::hive::prompt::{self, SeatPrompt};
 use crate::hive::session_log::EventLogSessionLog;
 use crate::hive::tools::HiveTurn;
 use crate::ports::types::{
-    CompanyEvent, EpisodeReason, EventSeq, ReplyEpisode, RoundUtteranceRecord, TurnOutcome,
-    UtteranceKind,
+    Actor, ActorKind, CompanyEvent, EpisodeReason, EventSeq, Mention, ReplyEpisode,
+    RoundUtteranceRecord, TurnOutcome, UtteranceKind,
 };
 
 /// Attempts a seat gets to end its turn with a speech tool before the host
@@ -118,6 +118,12 @@ pub struct RoundOutcome {
     pub records: Vec<RoundUtteranceRecord>,
     /// Each seat's utterance text, for referral decisions and assignments.
     pub texts: HashMap<String, String>,
+    /// Each seat's resolved mentions, exactly as journaled on its reply.
+    ///
+    /// Carried so the referral decision reads the mentions that were stored
+    /// rather than resolving the same text a second time against a second
+    /// directory, which is how two answers to "who is `@ada`" arise.
+    pub mentions: HashMap<String, Vec<Mention>>,
     /// A host-forced reason, when a seat had to be completed synthetically.
     pub forced: Option<EpisodeReason>,
     /// The seats that completed this round, in commit order, with what
@@ -302,6 +308,17 @@ pub(crate) async fn run_round(
             _ => Vec::new(),
         };
         let text = done.utterance.message().to_string();
+        let author = Actor {
+            kind: ActorKind::Agent,
+            id: done.agent_id.clone(),
+        };
+        let mentions = match &host.mentions {
+            Some(seam) => {
+                seam.resolve_mentions(&host.record.id, &text, None, Some(&author))
+                    .await
+            }
+            None => Vec::new(),
+        };
         let seq = host
             .events
             .append(
@@ -314,7 +331,7 @@ pub(crate) async fn run_round(
                     outputs: done.outputs,
                     task_id: None,
                     parent: Some(run.thread_root),
-                    mentions: Vec::new(),
+                    mentions: mentions.clone(),
                     mention_depth: 0,
                     audience: to.clone(),
                     episode: Some(ReplyEpisode {
@@ -327,6 +344,12 @@ pub(crate) async fn run_round(
                 },
             )
             .await?;
+        if let Some(seam) = &host.mentions
+            && !mentions.is_empty()
+        {
+            seam.notify_mentions(&host.record.id, &mentions, &seq, None, &run.desk.desk_id)
+                .await;
+        }
         if matches!(done.utterance, Utterance::CompleteEpisode { .. }) {
             outcome
                 .completions
@@ -339,6 +362,7 @@ pub(crate) async fn run_round(
             });
         }
         outcome.texts.insert(done.agent_id.clone(), text);
+        outcome.mentions.insert(done.agent_id.clone(), mentions);
         outcome.records.push(RoundUtteranceRecord {
             agent_id: done.agent_id.clone(),
             sequence: seq.value(),
@@ -599,3 +623,7 @@ impl RoundBracket {
 #[cfg(test)]
 #[path = "round_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "round_mentions_tests.rs"]
+mod mentions_tests;
