@@ -169,10 +169,17 @@ fn content(message: &Value) -> &str {
 }
 
 /// Whose turn this is, read from the persona the seat was built with.
+///
+/// Scans every message rather than the first `system` one. A hosted turn is
+/// assembled from the host's own composed prompt, then any recalled
+/// preamble, then the session's messages -- so the persona is not reliably
+/// the first system message, and reading only that one made later turns
+/// unparseable while the early ones worked.
 fn speaker_of(messages: &[Value]) -> Option<String> {
-    let system = messages.iter().find(|message| role(message) == "system")?;
-    let opening = content(system).split_once("You are the ")?.1;
-    let role_text = opening.split_once(" at ")?.0.trim();
+    let role_text = messages.iter().rev().find_map(|message| {
+        let (_, opening) = content(message).rsplit_once("You are the ")?;
+        Some(opening.split_once(" at ")?.0.trim().to_string())
+    })?;
     ROLES
         .iter()
         .find(|(_, title)| *title == role_text)
@@ -320,9 +327,15 @@ fn is_refused(output: &str) -> bool {
 fn speech(tool: &str, seat: &Seat, mut arguments: Value) -> Reply {
     if let Some(object) = arguments.as_object_mut() {
         object.insert("chat".to_string(), json!(seat.desk));
+        // A **string**, not a number: the schema is `string | null`, and the
+        // fence quotes it for the same reason. Sending the integer is
+        // refused with "arguments.parent must be one of string, null, got
+        // integer", the seat is turned again to make the same mistake, and
+        // the conversation times out at the wall having never been answered.
         object.insert(
             "parent".to_string(),
-            seat.parent.map_or(Value::Null, |seq| json!(seq)),
+            seat.parent
+                .map_or(Value::Null, |seq| json!(seq.to_string())),
         );
     }
     Reply::Call {
@@ -351,11 +364,40 @@ fn seat_script(
 ) -> Responder {
     Arc::new(move |ask: &Ask| {
         let Some(seat) = seat_of(ask) else {
+            if std::env::var_os("HIVE_E2E_TURNS").is_some() {
+                let last_user = ask
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|m| role(m) == "user")
+                    .map(|m| content(m).to_string())
+                    .unwrap_or_default();
+                eprintln!(
+                    "[unparsed] pending={:?} desk={:?} speaker={:?} roles={:?} tail={:?}",
+                    ask.pending_tool,
+                    fence_desk(&last_user),
+                    speaker_of(&ask.messages),
+                    ask.messages
+                        .iter()
+                        .map(|m| role(m).to_string())
+                        .collect::<Vec<_>>(),
+                    last_user.chars().rev().take(120).collect::<String>()
+                );
+            }
             if ask.pending_tool.is_some() {
                 return Reply::Say(DONE.to_string());
             }
             return Reply::Say(plain.to_string());
         };
+        // `HIVE_E2E_TURNS=1` prints what each seat turn saw and did. A
+        // hosted seat's session is cleared every turn, so this is the only
+        // place the two are visible together.
+        if std::env::var_os("HIVE_E2E_TURNS").is_some() {
+            eprintln!(
+                "[turn] {} parent={:?} heard={:?} calls={:?} results={:?}",
+                seat.speaker, seat.parent, seat.heard, seat.calls, seat.turn_tools
+            );
+        }
         if seat.spoke() {
             return Reply::Say(DONE.to_string());
         }
