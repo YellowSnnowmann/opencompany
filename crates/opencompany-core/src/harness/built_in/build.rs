@@ -1635,6 +1635,79 @@ pub fn build_agent(
     )
 }
 
+/// A memory that keeps nothing, for an episode seat.
+///
+/// This company's memory reaches a teammate through its own belt
+/// (`memory_store` / `memory_recall` over the company `ContextStore`), not
+/// through OpenHuman's memory trait, and the session writes no transcript of
+/// its own (`auto_save(false)`) because the company journal is the only log.
+/// The builder still requires one, so this is it: every store is accepted and
+/// discarded, every read is empty, nothing errors.
+#[cfg(feature = "openhuman")]
+#[derive(Debug, Default)]
+struct SeatMemory;
+
+#[cfg(feature = "openhuman")]
+#[async_trait::async_trait]
+impl oh::memory::Memory for SeatMemory {
+    fn name(&self) -> &'static str {
+        "none"
+    }
+
+    async fn store(
+        &self,
+        _namespace: &str,
+        _key: &str,
+        _content: &str,
+        _category: oh::memory::MemoryCategory,
+        _session_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn recall(
+        &self,
+        _query: &str,
+        _limit: usize,
+        _opts: oh::memory::RecallOpts<'_>,
+    ) -> anyhow::Result<Vec<oh::memory::MemoryEntry>> {
+        Ok(Vec::new())
+    }
+
+    async fn get(
+        &self,
+        _namespace: &str,
+        _key: &str,
+    ) -> anyhow::Result<Option<oh::memory::MemoryEntry>> {
+        Ok(None)
+    }
+
+    async fn list(
+        &self,
+        _namespace: Option<&str>,
+        _category: Option<&oh::memory::MemoryCategory>,
+        _session_id: Option<&str>,
+    ) -> anyhow::Result<Vec<oh::memory::MemoryEntry>> {
+        Ok(Vec::new())
+    }
+
+    async fn forget(&self, _namespace: &str, _key: &str) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+
+    async fn namespace_summaries(&self) -> anyhow::Result<Vec<oh::memory::NamespaceSummary>> {
+        Ok(Vec::new())
+    }
+
+    async fn count(&self) -> anyhow::Result<usize> {
+        Ok(0)
+    }
+
+    async fn health_check(&self) -> bool {
+        true
+    }
+}
+
 /// One teammate as a seat of a running completion episode: a session host
 /// carrying this company's own prompt, belt, model and policy, with the
 /// episode's tools added and its gate in front.
@@ -1650,18 +1723,29 @@ pub fn build_agent(
 /// The builder refusing the session.
 #[cfg(feature = "openhuman")]
 pub fn episode_seat(
-    seat: &str,
+    _seat: &str,
     blueprint: AgentBlueprint,
     episode_tools: Vec<Box<dyn Tool>>,
     gate: Arc<dyn oh::agent::tool_policy::ToolPolicy>,
 ) -> crate::Result<oh::agent::OpenHumanSessionHost> {
     let mut tools = blueprint.tools;
     tools.extend(episode_tools);
+    // The provider-visible allowlist *is* this belt. A seat is built with the
+    // tools it may call and no others, so the two cannot drift; leaving it
+    // unset makes the model visible nothing and every call is refused.
+    let visible: std::collections::HashSet<String> =
+        tools.iter().map(|tool| tool.name().to_string()).collect();
     oh::agent::OpenHumanSessionHost::builder()
         .chat_model(blueprint.chat_model.clone() as Arc<dyn tinyinference::model::ChatModel<()>>)
         .model_name(blueprint.model.clone())
         .tools(tools)
+        .visible_tool_names(visible)
         .tool_policy(gate)
+        .memory(Arc::new(SeatMemory))
+        // Native tool calling: the seat's belt is handed to it directly, so
+        // its model asks for a tool the structured way rather than through a
+        // text dialect the runtime would have to parse back.
+        .tool_dispatcher(Box::new(tinytools_agent::dialect::NativeDialect))
         .prompt_builder(oh::agent::prompts::SystemPromptBuilder::from_final_body(
             blueprint.system_prompt.clone(),
         ))
@@ -1675,7 +1759,11 @@ pub fn episode_seat(
         // OpenHuman's own transcript would be a second one, and the episode
         // reads its history back out of the journal every turn.
         .auto_save(false)
-        .agent_definition_name(seat.to_owned())
+        // Deliberately unnamed against `OpenHuman`'s definition registry.
+        // A named seat is validated as a hosted root invocation, which takes
+        // the model's tool allowlist from that definition -- and an episode's
+        // tools are bound to this seat of this episode, so no definition can
+        // name them.
         .build()
         .map_err(|error| crate::error::OpenCompanyError::Harness(error.to_string()))
 }

@@ -27,6 +27,8 @@ use openhuman_core::agent::tinyagents::host::LastTurnUsage;
 use tinyhivemind::{Sequence, SessionLog};
 use tinyhivemind_driver::{Commit, Note};
 use tinyhivemind_openhuman::{Disposition, EpisodeBelt, EpisodeHost, HostedTurn, Journal};
+use tinyhivemind_openhuman::{Lane, TurnResult};
+use tinyhivemind_tools::Refusal;
 
 use crate::harness::built_in::cost::TurnUsage;
 use crate::harness::built_in::{HarnessDeps, HarnessPool, build_episode_seat, meter_turn_costs};
@@ -245,6 +247,46 @@ impl Journal for DeskHost {
     ) -> tinyhivemind_openhuman::Result<()> {
         self.wave.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+
+    /// A turn came back. Nothing here changes the episode; it is how an
+    /// operator finds out why a room went quiet.
+    fn turn_done(
+        &self,
+        seat: &str,
+        lane: Lane,
+        outcome: &TurnResult,
+        refused: &[Refusal],
+        recorded: usize,
+    ) {
+        let where_ = match lane {
+            Lane::Desk => String::new(),
+            Lane::Thread(root) => format!(" in thread {}", root.0),
+        };
+        match outcome {
+            TurnResult::Replied(_) if recorded == 0 => tracing::warn!(
+                company = %self.company, %seat,
+                "[hive] @{seat}{where_} replied but recorded nothing"
+            ),
+            TurnResult::Replied(_) => {}
+            TurnResult::Failed(error) => {
+                tracing::warn!(
+                    company = %self.company, %seat, %error,
+                    "[hive] @{seat}{where_} failed"
+                );
+            }
+            TurnResult::Parked => tracing::info!(
+                company = %self.company, %seat,
+                "[hive] @{seat}{where_} is waiting on the operator"
+            ),
+        }
+        for refusal in refused {
+            tracing::warn!(
+                company = %self.company, %seat,
+                tool = %refusal.tool, reason = %refusal.reason,
+                "[hive] a call was refused"
+            );
+        }
     }
 
     fn note(&self, note: &Note) -> tinyhivemind_openhuman::Result<()> {
