@@ -1180,6 +1180,14 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
                     json!({ "to": CEO, "message": "Between us: does the rollout need a freeze?" }),
                 );
             }
+            // Inside the conversation, the CEO hands a piece of the work to
+            // the room before answering. That broadcast is the room's, not
+            // the pair's -- the library lands it on the desk with no thread,
+            // and it is the one row that carries a conversation marker while
+            // belonging to the desk.
+            if seat.speaker == CEO && seat.parent.is_some() && !seat.called("desk_broadcast") {
+                return broadcast(seat, "someone should size the copy changes");
+            }
             record_part(seat)
         }),
         Duration::from_millis(50),
@@ -1245,13 +1253,13 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
         "it concluded on the same root, with an answer"
     );
 
-    // The ask itself is a reply naming its recipient, and the answer hangs
-    // off it. That pair is what a reader reassembles the exchange from.
-    let desk_rows = replies(&rows, ENGINEERING);
-    let ask = desk_rows
+    // The exchange itself is in the pair channel: the question, and the
+    // answer hanging off it. That pair is what a reader reassembles it from.
+    let aside = replies(&rows, conversation_id);
+    let ask = aside
         .iter()
         .find(|row| row.kind == Some(UtteranceKind::Ask))
-        .expect("the ask row");
+        .expect("the ask row, in the pair channel");
     assert_eq!(ask.agent, ENGINEER);
     assert_eq!(ask.to, vec![CEO.to_string()], "it names who it asked");
     assert_eq!(
@@ -1260,6 +1268,44 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
         "and only the two of them read it"
     );
     assert_eq!(*root, ask.seq, "the reference is rooted at the ask row");
+    assert!(
+        aside
+            .iter()
+            .any(|row| row.kind == Some(UtteranceKind::CompleteEpisode)),
+        "the answer is filed beside the question: {aside:?}"
+    );
+
+    // And the desk carries none of it. This is the whole point: the room's
+    // timeline stays the room's, and the reference row is how it says an
+    // exchange happened.
+    let desk_rows = replies(&rows, ENGINEERING);
+    assert!(
+        desk_rows
+            .iter()
+            .all(|row| row.kind != Some(UtteranceKind::Ask)),
+        "no part of the exchange is on the desk: {desk_rows:?}"
+    );
+    assert!(
+        desk_rows.iter().all(|row| row.seq != ask.seq),
+        "not even the question that opened it: {desk_rows:?}"
+    );
+
+    // The trap, asserted rather than trusted: work handed to the room from
+    // inside the conversation lands on the *desk*. It carries a conversation
+    // marker and no thread, so routing on the marker would file public work
+    // where only two seats could read it, and nothing would say so.
+    assert!(
+        desk_rows
+            .iter()
+            .any(|row| row.kind == Some(UtteranceKind::Broadcast) && row.agent == CEO),
+        "the hand-off reached the room: {desk_rows:?}"
+    );
+    assert!(
+        aside
+            .iter()
+            .all(|row| row.kind != Some(UtteranceKind::Broadcast)),
+        "and did not end up in the pair channel: {aside:?}"
+    );
 
     // The askee answered inside the conversation: an ordinary turn, on the
     // thread the fence named, not on the desk.

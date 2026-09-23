@@ -83,6 +83,15 @@ pub struct DeskHost {
     /// approval queue into the operator's inbox -- so it arrives as a hook
     /// rather than as something this type reaches for itself.
     parking: Option<Arc<dyn SeatParking>>,
+    /// The channel each open conversation's rows are written to, by the ask
+    /// row that roots it.
+    ///
+    /// Filled when the conversation opens. A row landing in a thread is
+    /// looked up here rather than routed by the conversation marker it
+    /// carries, because a hand-off a seat makes *while* talking carries that
+    /// marker and belongs to the room -- routing on it would file public
+    /// work as private.
+    conversations: Mutex<BTreeMap<u64, String>>,
     /// Each seat's standing prompt, kept from when it was built.
     ///
     /// Read back on every turn after a seat's first: those turns are seeded
@@ -144,6 +153,7 @@ impl DeskHost {
             episode_id: String::new(),
             wave: AtomicU64::new(0),
             parking: None,
+            conversations: Mutex::new(BTreeMap::new()),
             personas: Mutex::new(BTreeMap::new()),
         }
     }
@@ -202,6 +212,50 @@ impl DeskHost {
         })
     }
 
+    /// The channel a committed row is filed under.
+    ///
+    /// Three cases, read straight off the commit:
+    ///
+    /// * an **ask** opens a conversation and is its first row, so it goes to
+    ///   the pair channel it names -- the question belongs with its answer,
+    ///   not in the room's own timeline;
+    /// * a row **landing in a thread** is inside that conversation, and the
+    ///   thread is the ask row that roots it;
+    /// * everything else is the desk's.
+    ///
+    /// Routed on the thread, never on `Commit::conversation`. A hand-off a
+    /// seat makes *while* talking carries that marker and lands with no
+    /// thread, because it belongs to the room: routing on the marker would
+    /// file public work where only two seats could read it, and nothing
+    /// would say so.
+    ///
+    /// # Errors
+    ///
+    /// Why, for the caller to dress: a thread whose conversation this host
+    /// never saw open. Deliberately an
+    /// error rather than a fall back to the desk: falling back would publish
+    /// a private row, which is the failure this whole arrangement exists to
+    /// prevent.
+    fn channel_for(&self, commit: &Commit) -> Result<String, String> {
+        if let tinyhivemind::speech::Utterance::Ask { to, .. } = &commit.utterance {
+            return Ok(crate::hive::referral::pair_conversation(&commit.author, to));
+        }
+        let Some(root) = commit.thread else {
+            return Ok(self.desk_id.clone());
+        };
+        self.conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&root.0)
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "a row landed in conversation {} that never opened here",
+                    root.0
+                )
+            })
+    }
+
     /// Append a row the episode reports, or say why it could not be.
     ///
     /// These rows describe what the conductor decided rather than what a
@@ -223,13 +277,14 @@ impl DeskHost {
     /// One row as this company stores it.
     fn reply(
         &self,
+        chat: &str,
         author: &str,
         text: String,
         thread: Option<Sequence>,
         only_for: Option<&str>,
     ) -> CompanyEvent {
         CompanyEvent::AgentReply {
-            chat_id: self.desk_id.clone(),
+            chat_id: chat.to_owned(),
             agent_id: author.to_owned(),
             text,
             steps: Vec::new(),
@@ -297,7 +352,13 @@ impl Journal for DeskHost {
     }
 
     fn commit(&self, commit: &Commit) -> tinyhivemind_openhuman::Result<Sequence> {
+        // The error is built here rather than inside, so the miss stays a
+        // small `String` on a private signature (`clippy::result_large_err`).
+        let chat = self.channel_for(commit).map_err(|why| {
+            tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!("hive episode: {why}"))
+        })?;
         let mut event = self.reply(
+            &chat,
             &commit.author,
             commit.utterance.message().to_owned(),
             commit.thread,
@@ -398,14 +459,19 @@ impl Journal for DeskHost {
         // desk -- can raise the "two seats are talking" indicator without
         // watching every pair channel for one to start.
         if let Event::Asked { seat, askee, root } = event {
+            let conversation_id = crate::hive::referral::pair_conversation(seat, askee);
             let row = CompanyEvent::ConversationOpened {
                 chat_id: self.desk_id.clone(),
                 episode_id: self.episode_id.clone(),
-                conversation_id: crate::hive::referral::pair_conversation(seat, askee),
+                conversation_id: conversation_id.clone(),
                 root: root.0,
                 asker: seat.clone(),
                 askee: askee.clone(),
             };
+            self.conversations
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(root.0, conversation_id);
             self.journal_or_warn(row);
             return;
         }
@@ -455,6 +521,7 @@ impl Journal for DeskHost {
 
     fn note(&self, note: &Note) -> tinyhivemind_openhuman::Result<()> {
         let event = self.reply(
+            &self.desk_id.clone(),
             DESK_AUTHOR,
             note.body.clone(),
             note.thread,
