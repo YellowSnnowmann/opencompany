@@ -212,3 +212,75 @@ async fn a_conclusion_is_threaded_under_the_conversation_it_concludes() {
         "desk work said from inside a conversation stays on the desk"
     );
 }
+
+/// **A row in a pair channel is addressed to that pair when it is written.**
+///
+/// The answer inside a conversation is a `complete_episode`, which names
+/// nobody, so it was stored with an empty audience -- and an empty audience
+/// means desk-visible. It stayed private only because the projection
+/// narrowed it on the way out, which puts the policy in the reader rather
+/// than in the row. The channel names the pair, so the row says so too.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_row_written_to_a_pair_channel_is_addressed_to_that_pair() {
+    let log = Arc::new(MemoryLog::default());
+    let company = MemoryLog::company();
+    let host = host(Arc::clone(&log) as Arc<dyn EventLog>);
+    let pair = crate::hive::referral::pair_conversation("ada", "grace");
+    let ask = log
+        .append(
+            &company,
+            crate::hive::test_support::agent_reply_in(&pair, "ada", "ask", Vec::new(), None),
+        )
+        .await
+        .unwrap();
+    host.event(&tinyhivemind_driver::Event::Asked {
+        seat: "ada".into(),
+        askee: "grace".into(),
+        root: tinyhivemind::Sequence(ask.value()),
+    });
+
+    // The answer names nobody: inside a conversation a seat completes, and
+    // `complete_episode` carries no recipient.
+    let answered = host
+        .commit(&commit(serde_json::json!({
+            "author": "grace",
+            "utterance": { "kind": "complete_episode", "message": "no freeze needed" },
+            "thread": ask.value(),
+            "only_for": null,
+            "conversation": null,
+            "purpose": { "kind": "desk" },
+        })))
+        .expect("the journal takes the answer");
+    // And a desk row still addresses the desk.
+    let broadcast = host
+        .commit(&commit(serde_json::json!({
+            "author": "grace",
+            "utterance": { "kind": "broadcast", "message": "freeze policy: none" },
+            "thread": null,
+            "only_for": null,
+            "conversation": null,
+            "purpose": { "kind": "desk" },
+        })))
+        .expect("the journal takes the broadcast");
+
+    let rows = log.read_from(&company, EventSeq::new(1), 16).await.unwrap();
+    let audience = |seq: tinyhivemind::Sequence| {
+        rows.iter()
+            .find(|stored| stored.seq.value() == seq.0)
+            .map(|stored| match &stored.event {
+                CompanyEvent::AgentReply { audience, .. } => audience.clone(),
+                other => panic!("not a reply: {other:?}"),
+            })
+            .expect("journaled")
+    };
+    assert_eq!(
+        audience(answered),
+        vec!["ada".to_string()],
+        "the answer is addressed to the seat that asked, in the row itself"
+    );
+    assert!(
+        audience(broadcast).is_empty(),
+        "a desk row is desk-visible: {:?}",
+        audience(broadcast)
+    );
+}

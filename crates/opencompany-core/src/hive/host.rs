@@ -379,6 +379,22 @@ impl DeskHost {
     }
 
     /// One row as this company stores it.
+    ///
+    /// A row written to a pair channel is addressed to that pair, whether or
+    /// not the conductor said so. Only the conclusion carries an `only_for`;
+    /// the ask carries one because the utterance names a recipient, and the
+    /// answer inside the conversation carries none at all -- it is a
+    /// `complete_episode`, which names nobody. Stored with an empty audience
+    /// it means desk-visible, and the `Audience` docs are explicit that an
+    /// absent audience silently taking the permissive value is how a private
+    /// message gets published with nothing failing.
+    ///
+    /// Until this, such a row was private only because the projection
+    /// narrowed it on the way out. That held, but it put the policy in the
+    /// reader rather than in the row: any other reader of this journal --
+    /// another adapter, an export, a later feature -- would have read a
+    /// desk-visible answer. The channel already says who the pair are, so
+    /// the row can say it too.
     fn reply(
         &self,
         chat: &str,
@@ -387,6 +403,18 @@ impl DeskHost {
         thread: Option<Sequence>,
         only_for: Option<&str>,
     ) -> CompanyEvent {
+        let mut audience: Vec<String> = only_for
+            .map(|seat| vec![seat.to_owned()])
+            .into_iter()
+            .flatten()
+            .collect();
+        if let Some((one, two)) = crate::hive::referral::pair_seats(chat) {
+            for seat in [one, two] {
+                if seat != author && !audience.iter().any(|member| member == seat) {
+                    audience.push(seat.to_owned());
+                }
+            }
+        }
         CompanyEvent::AgentReply {
             chat_id: chat.to_owned(),
             agent_id: author.to_owned(),
@@ -402,9 +430,7 @@ impl DeskHost {
                 .or(self.thread_root),
             mentions: Vec::new(),
             mention_depth: 0,
-            audience: only_for
-                .map(|seat| vec![seat.to_owned()])
-                .unwrap_or_default(),
+            audience,
         }
     }
 }
