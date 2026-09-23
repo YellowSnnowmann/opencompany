@@ -124,7 +124,7 @@ fn file_tools_are_sandboxed_to_the_workspace() {
     assert_eq!(policy.workspace_dir, ws);
     assert_eq!(policy.action_dir, ws);
 
-    let tools = file_tools(ws);
+    let tools = file_tools(ws, None);
     assert_eq!(tools.len(), 6, "read/write/edit/list/grep/glob");
     let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
     assert!(names.contains(&"file_read"), "got {names:?}");

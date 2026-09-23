@@ -84,6 +84,9 @@ mod composio_turn_tests;
 /// about the company. See [`confine`].
 pub mod confine;
 pub mod cost;
+/// The decorator that lands a native `file_write`/`edit` in the company
+/// workspace so the reply can address it. See [`file_tool_outputs`].
+pub mod file_tool_outputs;
 /// Hosting (TinyHosts): the per-company connection and the agent tools over it.
 /// The keys it reads live in `company::hosting`, which is compiled in every
 /// build — the console's Hosting settings write them whether or not this

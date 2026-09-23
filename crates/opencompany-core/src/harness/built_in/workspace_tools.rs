@@ -306,7 +306,7 @@ const _: () = assert!(MAX_CONTENT_BYTES + READ_OVERHEAD_BYTES <= TOOL_RESULT_BUD
 /// Deliberately the same as [`MAX_CONTENT_BYTES`]: a note an agent may write
 /// must stay a note the agent can read back in full, or the next write would be
 /// refused as oversized.
-const MAX_WRITE_BYTES: usize = MAX_CONTENT_BYTES;
+pub(crate) const MAX_WRITE_BYTES: usize = MAX_CONTENT_BYTES;
 
 /// Bytes a [`WORKSPACE_SEARCH_TOOL`] result reserves for everything that is not
 /// a hit: the header (with the narrowing guidance), the truncation notice, the
