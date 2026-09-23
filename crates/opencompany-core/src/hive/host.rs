@@ -573,13 +573,52 @@ impl Journal for DeskHost {
         Ok(Sequence(seq.value()))
     }
 
-    /// A wave settled. The snapshot is the host's to keep; this one counts
-    /// waves so a bracket can name the round it belongs to.
+    /// A wave settled: count it, and write the snapshot down.
+    ///
+    /// The wave counter is what a bracket names its round by. The snapshot
+    /// is everything about the episode that is not a row -- which seats are
+    /// open, each one's watermark, the ledger of outstanding asks, the
+    /// conversations under it, who is parked -- and it lives in memory and
+    /// nowhere else until this stores it. Journaled beside the rows, as the
+    /// port asks, so the ordering is the journal's own and a resume reads
+    /// the newest one back with [`latest_state`].
+    ///
+    /// **A failure ends the episode**, which is the port's rule and the
+    /// right one: an episode that cannot be checkpointed is one a restart
+    /// loses in silence, and carrying on would bank more work that the same
+    /// restart would also lose.
+    ///
+    /// [`latest_state`]: crate::hive::episode_store::latest_state
     fn checkpoint(
         &self,
-        _state: &tinyhivemind_driver::ConductorState,
+        state: &tinyhivemind_driver::ConductorState,
     ) -> tinyhivemind_openhuman::Result<()> {
-        self.wave.fetch_add(1, Ordering::SeqCst);
+        let revision = self.wave.fetch_add(1, Ordering::SeqCst);
+        let state = serde_json::to_value(state).map_err(|error| {
+            tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!(
+                "hive episode: the conductor snapshot would not serialize: {error}"
+            ))
+        })?;
+        let checkpoint = crate::hive::episode_store::PersistedEpisode {
+            episode_id: self.episode_id.clone(),
+            desk: self.desk_id.clone(),
+            thread_root: self.thread_root,
+            revision,
+            state,
+            // The conductor keeps its own watermarks, in `state`.
+            sharing: BTreeMap::new(),
+            // A referral's hop and return address. Both are a referral
+            // episode's, and the conductor does not run one yet -- the e2e
+            // case is ignored for exactly that reason -- so this records
+            // what is true rather than a guess that would resume wrongly.
+            hop: 0,
+            origin: None,
+        };
+        self.append(checkpoint.to_event()).map_err(|error| {
+            tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!(
+                "hive episode: the journal refused a checkpoint: {error}"
+            ))
+        })?;
         Ok(())
     }
 

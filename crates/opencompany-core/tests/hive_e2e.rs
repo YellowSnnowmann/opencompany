@@ -963,6 +963,36 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
     assert_eq!(done[0].2, EpisodeReason::CompleteEpisode);
     assert_eq!(done[0].3, 1, "one wave ran");
 
+    // **The episode wrote down what a restart would otherwise lose.**
+    //
+    // Every wave settles with a checkpoint: the seats, their watermarks, the
+    // ledger of outstanding asks, the conversations open under it. None of
+    // that is a row, so without this it lives in memory and dies with the
+    // process. Asserted by reading it back the way a resume would, and
+    // deserializing it into the type the conductor resumes from -- a
+    // checkpoint that will not round-trip is one a restart cannot use.
+    let checkpoint = opencompany::hive::episode_store::latest_state(
+        runtime.events().as_ref(),
+        runtime.id(),
+        &done[0].0,
+    )
+    .await
+    .expect("the journal reads")
+    .expect("the episode checkpointed itself");
+    assert_eq!(checkpoint.desk, ENGINEERING);
+    assert!(
+        checkpoint.sharing.is_empty(),
+        "the conductor keeps its watermarks in `state`: {:?}",
+        checkpoint.sharing
+    );
+    let resumable: tinyhivemind_driver::ConductorState =
+        serde_json::from_value(checkpoint.state.clone())
+            .expect("the snapshot is what the conductor resumes from");
+    assert_eq!(
+        resumable.chat, ENGINEERING,
+        "the snapshot names the desk it ran on"
+    );
+
     // Recording *is* a seat's contribution: there is no separate "say
     // something" act in a completion episode, so one seat leaves one row.
     let desk = replies(&rows, ENGINEERING);

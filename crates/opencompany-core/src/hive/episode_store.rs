@@ -285,9 +285,18 @@ pub struct PersistedEpisode {
     pub thread_root: Option<EventSeq>,
     /// The driver revision.
     pub revision: u64,
-    /// `tinyhivemind_driver::DriverState`, as serde wrote it.
+    /// The conductor's resumable snapshot
+    /// (`tinyhivemind_driver::ConductorState`), as serde wrote it: the
+    /// episode and every conversation open under it, each seat's watermark,
+    /// the ledger of outstanding asks, who is parked, and the wave in
+    /// progress. What is deliberately **not** here is the driver, the
+    /// routing and the policy -- the host supplies those again on resume,
+    /// because a router is a live object and a policy the operator changed
+    /// between restarts should be the new one.
     pub state: serde_json::Value,
-    /// Per-seat transcript delivery progress.
+    /// Per-seat transcript delivery progress, from before the conductor
+    /// kept its own watermarks. A conducted episode writes none: `state`
+    /// carries them, and two records of the same thing would disagree.
     pub sharing: BTreeMap<String, SharingState>,
     /// The referral hop.
     pub hop: u32,
@@ -332,7 +341,8 @@ impl PersistedEpisode {
         })
     }
 
-    fn to_event(&self) -> CompanyEvent {
+    /// This checkpoint as the row the journal stores.
+    pub(crate) fn to_event(&self) -> CompanyEvent {
         CompanyEvent::EpisodeStateSaved {
             episode_id: self.episode_id.clone(),
             desk: self.desk.clone(),
