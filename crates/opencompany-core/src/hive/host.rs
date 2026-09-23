@@ -19,8 +19,9 @@
 //! admission in front of this company's own `ApprovalPolicy`, so a call the
 //! episode does not serve still reaches that policy and can still park.
 
-use std::sync::Arc;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use openhuman_core::agent::OpenHumanSessionHost;
 use openhuman_core::agent::tinyagents::host::LastTurnUsage;
@@ -82,6 +83,13 @@ pub struct DeskHost {
     /// approval queue into the operator's inbox -- so it arrives as a hook
     /// rather than as something this type reaches for itself.
     parking: Option<Arc<dyn SeatParking>>,
+    /// Each seat's standing prompt, kept from when it was built.
+    ///
+    /// Read back on every turn after a seat's first: those turns are seeded
+    /// from the journal rather than composed, and a seeded turn renders no
+    /// system prompt of its own, so without this a teammate runs with the
+    /// episode brief and no persona at all.
+    personas: Mutex<BTreeMap<String, String>>,
 }
 
 /// What a host does with the approvals one seat's turn raised.
@@ -131,6 +139,7 @@ impl DeskHost {
             episode_id: String::new(),
             wave: AtomicU64::new(0),
             parking: None,
+            personas: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -417,7 +426,21 @@ impl EpisodeHost for DeskHost {
         // The belt goes through whole, admission and all: this company's own
         // gate is only knowable once the teammate is built, and it has to go
         // *behind* the episode's admission rather than be replaced by it.
-        build_episode_seat(record, deps, seat, belt).map_err(|error| refused(&error))
+        let (session, persona) =
+            build_episode_seat(record, deps, seat, belt).map_err(|error| refused(&error))?;
+        self.personas
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(seat.to_owned(), persona);
+        Ok(session)
+    }
+
+    fn persona(&self, seat: &str) -> Option<String> {
+        self.personas
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(seat)
+            .cloned()
     }
 
     fn tool_prefix(&self) -> String {

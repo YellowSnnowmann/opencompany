@@ -5756,7 +5756,7 @@ pub(crate) fn build_episode_seat(
     deps: &HarnessDeps,
     seat: &str,
     belt: tinyhivemind_openhuman::EpisodeBelt,
-) -> crate::Result<oh::agent::OpenHumanSessionHost> {
+) -> crate::Result<(oh::agent::OpenHumanSessionHost, String)> {
     let effective = company.effective_policy();
     let live_roster = company.effective_agents();
     let manifest_agent = live_roster
@@ -5811,7 +5811,13 @@ pub(crate) fn build_episode_seat(
     // serve -- the teammate's whole belt, memory, ledgers, skills -- and the
     // seat would be told its own tools are "not on this seat's belt".
     let gate = belt.admit(Some(Arc::new(behind)));
-    build::episode_seat(&company.id, seat, blueprint, belt.tools, gate)
+    // The persona travels back out with the session. A seat's turns after
+    // its first are seeded rather than composed, and a seeded turn renders
+    // no system prompt, so the host has to put this back at the head of the
+    // seed -- see `EpisodeHost::persona`.
+    let persona = blueprint.system_prompt.clone();
+    let session = build::episode_seat(&company.id, seat, blueprint, belt.tools, gate)?;
+    Ok((session, persona))
 }
 
 pub(crate) fn build_roster(
