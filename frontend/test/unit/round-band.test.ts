@@ -157,4 +157,29 @@ describe("RoundBand", () => {
     expect(referrals).toHaveLength(1);
     expect(referrals[0].textContent).toBe("asked #content");
   });
+
+  /**
+   * A finished episode draws no band, and loses none of its rows.
+   *
+   * The band is the live instrument -- who ran together, who is still
+   * thinking. None of that is news once the episode is over, and the
+   * completion marker already carries the round count and who closed it. So
+   * the frame goes and the transcript stays: hiding the rows with it would
+   * be hiding what the seats actually said.
+   */
+  it("draws no band once the episode has completed, but still draws its rows", () => {
+    const row = {
+      kind: "message" as const,
+      key: "m1",
+      at: 1,
+      entry: { message: { id: "m1" } },
+    } as unknown as TimelineItem;
+    const { band, rendered } = render(
+      round({ status: "committed" }),
+      episode([round({ status: "committed" })], { status: "completed" }),
+      [row],
+    );
+    expect(band).toBeNull();
+    expect(rendered).toEqual(["m1"]);
+  });
 });
