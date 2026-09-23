@@ -1867,3 +1867,98 @@ async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
     );
     assert_eq!(report(&runtime).await.episodes_completed, 2);
 }
+
+// ---------------------------------------------------------------------------
+// 8: a seat at two desks is shown the other one as context
+// ---------------------------------------------------------------------------
+
+/// **An agent seated at two desks knows the other exists.**
+///
+/// `hive_demo` seats the CEO at both `engineering` and `content`. Until the
+/// host answered `Journal::channels`, a seat's brief was its own desk and
+/// nothing else: the CEO ran both rooms and, on either turn, had no idea what
+/// the other held. The library asks for those conversations so it can put
+/// their newest rows in front of the seat as context -- "Nothing here is
+/// addressed to you on this desk."
+///
+/// Two halves have to be right, and both are this host's: `channels` names
+/// the desks, and `EventLogSessionLog::also_read` admits their rows. Naming a
+/// desk the log refuses renders nothing, which is what this ran as before.
+///
+/// **Sequential on purpose.** The desks run one after the other, unlike
+/// `a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice` -- for
+/// `elsewhere` to hold anything the *other* desk's rows must already be below
+/// this wave's watermark, and two desks opened at once have nothing to show
+/// each other yet.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_seat_at_two_desks_is_shown_the_other_as_context() {
+    let home = tempfile::tempdir().unwrap();
+    // The hand-off script, because the fallback plan names one seat and it is
+    // never the CEO: the seat it opens with broadcasts, the fallback places
+    // that on the desk's other seat, and that is what brings the CEO in.
+    let (base_url, script) = spawn_script_with_latency(
+        seat_script("Noted.", hand_off_then_record),
+        Duration::from_millis(150),
+    )
+    .await;
+    let (address, runtime) = boot_demo(home.path(), &base_url).await;
+    let client = Client::new(address);
+    client.sign_in(DEMO_ADMIN).await;
+
+    // The content desk first, and all the way to quiescence: its rows are
+    // what the engineering brief should later carry as context.
+    client.say(CONTENT, "Draft the release note.").await;
+    wait_for(
+        &runtime,
+        "the content episode to complete",
+        EPISODE,
+        completed(1),
+    )
+    .await;
+
+    client.say(ENGINEERING, "Plan the staging rollout.").await;
+    let rows = wait_for(&runtime, "both episodes to complete", EPISODE, completed(2)).await;
+    assert_eq!(completions(&rows).len(), 2);
+
+    let seats: Vec<Seat> = script.asks().iter().filter_map(seat_of).collect();
+    let elsewhere = |seat: &Seat| seat.prompt.contains("## Elsewhere, for context");
+
+    // The CEO sits at both, so its engineering turn is shown the content desk.
+    let ceo = seats
+        .iter()
+        .filter(|seat| seat.speaker == CEO && seat.desk == ENGINEERING)
+        .find(|seat| elsewhere(seat))
+        .unwrap_or_else(|| {
+            panic!(
+                "the CEO's engineering brief never carried the content desk; briefs: {:?}",
+                seats
+                    .iter()
+                    .filter(|seat| seat.speaker == CEO)
+                    .map(|seat| (&seat.desk, elsewhere(seat)))
+                    .collect::<Vec<_>>()
+            )
+        });
+    let section = ceo
+        .prompt
+        .rsplit_once("## Elsewhere, for context")
+        .map(|(_, rest)| rest.to_string())
+        .expect("the section is there");
+    assert!(
+        section.contains(CONTENT),
+        "the section names the other desk: {section}"
+    );
+    assert!(
+        section.contains(&format!("@{WRITER}")) || section.contains(&format!("@{CEO}")),
+        "the section carries a row said on that desk: {section}"
+    );
+
+    // And a seat that sits at one desk only is shown nothing else -- this is
+    // per seat, not per desk.
+    assert!(
+        seats
+            .iter()
+            .filter(|seat| seat.speaker == ENGINEER)
+            .all(|seat| !elsewhere(seat)),
+        "the engineer sits only at engineering and must be told it is in nothing else",
+    );
+}
