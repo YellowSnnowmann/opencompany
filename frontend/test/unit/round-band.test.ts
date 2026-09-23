@@ -47,6 +47,7 @@ function episode(rounds: EpisodeRound[], over: Partial<Episode> = {}): Episode {
     messageIds: [],
     roundCount: rounds.length,
     referrals: [],
+    conversations: [],
     live: true,
     plan: { kind: "hive", primaryId: "engineer", invitedIds: ["ceo"] },
     ...over,

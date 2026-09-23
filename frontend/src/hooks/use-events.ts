@@ -525,6 +525,40 @@ export type CompanyStreamEvent =
       actions?: unknown[];
     }
   | {
+      /** One seat opened a private conversation with another.
+       *
+       *  A **reference**: it carries no text. The question and the answer are
+       *  in `conversationId`, and this says two seats are talking and where,
+       *  so the indicator can be raised from the desk's own stream rather
+       *  than by watching every pair channel for one to start. */
+      type: "conversation_opened";
+      seq: number;
+      atMillis: number;
+      chatId: string;
+      episodeId: string;
+      /** The channel the exchange itself is written to. */
+      conversationId: string;
+      /** The `ask` row it is rooted at. */
+      root: number;
+      asker: string;
+      askee: string;
+    }
+  | {
+      /** The conversation ended — the other half of the reference. */
+      type: "conversation_concluded";
+      seq: number;
+      atMillis: number;
+      chatId: string;
+      episodeId: string;
+      conversationId: string;
+      root: number;
+      asker: string;
+      askee: string;
+      /** Ended without an answer: nothing was due, or it ran out of turns.
+       *  An indicator that only watched for an answer would hang here. */
+      forced: boolean;
+    }
+  | {
       type: "broadcast_routed";
       seq: number;
       atMillis: number;
@@ -760,6 +794,8 @@ export type EpisodeFrame = Extract<
       | "round_committed"
       | "broadcast_routed"
       | "dm_delivered"
+      | "conversation_opened"
+      | "conversation_concluded"
       | "episode_completed"
       | "referral";
   }

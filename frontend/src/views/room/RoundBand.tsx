@@ -26,6 +26,7 @@
 import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Clock, Loader2, MinusCircle } from "lucide-react";
 
+import { ConversationChip } from "@/components/episode/ConversationChip";
 import { RoutingPlanChip } from "@/components/episode/RoutingPlanChip";
 import { UTTERANCE_LABEL } from "@/components/episode/UtteranceChip";
 import { TeammateAvatar } from "@/components/teammate-avatar";
@@ -123,6 +124,17 @@ export function RoundBand({ episode, round, items, renderRow, agentNames }: Prop
           <span>committed</span>
         )}
         {first && episode.plan && <RoutingPlanChip plan={episode.plan} agentNames={agentNames} />}
+        {/* The private exchanges this episode opened. On the first band only:
+            a conversation belongs to the episode rather than to a round, and
+            repeating it under every round would read as several. */}
+        {first &&
+          episode.conversations.map((conversation) => (
+            <ConversationChip
+              key={conversation.root}
+              conversation={conversation}
+              agentNames={agentNames}
+            />
+          ))}
         {episode.referrals.filter((r) => !r.returning).map((referral) => (
           <span
             key={`${referral.toDesk}:${referral.sequence}`}

@@ -27,13 +27,14 @@ import type { RoutingPlanDto, UtteranceKind } from "@/api/types";
 import { hostMessageId, type ChatMessage } from "@/lib/chat";
 import {
   episodesOf,
+  type ConversationRecord,
   type EpisodeFrames,
   type EpisodeReferral,
   type EpisodeState,
   type SeatStatus,
 } from "@/lib/episode-frames";
 
-export type { SeatStatus } from "@/lib/episode-frames";
+export type { ConversationRecord, SeatStatus } from "@/lib/episode-frames";
 
 /** One seat of a round: who, what they are doing, and what they said. */
 export interface EpisodeSeat {
@@ -80,6 +81,11 @@ export interface Episode {
   /** Rounds the host counted, else the rounds seen here. */
   roundCount: number;
   referrals: EpisodeReferral[];
+  /** The private exchanges this episode opened, oldest first.
+   *
+   * Only the frames carry these: a conversation's own rows are in the pair
+   * channel, so a fold over this desk's transcript alone never sees them. */
+  conversations: ConversationRecord[];
   /** Whether any part of it came from live frames rather than rows alone. */
   live: boolean;
 }
@@ -117,6 +123,7 @@ export function foldEpisodes(
           messageIds: [],
           roundCount: 0,
           referrals: [],
+          conversations: [],
           live: false,
         },
         rounds: new Map(),
@@ -212,6 +219,9 @@ function layerFrames(bucket: Bucket, state: EpisodeState): void {
   }
   episode.openedAt = state.openedAtMillis ?? episode.openedAt;
   episode.referrals = state.referrals;
+  episode.conversations = Object.values(state.conversations).sort(
+    (one, two) => one.root - two.root,
+  );
   if (state.status === "completed") {
     episode.status = "completed";
     episode.completedAt = state.completedAtMillis ?? episode.completedAt;

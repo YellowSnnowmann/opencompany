@@ -230,3 +230,103 @@ describe("reduceEpisodeFrame", () => {
     expect(state.byId["ep-0"]).toBeUndefined();
   });
 });
+
+/**
+ * A private exchange between two seats.
+ *
+ * Its own rows are in the pair's channel, so a fold over this desk's
+ * transcript never sees them — the reference frames are the only way the
+ * room knows it happened, and the only thing the indicator can read.
+ */
+describe("conversations", () => {
+  const askedFrame = (episodeId: string, root: number, seq: number): EpisodeFrame => ({
+    type: "conversation_opened",
+    seq,
+    atMillis: seq * 10,
+    chatId: "engineering",
+    episodeId,
+    conversationId: "dm:ceo+engineer",
+    root,
+    asker: "engineer",
+    askee: "ceo",
+  });
+  const concludedFrame = (
+    episodeId: string,
+    root: number,
+    seq: number,
+    forced = false,
+  ): EpisodeFrame => ({
+    type: "conversation_concluded",
+    seq,
+    atMillis: seq * 10,
+    chatId: "engineering",
+    episodeId,
+    conversationId: "dm:ceo+engineer",
+    root,
+    asker: "engineer",
+    askee: "ceo",
+    forced,
+  });
+
+  const fold = (frames: EpisodeFrame[]): EpisodeFrames =>
+    frames.reduce((state, frame) => reduceEpisodeFrame(state, frame), EMPTY_EPISODE_FRAMES);
+
+  it("is live until something ends it", () => {
+    const state = fold([opened("ep-1"), askedFrame("ep-1", 14, 2)]);
+    const [conversation] = Object.values(state.byId["ep-1"].conversations);
+
+    expect(conversation.asker).toBe("engineer");
+    expect(conversation.askee).toBe("ceo");
+    expect(conversation.conversationId).toBe("dm:ceo+engineer");
+    expect(conversation.endedAtMillis).toBeUndefined();
+  });
+
+  it("ends on the same root it opened on", () => {
+    const state = fold([opened("ep-1"), askedFrame("ep-1", 14, 2), concludedFrame("ep-1", 14, 3)]);
+    const conversations = Object.values(state.byId["ep-1"].conversations);
+
+    expect(conversations).toHaveLength(1);
+    expect(conversations[0].endedAtMillis).toBe(30);
+    expect(conversations[0].forced).toBe(false);
+  });
+
+  /**
+   * The case an indicator watching only for an answer would hang on: a
+   * conversation that ran out of turns ends without one, and is still over.
+   */
+  it("ends without an answer when it was forced", () => {
+    const state = fold([
+      opened("ep-1"),
+      askedFrame("ep-1", 14, 2),
+      concludedFrame("ep-1", 14, 3, true),
+    ]);
+    const [conversation] = Object.values(state.byId["ep-1"].conversations);
+
+    expect(conversation.endedAtMillis).toBe(30);
+    expect(conversation.forced).toBe(true);
+  });
+
+  /** A fold that started mid-episode never saw the opening frame. */
+  it("still ends usably when only the concluding frame was seen", () => {
+    const state = fold([opened("ep-1"), concludedFrame("ep-1", 14, 3)]);
+    const [conversation] = Object.values(state.byId["ep-1"].conversations);
+
+    expect(conversation.asker).toBe("engineer");
+    expect(conversation.askee).toBe("ceo");
+    expect(conversation.endedAtMillis).toBe(30);
+  });
+
+  it("keeps two conversations apart by their root", () => {
+    const state = fold([
+      opened("ep-1"),
+      askedFrame("ep-1", 14, 2),
+      askedFrame("ep-1", 21, 3),
+      concludedFrame("ep-1", 14, 4),
+    ]);
+    const conversations = Object.values(state.byId["ep-1"].conversations);
+
+    expect(conversations).toHaveLength(2);
+    expect(conversations.find((one) => one.root === 14)?.endedAtMillis).toBe(40);
+    expect(conversations.find((one) => one.root === 21)?.endedAtMillis).toBeUndefined();
+  });
+});

@@ -84,6 +84,24 @@ export interface DmRecord {
   atMillis: number;
 }
 
+/** A private exchange between two seats of this desk.
+ *
+ * `endedAtMillis` is what turns the live indicator off. A conversation that
+ * ran out of turns ends `forced`, without an answer, and an indicator that
+ * only watched for an answer would hang on exactly that case. */
+export interface ConversationRecord {
+  /** The `ask` row it is rooted at, and the key it is folded by. */
+  root: number;
+  asker: string;
+  askee: string;
+  /** The channel the exchange itself is in. */
+  conversationId: string;
+  openedAtMillis: number;
+  endedAtMillis?: number;
+  /** Ended without an answer. */
+  forced?: boolean;
+}
+
 /** A crossing raised from inside this episode. */
 export interface EpisodeReferral {
   toDesk: string;
@@ -117,6 +135,9 @@ export interface EpisodeState {
   summarySeq?: number;
   broadcasts: BroadcastRecord[];
   dms: DmRecord[];
+  /** Keyed by the ask row that roots each one, so the concluding frame
+   *  finds the record the opening frame made. */
+  conversations: Record<number, ConversationRecord>;
   referrals: EpisodeReferral[];
   /** The newest frame sequence folded, for eviction order and tests. */
   lastSeq: number;
@@ -161,6 +182,7 @@ function mintEpisode(id: string, chatId: string, seq: number): EpisodeState {
     status: "open",
     broadcasts: [],
     dms: [],
+    conversations: {},
     referrals: [],
     lastSeq: seq,
   };
@@ -327,6 +349,45 @@ export function reduceEpisodeFrame(
         ],
       };
       break;
+    case "conversation_opened":
+      episode = {
+        ...episode,
+        conversations: {
+          ...episode.conversations,
+          [frame.root]: {
+            root: frame.root,
+            asker: frame.asker,
+            askee: frame.askee,
+            conversationId: frame.conversationId,
+            openedAtMillis: frame.atMillis,
+          },
+        },
+      };
+      break;
+    case "conversation_concluded": {
+      // Merge rather than replace: the concluding frame carries the pair and
+      // the channel too, so a fold that started mid-episode and never saw
+      // the opening still ends with a usable record.
+      const opened = episode.conversations[frame.root];
+      episode = {
+        ...episode,
+        conversations: {
+          ...episode.conversations,
+          [frame.root]: {
+            ...(opened ?? {
+              root: frame.root,
+              asker: frame.asker,
+              askee: frame.askee,
+              conversationId: frame.conversationId,
+              openedAtMillis: frame.atMillis,
+            }),
+            endedAtMillis: frame.atMillis,
+            forced: frame.forced,
+          },
+        },
+      };
+      break;
+    }
     case "episode_completed":
       episode = {
         ...episode,
