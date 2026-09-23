@@ -349,7 +349,11 @@ fn broadcast(seat: &Seat, message: impl Into<String>) -> Reply {
 }
 
 fn complete(seat: &Seat, message: impl Into<String>) -> Reply {
-    speech("complete_episode", seat, json!({ "message": message.into() }))
+    speech(
+        "complete_episode",
+        seat,
+        json!({ "message": message.into() }),
+    )
 }
 
 /// The turn is over once the seat's one speech act is recorded.
@@ -723,7 +727,13 @@ fn dump(rows: &[StoredEvent], script: &support::script_model::Script) {
         eprintln!(
             "[ask] tools={:?} seat={:?} pending={:?}",
             ask.tools,
-            seat_of(&ask).map(|seat| (seat.speaker, seat.parent, seat.heard, seat.assignment, seat.calls)),
+            seat_of(&ask).map(|seat| (
+                seat.speaker,
+                seat.parent,
+                seat.heard,
+                seat.assignment,
+                seat.calls
+            )),
             ask.pending_tool
         );
     }
@@ -742,9 +752,15 @@ async fn wait_for(
         if done(&rows) {
             if std::env::var_os("HIVE_E2E_DUMP").is_some() {
                 for row in &rows {
-                    eprintln!("[journal] {} {}", row.seq.value(),
-                        serde_json::to_string(&row.event).unwrap_or_default()
-                            .chars().take(300).collect::<String>());
+                    eprintln!(
+                        "[journal] {} {}",
+                        row.seq.value(),
+                        serde_json::to_string(&row.event)
+                            .unwrap_or_default()
+                            .chars()
+                            .take(300)
+                            .collect::<String>()
+                    );
                 }
             }
             return rows;
@@ -843,8 +859,7 @@ fn replies(rows: &[StoredEvent], chat: &str) -> Vec<ReplyRow> {
 
 /// Every `RoundStarted` on `chat`, as `(revision, seats)`.
 fn rounds(rows: &[StoredEvent], chat: &str) -> Vec<(u64, Vec<String>)> {
-    let mut waves: std::collections::BTreeMap<u64, Vec<String>> =
-        std::collections::BTreeMap::new();
+    let mut waves: std::collections::BTreeMap<u64, Vec<String>> = std::collections::BTreeMap::new();
     for row in rows {
         let CompanyEvent::TurnStarted {
             chat_id,
@@ -1599,14 +1614,15 @@ async fn a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice() {
         .filter(|row| {
             matches!(
                 &row.event,
-                CompanyEvent::TurnStarted { agent_id: Some(_), episode_id: Some(_), .. }
+                CompanyEvent::TurnStarted {
+                    agent_id: Some(_),
+                    episode_id: Some(_),
+                    ..
+                }
             )
         })
         .count();
-    assert!(
-        seat_turns >= 2,
-        "both desks ran a seat turn: {seat_turns}"
-    );
+    assert!(seat_turns >= 2, "both desks ran a seat turn: {seat_turns}");
     let failures = measured.failures(&Thresholds {
         cross_desk_referrals: 0,
         agent_contacts: 0,
@@ -1669,9 +1685,7 @@ async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
                     Some(recalled) if recalled.contains(FACT_KEY) => {
                         complete(seat, format!("From the desk's memory: {FACT_KEY}."))
                     }
-                    Some(recalled) => {
-                        complete(seat, format!("Memory had nothing: {recalled}"))
-                    }
+                    Some(recalled) => complete(seat, format!("Memory had nothing: {recalled}")),
                 };
             }
             record_part(seat)
