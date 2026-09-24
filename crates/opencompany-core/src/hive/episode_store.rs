@@ -76,6 +76,8 @@ pub struct EpisodeSummary {
     pub reason: Option<EpisodeReason>,
     /// The referral hop it runs at.
     pub hop: u32,
+    /// The seats parked on the operator right now, in the order they parked.
+    pub waiting: Vec<String>,
 }
 
 /// `GET {scope}/episodes` row. Mirrors `EpisodeDto` in
@@ -111,6 +113,9 @@ pub struct EpisodeDto {
     /// Why it closed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<EpisodeReason>,
+    /// The seats parked on the operator right now.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub waiting: Vec<String>,
 }
 
 impl From<EpisodeSummary> for EpisodeDto {
@@ -128,6 +133,7 @@ impl From<EpisodeSummary> for EpisodeDto {
             completed_at_millis: summary.completed_at_millis,
             completed_by: summary.completed_by,
             reason: summary.reason,
+            waiting: summary.waiting,
         }
     }
 }
@@ -167,6 +173,7 @@ pub fn fold_episodes(events: &[StoredEvent]) -> Vec<EpisodeSummary> {
                     completed_by: None,
                     reason: None,
                     hop: *hop,
+                    waiting: Vec::new(),
                 });
             }
             // An episode in flight reports the wave its turns are running
@@ -208,6 +215,24 @@ pub fn fold_episodes(events: &[StoredEvent]) -> Vec<EpisodeSummary> {
                     summary.completed_at_millis = Some(stored.at_millis);
                     summary.completed_by = completed_by.clone();
                     summary.reason = Some(*reason);
+                    summary.waiting.clear();
+                }
+            }
+            CompanyEvent::EpisodeSeatParked {
+                episode_id, seat, ..
+            } => {
+                if let Some(summary) = index.get(episode_id).map(|at| &mut episodes[*at])
+                    && summary.status == EpisodeStatus::Open
+                    && !summary.waiting.contains(seat)
+                {
+                    summary.waiting.push(seat.clone());
+                }
+            }
+            CompanyEvent::EpisodeSeatResumed {
+                episode_id, seat, ..
+            } => {
+                if let Some(summary) = index.get(episode_id).map(|at| &mut episodes[*at]) {
+                    summary.waiting.retain(|waiting| waiting != seat);
                 }
             }
             _ => {}
