@@ -328,6 +328,35 @@ pub struct HiveDispatcher {
     pub mentions: Option<crate::runtime::mention_seam::MentionSeam>,
 }
 
+/// Who answers an operator DM, when the conversation is one.
+///
+/// **A DM's responder is not a routing question.** The hive holds the roster
+/// so `ask` has somewhere to land, but a message in `dm:pm` is for the PM.
+/// Routed instead it would be answered by whoever the ranker liked -- and with
+/// a TinyHumans key present that ranker is a model, so the wrong teammate
+/// answering your DM would be a decision nobody made and nothing recorded.
+///
+/// An explicit `@mention` still wins: naming someone in your own DM is an
+/// instruction, not an ambiguity.
+///
+/// `None` for a desk, where routing is exactly the right question to ask.
+pub(crate) fn dm_opening(
+    desk_id: &str,
+    lead: &str,
+    explicit: Option<&str>,
+) -> Option<(Vec<String>, RoutingPlanDto)> {
+    if !desk_id.starts_with(crate::runtime::assignee::DM_PREFIX) {
+        return None;
+    }
+    let primary = explicit.unwrap_or(lead).to_owned();
+    Some((
+        vec![primary.clone()],
+        RoutingPlanDto::One {
+            primary_id: primary,
+        },
+    ))
+}
+
 impl HiveDispatcher {
     /// The hive bound to `desk_id`, when that desk runs one.
     #[must_use]
@@ -532,27 +561,8 @@ impl HiveDispatcher {
                 })
                 .map(str::to_owned)
         });
-        // **A DM's responder is not a routing question.**
-        //
-        // The hive holds the roster so `ask` has somewhere to land, but a
-        // message in `dm:pm` is for the PM. Routed instead, it would be
-        // answered by whoever the ranker liked -- and with a TinyHumans key
-        // present that ranker is a model, so the wrong teammate answering
-        // your DM would be a decision nobody made and nothing recorded.
-        //
-        // An explicit @mention still wins: naming someone in your own DM is
-        // an instruction, not an ambiguity.
-        if desk
-            .desk_id
-            .starts_with(crate::runtime::assignee::DM_PREFIX)
-        {
-            let primary = explicit.unwrap_or(lead);
-            return Ok((
-                vec![primary.clone()],
-                RoutingPlanDto::One {
-                    primary_id: primary,
-                },
-            ));
+        if let Some(pinned) = dm_opening(&desk.desk_id, &lead, explicit.as_deref()) {
+            return Ok(pinned);
         }
         let request = desk.hive.desk_request(
             trigger.text.clone(),

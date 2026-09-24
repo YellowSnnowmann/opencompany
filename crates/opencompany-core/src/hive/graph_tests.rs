@@ -166,3 +166,37 @@ async fn an_unbound_teammate_is_in_no_dm_at_all() {
         "and it is not askable from anyone else's"
     );
 }
+
+/// An operator DM is answered by whose DM it is, never by a router's pick.
+///
+/// This is the decision that binding the roster makes dangerous. Every
+/// teammate is a member so `ask` has somewhere to land -- which also makes
+/// every teammate a candidate the router could choose. If routing ran here, a
+/// message to your PM could be answered by whoever a ranker preferred, and
+/// with a TinyHumans key that ranker is a model.
+#[test]
+fn a_dm_is_answered_by_its_owner_and_a_desk_is_still_routed() {
+    use crate::hive::conducted::dm_opening;
+
+    let (starters, plan) =
+        dm_opening("dm:ceo", "ceo", None).expect("a DM pins its own responder");
+    assert_eq!(starters, vec!["ceo".to_string()]);
+    assert!(
+        matches!(plan, crate::hive::routing::RoutingPlanDto::One { primary_id } if primary_id == "ceo"),
+        "one recipient, named -- not a plan for the router to fill in"
+    );
+
+    // Naming someone in your own DM is an instruction, not an ambiguity.
+    let (starters, _) = dm_opening("dm:ceo", "ceo", Some("engineer"))
+        .expect("a DM still pins, even when a mention redirects it");
+    assert_eq!(
+        starters,
+        vec!["engineer".to_string()],
+        "an explicit mention wins over the owner"
+    );
+
+    assert!(
+        dm_opening("engineering", "ceo", None).is_none(),
+        "a desk is routed -- that is what a desk is for"
+    );
+}
