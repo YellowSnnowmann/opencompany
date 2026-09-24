@@ -32,9 +32,19 @@ const { values: args } = parseArgs({
 
 const base = args.base.replace(/\/+$/, "");
 const scope = `${base}/api/v1/company`;
-const samples = Number.parseInt(args.samples, 10);
-const waitMillis = Number.parseInt(args.seconds, 10) * 1000;
 const log = (line) => process.stderr.write(`[readable] ${line}\n`);
+
+function positiveInt(name, raw) {
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isInteger(value) || value <= 0 || String(value) !== raw.trim()) {
+    log(`--${name} must be a positive integer, got ${JSON.stringify(raw)}`);
+    process.exit(99);
+  }
+  return value;
+}
+
+const samples = positiveInt("samples", args.samples);
+const waitMillis = positiveInt("seconds", args.seconds) * 1000;
 
 if (!/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(base)) {
   log(`refusing ${base}: this eval signs in with an echoed dev code and only runs against a loopback host`);
