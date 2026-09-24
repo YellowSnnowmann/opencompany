@@ -130,3 +130,75 @@ async fn an_operator_dm_runs_an_episode_answered_by_its_own_teammate() {
         "and nobody else did -- the roster is bound to be asked, not to reply: {replies:?}"
     );
 }
+
+/// A teammate that takes something on says so in its own line, and that line
+/// is one the operator can write back to.
+///
+/// The announcement has to be a real row. A note returned to the asker for
+/// relaying would leave the operator writing back into the first teammate's
+/// line -- the line that no longer holds the work.
+///
+/// That the line then runs an episode is
+/// [`an_operator_dm_runs_an_episode_answered_by_its_own_teammate`]'s claim, not
+/// this one's: the point here is that the operator is told where, by the
+/// teammate that has it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_teammate_that_takes_over_says_so_in_a_line_the_operator_can_reach() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let (base_url, _script) = spawn_script_recording(Vec::new()).await;
+    let (deps, _journal) = deps(base_url, dir.path());
+    let record = record(TWO_DESKS);
+
+    let pool = HarnessPool::new();
+    pool.ensure(&record, &deps).await.expect("the roster boots");
+
+    let log = Arc::new(MemoryLog::default());
+    let events: Arc<dyn EventLog> = log.clone();
+
+    let (chat, _seq) = crate::hive::dispatch::announce_takeover(
+        events.as_ref(),
+        &record.id,
+        "engineer",
+        "I have the webauthn estimate, I will follow up here.",
+    )
+    .await
+    .expect("the announcement lands");
+    assert_eq!(chat, "dm:engineer", "in its own line, not the asker's");
+
+    let told = log.replies(&chat);
+    assert!(
+        told.iter()
+            .any(|(who, text)| who == "engineer" && text.contains("webauthn")),
+        "the operator can see who has it: {told:?}"
+    );
+    assert!(
+        log.replies("dm:ceo").is_empty(),
+        "and the teammate first written to has promised nothing on its behalf"
+    );
+
+    // And that line is a room, so the operator's reply there reaches the
+    // teammate that claimed the work rather than the one they first wrote to.
+    let (hives, errors) = crate::hive::graph::dm_hives(&record, 3, &|id| {
+        futures::executor::block_on(pool.agent(&record.id, id))
+            .map(|agent| agent.runtime_agent().clone())
+    });
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(
+        matches!(
+            crate::hive::dispatch::surface_of(&record, &hives, Some(&chat)),
+            crate::hive::dispatch::Surface::Room { ref desk_id } if desk_id == &chat
+        ),
+        "the line it claimed is one the operator can write back to"
+    );
+}
+
+/// The notice the asker may leave behind says only what is true.
+#[test]
+fn the_hand_off_notice_names_the_line_and_promises_no_timing() {
+    let notice = crate::hive::dispatch::hand_off_notice("engineer", "dm:engineer");
+    assert!(notice.contains("dm:engineer"), "it says where: {notice}");
+    assert!(
+        !notice.to_lowercase().contains("this turn"),
+        "and does not promise when: {notice}"
+    );
+}
