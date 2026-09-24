@@ -211,9 +211,6 @@ impl EventLogSessionLog {
     ///   workflow report, an owner-fallback report — is
     ///   [`SessionAuthor::System`]: a seat reads "the content desk answered"
     ///   rather than a teammate that never sat here.
-    ///
-    /// One committed row is deliberately not chat: the conclusion the
-    /// conductor mints when a conversation ends (see [`is_conclusion`]).
     fn row(&self, stored: StoredEvent) -> Option<LogMessage> {
         let sequence = Sequence(stored.seq.value());
         match stored.event {
@@ -239,16 +236,14 @@ impl EventLogSessionLog {
                 audience,
                 episode,
                 ..
-            } if self.addresses_desk(Some(&chat_id)) && !is_conclusion(episode.as_ref()) => {
-                Some(LogMessage {
-                    sequence,
-                    chat_id: Some(self.reported_chat(&chat_id)),
-                    parent: self.conversation_root(&chat_id, parent, episode.map(|e| e.kind)),
-                    author: author_of(&agent_id),
-                    content: text,
-                    audience: self.audience_of(&chat_id, &agent_id, audience),
-                })
-            }
+            } if self.addresses_desk(Some(&chat_id)) => Some(LogMessage {
+                sequence,
+                chat_id: Some(self.reported_chat(&chat_id)),
+                parent: self.conversation_root(&chat_id, parent, episode.map(|e| e.kind)),
+                author: author_of(&agent_id),
+                content: text,
+                audience: self.audience_of(&chat_id, &agent_id, audience),
+            }),
             _ => None,
         }
     }
@@ -306,29 +301,6 @@ impl EventLogSessionLog {
             Audience::Aside { members }
         }
     }
-}
-
-/// Whether this row is the conductor concluding a conversation.
-///
-/// The conductor mints one when an exchange ends: a `Dm` to the asker whose
-/// message **restates the askee's own last line**, verbatim. Both rows are in
-/// the same thread now (`DeskHost::commit`), so every reader that gets one
-/// gets the other directly above it, and a live run measured the paragraph
-/// three times in one 6.4k-character prompt -- once in the desk delta, once
-/// in the conversation transcript, and once as this restatement of it.
-///
-/// So it is journaled and not projected. The row is the ledger's proof that
-/// the asker was answered (`ledger.answered`), and the console reads the
-/// journal directly, so neither loses anything; what it stops being is a
-/// second copy in every brief and every rebuilt seat history that carries
-/// the conversation.
-///
-/// Safe to key on the kind: `dm` is unserved in the speech vocabulary, so no
-/// seat can call it and a `Dm` commit has exactly one author -- this
-/// conductor, concluding. A row from before episodes carries no kind at all
-/// and is chat like any other.
-fn is_conclusion(episode: Option<&crate::ports::types::ReplyEpisode>) -> bool {
-    episode.is_some_and(|episode| matches!(episode.kind, UtteranceKind::Dm))
 }
 
 /// Reserved reply authors this host journals under, which no roster id can

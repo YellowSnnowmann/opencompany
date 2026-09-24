@@ -502,19 +502,20 @@ async fn an_episodes_desk_rows_are_roots_and_a_conversation_is_its_own_thread() 
     // answer is the ask's first reply, and the completion is a root.
     for seat in ["strategist", "planner"] {
         let (readable, _) = read_as(&adapter, seat, None).await;
-        assert_eq!(readable, vec![1, 2, 3, 5], "{seat}'s desk");
+        // Row 4 is the conclusion: confided to this pair, so it is promoted
+        // into their desk read like every other row of the thread.
+        assert_eq!(readable, vec![1, 2, 3, 4, 5], "{seat}'s desk");
     }
     // A third seat reads the desk, and of the exchange only that it happened.
     let (readable, elided) = read_as(&adapter, "researcher", None).await;
     assert_eq!(readable, vec![1, 5], "the researcher's desk");
     assert!(!elided.is_empty(), "the aside is a stub, not absent");
 
-    // The conversation's own thread holds the exchange whole -- what the
-    // asker's brief carries -- and nothing of it for a third seat. Row 4 is
-    // the conclusion, journaled and not projected: it restates row 3, which
-    // is directly above it here (`is_conclusion`).
+    // The conversation's own thread holds the exchange whole -- the ask, the
+    // answer, and the conclusion that closes it -- and nothing of it for a
+    // third seat.
     let (readable, _) = read_as(&adapter, "strategist", Some(Sequence(2))).await;
-    assert_eq!(readable, vec![2, 3], "the asker's thread");
+    assert_eq!(readable, vec![2, 3, 4], "the asker's thread");
     let (readable, _) = read_as(&adapter, "researcher", Some(Sequence(2))).await;
     assert!(
         readable.is_empty(),
@@ -522,16 +523,18 @@ async fn an_episodes_desk_rows_are_roots_and_a_conversation_is_its_own_thread() 
     );
 }
 
-/// **A conclusion is journaled and not projected.**
+/// **A conclusion reaches the asker, because a forced one has to.**
 ///
-/// It restates the askee's own last line verbatim, and both rows are in the
-/// same thread, so every reader that reaches one reaches the other directly
-/// above it. A live run measured that paragraph three times in one prompt.
-/// Withholding it costs nothing the ledger or the console needs -- both read
-/// the journal, not this projection -- and saves a copy in every brief and
-/// every rebuilt seat history that carries the conversation.
+/// This adapter used to withhold every conclusion from the projection. That
+/// was right while the row restated the askee's last line verbatim -- a live
+/// run measured that paragraph three times in one prompt -- but `tinyhivemind`
+/// 8a672764 took the restatement out at the source. What is left is a marker,
+/// and on a forced close it is the only thing that says the answer never
+/// came: the rows show an exchange that simply stops, `awaiting` clears, and
+/// nothing else tells the seat why. Withholding it now would remove the one
+/// message worth sending.
 #[tokio::test]
-async fn the_conclusion_of_a_conversation_is_journaled_and_not_projected() {
+async fn a_forced_conclusion_reaches_the_asker() {
     use crate::ports::types::UtteranceKind;
     let log = Arc::new(MemoryLog::default());
     let company = MemoryLog::company();
@@ -555,26 +558,15 @@ async fn the_conclusion_of_a_conversation_is_journaled_and_not_projected() {
     )
     .await
     .unwrap();
-    let answer = "none on file for either client";
+    // No answer: the conversation ran past its wall and the conductor closed
+    // it. The only row that says so is the conclusion.
     log.append(
         &company,
         episode_row(
             &pair,
             "planner",
-            answer,
-            Vec::new(),
-            2,
-            UtteranceKind::CompleteEpisode,
-        ),
-    )
-    .await
-    .unwrap();
-    log.append(
-        &company,
-        episode_row(
-            &pair,
-            "planner",
-            &format!("concluded our conversation: {answer}"),
+            "concluded our conversation (thread 2): the conversation did not conclude in time; \
+             take what was said and proceed",
             vec!["strategist".into()],
             2,
             UtteranceKind::Dm,
@@ -582,41 +574,26 @@ async fn the_conclusion_of_a_conversation_is_journaled_and_not_projected() {
     )
     .await
     .unwrap();
-    let adapter = seated(&log, vec!["strategist".into(), "planner".into()]);
-
-    // Not on the desk, not in the thread, and not as an elided stub either:
-    // a row nobody may read is a gap the transcript has to explain, and this
-    // one is a restatement of the row above it rather than something said.
-    for thread_root in [None, Some(Sequence(2))] {
-        let (readable, elided) = read_as(&adapter, "strategist", thread_root).await;
-        assert!(
-            !readable.contains(&4) && !elided.contains(&4),
-            "the conclusion reached the asker at {thread_root:?}: {readable:?} {elided:?}"
-        );
-    }
-    // And the answer it restates is still there, once.
-    let (readable, _) = read_as(&adapter, "strategist", Some(Sequence(2))).await;
-    assert_eq!(
-        readable,
-        vec![2, 3],
-        "the exchange, without the restatement"
+    let adapter = seated(
+        &log,
+        vec!["strategist".into(), "planner".into(), "researcher".into()],
     );
 
-    // The row itself is untouched in the journal: it is the ledger's proof
-    // the asker was answered, and the console reads it from here.
-    let page = log
-        .read_from(&company, crate::ports::types::EventSeq::new(4), 1)
-        .await
-        .unwrap();
+    // The asker reads it -- on the desk, where the thread is confided to it,
+    // and in the thread itself.
+    let (desk, _) = read_as(&adapter, "strategist", None).await;
     assert!(
-        matches!(
-            &page.first().expect("journaled").event,
-            crate::ports::types::CompanyEvent::AgentReply { text, .. } if text.contains(answer)
-        ),
-        "the conclusion is still in the journal"
+        desk.contains(&3),
+        "the asker never learned the close: {desk:?}"
     );
-}
+    let (thread, _) = read_as(&adapter, "strategist", Some(Sequence(2))).await;
+    assert_eq!(thread, vec![2, 3], "the exchange, ending in why it ended");
 
+    // And a seat outside the pair reads none of it, as before.
+    let (readable, elided) = read_as(&adapter, "researcher", None).await;
+    assert_eq!(readable, vec![1], "the researcher reads only the desk");
+    assert!(!elided.is_empty(), "the aside is a stub, not absent");
+}
 /// **A party reads the whole of its own conversation on its desk turn.**
 ///
 /// The library's channel-level rule is each root and its *first* reply, so a
