@@ -154,7 +154,7 @@ export function RoundBand({ episode, round, items, renderRow, agentNames }: Prop
             className="rounded-full border border-dashed px-2 py-0.5"
             data-testid="round-referral"
           >
-            asked {referral.direct ? `@${agentNames?.[referral.target] ?? referral.target}` : `#${referral.toDesk}`}
+            asked {referral.direct ? `@${teammateName(referral.target, agentNames)}` : `#${referral.toDesk}`}
           </span>
         ))}
       </header>
