@@ -3481,6 +3481,15 @@ impl RuntimeBuilder {
                                     crate::harness::policy::ApprovalRequestQueue::with_grants(
                                         grants.clone(),
                                     ),
+                                approval_parker: Some(
+                                    crate::runtime::approval_park::ApprovalParker::new(
+                                        gate.clone(),
+                                        journal.clone(),
+                                        grants.clone(),
+                                        continuations.clone(),
+                                        events.clone(),
+                                    ),
+                                ),
                                 secrets: Some(secrets.clone()),
                                 // Cell A: the `web` toolbelt SSRF allowlist.
                                 // Domains come straight from the manifest.
