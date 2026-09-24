@@ -109,10 +109,12 @@ test("a two-seat desk answers as a room: two lanes at once, a dm, and a completi
 
   // 2. The dm chip, addressed to the seat the directive named. The engineer is
   // the seat that dms the CEO; the CEO's own round-1 act is a broadcast, since
-  // a seat does not dm itself — either way exactly one dm chip lands.
+  // a seat does not dm itself — either way exactly one dm chip lands. The CEO
+  // agent carries no `name` in companies/hive_demo/agents/ceo.toml, so the
+  // roster falls back to its `role`, "Chief Executive".
   const dmChip = ofEpisode.locator('[data-testid="utterance-chip"][data-kind="dm"]');
   await expect(dmChip.first()).toBeVisible();
-  await expect(dmChip.first().getByTestId("utterance-audience")).not.toBeEmpty();
+  await expect(dmChip.first().getByTestId("utterance-audience")).toHaveText("Chief Executive");
 
   // And the closing chip on the row that ended it.
   await expect(
