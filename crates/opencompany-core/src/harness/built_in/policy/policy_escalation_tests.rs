@@ -136,11 +136,10 @@ async fn a_flood_of_escalations_can_push_a_paid_media_card_off_the_shared_cap() 
 /// evaluated on its own terms rather than refused outright the way a
 /// second `request_approval` would be.
 #[tokio::test]
-async fn escalate_to_human_respects_combined_cycle_and_unscoped_capacity() {
+async fn escalate_to_human_respects_the_cycle_claims_drain_cap() {
     in_cycle(async {
-    use tinytools::Tool as _;
+        use tinytools::Tool as _;
 
-    for initially_scoped in [false, true] {
         let queue = ApprovalRequestQueue::default();
         let claim = queue.claim(ApprovalScope::Cycle);
         let tool = crate::harness::built_in::blockers::EscalateToHumanTool::new(
@@ -149,27 +148,23 @@ async fn escalate_to_human_respects_combined_cycle_and_unscoped_capacity() {
         );
         for i in 0..MAX_APPROVAL_REQUESTS_PER_TURN - 1 {
             let args = serde_json::json!({ "question": format!("question {i}") });
-            let asked = if initially_scoped {
-                claim.scoped(tool.execute(args)).await
-            } else {
-                tool.execute(args).await
-            }
-            .expect("the tool runs");
+            let asked = claim
+                .scoped(tool.execute(args))
+                .await
+                .expect("the tool runs");
             assert!(!asked.is_error, "{}", asked.text());
         }
 
         for (question, refused) in [("last available slot", false), ("overflow", true)] {
             let args = serde_json::json!({ "question": question });
-            let asked = if initially_scoped {
-                tool.execute(args).await
-            } else {
-                claim.scoped(tool.execute(args)).await
-            }
-            .expect("the tool runs");
+            let asked = claim
+                .scoped(tool.execute(args))
+                .await
+                .expect("the tool runs");
             assert_eq!(
                 asked.is_error,
                 refused,
-                "Cycle and Unscoped share one drain cap; initially_scoped={initially_scoped}: {}",
+                "the cycle claim's drain cap is shared across every push filed into it: {}",
                 asked.text()
             );
         }
@@ -189,17 +184,15 @@ async fn escalate_to_human_respects_combined_cycle_and_unscoped_capacity() {
                 .any(|r| r.reason == "last available slot")
         );
         assert!(drained.requests.iter().all(|r| r.reason != "overflow"));
-    }
-})
+    })
     .await;
 }
 
 #[tokio::test]
-async fn accepted_blockers_survive_later_ordinary_approvals_across_scopes() {
+async fn accepted_blockers_survive_later_ordinary_approvals() {
     in_cycle(async {
-    use tinytools::Tool as _;
+        use tinytools::Tool as _;
 
-    for blocker_in_cycle in [false, true] {
         for preceding in [0, MAX_APPROVAL_REQUESTS_PER_TURN - 1] {
             let (policy, queue) = queued_policy("supervised", &[]);
             let cycle = queue.claim(ApprovalScope::Cycle);
@@ -209,43 +202,31 @@ async fn accepted_blockers_survive_later_ordinary_approvals_across_scopes() {
             );
             for i in 0..preceding {
                 let call = request("composio_execute", composio_unclassified_args_numbered(i));
-                let decision = if blocker_in_cycle {
-                    policy.check(&call).await
-                } else {
-                    cycle.scoped(policy.check(&call)).await
-                };
+                let decision = cycle.scoped(policy.check(&call)).await;
                 assert!(matches!(
                     decision,
                     ToolPolicyDecision::RequireApproval { .. }
                 ));
             }
             let args = serde_json::json!({ "question": "must survive later approvals" });
-            let asked = if blocker_in_cycle {
-                cycle.scoped(tool.execute(args.clone())).await
-            } else {
-                tool.execute(args.clone()).await
-            }
-            .expect("the tool runs");
+            let asked = cycle
+                .scoped(tool.execute(args.clone()))
+                .await
+                .expect("the tool runs");
             assert!(!asked.is_error, "{}", asked.text());
 
             for i in preceding..preceding + MAX_APPROVAL_REQUESTS_PER_TURN {
                 let call = request("composio_execute", composio_unclassified_args_numbered(i));
-                let decision = if blocker_in_cycle {
-                    policy.check(&call).await
-                } else {
-                    cycle.scoped(policy.check(&call)).await
-                };
+                let decision = cycle.scoped(policy.check(&call)).await;
                 assert!(matches!(
                     decision,
                     ToolPolicyDecision::RequireApproval { .. }
                 ));
             }
-            let duplicate = if blocker_in_cycle {
-                cycle.scoped(tool.execute(args)).await
-            } else {
-                tool.execute(args).await
-            }
-            .expect("the tool runs");
+            let duplicate = cycle
+                .scoped(tool.execute(args))
+                .await
+                .expect("the tool runs");
             assert!(
                 !duplicate.is_error,
                 "the accepted duplicate retains its slot"
@@ -261,14 +242,13 @@ async fn accepted_blockers_survive_later_ordinary_approvals_across_scopes() {
                     .filter(|r| r.reason == "must survive later approvals")
                     .count(),
                 1,
-                "an accepted blocker must survive later ordinary approvals; blocker_in_cycle={blocker_in_cycle}, preceding={preceding}"
+                "an accepted blocker must survive later ordinary approvals; preceding={preceding}"
             );
             assert_eq!(drained.requests.len(), MAX_APPROVAL_REQUESTS_PER_TURN);
             assert_eq!(drained.discarded, preceding + 1);
             assert!(drained.overflow_notice().is_some());
         }
-    }
-})
+    })
     .await;
 }
 
