@@ -3005,6 +3005,38 @@ impl HarnessBrain {
         crate::hive::dispatch::hives_for(record, &|id| agents.get(id).cloned())
     }
 
+    /// The episode seat that parked `approval_id`, if a seat did.
+    fn episode_seat_of(
+        &self,
+        approval_id: &crate::ports::types::ApprovalId,
+    ) -> Option<crate::runtime::episode_resume::EpisodeSeat> {
+        self.deps
+            .approval_parker
+            .as_ref()?
+            .turn_of(approval_id)
+            .as_deref()
+            .and_then(crate::runtime::episode_resume::parse)
+    }
+
+    /// Carries on a desk episode from its last checkpoint, on its own task.
+    async fn resume_desk_episode(&self, episode_id: &str) -> bool {
+        let Some(events) = self.deps.events.clone() else {
+            return false;
+        };
+        let record = self.record();
+        let hives = self.desk_hives(&record).await;
+        let dispatcher = crate::hive::dispatch::dispatcher(
+            record,
+            events,
+            hives,
+            Arc::new(HarnessDeps::clone(&self.deps)),
+            Arc::clone(&self.pool),
+            self.mentions.clone(),
+        );
+        crate::hive::dispatch::spawn_resume(dispatcher, episode_id.to_owned());
+        true
+    }
+
     /// The first active teammate the message named, in reading order —
     /// `tinyhivemind_core::mention::direct_responder` over the live roster.
     fn mentioned_responder(&self, mentions: &[crate::ports::types::Mention]) -> Option<String> {
@@ -3590,6 +3622,10 @@ impl Brain for HarnessBrain {
     /// without the harness can still name what they open.
     fn titler(&self) -> Option<&dyn crate::ports::tasks::TitleSummariser> {
         Some(self.title_pass(&self.record().id))
+    }
+
+    async fn resume_episode(&self, episode_id: &str) -> bool {
+        self.resume_desk_episode(episode_id).await
     }
 
     async fn run_cycle(&self, req: CycleRequest, host: &dyn CycleHost) -> Result<CycleResult> {
@@ -4289,7 +4325,16 @@ impl HarnessBrain {
                     verdict,
                     ..
                 } => {
-                    if let Some(message) =
+                    if let Some(seat) = self.episode_seat_of(approval_id) {
+                        tracing::warn!(
+                            %approval_id,
+                            episode = %seat.episode_id,
+                            seat = %seat.seat,
+                            "[hive] an episode seat's decision reached a chat cycle; handing it to \
+                             its episode instead of re-running the call here"
+                        );
+                        self.resume_episode(&seat.episode_id).await;
+                    } else if let Some(message) =
                         self.redispatch_granted_call(approval_id, *verdict).await?
                     {
                         channel_responses.push(message);

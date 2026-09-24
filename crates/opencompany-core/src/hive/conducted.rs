@@ -16,9 +16,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tinyhivemind::SESSION_WINDOW;
-use tinyhivemind_driver::{BoundHive, BroadcastRouting, CompletionDriver, ConductPolicy, Door};
+use tinyhivemind_driver::{
+    BoundHive, BroadcastRouting, CompletionDriver, ConductPolicy, ConductorState, Door,
+};
 use tinyhivemind_embed::Router;
-use tinyhivemind_openhuman::{HostedRunner, Report, SeatRunner, run_episode};
+use tinyhivemind_openhuman::{HostedRunner, Report, SeatRunner, resume_episode, run_episode};
 use tinyhivemind_tools::EpisodeTools;
 
 use crate::error::{OpenCompanyError, Result};
@@ -29,7 +31,7 @@ use crate::hive::host::{DeskHost, EpisodeSeatParking, SeatParking};
 use crate::hive::routing::{EffectiveRouting, RoutingPlanDto, desk_routing, router_of};
 use crate::ports::events::EventLog;
 use crate::ports::types::CompanyEvent;
-use crate::ports::types::{CompanyRecord, EventSeq, Mention};
+use crate::ports::types::{CompanyRecord, EventSeq, Mention, StoredEvent};
 
 /// Everything this company brings to one episode.
 ///
@@ -75,6 +77,29 @@ pub struct Episode<'a> {
 /// cannot be built, a journal that refuses a row, an episode that stalls or
 /// runs past its wall, or one parked on the operator with nobody released.
 pub async fn run(episode: Episode<'_>) -> Result<Report> {
+    conduct(episode, None).await
+}
+
+/// Carry on an episode from the checkpoint `snapshot`, with `rows` the
+/// journal rows it has written so far and `revision` the wave the checkpoint
+/// was taken at.
+///
+/// # Errors
+///
+/// Whatever [`run`] errors on, plus a snapshot this desk cannot resume.
+pub async fn resume(
+    episode: Episode<'_>,
+    snapshot: ConductorState,
+    rows: &[StoredEvent],
+    revision: u64,
+) -> Result<Report> {
+    conduct(episode, Some((snapshot, rows, revision))).await
+}
+
+async fn conduct(
+    episode: Episode<'_>,
+    resumed: Option<(ConductorState, &[StoredEvent], u64)>,
+) -> Result<Report> {
     let members: Vec<String> = episode.desk.hive.members().map(str::to_owned).collect();
     if members.is_empty() {
         return Err(OpenCompanyError::Harness(format!(
@@ -109,9 +134,6 @@ pub async fn run(episode: Episode<'_>) -> Result<Report> {
         host
     });
 
-    // Each seat is built once, here, and torn down with the episode: its
-    // belt carries the episode's tools, which are bound to this seat of this
-    // episode and to nothing else.
     let releases = host.seat_releases();
     let _running = releases.as_ref().map(|releases| {
         releases.start(&episode.episode_id);
@@ -121,6 +143,9 @@ pub async fn run(episode: Episode<'_>) -> Result<Report> {
         }
     });
 
+    // Each seat is built once, here, and torn down with the episode: its
+    // belt carries the episode's tools, which are bound to this seat of this
+    // episode and to nothing else.
     let runner = HostedRunner::seat(
         Arc::clone(&host),
         Arc::new(EpisodeTools::new(members.iter().cloned())),
@@ -140,30 +165,47 @@ pub async fn run(episode: Episode<'_>) -> Result<Report> {
         .map_err(|error| OpenCompanyError::Harness(error.to_string()))?;
     let route_policy = episode.routing.policy();
 
-    let outcome = run_episode(
-        host.as_ref(),
-        &runner,
-        &driver,
-        BroadcastRouting {
-            // Threaded through deliberately: without it a handoff is still
-            // placed, but by lead and mention rather than by meaning, and
-            // nothing anywhere reports the difference.
-            primary: episode.router,
-            reasoning: None,
-            policy: &route_policy,
-            roster_version: episode.desk.roster_version,
-            thread_context: &[],
-        },
-        ConductPolicy::default(),
-        Door {
-            chat: episode.desk.desk_id.clone(),
-            desk_name: episode.desk.desk_name.clone(),
-            members,
-            starters,
-            opened_at: tinyhivemind::Sequence(episode.opened_at.value()),
-        },
-    )
-    .await;
+    let routing = BroadcastRouting {
+        // Threaded through deliberately: without it a handoff is still
+        // placed, but by lead and mention rather than by meaning, and
+        // nothing anywhere reports the difference.
+        primary: episode.router,
+        reasoning: None,
+        policy: &route_policy,
+        roster_version: episode.desk.roster_version,
+        thread_context: &[],
+    };
+    let outcome = match resumed {
+        None => {
+            run_episode(
+                host.as_ref(),
+                &runner,
+                &driver,
+                routing,
+                ConductPolicy::default(),
+                Door {
+                    chat: episode.desk.desk_id.clone(),
+                    desk_name: episode.desk.desk_name.clone(),
+                    members,
+                    starters,
+                    opened_at: tinyhivemind::Sequence(episode.opened_at.value()),
+                },
+            )
+            .await
+        }
+        Some((snapshot, rows, revision)) => {
+            host.recall(rows, revision);
+            resume_episode(
+                host.as_ref(),
+                &runner,
+                &driver,
+                routing,
+                ConductPolicy::default(),
+                snapshot,
+            )
+            .await
+        }
+    };
     if let Err(tinyhivemind_openhuman::Error::Conduct(tinyhivemind_driver::Error::Parked {
         seats,
     })) = &outcome
@@ -331,6 +373,73 @@ impl HiveDispatcher {
             mentions: self.mentions.clone(),
         })
         .await?;
+        self.complete(&desk.desk_id, &episode_id, &report).await?;
+        Ok(report.into())
+    }
+
+    /// Carry on a parked episode from its last checkpoint, once an operator
+    /// decision has come in for it and no running episode took it. `None`
+    /// when it is already running here.
+    ///
+    /// # Errors
+    ///
+    /// An episode with no checkpoint, on a desk that runs no hive, and
+    /// whatever stops the resumed episode.
+    pub async fn resume_desk_message(&self, episode_id: &str) -> Result<Option<EpisodeReport>> {
+        let releases = self.deps.approval_requests.grants().episode_releases();
+        if !releases.start(episode_id) {
+            return Ok(None);
+        }
+        let _running = RunningEpisode {
+            releases,
+            episode_id: episode_id.to_owned(),
+        };
+        let saved = episode_store::latest_state(self.events.as_ref(), &self.record.id, episode_id)
+            .await?
+            .ok_or_else(|| {
+                OpenCompanyError::NotFound(format!("episode `{episode_id}` has no checkpoint"))
+            })?;
+        let desk = self.hive(&saved.desk).ok_or_else(|| {
+            OpenCompanyError::InvalidRequest(format!("desk `{}` runs no hive", saved.desk))
+        })?;
+        let snapshot: ConductorState = serde_json::from_value(saved.state.clone())
+            .map_err(|error| OpenCompanyError::Harness(format!("episode checkpoint: {error}")))?;
+        let rows =
+            episode_store::episode_rows(self.events.as_ref(), &self.record.id, episode_id).await?;
+        let routing = desk_routing(&self.record, &desk.desk_id);
+        tracing::info!(
+            desk = %desk.desk_id,
+            episode = %episode_id,
+            revision = saved.revision,
+            "[hive] resuming a parked episode from its checkpoint"
+        );
+        let report = resume(
+            Episode {
+                record: Arc::clone(&self.record),
+                deps: Arc::clone(&self.deps),
+                pool: Arc::clone(&self.pool),
+                events: Arc::clone(&self.events),
+                desk: &desk,
+                routing: &routing,
+                router: self.router.as_deref(),
+                episode_id: episode_id.to_owned(),
+                thread_root: saved.thread_root,
+                opened_at: saved.thread_root.unwrap_or(EventSeq::new(0)),
+                starters: Vec::new(),
+                parking: self.seat_parking(&desk.desk_id, saved.thread_root, episode_id),
+                mentions: self.mentions.clone(),
+            },
+            snapshot,
+            &rows,
+            saved.revision,
+        )
+        .await?;
+        self.complete(&desk.desk_id, episode_id, &report).await?;
+        Ok(Some(report.into()))
+    }
+
+    /// Journals an episode's closing row.
+    async fn complete(&self, desk_id: &str, episode_id: &str, report: &Report) -> Result<()> {
         // The episode's closing row. `run_episode` returns only once every
         // seat has recorded its part -- a wall, a stall or a fold it could
         // not explain comes back as an error instead, and is journaled by
@@ -343,8 +452,8 @@ impl HiveDispatcher {
             .append(
                 &self.record.id,
                 CompanyEvent::EpisodeCompleted {
-                    chat_id: desk.desk_id.clone(),
-                    episode_id: episode_id.clone(),
+                    chat_id: desk_id.to_owned(),
+                    episode_id: episode_id.to_owned(),
                     revision: report.waves,
                     // The library reports what happened, not who spoke last:
                     // every seat completed, so no one seat closed it.
@@ -362,7 +471,7 @@ impl HiveDispatcher {
             waves = report.waves,
             "[hive] episode finished"
         );
-        Ok(report.into())
+        Ok(())
     }
 
     /// Parking for the seats of one episode, through the runtime's parker.

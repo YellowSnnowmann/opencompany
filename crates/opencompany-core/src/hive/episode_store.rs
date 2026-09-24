@@ -469,6 +469,22 @@ pub async fn replies_after(
         .collect())
 }
 
+/// Every row since `episode_id` opened, oldest first: what a resumed
+/// episode's host reads its open conversations and parked seats back from.
+pub async fn episode_rows(
+    events: &dyn EventLog,
+    company: &CompanyId,
+    episode_id: &str,
+) -> Result<Vec<StoredEvent>> {
+    tail(events, company, |stored| {
+        matches!(
+            &stored.event,
+            CompanyEvent::EpisodeOpened { episode_id: id, .. } if id == episode_id
+        )
+    })
+    .await
+}
+
 /// An episode still running on a desk thread.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenEpisode {

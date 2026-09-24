@@ -130,6 +130,12 @@ impl ApprovalParker {
         Ok(approval_id)
     }
 
+    /// The turn key `approval_id` was parked under, if it was parked under one.
+    #[must_use]
+    pub fn turn_of(&self, approval_id: &ApprovalId) -> Option<String> {
+        self.journal.approval_cycle(approval_id).flatten()
+    }
+
     /// Releases a continuation slot armed for a card that will never exist.
     fn release(&self, turn: Option<&str>) {
         if let Some(turn) = turn {

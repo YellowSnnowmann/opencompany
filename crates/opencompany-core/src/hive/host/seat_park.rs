@@ -21,7 +21,7 @@ use crate::harness::built_in::policy::{
 };
 use crate::harness::built_in::publish::{PendingPublishQueue, PublishClaim, PublishDestination};
 use crate::harness::built_in::turn_outputs::TurnOutputClaim;
-use crate::ports::types::{ApprovalId, ChatOutput, CompanyEvent, CompanyId, EventSeq};
+use crate::ports::types::{ApprovalId, ChatOutput, CompanyEvent, CompanyId, EventSeq, StoredEvent};
 use crate::runtime::approval_park::{ApprovalParker, ParkSite};
 use crate::runtime::episode_resume::{EpisodeReleases, SeatDecision, turn_key};
 use crate::runtime::journal::{ApprovalConversation, TaskLink};
@@ -185,6 +185,49 @@ impl DeskHost {
                 .as_ref()
                 .map(|(_, deps)| deps.approval_requests.grants().episode_releases())
         })
+    }
+
+    /// Reads back what a resumed episode had open: its conversations, the
+    /// conversation each still-parked seat is waiting in, and the wave.
+    pub(crate) fn recall(&self, rows: &[StoredEvent], revision: u64) {
+        let mut conversations = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut lanes = self
+            .parked_lanes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        for stored in rows {
+            match &stored.event {
+                CompanyEvent::ConversationOpened {
+                    episode_id,
+                    conversation_id,
+                    root,
+                    ..
+                } if *episode_id == self.episode_id => {
+                    conversations.insert(*root, conversation_id.clone());
+                }
+                CompanyEvent::EpisodeSeatParked {
+                    episode_id,
+                    seat,
+                    thread,
+                    ..
+                } if *episode_id == self.episode_id => {
+                    lanes.insert(seat.clone(), thread.map(Sequence));
+                }
+                CompanyEvent::EpisodeSeatResumed {
+                    episode_id, seat, ..
+                } if *episode_id == self.episode_id => {
+                    lanes.remove(seat);
+                }
+                _ => {}
+            }
+        }
+        self.wave.store(
+            revision.saturating_add(1),
+            std::sync::atomic::Ordering::SeqCst,
+        );
     }
 
     /// Claims seat turns on `approvals` rather than on the roster's.
