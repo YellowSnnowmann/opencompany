@@ -190,8 +190,9 @@ fn every_seat_turn_is_grounded_and_styled(asks: &[Ask]) -> usize {
         if ask
             .messages
             .iter()
-            .skip(1)
-            .any(|message| role(message) == "user")
+            .filter(|message| role(message) == "user")
+            .count()
+            > 1
         {
             seeded += 1;
         }
