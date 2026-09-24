@@ -16,7 +16,6 @@ use std::sync::Arc;
 use crate::harness::HarnessPool;
 use crate::hive::test_support::{MemoryLog, TWO_DESKS, record};
 use crate::ports::events::EventLog;
-use crate::ports::types::EventSeq;
 use crate::workflows::gated_tool_turn_tests::{Turn, deps, spawn_script_recording};
 
 /// An operator's message in a teammate's DM runs an episode, and the teammate
@@ -276,7 +275,7 @@ async fn a_desk_episode_with_prior_history_settles() {
     let events: Arc<dyn EventLog> = log.clone();
 
     // A prior row, exactly as in the DM case.
-    let first = events
+    let _first = events
         .append(
             &record.id,
             crate::hive::test_support::operator_message("content", "unrelated", None),
