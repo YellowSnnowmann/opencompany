@@ -416,3 +416,24 @@ async fn a_full_run_accepts_its_duplicate_without_consuming_another_runs_capacit
     assert_eq!(other_drain.requests[0].reason, "question 0");
     assert_eq!(other_drain.discarded, 0);
 }
+
+#[tokio::test]
+async fn a_question_nothing_can_record_is_an_error_and_parks_nothing() {
+    let queue = ApprovalRequestQueue::default();
+    let result = tool(&queue)
+        .execute(serde_json::json!({ "question": "staging or prod?" }))
+        .await
+        .expect("the tool runs");
+
+    assert!(
+        result.is_error,
+        "an unrecorded question must not read as asked"
+    );
+    assert!(
+        result.text().contains("was not recorded"),
+        "{}",
+        result.text()
+    );
+    assert!(result.text().contains("Do not tell anyone you asked"));
+    assert!(in_cycle(async { queue.drain(8) }).await.requests.is_empty());
+}
