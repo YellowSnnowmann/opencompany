@@ -106,6 +106,15 @@ describe("UtteranceChip", () => {
     expect(chip.querySelector('[data-testid="utterance-audience"]')?.textContent).toBe("Engineer");
   });
 
+  it("shows the dm's own recipients, not the desk's narrower audience, when the episode named them", () => {
+    // `audience` is a coordination device for who a desk routed the row to,
+    // not access control (api/types.ts) — the episode's own `to` is the DM's
+    // actual recipients and is what the chip reports, even when this seat's
+    // session narrowed delivery to a subset of them.
+    const chip = render({ id: "ep-1", revision: 1, kind: "dm", to: ["engineer", "ceo"] }, ["engineer"]);
+    expect(chip.querySelector('[data-testid="utterance-audience"]')?.textContent).toBe("Engineer, CEO");
+  });
+
   it("falls back to the audience when a dm names no recipients, and never shows a raw id", () => {
     const chip = render({ id: "ep-1", revision: 1, kind: "dm" }, ["writer"]);
     expect(chip.querySelector('[data-testid="utterance-audience"]')?.textContent).toBe("a teammate");
