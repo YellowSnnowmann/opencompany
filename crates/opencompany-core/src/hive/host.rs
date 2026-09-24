@@ -32,7 +32,7 @@ use tinyhivemind_openhuman::{Lane, TurnResult};
 use tinyhivemind_tools::Refusal;
 
 use crate::harness::built_in::cost::TurnUsage;
-use crate::harness::built_in::{HarnessDeps, HarnessPool, build_episode_seat, meter_turn_costs};
+use crate::harness::built_in::{HarnessDeps, HarnessPool, meter_turn_costs, seat_persona};
 use crate::ports::events::EventLog;
 use crate::ports::types::{CompanyEvent, CompanyId, CompanyRecord, EventSeq, TurnOutcome};
 
@@ -135,6 +135,9 @@ pub struct DeskHost {
     parked_ids: Mutex<BTreeMap<String, Vec<crate::ports::types::ApprovalId>>>,
     /// The conversation each parked seat was in, for where its decision lands.
     parked_lanes: Mutex<BTreeMap<String, Option<Sequence>>>,
+    /// The pool handles this episode's seats run on, resolved before the
+    /// runner is built because `build_seat` is sync and the pool is not.
+    seated: Mutex<BTreeMap<String, Arc<crate::harness::built_in::CompanyAgent>>>,
 }
 
 /// What a host does with the approvals one seat's turn raised.
@@ -204,7 +207,23 @@ impl DeskHost {
             seat_claims: Mutex::new(BTreeMap::new()),
             parked_ids: Mutex::new(BTreeMap::new()),
             parked_lanes: Mutex::new(BTreeMap::new()),
+            seated: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// The pool handle `seat` runs its turns on.
+    ///
+    /// Resolved here rather than in [`EpisodeHost::build_seat`] because that
+    /// is sync and the pool is not. Called once per member before the runner
+    /// is built; a member the pool does not know is simply not seated, and
+    /// `build_seat` says so.
+    #[must_use]
+    pub fn seat_on(self, seat: &str, agent: Arc<crate::harness::built_in::CompanyAgent>) -> Self {
+        self.seated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(seat.to_owned(), agent);
+        self
     }
 
     /// Where a seat is built from: the company as it effectively stands,
@@ -846,23 +865,50 @@ impl EpisodeHost for DeskHost {
     fn build_seat(
         &self,
         seat: &str,
-        belt: EpisodeBelt,
-    ) -> tinyhivemind_openhuman::Result<OpenHumanSessionHost> {
-        let Some((record, deps)) = self.roster.as_ref() else {
+        belt: tinyhivemind_openhuman::EpisodeBeltSource,
+    ) -> tinyhivemind_openhuman::Result<openhuman_embed::Agent> {
+        let Some((record, _)) = self.roster.as_ref() else {
             return Err(tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!(
                 "hive episode: no roster to seat `{seat}` from"
             )));
         };
-        // The belt goes through whole, admission and all: this company's own
-        // gate is only knowable once the teammate is built, and it has to go
-        // *behind* the episode's admission rather than be replaced by it.
-        let (session, persona) =
-            build_episode_seat(record, deps, seat, belt).map_err(|error| refused(&error))?;
+        let held = self
+            .seated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(seat)
+            .cloned();
+        let Some(agent) = held else {
+            return Err(tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!(
+                "hive episode: `{seat}` is not on this company's pool"
+            )));
+        };
+        // **The teammate is seated, not rebuilt.**
+        //
+        // The episode lends its belt under the conversation the seat will run
+        // in, and the agent's own per-turn factory picks it up there. So the
+        // handle returned is the one the pool already holds -- the same
+        // teammate, with the room's tools on the turns it sits in the room,
+        // and without them everywhere else.
+        agent.seating().lend(self.seat_session(seat), belt);
+        // The standing prompt still travels separately: a seeded turn renders
+        // no system prompt, so `persona` puts it back at the head of the seed.
+        let Some((_, deps)) = self.roster.as_ref() else { unreachable!() };
+        let persona = seat_persona(record, deps, seat)
+            .map_err(|error| refused(&error))?;
         self.personas
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(seat.to_owned(), persona);
-        Ok(session)
+        Ok(agent.runtime_agent().clone())
+    }
+
+    /// One conversation per seat per episode.
+    ///
+    /// The episode id is in it because a seat's belt is lent under this key:
+    /// two episodes seating the same teammate must not read each other's.
+    fn seat_session(&self, seat: &str) -> String {
+        format!("episode:{}:{}", self.episode_id, seat)
     }
 
     fn persona(&self, seat: &str) -> Option<String> {

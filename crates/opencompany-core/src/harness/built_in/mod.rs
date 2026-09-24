@@ -705,6 +705,9 @@ pub struct CompanyAgent {
     /// The runtime agent. Shared, not locked: see the type docs.
     agent: openhuman_embed::Agent,
     /// Serialises this agent's turns.
+    /// Belts episodes have lent this teammate, by conversation. The same map
+    /// the belt factory reads, so what a host lends here reaches the turn.
+    seating: crate::hive::seating::EpisodeBelts,
     turn_lock: Arc<Mutex<()>>,
     /// The loopback route this agent's model is served on, and the usage tap
     /// its attempts are metered from. See [`model_bridge`](crate::harness::model_bridge).
@@ -1257,6 +1260,9 @@ impl CompanyAgent {
                     .filter(|tool| !build::OPENHUMAN_NATIVE_TOOLS.contains(&tool.name()))
                     .collect(),
             ));
+        // Created before the agent, because the belt factory closes over it at
+        // registration and an episode writes to it long afterwards.
+        let seating = crate::hive::seating::EpisodeBelts::default();
         let base_id = crate::session_key::runtime_agent_id(company, agent_id);
         let mut runtime_id = base_id.clone();
         let mut attempt = 0u32;
@@ -1275,6 +1281,7 @@ impl CompanyAgent {
                 attach.as_ref(),
                 Some(&native_belt),
                 Some(&gate),
+                Some(&seating),
             );
             match runtime.agent(spec) {
                 Ok(agent) => break agent,
@@ -1331,6 +1338,7 @@ impl CompanyAgent {
             mcp_bearer,
             company: company.clone(),
             agent,
+            seating,
             turn_lock: Arc::new(Mutex::new(())),
             bridge,
             step_labels,
@@ -1405,6 +1413,12 @@ impl CompanyAgent {
     /// this agent is bound into, so two desks cannot run it at once.
     pub fn turn_lock(&self) -> Arc<Mutex<()>> {
         self.turn_lock.clone()
+    }
+
+    /// Where an episode lends this teammate its belt.
+    #[must_use]
+    pub fn seating(&self) -> &crate::hive::seating::EpisodeBelts {
+        &self.seating
     }
 
     /// The names of every tool this agent's belt wires, in belt order — the
@@ -5759,12 +5773,11 @@ pub(crate) fn agent_policy_for(
 /// [`OpenCompanyError::Config`] when the company seats no teammate by that
 /// name, or whatever stops the session being built.
 #[cfg(feature = "openhuman")]
-pub(crate) fn build_episode_seat(
+pub(crate) fn seat_persona(
     company: &CompanyRecord,
     deps: &HarnessDeps,
     seat: &str,
-    belt: tinyhivemind_openhuman::EpisodeBelt,
-) -> crate::Result<(oh::agent::OpenHumanSessionHost, String)> {
+) -> crate::Result<String> {
     let effective = company.effective_policy();
     let live_roster = company.effective_agents();
     let manifest_agent = live_roster
@@ -5870,20 +5883,14 @@ pub(crate) fn build_episode_seat(
         }
     }
 
-    // The episode's own tools are admitted by name; everything else is this
-    // company's policy to decide, and can still park for the operator.
+    // The persona is all this builds now.
     //
-    // Passing `None` here instead would deny every call the episode does not
-    // serve -- the teammate's whole belt, memory, ledgers, skills -- and the
-    // seat would be told its own tools are "not on this seat's belt".
-    let gate = belt.admit(Some(Arc::new(behind)));
-    // The persona travels back out with the session. A seat's turns after
-    // its first are seeded rather than composed, and a seeded turn renders
-    // no system prompt, so the host has to put this back at the head of the
-    // seed -- see `EpisodeHost::persona`.
-    let persona = blueprint.system_prompt.clone();
-    let session = build::episode_seat(&company.id, seat, blueprint, belt.tools, gate)?;
-    Ok((session, persona))
+    // A seat used to be a second session built around the episode's belt;
+    // it is the pool's own agent now, and the belt reaches it per turn
+    // through `EpisodeBelts`. What cannot travel that way is the standing
+    // prompt: a seeded turn is not cold and composes none, so the host puts
+    // this back at the head of the seed -- see `EpisodeHost::persona`.
+    Ok(blueprint.system_prompt)
 }
 
 /// The roster tools an episode seat is **not** built with.
@@ -5891,7 +5898,7 @@ pub(crate) fn build_episode_seat(
 /// Every one of these queues work for the [`HarnessBrain`] to drain, and no
 /// brain drains inside an episode. See `build_episode_seat` for why they are
 /// withheld rather than left to refuse.
-const EPISODE_WITHHELD_TOOLS: [&str; 3] =
+pub(crate) const EPISODE_WITHHELD_TOOLS: [&str; 3] =
     ["spawn_task", "delegate_to_desk", "delegate_to_teammate"];
 
 pub(crate) fn build_roster(

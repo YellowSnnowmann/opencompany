@@ -131,6 +131,17 @@ async fn conduct(
         if let Some(mentions) = episode.mentions.clone() {
             host = host.resolving_mentions(mentions);
         }
+        // The pool handle each seat runs its turns on.
+        //
+        // Resolved here because `EpisodeHost::build_seat` is sync and the pool
+        // is not, and this is the last place that can await. A member the pool
+        // does not know is left unseated, and `build_seat` says so rather than
+        // inventing an agent for it.
+        for member in &members {
+            if let Some(agent) = episode.pool.agent(&episode.record.id, member).await {
+                host = host.seat_on(member, agent);
+            }
+        }
         host
     });
 

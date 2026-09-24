@@ -52,6 +52,8 @@ pub mod referral;
 /// The `[group_chat.routing]` block, its resolved `RoutingPolicy`, and the
 /// desk-routing wire shapes (plan Phase 4).
 pub mod routing;
+/// What an episode lends a teammate for the turns it runs as a seat.
+pub mod seating;
 pub mod session_log;
 /// The in-flight turn registry, the speech fold and the tool adapter the
 /// server dispatches through (plan Phase 3).

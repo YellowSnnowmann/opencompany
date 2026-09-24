@@ -1510,6 +1510,7 @@ pub fn agent_spec_for(
     mcp: Option<&McpAttach>,
     belt: Option<&Arc<Vec<Arc<dyn Tool>>>>,
     gate: Option<&Arc<crate::harness::policy::ApprovalPolicy>>,
+    seating: Option<&crate::hive::seating::EpisodeBelts>,
 ) -> AgentSpec {
     // **This crate's own tools are native.**
     //
@@ -1577,14 +1578,57 @@ pub fn agent_spec_for(
         // `[policy]`, the per-agent budget and the HITL parks all silently
         // stop applying.
         let gate = gate.map(Arc::clone);
-        spec = spec.tools(move || {
-            let belt = openhuman_embed::HostTurnTools::advertised(
-                crate::hive::shared_tool::owned_belt(&belt),
+        let seating = seating.cloned().unwrap_or_default();
+        spec = spec.tools(move |turn| {
+            let mut tools = crate::hive::shared_tool::owned_belt(&belt);
+            // **A seated turn carries the episode's tools too.**
+            //
+            // The belt is composed per turn and the turn says which
+            // conversation it is for, so an episode that lent this teammate a
+            // belt gets it back here -- on the turns it runs as a seat, and
+            // on no others. That is what lets one teammate answer its
+            // operator and sit in a room without being two agents.
+            let seated = seating.lent_to(turn.session_id());
+            let Some(source) = seated else {
+                let belt = openhuman_embed::HostTurnTools::advertised(tools);
+                return match &gate {
+                    Some(gate) => belt.with_policy(
+                        Arc::clone(gate) as Arc<dyn oh::agent::tool_policy::ToolPolicy>
+                    ),
+                    None => belt,
+                };
+            };
+            // **What a seat still may not reach.**
+            //
+            // These queue work for the `HarnessBrain` to drain, and no brain
+            // drains inside an episode. The persona has their prose cut to
+            // match (`seat_persona`), so the seat is neither told about them
+            // nor handed them -- which is the only honest pairing until the
+            // queues drain on a seated turn. Then both go.
+            tools.retain(|tool| {
+                !crate::harness::built_in::EPISODE_WITHHELD_TOOLS.contains(&tool.name())
+            });
+            let episode = source.belt();
+            let mut visible: std::collections::HashSet<String> =
+                tools.iter().map(|tool| tool.name().to_owned()).collect();
+            visible.extend(episode.names().iter().cloned());
+            let mut episode_tools = episode.tools;
+            tools.append(&mut episode_tools);
+            // **The gate is the episode's, over this company's.**
+            //
+            // `with_policy` *replaces* the session's policy rather than
+            // sitting in front of it, so composition is ours to do:
+            // `admit` answers for the episode's own names and defers every
+            // other call to the company gate. Passing `None` would deny the
+            // teammate every tool it otherwise has.
+            let admit = source.belt().admit(
+                gate.as_ref()
+                    .map(|gate| Arc::clone(gate) as Arc<dyn oh::agent::tool_policy::ToolPolicy>),
             );
-            match &gate {
-                Some(gate) => belt
-                    .with_policy(Arc::clone(gate) as Arc<dyn oh::agent::tool_policy::ToolPolicy>),
-                None => belt,
+            openhuman_embed::HostTurnTools {
+                tools,
+                visible,
+                policy: Some(admit),
             }
         });
     }
