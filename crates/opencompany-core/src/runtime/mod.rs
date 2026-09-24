@@ -72,6 +72,9 @@ pub mod delegation_tools;
 /// hand-written edit to a file a ledger renders, and names the tool that
 /// actually writes the row.
 pub mod derived_guard;
+/// Handing an operator's decision back to the hive episode seat that asked.
+/// See [`episode_resume`].
+pub mod episode_resume;
 /// Single-use grants minted when an operator approves a blocked tool call
 /// (issue #243). Compiled in every build: the journal records and their replay
 /// are feature-independent, so a company that ran under the harness stays
