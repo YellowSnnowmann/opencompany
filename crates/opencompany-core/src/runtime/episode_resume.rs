@@ -11,7 +11,7 @@
 //! here and the episode is resumed from its checkpoint, whose `released` wait
 //! then finds it at once.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::Notify;
@@ -148,6 +148,7 @@ impl SeatDecision {
 struct Registry {
     running: BTreeSet<String>,
     banked: BTreeMap<String, BTreeMap<String, Vec<SeatDecision>>>,
+    answers: HashMap<ApprovalId, (SeatVerdict, String)>,
 }
 
 /// The decisions each running or resumable episode's seats are owed.
@@ -196,6 +197,20 @@ impl EpisodeReleases {
         );
         self.changed.notify_waiters();
         running
+    }
+
+    /// Holds the operator's own answer to an escalation until its decision is
+    /// assembled, which is after the answer has left the blocker queue.
+    pub fn answer(&self, approval_id: &ApprovalId, verdict: SeatVerdict, answer: String) {
+        self.lock()
+            .answers
+            .insert(approval_id.clone(), (verdict, answer));
+    }
+
+    /// Takes the answer [`answer`](Self::answer) held for `approval_id`.
+    #[must_use]
+    pub fn take_answer(&self, approval_id: &ApprovalId) -> Option<(SeatVerdict, String)> {
+        self.lock().answers.remove(approval_id)
     }
 
     /// Marks `episode_id` as running here. `false` when it already is, so a
