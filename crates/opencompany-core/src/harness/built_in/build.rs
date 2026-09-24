@@ -513,10 +513,18 @@ pub fn build_agent_with_model(
     // node through `park_gated_calls`. There is no belt on which the question
     // would stage into a queue nothing empties — the `media` failure mode the
     // publish gate below guards against.
+    let agent_label = manifest_agent
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(manifest_agent.role.trim())
+        .to_string();
     tools.push(Box::new(
         crate::harness::built_in::blockers::EscalateToHumanTool::new(
             deps.approval_requests.clone(),
             manifest_agent.id.clone(),
+            agent_label,
         ),
     ));
 
