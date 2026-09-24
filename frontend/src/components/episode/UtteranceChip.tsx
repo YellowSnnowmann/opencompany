@@ -16,6 +16,7 @@ import { CheckCircle2, MessageSquare, Radio, Send } from "lucide-react";
 
 import type { MessageEpisodeDto, UtteranceKind } from "@/api/types";
 import { RoutingPlanChip } from "@/components/episode/RoutingPlanChip";
+import { teammateName } from "@/components/episode/teammate-name";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -43,14 +44,12 @@ export function utteranceLead(kind: UtteranceKind, hasRecipients: boolean): stri
   return kind === "dm" ? "Sent to" : `${label} to`;
 }
 
-const UNNAMED_RECIPIENT = "a teammate";
-
 /** Recipients by display name, never by roster id. */
 export function recipientNames(
   ids: readonly string[],
   agentNames?: Readonly<Record<string, string>>,
 ): string[] {
-  return [...new Set(ids.map((id) => agentNames?.[id] ?? UNNAMED_RECIPIENT))];
+  return [...new Set(ids.map((id) => teammateName(id, agentNames)))];
 }
 
 export function roundTitle(revision: number): string {
