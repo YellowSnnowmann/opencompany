@@ -1800,8 +1800,31 @@ impl CompanyAgent {
             .any(|usage| usage.is_zero() || usage.cost_usd == 0.0)
         {
             let segments = progress_pump::attempt_event_segments(&events, usages.len());
+            // **The price when nothing marks where an attempt began.**
+            //
+            // `attempt_event_segments` splits on `AgentProgress::TurnStarted`,
+            // which is declared and never emitted -- a real stream opens
+            // `IterationStarted`. So every segment comes back empty and the
+            // `else { continue }` below skipped silently: a provider that
+            // reported tokens but no price (every scripted double, and a BYOK
+            // route per the note above) kept `cost_usd` at zero, and the spend
+            // a halt announced was zero with it.
+            //
+            // `TurnCostUpdated` is a cumulative rollup, so the stream's last
+            // one prices the turn. It supplies the **price only**, and only to
+            // an attempt that burned something: a turn that burned nothing must
+            // not inherit a total, which is what `zero_usage_turn_writes_nothing`
+            // and its two neighbours exist to hold.
+            let rollup = progress_pump::last_observed_turn_cost(&events);
             for (usage, segment) in usages.iter_mut().zip(segments) {
                 let Some(observed) = progress_pump::last_observed_turn_cost(segment) else {
+                    if !usage.is_zero()
+                        && usage.cost_usd == 0.0
+                        && let Some(rollup) = rollup.as_ref()
+                        && rollup.cost_usd > 0.0
+                    {
+                        usage.cost_usd = rollup.cost_usd;
+                    }
                     continue;
                 };
                 if usage.is_zero() {
