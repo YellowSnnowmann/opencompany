@@ -1555,7 +1555,7 @@ pub fn agent_spec_for(
     // decides whether the tools exist at all, and the episode's own admission
     // gates them when they do. The scope only stops being a reason they
     // cannot.
-    for speech in crate::hive::tools::speech_tool_names() {
+    for speech in crate::hive::tools::served_speech_tool_names() {
         let prefixed = format!("{}{speech}", crate::hive::host::TOOL_PREFIX);
         if !tool_names.contains(&prefixed) {
             tool_names.push(prefixed);

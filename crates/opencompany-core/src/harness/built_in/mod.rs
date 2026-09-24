@@ -1237,7 +1237,7 @@ impl CompanyAgent {
         let mcp_bearer = crate::hive::mcp_server::McpAgent::mint_bearer();
         // The speech tools stay on the MCP server; this crate's own tools do
         // not, so they leave the served catalogue with them.
-        let allow_tools: Vec<String> = crate::hive::tools::speech_tool_names()
+        let allow_tools: Vec<String> = crate::hive::tools::served_speech_tool_names()
             .iter()
             .map(|name| (*name).to_string())
             .collect();

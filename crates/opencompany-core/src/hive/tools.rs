@@ -58,6 +58,26 @@ pub fn speech_tool_names() -> Vec<&'static str> {
     speech::tool_specs().iter().map(|spec| spec.name).collect()
 }
 
+/// The speech tools a room actually offers a seat.
+///
+/// Narrower than [`speech_tool_names`], which is the whole vocabulary. `post`
+/// and `dm` are defined and deliberately withheld: `post` is text with no
+/// consequence, and five live runs spent it on status, on restating findings
+/// the seat completed with anyway, and on describing calls it had not made;
+/// `dm` beside `ask` is two ways to say nearly the same thing.
+///
+/// Use this wherever this crate **advertises** the vocabulary -- the MCP
+/// brief's `Tools:` line, the definition's tool scope -- so a seat is never
+/// told about a tool the room will refuse. Classification stays on the wider
+/// list: a call to a withheld name is still a speech call, and still the
+/// room's to refuse rather than the company's to mistake for one of its own.
+#[must_use]
+pub fn served_speech_tool_names() -> Vec<&'static str> {
+    tinyhivemind_tools::served_specs()
+        .map(|spec| spec.name)
+        .collect()
+}
+
 /// Whether `name` is one of the room's speech tools.
 #[must_use]
 pub fn is_speech_tool(name: &str) -> bool {
