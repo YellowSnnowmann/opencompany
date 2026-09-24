@@ -231,7 +231,8 @@ The walk is capped at 5,000 entries. A truncated scan can only miss changes.
 
 Publishing needs somewhere to record the version. The chat and task paths each
 claim a destination before the turn (`PublishDestination::Conversation` /
-`::Task`); a **workflow run claims nothing**, because `publish_artifact` needs a
+`::Task`) and run the turn inside that claim (`PublishClaim::scoped`), so each
+claim stages into and drains only its own bucket; a **workflow run claims nothing**, because `publish_artifact` needs a
 card to attach a version to and a run has neither a card nor a conversation. So
 a node that calls the tool is refused in-turn, and that refusal is correct —
 `Unclaimed` is the `#[default]`, which is the fail-safe direction: a turn-running
