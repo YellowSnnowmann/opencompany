@@ -43,6 +43,10 @@ export function utteranceLead(kind: UtteranceKind, hasRecipients: boolean): stri
   return kind === "dm" ? "Sent to" : `${label} to`;
 }
 
+export function roundTitle(revision: number): string {
+  return `Round ${revision + 1}`;
+}
+
 const ICON: Record<UtteranceKind, typeof MessageSquare> = {
   post: MessageSquare,
   broadcast: Radio,
@@ -69,7 +73,7 @@ export function UtteranceChip({ episode, audience, agentNames, className }: Prop
             ? "border-status-done/50 text-foreground"
             : "text-muted-foreground",
         )}
-        title={`round ${episode.revision + 1} of episode ${episode.id}`}
+        title={roundTitle(episode.revision)}
       >
         <Icon className="size-3 shrink-0" aria-hidden />
         {utteranceLead(episode.kind, Boolean(to?.length))}
