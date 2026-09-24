@@ -163,6 +163,7 @@ fn pin_deps(root: std::path::PathBuf) -> HarnessDeps {
         run_output_store: None,
         workflow_revisions: None,
         approval_requests: ApprovalRequestQueue::default(),
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities: toolbelt::CapabilityFilter::AllowAll,

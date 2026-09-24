@@ -499,6 +499,9 @@ pub struct HarnessDeps {
     /// cheap-shared-handle pattern as [`Self::delegations`]; the default is an
     /// empty queue, which simply means nothing is ever parked.
     pub approval_requests: ApprovalRequestQueue,
+    /// The runtime's shared park transaction, for a turn that parks outside a
+    /// cycle. `None` where no runtime is wired (tests, examples).
+    pub approval_parker: Option<crate::runtime::approval_park::ApprovalParker>,
     /// The company's [`SecretStore`], so [`HarnessPool::ensure`] can **re-resolve**
     /// the effective MCP server set on each call and rebuild the roster when a
     /// console add/remove/enable-toggle changes it — the MCP-freshness fix (a
@@ -6234,6 +6237,7 @@ pub(crate) fn workflow_wiring_deps(
         deep_trace: None,
         workflow_revisions: None,
         approval_requests: policy::ApprovalRequestQueue::default(),
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities,

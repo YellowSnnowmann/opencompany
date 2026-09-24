@@ -469,10 +469,9 @@ pub enum DelegationScope {
     /// under the cycle lock, so one bucket is all they have ever needed and
     /// their behaviour is unchanged by this scoping.
     ///
-    /// Deliberately **not** an error, for the same reason
-    /// [`ApprovalScope::Unscoped`](crate::harness::policy::ApprovalScope)
-    /// is not: a claimant added later that forgets to name a scope degrades to
-    /// today's behaviour rather than to a silently dropped delegation.
+    /// Deliberately **not** an error: a claimant added later that forgets to
+    /// name a scope degrades to today's behaviour rather than to a silently
+    /// dropped delegation.
     #[default]
     Unscoped,
     /// One workflow run, keyed by its run id.

@@ -817,37 +817,38 @@ impl HarnessBrain {
         // chat path. It is a conversation continuation (it answers into the
         // thread the approval was raised in), so it files the same way a chat
         // turn does.
-        let publish_claim =
-            (self.deps.tasks.is_some() && self.deps.artifacts.is_some()).then(|| {
-                self.deps
-                    .pending_publishes
-                    .claim(publish::PublishDestination::Conversation)
-            });
+        let publish_claim = self
+            .deps
+            .pending_publishes
+            .claim(self.conversation_destination());
         let output_claim = self.deps.pending_publishes.output_collector().claim();
         // Un-streamed, like a dispatched card: this turn is answered by the
         // bubble returned below, and its transient frames would otherwise
         // misattribute onto whichever chat thread the console is watching.
         let outcome = output_claim
-            .scoped(run_turn.run_steered_background(
-                &self.record().id,
-                &grant.agent,
-                &instruction,
-                &control,
-                // Issue #1890 I. Un-streamed, but **not** unaddressed: this
-                // call was raised in a conversation, and the grant has recorded
-                // which one — channel and thread — since #435. Without it the
-                // re-issued call bound to nothing, so it ran against whatever
-                // history the agent happened to be holding and then published
-                // its answer into the origin thread regardless. The same pair
-                // the delegation drain below is bound to.
-                ChatTarget::in_thread(grant.origin_thread.as_deref(), grant.origin_parent),
-                None,
-            ))
+            .scoped(Box::pin(publish_claim.scoped(Box::pin(
+                run_turn.run_steered_background(
+                    &self.record().id,
+                    &grant.agent,
+                    &instruction,
+                    &control,
+                    // Issue #1890 I. Un-streamed, but **not** unaddressed: this
+                    // call was raised in a conversation, and the grant has
+                    // recorded which one — channel and thread — since #435.
+                    // Without it the re-issued call bound to nothing, so it ran
+                    // against whatever history the agent happened to be holding
+                    // and then published its answer into the origin thread
+                    // regardless. The same pair the delegation drain below is
+                    // bound to.
+                    ChatTarget::in_thread(grant.origin_thread.as_deref(), grant.origin_parent),
+                    None,
+                ),
+            ))))
             .await;
         drop(guard);
-        let published = self.deps.pending_publishes.drain();
+        let published = publish_claim.drain();
         if !published.is_empty()
-            && publish_claim.is_some()
+            && publish_claim.is_claimed()
             && let Err(err) = output_claim
                 .scoped(self.record_conversation_publishes(
                     &grant.agent,
@@ -1110,11 +1111,14 @@ impl HarnessBrain {
         // turns that into an in-turn refusal the agent can actually report.
         // `build_agent` already declines to wire the tool at all in that case;
         // this makes the invariant local rather than borrowed from the builder.
-        let _publish_claim = self.deps.artifacts.as_ref().map(|_| {
-            self.deps
-                .pending_publishes
-                .claim(publish::PublishDestination::Task)
-        });
+        let publish_claim = self
+            .deps
+            .pending_publishes
+            .claim(if self.deps.artifacts.is_some() {
+                publish::PublishDestination::Task
+            } else {
+                publish::PublishDestination::Unclaimed
+            });
         // Issue #453: and the delegation queue, for the same span. A dispatched
         // card's responder is the orchestrator, which carries the delegation
         // tools, and `handle_task_delegations` below is the drain — so this path
@@ -1198,34 +1202,36 @@ impl HarnessBrain {
             // it. This is inside the loop deliberately; the nudge below is not
             // part of the loop and never clears, so a nudge cannot discard what
             // the turn it is asking about published.
-            self.deps.pending_publishes.clear();
+            publish_claim.clear();
             // Issue #339: an abandoned redirect's workflow run is abandoned with
             // it, for the same reason — the card's link must name what the turn
             // that actually settled produced, not what a discarded one did.
             self.deps.workflow_refs.clear();
-            let outcome = dispatch_origin
+            let outcome = publish_claim
                 .scoped(Box::pin(
-                    run_turn
-                        // A dispatched task card carries no chat bubble (its steps
-                        // are discarded into the note), so its live turn frames
-                        // must not leak onto the console timeline — run it
-                        // un-streamed (#125 review).
-                        .run_steered_background(
-                            &self.record().id,
-                            &responder,
-                            &instruction,
-                            &control,
-                            // No conversation to bind to: a dispatched card's turn
-                            // answers the board, not a thread (#1890 I). Unchanged
-                            // behaviour — including that it does not clear
-                            // history, since one task can span several turns.
-                            ChatTarget::default(),
-                            // Issue #242: un-streamed does not mean unrecorded. The
-                            // trace this turn produces is written to the attempt
-                            // row as it happens, which is what a redirect re-run
-                            // appends to rather than restarting.
-                            sink.clone(),
-                        ),
+                    dispatch_origin.scoped(Box::pin(
+                        run_turn
+                            // A dispatched task card carries no chat bubble (its steps
+                            // are discarded into the note), so its live turn frames
+                            // must not leak onto the console timeline — run it
+                            // un-streamed (#125 review).
+                            .run_steered_background(
+                                &self.record().id,
+                                &responder,
+                                &instruction,
+                                &control,
+                                // No conversation to bind to: a dispatched card's turn
+                                // answers the board, not a thread (#1890 I). Unchanged
+                                // behaviour — including that it does not clear
+                                // history, since one task can span several turns.
+                                ChatTarget::default(),
+                                // Issue #242: un-streamed does not mean unrecorded. The
+                                // trace this turn produces is written to the attempt
+                                // row as it happens, which is what a redirect re-run
+                                // appends to rather than restarting.
+                                sink.clone(),
+                            ),
+                    )),
                 ))
                 .await;
             // One-shot read of what (if anything) the operator asked for. `None`
@@ -1292,22 +1298,24 @@ impl HarnessBrain {
                             // The card keeps the delegate as its assignee on the
                             // way to `todo` — the hand-off did happen, and a
                             // re-dispatch should start from who it was given to.
-                            let handoff = match self
-                                .delegation_runner(run_turn.as_ref(), &record)
-                                .for_task(&card.id)
-                                // The delegate's turn is part of THIS attempt —
-                                // its steps and its spend belong to the card's
-                                // run, not to nothing (#242).
-                                .for_run(sink.clone())
-                                // Issue #1846 review (Codex #3864988176): the
-                                // card's own (possibly redirect-augmented)
-                                // instruction — the closest thing a dispatched
-                                // task has to "the operator's own words" — so a
-                                // delegate's budget-pause marker re-parks with
-                                // the brief this attempt is actually running,
-                                // not the hand-off instruction the model wrote.
-                                .reissue_message(instruction.clone())
-                                .handle_task_delegations(&mut card, &responder)
+                            let handoff = match publish_claim
+                                .scoped(Box::pin(
+                                    self.delegation_runner(run_turn.as_ref(), &record)
+                                        .for_task(&card.id)
+                                        // The delegate's turn is part of THIS attempt —
+                                        // its steps and its spend belong to the card's
+                                        // run, not to nothing (#242).
+                                        .for_run(sink.clone())
+                                        // Issue #1846 review (Codex #3864988176): the
+                                        // card's own (possibly redirect-augmented)
+                                        // instruction — the closest thing a dispatched
+                                        // task has to "the operator's own words" — so a
+                                        // delegate's budget-pause marker re-parks with
+                                        // the brief this attempt is actually running,
+                                        // not the hand-off instruction the model wrote.
+                                        .reissue_message(instruction.clone())
+                                        .handle_task_delegations(&mut card, &responder),
+                                ))
                                 .await
                             {
                                 Ok(handoff) => handoff,
@@ -1517,7 +1525,7 @@ impl HarnessBrain {
                 let changed = workspace_at_dispatch.changed_since(&workspace);
                 scan_partial = changed.partial;
                 unpublished_before_nudge =
-                    publish::unpublished(&changed.files, &self.deps.pending_publishes.sources());
+                    publish::unpublished(&changed.files, &publish_claim.sources());
             } else {
                 // A hand-off reassigned the card, so the snapshot above is of
                 // the delegator's workspace and the work happened in the
@@ -1537,8 +1545,8 @@ impl HarnessBrain {
         // a local — not a loop, not a counter, not inside the redirect loop. A
         // second nudge is not merely absent, there is nowhere to write one.
         if !unpublished_before_nudge.is_empty() {
-            declined = self
-                .nudge_for_unpublished(
+            declined = publish_claim
+                .scoped(Box::pin(self.nudge_for_unpublished(
                     run_turn.as_ref(),
                     &responder,
                     &base_instruction,
@@ -1554,7 +1562,7 @@ impl HarnessBrain {
                             scope: None,
                         },
                     ),
-                )
+                )))
                 .await;
         }
 
@@ -1562,10 +1570,8 @@ impl HarnessBrain {
         // staged now. Deliberately not a fresh scan: a scratch file the agent
         // wrote *while answering the nudge* is an artifact of being asked, and
         // naming it in the warning would make the nudge generate its own noise.
-        let still_unpublished = publish::unpublished(
-            &unpublished_before_nudge,
-            &self.deps.pending_publishes.sources(),
-        );
+        let still_unpublished =
+            publish::unpublished(&unpublished_before_nudge, &publish_claim.sources());
         if !still_unpublished.is_empty() {
             // A decline is a clean outcome, not an error: the reason goes on the
             // card where it is addressable, the warning names the files for
@@ -1652,7 +1658,7 @@ impl HarnessBrain {
         // outcome than a missing deliverable record. So the failure is now
         // logged at `error` (loudly: an operator whose published file did not
         // store needs to know) and the settle continues.
-        let published = self.deps.pending_publishes.drain();
+        let published = publish_claim.drain();
         let staged_workflows = self.deps.workflow_refs.drain();
         let succeeded = lifecycle::run_status_for(run_end) == RunStatus::Succeeded;
         let recorded: Vec<TaskOutputArtifact> = if succeeded {
@@ -2607,13 +2613,23 @@ impl HarnessBrain {
         Ok(written)
     }
 
+    /// Where a conversation turn's publishes go: a fresh card when both stores
+    /// the drain needs are wired, else nowhere, so the tool refuses in-turn.
+    fn conversation_destination(&self) -> publish::PublishDestination {
+        if self.deps.tasks.is_some() && self.deps.artifacts.is_some() {
+            publish::PublishDestination::Conversation
+        } else {
+            publish::PublishDestination::Unclaimed
+        }
+    }
+
     /// Files one drained batch of conversation publishes onto the right card —
     /// same destination rule (`spawned_task` vs a fresh card), same
     /// publisher-attribution fallback, same failure escalation into the
     /// operator's own reply (issue #445) — and returns the card it landed on.
     ///
     /// `claimed` mirrors the belt-and-suspenders guard every call site already
-    /// used inline (`!published.is_empty() && publish_claim.is_some()`): an
+    /// used inline (`!published.is_empty() && publish_claim.is_claimed()`): an
     /// unclaimed queue can only ever drain empty, so this is defensive rather
     /// than load-bearing, but it keeps both conditions visible together instead
     /// of only at the call site.
@@ -3234,13 +3250,23 @@ impl HarnessBrain {
             agent: None,
             run_id: run_id.map(str::to_string),
         };
-        self.deps
-            .approval_requests
-            .push(crate::harness::built_in::policy::ApprovalRequest {
-                tool: payload.kind.effect_kind(),
-                reason: reason.to_string(),
-                effect,
-            });
+        let pushed =
+            self.deps
+                .approval_requests
+                .push(crate::harness::built_in::policy::ApprovalRequest {
+                    tool: payload.kind.effect_kind(),
+                    reason: reason.to_string(),
+                    effect,
+                });
+        if !pushed.is_queued() {
+            tracing::error!(
+                kind = %payload.kind.effect_kind(),
+                outcome = ?pushed,
+                "[harness::brain] a blocker could not be queued for the operator; settling the \
+                 run as failed rather than blocked on a question nobody was asked"
+            );
+            return TaskRunEnd::Failed;
+        }
         TaskRunEnd::Blocked
     }
 
@@ -3891,12 +3917,10 @@ impl HarnessBrain {
                     // a promise to record, and one that cannot be kept must not
                     // be made, or the tool goes back to issuing receipts nothing
                     // honours.
-                    let publish_claim =
-                        (self.deps.tasks.is_some() && self.deps.artifacts.is_some()).then(|| {
-                            self.deps
-                                .pending_publishes
-                                .claim(publish::PublishDestination::Conversation)
-                        });
+                    let publish_claim = self
+                        .deps
+                        .pending_publishes
+                        .claim(self.conversation_destination());
                     // Drive the brain-agnostic delegation seam (issue #176): the
                     // orchestrator turn, its queued delegations, and the CEO-relay
                     // hand-back all run behind the `RunTurn` impl. `HarnessDeps` is
@@ -3906,37 +3930,39 @@ impl HarnessBrain {
                     let record = self.record();
                     let output_claim = self.deps.pending_publishes.output_collector().claim();
                     let turn = output_claim
-                        .scoped(
-                            self.delegation_runner(run_turn.as_ref(), &record)
-                                // Issues #1035 / #1152: the operator's own statement of
-                                // what this message is for. The REST handler already
-                                // acts on it; until #1035 the runtime never saw it, so
-                                // it could not tell a message the handler had carded
-                                // from one it had not — and since #1152 it also carries
-                                // "this is not work", which the runtime has to honour or
-                                // the console's promise holds on one surface only.
-                                .requested(*deliverable)
-                                // Who else this message named (issue: mentions). Context
-                                // for the turn, never a second dispatch.
-                                .also_mentioned(also_mentioned)
-                                // The thread this message belongs to (#1890). Its own
-                                // `parent` IS the root — a reply is parented to its
-                                // question's parent, never to the question — so an
-                                // unparented message carries `None` and lands on the
-                                // channel-level conversation.
-                                .in_thread(*parent)
-                                // This message's own line in the journal, so the chat
-                                // seed can tell it apart from a concurrently accepted
-                                // sibling by identity instead of by text.
-                                .answering(event_seq)
-                                .maybe_for_task(thread_card.as_deref())
-                                // Issue #1846 review (Codex #3864988176): the operator's
-                                // own words, so a delegate's budget-pause marker re-parks
-                                // with what the operator actually asked for rather than
-                                // the hand-off instruction the model wrote.
-                                .reissue_message(composed.clone())
-                                .handle_operator_message(&responder, &composed, chat_id),
-                        )
+                        .scoped(Box::pin(
+                            publish_claim.scoped(Box::pin(
+                                self.delegation_runner(run_turn.as_ref(), &record)
+                                    // Issues #1035 / #1152: the operator's own statement of
+                                    // what this message is for. The REST handler already
+                                    // acts on it; until #1035 the runtime never saw it, so
+                                    // it could not tell a message the handler had carded
+                                    // from one it had not — and since #1152 it also carries
+                                    // "this is not work", which the runtime has to honour or
+                                    // the console's promise holds on one surface only.
+                                    .requested(*deliverable)
+                                    // Who else this message named (issue: mentions). Context
+                                    // for the turn, never a second dispatch.
+                                    .also_mentioned(also_mentioned)
+                                    // The thread this message belongs to (#1890). Its own
+                                    // `parent` IS the root — a reply is parented to its
+                                    // question's parent, never to the question — so an
+                                    // unparented message carries `None` and lands on the
+                                    // channel-level conversation.
+                                    .in_thread(*parent)
+                                    // This message's own line in the journal, so the chat
+                                    // seed can tell it apart from a concurrently accepted
+                                    // sibling by identity instead of by text.
+                                    .answering(event_seq)
+                                    .maybe_for_task(thread_card.as_deref())
+                                    // Issue #1846 review (Codex #3864988176): the operator's
+                                    // own words, so a delegate's budget-pause marker re-parks
+                                    // with what the operator actually asked for rather than
+                                    // the hand-off instruction the model wrote.
+                                    .reissue_message(composed.clone())
+                                    .handle_operator_message(&responder, &composed, chat_id),
+                            )),
+                        ))
                         .await?;
                     let mut operator_steps = turn.steps;
                     let mut operator_reply = turn.reply;
@@ -3970,7 +3996,7 @@ impl HarnessBrain {
                     // so nothing survives into the next turn, and only *recorded*
                     // when the claim was actually taken — an unclaimed queue can
                     // only be empty here, because the tool refuses without one.
-                    let published = self.deps.pending_publishes.drain();
+                    let published = publish_claim.drain();
                     // Issue #989: the paths this turn actually offered, captured
                     // before `file_conversation_batch` below moves `published` —
                     // the cap-pause scan's "staged" side of `publish::unpublished`
@@ -3985,7 +4011,7 @@ impl HarnessBrain {
                             // Issue #1890 B: the same conversation this turn
                             // answers in, thread and all — `parent` IS the root.
                             ChatTarget::in_thread(chat_id, *parent),
-                            publish_claim.is_some(),
+                            publish_claim.is_claimed(),
                             published,
                             &mut operator_reply,
                         ))
@@ -4024,25 +4050,27 @@ impl HarnessBrain {
                         if !unpublished.is_empty() {
                             let nudge_control = SteerControl::new();
                             let declined = output_claim
-                                .scoped(self.nudge_for_unpublished(
-                                    run_turn.as_ref(),
-                                    &responder,
-                                    text,
-                                    &operator_reply,
-                                    &unpublished,
-                                    changed.partial,
-                                    &nudge_control,
-                                    None,
-                                    None,
-                                ))
+                                .scoped(Box::pin(publish_claim.scoped(Box::pin(
+                                    self.nudge_for_unpublished(
+                                        run_turn.as_ref(),
+                                        &responder,
+                                        text,
+                                        &operator_reply,
+                                        &unpublished,
+                                        changed.partial,
+                                        &nudge_control,
+                                        None,
+                                        None,
+                                    ),
+                                ))))
                                 .await;
-                            let nudge_published = self.deps.pending_publishes.drain();
+                            let nudge_published = publish_claim.drain();
                             if let Some(card_id) = output_claim
                                 .scoped(self.file_conversation_batch(
                                     &responder,
                                     turn.spawned_task.as_deref(),
                                     ChatTarget::in_thread(chat_id, *parent),
-                                    publish_claim.is_some(),
+                                    publish_claim.is_claimed(),
                                     nudge_published,
                                     &mut operator_reply,
                                 ))
@@ -4057,10 +4085,8 @@ impl HarnessBrain {
                             // answering the nudge* is an artifact of being
                             // asked, and naming it here would make the nudge
                             // generate its own noise.
-                            let still_unpublished = publish::unpublished(
-                                &unpublished,
-                                &self.deps.pending_publishes.sources(),
-                            );
+                            let still_unpublished =
+                                publish::unpublished(&unpublished, &publish_claim.sources());
                             if !still_unpublished.is_empty() {
                                 // A plain chat turn has no card to note a
                                 // decline on unless one happened to be opened
@@ -4290,12 +4316,10 @@ impl HarnessBrain {
                     // the claim is a promise to record, and one that cannot be
                     // kept must not be made, or the tool goes back to issuing
                     // receipts nothing honours.
-                    let publish_claim =
-                        (self.deps.tasks.is_some() && self.deps.artifacts.is_some()).then(|| {
-                            self.deps
-                                .pending_publishes
-                                .claim(publish::PublishDestination::Conversation)
-                        });
+                    let publish_claim = self
+                        .deps
+                        .pending_publishes
+                        .claim(self.conversation_destination());
                     // Drive the same routed turn an operator message gets, so a
                     // responder bound to a named harness runs there and an
                     // unavailable default fails loudly instead of silently
@@ -4304,10 +4328,12 @@ impl HarnessBrain {
                     let record = self.record();
                     let output_claim = self.deps.pending_publishes.output_collector().claim();
                     let turn = output_claim
-                        .scoped(
-                            self.delegation_runner(run_turn.as_ref(), &record)
-                                .handle_operator_message(&responder, prompt, None),
-                        )
+                        .scoped(Box::pin(
+                            publish_claim.scoped(Box::pin(
+                                self.delegation_runner(run_turn.as_ref(), &record)
+                                    .handle_operator_message(&responder, prompt, None),
+                            )),
+                        ))
                         .await?;
                     let mut responses = vec![OutboundMessage {
                         message_id: None,
@@ -4389,7 +4415,7 @@ impl HarnessBrain {
                     // onto the card the turn opened — or a freshly minted one —
                     // exactly as an operator turn's publish is filed.
                     let spawned_task = responses[0].task_id.clone();
-                    let published = self.deps.pending_publishes.drain();
+                    let published = publish_claim.drain();
                     let published_sources: Vec<String> = published
                         .iter()
                         .map(|publish| publish.source.clone())
@@ -4402,7 +4428,7 @@ impl HarnessBrain {
                             // the General desk's channel-level conversation,
                             // which is what the bare id meant before #1890 B.
                             ChatTarget::channel(Some(crate::server::ops::language::DEFAULT_DESK)),
-                            publish_claim.is_some(),
+                            publish_claim.is_claimed(),
                             published,
                             &mut responses[0].text,
                         ))
@@ -4420,19 +4446,21 @@ impl HarnessBrain {
                         if !unpublished.is_empty() {
                             let nudge_control = SteerControl::new();
                             let _declined = output_claim
-                                .scoped(self.nudge_for_unpublished(
-                                    run_turn.as_ref(),
-                                    &responder,
-                                    prompt,
-                                    &responses[0].text,
-                                    &unpublished,
-                                    changed.partial,
-                                    &nudge_control,
-                                    None,
-                                    None,
-                                ))
+                                .scoped(Box::pin(publish_claim.scoped(Box::pin(
+                                    self.nudge_for_unpublished(
+                                        run_turn.as_ref(),
+                                        &responder,
+                                        prompt,
+                                        &responses[0].text,
+                                        &unpublished,
+                                        changed.partial,
+                                        &nudge_control,
+                                        None,
+                                        None,
+                                    ),
+                                ))))
                                 .await;
-                            let nudge_published = self.deps.pending_publishes.drain();
+                            let nudge_published = publish_claim.drain();
                             if let Some(card_id) = output_claim
                                 .scoped(self.file_conversation_batch(
                                     &responder,
@@ -4440,7 +4468,7 @@ impl HarnessBrain {
                                     ChatTarget::channel(Some(
                                         crate::server::ops::language::DEFAULT_DESK,
                                     )),
-                                    publish_claim.is_some(),
+                                    publish_claim.is_claimed(),
                                     nudge_published,
                                     &mut responses[0].text,
                                 ))

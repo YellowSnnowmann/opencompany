@@ -24,6 +24,9 @@ pub mod advance;
 pub mod approval_display;
 /// Which card owns a parked approval on the queue read (#1891).
 pub mod approval_ownership;
+/// The shared park transaction every approval path goes through. See
+/// [`approval_park`].
+pub mod approval_park;
 /// Brain-agnostic resolution of a task card's `assignee` against the full
 /// roster — teammates, overlay teammates and desks (issue #205). Shared by the
 /// harness dispatch path and the REST write boundary so the board's assignee
