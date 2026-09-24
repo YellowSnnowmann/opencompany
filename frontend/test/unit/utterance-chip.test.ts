@@ -34,7 +34,7 @@ function render(episode: MessageEpisodeDto, audience?: string[]) {
 }
 
 const KINDS = ["post", "broadcast", "dm", "complete_episode"] as const;
-const TOOL_WORD = /\b(post|broadcast|dm|complete|complete_episode)\b/;
+const TOOL_WORD = /\b(post|broadcast|dm|complete|complete_episode)\b/i;
 
 describe("utterance chip wording", () => {
   it("labels every kind in plain words, never the tool's name", () => {
@@ -45,6 +45,12 @@ describe("utterance chip wording", () => {
     }
     expect(utteranceLead("dm", true)).toBe("Sent to");
     expect(utteranceLead("dm", false)).toBe("Private note");
+  });
+
+  it("catches a tool name regardless of how it's capitalized", () => {
+    expect("DM").toMatch(TOOL_WORD);
+    expect("Post").toMatch(TOOL_WORD);
+    expect("Complete_Episode").toMatch(TOOL_WORD);
   });
 
   it("titles the round without the episode id", () => {
