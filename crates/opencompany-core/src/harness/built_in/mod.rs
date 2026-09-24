@@ -1239,12 +1239,30 @@ impl CompanyAgent {
             .map(|tool| tool.name().to_string())
             .filter(|name| !build::OPENHUMAN_NATIVE_TOOLS.contains(&name.as_str()))
             .collect();
-        let mut allow_tools: Vec<String> = crate::hive::tools::speech_tool_names()
+        // The speech tools stay on the MCP server; this crate's own tools do
+        // not, so they leave the served catalogue with them.
+        let allow_tools: Vec<String> = crate::hive::tools::speech_tool_names()
             .iter()
             .map(|name| (*name).to_string())
             .collect();
-        allow_tools.extend(served_names.iter().cloned());
         let served_catalogue = allow_tools.clone();
+        // Shared once, here, and handed to the spec as a factory that mints
+        // owned handles per turn. OpenHuman's own tools are filtered out: it
+        // runs those itself, and handing them back would register each twice.
+        let mut blueprint = blueprint;
+        let step_labels = steps::StepLabels::from_tools(&blueprint.tools);
+        let belt_names: Vec<String> = blueprint
+            .tools
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect();
+        let native_belt: Arc<Vec<Arc<dyn tinytools::Tool>>> =
+            Arc::new(crate::hive::tools::share_belt(
+                std::mem::take(&mut blueprint.tools)
+                    .into_iter()
+                    .filter(|tool| !build::OPENHUMAN_NATIVE_TOOLS.contains(&tool.name()))
+                    .collect(),
+            ));
         let base_id = crate::session_key::runtime_agent_id(company, agent_id);
         let mut runtime_id = base_id.clone();
         let mut attempt = 0u32;
@@ -1256,8 +1274,13 @@ impl CompanyAgent {
                     allow_tools: allow_tools.clone(),
                 }
             });
-            let spec =
-                build::agent_spec_for(&blueprint, &runtime_id, bridge.provider(), attach.as_ref());
+            let spec = build::agent_spec_for(
+                &blueprint,
+                &runtime_id,
+                bridge.provider(),
+                attach.as_ref(),
+                Some(&native_belt),
+            );
             match runtime.agent(spec) {
                 Ok(agent) => break agent,
                 Err(openhuman_embed::AgentError::DuplicateId(_)) if attempt < 64 => {
@@ -1284,32 +1307,21 @@ impl CompanyAgent {
                 "[harness] runtime id was taken; registered under a numbered suffix"
             );
         }
-        let step_labels = steps::StepLabels::from_tools(&blueprint.tools);
-        let belt_names: Vec<String> = blueprint
-            .tools
-            .iter()
-            .map(|tool| tool.name().to_string())
-            .collect();
         let build::AgentBlueprint {
-            tools,
             policy,
             workspace,
             chat_model,
             ..
         } = blueprint;
-        let served: Vec<Arc<dyn tinytools::Tool>> = crate::hive::tools::share_belt(
-            tools
-                .into_iter()
-                .filter(|tool| !build::OPENHUMAN_NATIVE_TOOLS.contains(&tool.name()))
-                .collect(),
-        );
+        // No `.tools(..)`: the belt is the agent's own now. The server still
+        // serves the speech tools, and still holds the policy and workspace
+        // those calls are admitted and sandboxed against.
         let mut entry = crate::hive::mcp_server::McpAgent::new(
             company.clone(),
             agent_id,
             runtime_id.clone(),
             mcp_bearer.clone(),
         )
-        .tools(served.clone())
         .policy(Arc::new(policy))
         .workspace(workspace.clone());
         if let Some(events) = events {
@@ -1328,7 +1340,7 @@ impl CompanyAgent {
             turn_lock: Arc::new(Mutex::new(())),
             bridge,
             step_labels,
-            tools: Arc::new(served),
+            tools: native_belt,
             belt_names,
             mcp,
             workspace,

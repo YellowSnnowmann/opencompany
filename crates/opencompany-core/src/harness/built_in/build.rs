@@ -1504,15 +1504,38 @@ pub fn agent_spec_for(
     runtime_id: &str,
     provider: openhuman_embed::Provider,
     mcp: Option<&McpAttach>,
+    belt: Option<&Arc<Vec<Arc<dyn Tool>>>>,
 ) -> AgentSpec {
-    // Plan hive-desks Phase 3: this crate's own tools reach the agent over
-    // the `opencompany` MCP server, which the model calls through OpenHuman's
-    // bridge tools — so those two join the native scope whenever the server
-    // is attached, and the prompt says where the belt went. Without an
-    // attachment (no listener yet: a roster built by a test that never
-    // dispatches) the spec is exactly the Phase 2 one.
+    // **This crate's own tools are native.**
+    //
+    // They used to reach the model only over the `opencompany` MCP server,
+    // because an `AgentSpec` had no seam for a host's own `dyn Tool` and MCP
+    // was the one road a spec offered. The model paid for that road: a
+    // discovery call to learn the catalogue, and an `mcp_call_tool` envelope
+    // whose inner `arguments` object carries no schema a provider can validate
+    // or constrain decoding against. Observed live, a teammate asked to
+    // convene a room spent three calls guessing argument names before it got
+    // one right, then a fourth on `mcp_list_tools` to read the schema it
+    // should have been handed.
+    //
+    // `AgentSpec::tools` takes them directly now: own schema on the wire, own
+    // name, validated arguments. The belt is shared and this factory mints
+    // owned handles onto it per turn (`hive::shared_tool`), so nothing is
+    // rebuilt.
+    //
+    // The MCP attachment stays for what MCP is actually for — the speech tools
+    // an episode seat answers with, and any server an operator connected to
+    // this company. A company with neither carries no bridge tools at all.
     let mut tool_names = blueprint.native_tool_names.clone();
     let mut system_prompt = blueprint.system_prompt.clone();
+    if let Some(belt) = belt {
+        for tool in belt.iter() {
+            let name = tool.name().to_string();
+            if !tool_names.contains(&name) {
+                tool_names.push(name);
+            }
+        }
+    }
     if let Some(mcp) = mcp {
         for bridge in ["mcp_list_tools", "mcp_call_tool"] {
             if !tool_names.iter().any(|name| name == bridge) {
@@ -1537,6 +1560,12 @@ pub fn agent_spec_for(
         )
         .provider(provider)
         .access(Access::full());
+    if let Some(belt) = belt {
+        let belt = Arc::clone(belt);
+        spec = spec.tools(move || {
+            openhuman_embed::HostTurnTools::advertised(crate::hive::shared_tool::owned_belt(&belt))
+        });
+    }
     if let Some(mcp) = mcp {
         spec = attach_opencompany_mcp(spec, mcp);
     }

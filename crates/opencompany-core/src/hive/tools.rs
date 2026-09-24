@@ -538,13 +538,18 @@ pub fn share_belt(belt: Vec<Box<dyn Tool>>) -> Vec<Arc<dyn Tool>> {
     belt.into_iter().map(Arc::from).collect()
 }
 
-/// How a model reaches `tool` on a company agent: by its bare name when
-/// OpenHuman runs it natively, else as `mcp_call_tool` on the `opencompany`
-/// server with `args` as the arguments object — the shape the scripted
+/// How a model reaches `tool` on a company agent — the shape the scripted
 /// models in this crate's turn tests emit, and the console's mock brain.
+///
+/// **Almost everything is a bare name now.** This crate's own tools ride the
+/// agent's belt directly (`AgentSpec::tools`), so a model calls them the way
+/// it calls a shell: by name, against their own schema. Only the speech tools
+/// are still served over the `opencompany` server, because only a seat in an
+/// episode answers with one, and they go on the wire wrapped in
+/// `mcp_call_tool` with `args` as the arguments object.
 #[must_use]
 pub fn via_opencompany_mcp(tool: &str, args: Value) -> (String, Value) {
-    if crate::harness::build::OPENHUMAN_NATIVE_TOOLS.contains(&tool) {
+    if !speech_tool_names().contains(&tool) {
         return (tool.to_string(), args);
     }
     (
