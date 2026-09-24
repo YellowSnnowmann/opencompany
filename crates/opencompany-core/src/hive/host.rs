@@ -875,9 +875,25 @@ impl Journal for DeskHost {
 fn dm_persona_note(desk_id: &str, seat: &str) -> Option<&'static str> {
     let owner = desk_id.strip_prefix(crate::runtime::assignee::DM_PREFIX)?;
     Some(if owner == seat {
+        // **The other half of `take_over`'s pairing.**
+        //
+        // A guest is told it may claim work; without this the seat that would
+        // *prompt* that claim is told nothing, and a live run showed what it
+        // does instead: asked to have work owned end to end, it broadcast
+        // "handed to creative_director" and told the operator so. Nobody had
+        // been asked, creative_director never ran, and the operator was told
+        // a transfer had happened that had not. `ask` is the only thing that
+        // wakes a teammate and lets it answer by taking the work, so the seat
+        // that wants a transfer has to know that is what asking is for.
         "\n\n## This conversation\n\nThis is your own direct line with the operator, not a \
          desk. What the brief calls desk messages are theirs. Answer them; the teammates \
-         listed as members are here to be asked, and none of them is waiting on you."
+         listed as members are here to be asked, and none of them is waiting on you.\n\nIf \
+         the operator wants a teammate to *own* something rather than advise on it, `ask` \
+         that teammate whether they will take it. Asking is the only thing that reaches \
+         them: they may answer by claiming the work, and you will be told where the \
+         operator can reach them about it. Never tell the operator that someone has taken \
+         work on unless that teammate has said so themselves — saying it in a message \
+         hands over nothing."
     } else {
         "\n\n## This conversation\n\nYou are here because a teammate may need to ask you \
          something in their direct line with the operator. You are not the operator's \
@@ -915,7 +931,32 @@ impl EpisodeHost for DeskHost {
         // handle returned is the one the pool already holds -- the same
         // teammate, with the room's tools on the turns it sits in the room,
         // and without them everywhere else.
-        agent.seating().lend(self.seat_session(seat), belt);
+        // **Only a guest is lent a takeover.**
+        //
+        // `take_over` announces in the seat's own line with the operator, and
+        // the teammate whose DM this is *is* that line -- it would be telling
+        // the operator, in the conversation they are already having, that it
+        // has the thing they just asked it for. A desk seat has no such line
+        // at all. `None` here is what withholds the tool: the belt factory
+        // offers it only when this is `Some`.
+        let takeover = crate::hive::takeover::is_guest_seat(&self.desk_id, seat).then(|| {
+            crate::hive::seating::TakeoverLoan {
+                events: Arc::clone(&self.events),
+                company: self.company.clone(),
+                agent: seat.to_owned(),
+            }
+        });
+        let guest = takeover.is_some();
+        agent.seating().lend(
+            self.seat_session(seat),
+            crate::hive::seating::SeatLoan {
+                source: belt,
+                takeover,
+                dm: self
+                    .desk_id
+                    .starts_with(crate::runtime::assignee::DM_PREFIX),
+            },
+        );
         // The standing prompt still travels separately: a seeded turn renders
         // no system prompt, so `persona` puts it back at the head of the seed.
         let Some((_, deps)) = self.roster.as_ref() else {
@@ -924,6 +965,11 @@ impl EpisodeHost for DeskHost {
         let mut persona = seat_persona(record, deps, seat).map_err(|error| refused(&error))?;
         if let Some(note) = dm_persona_note(&self.desk_id, seat) {
             persona.push_str(note);
+        }
+        // A verb it is handed but never told about is one a live run shows it
+        // will not reach for, so the note travels with the tool.
+        if guest {
+            persona.push_str(&crate::hive::takeover::guest_persona_note(TOOL_PREFIX));
         }
         self.personas
             .lock()

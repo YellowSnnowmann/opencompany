@@ -1555,7 +1555,10 @@ pub fn agent_spec_for(
     // decides whether the tools exist at all, and the episode's own admission
     // gates them when they do. The scope only stops being a reason they
     // cannot.
-    for speech in crate::hive::tools::served_speech_tool_names() {
+    for speech in crate::hive::tools::served_speech_tool_names()
+        .into_iter()
+        .chain([crate::hive::takeover::TAKE_OVER_TOOL])
+    {
         let prefixed = format!("{}{speech}", crate::hive::host::TOOL_PREFIX);
         if !tool_names.contains(&prefixed) {
             tool_names.push(prefixed);
@@ -1608,7 +1611,7 @@ pub fn agent_spec_for(
             // on no others. That is what lets one teammate answer its
             // operator and sit in a room without being two agents.
             let seated = seating.lent_to(turn.session_id());
-            let Some(source) = seated else {
+            let Some(loan) = seated else {
                 let belt = openhuman_embed::HostTurnTools::advertised(tools);
                 return match &gate {
                     Some(gate) => belt.with_policy(
@@ -1627,12 +1630,36 @@ pub fn agent_spec_for(
             tools.retain(|tool| {
                 !crate::harness::built_in::EPISODE_WITHHELD_TOOLS.contains(&tool.name())
             });
-            let episode = source.belt();
+            let episode = loan.source.belt();
+            // **`broadcast` is withheld in an operator's direct line.**
+            //
+            // There is no room to broadcast to: the roster is bound so `ask`
+            // has targets, not so a message can be addressed to it. See
+            // `seating::broadcast_withheld_in` for what two live runs cost.
+            let withheld = crate::hive::seating::broadcast_withheld_in(
+                loan.dm,
+                crate::hive::host::TOOL_PREFIX,
+            );
+            let kept = |name: &str| withheld.as_deref() != Some(name);
             let mut visible: std::collections::HashSet<String> =
                 tools.iter().map(|tool| tool.name().to_owned()).collect();
-            visible.extend(episode.names().iter().cloned());
+            visible.extend(episode.names().iter().filter(|name| kept(name)).cloned());
             let mut episode_tools = episode.tools;
+            episode_tools.retain(|tool| kept(tool.name()));
             tools.append(&mut episode_tools);
+            // **A guest seat can claim the work instead of answering it.**
+            //
+            // `take_over` wraps the room's own `complete_episode`, so the
+            // conversation that asked still concludes -- which is the only
+            // thing that releases the asker -- and the operator is told in
+            // this teammate's own line. `None` for every seat the episode
+            // lent no takeover: a desk seat, and the teammate whose DM it is.
+            if let Some(takeover) =
+                crate::hive::takeover::tool_for(&loan, crate::hive::host::TOOL_PREFIX)
+            {
+                visible.insert(takeover.name().to_owned());
+                tools.push(takeover);
+            }
             // **The gate is the episode's, over this company's.**
             //
             // `with_policy` *replaces* the session's policy rather than
@@ -1640,7 +1667,7 @@ pub fn agent_spec_for(
             // `admit` answers for the episode's own names and defers every
             // other call to the company gate. Passing `None` would deny the
             // teammate every tool it otherwise has.
-            let admit = source.belt().admit(
+            let admit = loan.source.belt().admit(
                 gate.as_ref()
                     .map(|gate| Arc::clone(gate) as Arc<dyn oh::agent::tool_policy::ToolPolicy>),
             );

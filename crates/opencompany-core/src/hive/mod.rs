@@ -62,6 +62,10 @@ pub mod session_log;
 /// server dispatches through (plan Phase 3).
 #[cfg(feature = "openhuman")]
 pub mod shared_tool;
+/// `take_over`: a guest seat claims work, concluding the conversation that
+/// asked it and telling the operator in its own line.
+#[cfg(feature = "openhuman")]
+pub mod takeover;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod tools;
