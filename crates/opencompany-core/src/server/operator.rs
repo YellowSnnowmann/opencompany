@@ -1378,10 +1378,13 @@ async fn company_events(
                         .write()
                         .unwrap_or_else(|poisoned| poisoned.into_inner()) = fresh;
                 }
-                let fresh_names = crate::server::readable::DisplayNames::load(&runtime).await;
-                *shared_names
-                    .write()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = fresh_names;
+                if let Some(fresh_names) =
+                    crate::server::readable::DisplayNames::try_load(&runtime).await
+                {
+                    *shared_names
+                        .write()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = fresh_names;
+                }
                 let previous = is_admin_cell.load(std::sync::atomic::Ordering::Relaxed);
                 let refreshed = refreshed_is_admin(&runtime, actor.as_ref(), previous).await;
                 is_admin_cell.store(refreshed, std::sync::atomic::Ordering::Relaxed);

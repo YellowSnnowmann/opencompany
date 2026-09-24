@@ -89,6 +89,26 @@ impl DisplayNames {
         }
     }
 
+    /// Names for `runtime`'s company, or `None` when the read itself failed.
+    ///
+    /// Unlike [`Self::load`], a store error yields `None` rather than an
+    /// empty map, so a caller refreshing a cached value can keep the last
+    /// good one instead of clearing it on a transient read failure.
+    pub async fn try_load(runtime: &crate::company::runtime::CompanyRuntime) -> Option<Self> {
+        match runtime.store().load(runtime.id()).await {
+            Ok(Some(record)) => Some(Self::from_record(&record)),
+            Ok(None) => Some(Self::default()),
+            Err(error) => {
+                tracing::debug!(
+                    company = %runtime.id(),
+                    %error,
+                    "[chat] display names refresh failed; keeping the cached names"
+                );
+                None
+            }
+        }
+    }
+
     fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
         let mut by_id: HashMap<String, String> = HashMap::new();
         for (id, label) in pairs {
