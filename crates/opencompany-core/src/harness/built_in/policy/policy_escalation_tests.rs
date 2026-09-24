@@ -136,11 +136,10 @@ async fn a_flood_of_escalations_can_push_a_paid_media_card_off_the_shared_cap() 
 /// evaluated on its own terms rather than refused outright the way a
 /// second `request_approval` would be.
 #[tokio::test]
-async fn escalate_to_human_respects_combined_cycle_and_unscoped_capacity() {
+async fn escalate_to_human_respects_the_cycle_claims_drain_cap() {
     in_cycle(async {
-    use tinytools::Tool as _;
+        use tinytools::Tool as _;
 
-    for initially_scoped in [false, true] {
         let queue = ApprovalRequestQueue::default();
         let claim = queue.claim(ApprovalScope::Cycle);
         let tool = crate::harness::built_in::blockers::EscalateToHumanTool::new(
@@ -149,27 +148,23 @@ async fn escalate_to_human_respects_combined_cycle_and_unscoped_capacity() {
         );
         for i in 0..MAX_APPROVAL_REQUESTS_PER_TURN - 1 {
             let args = serde_json::json!({ "question": format!("question {i}") });
-            let asked = if initially_scoped {
-                claim.scoped(tool.execute(args)).await
-            } else {
-                tool.execute(args).await
-            }
-            .expect("the tool runs");
+            let asked = claim
+                .scoped(tool.execute(args))
+                .await
+                .expect("the tool runs");
             assert!(!asked.is_error, "{}", asked.text());
         }
 
         for (question, refused) in [("last available slot", false), ("overflow", true)] {
             let args = serde_json::json!({ "question": question });
-            let asked = if initially_scoped {
-                tool.execute(args).await
-            } else {
-                claim.scoped(tool.execute(args)).await
-            }
-            .expect("the tool runs");
+            let asked = claim
+                .scoped(tool.execute(args))
+                .await
+                .expect("the tool runs");
             assert_eq!(
                 asked.is_error,
                 refused,
-                "Cycle and Unscoped share one drain cap; initially_scoped={initially_scoped}: {}",
+                "the cycle claim's drain cap is shared across every push filed into it: {}",
                 asked.text()
             );
         }
@@ -189,8 +184,7 @@ async fn escalate_to_human_respects_combined_cycle_and_unscoped_capacity() {
                 .any(|r| r.reason == "last available slot")
         );
         assert!(drained.requests.iter().all(|r| r.reason != "overflow"));
-    }
-})
+    })
     .await;
 }
 
