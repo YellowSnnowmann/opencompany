@@ -43,6 +43,16 @@ export function utteranceLead(kind: UtteranceKind, hasRecipients: boolean): stri
   return kind === "dm" ? "Sent to" : `${label} to`;
 }
 
+const UNNAMED_RECIPIENT = "a teammate";
+
+/** Recipients by display name, never by roster id. */
+export function recipientNames(
+  ids: readonly string[],
+  agentNames?: Readonly<Record<string, string>>,
+): string[] {
+  return [...new Set(ids.map((id) => agentNames?.[id] ?? UNNAMED_RECIPIENT))];
+}
+
 export function roundTitle(revision: number): string {
   return `Round ${revision + 1}`;
 }
@@ -56,7 +66,6 @@ const ICON: Record<UtteranceKind, typeof MessageSquare> = {
 
 export function UtteranceChip({ episode, audience, agentNames, className }: Props) {
   const Icon = ICON[episode.kind] ?? MessageSquare;
-  const name = (id: string) => agentNames?.[id] ?? id;
   const to = episode.to?.length ? episode.to : episode.kind === "dm" ? audience : undefined;
   return (
     <span
@@ -79,7 +88,7 @@ export function UtteranceChip({ episode, audience, agentNames, className }: Prop
         {utteranceLead(episode.kind, Boolean(to?.length))}
         {to?.length ? (
           <span className="font-normal" data-testid="utterance-audience">
-            {to.map(name).join(", ")}
+            {recipientNames(to, agentNames).join(", ")}
           </span>
         ) : null}
       </span>
