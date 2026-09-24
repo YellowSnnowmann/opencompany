@@ -69,13 +69,6 @@ const EXTRACT_TIMEOUT: Duration = Duration::from_secs(25);
 /// budget problem with a second one.
 const MAX_SUMMARY_TOKENS: u32 = 1_500;
 
-/// Below this, a payload is passed through untouched as `NotNeeded`.
-///
-/// Mirrors the reference summarizer's `summarizer_payload_threshold_tokens`
-/// (4 000 tokens, ~4 chars per token) so both implementations answer the same
-/// question the same way.
-const PASS_THROUGH_BYTES: usize = 16 * 1024;
-
 /// The most of an oversized payload that is worth sending to the extractor.
 ///
 /// `raw` arrives here *because* it exceeded the per-result budget, so it has no
@@ -228,30 +221,6 @@ fn usage_from(response: &tinyinference::model::ModelResponse) -> crate::ports::t
     }
 }
 
-/// The instruction: OpenHuman's own summarizer archetype, verbatim.
-///
-/// Not a prompt of this crate's own. The first cut here was, and it was a
-/// weaker restatement of a prompt that already existed two directories away —
-/// it dropped the structural hints ("if the payload is a list, state how many
-/// items it had... what page boundaries exist"), the error-payload rule
-/// ("preserve the error message verbatim at the top"), the binary-payload rule,
-/// and the `Identifiers preserved` section that gives every kept record a line
-/// of its own. That last omission showed up immediately in testing: a task that
-/// asked for issue numbers got thirty numbers and no titles, because nothing
-/// told the model to keep an identifying line per record regardless of what was
-/// asked.
-///
-/// Referenced through the vendored const rather than copied, so the two cannot
-/// drift: an upstream edit to the extraction contract reaches this caller on
-/// the next vendor bump instead of leaving OpenCompany on a stale fork of it.
-///
-/// The archetype is written for a sub-agent invocation, and every line of that
-/// framing holds here — "you run exactly once per invocation, with no tools and
-/// no follow-up iterations" is precisely what this single tool-less call is.
-fn system_prompt() -> &'static str {
-    oh::agent::registry::agents::summarizer::prompt::ARCHETYPE
-}
-
 impl PayloadSummarizer for PayloadExtractor {
     fn prepare(
         &self,
@@ -271,11 +240,11 @@ impl PayloadSummarizer for PayloadExtractor {
                 // stage spent the call.
                 let body = cap_input(&request.prompt);
                 let (body, was_cut) = body;
-                let max_tokens = request.max_output_tokens.min(MAX_SUMMARY_TOKENS).max(1);
+                let max_tokens = request.max_output_tokens.clamp(1, MAX_SUMMARY_TOKENS);
                 let model_request = tinyinference::model::ModelRequest {
                     messages: vec![
                         tinyinference::message::Message::system(request.system),
-                        tinyinference::message::Message::user(body.clone()),
+                        tinyinference::message::Message::user(body),
                     ],
                     model: Some(model_name),
                     max_tokens: Some(max_tokens),

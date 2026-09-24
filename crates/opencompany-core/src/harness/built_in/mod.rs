@@ -4812,9 +4812,9 @@ impl HarnessPool {
         // (`delegation::seat_turn`), never through the reply text: on a hive
         // seat turn the reply is the seat's own thinking, and on every other
         // turn there is no speech tool to call.
-        let (outcome, turn_costs) = crate::runtime::delegation::with_task_hint(
-            crate::runtime::delegation::operator_words(message).to_string(),
-            deps.approval_requests.turn_scoped(agent.run_with_steer(
+        let (outcome, turn_costs) = deps
+            .approval_requests
+            .turn_scoped(agent.run_with_steer(
                 &augmented,
                 steer,
                 stream_ctx,
@@ -4822,9 +4822,8 @@ impl HarnessPool {
                 // The caller's own, not read off `live` (#1890 I). A turn can
                 // have a conversation and stream nothing.
                 chat,
-            )),
-        )
-        .await;
+            ))
+            .await;
         // Issue B-120: bank what the turn spent BEFORE its result is unwrapped.
         //
         // Both consumers of `turn_costs` used to sit below a `?` on this very
