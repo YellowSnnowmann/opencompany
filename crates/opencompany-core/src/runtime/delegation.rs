@@ -3955,9 +3955,6 @@ pub struct SeatTurnScope {
     pub outbox: std::sync::Mutex<Vec<tinyhivemind::speech::Utterance>>,
     /// Whether the turn ran past its timeout.
     pub timed_out: std::sync::atomic::AtomicBool,
-    /// The journal bracket the pool writes around the turn while it holds
-    /// the agent's lock (`SeatBracket`), when the driver handed one down.
-    pub bracket: Option<std::sync::Arc<dyn crate::hive::driver::SeatBracket>>,
 }
 
 impl SeatTurnScope {
@@ -3969,19 +3966,7 @@ impl SeatTurnScope {
             timeout,
             outbox: std::sync::Mutex::new(Vec::new()),
             timed_out: std::sync::atomic::AtomicBool::new(false),
-            bracket: None,
         }
-    }
-
-    /// The bracket the pool opens once it holds the lock and closes before
-    /// it lets go.
-    #[must_use]
-    pub fn with_bracket(
-        mut self,
-        bracket: Option<std::sync::Arc<dyn crate::hive::driver::SeatBracket>>,
-    ) -> Self {
-        self.bracket = bracket;
-        self
     }
 
     /// The utterances the turn made, drained.

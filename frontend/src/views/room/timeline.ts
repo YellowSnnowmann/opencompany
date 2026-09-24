@@ -644,6 +644,7 @@ export type TimelineItem =
       episode: Episode;
     };
 
+
 /**
  * Interleave a channel's messages and the approvals raised in it, oldest first.
  *
@@ -778,7 +779,16 @@ function groupEpisodes(items: TimelineItem[], episodes: Episode[]): TimelineItem
 
   const out: TimelineItem[] = [];
   const blocks = new Map<string, Extract<TimelineItem, { kind: "round" }>>();
-  const blockKey = (round: EpisodeRound) => `round:${round.episodeId}:${round.revision}`;
+  /**
+   * One band per **episode**, not per revision.
+   *
+   * It used to key on the revision too, so every wave opened another band and
+   * an episode that ran nine of them stacked nine. They also carried the raw
+   * revision number, which is not a count: conversation waves take revisions
+   * of their own, so a desk that ran nine rounds showed a band labelled
+   * "Round 17". One band holding every row is what an episode actually is.
+   */
+  const blockKey = (round: EpisodeRound) => `round:${round.episodeId}`;
 
   for (const item of items) {
     const owned = item.kind === "message" ? owner.get(item.entry.message.id) : undefined;
@@ -800,6 +810,9 @@ function groupEpisodes(items: TimelineItem[], episodes: Episode[]): TimelineItem
       blocks.set(key, block);
       out.push(block);
     }
+    // The live state is the newest wave's, so a band that outlives several
+    // shows the seats working now rather than the ones that finished first.
+    if (owned.round.revision >= block.round.revision) block.round = owned.round;
     block.items.push(item);
   }
 
@@ -812,6 +825,11 @@ function groupEpisodes(items: TimelineItem[], episodes: Episode[]): TimelineItem
       const held = blocks.get(blockKey(round));
       if (held) {
         last = Math.max(last, ...held.items.map((row) => row.at));
+        // A wave that has opened but committed nothing yet is still the live
+        // one, and it owns no rows to carry it in above — without this the
+        // band freezes on the last wave that spoke and shows seats as
+        // finished while they are working.
+        if (round.revision >= held.round.revision) held.round = round;
         continue;
       }
       const at = Math.max(round.startedAt ?? -Infinity, last === -Infinity ? -Infinity : last + 1);

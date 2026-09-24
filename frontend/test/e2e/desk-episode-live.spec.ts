@@ -128,7 +128,7 @@ test("a two-seat desk answers as a room: two lanes at once, a dm, and a completi
     .toBe(episodeId);
 });
 
-test("the round bands survive a reload, rebuilt from the transcript alone", async ({ page }) => {
+test("a completed episode survives a reload as its marker, and draws no band", async ({ page }) => {
   test.skip(!LIVE_BRAIN, LIVE_BRAIN_REASON);
   test.skip(!HIVE, HIVE_REASON);
 
@@ -139,7 +139,12 @@ test("the round bands survive a reload, rebuilt from the transcript alone", asyn
   // `chat/history`'s `episode` field — the reload path.
   await page.reload();
   await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: 30_000 });
-  await expect(bands(page).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('[data-testid="round-band"][data-round-status="open"]')).toHaveCount(0);
-  await expect(page.getByTestId("episode-complete").first()).toBeVisible();
+  // The marker is the reload path's evidence now: its round count is folded
+  // from the same rebuilt episode the band used to be drawn from.
+  const marker = page.getByTestId("episode-complete").first();
+  await expect(marker).toBeVisible({ timeout: 30_000 });
+  await expect(marker).toContainText(/\d+ round/);
+  // And the band is a live instrument: a finished episode draws none, so
+  // nothing on screen says "committed" about a desk that has stopped.
+  await expect(bands(page)).toHaveCount(0);
 });

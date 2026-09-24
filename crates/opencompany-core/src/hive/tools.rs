@@ -46,12 +46,22 @@ use crate::ports::types::CompanyId;
 
 /// The bare speech tool names, in the order [`speech::tool_specs`] presents
 /// them. Every other name the server serves is an OpenCompany tool.
-pub const SPEECH_TOOL_NAMES: [&str; 5] = ["post", "broadcast", "dm", "complete_episode", "read"];
+/// The room's speech tools, named by the library that defines them.
+///
+/// Derived rather than mirrored. This used to be a hand-written list beside
+/// `speech_descriptors`, which builds from the same specs, so the two could
+/// disagree -- and did, the first time the vocabulary grew a verb (`ask`,
+/// which opens a conversation with one seat). A list that cannot drift is
+/// worth more than a `const`.
+#[must_use]
+pub fn speech_tool_names() -> Vec<&'static str> {
+    speech::tool_specs().iter().map(|spec| spec.name).collect()
+}
 
 /// Whether `name` is one of the room's speech tools.
 #[must_use]
 pub fn is_speech_tool(name: &str) -> bool {
-    SPEECH_TOOL_NAMES.contains(&name)
+    speech_tool_names().contains(&name)
 }
 
 /// The hive coordinates of a desk turn: which episode and round the seat is
@@ -251,6 +261,9 @@ fn kind_of(utterance: &Utterance) -> &'static str {
         Utterance::Post { .. } => "post",
         Utterance::Broadcast { .. } => "broadcast",
         Utterance::Dm { .. } => "dm",
+        // New with the conductor: a private question to one seat, which
+        // opens a conversation only those two read.
+        Utterance::Ask { .. } => "ask",
         Utterance::CompleteEpisode { .. } => "complete_episode",
     }
 }

@@ -3790,10 +3790,8 @@ impl HarnessBrain {
                                 record,
                                 events,
                                 hives,
-                                Arc::new(crate::hive::seats::HarnessSeatRunner {
-                                    run_turn: self.run_turn(),
-                                }),
-                                self.deps.workflow_runs.clone(),
+                                Arc::new(HarnessDeps::clone(&self.deps)),
+                                Arc::clone(&self.pool),
                                 self.mentions.clone(),
                             );
                             let trigger = crate::hive::dispatch::trigger_for(

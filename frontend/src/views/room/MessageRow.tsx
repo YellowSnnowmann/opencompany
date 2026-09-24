@@ -28,7 +28,7 @@ import {
   type TimelineEntry,
 } from "./model";
 import { EchoPlaceholder, echoMarkerFor } from "./EchoPlaceholder";
-import { CardChip, ReferralChip, ReferralConversation } from "./StepTimeline";
+import { AgentConversation, CardChip, ReferralChip, ReferralConversation } from "./StepTimeline";
 import { WorkingIndicator } from "./WorkingIndicator";
 
 interface Props {
@@ -411,6 +411,9 @@ export function MessageRow({
         {message.referralConversation && (
           <ReferralConversation crossing={message.referralConversation} rowId={message.id} />
         )}
+        {message.agentConversations?.map((exchange) => (
+          <AgentConversation key={exchange.root} exchange={exchange} />
+        ))}
         {/* What this line was inside its episode — its speech act and, for a
             dm, who it went to. Absent for every ordinary reply, which is what
             keeps a DM, `#general` and a single-responder desk rendering exactly

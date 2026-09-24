@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use tinyhivemind_embed::Router;
 
-use crate::hive::driver::{EpisodeReport, HiveDispatcher, SeatRunner, Trigger};
+use crate::hive::conducted::{EpisodeReport, HiveDispatcher, Trigger};
 use crate::hive::graph::desk_hives;
 use crate::ports::events::EventLog;
 use crate::ports::types::{CompanyRecord, EventSeq, Mention};
@@ -103,9 +103,6 @@ pub fn trigger_for(
         text: text.to_string(),
         parent,
         mentions: mentions.to_vec(),
-        hop: 0,
-        origin: None,
-        referred_from: None,
     }
 }
 
@@ -140,8 +137,8 @@ pub fn dispatcher(
     record: Arc<CompanyRecord>,
     events: Arc<dyn EventLog>,
     hives: HashMap<String, Arc<crate::hive::graph::DeskHive>>,
-    seats: Arc<dyn SeatRunner>,
-    runs: Option<Arc<dyn crate::ports::RunStore>>,
+    deps: Arc<crate::harness::built_in::HarnessDeps>,
+    pool: Arc<crate::harness::built_in::HarnessPool>,
     mentions: Option<crate::runtime::mention_seam::MentionSeam>,
 ) -> Arc<HiveDispatcher> {
     Arc::new(HiveDispatcher {
@@ -149,8 +146,8 @@ pub fn dispatcher(
         events,
         hives,
         router: host_router(),
-        seats,
-        runs,
+        deps,
+        pool,
         mentions,
     })
 }

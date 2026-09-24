@@ -2,9 +2,13 @@
 //! the driver checkpoint a resume reads back, and the "is one already open
 //! here?" lookup a desk message needs before it opens another.
 //!
-//! There is no second store. An episode is the `EpisodeOpened` /
-//! `RoundStarted` / `RoundCommitted` / `EpisodeCompleted` rows it wrote plus
-//! the `AgentReply` rows they bracket, and the driver's own resumable state is
+//! There is no second store. An episode is its `EpisodeOpened` and
+//! `EpisodeCompleted` rows, the `TurnStarted` rows between them -- which
+//! carry the wave each turn ran in, and are what an open episode's progress
+//! is read from -- and the `AgentReply` rows they bracket. (A journal
+//! written before the loop moved to the library carries `RoundStarted` /
+//! `RoundCommitted` rows instead, and folds the same.) The driver's own
+//! resumable state is
 //! one more row (`EpisodeStateSaved`) rather than a file beside the journal —
 //! so a host that died after committing a round finds, on the next boot, both
 //! the state it had reached and the rows it committed since, and can replay
@@ -165,6 +169,22 @@ pub fn fold_episodes(events: &[StoredEvent]) -> Vec<EpisodeSummary> {
                     hop: *hop,
                 });
             }
+            // An episode in flight reports the wave its turns are running
+            // in. The conductor announces no round -- a wave is whoever is
+            // due, decided as it goes -- so the turn rows are what say how
+            // far an open episode has got, and an operator watching one
+            // would otherwise see it sit at round zero until it closed.
+            CompanyEvent::TurnStarted {
+                episode_id: Some(episode_id),
+                round_revision: Some(revision),
+                ..
+            } => {
+                if let Some(summary) = index.get(episode_id).map(|at| &mut episodes[*at]) {
+                    summary.revision = summary.revision.max(*revision);
+                }
+            }
+            // Legacy: the hand-written round loop committed a round at a
+            // time. An old journal still folds to the same revision.
             CompanyEvent::RoundCommitted {
                 episode_id,
                 revision,
@@ -265,9 +285,18 @@ pub struct PersistedEpisode {
     pub thread_root: Option<EventSeq>,
     /// The driver revision.
     pub revision: u64,
-    /// `tinyhivemind_openhuman::DriverState`, as serde wrote it.
+    /// The conductor's resumable snapshot
+    /// (`tinyhivemind_driver::ConductorState`), as serde wrote it: the
+    /// episode and every conversation open under it, each seat's watermark,
+    /// the ledger of outstanding asks, who is parked, and the wave in
+    /// progress. What is deliberately **not** here is the driver, the
+    /// routing and the policy -- the host supplies those again on resume,
+    /// because a router is a live object and a policy the operator changed
+    /// between restarts should be the new one.
     pub state: serde_json::Value,
-    /// Per-seat transcript delivery progress.
+    /// Per-seat transcript delivery progress, from before the conductor
+    /// kept its own watermarks. A conducted episode writes none: `state`
+    /// carries them, and two records of the same thing would disagree.
     pub sharing: BTreeMap<String, SharingState>,
     /// The referral hop.
     pub hop: u32,
@@ -312,7 +341,8 @@ impl PersistedEpisode {
         })
     }
 
-    fn to_event(&self) -> CompanyEvent {
+    /// This checkpoint as the row the journal stores.
+    pub(crate) fn to_event(&self) -> CompanyEvent {
         CompanyEvent::EpisodeStateSaved {
             episode_id: self.episode_id.clone(),
             desk: self.desk.clone(),

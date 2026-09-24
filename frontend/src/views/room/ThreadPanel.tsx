@@ -13,7 +13,7 @@ import { BudgetPauseNoticeCard } from "./BudgetPauseNoticeCard";
 import { EchoPlaceholder, echoMarkerFor } from "./EchoPlaceholder";
 import { FailedSendNotice, OutputLinkRow, TurnFailureNotice } from "./MessageRow";
 import { MessageAttachments } from "./MessageAttachments";
-import { ReferralChip, ReferralConversation, StepTimeline } from "./StepTimeline";
+import { AgentConversation, ReferralChip, ReferralConversation, StepTimeline } from "./StepTimeline";
 import { MessageComposer } from "./MessageComposer";
 import { TypingLine } from "./TypingLine";
 import { WorkingIndicator } from "./WorkingIndicator";
@@ -618,6 +618,9 @@ function Line({
         {message.referralConversation && (
           <ReferralConversation crossing={message.referralConversation} rowId={message.id} />
         )}
+        {message.agentConversations?.map((exchange) => (
+          <AgentConversation key={exchange.root} exchange={exchange} />
+        ))}
       </div>
     </div>
   );

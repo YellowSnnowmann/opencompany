@@ -2564,6 +2564,8 @@ fn summarize_event(event: &CompanyEvent) -> String {
         CompanyEvent::RoundCommitted { .. } => "episode round committed".into(),
         CompanyEvent::BroadcastRouted { .. } => "episode broadcast routed".into(),
         CompanyEvent::DmDelivered { .. } => "episode dm delivered".into(),
+        CompanyEvent::ConversationOpened { .. } => "episode conversation opened".into(),
+        CompanyEvent::ConversationConcluded { .. } => "episode conversation concluded".into(),
         CompanyEvent::EpisodeCompleted { .. } => "episode completed".into(),
         CompanyEvent::EpisodeStateSaved { .. } => "episode state saved".into(),
         // Issue #276. This one-liner is folded into the orchestrator's

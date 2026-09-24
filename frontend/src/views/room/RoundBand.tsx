@@ -21,6 +21,13 @@
  *
  * `data-round-status` and `data-seat-status` are the contract the live spec
  * reads (`test/e2e/desk-episode-live.spec.ts`).
+ *
+ * # It is drawn only while the episode is live
+ *
+ * A completed episode renders its rows and no band. Everything the band says
+ * about a finished one — how many rounds, who closed it — is what
+ * {@link EpisodeCompleteMarker} says, so keeping both prints the same fact
+ * twice.
  */
 
 import type { ReactNode } from "react";
@@ -29,7 +36,7 @@ import { AlertTriangle, CheckCircle2, Clock, Loader2, MinusCircle } from "lucide
 import { RoutingPlanChip } from "@/components/episode/RoutingPlanChip";
 import { UTTERANCE_LABEL } from "@/components/episode/UtteranceChip";
 import { TeammateAvatar } from "@/components/teammate-avatar";
-import type { Episode, EpisodeRound, EpisodeSeat, SeatStatus } from "@/lib/episodes";
+import { deskRounds, type Episode, type EpisodeRound, type EpisodeSeat, type SeatStatus } from "@/lib/episodes";
 import { cn } from "@/lib/utils";
 import type { TimelineItem } from "@/views/room/timeline";
 
@@ -95,8 +102,23 @@ function SeatLane({ seat, agentNames }: { seat: EpisodeSeat; agentNames?: Readon
 }
 
 export function RoundBand({ episode, round, items, renderRow, agentNames }: Props) {
+  // **A finished episode draws no band.**
+  //
+  // The band is a live instrument: it exists to show that these seats ran at
+  // the same time and that a fourth is still thinking. Once the episode is
+  // over none of that is news, and the completion marker below already says
+  // how many rounds there were and who closed it — so a band left behind is
+  // the same fact twice, the second time in the louder shape.
+  //
+  // The rows still render. They are ordinary messages that happen to have
+  // been produced inside an episode, and they are the transcript: what goes
+  // away is the frame around them, never what a seat said.
+  if (episode.status === "completed") {
+    return <>{items.map(renderRow)}</>;
+  }
   const done = round.seats.filter((seat) => seat.status !== "waiting" && seat.status !== "working").length;
   const first = episode.rounds[0]?.revision === round.revision;
+  const rounds = deskRounds(episode);
   return (
     <section
       className={cn(
@@ -107,10 +129,12 @@ export function RoundBand({ episode, round, items, renderRow, agentNames }: Prop
       data-episode-id={episode.id}
       data-round-revision={round.revision}
       data-round-status={round.status}
-      aria-label={`Round ${round.revision + 1}${round.status === "open" ? ", running" : ""}`}
+      aria-label={`${rounds} round${rounds === 1 ? "" : "s"}${round.status === "open" ? ", running" : ""}`}
     >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5 text-2xs text-muted-foreground">
-        <span className="font-medium text-foreground">Round {round.revision + 1}</span>
+        <span className="font-medium text-foreground" data-testid="round-count">
+          {rounds} round{rounds === 1 ? "" : "s"}
+        </span>
         <span>
           {done}/{round.seats.length} seat{round.seats.length === 1 ? "" : "s"}
         </span>

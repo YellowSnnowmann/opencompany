@@ -223,7 +223,15 @@ fn speech_specs_render_to_mcp_descriptors_with_the_contract_argument_names() {
         .iter()
         .map(|d| d["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, SPEECH_TOOL_NAMES);
+    assert_eq!(
+        names,
+        speech_tool_names(),
+        "the descriptors and the names come from the same specs"
+    );
+    assert!(
+        names.contains(&"ask"),
+        "the vocabulary the library defines includes `ask`: {names:?}"
+    );
     let dm = descriptors.iter().find(|d| d["name"] == "dm").unwrap();
     assert_eq!(dm["inputSchema"]["properties"]["to"]["type"], "array");
     assert_eq!(

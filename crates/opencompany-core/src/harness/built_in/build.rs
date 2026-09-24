@@ -1432,6 +1432,49 @@ pub fn native_tool_names(tools: &[Box<dyn Tool>]) -> Vec<String> {
         .collect()
 }
 
+/// One teammate as a custom agent definition, for whichever hosted authority
+/// is about to resolve it.
+///
+/// Every turn OpenHuman runs is a *hosted root invocation*: before composing
+/// a message it resolves the agent's id against the host catalogue and
+/// refuses the turn when the id is not there. This entry is how a teammate
+/// declares itself, and both of this crate's agent shapes need one -- the
+/// pooled [`AgentSpec`] agent, which carries the entry on the config the
+/// embedded runtime threads through, and the
+/// [`episode_seat`](episode_seat) session host, which projects it to an
+/// `AgentDefinition` the session carries itself. One constructor so the two
+/// cannot describe the same teammate differently.
+///
+/// `tools` is the authority, not a hint: the resolved definition's tool list
+/// becomes the turn's allow-list, intersected with the belt the agent was
+/// actually built with. Naming nothing denies everything rather than
+/// allowing everything -- the hosted allow-list is fail-closed -- so this
+/// always takes the whole belt.
+#[cfg(feature = "openhuman")]
+fn registry_entry(
+    runtime_id: &str,
+    definition_name: &str,
+    system_prompt: &str,
+    tools: Vec<String>,
+) -> oh::agent::registry::AgentRegistryEntry {
+    oh::agent::registry::AgentRegistryEntry {
+        id: runtime_id.to_string(),
+        name: definition_name.to_string(),
+        description: format!("OpenCompany agent {definition_name}"),
+        source: oh::agent::registry::AgentRegistrySource::Custom,
+        enabled: true,
+        // The blueprint's own model is already on the session or the spec;
+        // a pin here would be a second opinion about the same turn.
+        model: None,
+        system_prompt: Some(system_prompt.to_string()),
+        tool_allowlist: tools,
+        tool_denylist: Vec::new(),
+        subagents: oh::agent::registry::types::AgentSubagentPolicy::default(),
+        tags: Vec::new(),
+        metadata: serde_json::Value::Null,
+    }
+}
+
 /// Renders a blueprint into the [`AgentSpec`] the runtime instantiates.
 ///
 /// * `runtime_id` is [`runtime_agent_id`](crate::session_key::runtime_agent_id);
@@ -1478,20 +1521,12 @@ pub fn agent_spec_for(
         }
         system_prompt.push_str(&opencompany_mcp_brief(&mcp.allow_tools));
     }
-    let entry = oh::agent::registry::AgentRegistryEntry {
-        id: runtime_id.to_string(),
-        name: blueprint.definition_name.clone(),
-        description: format!("OpenCompany agent {}", blueprint.definition_name),
-        source: oh::agent::registry::AgentRegistrySource::Custom,
-        enabled: true,
-        model: None,
-        system_prompt: Some(system_prompt.clone()),
-        tool_allowlist: tool_names.clone(),
-        tool_denylist: Vec::new(),
-        subagents: oh::agent::registry::types::AgentSubagentPolicy::default(),
-        tags: Vec::new(),
-        metadata: serde_json::Value::Null,
-    };
+    let entry = registry_entry(
+        runtime_id,
+        &blueprint.definition_name,
+        &system_prompt,
+        tool_names.clone(),
+    );
     let mut spec = AgentSpec::new(runtime_id)
         .definition(
             AgentDefinitionSpec::new()
@@ -1633,6 +1668,164 @@ pub fn build_agent(
         // every caller of this wrapper is exercising something else.
         "",
     )
+}
+
+/// A memory that keeps nothing, for an episode seat.
+///
+/// This company's memory reaches a teammate through its own belt
+/// (`memory_store` / `memory_recall` over the company `ContextStore`), not
+/// through OpenHuman's memory trait, and the session writes no transcript of
+/// its own (`auto_save(false)`) because the company journal is the only log.
+/// The builder still requires one, so this is it: every store is accepted and
+/// discarded, every read is empty, nothing errors.
+#[cfg(feature = "openhuman")]
+#[derive(Debug, Default)]
+struct SeatMemory;
+
+#[cfg(feature = "openhuman")]
+#[async_trait::async_trait]
+impl oh::memory::Memory for SeatMemory {
+    fn name(&self) -> &'static str {
+        "none"
+    }
+
+    async fn store(
+        &self,
+        _namespace: &str,
+        _key: &str,
+        _content: &str,
+        _category: oh::memory::MemoryCategory,
+        _session_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn recall(
+        &self,
+        _query: &str,
+        _limit: usize,
+        _opts: oh::memory::RecallOpts<'_>,
+    ) -> anyhow::Result<Vec<oh::memory::MemoryEntry>> {
+        Ok(Vec::new())
+    }
+
+    async fn get(
+        &self,
+        _namespace: &str,
+        _key: &str,
+    ) -> anyhow::Result<Option<oh::memory::MemoryEntry>> {
+        Ok(None)
+    }
+
+    async fn list(
+        &self,
+        _namespace: Option<&str>,
+        _category: Option<&oh::memory::MemoryCategory>,
+        _session_id: Option<&str>,
+    ) -> anyhow::Result<Vec<oh::memory::MemoryEntry>> {
+        Ok(Vec::new())
+    }
+
+    async fn forget(&self, _namespace: &str, _key: &str) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+
+    async fn namespace_summaries(&self) -> anyhow::Result<Vec<oh::memory::NamespaceSummary>> {
+        Ok(Vec::new())
+    }
+
+    async fn count(&self) -> anyhow::Result<usize> {
+        Ok(0)
+    }
+
+    async fn health_check(&self) -> bool {
+        true
+    }
+}
+
+/// One teammate as a seat of a running completion episode: a session host
+/// carrying this company's own prompt, belt, model and policy, with the
+/// episode's tools added and its gate in front.
+///
+/// A session host rather than an `AgentSpec` because a spec names its tools
+/// from the runtime's registry, which is fixed when the agent is built. An
+/// episode's tools are neither: they are bound to one seat of one episode
+/// and drain into that episode's record. That is the whole reason this path
+/// exists beside the spec one.
+///
+/// # Errors
+///
+/// The builder refusing the session.
+#[cfg(feature = "openhuman")]
+pub fn episode_seat(
+    company: &CompanyId,
+    seat: &str,
+    blueprint: AgentBlueprint,
+    episode_tools: Vec<Box<dyn Tool>>,
+    gate: Arc<dyn oh::agent::tool_policy::ToolPolicy>,
+) -> crate::Result<oh::agent::OpenHumanSessionHost> {
+    let mut tools = blueprint.tools;
+    tools.extend(episode_tools);
+    // The provider-visible allowlist *is* this belt. A seat is built with the
+    // tools it may call and no others, so the two cannot drift; leaving it
+    // unset makes the model visible nothing and every call is refused.
+    //
+    // The same list is what the seat's own definition declares below, so the
+    // belt and the authority that admits it are computed once, here, from the
+    // tools actually in hand.
+    let belt: Vec<String> = tools.iter().map(|tool| tool.name().to_string()).collect();
+    let visible: std::collections::HashSet<String> = belt.iter().cloned().collect();
+    let runtime_id = crate::session_key::runtime_agent_id(company, seat);
+    oh::agent::OpenHumanSessionHost::builder()
+        .chat_model(blueprint.chat_model.clone() as Arc<dyn tinyinference::model::ChatModel<()>>)
+        .model_name(blueprint.model.clone())
+        .tools(tools)
+        .visible_tool_names(visible)
+        .tool_policy(gate)
+        .memory(Arc::new(SeatMemory))
+        // Native tool calling: the seat's belt is handed to it directly, so
+        // its model asks for a tool the structured way rather than through a
+        // text dialect the runtime would have to parse back.
+        .tool_dispatcher(Box::new(tinytools_agent::dialect::NativeDialect))
+        .prompt_builder(oh::agent::prompts::SystemPromptBuilder::from_final_body(
+            blueprint.system_prompt.clone(),
+        ))
+        .config(oh::config::AgentConfig {
+            max_tool_iterations: MAX_TOOL_ITERATIONS,
+            ..oh::config::AgentConfig::default()
+        })
+        .workspace_dir(blueprint.workspace.clone())
+        .action_dir(blueprint.workspace.clone())
+        // The company journal is the only log. A session that also wrote
+        // OpenHuman's own transcript would be a second one, and the episode
+        // reads its history back out of the journal every turn.
+        .auto_save(false)
+        // The runtime id this seat's turns are resolved under, and the
+        // definition they resolve to. A hosted root invocation looks the id
+        // up before it composes a message and refuses the turn when nothing
+        // answers, so a seat has to declare itself. `agent_definition` is
+        // the seat's own declaration and outranks any registry, which is
+        // what makes a seat independent of process-wide boot order.
+        //
+        // It is the same declaration the pooled agent carries on its spec,
+        // from the same constructor, projected: one description of a
+        // teammate, whichever shape is about to run it.
+        //
+        // It names the whole belt because the resolved definition's tool
+        // list *is* the turn's allow-list, intersected with the tools the
+        // seat was built with. Naming nothing would deny every call rather
+        // than allow them all.
+        .agent_definition_name(runtime_id.clone())
+        .agent_definition(Arc::new(
+            oh::agent::registry::definition_from_registry_entry(&registry_entry(
+                &runtime_id,
+                &blueprint.definition_name,
+                &blueprint.system_prompt,
+                belt.clone(),
+            )),
+        ))
+        .build()
+        .map_err(|error| crate::error::OpenCompanyError::Harness(error.to_string()))
 }
 
 /// The intrinsic deliberate-memory tools (`memory_store` / `memory_recall` /

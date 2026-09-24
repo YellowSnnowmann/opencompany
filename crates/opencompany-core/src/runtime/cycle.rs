@@ -3009,6 +3009,8 @@ fn cycle_task_id(
             | CompanyEvent::BroadcastRouted { .. }
             | CompanyEvent::DmDelivered { .. }
             | CompanyEvent::EpisodeCompleted { .. }
+            | CompanyEvent::ConversationOpened { .. }
+            | CompanyEvent::ConversationConcluded { .. }
             | CompanyEvent::EpisodeStateSaved { .. }
             | CompanyEvent::WorkflowEnabledChanged { .. }
             | CompanyEvent::WorkflowRunFinished { .. }
@@ -3260,6 +3262,8 @@ fn cycle_conversation(
             | CompanyEvent::BroadcastRouted { .. }
             | CompanyEvent::DmDelivered { .. }
             | CompanyEvent::EpisodeCompleted { .. }
+            | CompanyEvent::ConversationOpened { .. }
+            | CompanyEvent::ConversationConcluded { .. }
             | CompanyEvent::EpisodeStateSaved { .. }
             | CompanyEvent::WorkflowEnabledChanged { .. }
             | CompanyEvent::WorkflowRunFinished { .. }

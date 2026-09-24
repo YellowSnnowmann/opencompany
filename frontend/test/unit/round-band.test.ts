@@ -47,6 +47,7 @@ function episode(rounds: EpisodeRound[], over: Partial<Episode> = {}): Episode {
     messageIds: [],
     roundCount: rounds.length,
     referrals: [],
+    conversations: [],
     live: true,
     plan: { kind: "hive", primaryId: "engineer", invitedIds: ["ceo"] },
     ...over,
@@ -86,7 +87,9 @@ describe("RoundBand", () => {
     expect(band.dataset.roundRevision).toBe("0");
     expect(band.querySelector('[data-testid="round-running"]')).not.toBeNull();
     expect(seats(band)).toEqual(["engineer:working", "ceo:working"]);
-    expect(band.textContent).toContain("Round 1");
+    // A count of the desk's own waves, not a revision number: conversation
+    // waves take revisions of their own, so the raw number is not a count.
+    expect(band.textContent).toContain("1 round");
     expect(band.textContent).toContain("0/2 seats");
   });
 
@@ -153,5 +156,30 @@ describe("RoundBand", () => {
     const referrals = band.querySelectorAll('[data-testid="round-referral"]');
     expect(referrals).toHaveLength(1);
     expect(referrals[0].textContent).toBe("asked #content");
+  });
+
+  /**
+   * A finished episode draws no band, and loses none of its rows.
+   *
+   * The band is the live instrument -- who ran together, who is still
+   * thinking. None of that is news once the episode is over, and the
+   * completion marker already carries the round count and who closed it. So
+   * the frame goes and the transcript stays: hiding the rows with it would
+   * be hiding what the seats actually said.
+   */
+  it("draws no band once the episode has completed, but still draws its rows", () => {
+    const row = {
+      kind: "message" as const,
+      key: "m1",
+      at: 1,
+      entry: { message: { id: "m1" } },
+    } as unknown as TimelineItem;
+    const { band, rendered } = render(
+      round({ status: "committed" }),
+      episode([round({ status: "committed" })], { status: "completed" }),
+      [row],
+    );
+    expect(band).toBeNull();
+    expect(rendered).toEqual(["m1"]);
   });
 });
