@@ -3627,6 +3627,8 @@ impl RuntimeBuilder {
                                         // for a blocked agent node so the resolve
                                         // path can find the run to re-dispatch.
                                         blocked_nodes: blocked_nodes.clone(),
+                                        grants: grants.clone(),
+                                        events: events.clone(),
                                     }),
                                     // Issue #529: the same journal the runner
                                     // writes its start/per-node trail to, so a
