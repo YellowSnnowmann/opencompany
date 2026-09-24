@@ -227,8 +227,8 @@ pub fn model_for_tier(tier: Option<&str>) -> String {
 /// them, and pointing an agent at a tool it was not granted is the "a tool
 /// granted, unmentioned" problem pointed the other way. The agents that do
 /// have them are told in [`orchestrator::orchestrator_brief`].
-const MENTION_BRIEF: &str = " Naming a teammate: write their name or id as ordinary text when you are \
-referring to them — \"qa_engineer has the failing case\". An `@` in your reply renders a chip and \
+const MENTION_BRIEF: &str = " Naming a teammate: write their name as ordinary text when you are \
+referring to them: \"Quinn has the failing case\". An `@` in your reply renders a chip and \
 nothing more: it notifies nobody and starts no work, so it cannot hand anything over. Reaching for \
 `@` to make somebody pick something up does not make them pick it up. ";
 
