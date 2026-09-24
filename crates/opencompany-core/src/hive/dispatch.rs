@@ -240,10 +240,7 @@ mod dm_surface_tests {
         let empty: HashMap<String, Arc<crate::hive::graph::DeskHive>> = HashMap::new();
 
         assert!(
-            matches!(
-                surface_of(&record, &empty, Some("dm:ceo")),
-                Surface::Single
-            ),
+            matches!(surface_of(&record, &empty, Some("dm:ceo")), Surface::Single),
             "with no DM hive the pooled turn still answers"
         );
 

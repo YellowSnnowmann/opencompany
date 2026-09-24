@@ -141,7 +141,10 @@ async fn an_unbound_teammate_is_in_no_dm_at_all() {
             (
                 id.to_string(),
                 runtime
-                    .agent(AgentSpec::new(format!("hive-dm-unbound-{id}-{}", &salt[..8])))
+                    .agent(AgentSpec::new(format!(
+                        "hive-dm-unbound-{id}-{}",
+                        &salt[..8]
+                    )))
                     .expect("agent"),
             )
         })
@@ -153,7 +156,11 @@ async fn an_unbound_teammate_is_in_no_dm_at_all() {
 
     let mut ids: Vec<&String> = dms.keys().collect();
     ids.sort();
-    assert_eq!(ids, vec!["dm:ceo", "dm:engineer"], "no DM for an unbound seat");
+    assert_eq!(
+        ids,
+        vec!["dm:ceo", "dm:engineer"],
+        "no DM for an unbound seat"
+    );
     assert!(
         !dms["dm:ceo"].members().contains(&"writer".to_string()),
         "and it is not askable from anyone else's"

@@ -860,6 +860,32 @@ impl Journal for DeskHost {
     }
 }
 
+/// What a seat is told about a conversation the driver has no word for.
+///
+/// A brief opens `## New desk messages`, because `Desk` is the driver's type
+/// for any shared conversation and a DM bound as a hive is one. That is right
+/// in its vocabulary and wrong in ours -- and the fix belongs here rather than
+/// there: `dm:` is this company's convention, and teaching the driver about it
+/// would put a host's naming inside a crate that has no hosts.
+///
+/// The persona is already the host's to write and already sits at the head of
+/// every seeded turn, so this is the sentence's natural home.
+///
+/// `None` for a desk, which needs no correction.
+fn dm_persona_note(desk_id: &str, seat: &str) -> Option<&'static str> {
+    let owner = desk_id.strip_prefix(crate::runtime::assignee::DM_PREFIX)?;
+    Some(if owner == seat {
+        "\n\n## This conversation\n\nThis is your own direct line with the operator, not a \
+         desk. What the brief calls desk messages are theirs. Answer them; the teammates \
+         listed as members are here to be asked, and none of them is waiting on you."
+    } else {
+        "\n\n## This conversation\n\nYou are here because a teammate may need to ask you \
+         something in their direct line with the operator. You are not the operator's \
+         correspondent here and should not answer them; reply when you are asked, and \
+         otherwise end your turn."
+    })
+}
+
 impl EpisodeHost for DeskHost {
     fn build_seat(
         &self,
@@ -892,9 +918,13 @@ impl EpisodeHost for DeskHost {
         agent.seating().lend(self.seat_session(seat), belt);
         // The standing prompt still travels separately: a seeded turn renders
         // no system prompt, so `persona` puts it back at the head of the seed.
-        let Some((_, deps)) = self.roster.as_ref() else { unreachable!() };
-        let persona = seat_persona(record, deps, seat)
-            .map_err(|error| refused(&error))?;
+        let Some((_, deps)) = self.roster.as_ref() else {
+            unreachable!()
+        };
+        let mut persona = seat_persona(record, deps, seat).map_err(|error| refused(&error))?;
+        if let Some(note) = dm_persona_note(&self.desk_id, seat) {
+            persona.push_str(note);
+        }
         self.personas
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

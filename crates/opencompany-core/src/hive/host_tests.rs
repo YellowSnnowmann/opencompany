@@ -315,3 +315,34 @@ async fn a_committed_row_names_the_wave_its_turn_opened_in() {
     // still gets a number rather than nothing: the live counter, as before.
     assert_eq!(host.wave_of("grace"), 2);
 }
+
+/// A DM seat is told which of the two it is, and a desk seat is told nothing.
+///
+/// The distinction is the whole point of the note. Every roster teammate is a
+/// member of every DM, so without it the seats a teammate can *ask* read the
+/// same brief as the teammate the operator is actually talking to -- and a
+/// brief that opens "## New desk messages" invites all of them to answer.
+#[test]
+fn a_dm_seat_learns_whether_the_line_is_its_own() {
+    let owner = super::dm_persona_note("dm:ceo", "ceo").expect("the owner is told");
+    assert!(
+        owner.contains("your own direct line with the operator"),
+        "{owner}"
+    );
+    assert!(
+        owner.contains("here to be asked"),
+        "the owner is told why the others are present: {owner}"
+    );
+
+    let guest = super::dm_persona_note("dm:ceo", "engineer").expect("a guest is told");
+    assert!(
+        guest.contains("should not answer them"),
+        "a guest must not answer the operator: {guest}"
+    );
+    assert_ne!(owner, guest, "the two roles read differently");
+
+    assert!(
+        super::dm_persona_note("engineering", "ceo").is_none(),
+        "a desk needs no correction -- `desk` is the right word there"
+    );
+}
