@@ -4004,7 +4004,7 @@ dependencies = [
 
 [[package]]
 name = "openhuman"
-version = "0.63.31"
+version = "0.63.32"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -4100,7 +4100,7 @@ dependencies = [
 
 [[package]]
 name = "openhuman-embed"
-version = "0.63.31"
+version = "0.63.32"
 dependencies = [
  "anyhow",
  "log",
@@ -4116,7 +4116,7 @@ dependencies = [
 
 [[package]]
 name = "openhuman-rpc"
-version = "0.63.31"
+version = "0.63.32"
 dependencies = [
  "serde",
  "serde_json",
@@ -4124,7 +4124,7 @@ dependencies = [
 
 [[package]]
 name = "openhuman-tinyhumans"
-version = "0.63.31"
+version = "0.63.32"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6576,6 +6576,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -6583,7 +6584,9 @@ dependencies = [
  "thiserror 2.0.20",
  "tinyagents-definition",
  "tinyinference-embeddings",
+ "tinyinference-image",
  "tinyinference-llm",
+ "tinyinference-video",
  "tinytools 0.4.1",
  "tinytools-agent 0.4.1",
  "tokio",
@@ -6633,6 +6636,7 @@ version = "2.1.2"
 dependencies = [
  "async-trait",
  "chrono",
+ "serde_json",
  "thiserror 2.0.20",
  "tinyagents-harness",
  "tinyagents-session",
@@ -6880,6 +6884,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinyinference-image"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tinyinference-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "tinyinference-llm"
 version = "0.3.0"
 dependencies = [
@@ -6938,6 +6958,19 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "url",
+]
+
+[[package]]
+name = "tinyinference-video"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tinyinference-image",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
