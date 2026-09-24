@@ -72,46 +72,31 @@ async fn an_operator_dm_runs_an_episode_answered_by_its_own_teammate() {
         None,
     );
 
+    // Journalled first, as `run_cycle` does. A trigger naming a row that was
+    // never said threads the episode under a root nothing exists at, and the
+    // seat is left holding work it cannot close.
+    let seq = events
+        .append(
+            &record.id,
+            crate::hive::test_support::operator_message(
+                &desk_id,
+                "ship passkeys next sprint?",
+                None,
+            ),
+        )
+        .await
+        .expect("the operator's message is a real row");
     let report: crate::Result<_> = dispatcher
         .run_desk_message(
             &desk_id,
             crate::hive::conducted::Trigger {
-                seq: EventSeq::new(1),
+                seq,
                 text: "ship passkeys next sprint?".to_owned(),
                 parent: None,
                 mentions: Vec::new(),
             },
         )
         .await;
-    {
-        let seen = script.seen.lock().unwrap();
-        eprintln!("[dm-test] requests seen: {}", seen.len());
-        if let Some(first) = seen.first() {
-            let names: Vec<String> = first["tools"]
-                .as_array()
-                .map(|t| {
-                    t.iter()
-                        .filter_map(|x| x["function"]["name"].as_str().map(str::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default();
-            eprintln!("[dm-test] tools offered: {names:?}");
-        }
-        if let Some(last) = seen.last() {
-            for m in last["messages"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .rev()
-                .take(4)
-            {
-                eprintln!(
-                    "[dm-test] msg role={} content={:?}",
-                    m["role"], m["content"]
-                );
-            }
-        }
-    }
     let report = report.expect("the episode runs");
 
     assert!(report.turns > 0, "a seat took a turn: {report:?}");
@@ -201,4 +186,143 @@ fn the_hand_off_notice_names_the_line_and_promises_no_timing() {
         !notice.to_lowercase().contains("this turn"),
         "and does not promise when: {notice}"
     );
+}
+
+/// Reproduces the stall: a teammate announces, then the operator replies.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn announce_then_reply_does_not_stall() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let completing = || Turn::Call {
+        tool: "desk_complete_episode",
+        args: serde_json::json!({
+            "message": "two sprints",
+            "chat": "dm:engineer",
+            "parent": null
+        }),
+    };
+    let (base_url, _script) =
+        spawn_script_recording(vec![completing(), completing(), completing()]).await;
+    let (deps, _journal) = deps(base_url, dir.path());
+    let record = record(TWO_DESKS);
+    let pool = HarnessPool::new();
+    pool.ensure(&record, &deps).await.expect("roster");
+    let log = Arc::new(MemoryLog::default());
+    let events: Arc<dyn EventLog> = log.clone();
+
+    let (chat, _announced_at) = crate::hive::dispatch::announce_takeover(
+        events.as_ref(),
+        &record.id,
+        "engineer",
+        "I have the webauthn estimate.",
+    )
+    .await
+    .expect("announced");
+
+    let (hives, _) = crate::hive::graph::dm_hives(&record, 3, &|id| {
+        futures::executor::block_on(pool.agent(&record.id, id))
+            .map(|agent| agent.runtime_agent().clone())
+    });
+    let dispatcher = crate::hive::dispatch::dispatcher(
+        Arc::new(record.clone()),
+        Arc::clone(&events),
+        hives,
+        Arc::new(deps),
+        Arc::new(pool),
+        None,
+    );
+    let reply_seq = events
+        .append(
+            &record.id,
+            crate::hive::test_support::operator_message(&chat, "two sprints is fine, go", None),
+        )
+        .await
+        .expect("the operator's reply is a real row");
+    let outcome = dispatcher
+        .run_desk_message(
+            &chat,
+            crate::hive::conducted::Trigger {
+                seq: reply_seq,
+                text: "two sprints is fine, go".to_owned(),
+                parent: None,
+                mentions: Vec::new(),
+            },
+        )
+        .await;
+    outcome.expect("the episode should settle, not stall");
+}
+
+/// The same shape on a **desk**: does prior history stall an episode there too?
+///
+/// If it does, the stall is the hive path's and predates DMs. If it does not,
+/// something about how a DM is built is the cause.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_desk_episode_with_prior_history_settles() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let completing = || Turn::Call {
+        tool: "desk_complete_episode",
+        args: serde_json::json!({
+            "message": "noted",
+            "chat": "engineering",
+            "parent": null
+        }),
+    };
+    let (base_url, _script) =
+        spawn_script_recording(vec![completing(), completing(), completing(), completing()]).await;
+    let (deps, _journal) = deps(base_url, dir.path());
+    let record = record(TWO_DESKS);
+    let pool = HarnessPool::new();
+    pool.ensure(&record, &deps).await.expect("roster");
+    let log = Arc::new(MemoryLog::default());
+    let events: Arc<dyn EventLog> = log.clone();
+
+    // A prior row, exactly as in the DM case.
+    let first = events
+        .append(
+            &record.id,
+            crate::hive::test_support::operator_message("content", "unrelated", None),
+        )
+        .await
+        .expect("prior row");
+
+    let (hives, errors) = crate::hive::graph::desk_hives(&record, 3, &|id| {
+        futures::executor::block_on(pool.agent(&record.id, id))
+            .map(|agent| agent.runtime_agent().clone())
+    });
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(hives.contains_key("engineering"), "the desk has a hive");
+
+    let dispatcher = crate::hive::dispatch::dispatcher(
+        Arc::new(record.clone()),
+        Arc::clone(&events),
+        hives,
+        Arc::new(deps),
+        Arc::new(pool),
+        None,
+    );
+    // Journal the triggering message, as `run_cycle` does in production, and
+    // dispatch on *its* sequence. A fabricated trigger names a row that does
+    // not exist, and the episode threads under a root nothing was said at.
+    let trigger_seq = events
+        .append(
+            &record.id,
+            crate::hive::test_support::operator_message(
+                "engineering",
+                "two sprints is fine, go",
+                None,
+            ),
+        )
+        .await
+        .expect("the trigger is a real row");
+    dispatcher
+        .run_desk_message(
+            "engineering",
+            crate::hive::conducted::Trigger {
+                seq: trigger_seq,
+                text: "two sprints is fine, go".to_owned(),
+                parent: None,
+                mentions: Vec::new(),
+            },
+        )
+        .await
+        .expect("a desk episode with prior history should settle");
 }
