@@ -286,77 +286,80 @@ mod dm_surface_tests {
     }
 }
 
-/// Deliver a question into another teammate's operator DM, and open the
-/// episode that answers it.
+/// A teammate tells the operator it is taking something on, in its own line.
 ///
-/// # What a hand-off is, as distinct from an ask
+/// # Why the askee speaks, and not the asker
 ///
-/// `ask` keeps the conversation: a teammate answers the asker, and the
-/// operator only ever hears from the one they wrote to. A hand-off moves it.
-/// The teammate handed to becomes the operator's correspondent, in its own
-/// line, and the one who handed it over steps out of the way.
+/// The obvious shape is the other way round: the teammate holding the
+/// conversation pushes the question into the other's line and steps back. It
+/// does not work, and the reason is structural rather than incidental. An
+/// episode opens when a message arrives *through the cycle* -- that is the one
+/// call site of `spawn_episode`. A row appended straight to the journal is the
+/// record of a message, not the delivery of one: nobody reads for it, and the
+/// teammate it was addressed to never wakes.
 ///
-/// So this cannot be an `ask`, however the roster is bound. `ask` resolves its
-/// target inside one episode's membership; `dm:{to}` is a different
-/// conversation, and membership does not cross conversations.
+/// Inverting it removes the problem instead of working around it. The askee is
+/// **already running** -- it was asked, so it has a turn. It does not need one
+/// started for it; it needs somewhere to say so. And the operator's reply is an
+/// ordinary message on an ordinary chat, so it comes through the cycle like any
+/// other and opens that teammate's episode by the normal door.
 ///
-/// # Why it is a message and not an event
+/// It also makes the transfer consensual. A hand-off pushed at someone is work
+/// they have not agreed to; this is a teammate saying it has the thing, which
+/// is the only version an operator can rely on.
 ///
-/// An episode opens when a *message arrives on a chat* -- that is the branch
-/// in the brain that reads `surface_of`. A row appended with no one reading
-/// for it is a row nobody answers. So the question is delivered the way the
-/// operator's own questions are, and the same dispatch picks it up.
+/// # What the operator sees
 ///
-/// Returns the sequence the question landed at, so the nudge that tells the
-/// operator where their answer will appear can name it.
+/// A row in `dm:{agent}` -- the same console channel a parked blocker stamps
+/// (`blocker_sender::dm_thread`). From then on that line is where the work is
+/// discussed, and a reply there reaches this teammate rather than whoever the
+/// operator first wrote to.
 ///
 /// # Errors
 ///
 /// Whatever stops the journal accepting the row.
-pub async fn hand_off_to_dm(
+pub async fn announce_takeover(
     events: &dyn EventLog,
     company: &crate::ports::types::CompanyId,
-    to: &str,
-    question: &str,
+    agent: &str,
+    saying: &str,
 ) -> crate::Result<(String, EventSeq)> {
-    let chat = format!("{}{to}", crate::runtime::assignee::DM_PREFIX);
+    let chat = crate::company::blocker_sender::dm_thread(agent);
     let seq = events
         .append(
             company,
-            CompanyEvent::OperatorMessage {
-                text: question.to_owned(),
-                // Unattributed on purpose. The teammate reads it as the
-                // operator's question, because that is what it now is: the
-                // work is theirs and so is the correspondence. Stamping the
-                // agent who handed it over would make it look like a peer's
-                // request, which is the one thing it is not.
-                by: None,
-                chat: Some(chat.clone()),
+            CompanyEvent::AgentReply {
+                chat_id: chat.clone(),
+                agent_id: agent.to_owned(),
+                text: saying.to_owned(),
+                steps: Vec::new(),
+                outputs: Vec::new(),
+                task_id: None,
                 parent: None,
-                deliverable: None,
                 mentions: Vec::new(),
-                attachments: Vec::new(),
+                mention_depth: 0,
+                audience: Default::default(),
+                // Not an episode's row. The announcement outlives whatever
+                // episode prompted it -- the operator can come back to this
+                // line tomorrow, and the episode will be long closed.
+                episode: None,
             },
         )
         .await?;
     Ok((chat, seq))
 }
 
-/// What the operator is told when their question is handed on.
+/// What the teammate that handed work on tells the operator, if it says
+/// anything at all.
 ///
-/// Fixed wording, and deliberately so. The tool that hands work over used to
-/// return a sentence for the agent to paraphrase, and it paraphrased it into
-/// a promise -- "they will answer this turn" -- that nothing could keep. The
-/// mechanism guarantees one thing: the question was delivered. This says that
-/// and stops.
-///
-/// It names where, because a hand-off splits the thread: the status lands
-/// here and the answer lands there, and an operator who is not told where to
-/// look is being handed a dead end.
+/// Fixed wording. The tool that handed work over used to return a sentence for
+/// the agent to paraphrase, and it paraphrased it into a promise -- "they will
+/// answer this turn" -- that nothing could keep. What is true is that somebody
+/// else has it and where they will be reached; that is what this says.
 #[must_use]
 pub fn hand_off_notice(to: &str, chat: &str) -> String {
     format!(
-        "Handed to @{to}. This is their line with you now, and their reply will \
-         arrive there ({chat}) rather than here."
+        "@{to} has picked this up. Their line with you ({chat}) is where they \
+         will reply."
     )
 }
