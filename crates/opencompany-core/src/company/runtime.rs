@@ -6239,6 +6239,14 @@ impl CompanyRuntime {
                 // derived — grouping by "same agent, same thread, close
                 // together" would guess at a fact the journal already records,
                 // and would guess wrong exactly when two turns overlap.
+                episode: p
+                    .batch
+                    .as_deref()
+                    .and_then(crate::runtime::episode_resume::parse)
+                    .map(|seat| crate::runtime::types::ApprovalEpisode {
+                        id: seat.episode_id,
+                        seat: seat.seat,
+                    }),
                 batch: p.batch,
                 // Issue #1862: the shared root cause, so the console folds every
                 // card stalled on one broken integration into a single question.
@@ -7809,6 +7817,9 @@ mod tests_dispatch;
 #[cfg(test)]
 #[path = "runtime_emergency_stop_tests.rs"]
 mod tests_emergency_stop;
+#[cfg(test)]
+#[path = "runtime_episode_seat_tests.rs"]
+mod tests_episode_seat;
 /// What is under test is whether a continuation run is started, with what
 /// trigger input, and how many times.
 #[cfg(feature = "openhuman")]
