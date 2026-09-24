@@ -123,6 +123,24 @@ describe("episode seat waiting on an approval", () => {
     for (const raw of ["ceo", "ep-1", "ap-1"]) expect(text).not.toContain(raw);
   });
 
+  it("splits one blocker group across two episodes into a card per episode", () => {
+    const rows = ROWS.slice(0, 1);
+    const first = approval({ id: "ap-7", at_millis: 15, group_key: "gmail", episode: { id: "ep-2", seat: "engineer" } });
+    const second = approval({ id: "ap-8", at_millis: 16, group_key: "gmail", episode: { id: "ep-3", seat: "ceo" } });
+    const list = buildTimelineItems(
+      buildTimeline(rows, CHANNEL, []),
+      [first, second],
+      {},
+      foldEpisodes(rows, undefined, "engineering"),
+    );
+    const bands = list.filter((i): i is Extract<TimelineItem, { kind: "round" }> => i.kind === "round");
+    expect(bands.map((b) => [b.episode.id, b.items.map((i) => i.key)])).toEqual([
+      ["ep-2", ["approval:group:gmail@ep-2"]],
+      ["ep-3", ["approval:group:gmail@ep-3"]],
+    ]);
+    expect(waiting(list).map((w) => w.episode.id)).toEqual(["ep-2", "ep-3"]);
+  });
+
   it("keeps the band and marker after a reload for a seat that parked before any reply", () => {
     const rows = ROWS.slice(0, 1);
     const pending = approval({ id: "ap-9", at_millis: 15, episode: { id: "ep-2", seat: "engineer" } });

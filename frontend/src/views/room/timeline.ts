@@ -771,9 +771,18 @@ export function buildTimelineItems(
   // pending feed followed by the settled ones, so an item decided on the
   // Approvals page rejoins the card it was raised in instead of opening a
   // second one below it.
-  const batches = new Map<string, ApprovalSummary[]>();
+  const episodesByBatch = new Map<string, Set<string>>();
   for (const approval of approvals) {
     const key = approvalBatchKey(approval);
+    const seen = episodesByBatch.get(key) ?? new Set<string>();
+    seen.add(approval.episode?.id ?? "");
+    episodesByBatch.set(key, seen);
+  }
+  const batches = new Map<string, ApprovalSummary[]>();
+  for (const approval of approvals) {
+    const batch = approvalBatchKey(approval);
+    const key =
+      (episodesByBatch.get(batch)?.size ?? 0) > 1 ? `${batch}@${approval.episode?.id ?? ""}` : batch;
     const bucket = batches.get(key);
     if (bucket) bucket.push(approval);
     else batches.set(key, [approval]);
