@@ -159,6 +159,49 @@ fn fence_parent(text: &str) -> Option<u64> {
     value.trim().trim_matches('"').parse().ok()
 }
 
+/// The heading OpenHuman's writing-style block opens with.
+const STYLE_HEADING: &str = "# Writing style";
+
+/// The heading OpenHuman's grounding contract opens with.
+const GROUNDING_HEADING: &str = "## Grounding and tool use";
+
+/// Every system message on a request, joined.
+fn system_messages(ask: &Ask) -> String {
+    ask.messages
+        .iter()
+        .filter(|message| role(message) == "system")
+        .map(content)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Every seat request carries the grounding contract and the writing-style
+/// rules exactly once, cold or seeded. Returns how many were seeded.
+fn every_seat_turn_is_grounded_and_styled(asks: &[Ask]) -> usize {
+    let seat_asks: Vec<&Ask> = asks.iter().filter(|ask| seat_of(ask).is_some()).collect();
+    assert!(!seat_asks.is_empty(), "no seat turns were captured");
+    let mut seeded = 0;
+    for ask in seat_asks {
+        let system = system_messages(ask);
+        if ask
+            .messages
+            .iter()
+            .skip(1)
+            .any(|message| role(message) == "user")
+        {
+            seeded += 1;
+        }
+        for heading in [STYLE_HEADING, GROUNDING_HEADING] {
+            assert_eq!(
+                system.matches(heading).count(),
+                1,
+                "a seat turn must carry `{heading}` exactly once: {system}"
+            );
+        }
+    }
+    seeded
+}
+
 fn role(message: &Value) -> &str {
     message.get("role").and_then(Value::as_str).unwrap_or("")
 }
@@ -1169,6 +1212,7 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
         }),
         "the CEO was not assigned from the engineer's hand-off: {told:?}"
     );
+    every_seat_turn_is_grounded_and_styled(&script.asks());
     let done = completions(&rows);
     assert_eq!(done[0].2, EpisodeReason::CompleteEpisode, "{done:?}");
     let measured = report(&runtime).await;
@@ -1394,6 +1438,10 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
         );
     }
 
+    assert!(
+        every_seat_turn_is_grounded_and_styled(&script.asks()) > 0,
+        "the asker's return is a seeded turn, which is the case this pins"
+    );
     assert_eq!(completions(&rows)[0].2, EpisodeReason::CompleteEpisode);
 }
 
@@ -1865,6 +1913,7 @@ async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
         recalled.iter().any(|output| output.contains(FACT_KEY)),
         "memory_recall came back with the fact: {recalled:?}"
     );
+    every_seat_turn_is_grounded_and_styled(&script.asks());
     assert_eq!(report(&runtime).await.episodes_completed, 2);
 }
 

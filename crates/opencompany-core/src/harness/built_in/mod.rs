@@ -5869,11 +5869,10 @@ pub(crate) fn build_episode_seat(
     // serve -- the teammate's whole belt, memory, ledgers, skills -- and the
     // seat would be told its own tools are "not on this seat's belt".
     let gate = belt.admit(Some(Arc::new(behind)));
-    // The persona travels back out with the session. A seat's turns after
-    // its first are seeded rather than composed, and a seeded turn renders
-    // no system prompt, so the host has to put this back at the head of the
-    // seed -- see `EpisodeHost::persona`.
-    let persona = blueprint.system_prompt.clone();
+    // A seeded turn renders no system prompt, so the host puts this back at
+    // the head of the seed (`EpisodeHost::persona`): the rendered prompt, not
+    // the body, so every turn keeps grounding and the writing style.
+    let persona = build::rendered_seat_persona(&blueprint)?;
     let session = build::episode_seat(&company.id, seat, blueprint, belt.tools, gate)?;
     Ok((session, persona))
 }

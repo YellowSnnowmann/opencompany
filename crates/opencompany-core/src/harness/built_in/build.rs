@@ -1828,6 +1828,46 @@ pub fn episode_seat(
         .map_err(|error| crate::error::OpenCompanyError::Harness(error.to_string()))
 }
 
+/// The system prompt a seat's cold turn renders from `blueprint`, byte for byte.
+///
+/// A seat's later turns are seeded, and a seeded turn puts this string back at
+/// the head of the conversation instead of rendering a prompt of its own. It
+/// has to be the rendered prompt rather than the persona body, or every seeded
+/// turn loses the grounding contract and the writing-style rules that the
+/// builder appends.
+///
+/// # Errors
+///
+/// The builder refusing the prompt.
+#[cfg(feature = "openhuman")]
+pub fn rendered_seat_persona(blueprint: &AgentBlueprint) -> crate::Result<String> {
+    let tools = Vec::new();
+    let visible = std::collections::HashSet::new();
+    let context = oh::agent::prompts::PromptContext {
+        workspace_dir: &blueprint.workspace,
+        model_name: &blueprint.model,
+        agent_id: &blueprint.definition_name,
+        tools: &tools,
+        workflows: &[],
+        dispatcher_instructions: "",
+        learned: oh::agent::prompts::LearnedContextData::default(),
+        visible_tool_names: &visible,
+        tool_call_format: oh::agent::prompts::ToolCallFormat::Native,
+        connected_integrations: &[],
+        connected_identities_md: String::new(),
+        include_profile: false,
+        include_memory_md: false,
+        curated_snapshot: None,
+        user_identity: None,
+        personality_roster: Vec::new(),
+        agents_md_global: None,
+        agents_md_local: None,
+    };
+    oh::agent::prompts::SystemPromptBuilder::from_final_body(blueprint.system_prompt.clone())
+        .build(&context)
+        .map_err(|error| crate::error::OpenCompanyError::Harness(error.to_string()))
+}
+
 /// The intrinsic deliberate-memory tools (`memory_store` / `memory_recall` /
 /// `memory_forget`) — **oc-authored**, over the company's own `ContextStore`
 /// (issue #1113 / G11).
