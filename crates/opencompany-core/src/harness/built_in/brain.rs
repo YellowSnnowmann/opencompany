@@ -3023,6 +3023,18 @@ impl HarnessBrain {
         let Some(events) = self.deps.events.clone() else {
             return false;
         };
+        let warmed = match self.refresh_record().await {
+            Ok(()) => self.run_turn().ensure(&self.record()).await,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = warmed {
+            tracing::error!(
+                episode = %episode_id,
+                %error,
+                "[hive] the roster a parked episode resumes with could not be built"
+            );
+            return false;
+        }
         let record = self.record();
         let hives = self.desk_hives(&record).await;
         let dispatcher = crate::hive::dispatch::dispatcher(
