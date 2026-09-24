@@ -234,6 +234,9 @@ async function ask(chat, text, after) {
       break;
     }
   }
+  if (seen.length === 0) {
+    throw new Error(`no reply from ${chat} to ${JSON.stringify(text)} within ${waitMillis}ms`);
+  }
   return seen;
 }
 
