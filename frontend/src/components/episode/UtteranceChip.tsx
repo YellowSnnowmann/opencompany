@@ -26,13 +26,22 @@ interface Props {
   className?: string;
 }
 
-/** The chip's word for each kind. */
+/** The chip's words for each kind, in the reader's terms rather than the tool's. */
 export const UTTERANCE_LABEL: Record<UtteranceKind, string> = {
-  post: "post",
-  broadcast: "broadcast",
-  dm: "dm",
-  complete_episode: "complete",
+  post: "Posted",
+  broadcast: "Shared with the desk",
+  dm: "Private note",
+  complete_episode: "Finished",
 };
+
+const UNKNOWN_LABEL = "Replied";
+
+/** The words before the recipients, or the whole label when there are none. */
+export function utteranceLead(kind: UtteranceKind, hasRecipients: boolean): string {
+  const label = UTTERANCE_LABEL[kind] ?? UNKNOWN_LABEL;
+  if (!hasRecipients) return label;
+  return kind === "dm" ? "Sent to" : `${label} to`;
+}
 
 const ICON: Record<UtteranceKind, typeof MessageSquare> = {
   post: MessageSquare,
@@ -44,9 +53,6 @@ const ICON: Record<UtteranceKind, typeof MessageSquare> = {
 export function UtteranceChip({ episode, audience, agentNames, className }: Props) {
   const Icon = ICON[episode.kind] ?? MessageSquare;
   const name = (id: string) => agentNames?.[id] ?? id;
-  // A dm names its recipients; the audience is the same list when the host
-  // narrowed the row, so the recipients are shown once, from whichever the
-  // host filled in.
   const to = episode.to?.length ? episode.to : episode.kind === "dm" ? audience : undefined;
   return (
     <span
@@ -66,10 +72,10 @@ export function UtteranceChip({ episode, audience, agentNames, className }: Prop
         title={`round ${episode.revision + 1} of episode ${episode.id}`}
       >
         <Icon className="size-3 shrink-0" aria-hidden />
-        {UTTERANCE_LABEL[episode.kind] ?? episode.kind}
+        {utteranceLead(episode.kind, Boolean(to?.length))}
         {to?.length ? (
           <span className="font-normal" data-testid="utterance-audience">
-            → {to.map((id) => `@${name(id)}`).join(", ")}
+            {to.map(name).join(", ")}
           </span>
         ) : null}
       </span>
