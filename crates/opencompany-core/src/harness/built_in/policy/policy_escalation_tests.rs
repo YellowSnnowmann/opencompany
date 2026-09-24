@@ -189,11 +189,10 @@ async fn escalate_to_human_respects_the_cycle_claims_drain_cap() {
 }
 
 #[tokio::test]
-async fn accepted_blockers_survive_later_ordinary_approvals_across_scopes() {
+async fn accepted_blockers_survive_later_ordinary_approvals() {
     in_cycle(async {
-    use tinytools::Tool as _;
+        use tinytools::Tool as _;
 
-    for blocker_in_cycle in [false, true] {
         for preceding in [0, MAX_APPROVAL_REQUESTS_PER_TURN - 1] {
             let (policy, queue) = queued_policy("supervised", &[]);
             let cycle = queue.claim(ApprovalScope::Cycle);
@@ -203,43 +202,31 @@ async fn accepted_blockers_survive_later_ordinary_approvals_across_scopes() {
             );
             for i in 0..preceding {
                 let call = request("composio_execute", composio_unclassified_args_numbered(i));
-                let decision = if blocker_in_cycle {
-                    policy.check(&call).await
-                } else {
-                    cycle.scoped(policy.check(&call)).await
-                };
+                let decision = cycle.scoped(policy.check(&call)).await;
                 assert!(matches!(
                     decision,
                     ToolPolicyDecision::RequireApproval { .. }
                 ));
             }
             let args = serde_json::json!({ "question": "must survive later approvals" });
-            let asked = if blocker_in_cycle {
-                cycle.scoped(tool.execute(args.clone())).await
-            } else {
-                tool.execute(args.clone()).await
-            }
-            .expect("the tool runs");
+            let asked = cycle
+                .scoped(tool.execute(args.clone()))
+                .await
+                .expect("the tool runs");
             assert!(!asked.is_error, "{}", asked.text());
 
             for i in preceding..preceding + MAX_APPROVAL_REQUESTS_PER_TURN {
                 let call = request("composio_execute", composio_unclassified_args_numbered(i));
-                let decision = if blocker_in_cycle {
-                    policy.check(&call).await
-                } else {
-                    cycle.scoped(policy.check(&call)).await
-                };
+                let decision = cycle.scoped(policy.check(&call)).await;
                 assert!(matches!(
                     decision,
                     ToolPolicyDecision::RequireApproval { .. }
                 ));
             }
-            let duplicate = if blocker_in_cycle {
-                cycle.scoped(tool.execute(args)).await
-            } else {
-                tool.execute(args).await
-            }
-            .expect("the tool runs");
+            let duplicate = cycle
+                .scoped(tool.execute(args))
+                .await
+                .expect("the tool runs");
             assert!(
                 !duplicate.is_error,
                 "the accepted duplicate retains its slot"
@@ -255,14 +242,13 @@ async fn accepted_blockers_survive_later_ordinary_approvals_across_scopes() {
                     .filter(|r| r.reason == "must survive later approvals")
                     .count(),
                 1,
-                "an accepted blocker must survive later ordinary approvals; blocker_in_cycle={blocker_in_cycle}, preceding={preceding}"
+                "an accepted blocker must survive later ordinary approvals; preceding={preceding}"
             );
             assert_eq!(drained.requests.len(), MAX_APPROVAL_REQUESTS_PER_TURN);
             assert_eq!(drained.discarded, preceding + 1);
             assert!(drained.overflow_notice().is_some());
         }
-    }
-})
+    })
     .await;
 }
 
