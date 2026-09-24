@@ -25,7 +25,7 @@ use crate::error::{OpenCompanyError, Result};
 use crate::harness::built_in::{HarnessDeps, HarnessPool};
 use crate::hive::episode_store;
 use crate::hive::graph::DeskHive;
-use crate::hive::host::{DeskHost, SeatParking};
+use crate::hive::host::{DeskHost, EpisodeSeatParking, SeatParking};
 use crate::hive::routing::{EffectiveRouting, RoutingPlanDto, desk_routing, router_of};
 use crate::ports::events::EventLog;
 use crate::ports::types::CompanyEvent;
@@ -112,6 +112,15 @@ pub async fn run(episode: Episode<'_>) -> Result<Report> {
     // Each seat is built once, here, and torn down with the episode: its
     // belt carries the episode's tools, which are bound to this seat of this
     // episode and to nothing else.
+    let releases = host.seat_releases();
+    let _running = releases.as_ref().map(|releases| {
+        releases.start(&episode.episode_id);
+        RunningEpisode {
+            releases: releases.clone(),
+            episode_id: episode.episode_id.clone(),
+        }
+    });
+
     let runner = HostedRunner::seat(
         Arc::clone(&host),
         Arc::new(EpisodeTools::new(members.iter().cloned())),
@@ -131,7 +140,7 @@ pub async fn run(episode: Episode<'_>) -> Result<Report> {
         .map_err(|error| OpenCompanyError::Harness(error.to_string()))?;
     let route_policy = episode.routing.policy();
 
-    run_episode(
+    let outcome = run_episode(
         host.as_ref(),
         &runner,
         &driver,
@@ -154,8 +163,57 @@ pub async fn run(episode: Episode<'_>) -> Result<Report> {
             opened_at: tinyhivemind::Sequence(episode.opened_at.value()),
         },
     )
-    .await
-    .map_err(|error| OpenCompanyError::Harness(error.to_string()))
+    .await;
+    if let Err(tinyhivemind_openhuman::Error::Conduct(tinyhivemind_driver::Error::Parked {
+        seats,
+    })) = &outcome
+    {
+        paused(&episode, seats).await;
+    }
+    outcome.map_err(|error| OpenCompanyError::Harness(error.to_string()))
+}
+
+/// Says on the desk that an episode stopped with seats still waiting on the
+/// operator, so the room does not simply go quiet.
+async fn paused(episode: &Episode<'_>, seats: &[String]) {
+    tracing::error!(
+        company = %episode.record.id,
+        desk = %episode.desk.desk_id,
+        episode = %episode.episode_id,
+        ?seats,
+        "[hive] an episode stopped with seats waiting on the operator and nothing to release them"
+    );
+    let row = CompanyEvent::AgentReply {
+        chat_id: episode.desk.desk_id.clone(),
+        agent_id: crate::ports::SYSTEM_AUTHOR.to_owned(),
+        text: "This conversation stopped while a teammate was waiting on a decision that could \
+               not be handed back to it. Answer the pending approval and ask again to pick it \
+               back up."
+            .to_owned(),
+        steps: Vec::new(),
+        outputs: Vec::new(),
+        task_id: None,
+        episode: None,
+        parent: episode.thread_root,
+        mentions: Vec::new(),
+        mention_depth: 0,
+        audience: Vec::new(),
+    };
+    if let Err(error) = episode.events.append(&episode.record.id, row).await {
+        tracing::warn!(%error, "[hive] could not record why an episode stopped");
+    }
+}
+
+/// Marks an episode as running for as long as it is held.
+struct RunningEpisode {
+    releases: crate::runtime::episode_resume::EpisodeReleases,
+    episode_id: String,
+}
+
+impl Drop for RunningEpisode {
+    fn drop(&mut self) {
+        self.releases.finish(&self.episode_id);
+    }
 }
 
 /// What opened an episode: the operator's row and what it said.
@@ -269,7 +327,7 @@ impl HiveDispatcher {
             thread_root: Some(thread_root),
             opened_at: trigger.seq,
             starters,
-            parking: None,
+            parking: self.seat_parking(&desk.desk_id, Some(thread_root), &episode_id),
             mentions: self.mentions.clone(),
         })
         .await?;
@@ -305,6 +363,23 @@ impl HiveDispatcher {
             "[hive] episode finished"
         );
         Ok(report.into())
+    }
+
+    /// Parking for the seats of one episode, through the runtime's parker.
+    fn seat_parking(
+        &self,
+        desk_id: &str,
+        thread_root: Option<EventSeq>,
+        episode_id: &str,
+    ) -> Option<Arc<dyn SeatParking>> {
+        let parker = self.deps.approval_parker.clone()?;
+        Some(Arc::new(EpisodeSeatParking::new(
+            parker,
+            self.record.id.clone(),
+            desk_id.to_owned(),
+            thread_root,
+            episode_id.to_owned(),
+        )))
     }
 
     /// Who the opening routing plan starts, or the desk in order when no
