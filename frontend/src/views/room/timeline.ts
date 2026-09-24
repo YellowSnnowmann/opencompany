@@ -642,8 +642,59 @@ export type TimelineItem =
       key: string;
       at: number;
       episode: Episode;
+    }
+  | {
+      /** The seats of an open episode parked on an operator decision, after its last row. */
+      kind: "episode_waiting";
+      key: string;
+      at: number;
+      episode: Episode;
+      seats: WaitingSeat[];
     };
 
+/** A seat waiting on the operator, and the approvals it is waiting on. */
+export interface WaitingSeat {
+  agentId: string;
+  approvalIds: string[];
+}
+
+/** The episode an approval item was raised in, when a seat raised it. */
+function approvalEpisodeId(item: Extract<TimelineItem, { kind: "approval" }>): string | undefined {
+  return item.approvals.find((approval) => approval.episode?.id)?.episode?.id;
+}
+
+/**
+ * The seats of `episode` still waiting on the operator.
+ *
+ * A seat the frames parked counts until it resumes, unless every approval it
+ * named has been decided here. A pending approval a seat raised counts on its
+ * own, which is what survives a reload that dropped the frames.
+ */
+export function waitingSeats(
+  episode: Episode,
+  approvals: ApprovalSummary[],
+  decided: Record<string, DecidedApproval> = {},
+): WaitingSeat[] {
+  if (episode.status === "completed") return [];
+  const seats = new Map<string, WaitingSeat>();
+  const add = (agentId: string, approvalIds: string[]) => {
+    const held = seats.get(agentId);
+    if (!held) {
+      seats.set(agentId, { agentId, approvalIds: [...approvalIds] });
+      return;
+    }
+    for (const id of approvalIds) if (!held.approvalIds.includes(id)) held.approvalIds.push(id);
+  };
+  for (const seat of episode.waiting ?? []) {
+    const settled = seat.approvalIds.length > 0 && seat.approvalIds.every((id) => decided[id]);
+    if (!settled) add(seat.agentId, seat.approvalIds.filter((id) => !decided[id]));
+  }
+  for (const approval of approvals) {
+    if (approval.episode?.id !== episode.id || decided[approval.id]) continue;
+    add(approval.episode.seat, [approval.id]);
+  }
+  return [...seats.values()];
+}
 
 /**
  * Interleave a channel's messages and the approvals raised in it, oldest first.
@@ -752,7 +803,7 @@ export function buildTimelineItems(
   // renders. `sort` is stable in every engine this ships to, so equal `at`
   // keeps insertion order — messages first, then cards.
   const ordered = items.sort((a, b) => a.at - b.at);
-  return episodes.length === 0 ? ordered : groupEpisodes(ordered, episodes);
+  return episodes.length === 0 ? ordered : groupEpisodes(ordered, episodes, decided);
 }
 
 /**
@@ -765,17 +816,27 @@ export function buildTimelineItems(
  * its last round. Rows an episode claims that are not in this window (history
  * that has not loaded) are simply absent: the band renders what it has.
  *
- * Approvals raised mid-round stay in the channel at their own time, beside the
- * band rather than inside it: a card is a question to the operator, not a
- * seat's utterance.
+ * An approval a seat of the episode raised sits inside its band, since the
+ * episode is waiting on it; any other approval stays in the channel at its own
+ * time. An open episode with a seat waiting on the operator gets a waiting
+ * marker after its last row.
  */
-function groupEpisodes(items: TimelineItem[], episodes: Episode[]): TimelineItem[] {
+function groupEpisodes(
+  items: TimelineItem[],
+  episodes: Episode[],
+  decided: Record<string, DecidedApproval>,
+): TimelineItem[] {
   const owner = new Map<string, { episode: Episode; round: EpisodeRound }>();
+  const latest = new Map<string, { episode: Episode; round: EpisodeRound }>();
   for (const episode of episodes) {
     for (const round of episode.rounds) {
       for (const id of round.messageIds) owner.set(id, { episode, round });
     }
+    const round = episode.rounds[episode.rounds.length - 1];
+    if (round) latest.set(episode.id, { episode, round });
   }
+  const approvals: ApprovalSummary[] = [];
+  for (const item of items) if (item.kind === "approval") approvals.push(...item.approvals);
 
   const out: TimelineItem[] = [];
   const blocks = new Map<string, Extract<TimelineItem, { kind: "round" }>>();
@@ -791,7 +852,13 @@ function groupEpisodes(items: TimelineItem[], episodes: Episode[]): TimelineItem
   const blockKey = (round: EpisodeRound) => `round:${round.episodeId}`;
 
   for (const item of items) {
-    const owned = item.kind === "message" ? owner.get(item.entry.message.id) : undefined;
+    const episodeId = item.kind === "approval" ? approvalEpisodeId(item) : undefined;
+    const owned =
+      item.kind === "message"
+        ? owner.get(item.entry.message.id)
+        : episodeId
+          ? latest.get(episodeId)
+          : undefined;
     if (!owned) {
       out.push(item);
       continue;
@@ -845,6 +912,17 @@ function groupEpisodes(items: TimelineItem[], episodes: Episode[]): TimelineItem
       blocks.set(block.key, block);
       out.push(block);
       last = at;
+    }
+    const waiting = waitingSeats(episode, approvals, decided);
+    if (waiting.length > 0) {
+      const raised = approvals
+        .filter((approval) => approval.episode?.id === episode.id)
+        .map((approval) => approval.at_millis);
+      let at = Math.max(last, ...raised);
+      if (at === -Infinity) at = episode.openedAt ?? -Infinity;
+      if (at !== -Infinity) {
+        out.push({ kind: "episode_waiting", key: `episode_waiting:${episode.id}`, at, episode, seats: waiting });
+      }
     }
     if (episode.status === "completed") {
       const at = Math.max(episode.completedAt ?? -Infinity, last === -Infinity ? -Infinity : last + 1);

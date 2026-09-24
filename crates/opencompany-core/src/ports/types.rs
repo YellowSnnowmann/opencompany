@@ -1849,6 +1849,31 @@ pub enum CompanyEvent {
         /// turns.
         forced: bool,
     },
+    /// An episode seat's turn parked on the operator: the episode holds the
+    /// seat until every approval it raised is decided.
+    EpisodeSeatParked {
+        /// The desk.
+        chat_id: String,
+        /// The episode.
+        episode_id: String,
+        /// The seat that is waiting.
+        seat: String,
+        /// The conversation root the seat parked in, or `None` on the desk.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread: Option<u64>,
+        /// The approvals it waits on.
+        approval_ids: Vec<ApprovalId>,
+    },
+    /// A parked episode seat was released by the operator's decisions and
+    /// takes its turn again.
+    EpisodeSeatResumed {
+        /// The desk.
+        chat_id: String,
+        /// The episode.
+        episode_id: String,
+        /// The seat that resumed.
+        seat: String,
+    },
     /// The driver's resumable state after a committed round (plan hive-desks,
     /// Phase 4): what `hive::episode_store` reads back to resume an episode
     /// the host died under.
@@ -2675,6 +2700,8 @@ impl CompanyEvent {
             Self::EpisodeCompleted { .. } => "EpisodeCompleted",
             Self::ConversationOpened { .. } => "ConversationOpened",
             Self::ConversationConcluded { .. } => "ConversationConcluded",
+            Self::EpisodeSeatParked { .. } => "EpisodeSeatParked",
+            Self::EpisodeSeatResumed { .. } => "EpisodeSeatResumed",
             Self::EpisodeStateSaved { .. } => "EpisodeStateSaved",
             Self::TaskSteered { .. } => "TaskSteered",
             Self::TaskCardChanged { .. } => "TaskCardChanged",
@@ -2850,6 +2877,10 @@ impl CompanyEvent {
             // conversation happened at all.
             | Self::ConversationOpened { .. }
             | Self::ConversationConcluded { .. }
+            // What a seat waited on and when it came back: the only record
+            // that an episode stood still on the operator.
+            | Self::EpisodeSeatParked { .. }
+            | Self::EpisodeSeatResumed { .. }
             | Self::EpisodeStateSaved { .. }
             | Self::TaskSteered { .. }
             | Self::TaskCardChanged { .. }

@@ -2815,7 +2815,10 @@ impl CompanyRuntime {
             if let CompanyEvent::ApprovalResolved { approval_id, .. } = &event
                 && let Some(resolution) = rt.grants.take_blocker_resolution(approval_id)
             {
-                return rt.resume_blocker(approval_id, resolution).await;
+                if rt.episode_seat_of(approval_id).is_none() {
+                    return rt.resume_blocker(approval_id, resolution).await;
+                }
+                rt.hold_episode_answer(approval_id, &resolution).await;
             }
             rt.continue_turn(event).await
         })
@@ -3640,6 +3643,12 @@ impl CompanyRuntime {
             },
             None => vec![event],
         };
+        if let Some(seat) = turn
+            .as_deref()
+            .and_then(crate::runtime::episode_resume::parse)
+        {
+            return self.resume_episode_seat(&seat, batch).await;
+        }
         // Issue #978: a workflow run is not a brain turn, so it is not continued
         // like one. The fork is read off the turn key itself — see
         // `continuation_target` — rather than from a side lookup that could
@@ -5606,7 +5615,32 @@ impl CompanyRuntime {
             // pause the continuation, and park a brand-new card for a
             // decision that has already been made.
             self.workflow_gates.decide(&turn, id, Verdict::Deny);
-            if let Some(batch) = self.continuations.decide(&turn, None) {
+            let episode_seat = crate::runtime::episode_resume::parse(&turn);
+            let expiry = episode_seat
+                .as_ref()
+                .map(|_| CompanyEvent::ApprovalResolved {
+                    approval_id: id.clone(),
+                    verdict: Verdict::Deny,
+                    by: Actor {
+                        kind: ActorKind::System,
+                        id: episode_seat::EXPIRY_ACTOR.into(),
+                    },
+                });
+            if let Some(batch) = self.continuations.decide(&turn, expiry) {
+                if let Some(seat) = episode_seat {
+                    let rt = Arc::clone(self);
+                    tokio::spawn(async move {
+                        if let Err(error) = rt.resume_episode_seat(&seat, batch).await {
+                            tracing::error!(
+                                company = %rt.id,
+                                %error,
+                                "[approval] the episode seat released by an expiry could not be \
+                                 resumed"
+                            );
+                        }
+                    });
+                    return self.append_expiry_resolution(id).await;
+                }
                 let workflow_run =
                     crate::runtime::workflow_resume::run_id_from_turn(&turn).is_some();
                 // A workflow run releases even on an empty batch: every
@@ -5635,6 +5669,11 @@ impl CompanyRuntime {
                 }
             }
         }
+        self.append_expiry_resolution(id).await
+    }
+
+    /// Appends the system's default-deny for an expired approval.
+    async fn append_expiry_resolution(&self, id: &ApprovalId) -> Result<()> {
         if let Err(e) = self
             .events
             .append(
@@ -6239,6 +6278,14 @@ impl CompanyRuntime {
                 // derived — grouping by "same agent, same thread, close
                 // together" would guess at a fact the journal already records,
                 // and would guess wrong exactly when two turns overlap.
+                episode: p
+                    .batch
+                    .as_deref()
+                    .and_then(crate::runtime::episode_resume::parse)
+                    .map(|seat| crate::runtime::types::ApprovalEpisode {
+                        id: seat.episode_id,
+                        seat: seat.seat,
+                    }),
                 batch: p.batch,
                 // Issue #1862: the shared root cause, so the console folds every
                 // card stalled on one broken integration into a single question.
@@ -7760,6 +7807,8 @@ impl std::fmt::Debug for CompanyRuntime {
     }
 }
 
+mod episode_seat;
+
 #[cfg(test)]
 #[path = "runtime_ambiguous_mentions_tests.rs"]
 mod tests_ambiguous_mentions;
@@ -7809,6 +7858,9 @@ mod tests_dispatch;
 #[cfg(test)]
 #[path = "runtime_emergency_stop_tests.rs"]
 mod tests_emergency_stop;
+#[cfg(test)]
+#[path = "runtime_episode_seat_tests.rs"]
+mod tests_episode_seat;
 /// What is under test is whether a continuation run is started, with what
 /// trigger input, and how many times.
 #[cfg(feature = "openhuman")]

@@ -175,3 +175,22 @@ pub fn spawn_episode(
         });
     tokio::spawn(task)
 }
+
+/// Carries on a parked episode from its checkpoint on its own task, as
+/// [`spawn_episode`] runs a new one.
+pub fn spawn_resume(
+    dispatcher: Arc<HiveDispatcher>,
+    episode_id: String,
+) -> tokio::task::JoinHandle<Option<EpisodeReport>> {
+    let task: std::pin::Pin<Box<dyn std::future::Future<Output = Option<EpisodeReport>> + Send>> =
+        Box::pin(async move {
+            match dispatcher.resume_desk_message(&episode_id).await {
+                Ok(report) => report,
+                Err(error) => {
+                    tracing::error!(episode = %episode_id, %error, "[hive] the episode could not be resumed");
+                    None
+                }
+            }
+        });
+    tokio::spawn(task)
+}
