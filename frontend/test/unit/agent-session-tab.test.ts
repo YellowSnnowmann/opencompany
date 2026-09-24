@@ -100,9 +100,23 @@ describe("the Session tab", () => {
    */
   it("threads the roster's names from the shell down to the utterance chip", () => {
     expect(shell).toMatch(/<TeamView[\s\S]*?agentNames=\{agentNames\}/);
-    expect(team).toMatch(/<AgentDetailView[\s\S]*?agentNames=\{agentNames\}/);
+    // `TeamView` overlays the shell's roster snapshot with its own `members`
+    // state, so a rename saved on the detail page shows up immediately rather
+    // than waiting for the shell's next company-switch refetch.
+    expect(team).toMatch(/<AgentDetailView[\s\S]*?agentNames=\{currentAgentNames\}/);
     expect(detail).toMatch(/<AgentSession[\s\S]*?agentNames=\{agentNames\}/);
     expect(session).toContain("<SessionRow key={line.message.id} line={line} agentId={agentId} agentNames={agentNames} />");
+  });
+
+  /**
+   * A rename saved on the detail page must reach the chips this same view
+   * feeds, without waiting for the shell's roster refetch — the gap
+   * CodeRabbit flagged on PR #2469.
+   */
+  it("folds a saved rename back into TeamView's own roster map", () => {
+    expect(team).toContain("onAgentNameChange");
+    expect(team).toContain("member.id === agentId ? { ...member, name } : member");
+    expect(detail).toContain("onAgentNameChange?.(agentId, updated.name?.trim() || updated.role)");
   });
 
   it("badges every row with the channel the host stamped", () => {

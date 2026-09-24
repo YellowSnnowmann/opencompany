@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Cpu,
   MessageSquare,
@@ -128,6 +128,25 @@ export function TeamView({
    */
   const [hostEmpty, setHostEmpty] = useState(false);
   const [members, setMembers] = useState<TeamMember[]>([]);
+  /**
+   * `agentNames` is the shell's roster snapshot, re-fetched on company switch
+   * rather than on every rename — so a save on the detail page below would
+   * otherwise show the old name in every chip that resolves through it until
+   * the operator changes company. Overlaid with this view's own `members`,
+   * which {@link onAgentNameChange} keeps current the moment a save lands.
+   */
+  const currentAgentNames = useMemo(
+    () => ({
+      ...agentNames,
+      ...Object.fromEntries(members.map((member) => [member.id, member.name])),
+    }),
+    [agentNames, members],
+  );
+  const onAgentNameChange = useCallback((agentId: string, name: string) => {
+    setMembers((current) =>
+      current.map((member) => (member.id === agentId ? { ...member, name } : member)),
+    );
+  }, []);
   /**
    * Ids of rows this console appended itself, because the host has no team
    * write plane (`addMember`'s 404 branch below).
@@ -434,7 +453,8 @@ export function TeamView({
         client={client}
         company={company}
         agentId={sub}
-        agentNames={agentNames}
+        agentNames={currentAgentNames}
+        onAgentNameChange={onAgentNameChange}
         onBack={() => onOpenAgent(null)}
       />
     );
