@@ -5802,7 +5802,7 @@ pub(crate) fn build_episode_seat(
         &[],
         instructions.as_deref(),
         orchestrator::orchestrator_id(&live_roster).as_deref() == Some(manifest_agent.id.as_str()),
-        &crate::company::team_brief::team_section(company, &manifest_agent.id),
+        &crate::company::team_brief::seat_team_section(company, &manifest_agent.id),
     )?;
     // **The hand-off tools come off an episode seat's belt.**
     //
