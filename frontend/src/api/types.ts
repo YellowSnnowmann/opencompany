@@ -438,6 +438,8 @@ export interface EpisodeDto {
   completedAtMillis?: number;
   completedBy?: string;
   reason?: EpisodeCompletionReason;
+  /** Seats parked waiting on the operator, by agent id. Absent or empty when none. */
+  waiting?: string[];
 }
 
 /** Why an episode closed. Widened by the console to a string on read, so a
@@ -1177,6 +1179,12 @@ export interface ApprovalSummary {
    * should fall back to wording that is true regardless.
    */
   blocker_step_kind?: BlockerStepKind;
+  /**
+   * The hive episode seat that raised this approval — `id` is the episode,
+   * `seat` the roster agent id. Such an approval's {@link thread} is the desk.
+   * Absent for an approval no episode seat raised, and on an older host.
+   */
+  episode?: { id: string; seat: string } | null;
 }
 
 /**

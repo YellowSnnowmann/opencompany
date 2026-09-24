@@ -23,6 +23,11 @@ pub mod conducted;
 /// the episode it opens on a desk with a room (Phase 5).
 #[cfg(feature = "openhuman")]
 pub mod dispatch;
+/// An operator DM driven end to end: the hive, the surface, the dispatcher,
+/// the seats. Needs the harness it drives, so it is gated with it.
+#[cfg(all(test, feature = "openhuman"))]
+#[path = "dm_episode_tests.rs"]
+mod dm_episode_tests;
 /// The journal as the episode store: the `GET {scope}/episodes` fold, the
 /// driver checkpoint a resume reads, and the open-episode lookup (Phase 4).
 pub mod episode_store;
@@ -52,10 +57,18 @@ pub mod referral;
 /// The `[group_chat.routing]` block, its resolved `RoutingPolicy`, and the
 /// desk-routing wire shapes (plan Phase 4).
 pub mod routing;
+#[cfg(feature = "openhuman")]
+pub mod seating;
 pub mod session_log;
-#[cfg(test)]
-pub(crate) mod test_support;
 /// The in-flight turn registry, the speech fold and the tool adapter the
 /// server dispatches through (plan Phase 3).
+#[cfg(feature = "openhuman")]
+pub mod shared_tool;
+/// `take_over`: a guest seat claims work, concluding the conversation that
+/// asked it and telling the operator in its own line.
+#[cfg(feature = "openhuman")]
+pub mod takeover;
+#[cfg(test)]
+pub(crate) mod test_support;
 #[cfg(feature = "openhuman")]
 pub mod tools;

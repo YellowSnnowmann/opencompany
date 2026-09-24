@@ -16,20 +16,22 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tinyhivemind::SESSION_WINDOW;
-use tinyhivemind_driver::{BoundHive, BroadcastRouting, CompletionDriver, ConductPolicy, Door};
+use tinyhivemind_driver::{
+    BoundHive, BroadcastRouting, CompletionDriver, ConductPolicy, ConductorState, Door,
+};
 use tinyhivemind_embed::Router;
-use tinyhivemind_openhuman::{HostedRunner, Report, SeatRunner, run_episode};
+use tinyhivemind_openhuman::{HostedRunner, Report, SeatRunner, resume_episode, run_episode};
 use tinyhivemind_tools::EpisodeTools;
 
 use crate::error::{OpenCompanyError, Result};
 use crate::harness::built_in::{HarnessDeps, HarnessPool};
 use crate::hive::episode_store;
 use crate::hive::graph::DeskHive;
-use crate::hive::host::{DeskHost, SeatParking};
+use crate::hive::host::{DeskHost, EpisodeSeatParking, SeatParking};
 use crate::hive::routing::{EffectiveRouting, RoutingPlanDto, desk_routing, router_of};
 use crate::ports::events::EventLog;
 use crate::ports::types::CompanyEvent;
-use crate::ports::types::{CompanyRecord, EventSeq, Mention};
+use crate::ports::types::{CompanyRecord, EventSeq, Mention, StoredEvent};
 
 /// Everything this company brings to one episode.
 ///
@@ -75,6 +77,29 @@ pub struct Episode<'a> {
 /// cannot be built, a journal that refuses a row, an episode that stalls or
 /// runs past its wall, or one parked on the operator with nobody released.
 pub async fn run(episode: Episode<'_>) -> Result<Report> {
+    conduct(episode, None).await
+}
+
+/// Carry on an episode from the checkpoint `snapshot`, with `rows` the
+/// journal rows it has written so far and `revision` the wave the checkpoint
+/// was taken at.
+///
+/// # Errors
+///
+/// Whatever [`run`] errors on, plus a snapshot this desk cannot resume.
+pub async fn resume(
+    episode: Episode<'_>,
+    snapshot: ConductorState,
+    rows: &[StoredEvent],
+    revision: u64,
+) -> Result<Report> {
+    conduct(episode, Some((snapshot, rows, revision))).await
+}
+
+async fn conduct(
+    episode: Episode<'_>,
+    resumed: Option<(ConductorState, &[StoredEvent], u64)>,
+) -> Result<Report> {
     let members: Vec<String> = episode.desk.hive.members().map(str::to_owned).collect();
     if members.is_empty() {
         return Err(OpenCompanyError::Harness(format!(
@@ -106,7 +131,27 @@ pub async fn run(episode: Episode<'_>) -> Result<Report> {
         if let Some(mentions) = episode.mentions.clone() {
             host = host.resolving_mentions(mentions);
         }
+        // The pool handle each seat runs its turns on.
+        //
+        // Resolved here because `EpisodeHost::build_seat` is sync and the pool
+        // is not, and this is the last place that can await. A member the pool
+        // does not know is left unseated, and `build_seat` says so rather than
+        // inventing an agent for it.
+        for member in &members {
+            if let Some(agent) = episode.pool.agent(&episode.record.id, member).await {
+                host = host.seat_on(member, agent);
+            }
+        }
         host
+    });
+
+    let releases = host.seat_releases();
+    let _running = releases.as_ref().map(|releases| {
+        releases.start(&episode.episode_id);
+        RunningEpisode {
+            releases: releases.clone(),
+            episode_id: episode.episode_id.clone(),
+        }
     });
 
     // Each seat is built once, here, and torn down with the episode: its
@@ -131,31 +176,97 @@ pub async fn run(episode: Episode<'_>) -> Result<Report> {
         .map_err(|error| OpenCompanyError::Harness(error.to_string()))?;
     let route_policy = episode.routing.policy();
 
-    run_episode(
-        host.as_ref(),
-        &runner,
-        &driver,
-        BroadcastRouting {
-            // Threaded through deliberately: without it a handoff is still
-            // placed, but by lead and mention rather than by meaning, and
-            // nothing anywhere reports the difference.
-            primary: episode.router,
-            reasoning: None,
-            policy: &route_policy,
-            roster_version: episode.desk.roster_version,
-            thread_context: &[],
-        },
-        ConductPolicy::default(),
-        Door {
-            chat: episode.desk.desk_id.clone(),
-            desk_name: episode.desk.desk_name.clone(),
-            members,
-            starters,
-            opened_at: tinyhivemind::Sequence(episode.opened_at.value()),
-        },
-    )
-    .await
-    .map_err(|error| OpenCompanyError::Harness(error.to_string()))
+    let routing = BroadcastRouting {
+        // Threaded through deliberately: without it a handoff is still
+        // placed, but by lead and mention rather than by meaning, and
+        // nothing anywhere reports the difference.
+        primary: episode.router,
+        reasoning: None,
+        policy: &route_policy,
+        roster_version: episode.desk.roster_version,
+        thread_context: &[],
+    };
+    let outcome = match resumed {
+        None => {
+            run_episode(
+                host.as_ref(),
+                &runner,
+                &driver,
+                routing,
+                ConductPolicy::default(),
+                Door {
+                    chat: episode.desk.desk_id.clone(),
+                    desk_name: episode.desk.desk_name.clone(),
+                    members,
+                    starters,
+                    opened_at: tinyhivemind::Sequence(episode.opened_at.value()),
+                },
+            )
+            .await
+        }
+        Some((snapshot, rows, revision)) => {
+            host.recall(rows, revision);
+            resume_episode(
+                host.as_ref(),
+                &runner,
+                &driver,
+                routing,
+                ConductPolicy::default(),
+                snapshot,
+            )
+            .await
+        }
+    };
+    if let Err(tinyhivemind_openhuman::Error::Conduct(tinyhivemind_driver::Error::Parked {
+        seats,
+    })) = &outcome
+    {
+        paused(&episode, seats).await;
+    }
+    outcome.map_err(|error| OpenCompanyError::Harness(error.to_string()))
+}
+
+/// Says on the desk that an episode stopped with seats still waiting on the
+/// operator, so the room does not simply go quiet.
+async fn paused(episode: &Episode<'_>, seats: &[String]) {
+    tracing::error!(
+        company = %episode.record.id,
+        desk = %episode.desk.desk_id,
+        episode = %episode.episode_id,
+        ?seats,
+        "[hive] an episode stopped with seats waiting on the operator and nothing to release them"
+    );
+    let row = CompanyEvent::AgentReply {
+        chat_id: episode.desk.desk_id.clone(),
+        agent_id: crate::ports::SYSTEM_AUTHOR.to_owned(),
+        text: "This conversation stopped while a teammate was waiting on a decision that could \
+               not be handed back to it. Answer the pending approval and ask again to pick it \
+               back up."
+            .to_owned(),
+        steps: Vec::new(),
+        outputs: Vec::new(),
+        task_id: None,
+        episode: None,
+        parent: episode.thread_root,
+        mentions: Vec::new(),
+        mention_depth: 0,
+        audience: Vec::new(),
+    };
+    if let Err(error) = episode.events.append(&episode.record.id, row).await {
+        tracing::warn!(%error, "[hive] could not record why an episode stopped");
+    }
+}
+
+/// Marks an episode as running for as long as it is held.
+struct RunningEpisode {
+    releases: crate::runtime::episode_resume::EpisodeReleases,
+    episode_id: String,
+}
+
+impl Drop for RunningEpisode {
+    fn drop(&mut self) {
+        self.releases.finish(&self.episode_id);
+    }
 }
 
 /// What opened an episode: the operator's row and what it said.
@@ -217,6 +328,35 @@ pub struct HiveDispatcher {
     pub mentions: Option<crate::runtime::mention_seam::MentionSeam>,
 }
 
+/// Who answers an operator DM, when the conversation is one.
+///
+/// **A DM's responder is not a routing question.** The hive holds the roster
+/// so `ask` has somewhere to land, but a message in `dm:pm` is for the PM.
+/// Routed instead it would be answered by whoever the ranker liked -- and with
+/// a TinyHumans key present that ranker is a model, so the wrong teammate
+/// answering your DM would be a decision nobody made and nothing recorded.
+///
+/// An explicit `@mention` still wins: naming someone in your own DM is an
+/// instruction, not an ambiguity.
+///
+/// `None` for a desk, where routing is exactly the right question to ask.
+pub(crate) fn dm_opening(
+    desk_id: &str,
+    lead: &str,
+    explicit: Option<&str>,
+) -> Option<(Vec<String>, RoutingPlanDto)> {
+    if !desk_id.starts_with(crate::runtime::assignee::DM_PREFIX) {
+        return None;
+    }
+    let primary = explicit.unwrap_or(lead).to_owned();
+    Some((
+        vec![primary.clone()],
+        RoutingPlanDto::One {
+            primary_id: primary,
+        },
+    ))
+}
+
 impl HiveDispatcher {
     /// The hive bound to `desk_id`, when that desk runs one.
     #[must_use]
@@ -264,15 +404,91 @@ impl HiveDispatcher {
             events: Arc::clone(&self.events),
             desk: &desk,
             routing: &routing,
-            router: self.router.as_deref(),
+            // No router in a DM. It governs `broadcast`, and handing work
+            // to another seat inside a one-to-one conversation is a hand-off
+            // -- a different conversation -- not something a ranker should
+            // pick a recipient for. Without one, a broadcast falls back to
+            // lead-and-mention, which is what a DM means anyway.
+            router: if desk_id.starts_with(crate::runtime::assignee::DM_PREFIX) {
+                None
+            } else {
+                self.router.as_deref()
+            },
             episode_id: episode_id.clone(),
             thread_root: Some(thread_root),
             opened_at: trigger.seq,
             starters,
-            parking: None,
+            parking: self.seat_parking(&desk.desk_id, Some(thread_root), &episode_id),
             mentions: self.mentions.clone(),
         })
         .await?;
+        self.complete(&desk.desk_id, &episode_id, &report).await?;
+        Ok(report.into())
+    }
+
+    /// Carry on a parked episode from its last checkpoint, once an operator
+    /// decision has come in for it and no running episode took it. `None`
+    /// when it is already running here.
+    ///
+    /// # Errors
+    ///
+    /// An episode with no checkpoint, on a desk that runs no hive, and
+    /// whatever stops the resumed episode.
+    pub async fn resume_desk_message(&self, episode_id: &str) -> Result<Option<EpisodeReport>> {
+        let releases = self.deps.approval_requests.grants().episode_releases();
+        if !releases.start(episode_id) {
+            return Ok(None);
+        }
+        let _running = RunningEpisode {
+            releases,
+            episode_id: episode_id.to_owned(),
+        };
+        let saved = episode_store::latest_state(self.events.as_ref(), &self.record.id, episode_id)
+            .await?
+            .ok_or_else(|| {
+                OpenCompanyError::NotFound(format!("episode `{episode_id}` has no checkpoint"))
+            })?;
+        let desk = self.hive(&saved.desk).ok_or_else(|| {
+            OpenCompanyError::InvalidRequest(format!("desk `{}` runs no hive", saved.desk))
+        })?;
+        let snapshot: ConductorState = serde_json::from_value(saved.state.clone())
+            .map_err(|error| OpenCompanyError::Harness(format!("episode checkpoint: {error}")))?;
+        let rows =
+            episode_store::episode_rows(self.events.as_ref(), &self.record.id, episode_id).await?;
+        let routing = desk_routing(&self.record, &desk.desk_id);
+        tracing::info!(
+            desk = %desk.desk_id,
+            episode = %episode_id,
+            revision = saved.revision,
+            "[hive] resuming a parked episode from its checkpoint"
+        );
+        let report = resume(
+            Episode {
+                record: Arc::clone(&self.record),
+                deps: Arc::clone(&self.deps),
+                pool: Arc::clone(&self.pool),
+                events: Arc::clone(&self.events),
+                desk: &desk,
+                routing: &routing,
+                router: self.router.as_deref(),
+                episode_id: episode_id.to_owned(),
+                thread_root: saved.thread_root,
+                opened_at: saved.thread_root.unwrap_or(EventSeq::new(0)),
+                starters: Vec::new(),
+                parking: self.seat_parking(&desk.desk_id, saved.thread_root, episode_id),
+                mentions: self.mentions.clone(),
+            },
+            snapshot,
+            &rows,
+            saved.revision,
+        )
+        .await?;
+        self.complete(&desk.desk_id, episode_id, &report).await?;
+        Ok(Some(report.into()))
+    }
+
+    /// Journals an episode's closing row.
+    async fn complete(&self, desk_id: &str, episode_id: &str, report: &Report) -> Result<()> {
         // The episode's closing row. `run_episode` returns only once every
         // seat has recorded its part -- a wall, a stall or a fold it could
         // not explain comes back as an error instead, and is journaled by
@@ -285,8 +501,8 @@ impl HiveDispatcher {
             .append(
                 &self.record.id,
                 CompanyEvent::EpisodeCompleted {
-                    chat_id: desk.desk_id.clone(),
-                    episode_id: episode_id.clone(),
+                    chat_id: desk_id.to_owned(),
+                    episode_id: episode_id.to_owned(),
                     revision: report.waves,
                     // The library reports what happened, not who spoke last:
                     // every seat completed, so no one seat closed it.
@@ -304,7 +520,24 @@ impl HiveDispatcher {
             waves = report.waves,
             "[hive] episode finished"
         );
-        Ok(report.into())
+        Ok(())
+    }
+
+    /// Parking for the seats of one episode, through the runtime's parker.
+    fn seat_parking(
+        &self,
+        desk_id: &str,
+        thread_root: Option<EventSeq>,
+        episode_id: &str,
+    ) -> Option<Arc<dyn SeatParking>> {
+        let parker = self.deps.approval_parker.clone()?;
+        Some(Arc::new(EpisodeSeatParking::new(
+            parker,
+            self.record.id.clone(),
+            desk_id.to_owned(),
+            thread_root,
+            episode_id.to_owned(),
+        )))
     }
 
     /// Who the opening routing plan starts, or the desk in order when no
@@ -328,6 +561,9 @@ impl HiveDispatcher {
                 })
                 .map(str::to_owned)
         });
+        if let Some(pinned) = dm_opening(&desk.desk_id, &lead, explicit.as_deref()) {
+            return Ok(pinned);
+        }
         let request = desk.hive.desk_request(
             trigger.text.clone(),
             Vec::new(),

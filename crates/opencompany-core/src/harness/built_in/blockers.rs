@@ -425,19 +425,28 @@ impl tinytools::Tool for EscalateToHumanTool {
             // every request this turn queued.
             run_id: None,
         };
-        if !self
+        use crate::harness::built_in::policy::ApprovalPush;
+        match self
             .requests
             .push_blocker(crate::harness::built_in::policy::ApprovalRequest {
                 tool: ESCALATE_TO_HUMAN_TOOL.to_string(),
                 reason,
                 effect,
-            })
-        {
-            return Ok(ToolResult::error(format!(
-                "Your question was not raised: this batch already has the maximum of {} approval \
-                 requests. Stop and wait for the queued requests to be resolved, then ask again.",
-                crate::harness::built_in::policy::MAX_APPROVAL_REQUESTS_PER_TURN
-            )));
+            }) {
+            ApprovalPush::Queued => {}
+            ApprovalPush::OverCap => {
+                return Ok(ToolResult::error(format!(
+                    "Your question was not raised: this batch already has the maximum of {} \
+                     approval requests. Stop and wait for the queued requests to be resolved, then \
+                     ask again.",
+                    crate::harness::built_in::policy::MAX_APPROVAL_REQUESTS_PER_TURN
+                )));
+            }
+            ApprovalPush::Unclaimed => {
+                return Ok(ToolResult::error(
+                    crate::harness::approval_tool::NOT_RECORDED.to_string(),
+                ));
+            }
         }
 
         Ok(ToolResult::success(format!(

@@ -2016,3 +2016,326 @@ async fn a_seat_at_two_desks_is_shown_the_other_as_context() {
         "the engineer sits only at engineering and must be told it is in nothing else",
     );
 }
+
+// ---------------------------------------------------------------------------
+// 9: a seat parks on the operator and the episode resumes on the decision
+// ---------------------------------------------------------------------------
+
+/// Boots the in-test company under `id`, so a second boot on the same home
+/// is the same company after a restart.
+async fn boot_named(home: &Path, id: &str, base_url: &str) -> (SocketAddr, Arc<CompanyRuntime>) {
+    let manifest = CompanyManifest::from_stored_toml(&manifest(id, base_url))
+        .expect("the in-test manifest parses");
+    boot(home, id, manifest).await
+}
+
+/// Whether the seat's brief carries the operator's decision.
+fn decided(seat: &Seat, words: &str) -> bool {
+    seat.prompt.contains(words)
+}
+
+/// The engineer asks the operator first, and records its part once the
+/// decision is in its brief. Every other seat records at once.
+fn ask_then_record(
+    ask: impl Fn(&Seat) -> Reply + Send + Sync + 'static,
+    asked_with: &'static str,
+    decision: &'static [&'static str],
+) -> Responder {
+    seat_script("Noted.", move |seat| {
+        if seat.speaker != ENGINEER {
+            return record_part(seat);
+        }
+        if let Some(words) = decision.iter().find(|words| decided(seat, words)) {
+            return complete(seat, format!("Decision received: {words}"));
+        }
+        if seat.called(asked_with) {
+            return Reply::Say(DONE.to_string());
+        }
+        ask(seat)
+    })
+}
+
+fn request_approval(_: &Seat) -> Reply {
+    Reply::Call {
+        tool: "request_approval",
+        args: json!({
+            "title": "Email the client",
+            "question": "May I email the client the rollout plan?"
+        }),
+    }
+}
+
+/// The pending approvals, as the console reads them.
+async fn approvals(client: &Client) -> Vec<Value> {
+    let (status, body) = client.get("/api/v1/company/approvals").await;
+    assert_eq!(status, 200, "{body}");
+    body.as_array().cloned().unwrap_or_default()
+}
+
+/// Polls until an approval raised by an episode seat is pending.
+async fn seat_approval(client: &Client) -> Value {
+    let started = Instant::now();
+    loop {
+        if let Some(found) = approvals(client)
+            .await
+            .into_iter()
+            .find(|approval| approval.get("episode").is_some())
+        {
+            return found;
+        }
+        assert!(
+            started.elapsed() < EPISODE,
+            "no episode seat's approval appeared: {:?}",
+            approvals(client).await
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+fn seat_parked(rows: &[StoredEvent]) -> Vec<(String, String, Vec<String>)> {
+    rows.iter()
+        .filter_map(|row| match &row.event {
+            CompanyEvent::EpisodeSeatParked {
+                episode_id,
+                seat,
+                approval_ids,
+                ..
+            } => Some((
+                episode_id.clone(),
+                seat.clone(),
+                approval_ids
+                    .iter()
+                    .map(|id| id.as_ref().to_string())
+                    .collect(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+fn seat_resumed(rows: &[StoredEvent]) -> Vec<String> {
+    rows.iter()
+        .filter_map(|row| match &row.event {
+            CompanyEvent::EpisodeSeatResumed { seat, .. } => Some(seat.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Parks the engineer on its first approval and checks the park is what the
+/// console and the journal say it is. Returns the approval.
+async fn parked_on_the_operator(client: &Client, runtime: &Arc<CompanyRuntime>) -> Value {
+    client
+        .say(
+            ENGINEERING,
+            "Plan the staging rollout for the new checkout.",
+        )
+        .await;
+    let approval = seat_approval(client).await;
+    assert_eq!(approval["episode"]["seat"], ENGINEER, "{approval}");
+    assert_eq!(approval["thread"], ENGINEERING, "the card sits on the desk");
+    let episode = approval["episode"]["id"].as_str().unwrap().to_string();
+    let rows = wait_for(runtime, "the seat's park row", EPISODE, |rows| {
+        !seat_parked(rows).is_empty()
+    })
+    .await;
+    assert_eq!(
+        seat_parked(&rows),
+        vec![(
+            episode.clone(),
+            ENGINEER.to_string(),
+            vec![approval["id"].as_str().unwrap().to_string()]
+        )]
+    );
+    assert!(
+        completions(&rows).is_empty(),
+        "the episode waits on the operator rather than completing"
+    );
+    let (_, episodes) = client.get("/api/v1/company/episodes").await;
+    assert_eq!(episodes[0]["waiting"], json!([ENGINEER]), "{episodes}");
+    approval
+}
+
+async fn decide(client: &Client, approval: &Value, body: Value) {
+    let id = approval["id"].as_str().unwrap();
+    let (status, answer) = client
+        .post(&format!("/api/v1/company/approvals/{id}"), body)
+        .await;
+    assert_eq!(status, 200, "the decision is refused: {answer}");
+}
+
+/// The engineer's turns that were shown `words`.
+fn told(script: &support::script_model::Script, words: &str) -> usize {
+    script
+        .asks()
+        .iter()
+        .filter_map(seat_of)
+        .filter(|seat| {
+            seat.speaker == ENGINEER && seat.turn_tools.is_empty() && decided(seat, words)
+        })
+        .count()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_approved_request_resumes_the_seat_and_completes_the_episode() {
+    let home = tempfile::tempdir().unwrap();
+    let (base_url, script) = spawn_script_with_latency(
+        ask_then_record(
+            request_approval,
+            "request_approval",
+            &["approved your request", "denied your request"],
+        ),
+        Duration::from_millis(30),
+    )
+    .await;
+    let (address, runtime) = boot_named(home.path(), &unique("hive-park"), &base_url).await;
+    let client = Client::new(address);
+    client.sign_in(ADMIN).await;
+
+    let approval = parked_on_the_operator(&client, &runtime).await;
+    decide(
+        &client,
+        &approval,
+        json!({ "verdict": "approve", "detach": true }),
+    )
+    .await;
+
+    let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
+    dump(&rows, &script);
+    assert_eq!(seat_resumed(&rows), vec![ENGINEER.to_string()]);
+    assert_eq!(
+        told(&script, "approved your request: Email the client"),
+        1,
+        "the resumed seat is shown the decision once"
+    );
+    assert!(
+        replies(&rows, ENGINEERING)
+            .iter()
+            .any(|row| row.agent == ENGINEER && row.text.contains("approved your request")),
+        "{:?}",
+        replies(&rows, ENGINEERING)
+    );
+    assert!(approvals(&client).await.is_empty());
+    let (_, episodes) = client.get("/api/v1/company/episodes").await;
+    assert_eq!(episodes[0]["status"], "completed");
+    assert!(episodes[0].get("waiting").is_none(), "{episodes}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_denied_request_resumes_the_seat_with_the_denial() {
+    let home = tempfile::tempdir().unwrap();
+    let (base_url, script) = spawn_script_with_latency(
+        ask_then_record(
+            request_approval,
+            "request_approval",
+            &["approved your request", "denied your request"],
+        ),
+        Duration::from_millis(30),
+    )
+    .await;
+    let (address, runtime) = boot_named(home.path(), &unique("hive-deny"), &base_url).await;
+    let client = Client::new(address);
+    client.sign_in(ADMIN).await;
+
+    let approval = parked_on_the_operator(&client, &runtime).await;
+    decide(
+        &client,
+        &approval,
+        json!({ "verdict": "deny", "detach": true }),
+    )
+    .await;
+
+    let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
+    dump(&rows, &script);
+    assert_eq!(told(&script, "denied your request: Email the client"), 1);
+    assert_eq!(told(&script, "approved your request"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_answered_escalation_reaches_the_seat_that_asked() {
+    let home = tempfile::tempdir().unwrap();
+    let (base_url, script) = spawn_script_with_latency(
+        ask_then_record(
+            |_| Reply::Call {
+                tool: "escalate_to_human",
+                args: json!({ "question": "Which region do we roll out to first?" }),
+            },
+            "escalate_to_human",
+            &["answered your question"],
+        ),
+        Duration::from_millis(30),
+    )
+    .await;
+    let (address, runtime) = boot_named(home.path(), &unique("hive-ask"), &base_url).await;
+    let client = Client::new(address);
+    client.sign_in(ADMIN).await;
+
+    let approval = parked_on_the_operator(&client, &runtime).await;
+    decide(
+        &client,
+        &approval,
+        json!({
+            "verdict": "approve",
+            "blocker_verdict": "amend",
+            "blocker_answer": "eu-west first",
+            "detach": true
+        }),
+    )
+    .await;
+
+    let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
+    dump(&rows, &script);
+    assert_eq!(told(&script, "\"eu-west first\""), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_parked_episode_resumes_from_its_checkpoint_after_a_restart() {
+    let home = tempfile::tempdir().unwrap();
+    let (base_url, script) = spawn_script_with_latency(
+        ask_then_record(
+            request_approval,
+            "request_approval",
+            &["approved your request"],
+        ),
+        Duration::from_millis(30),
+    )
+    .await;
+    let id = unique("hive-restart");
+    let approval = {
+        let (address, runtime) = boot_named(home.path(), &id, &base_url).await;
+        let client = Client::new(address);
+        client.sign_in(ADMIN).await;
+        parked_on_the_operator(&client, &runtime).await
+    };
+
+    let (address, runtime) = boot_named(home.path(), &id, &base_url).await;
+    let client = Client::new(address);
+    client.sign_in(ADMIN).await;
+    let pending = approvals(&client).await;
+    assert_eq!(
+        pending.iter().map(|a| a["id"].clone()).collect::<Vec<_>>(),
+        vec![approval["id"].clone()],
+        "the park survives the restart"
+    );
+    decide(
+        &client,
+        &approval,
+        json!({ "verdict": "approve", "detach": true }),
+    )
+    .await;
+
+    let rows = wait_for(
+        &runtime,
+        "the resumed episode to complete",
+        EPISODE,
+        completed(1),
+    )
+    .await;
+    dump(&rows, &script);
+    assert_eq!(
+        completions(&rows)[0].0,
+        approval["episode"]["id"].as_str().unwrap(),
+        "the same episode completes, resumed rather than reopened"
+    );
+    assert_eq!(told(&script, "approved your request: Email the client"), 1);
+}

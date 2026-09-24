@@ -92,33 +92,6 @@ async fn each_settled_wave_moves_the_round_a_bracket_names() {
     assert_eq!(host.episode_id, "ep-1");
 }
 
-/// A parking hook that holds whichever seats it was told to.
-#[derive(Debug)]
-struct Holds(Vec<String>);
-
-#[async_trait::async_trait]
-impl super::SeatParking for Holds {
-    async fn park(&self, seat: &str) -> bool {
-        self.0.iter().any(|held| held == seat)
-    }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_seat_with_an_approval_waiting_is_held_and_one_without_is_not() {
-    let events: Arc<dyn EventLog> = Arc::new(MemoryLog::default());
-    let host = host(Arc::clone(&events)).parking(Arc::new(Holds(vec!["one".to_owned()])));
-    assert_eq!(
-        host.after_turn("one", None).expect("the hook runs"),
-        tinyhivemind_openhuman::Disposition::Parked,
-        "one raised an approval, so the episode holds it"
-    );
-    assert_eq!(
-        host.after_turn("two", None).expect("the hook runs"),
-        tinyhivemind_openhuman::Disposition::Done,
-        "two raised nothing, so its turn simply stands"
-    );
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn a_host_that_parks_nothing_never_holds_a_seat() {
     let events: Arc<dyn EventLog> = Arc::new(MemoryLog::default());
@@ -341,4 +314,35 @@ async fn a_committed_row_names_the_wave_its_turn_opened_in() {
     // A seat this host never bracketed -- no pool, so no turn was recorded --
     // still gets a number rather than nothing: the live counter, as before.
     assert_eq!(host.wave_of("grace"), 2);
+}
+
+/// A DM seat is told which of the two it is, and a desk seat is told nothing.
+///
+/// The distinction is the whole point of the note. Every roster teammate is a
+/// member of every DM, so without it the seats a teammate can *ask* read the
+/// same brief as the teammate the operator is actually talking to -- and a
+/// brief that opens "## New desk messages" invites all of them to answer.
+#[test]
+fn a_dm_seat_learns_whether_the_line_is_its_own() {
+    let owner = super::dm_persona_note("dm:ceo", "ceo").expect("the owner is told");
+    assert!(
+        owner.contains("your own direct line with the operator"),
+        "{owner}"
+    );
+    assert!(
+        owner.contains("here to be asked"),
+        "the owner is told why the others are present: {owner}"
+    );
+
+    let guest = super::dm_persona_note("dm:ceo", "engineer").expect("a guest is told");
+    assert!(
+        guest.contains("should not answer them"),
+        "a guest must not answer the operator: {guest}"
+    );
+    assert_ne!(owner, guest, "the two roles read differently");
+
+    assert!(
+        super::dm_persona_note("engineering", "ceo").is_none(),
+        "a desk needs no correction -- `desk` is the right word there"
+    );
 }

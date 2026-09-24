@@ -23,16 +23,15 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use openhuman_core::agent::OpenHumanSessionHost;
 use openhuman_core::agent::tinyagents::host::LastTurnUsage;
 use tinyhivemind::{Sequence, SessionLog};
 use tinyhivemind_driver::{Commit, Note};
-use tinyhivemind_openhuman::{Disposition, EpisodeBelt, EpisodeHost, HostedTurn, Journal};
+use tinyhivemind_openhuman::{Disposition, EpisodeHost, HostedTurn, Journal};
 use tinyhivemind_openhuman::{Lane, TurnResult};
 use tinyhivemind_tools::Refusal;
 
 use crate::harness::built_in::cost::TurnUsage;
-use crate::harness::built_in::{HarnessDeps, HarnessPool, build_episode_seat, meter_turn_costs};
+use crate::harness::built_in::{HarnessDeps, HarnessPool, meter_turn_costs, seat_persona};
 use crate::ports::events::EventLog;
 use crate::ports::types::{CompanyEvent, CompanyId, CompanyRecord, EventSeq, TurnOutcome};
 
@@ -44,7 +43,7 @@ use super::session_log::EventLogSessionLog;
 /// so the episode's bare `post` and `complete_episode` would collide at the
 /// gate: admission is by name, and a host tool sharing a bare name would be
 /// admitted past this company's own policy.
-const TOOL_PREFIX: &str = "desk_";
+pub(crate) const TOOL_PREFIX: &str = "desk_";
 
 /// The author a desk note is written under: the episode speaking, not a
 /// teammate. The session log reads a reserved id as a system row, which is
@@ -123,18 +122,39 @@ pub struct DeskHost {
     /// system prompt of its own, so without this a teammate runs with the
     /// episode brief and no persona at all.
     personas: Mutex<BTreeMap<String, String>>,
+    /// The queues a seat's turn claims, when they are not the roster's.
+    queues: Option<seat_park::SeatQueues>,
+    /// Where operator decisions for parked seats arrive, when it is not the
+    /// roster's.
+    releases: Option<crate::runtime::episode_resume::EpisodeReleases>,
+    /// The claims each seat's running turn holds, kept until `after_turn`
+    /// settles what the turn left.
+    seat_claims: Mutex<BTreeMap<String, seat_park::SeatClaims>>,
+    /// The approvals each seat parked on, until the park is journaled.
+    parked_ids: Mutex<BTreeMap<String, Vec<crate::ports::types::ApprovalId>>>,
+    /// The conversation each parked seat was in, for where its decision lands.
+    parked_lanes: Mutex<BTreeMap<String, Option<Sequence>>>,
+    /// The pool handles this episode's seats run on, resolved before the
+    /// runner is built because `build_seat` is sync and the pool is not.
+    seated: Mutex<BTreeMap<String, Arc<crate::harness::built_in::CompanyAgent>>>,
 }
 
 /// What a host does with the approvals one seat's turn raised.
 ///
-/// `true` when the seat is now waiting on a human and the episode must hold
+/// A seat with anything parked is waiting on a human and the episode holds
 /// it: the library stops proposing that seat, stops nudging it for silence,
 /// and waits rather than treating the pause as an answer.
 #[async_trait::async_trait]
 pub trait SeatParking: Send + Sync {
-    /// Park what `seat`'s turn left outstanding, and say whether it is held.
-    async fn park(&self, seat: &str) -> bool;
+    /// Park what `seat`'s turn raised, saying what parked and what did not.
+    async fn park(
+        &self,
+        seat: &str,
+        requests: Vec<crate::harness::built_in::policy::ApprovalRequest>,
+    ) -> seat_park::SeatParked;
 }
+
+pub use seat_park::{EpisodeSeatParking, SeatParked};
 
 impl std::fmt::Debug for DeskHost {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -181,7 +201,28 @@ impl DeskHost {
             conversations: Mutex::new(BTreeMap::new()),
             turn_waves: Mutex::new(BTreeMap::new()),
             personas: Mutex::new(BTreeMap::new()),
+            queues: None,
+            releases: None,
+            seat_claims: Mutex::new(BTreeMap::new()),
+            parked_ids: Mutex::new(BTreeMap::new()),
+            parked_lanes: Mutex::new(BTreeMap::new()),
+            seated: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// The pool handle `seat` runs its turns on.
+    ///
+    /// Resolved here rather than in [`EpisodeHost::build_seat`] because that
+    /// is sync and the pool is not. Called once per member before the runner
+    /// is built; a member the pool does not know is simply not seated, and
+    /// `build_seat` says so.
+    #[must_use]
+    pub fn seat_on(self, seat: &str, agent: Arc<crate::harness::built_in::CompanyAgent>) -> Self {
+        self.seated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(seat.to_owned(), agent);
+        self
     }
 
     /// Where a seat is built from: the company as it effectively stands,
@@ -751,6 +792,18 @@ impl Journal for DeskHost {
             self.journal_or_warn(row);
             return;
         }
+        if let Event::Parked { seat, thread } = event {
+            self.journal_or_warn(self.seat_parked_row(seat, *thread));
+            return;
+        }
+        if let Event::Resumed { seat, .. } = event {
+            self.journal_or_warn(CompanyEvent::EpisodeSeatResumed {
+                chat_id: self.desk_id.clone(),
+                episode_id: self.episode_id.clone(),
+                seat: seat.clone(),
+            });
+            return;
+        }
         let (seat, at, took) = match event {
             // A broadcast reached these seats. Without this the console can
             // see that a broadcast was said and not who picked it up.
@@ -775,6 +828,25 @@ impl Journal for DeskHost {
         self.journal_or_warn(row);
     }
 
+    /// Wait for the operator to decide what a parked seat asked, tell the
+    /// seat in plain words, and hand it back to the episode.
+    fn released<'a>(&'a self, parked: &'a [String]) -> tinyhivemind_openhuman::Released<'a> {
+        Box::pin(async move {
+            let Some(releases) = self.seat_releases() else {
+                return Ok(Vec::new());
+            };
+            let decided = releases.released(&self.episode_id, parked).await;
+            let mut seats = Vec::with_capacity(decided.len());
+            for (seat, decisions) in decided {
+                self.tell_decisions(&seat, &decisions)
+                    .await
+                    .map_err(|error| refused(&error))?;
+                seats.push(seat);
+            }
+            Ok(seats)
+        })
+    }
+
     fn note(&self, note: &Note) -> tinyhivemind_openhuman::Result<()> {
         let event = self.reply(
             &self.desk_id.clone(),
@@ -788,27 +860,130 @@ impl Journal for DeskHost {
     }
 }
 
+/// What a seat is told about a conversation the driver has no word for.
+///
+/// A brief opens `## New desk messages`, because `Desk` is the driver's type
+/// for any shared conversation and a DM bound as a hive is one. That is right
+/// in its vocabulary and wrong in ours -- and the fix belongs here rather than
+/// there: `dm:` is this company's convention, and teaching the driver about it
+/// would put a host's naming inside a crate that has no hosts.
+///
+/// The persona is already the host's to write and already sits at the head of
+/// every seeded turn, so this is the sentence's natural home.
+///
+/// `None` for a desk, which needs no correction.
+fn dm_persona_note(desk_id: &str, seat: &str) -> Option<&'static str> {
+    let owner = desk_id.strip_prefix(crate::runtime::assignee::DM_PREFIX)?;
+    Some(if owner == seat {
+        // **The other half of `take_over`'s pairing.**
+        //
+        // A guest is told it may claim work; without this the seat that would
+        // *prompt* that claim is told nothing, and a live run showed what it
+        // does instead: asked to have work owned end to end, it broadcast
+        // "handed to creative_director" and told the operator so. Nobody had
+        // been asked, creative_director never ran, and the operator was told
+        // a transfer had happened that had not. `ask` is the only thing that
+        // wakes a teammate and lets it answer by taking the work, so the seat
+        // that wants a transfer has to know that is what asking is for.
+        "\n\n## This conversation\n\nThis is your own direct line with the operator, not a \
+         desk. What the brief calls desk messages are theirs. Answer them; the teammates \
+         listed as members are here to be asked, and none of them is waiting on you.\n\nIf \
+         the operator wants a teammate to *own* something rather than advise on it, `ask` \
+         that teammate whether they will take it. Asking is the only thing that reaches \
+         them: they may answer by claiming the work, and you will be told where the \
+         operator can reach them about it. Never tell the operator that someone has taken \
+         work on unless that teammate has said so themselves — saying it in a message \
+         hands over nothing."
+    } else {
+        "\n\n## This conversation\n\nYou are here because a teammate may need to ask you \
+         something in their direct line with the operator. You are not the operator's \
+         correspondent here and should not answer them; reply when you are asked, and \
+         otherwise end your turn."
+    })
+}
+
 impl EpisodeHost for DeskHost {
     fn build_seat(
         &self,
         seat: &str,
-        belt: EpisodeBelt,
-    ) -> tinyhivemind_openhuman::Result<OpenHumanSessionHost> {
-        let Some((record, deps)) = self.roster.as_ref() else {
+        belt: tinyhivemind_openhuman::EpisodeBeltSource,
+    ) -> tinyhivemind_openhuman::Result<openhuman_embed::Agent> {
+        let Some((record, _)) = self.roster.as_ref() else {
             return Err(tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!(
                 "hive episode: no roster to seat `{seat}` from"
             )));
         };
-        // The belt goes through whole, admission and all: this company's own
-        // gate is only knowable once the teammate is built, and it has to go
-        // *behind* the episode's admission rather than be replaced by it.
-        let (session, persona) =
-            build_episode_seat(record, deps, seat, belt).map_err(|error| refused(&error))?;
+        let held = self
+            .seated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(seat)
+            .cloned();
+        let Some(agent) = held else {
+            return Err(tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!(
+                "hive episode: `{seat}` is not on this company's pool"
+            )));
+        };
+        // **The teammate is seated, not rebuilt.**
+        //
+        // The episode lends its belt under the conversation the seat will run
+        // in, and the agent's own per-turn factory picks it up there. So the
+        // handle returned is the one the pool already holds -- the same
+        // teammate, with the room's tools on the turns it sits in the room,
+        // and without them everywhere else.
+        // **Only a guest is lent a takeover.**
+        //
+        // `take_over` announces in the seat's own line with the operator, and
+        // the teammate whose DM this is *is* that line -- it would be telling
+        // the operator, in the conversation they are already having, that it
+        // has the thing they just asked it for. A desk seat has no such line
+        // at all. `None` here is what withholds the tool: the belt factory
+        // offers it only when this is `Some`.
+        let takeover = crate::hive::takeover::is_guest_seat(&self.desk_id, seat).then(|| {
+            crate::hive::seating::TakeoverLoan {
+                events: Arc::clone(&self.events),
+                company: self.company.clone(),
+                agent: seat.to_owned(),
+            }
+        });
+        let guest = takeover.is_some();
+        agent.seating().lend(
+            self.seat_session(seat),
+            crate::hive::seating::SeatLoan {
+                source: belt,
+                takeover,
+                dm: self
+                    .desk_id
+                    .starts_with(crate::runtime::assignee::DM_PREFIX),
+            },
+        );
+        // The standing prompt still travels separately: a seeded turn renders
+        // no system prompt, so `persona` puts it back at the head of the seed.
+        let Some((_, deps)) = self.roster.as_ref() else {
+            unreachable!()
+        };
+        let mut persona = seat_persona(record, deps, seat).map_err(|error| refused(&error))?;
+        if let Some(note) = dm_persona_note(&self.desk_id, seat) {
+            persona.push_str(note);
+        }
+        // A verb it is handed but never told about is one a live run shows it
+        // will not reach for, so the note travels with the tool.
+        if guest {
+            persona.push_str(&crate::hive::takeover::guest_persona_note(TOOL_PREFIX));
+        }
         self.personas
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(seat.to_owned(), persona);
-        Ok(session)
+        Ok(agent.runtime_agent().clone())
+    }
+
+    /// One conversation per seat per episode.
+    ///
+    /// The episode id is in it because a seat's belt is lent under this key:
+    /// two episodes seating the same teammate must not read each other's.
+    fn seat_session(&self, seat: &str) -> String {
+        format!("episode:{}:{}", self.episode_id, seat)
     }
 
     fn persona(&self, seat: &str) -> Option<String> {
@@ -839,13 +1014,16 @@ impl EpisodeHost for DeskHost {
         // an approval it could not park are both worth a warning, not the
         // loss of work that already ran. So the block answers a disposition
         // rather than a result.
+        let settled = self
+            .take_seat_claims(seat)
+            .map(seat_park::SeatClaims::settle);
         let held = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 if let Some(usage) = usage {
                     self.meter(seat, usage).await;
                 }
-                match self.parking.as_ref() {
-                    Some(parking) => parking.park(seat).await,
+                match settled {
+                    Some(settled) => self.park_seat(seat, settled).await,
                     None => false,
                 }
             })
@@ -871,6 +1049,22 @@ impl EpisodeHost for DeskHost {
     /// A host with no pool runs unserialised and writes no brackets, which
     /// is what a test over the journal alone wants.
     fn wrap_turn<'a>(&'a self, seat: &'a str, turn: HostedTurn<'a>) -> HostedTurn<'a> {
+        Box::pin(async move {
+            let Some(queues) = self.seat_queues() else {
+                return self.locked_turn(seat, turn).await;
+            };
+            let mut claims = queues.claim(&self.episode_id, seat);
+            let outcome = claims.run(self.locked_turn(seat, turn)).await;
+            self.keep_seat_claims(seat, claims);
+            outcome
+        })
+    }
+}
+
+impl DeskHost {
+    /// The turn under the teammate's lock, bracketed on the journal. A host
+    /// with no pool runs it unserialised and unbracketed.
+    fn locked_turn<'a>(&'a self, seat: &'a str, turn: HostedTurn<'a>) -> HostedTurn<'a> {
         Box::pin(async move {
             let Some(pool) = self.pool.as_ref() else {
                 return turn.await;
@@ -1019,6 +1213,8 @@ impl Bracket<'_> {
         }
     }
 }
+
+mod seat_park;
 
 #[cfg(test)]
 #[path = "host_tests.rs"]

@@ -1,7 +1,4 @@
 use super::*;
-use oh::agent::prompts::GROUNDING_HEADING;
-
-const STYLE_HEADING: &str = "# Writing style";
 
 fn blueprint(dir: &std::path::Path, is_orchestrator: bool) -> AgentBlueprint {
     let deps = pin_deps(dir.to_path_buf());
@@ -30,7 +27,7 @@ fn blueprint(dir: &std::path::Path, is_orchestrator: bool) -> AgentBlueprint {
         &CompanyId::new("acme"),
         "Acme",
         &manifest_agent,
-        ApprovalPolicy::new(&Policy::default(), None),
+        Arc::new(ApprovalPolicy::new(&Policy::default(), None)),
         &deps,
         &[],
         &[],
@@ -42,56 +39,16 @@ fn blueprint(dir: &std::path::Path, is_orchestrator: bool) -> AgentBlueprint {
 }
 
 #[test]
-fn a_seat_persona_carries_grounding_and_the_writing_style() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let agent = blueprint(dir.path(), false);
-    assert!(
-        !agent.system_prompt.contains(STYLE_HEADING),
-        "the body alone is what a seeded turn used to carry"
-    );
-
-    let persona = rendered_seat_persona(&agent).expect("renders");
-    assert!(
-        persona.starts_with(agent.system_prompt.trim_end()),
-        "{persona}"
-    );
-    assert_eq!(persona.matches(STYLE_HEADING).count(), 1, "{persona}");
-    assert_eq!(persona.matches(GROUNDING_HEADING).count(), 1, "{persona}");
-    assert!(
-        persona.find(GROUNDING_HEADING) < persona.find(STYLE_HEADING),
-        "grounding closes the stable tier ahead of the style rules: {persona}"
-    );
-}
-
-#[test]
-fn the_seat_persona_is_the_cold_turns_prompt() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let agent = blueprint(dir.path(), true);
-    let persona = rendered_seat_persona(&agent).expect("renders");
-    assert_eq!(
-        persona,
-        rendered_seat_persona(&agent).expect("renders again"),
-        "stable across renders, so a seed and a cold turn agree"
-    );
-    assert!(
-        agent.workspace.join("STYLE.md").exists(),
-        "the style block is read from the seat's own workspace, as a cold turn reads it"
-    );
-}
-
-#[test]
 fn the_reader_brief_reaches_pooled_and_seated_prompts_exactly_once() {
     for is_orchestrator in [false, true] {
         let dir = tempfile::tempdir().expect("tempdir");
         let agent = blueprint(dir.path(), is_orchestrator);
-        let seat = rendered_seat_persona(&agent).expect("renders");
-        for (surface, prompt) in [("pooled", &agent.system_prompt), ("seat", &seat)] {
-            assert_eq!(
-                prompt.matches(READER_BRIEF).count(),
-                1,
-                "{surface} prompt (orchestrator: {is_orchestrator}): {prompt}"
-            );
-        }
+        assert_eq!(
+            agent.system_prompt.matches(READER_BRIEF).count(),
+            1,
+            "orchestrator: {is_orchestrator}: {}",
+            agent.system_prompt
+        );
     }
 }
 

@@ -388,6 +388,21 @@ pub struct ApprovalSummary {
     /// step-specific claim can be made, so the generic wording applies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocker_step_kind: Option<String>,
+    /// The hive episode seat waiting on this approval, when a seat raised it.
+    ///
+    /// Read off the turn key the seat parked under, so a console can draw the
+    /// card inside that episode and say whose turn is held.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode: Option<ApprovalEpisode>,
+}
+
+/// The hive episode seat an approval belongs to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovalEpisode {
+    /// The episode.
+    pub id: String,
+    /// The seat whose turn waits on the decision.
+    pub seat: String,
 }
 
 #[cfg(test)]

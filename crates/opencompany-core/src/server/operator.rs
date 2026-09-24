@@ -2226,6 +2226,34 @@ fn project_event_for_viewer(
             }
             o
         }
+        CompanyEvent::EpisodeSeatParked {
+            chat_id,
+            episode_id,
+            seat,
+            thread,
+            approval_ids,
+        } => {
+            let mut o = envelope("episode_seat_parked");
+            o["chatId"] = json!(chat_id);
+            o["episodeId"] = json!(episode_id);
+            o["seat"] = json!(seat);
+            if let Some(thread) = thread {
+                o["thread"] = json!(thread);
+            }
+            o["approvalIds"] = json!(approval_ids);
+            o
+        }
+        CompanyEvent::EpisodeSeatResumed {
+            chat_id,
+            episode_id,
+            seat,
+        } => {
+            let mut o = envelope("episode_seat_resumed");
+            o["chatId"] = json!(chat_id);
+            o["episodeId"] = json!(episode_id);
+            o["seat"] = json!(seat);
+            o
+        }
         // Issue #276: a workflow armed or paused, so a console holding the
         // Workflows tab open re-renders the toggle instead of showing a stale
         // one — and so an operator watching the stream sees the disarm rule fire

@@ -612,6 +612,28 @@ export type CompanyStreamEvent =
       summarySeq?: number;
     }
   | {
+      /** A seat parked on an approval: it asked the operator, or made a gated
+       *  call, and the episode waits for the decision. */
+      type: "episode_seat_parked";
+      seq: number;
+      atMillis: number;
+      chatId: string;
+      episodeId: string;
+      seat: string;
+      /** The conversation root the seat was in; absent on the desk itself. */
+      thread?: number;
+      approvalIds: string[];
+    }
+  | {
+      /** The parked seat was released and its turn goes on. */
+      type: "episode_seat_resumed";
+      seq: number;
+      atMillis: number;
+      chatId: string;
+      episodeId: string;
+      seat: string;
+    }
+  | {
       type:
         | "workflow_created"
         | "workflow_updated"
@@ -812,6 +834,8 @@ export type EpisodeFrame = Extract<
       | "conversation_opened"
       | "conversation_concluded"
       | "episode_completed"
+      | "episode_seat_parked"
+      | "episode_seat_resumed"
       // Not an episode frame as such -- it is the transcript's own row, and
       // the fold ignores every one on a desk. It is here for the pair
       // channels: an a2a exchange is written there, the desk never shows it,
@@ -1647,6 +1671,8 @@ export function handleEvent(
     case "conversation_opened":
     case "conversation_concluded":
     case "episode_completed":
+    case "episode_seat_parked":
+    case "episode_seat_resumed":
       onEpisodeEvent?.(event);
       break;
     // The chat turn bracket (issue #983). Silent, and routed to its own
