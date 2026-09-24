@@ -115,6 +115,17 @@ test("a two-seat desk answers as a room: two lanes at once, a dm, and a completi
   const dmChip = ofEpisode.locator('[data-testid="utterance-chip"][data-kind="dm"]');
   await expect(dmChip.first()).toBeVisible();
   await expect(dmChip.first().getByTestId("utterance-audience")).toHaveText("Chief Executive");
+  // The lead and the recipient are separate DOM nodes; a full-text check
+  // guards against the two rendering with no space between them.
+  await expect(dmChip.first()).toContainText("Sent to Chief Executive");
+
+  // The chip's tooltip titles the round it belongs to, by revision, never by
+  // episode id — `data-round-revision` is the same number the title derives.
+  const dmRevision = await dmChip.first().getAttribute("data-round-revision");
+  await expect(dmChip.first().locator("[title]").first()).toHaveAttribute(
+    "title",
+    `Round ${Number(dmRevision) + 1}`,
+  );
 
   // And the closing chip on the row that ended it.
   await expect(
