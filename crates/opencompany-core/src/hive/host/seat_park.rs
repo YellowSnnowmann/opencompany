@@ -6,9 +6,8 @@
 //! the explicit-request guard, a publish claim and an output claim. `after_turn`
 //! drains the approval bucket and parks it through the runtime's shared
 //! [`ApprovalParker`], under that same turn key, so the resolve path can find
-//! its way back to this episode. Publishing from a seat is refused in-turn:
-//! nothing files an episode's publishes yet, and a seat told its file was filed
-//! would repeat that to the operator.
+//! its way back to this episode. What the turn published and produced is
+//! filed when the turn ends (`delivery`).
 
 use std::sync::PoisonError;
 
@@ -19,7 +18,9 @@ use crate::harness::built_in::policy::{
     ApprovalClaim, ApprovalRequest, ApprovalRequestQueue, ApprovalScope, DrainedRequests,
     MAX_APPROVAL_REQUESTS_PER_TURN,
 };
-use crate::harness::built_in::publish::{PendingPublishQueue, PublishClaim, PublishDestination};
+use crate::harness::built_in::publish::{
+    PendingPublish, PendingPublishQueue, PublishClaim, PublishDestination,
+};
 use crate::harness::built_in::turn_outputs::TurnOutputClaim;
 use crate::ports::types::{ApprovalId, ChatOutput, CompanyEvent, CompanyId, EventSeq, StoredEvent};
 use crate::runtime::approval_park::{ApprovalParker, ParkSite};
@@ -34,16 +35,22 @@ pub(crate) struct SeatQueues {
 }
 
 impl SeatQueues {
-    /// Opens one seat turn's claims.
-    pub(crate) fn claim(&self, episode_id: &str, seat: &str) -> SeatClaims {
+    /// Opens one seat turn's claims, its publishes headed for `destination`.
+    pub(crate) fn claim(
+        &self,
+        episode_id: &str,
+        seat: &str,
+        destination: PublishDestination,
+    ) -> SeatClaims {
         SeatClaims {
             approvals: self
                 .approvals
                 .claim(ApprovalScope::Seat(turn_key(episode_id, seat))),
             queue: self.approvals.clone(),
-            publish: self.publishes.claim(PublishDestination::Unclaimed),
+            publish: self.publishes.claim(destination),
             outputs: self.publishes.output_collector().claim(),
-            collected: Vec::new(),
+            unfiled: 0,
+            task_id: None,
         }
     }
 }
@@ -54,14 +61,30 @@ pub(crate) struct SeatClaims {
     queue: ApprovalRequestQueue,
     publish: PublishClaim,
     outputs: TurnOutputClaim,
-    collected: Vec<ChatOutput>,
+    unfiled: usize,
+    task_id: Option<String>,
 }
 
 /// What a seat turn left behind once its claims are released.
 pub(crate) struct SettledTurn {
     requests: DrainedRequests,
-    publishes: usize,
-    outputs: usize,
+    unfiled: usize,
+    delivery: Delivery,
+}
+
+/// What a seat turn hands over: the outputs it produced, and the card its
+/// published files were filed on.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Delivery {
+    pub(crate) outputs: Vec<ChatOutput>,
+    pub(crate) task_id: Option<String>,
+}
+
+impl Delivery {
+    /// Whether there is nothing to hand over.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.outputs.is_empty() && self.task_id.is_none()
+    }
 }
 
 impl SeatClaims {
@@ -70,23 +93,51 @@ impl SeatClaims {
     where
         F: std::future::Future<Output = T> + Send,
     {
-        let outcome = Box::pin(
+        Box::pin(
             self.approvals.scoped(
                 self.queue
                     .turn_scoped(self.publish.scoped(self.outputs.scoped(turn))),
             ),
         )
-        .await;
-        self.collected = self.outputs.drain();
-        outcome
+        .await
+    }
+
+    /// Takes what the turn published, when its claim had somewhere to file it.
+    pub(crate) fn published(&self) -> Vec<PendingPublish> {
+        if self.publish.is_claimed() {
+            self.publish.drain()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Runs `fut` so the outputs it records belong to this turn.
+    pub(crate) async fn collecting<F, T>(&self, fut: F) -> T
+    where
+        F: std::future::Future<Output = T>,
+    {
+        self.outputs.scoped(fut).await
+    }
+
+    /// Records that the turn's files were filed on `card`.
+    pub(crate) fn filed_on(&mut self, card: String) {
+        self.task_id = Some(card);
+    }
+
+    /// Records `count` published files that could not be filed.
+    pub(crate) fn not_filed(&mut self, count: usize) {
+        self.unfiled += count;
     }
 
     /// Drains the claims and releases them.
     pub(crate) fn settle(self) -> SettledTurn {
         SettledTurn {
             requests: self.approvals.drain(MAX_APPROVAL_REQUESTS_PER_TURN),
-            publishes: self.publish.drain().len(),
-            outputs: self.collected.len(),
+            unfiled: self.unfiled + self.publish.drain().len(),
+            delivery: Delivery {
+                outputs: self.outputs.drain(),
+                task_id: self.task_id,
+            },
         }
     }
 }
@@ -267,24 +318,16 @@ impl DeskHost {
     pub(super) async fn park_seat(&self, seat: &str, settled: SettledTurn) -> bool {
         let SettledTurn {
             requests,
-            publishes,
-            outputs,
+            unfiled,
+            delivery,
         } = settled;
+        self.hold_delivery(seat, delivery);
         let mut problems = Vec::new();
-        if publishes > 0 {
+        if unfiled > 0 {
             problems.push(format!(
-                "{publishes} file(s) you published in this room were not filed anywhere. Tell \
+                "{unfiled} file(s) you published in this room were not filed anywhere. Tell \
                  the operator plainly that they were not delivered."
             ));
-        }
-        if outputs > 0 {
-            tracing::debug!(
-                company = %self.company,
-                episode = %self.episode_id,
-                %seat,
-                outputs,
-                "[hive] a seat turn's outputs are not attached to any row"
-            );
         }
         if let Some(notice) = requests.overflow_notice() {
             problems.push(notice);
