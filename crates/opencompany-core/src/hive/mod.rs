@@ -23,8 +23,9 @@ pub mod conducted;
 /// the episode it opens on a desk with a room (Phase 5).
 #[cfg(feature = "openhuman")]
 pub mod dispatch;
-/// What an episode lends a teammate for the turns it runs as a seat.
-#[cfg(test)]
+/// An operator DM driven end to end: the hive, the surface, the dispatcher,
+/// the seats. Needs the harness it drives, so it is gated with it.
+#[cfg(all(test, feature = "openhuman"))]
 #[path = "dm_episode_tests.rs"]
 mod dm_episode_tests;
 /// The journal as the episode store: the `GET {scope}/episodes` fold, the
@@ -56,6 +57,7 @@ pub mod referral;
 /// The `[group_chat.routing]` block, its resolved `RoutingPolicy`, and the
 /// desk-routing wire shapes (plan Phase 4).
 pub mod routing;
+#[cfg(feature = "openhuman")]
 pub mod seating;
 pub mod session_log;
 /// The in-flight turn registry, the speech fold and the tool adapter the
@@ -68,4 +70,5 @@ pub mod shared_tool;
 pub mod takeover;
 #[cfg(test)]
 pub(crate) mod test_support;
+#[cfg(feature = "openhuman")]
 pub mod tools;
