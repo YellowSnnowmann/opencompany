@@ -81,6 +81,9 @@ describe("UtteranceChip", () => {
   it("addresses a dm to its recipients by display name", () => {
     const chip = render({ id: "ep-1", revision: 1, kind: "dm", to: ["engineer"] });
     expect(chip.textContent).toContain("Sent to");
+    // The lead and the recipient are separate nodes; textContent must not
+    // concatenate them into "Sent toEngineer".
+    expect(chip.textContent).toContain("Sent to Engineer");
     expect(chip.querySelector('[data-testid="utterance-audience"]')?.textContent).toBe("Engineer");
   });
 

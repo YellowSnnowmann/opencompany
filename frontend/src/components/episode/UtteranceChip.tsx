@@ -86,9 +86,12 @@ export function UtteranceChip({ episode, audience, agentNames, className }: Prop
         <Icon className="size-3 shrink-0" aria-hidden />
         {utteranceLead(episode.kind, Boolean(to?.length))}
         {to?.length ? (
-          <span className="font-normal" data-testid="utterance-audience">
-            {recipientNames(to, agentNames).join(", ")}
-          </span>
+          <>
+            {" "}
+            <span className="font-normal" data-testid="utterance-audience">
+              {recipientNames(to, agentNames).join(", ")}
+            </span>
+          </>
         ) : null}
       </span>
       {episode.routedBy && (
