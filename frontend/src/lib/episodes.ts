@@ -176,6 +176,8 @@ export interface Episode {
   conversations: ConversationRecord[];
   /** Whether any part of it came from live frames rather than rows alone. */
   live: boolean;
+  /** Seats the frames say are parked on the operator. Only the frames carry these. */
+  waiting?: { agentId: string; approvalIds: string[] }[];
 }
 
 interface Bucket {
@@ -310,6 +312,10 @@ function layerFrames(bucket: Bucket, state: EpisodeState): void {
   episode.conversations = Object.values(state.conversations).sort(
     (one, two) => one.root - two.root,
   );
+  episode.waiting = Object.values(state.parked).map(({ agentId, approvalIds }) => ({
+    agentId,
+    approvalIds,
+  }));
   if (state.status === "completed") {
     episode.status = "completed";
     episode.completedAt = state.completedAtMillis ?? episode.completedAt;

@@ -58,6 +58,26 @@ pub fn speech_tool_names() -> Vec<&'static str> {
     speech::tool_specs().iter().map(|spec| spec.name).collect()
 }
 
+/// The speech tools a room actually offers a seat.
+///
+/// Narrower than [`speech_tool_names`], which is the whole vocabulary. `post`
+/// and `dm` are defined and deliberately withheld: `post` is text with no
+/// consequence, and five live runs spent it on status, on restating findings
+/// the seat completed with anyway, and on describing calls it had not made;
+/// `dm` beside `ask` is two ways to say nearly the same thing.
+///
+/// Use this wherever this crate **advertises** the vocabulary -- the MCP
+/// brief's `Tools:` line, the definition's tool scope -- so a seat is never
+/// told about a tool the room will refuse. Classification stays on the wider
+/// list: a call to a withheld name is still a speech call, and still the
+/// room's to refuse rather than the company's to mistake for one of its own.
+#[must_use]
+pub fn served_speech_tool_names() -> Vec<&'static str> {
+    tinyhivemind_tools::served_specs()
+        .map(|spec| spec.name)
+        .collect()
+}
+
 /// Whether `name` is one of the room's speech tools.
 #[must_use]
 pub fn is_speech_tool(name: &str) -> bool {
@@ -538,13 +558,18 @@ pub fn share_belt(belt: Vec<Box<dyn Tool>>) -> Vec<Arc<dyn Tool>> {
     belt.into_iter().map(Arc::from).collect()
 }
 
-/// How a model reaches `tool` on a company agent: by its bare name when
-/// OpenHuman runs it natively, else as `mcp_call_tool` on the `opencompany`
-/// server with `args` as the arguments object — the shape the scripted
+/// How a model reaches `tool` on a company agent — the shape the scripted
 /// models in this crate's turn tests emit, and the console's mock brain.
+///
+/// **Almost everything is a bare name now.** This crate's own tools ride the
+/// agent's belt directly (`AgentSpec::tools`), so a model calls them the way
+/// it calls a shell: by name, against their own schema. Only the speech tools
+/// are still served over the `opencompany` server, because only a seat in an
+/// episode answers with one, and they go on the wire wrapped in
+/// `mcp_call_tool` with `args` as the arguments object.
 #[must_use]
 pub fn via_opencompany_mcp(tool: &str, args: Value) -> (String, Value) {
-    if crate::harness::build::OPENHUMAN_NATIVE_TOOLS.contains(&tool) {
+    if !speech_tool_names().contains(&tool) {
         return (tool.to_string(), args);
     }
     (

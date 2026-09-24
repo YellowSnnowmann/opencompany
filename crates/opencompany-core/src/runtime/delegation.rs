@@ -3894,41 +3894,6 @@ tokio::task_local! {
 }
 
 tokio::task_local! {
-    /// What the current turn is trying to do, in the requester's own words
-    /// (issue #6014).
-    ///
-    /// Read by [`PayloadExtractor`](crate::harness::payload_extract) when a tool
-    /// returns more than the per-result budget: knowing the task is what lets it
-    /// keep the records that answer the question and shorten the ones that do
-    /// not. Without it the extractor declines outright rather than guessing,
-    /// because a task-blind extraction is a byte cut with a model call attached
-    /// — it would drop the one issue that mattered exactly as readily as the
-    /// twenty-nine that did not.
-    ///
-    /// Set to [`operator_words`], not the composed turn text: by the time a turn
-    /// runs, `message` carries the cycle's machine briefings (open work, the
-    /// settled digest, the thread index, attachment markers), and an extractor
-    /// told the task is "here is a list of finished cards" would keep the wrong
-    /// half of the payload. The same cut the triage and the budget-pause re-park
-    /// already take, for the same reason.
-    ///
-    /// Absent on any path that has not been taught to set it, which the
-    /// extractor treats as "no hint" and declines — no worse than before it
-    /// existed.
-    pub(crate) static TURN_TASK_HINT: String;
-}
-
-/// The current turn's task, when one is in scope.
-pub(crate) fn current_task_hint() -> Option<String> {
-    TURN_TASK_HINT.try_with(|hint| hint.clone()).ok()
-}
-
-/// Runs `fut` with `task` readable as the turn's task hint.
-pub(crate) async fn with_task_hint<F: std::future::Future>(task: String, fut: F) -> F::Output {
-    TURN_TASK_HINT.scope(task, fut).await
-}
-
-tokio::task_local! {
     /// The hive seat the current turn runs as, when it is one (plan
     /// hive-desks, Phase 4).
     ///
@@ -4047,7 +4012,3 @@ mod tests_part8;
 #[cfg(test)]
 #[path = "delegation_tests_part9.rs"]
 mod tests_part9;
-
-#[cfg(test)]
-#[path = "delegation_task_hint_tests.rs"]
-mod task_hint_tests;

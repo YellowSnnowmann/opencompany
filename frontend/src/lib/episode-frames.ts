@@ -133,6 +133,15 @@ export interface EpisodeReferral {
   atMillis: number;
 }
 
+/** A seat waiting on an operator decision. */
+export interface ParkedSeat {
+  agentId: string;
+  approvalIds: string[];
+  /** The conversation root the seat was in; absent on the desk. */
+  thread?: number;
+  atMillis: number;
+}
+
 /** Everything the frames have said about one episode. */
 export interface EpisodeState {
   id: string;
@@ -166,6 +175,8 @@ export interface EpisodeState {
    */
   pending: Record<number, { chatId: string; authorId: string; text: string; parentId?: number }>;
   referrals: EpisodeReferral[];
+  /** Seats parked on the operator, by agent id, until they resume or the episode ends. */
+  parked: Record<string, ParkedSeat>;
   /** The newest frame sequence folded, for eviction order and tests. */
   lastSeq: number;
 }
@@ -212,6 +223,7 @@ function mintEpisode(id: string, chatId: string, seq: number): EpisodeState {
     conversations: {},
     pending: {},
     referrals: [],
+    parked: {},
     lastSeq: seq,
   };
 }
@@ -481,6 +493,7 @@ export function reduceEpisodeFrame(
         reason: frame.reason,
         roundCount: frame.rounds,
         summarySeq: frame.summarySeq,
+        parked: {},
         // **Settle whatever was still open.** The wave a seat completes the
         // episode from never gets a `round_committed` of its own — the
         // episode ends under it — so without this its seats stay `working`
@@ -513,6 +526,33 @@ export function reduceEpisodeFrame(
         ),
       };
       break;
+    case "episode_seat_parked":
+      if (episode.status === "completed") return state;
+      episode = {
+        ...episode,
+        parked: {
+          ...episode.parked,
+          [frame.seat]: {
+            agentId: frame.seat,
+            approvalIds: [
+              ...(episode.parked[frame.seat]?.approvalIds ?? []).filter(
+                (id) => !frame.approvalIds.includes(id),
+              ),
+              ...frame.approvalIds,
+            ],
+            thread: frame.thread,
+            atMillis: frame.atMillis,
+          },
+        },
+      };
+      break;
+    case "episode_seat_resumed": {
+      if (!episode.parked[frame.seat]) return state;
+      const parked = { ...episode.parked };
+      delete parked[frame.seat];
+      episode = { ...episode, parked };
+      break;
+    }
     case "referral":
       episode = {
         ...episode,

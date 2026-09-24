@@ -648,6 +648,22 @@ pub(crate) fn wire_event(seq: u64, event: &CompanyEvent) -> WireEvent {
             ),
             "episode.conversation.concluded",
         ),
+        CompanyEvent::EpisodeSeatParked {
+            episode_id, seat, ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            format!("Episode {episode_id}: @{seat} is waiting on the operator"),
+            "episode.seat.parked",
+        ),
+        CompanyEvent::EpisodeSeatResumed {
+            episode_id, seat, ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            format!("Episode {episode_id}: @{seat} resumed"),
+            "episode.seat.resumed",
+        ),
         CompanyEvent::EpisodeCompleted {
             episode_id,
             reason,

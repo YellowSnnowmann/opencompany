@@ -31,11 +31,8 @@
 //! ([`InFlightRegistry`]) names the episode, round and conversation. A speech
 //! call folds into that turn's outbox; an OpenCompany tool call is decided by
 //! the agent's [`ApprovalPolicy`] — allow, deny, or park — and runs under an
-//! [`InFlightContext`]. A parked call pushes onto the same
-//! `ApprovalRequestQueue` the previous in-process dispatcher fed, so the chat
-//! cycle's `park_approval_requests` still journals `ApprovalParked` and the
-//! grant re-issue on `ApprovalResolved` still re-dispatches the message; the
-//! seat is told "awaiting approval" and stops.
+//! [`InFlightContext`]. A call parks only on a task that holds an approval
+//! claim; without one the policy refuses it and says nobody was asked.
 
 use std::collections::HashMap;
 use std::fmt;
