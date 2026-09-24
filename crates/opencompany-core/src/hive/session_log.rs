@@ -227,8 +227,37 @@ impl EventLogSessionLog {
             chat.eq_ignore_ascii_case(&self.desk_id)
                 || chat.eq_ignore_ascii_case(&self.desk_name)
                 || self.addresses_a_seat_pair(chat)
+                || self.owned_dm_seat(chat).is_some()
                 || self.addresses_elsewhere(chat)
         })
+    }
+
+    /// The seat whose **own** operator line `chat` is, when that seat sits
+    /// here.
+    ///
+    /// # Ownership, never membership
+    ///
+    /// A teammate's private line with the operator is that teammate's own
+    /// memory: told something there, it should not be amnesiac about it the
+    /// moment it sits down at a desk. So the line is admitted -- as an aside
+    /// to its owner, which is what keeps it out of everyone else's transcript
+    /// (see `audience_of`).
+    ///
+    /// Keyed on the `dm:` owner and nothing else. A DM is *bound* as a hive
+    /// of the whole roster, because `resolve_dm` refuses a recipient that is
+    /// not a member and `ask` would otherwise have no legal target -- so
+    /// every teammate is a member of every DM, and a membership rule of the
+    /// kind [`addresses_elsewhere`](Self::addresses_elsewhere) uses would
+    /// admit every operator DM to every desk. Ownership is the only reading
+    /// that admits one line to one seat.
+    fn owned_dm_seat(&self, chat: &str) -> Option<&str> {
+        let owner = chat
+            .strip_prefix(crate::runtime::assignee::DM_PREFIX)?
+            .trim();
+        self.seats
+            .iter()
+            .find(|seat| seat.eq_ignore_ascii_case(owner))
+            .map(String::as_str)
     }
 
     /// The id a row is reported under: its own when it came from a desk this
@@ -284,7 +313,15 @@ impl EventLogSessionLog {
                     parent: None,
                     author: SessionAuthor::Operator,
                     content: text,
-                    audience: Audience::Desk,
+                    // Desk-visible, unless it was said in a seat's own
+                    // operator line — the operator's half of that line is as
+                    // private as the seat's half, and this arm never reached
+                    // `audience_of`, so it was the half that leaked.
+                    audience: self.audience_of(
+                        chat.as_deref().unwrap_or(&self.desk_id),
+                        crate::ports::SYSTEM_AUTHOR,
+                        Vec::new(),
+                    ),
                 })
             }
             CompanyEvent::AgentReply {
@@ -358,6 +395,17 @@ impl EventLogSessionLog {
                     members.push(seat.to_owned());
                 }
             }
+        }
+        // A seat's own operator line is an aside to that seat, whether or not
+        // the row said so. Derived from the channel for the same reason the
+        // pair channel above is: the rows carry no audience of their own --
+        // they are an ordinary operator message and an ordinary reply -- and
+        // reported desk-visible they would be one promotion away from every
+        // other seat's transcript.
+        if let Some(owner) = self.owned_dm_seat(chat)
+            && !members.iter().any(|member| member == owner)
+        {
+            members.push(owner.to_owned());
         }
         if members.is_empty() {
             Audience::Desk
