@@ -239,19 +239,36 @@ pub(crate) fn project(text: &str, names: &DisplayNames, protected: &[Range<usize
         stripped = true;
     }
     let prefix_edits = edits.len();
-    let mut in_fence = false;
+    // The fence character and opener length while inside a fenced block, so a
+    // closing fence has to match CommonMark rules: same character as the
+    // opener, at least as long, with nothing but whitespace after it. A
+    // shorter or differently-charactered line (e.g. a nested ``` inside a
+    // ```` block) then stays inside the fence instead of closing it early.
+    let mut open_fence: Option<(u8, usize)> = None;
     for line in text[pos..].split_inclusive('\n') {
-        let fence = {
-            let trimmed = line.trim_start();
-            trimmed.starts_with("```") || trimmed.starts_with("~~~")
+        let trimmed = line.trim_start();
+        let marker = trimmed
+            .bytes()
+            .next()
+            .filter(|byte| *byte == b'`' || *byte == b'~');
+        let run = marker.map_or(0, |byte| trimmed.bytes().take_while(|b| *b == byte).count());
+        let fence = match (open_fence, marker) {
+            (None, Some(byte)) if run >= 3 => {
+                open_fence = Some((byte, run));
+                true
+            }
+            (Some((byte, len)), Some(closing))
+                if closing == byte && run >= len && trimmed[run..].trim().is_empty() =>
+            {
+                open_fence = None;
+                true
+            }
+            _ => false,
         };
-        if fence || in_fence || names.by_id.is_empty() {
+        if fence || open_fence.is_some() || names.by_id.is_empty() {
             out.push_str(line);
         } else {
             rewrite_line(line, pos, names, protected, &mut out, &mut edits);
-        }
-        if fence {
-            in_fence = !in_fence;
         }
         pos += line.len();
     }

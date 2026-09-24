@@ -106,6 +106,20 @@ fn fenced_code_is_untouched() {
 }
 
 #[test]
+fn a_shorter_or_mismatched_fence_does_not_close_the_block() {
+    let text = "````\nagent: qa_engineer\n```\nstill inside\n````\nqa_engineer is on it.";
+    assert_eq!(
+        shown(text),
+        "````\nagent: qa_engineer\n```\nstill inside\n````\nQuinn is on it."
+    );
+    let text = "```\nagent: qa_engineer\n~~~\nstill inside\n```\nqa_engineer is on it.";
+    assert_eq!(
+        shown(text),
+        "```\nagent: qa_engineer\n~~~\nstill inside\n```\nQuinn is on it."
+    );
+}
+
+#[test]
 fn projecting_twice_changes_nothing() {
     for text in [
         "[conversation: a]\n[conversation: b]\n@qa_engineer and `eng_desk`, backend-dev.",
