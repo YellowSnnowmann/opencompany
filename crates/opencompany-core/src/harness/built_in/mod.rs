@@ -1232,13 +1232,6 @@ impl CompanyAgent {
         )?;
         let mcp = crate::hive::mcp_server::global();
         let mcp_bearer = crate::hive::mcp_server::McpAgent::mint_bearer();
-        // The served catalogue: the belt minus what OpenHuman runs itself.
-        let served_names: Vec<String> = blueprint
-            .tools
-            .iter()
-            .map(|tool| tool.name().to_string())
-            .filter(|name| !build::OPENHUMAN_NATIVE_TOOLS.contains(&name.as_str()))
-            .collect();
         // The speech tools stay on the MCP server; this crate's own tools do
         // not, so they leave the served catalogue with them.
         let allow_tools: Vec<String> = crate::hive::tools::speech_tool_names()
@@ -1256,6 +1249,7 @@ impl CompanyAgent {
             .iter()
             .map(|tool| tool.name().to_string())
             .collect();
+        let gate = Arc::clone(&blueprint.policy);
         let native_belt: Arc<Vec<Arc<dyn tinytools::Tool>>> =
             Arc::new(crate::hive::tools::share_belt(
                 std::mem::take(&mut blueprint.tools)
@@ -1280,6 +1274,7 @@ impl CompanyAgent {
                 bridge.provider(),
                 attach.as_ref(),
                 Some(&native_belt),
+                Some(&gate),
             );
             match runtime.agent(spec) {
                 Ok(agent) => break agent,
@@ -1308,7 +1303,6 @@ impl CompanyAgent {
             );
         }
         let build::AgentBlueprint {
-            policy,
             workspace,
             chat_model,
             ..
@@ -1322,7 +1316,7 @@ impl CompanyAgent {
             runtime_id.clone(),
             mcp_bearer.clone(),
         )
-        .policy(Arc::new(policy))
+        .policy(Arc::clone(&gate))
         .workspace(workspace.clone());
         if let Some(events) = events {
             entry = entry.events(events);
@@ -5807,7 +5801,7 @@ pub(crate) fn build_episode_seat(
         &company.id,
         &company.manifest.company.name,
         manifest_agent,
-        policy,
+        Arc::new(policy),
         deps,
         &grants,
         // An episode seat carries no skill deltas and no routed context: it
@@ -6012,7 +6006,7 @@ pub(crate) fn build_roster(
             &company.id,
             company_name,
             manifest_agent,
-            agent_policy,
+            Arc::new(agent_policy),
             deps,
             &grants,
             skill_deltas,
@@ -6101,7 +6095,7 @@ pub(crate) fn build_roster(
             &company.id,
             company_name,
             &manifest_agent,
-            agent_policy,
+            Arc::new(agent_policy),
             deps,
             &grants,
             skill_deltas,

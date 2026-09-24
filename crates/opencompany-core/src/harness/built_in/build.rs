@@ -316,7 +316,7 @@ pub fn build_agent_with_model(
     company: &CompanyId,
     company_name: &str,
     manifest_agent: &ManifestAgent,
-    policy: ApprovalPolicy,
+    policy: Arc<ApprovalPolicy>,
     deps: &HarnessDeps,
     grants: &[String],
     skill_deltas: &[SkillState],
@@ -1354,7 +1354,11 @@ pub struct AgentBlueprint {
     /// The agent's own workspace directory (file tools sandbox / turn cwd).
     pub workspace: PathBuf,
     /// The approval policy the (Phase 3) tool handler decides under.
-    pub policy: ApprovalPolicy,
+    /// Shared, because both consumers need their own handle: the MCP server
+    /// admits speech calls against it, and it rides the native belt as that
+    /// belt's gate (`agent_spec_for`). A `Box` here would force one of them
+    /// to go without.
+    pub policy: Arc<ApprovalPolicy>,
     /// The definition name the agent runs under — its manifest id, or
     /// `integrations_agent` when Composio toolkits are wired.
     pub definition_name: String,
@@ -1505,6 +1509,7 @@ pub fn agent_spec_for(
     provider: openhuman_embed::Provider,
     mcp: Option<&McpAttach>,
     belt: Option<&Arc<Vec<Arc<dyn Tool>>>>,
+    gate: Option<&Arc<crate::harness::policy::ApprovalPolicy>>,
 ) -> AgentSpec {
     // **This crate's own tools are native.**
     //
@@ -1562,8 +1567,25 @@ pub fn agent_spec_for(
         .access(Access::full());
     if let Some(belt) = belt {
         let belt = Arc::clone(belt);
+        // **The gate travels with the belt.**
+        //
+        // While these tools were served over MCP, every call went through
+        // `McpAgent::serve_call`, which checked the company's `ApprovalPolicy`
+        // before dispatching. A native tool runs inside OpenHuman's own loop
+        // and never reaches that handler, so a belt handed over without its
+        // gate is a belt with no approval on it at all — the manifest
+        // `[policy]`, the per-agent budget and the HITL parks all silently
+        // stop applying.
+        let gate = gate.map(Arc::clone);
         spec = spec.tools(move || {
-            openhuman_embed::HostTurnTools::advertised(crate::hive::shared_tool::owned_belt(&belt))
+            let belt = openhuman_embed::HostTurnTools::advertised(
+                crate::hive::shared_tool::owned_belt(&belt),
+            );
+            match &gate {
+                Some(gate) => belt
+                    .with_policy(Arc::clone(gate) as Arc<dyn oh::agent::tool_policy::ToolPolicy>),
+                None => belt,
+            }
         });
     }
     if let Some(mcp) = mcp {
@@ -1697,7 +1719,7 @@ pub fn build_agent(
     company: &CompanyId,
     company_name: &str,
     manifest_agent: &ManifestAgent,
-    policy: ApprovalPolicy,
+    policy: Arc<ApprovalPolicy>,
     deps: &HarnessDeps,
     grants: &[String],
     skill_deltas: &[SkillState],
