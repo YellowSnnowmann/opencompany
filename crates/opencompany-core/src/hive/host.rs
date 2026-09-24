@@ -43,7 +43,7 @@ use super::session_log::EventLogSessionLog;
 /// so the episode's bare `post` and `complete_episode` would collide at the
 /// gate: admission is by name, and a host tool sharing a bare name would be
 /// admitted past this company's own policy.
-const TOOL_PREFIX: &str = "desk_";
+pub(crate) const TOOL_PREFIX: &str = "desk_";
 
 /// The author a desk note is written under: the episode speaking, not a
 /// teammate. The session log reads a reserved id as a system row, which is

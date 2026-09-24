@@ -178,8 +178,7 @@ async fn an_unbound_teammate_is_in_no_dm_at_all() {
 fn a_dm_is_answered_by_its_owner_and_a_desk_is_still_routed() {
     use crate::hive::conducted::dm_opening;
 
-    let (starters, plan) =
-        dm_opening("dm:ceo", "ceo", None).expect("a DM pins its own responder");
+    let (starters, plan) = dm_opening("dm:ceo", "ceo", None).expect("a DM pins its own responder");
     assert_eq!(starters, vec!["ceo".to_string()]);
     assert!(
         matches!(plan, crate::hive::routing::RoutingPlanDto::One { primary_id } if primary_id == "ceo"),

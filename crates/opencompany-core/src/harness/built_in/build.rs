@@ -1542,6 +1542,25 @@ pub fn agent_spec_for(
             }
         }
     }
+    // **The scope has to allow what a seated turn may carry.**
+    //
+    // `ToolScopeSpec::Named` is fixed when the agent is registered; the
+    // episode's belt arrives per turn. A name the scope does not list is
+    // dropped before the model sees it, so a seat was offered its teammate's
+    // belt and told to reach the room over MCP -- the envelope this work
+    // exists to remove, still there because the scope had never heard of
+    // `desk_complete_episode`.
+    //
+    // Listing them here costs nothing on an ordinary turn: the belt factory
+    // decides whether the tools exist at all, and the episode's own admission
+    // gates them when they do. The scope only stops being a reason they
+    // cannot.
+    for speech in crate::hive::tools::speech_tool_names() {
+        let prefixed = format!("{}{speech}", crate::hive::host::TOOL_PREFIX);
+        if !tool_names.contains(&prefixed) {
+            tool_names.push(prefixed);
+        }
+    }
     if let Some(mcp) = mcp {
         for bridge in ["mcp_list_tools", "mcp_call_tool"] {
             if !tool_names.iter().any(|name| name == bridge) {
@@ -1787,94 +1806,6 @@ pub fn build_agent(
         "",
     )
 }
-
-/// A memory that keeps nothing, for an episode seat.
-///
-/// This company's memory reaches a teammate through its own belt
-/// (`memory_store` / `memory_recall` over the company `ContextStore`), not
-/// through OpenHuman's memory trait, and the session writes no transcript of
-/// its own (`auto_save(false)`) because the company journal is the only log.
-/// The builder still requires one, so this is it: every store is accepted and
-/// discarded, every read is empty, nothing errors.
-#[cfg(feature = "openhuman")]
-#[derive(Debug, Default)]
-struct SeatMemory;
-
-#[cfg(feature = "openhuman")]
-#[async_trait::async_trait]
-impl oh::memory::Memory for SeatMemory {
-    fn name(&self) -> &'static str {
-        "none"
-    }
-
-    async fn store(
-        &self,
-        _namespace: &str,
-        _key: &str,
-        _content: &str,
-        _category: oh::memory::MemoryCategory,
-        _session_id: Option<&str>,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    async fn recall(
-        &self,
-        _query: &str,
-        _limit: usize,
-        _opts: oh::memory::RecallOpts<'_>,
-    ) -> anyhow::Result<Vec<oh::memory::MemoryEntry>> {
-        Ok(Vec::new())
-    }
-
-    async fn get(
-        &self,
-        _namespace: &str,
-        _key: &str,
-    ) -> anyhow::Result<Option<oh::memory::MemoryEntry>> {
-        Ok(None)
-    }
-
-    async fn list(
-        &self,
-        _namespace: Option<&str>,
-        _category: Option<&oh::memory::MemoryCategory>,
-        _session_id: Option<&str>,
-    ) -> anyhow::Result<Vec<oh::memory::MemoryEntry>> {
-        Ok(Vec::new())
-    }
-
-    async fn forget(&self, _namespace: &str, _key: &str) -> anyhow::Result<bool> {
-        Ok(false)
-    }
-
-    async fn namespace_summaries(&self) -> anyhow::Result<Vec<oh::memory::NamespaceSummary>> {
-        Ok(Vec::new())
-    }
-
-    async fn count(&self) -> anyhow::Result<usize> {
-        Ok(0)
-    }
-
-    async fn health_check(&self) -> bool {
-        true
-    }
-}
-
-/// One teammate as a seat of a running completion episode: a session host
-/// carrying this company's own prompt, belt, model and policy, with the
-/// episode's tools added and its gate in front.
-///
-/// A session host rather than an `AgentSpec` because a spec names its tools
-/// from the runtime's registry, which is fixed when the agent is built. An
-/// episode's tools are neither: they are bound to one seat of one episode
-/// and drain into that episode's record. That is the whole reason this path
-/// exists beside the spec one.
-///
-/// # Errors
-///
-/// The builder refusing the session.
-#[cfg(feature = "openhuman")]
 
 /// The intrinsic deliberate-memory tools (`memory_store` / `memory_recall` /
 /// `memory_forget`) — **oc-authored**, over the company's own `ContextStore`
