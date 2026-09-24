@@ -1,8 +1,10 @@
 use super::*;
+use crate::harness::policy::ApprovalScope;
 
 #[tokio::test]
 async fn calling_the_tool_queues_one_explicit_request_for_its_agent() {
     let queue = ApprovalRequestQueue::default();
+    let claim = queue.claim(ApprovalScope::Cycle);
     let tool = RequestApprovalTool::new("finance", queue.clone());
     let args = json!({
         "title": "Send the filing",
@@ -10,11 +12,11 @@ async fn calling_the_tool_queues_one_explicit_request_for_its_agent() {
         "context": "Submission is irreversible."
     });
 
-    let result = tool.execute(args.clone()).await.unwrap();
+    let result = claim.scoped(tool.execute(args.clone())).await.unwrap();
     assert!(!result.is_error);
     assert!(result.output().contains("Stop now"));
 
-    let drained = queue.drain(8);
+    let drained = claim.drain(8);
     assert_eq!(drained.requests.len(), 1);
     let request = &drained.requests[0];
     assert_eq!(request.tool, REQUEST_APPROVAL_TOOL);

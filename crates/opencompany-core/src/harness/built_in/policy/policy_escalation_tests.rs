@@ -8,57 +8,60 @@ use crate::policy::test_support::{composio_send_args, composio_unclassified_args
 
 #[tokio::test]
 async fn escalate_to_human_sets_the_turn_boundary_and_explicitly_refuses_overflow() {
-    use tinytools::Tool as _;
+    in_cycle(async {
+        use tinytools::Tool as _;
 
-    let queue = ApprovalRequestQueue::default();
-    let tool = crate::harness::built_in::blockers::EscalateToHumanTool::new(
-        queue.clone(),
-        "engineer".to_string(),
-    );
+        let queue = ApprovalRequestQueue::default();
+        let tool = crate::harness::built_in::blockers::EscalateToHumanTool::new(
+            queue.clone(),
+            "engineer".to_string(),
+        );
 
-    queue
-        .turn_scoped(async {
-            for i in 0..MAX_APPROVAL_REQUESTS_PER_TURN {
-                let asked = tool
-                    .execute(serde_json::json!({ "question": format!("question {i}") }))
+        queue
+            .turn_scoped(async {
+                for i in 0..MAX_APPROVAL_REQUESTS_PER_TURN {
+                    let asked = tool
+                        .execute(serde_json::json!({ "question": format!("question {i}") }))
+                        .await
+                        .expect("the tool runs");
+                    assert!(!asked.is_error, "{}", asked.text());
+                }
+                let refused = tool
+                    .execute(serde_json::json!({ "question": "ninth question" }))
                     .await
-                    .expect("the tool runs");
-                assert!(!asked.is_error, "{}", asked.text());
-            }
-            let refused = tool
-                .execute(serde_json::json!({ "question": "ninth question" }))
-                .await
-                .expect("the tool returns its refusal");
-            assert!(
-                refused.is_error,
-                "the ninth question must be explicitly refused, not reported as raised: {}",
-                refused.text()
-            );
-            assert!(refused.text().contains("not raised"));
-            assert!(
-                refused
-                    .text()
-                    .contains(&MAX_APPROVAL_REQUESTS_PER_TURN.to_string())
-            );
-            assert!(
-                queue.explicit_request_pending(),
-                "escalation must end the turn"
-            );
-        })
-        .await;
+                    .expect("the tool returns its refusal");
+                assert!(
+                    refused.is_error,
+                    "the ninth question must be explicitly refused, not reported as raised: {}",
+                    refused.text()
+                );
+                assert!(refused.text().contains("not raised"));
+                assert!(
+                    refused
+                        .text()
+                        .contains(&MAX_APPROVAL_REQUESTS_PER_TURN.to_string())
+                );
+                assert!(
+                    queue.explicit_request_pending(),
+                    "escalation must end the turn"
+                );
+            })
+            .await;
 
-    let drained = queue.drain(MAX_APPROVAL_REQUESTS_PER_TURN);
-    assert_eq!(
-        drained.discarded, 0,
-        "a question reported as raised must not be lost at drain"
-    );
-    assert_eq!(drained.requests.len(), MAX_APPROVAL_REQUESTS_PER_TURN);
-    assert!(
-        drained
-            .requests
-            .iter()
-            .all(|request| request.reason != "ninth question")
-    );
+        let drained = queue.drain(MAX_APPROVAL_REQUESTS_PER_TURN);
+        assert_eq!(
+            drained.discarded, 0,
+            "a question reported as raised must not be lost at drain"
+        );
+        assert_eq!(drained.requests.len(), MAX_APPROVAL_REQUESTS_PER_TURN);
+        assert!(
+            drained
+                .requests
+                .iter()
+                .all(|request| request.reason != "ninth question")
+        );
+    })
+    .await;
 }
 
 /// LIMIT-axis (TOOL-008): `media_generate_image`/`media_generate_video` are
@@ -73,54 +76,57 @@ async fn escalate_to_human_sets_the_turn_boundary_and_explicitly_refuses_overflo
 /// about to commit to spending.
 #[tokio::test]
 async fn a_flood_of_escalations_can_push_a_paid_media_card_off_the_shared_cap() {
-    use tinytools::Tool as _;
+    in_cycle(async {
+        use tinytools::Tool as _;
 
-    let queue = ApprovalRequestQueue::default();
-    let policy = policy("full", &[], None)
-        .with_policy_hitl_disabled()
-        .with_requests(queue.clone());
-    let blockers = crate::harness::built_in::blockers::EscalateToHumanTool::new(
-        queue.clone(),
-        "engineer".to_string(),
-    );
+        let queue = ApprovalRequestQueue::default();
+        let policy = policy("full", &[], None)
+            .with_policy_hitl_disabled()
+            .with_requests(queue.clone());
+        let blockers = crate::harness::built_in::blockers::EscalateToHumanTool::new(
+            queue.clone(),
+            "engineer".to_string(),
+        );
 
-    for i in 0..MAX_APPROVAL_REQUESTS_PER_TURN {
-        let asked = blockers
-            .execute(serde_json::json!({ "question": format!("question {i}?") }))
-            .await
-            .expect("the question runs");
-        assert!(!asked.is_error, "{}", asked.output());
-    }
+        for i in 0..MAX_APPROVAL_REQUESTS_PER_TURN {
+            let asked = blockers
+                .execute(serde_json::json!({ "question": format!("question {i}?") }))
+                .await
+                .expect("the question runs");
+            assert!(!asked.is_error, "{}", asked.output());
+        }
 
-    assert!(
-        matches!(
-            policy
-                .check(&request("media_generate_image", serde_json::json!({})))
-                .await,
-            ToolPolicyDecision::RequireApproval { .. }
-        ),
-        "policy HITL disabled must still stage the paid media call for approval"
-    );
+        assert!(
+            matches!(
+                policy
+                    .check(&request("media_generate_image", serde_json::json!({})))
+                    .await,
+                ToolPolicyDecision::RequireApproval { .. }
+            ),
+            "policy HITL disabled must still stage the paid media call for approval"
+        );
 
-    let drained = queue.drain(MAX_APPROVAL_REQUESTS_PER_TURN);
-    assert_eq!(
-        drained.requests.len(),
-        MAX_APPROVAL_REQUESTS_PER_TURN,
-        "the cap is shared across kinds, not per-kind"
-    );
-    assert_eq!(
-        drained.discarded, 1,
-        "the ninth card — the paid one — is what overflows the shared cap"
-    );
-    assert!(
-        drained
-            .requests
-            .iter()
-            .all(|r| r.tool != "media_generate_image"),
-        "the media card lost the race to the questions asked before it and never reached \
+        let drained = queue.drain(MAX_APPROVAL_REQUESTS_PER_TURN);
+        assert_eq!(
+            drained.requests.len(),
+            MAX_APPROVAL_REQUESTS_PER_TURN,
+            "the cap is shared across kinds, not per-kind"
+        );
+        assert_eq!(
+            drained.discarded, 1,
+            "the ninth card — the paid one — is what overflows the shared cap"
+        );
+        assert!(
+            drained
+                .requests
+                .iter()
+                .all(|r| r.tool != "media_generate_image"),
+            "the media card lost the race to the questions asked before it and never reached \
          the operator's queue: {:?}",
-        drained.requests.iter().map(|r| &r.tool).collect::<Vec<_>>()
-    );
+            drained.requests.iter().map(|r| &r.tool).collect::<Vec<_>>()
+        );
+    })
+    .await;
 }
 
 /// `check`'s fail-closed boundary (the block right above `Deny`ing every
@@ -131,6 +137,7 @@ async fn a_flood_of_escalations_can_push_a_paid_media_card_off_the_shared_cap() 
 /// second `request_approval` would be.
 #[tokio::test]
 async fn escalate_to_human_respects_combined_cycle_and_unscoped_capacity() {
+    in_cycle(async {
     use tinytools::Tool as _;
 
     for initially_scoped in [false, true] {
@@ -183,10 +190,13 @@ async fn escalate_to_human_respects_combined_cycle_and_unscoped_capacity() {
         );
         assert!(drained.requests.iter().all(|r| r.reason != "overflow"));
     }
+})
+    .await;
 }
 
 #[tokio::test]
 async fn accepted_blockers_survive_later_ordinary_approvals_across_scopes() {
+    in_cycle(async {
     use tinytools::Tool as _;
 
     for blocker_in_cycle in [false, true] {
@@ -258,109 +268,103 @@ async fn accepted_blockers_survive_later_ordinary_approvals_across_scopes() {
             assert!(drained.overflow_notice().is_some());
         }
     }
+})
+    .await;
 }
 
 #[tokio::test]
 async fn a_blocker_duplicate_outside_the_drain_budget_is_refused() {
-    use tinytools::Tool as _;
+    in_cycle(async {
+        use tinytools::Tool as _;
 
-    let fixture = ApprovalRequestQueue::default();
-    let args = serde_json::json!({ "question": "outside the budget" });
-    super::super::blockers::EscalateToHumanTool::new(fixture.clone(), "engineer".to_string())
-        .execute(args.clone())
-        .await
-        .expect("the fixture tool runs");
-    let existing = fixture
-        .drain(MAX_APPROVAL_REQUESTS_PER_TURN)
-        .requests
-        .remove(0);
+        let fixture = ApprovalRequestQueue::default();
+        let args = serde_json::json!({ "question": "outside the budget" });
+        super::super::blockers::EscalateToHumanTool::new(fixture.clone(), "engineer".to_string())
+            .execute(args.clone())
+            .await
+            .expect("the fixture tool runs");
+        let existing = fixture
+            .drain(MAX_APPROVAL_REQUESTS_PER_TURN)
+            .requests
+            .remove(0);
 
-    for (existing_in_cycle, ordinary_in_cycle) in
-        [(false, false), (false, true), (true, false), (true, true)]
-    {
-        let queue = ApprovalRequestQueue::default();
-        let cycle = queue.claim(ApprovalScope::Cycle);
-        for i in 0..MAX_APPROVAL_REQUESTS_PER_TURN {
-            let request = gated(&format!("ordinary.{i}"));
-            if ordinary_in_cycle {
-                cycle.scoped(async { queue.push(request) }).await;
-            } else {
-                queue.push(request);
+        for (existing_in_cycle, ordinary_in_cycle) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let queue = ApprovalRequestQueue::default();
+            let cycle = queue.claim(ApprovalScope::Cycle);
+            for i in 0..MAX_APPROVAL_REQUESTS_PER_TURN {
+                let request = gated(&format!("ordinary.{i}"));
+                if ordinary_in_cycle {
+                    cycle.scoped(async { queue.push(request) }).await;
+                } else {
+                    queue.push(request);
+                }
             }
+            let tool = super::super::blockers::EscalateToHumanTool::new(
+                queue.clone(),
+                "engineer".to_string(),
+            );
+            let asked = if existing_in_cycle {
+                cycle
+                    .scoped(async {
+                        queue.push(existing.clone());
+                        tool.execute(args.clone()).await
+                    })
+                    .await
+            } else {
+                queue.push(existing.clone());
+                tool.execute(args.clone()).await
+            }
+            .expect("the tool runs");
+            assert!(
+                asked.is_error,
+                "an overflow duplicate must not be reported as raised"
+            );
+            assert!(asked.text().contains("not raised"));
+            let drained = cycle
+                .scoped(async { queue.drain(MAX_APPROVAL_REQUESTS_PER_TURN) })
+                .await;
+            assert_eq!(drained.requests.len(), MAX_APPROVAL_REQUESTS_PER_TURN);
+            assert_eq!(drained.discarded, 1);
+            assert!(
+                drained
+                    .requests
+                    .iter()
+                    .all(|r| r.reason != "outside the budget")
+            );
         }
-        let tool =
-            super::super::blockers::EscalateToHumanTool::new(queue.clone(), "engineer".to_string());
-        let asked = if existing_in_cycle {
-            cycle
-                .scoped(async {
-                    queue.push(existing.clone());
-                    tool.execute(args.clone()).await
-                })
-                .await
-        } else {
-            queue.push(existing.clone());
-            tool.execute(args.clone()).await
-        }
-        .expect("the tool runs");
-        assert!(
-            asked.is_error,
-            "an overflow duplicate must not be reported as raised"
-        );
-        assert!(asked.text().contains("not raised"));
-        let drained = cycle
-            .scoped(async { queue.drain(MAX_APPROVAL_REQUESTS_PER_TURN) })
-            .await;
-        assert_eq!(drained.requests.len(), MAX_APPROVAL_REQUESTS_PER_TURN);
-        assert_eq!(drained.discarded, 1);
-        assert!(
-            drained
-                .requests
-                .iter()
-                .all(|r| r.reason != "outside the budget")
-        );
-    }
+    })
+    .await;
 }
 
 #[tokio::test]
-async fn mixed_scope_drain_preserves_enqueue_order_and_scoped_stamping() {
+async fn interleaved_scopes_drain_in_their_own_enqueue_order_with_their_own_stamps() {
     for cap in [0, 3, MAX_APPROVAL_REQUESTS_PER_TURN] {
         let queue = ApprovalRequestQueue::default();
         let cycle = queue.claim(ApprovalScope::Cycle);
         let run = queue.claim(ApprovalScope::Run("independent".to_string()));
         for i in 0..10 {
-            let request = gated(&format!("ordinary.{i}"));
-            if i % 2 == 0 {
-                let boundary = queue.queued();
-                assert_eq!(boundary, i / 2);
-                queue.push(request);
-                assert_eq!(queue.stamp_run(boundary, &format!("fallback.{i}")), 1);
-            } else {
-                cycle
-                    .scoped(async {
-                        let boundary = queue.queued();
-                        assert_eq!(boundary, i / 2);
-                        queue.push(request);
-                        assert_eq!(queue.stamp_run(boundary, &format!("cycle.{i}")), 1);
-                    })
-                    .await;
-            }
+            cycle
+                .scoped(async {
+                    let boundary = queue.queued();
+                    assert_eq!(boundary, i);
+                    queue.push(gated(&format!("ordinary.{i}")));
+                    assert_eq!(queue.stamp_run(boundary, &format!("cycle.{i}")), 1);
+                })
+                .await;
             run.scoped(async { queue.push(gated(&format!("run.{i}"))) })
                 .await;
         }
-        let drained = cycle.scoped(async { queue.drain(cap) }).await;
+        let drained = cycle.drain(cap);
         assert_eq!(drained.cap(), cap);
         assert_eq!(drained.discarded, 10 - cap);
         assert_eq!(drained.requests.len(), cap);
         for (i, request) in drained.requests.iter().enumerate() {
-            assert_eq!(
-                request.tool,
-                format!("ordinary.{i}"),
-                "merged drains must preserve enqueue order"
-            );
-            let scope = if i % 2 == 0 { "fallback" } else { "cycle" };
-            assert_eq!(request.effect.run_id, Some(format!("{scope}.{i}")));
+            assert_eq!(request.tool, format!("ordinary.{i}"));
+            assert_eq!(request.effect.run_id, Some(format!("cycle.{i}")));
         }
-        let independent = run.scoped(async { queue.drain(cap) }).await;
+        let independent = run.drain(cap);
         assert_eq!(independent.discarded, 10 - cap);
         assert_eq!(independent.requests.len(), cap);
         for (i, request) in independent.requests.iter().enumerate() {
@@ -416,43 +420,46 @@ async fn escalate_to_human_refuses_a_sibling_gated_call_in_the_same_turn() {
 /// duplicate.
 #[tokio::test]
 async fn a_repeated_identical_escalation_collapses_but_a_distinct_one_survives() {
-    use tinytools::Tool as _;
+    in_cycle(async {
+        use tinytools::Tool as _;
 
-    let queue = ApprovalRequestQueue::default();
-    let tool = crate::harness::built_in::blockers::EscalateToHumanTool::new(
-        queue.clone(),
-        "engineer".to_string(),
-    );
+        let queue = ApprovalRequestQueue::default();
+        let tool = crate::harness::built_in::blockers::EscalateToHumanTool::new(
+            queue.clone(),
+            "engineer".to_string(),
+        );
 
-    let first = tool
-        .execute(serde_json::json!({ "question": "staging or prod?" }))
-        .await
-        .expect("the tool runs");
-    let second = tool
-        .execute(serde_json::json!({ "question": "staging or prod?" }))
-        .await
-        .expect("the tool runs");
-    assert!(!first.is_error);
-    assert!(!second.is_error, "a duplicate ask is not itself a failure");
+        let first = tool
+            .execute(serde_json::json!({ "question": "staging or prod?" }))
+            .await
+            .expect("the tool runs");
+        let second = tool
+            .execute(serde_json::json!({ "question": "staging or prod?" }))
+            .await
+            .expect("the tool runs");
+        assert!(!first.is_error);
+        assert!(!second.is_error, "a duplicate ask is not itself a failure");
 
-    let distinct = tool
-        .execute(serde_json::json!({ "question": "which key rotates first?" }))
-        .await
-        .expect("the tool runs");
-    assert!(!distinct.is_error);
+        let distinct = tool
+            .execute(serde_json::json!({ "question": "which key rotates first?" }))
+            .await
+            .expect("the tool runs");
+        assert!(!distinct.is_error);
 
-    let drained = queue.drain(MAX_APPROVAL_REQUESTS_PER_TURN);
-    assert_eq!(
-        drained.requests.len(),
-        2,
-        "the repeated question collapses into the card already queued, but the distinct \
+        let drained = queue.drain(MAX_APPROVAL_REQUESTS_PER_TURN);
+        assert_eq!(
+            drained.requests.len(),
+            2,
+            "the repeated question collapses into the card already queued, but the distinct \
          question still gets its own: {:?}",
-        drained
-            .requests
-            .iter()
-            .map(|r| &r.reason)
-            .collect::<Vec<_>>()
-    );
+            drained
+                .requests
+                .iter()
+                .map(|r| &r.reason)
+                .collect::<Vec<_>>()
+        );
+    })
+    .await;
 }
 
 /// Outside `turn_scoped`, the task-local backing the boundary was never

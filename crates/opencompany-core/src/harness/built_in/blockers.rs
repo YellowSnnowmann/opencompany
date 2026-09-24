@@ -399,6 +399,7 @@ impl tinytools::Tool for EscalateToHumanTool {
                 reason,
                 effect,
             })
+            .is_queued()
         {
             return Ok(ToolResult::error(format!(
                 "Your question was not raised: this batch already has the maximum of {} approval \

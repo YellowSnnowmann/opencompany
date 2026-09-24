@@ -3234,13 +3234,23 @@ impl HarnessBrain {
             agent: None,
             run_id: run_id.map(str::to_string),
         };
-        self.deps
-            .approval_requests
-            .push(crate::harness::built_in::policy::ApprovalRequest {
-                tool: payload.kind.effect_kind(),
-                reason: reason.to_string(),
-                effect,
-            });
+        let pushed =
+            self.deps
+                .approval_requests
+                .push(crate::harness::built_in::policy::ApprovalRequest {
+                    tool: payload.kind.effect_kind(),
+                    reason: reason.to_string(),
+                    effect,
+                });
+        if !pushed.is_queued() {
+            tracing::error!(
+                kind = %payload.kind.effect_kind(),
+                outcome = ?pushed,
+                "[harness::brain] a blocker could not be queued for the operator; settling the \
+                 run as failed rather than blocked on a question nobody was asked"
+            );
+            return TaskRunEnd::Failed;
+        }
         TaskRunEnd::Blocked
     }
 
