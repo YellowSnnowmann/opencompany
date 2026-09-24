@@ -133,19 +133,27 @@ export function TeamView({
    * rather than on every rename — so a save on the detail page below would
    * otherwise show the old name in every chip that resolves through it until
    * the operator changes company. Overlaid with this view's own `members`,
-   * which {@link onAgentNameChange} keeps current the moment a save lands.
+   * which {@link onAgentNameChange} keeps current the moment a save lands,
+   * and then with `nameOverrides` for a rename on an agent `members` doesn't
+   * hold: `#/team/<agentId>` is unvalidated (the detail page resolves it
+   * against the host directly), so an operator can rename an agent this
+   * view's own roster read omitted or hasn't returned yet, and a `members`-only
+   * update would silently no-op.
    */
+  const [nameOverrides, setNameOverrides] = useState<Readonly<Record<string, string>>>({});
   const currentAgentNames = useMemo(
     () => ({
       ...agentNames,
       ...Object.fromEntries(members.map((member) => [member.id, member.name])),
+      ...nameOverrides,
     }),
-    [agentNames, members],
+    [agentNames, members, nameOverrides],
   );
   const onAgentNameChange = useCallback((agentId: string, name: string) => {
     setMembers((current) =>
       current.map((member) => (member.id === agentId ? { ...member, name } : member)),
     );
+    setNameOverrides((current) => ({ ...current, [agentId]: name }));
   }, []);
   /**
    * Ids of rows this console appended itself, because the host has no team
@@ -278,6 +286,10 @@ export function TeamView({
     // strand the roster mid-re-read.
     setWorkload(null);
     workloadRun.current += 1;
+    // A fresh roster read is the host's own current state, which already
+    // carries any rename the override above stood in for — so the override
+    // would only ever go stale from here, never add information.
+    setNameOverrides({});
     void boot();
     void loadWorkload();
     // `refreshKey` re-runs the read after setup staffs the company; without it
