@@ -225,11 +225,13 @@ export function AgentDetailView({
   client,
   company,
   agentId,
+  agentNames,
   onBack,
 }: {
   client: OpenCompanyClient;
   company: string | null;
   agentId: string;
+  agentNames?: Readonly<Record<string, string>>;
   onBack: () => void;
 }) {
   const [load, setLoad] = useState<Load>("loading");
@@ -942,6 +944,7 @@ export function AgentDetailView({
                 company={company}
                 agentId={agent.id}
                 agentName={agent.name?.trim() || agent.role}
+                agentNames={agentNames}
               />
             </PageTabPanel>
 

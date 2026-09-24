@@ -56,6 +56,8 @@ interface Props {
    * agent, refresh onto it, and use Back (issue #264).
    */
   sub: string | null;
+  /** Roster id to display name, for the teammates an agent's session mentions. */
+  agentNames?: Readonly<Record<string, string>>;
   /**
    * Open an agent, or return to the roster with `null`.
    *
@@ -101,6 +103,7 @@ export function TeamView({
   client,
   company,
   sub,
+  agentNames,
   onOpenAgent,
   refreshKey,
   onRunSetup,
@@ -431,6 +434,7 @@ export function TeamView({
         client={client}
         company={company}
         agentId={sub}
+        agentNames={agentNames}
         onBack={() => onOpenAgent(null)}
       />
     );
