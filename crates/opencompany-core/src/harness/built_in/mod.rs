@@ -5948,7 +5948,14 @@ pub(crate) fn build_roster(
         // the blueprint without cloning the borrowed `&ManifestAgent`.
         let effective_instructions = company.effective_instructions(&manifest_agent.id);
         let grants = grants_for_policy(company, allow, manifest_agent);
-        let agent_policy = agent_policy_for(
+        // `mut` for the Composio arm below, which is the only thing that
+        // reassigns it -- and is feature-gated, so a build without that
+        // feature would see the binding as needlessly mutable. Same
+        // `cfg_attr` the `grants` parameter above carries, for the same
+        // reason: one feature owns the mutation and every other build must
+        // compile clean under `-D warnings`.
+        #[cfg_attr(not(feature = "composio"), allow(unused_mut))]
+        let mut agent_policy = agent_policy_for(
             company,
             deps,
             manifest_agent,
