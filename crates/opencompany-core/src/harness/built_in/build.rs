@@ -1596,6 +1596,29 @@ pub fn agent_spec_for(
             .entries
             .retain(|existing| existing.id != entry.id);
         config.agent_registry.entries.push(entry);
+        // Pin the pooled turn to provider-native tool calls.
+        //
+        // A pooled turn's dialect comes from `agent.tool_dispatcher`
+        // (`resolve_dispatcher_kind`, reached via `agent_chat_for` ->
+        // `from_config_with_definition`), and OpenHuman's schema default for
+        // that field is `"python"` — which resolves to
+        // `DispatcherKind::Code(CodeStyle::Python)` *before* the native-support
+        // arm is consulted, so an explicit choice wins over a model that can do
+        // native calling perfectly well. `CodeDialect::should_send_tool_specs()`
+        // is `false`, so the model is handed the catalogue as prose in the
+        // system prompt and asked to write Python, and never sees a structured
+        // tool spec at all.
+        //
+        // That is the wrong protocol for this crate: every OpenCompany tool
+        // reaches a pooled teammate over the `opencompany` MCP server as
+        // `mcp_call_tool` with a JSON `arguments` object, which is a structured
+        // call described in prose. Models answer it with whatever markup they
+        // favour, and `native_salvage` exists to parse the result back out.
+        //
+        // `episode_seat` already pins `NativeDialect` explicitly, so the two
+        // agent shapes disagreed about the tool protocol for no reason. Pin the
+        // pooled path to the same one.
+        config.agent.tool_dispatcher = "native".into();
     })
 }
 
