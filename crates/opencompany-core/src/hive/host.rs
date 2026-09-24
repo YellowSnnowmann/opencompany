@@ -23,11 +23,10 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use openhuman_core::agent::OpenHumanSessionHost;
 use openhuman_core::agent::tinyagents::host::LastTurnUsage;
 use tinyhivemind::{Sequence, SessionLog};
 use tinyhivemind_driver::{Commit, Note};
-use tinyhivemind_openhuman::{Disposition, EpisodeBelt, EpisodeHost, HostedTurn, Journal};
+use tinyhivemind_openhuman::{Disposition, EpisodeHost, HostedTurn, Journal};
 use tinyhivemind_openhuman::{Lane, TurnResult};
 use tinyhivemind_tools::Refusal;
 

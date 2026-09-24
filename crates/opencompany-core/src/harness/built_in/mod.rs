@@ -5802,13 +5802,11 @@ pub(crate) fn seat_persona(
             &grants,
         )
     };
-    // Built twice, from the same inputs, because the two consumers own their
-    // copy: the session's own policy rides the blueprint, and the episode's
-    // admission holds the one it falls back to. `ApprovalPolicy` carries a
-    // gate handle and a spend meter rather than state of its own, so the two
-    // decide alike.
+    // One copy now. It used to be built twice -- once for the blueprint, once
+    // for the episode's admission to fall back to -- because a seat was its
+    // own session with its own policy. The seat is the pool's agent now, and
+    // the admission composes over the gate that agent already carries.
     let policy = approval();
-    let behind = approval();
     let instructions = company.effective_instructions(&manifest_agent.id);
     let blueprint = build::build_agent_with_model(
         &company.id,
