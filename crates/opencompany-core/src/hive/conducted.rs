@@ -375,7 +375,16 @@ impl HiveDispatcher {
             events: Arc::clone(&self.events),
             desk: &desk,
             routing: &routing,
-            router: self.router.as_deref(),
+            // No router in a DM. It governs `broadcast`, and handing work
+            // to another seat inside a one-to-one conversation is a hand-off
+            // -- a different conversation -- not something a ranker should
+            // pick a recipient for. Without one, a broadcast falls back to
+            // lead-and-mention, which is what a DM means anyway.
+            router: if desk_id.starts_with(crate::runtime::assignee::DM_PREFIX) {
+                None
+            } else {
+                self.router.as_deref()
+            },
             episode_id: episode_id.clone(),
             thread_root: Some(thread_root),
             opened_at: trigger.seq,
@@ -523,6 +532,28 @@ impl HiveDispatcher {
                 })
                 .map(str::to_owned)
         });
+        // **A DM's responder is not a routing question.**
+        //
+        // The hive holds the roster so `ask` has somewhere to land, but a
+        // message in `dm:pm` is for the PM. Routed instead, it would be
+        // answered by whoever the ranker liked -- and with a TinyHumans key
+        // present that ranker is a model, so the wrong teammate answering
+        // your DM would be a decision nobody made and nothing recorded.
+        //
+        // An explicit @mention still wins: naming someone in your own DM is
+        // an instruction, not an ambiguity.
+        if desk
+            .desk_id
+            .starts_with(crate::runtime::assignee::DM_PREFIX)
+        {
+            let primary = explicit.unwrap_or(lead);
+            return Ok((
+                vec![primary.clone()],
+                RoutingPlanDto::One {
+                    primary_id: primary,
+                },
+            ));
+        }
         let request = desk.hive.desk_request(
             trigger.text.clone(),
             Vec::new(),

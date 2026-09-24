@@ -66,3 +66,96 @@ async fn a_shared_seat_is_the_same_agent_in_both_hives_and_a_desk_of_one_gets_no
     assert!(errors.is_empty(), "{errors:?}");
     assert!(hives.is_empty(), "{:?}", hives.keys().collect::<Vec<_>>());
 }
+
+/// A DM is a room of the whole roster, led by whose DM it is.
+///
+/// The membership is what makes `ask` possible at all: its target is resolved
+/// against the bound members, so a teammate alone in its own DM would carry
+/// the tool with nobody it could legally name. The *lead* is what keeps that
+/// membership from changing who answers the operator -- a message in `dm:ceo`
+/// is the CEO's, and the rest of the roster is there to be asked, not to reply.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dm_is_the_whole_roster_led_by_the_teammate_it_belongs_to() {
+    let runtime = global(RuntimeBoot::ephemeral()).await.expect("runtime");
+    let salt = uuid::Uuid::new_v4().simple().to_string();
+    let agents: HashMap<String, openhuman_embed::Agent> = ["ceo", "engineer", "writer"]
+        .into_iter()
+        .map(|id| {
+            (
+                id.to_string(),
+                runtime
+                    .agent(AgentSpec::new(format!("hive-dm-{id}-{}", &salt[..8])))
+                    .expect("agent"),
+            )
+        })
+        .collect();
+    let record = record(TWO_DESKS);
+
+    let (dms, errors) = dm_hives(&record, 7, &|id| agents.get(id).cloned());
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let mut ids: Vec<&String> = dms.keys().collect();
+    ids.sort();
+    assert_eq!(
+        ids,
+        vec!["dm:ceo", "dm:engineer", "dm:writer"],
+        "one DM per roster teammate, keyed by the chat id `surface_of` looks up"
+    );
+
+    let ceo = dms.get("dm:ceo").expect("the CEO's DM");
+    assert_eq!(
+        ceo.lead().as_deref(),
+        Some("ceo"),
+        "the lead is whose DM it is, so the operator is never answered by someone else"
+    );
+    let mut members = ceo.members();
+    members.sort();
+    assert_eq!(
+        members,
+        vec!["ceo", "engineer", "writer"],
+        "everyone is bound, so `ask` has somewhere to land"
+    );
+
+    // The same teammate leads its own DM and is merely present in the others.
+    let writer = dms.get("dm:writer").expect("the writer's DM");
+    assert_eq!(writer.lead().as_deref(), Some("writer"));
+    assert!(
+        writer.members().contains(&"ceo".to_string()),
+        "a teammate is askable from a DM that is not its own"
+    );
+}
+
+/// A teammate the pool cannot bind gets no DM, and is in nobody else's.
+///
+/// An unbound member would be a name `ask` could reach for and the runner
+/// could not seat -- the refusal arriving a turn later, from the driver,
+/// rather than here where it can simply not be offered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unbound_teammate_is_in_no_dm_at_all() {
+    let runtime = global(RuntimeBoot::ephemeral()).await.expect("runtime");
+    let salt = uuid::Uuid::new_v4().simple().to_string();
+    // `writer` is deliberately absent from the pool.
+    let agents: HashMap<String, openhuman_embed::Agent> = ["ceo", "engineer"]
+        .into_iter()
+        .map(|id| {
+            (
+                id.to_string(),
+                runtime
+                    .agent(AgentSpec::new(format!("hive-dm-unbound-{id}-{}", &salt[..8])))
+                    .expect("agent"),
+            )
+        })
+        .collect();
+    let record = record(TWO_DESKS);
+
+    let (dms, errors) = dm_hives(&record, 7, &|id| agents.get(id).cloned());
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let mut ids: Vec<&String> = dms.keys().collect();
+    ids.sort();
+    assert_eq!(ids, vec!["dm:ceo", "dm:engineer"], "no DM for an unbound seat");
+    assert!(
+        !dms["dm:ceo"].members().contains(&"writer".to_string()),
+        "and it is not askable from anyone else's"
+    );
+}

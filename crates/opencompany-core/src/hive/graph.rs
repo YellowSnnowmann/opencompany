@@ -151,3 +151,118 @@ pub fn desk_hives(
 #[cfg(test)]
 #[path = "graph_tests.rs"]
 mod tests;
+
+/// Whether operator DMs run as episodes.
+///
+/// Off by default, and deliberately: a seat has `spawn_task` withheld,
+/// because the queue it writes to is drained by a brain that does not run
+/// inside an episode. Turning DMs into episodes before that drain exists
+/// would take task cards away from the one conversation where an operator
+/// says "track this" -- so this stays behind a flag until it does.
+#[must_use]
+pub fn dm_episodes_enabled(env: &dyn crate::app::config::EnvSource) -> bool {
+    env.get("OPENCOMPANY_DM_EPISODES")
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
+}
+
+/// One hive per operator DM: the teammate it belongs to, and everyone it may
+/// consult.
+///
+/// # Why a DM is not a one-member room
+///
+/// Because a one-member room cannot consult anyone. `ask` resolves its target
+/// through `BoundHive::resolve_dm`, which refuses a recipient that is not a
+/// member -- and asking yourself is refused separately. A teammate alone in
+/// its own DM would carry `ask` on its belt with no legal target for it.
+///
+/// So the hive holds the roster, and the *round* holds one seat. Membership
+/// says who may be turned to; routing says who is. The operator's message
+/// goes to the teammate whose DM it is and wakes nobody else; the others sit
+/// idle until that teammate asks one of them something.
+///
+/// # What this decides
+///
+/// That consulting is unscoped. `delegates_to` narrows *delegation*, and it
+/// names desks rather than teammates, so it cannot express "these colleagues
+/// may be asked". Binding the roster means any teammate can be asked a
+/// question in a DM -- which is a different act from putting work on them,
+/// and the narrower rule is still the board's to enforce.
+pub fn dm_hives(
+    record: &CompanyRecord,
+    roster_version: u64,
+    bind: &dyn Fn(&str) -> Option<openhuman_embed::Agent>,
+) -> (HashMap<String, Arc<DeskHive>>, Vec<HiveBuildError>) {
+    let agents = record.effective_agents();
+    let mut hives = HashMap::new();
+    let mut errors = Vec::new();
+    // Bound once: every DM's membership is the same roster in a different
+    // order, and binding is a clone of a handle the pool already holds.
+    let bound: Vec<(String, openhuman_embed::Agent)> = agents
+        .iter()
+        .filter(|agent| record.is_roster_agent(&agent.id))
+        .filter_map(|agent| bind(&agent.id).map(|handle| (agent.id.clone(), handle)))
+        .collect();
+    for (owner, _) in &bound {
+        // The owner first, because `DeskHive::lead` is the first member and a
+        // DM's responder is never in doubt: it is whose DM it is.
+        let ordered: Vec<&(String, openhuman_embed::Agent)> = bound
+            .iter()
+            .filter(|(member, _)| member == owner)
+            .chain(bound.iter().filter(|(member, _)| member != owner))
+            .collect();
+        let profile = |id: &str| agents.iter().find(|agent| agent.id == id);
+        let candidates: Vec<RouteCandidate> = ordered
+            .iter()
+            .map(|(member, _)| RouteCandidate {
+                id: member.clone(),
+                label: profile(member)
+                    .and_then(|agent| agent.name.clone())
+                    .unwrap_or_else(|| member.clone()),
+                role: profile(member).map(|agent| agent.role.clone()),
+                description: profile(member).and_then(|agent| agent.description.clone()),
+                capabilities: Vec::new(),
+                learned_topics: Vec::new(),
+                available: true,
+            })
+            .collect();
+        let bindings: Vec<AgentBinding<EmbedSeat>> = ordered
+            .iter()
+            .map(|(member, handle)| AgentBinding::new(member.clone(), EmbedSeat(handle.clone())))
+            .collect();
+        let members: Vec<String> = ordered.iter().map(|(member, _)| member.clone()).collect();
+        let chat = format!("{}{owner}", crate::runtime::assignee::DM_PREFIX);
+        let name = profile(owner)
+            .and_then(|agent| agent.name.clone())
+            .unwrap_or_else(|| owner.clone());
+        let graph = HiveGraph::new(
+            tinyhivemind::desk::Desk {
+                id: chat.clone(),
+                name: name.clone(),
+                description: profile(owner).and_then(|agent| agent.description.clone()),
+                members,
+                // The lead answers, always. A DM has one correct responder and
+                // it is not a question a router should be asked.
+                responder_mode: tinyhivemind::desk::ResponderMode::Lead,
+            },
+            candidates,
+        );
+        match BoundHive::new(graph, bindings) {
+            Ok(hive) => {
+                hives.insert(
+                    chat.clone(),
+                    Arc::new(DeskHive {
+                        desk_id: chat,
+                        desk_name: name,
+                        hive,
+                        roster_version,
+                    }),
+                );
+            }
+            Err(source) => errors.push(HiveBuildError::Invalid {
+                desk_id: chat,
+                source,
+            }),
+        }
+    }
+    (hives, errors)
+}
