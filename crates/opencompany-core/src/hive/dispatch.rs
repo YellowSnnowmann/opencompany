@@ -24,7 +24,7 @@ use tinyhivemind_embed::Router;
 use crate::hive::conducted::{EpisodeReport, HiveDispatcher, Trigger};
 use crate::hive::graph::desk_hives;
 use crate::ports::events::EventLog;
-use crate::ports::types::{CompanyRecord, EventSeq, Mention};
+use crate::ports::types::{CompanyEvent, CompanyRecord, EventSeq, Mention};
 
 /// The surface a chat message landed on.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -284,4 +284,79 @@ mod dm_surface_tests {
             assert!(dm_episodes_enabled(&Env(Some(on))), "`{on}` is on");
         }
     }
+}
+
+/// Deliver a question into another teammate's operator DM, and open the
+/// episode that answers it.
+///
+/// # What a hand-off is, as distinct from an ask
+///
+/// `ask` keeps the conversation: a teammate answers the asker, and the
+/// operator only ever hears from the one they wrote to. A hand-off moves it.
+/// The teammate handed to becomes the operator's correspondent, in its own
+/// line, and the one who handed it over steps out of the way.
+///
+/// So this cannot be an `ask`, however the roster is bound. `ask` resolves its
+/// target inside one episode's membership; `dm:{to}` is a different
+/// conversation, and membership does not cross conversations.
+///
+/// # Why it is a message and not an event
+///
+/// An episode opens when a *message arrives on a chat* -- that is the branch
+/// in the brain that reads `surface_of`. A row appended with no one reading
+/// for it is a row nobody answers. So the question is delivered the way the
+/// operator's own questions are, and the same dispatch picks it up.
+///
+/// Returns the sequence the question landed at, so the nudge that tells the
+/// operator where their answer will appear can name it.
+///
+/// # Errors
+///
+/// Whatever stops the journal accepting the row.
+pub async fn hand_off_to_dm(
+    events: &dyn EventLog,
+    company: &crate::ports::types::CompanyId,
+    to: &str,
+    question: &str,
+) -> crate::Result<(String, EventSeq)> {
+    let chat = format!("{}{to}", crate::runtime::assignee::DM_PREFIX);
+    let seq = events
+        .append(
+            company,
+            CompanyEvent::OperatorMessage {
+                text: question.to_owned(),
+                // Unattributed on purpose. The teammate reads it as the
+                // operator's question, because that is what it now is: the
+                // work is theirs and so is the correspondence. Stamping the
+                // agent who handed it over would make it look like a peer's
+                // request, which is the one thing it is not.
+                by: None,
+                chat: Some(chat.clone()),
+                parent: None,
+                deliverable: None,
+                mentions: Vec::new(),
+                attachments: Vec::new(),
+            },
+        )
+        .await?;
+    Ok((chat, seq))
+}
+
+/// What the operator is told when their question is handed on.
+///
+/// Fixed wording, and deliberately so. The tool that hands work over used to
+/// return a sentence for the agent to paraphrase, and it paraphrased it into
+/// a promise -- "they will answer this turn" -- that nothing could keep. The
+/// mechanism guarantees one thing: the question was delivered. This says that
+/// and stops.
+///
+/// It names where, because a hand-off splits the thread: the status lands
+/// here and the answer lands there, and an operator who is not told where to
+/// look is being handed a dead end.
+#[must_use]
+pub fn hand_off_notice(to: &str, chat: &str) -> String {
+    format!(
+        "Handed to @{to}. This is their line with you now, and their reply will \
+         arrive there ({chat}) rather than here."
+    )
 }
