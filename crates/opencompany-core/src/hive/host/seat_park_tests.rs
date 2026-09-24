@@ -351,4 +351,32 @@ async fn a_seat_turn_publishes_into_its_own_episode() {
         Some(true),
         "a seat's publish is staged rather than refused"
     );
+
+    // **Through the drain, not just the push.**
+    //
+    // Stopping at `push` would pass even if `settle` threw the files away.
+    // `after_turn` takes the claims and settles them, and `park_seat` is
+    // where they are filed -- so the assertion has to reach it.
+    let settled = host
+        .take_seat_claims("one")
+        .expect("the turn's claims were kept for `after_turn`")
+        .settle();
+    assert_eq!(
+        settled.publishes.len(),
+        1,
+        "settle hands the staged file on to be filed, rather than counting it"
+    );
+    assert_eq!(settled.publishes[0].source, "report.md");
+
+    // This host has no roster, so filing cannot succeed -- which is the path
+    // worth pinning: the seat must be told *which* file did not land, by
+    // name, because nothing else can recover it. A bare count would leave it
+    // reporting a number the operator cannot act on.
+    let held = host.park_seat("one", settled).await;
+    assert!(!held, "a failed filing does not hold the seat");
+    let told = readable_by(&host, "one").await;
+    assert!(
+        told.iter().any(|row| row.contains("report.md")),
+        "the seat is told which file could not be filed: {told:?}"
+    );
 }

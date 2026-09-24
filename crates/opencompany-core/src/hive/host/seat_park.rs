@@ -83,7 +83,7 @@ pub(crate) struct SettledTurn {
     /// What the seat published, to be filed by `park_seat`. The files
     /// themselves rather than a count: the count could only be apologised
     /// for.
-    publishes: Vec<PendingPublish>,
+    pub(super) publishes: Vec<PendingPublish>,
     outputs: usize,
 }
 
@@ -362,18 +362,34 @@ impl DeskHost {
         // work ran, and a seat that is told nothing would report a delivery
         // that did not happen.
         if !publishes.is_empty() {
-            let count = publishes.len();
+            // **Named, not counted.**
+            //
+            // Nothing can durably retain these: the bucket belongs to a claim
+            // that `settle` has already released, and no later drain reaches
+            // an episode -- `push_refusal` files into the bucket the workflow
+            // runner drains, which is the "queue nobody empties" shape this
+            // whole area exists to avoid. What is recoverable is the file
+            // itself, still in the seat's sandbox under this path. So the
+            // seat is told which paths did not land, and can say so precisely
+            // rather than reporting a number the operator cannot act on.
+            let sources: Vec<String> = publishes
+                .iter()
+                .map(|staged| staged.source.clone())
+                .collect();
             if let Err(error) = self.file_seat_publishes(seat, publishes).await {
                 tracing::error!(
                     company = %self.company,
                     episode = %self.episode_id,
                     %seat,
                     %error,
+                    sources = sources.join(", "),
                     "[hive] a seat published files that could not be recorded"
                 );
                 problems.push(format!(
-                    "{count} file(s) you published in this room could not be filed. Tell the \
-                     operator plainly that they were not delivered."
+                    "These file(s) you published in this room could not be filed: {}. They are \
+                     still in your sandbox at those paths. Tell the operator plainly that they \
+                     were not delivered, and name them.",
+                    sources.join(", ")
                 ));
             }
         }
