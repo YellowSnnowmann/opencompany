@@ -267,6 +267,26 @@ Whether a run *should* be able to publish is a separate, open question:
 the "a run has nowhere to file one" premise stale. This change does not settle
 it — it only removes the silence around the current answer.
 
+## A desk seat files a deliverable like a conversation does
+
+A hive episode seat's turn claims `PublishDestination::Episode` when the company
+has a board and an artifact store, and `Unclaimed` otherwise, so a company with
+nowhere to file still gets the in-turn refusal. When the seat's turn returns,
+what it published is filed through `HarnessDeps::record_conversation_publishes`
+— the same path a chat turn takes: a card minted for the room in `in_review`,
+whose `origin` names the desk and the episode's thread, carrying one versioned
+artifact per path. The operator edits it from that card's Artifacts tab, and the
+edit lands as the next version, so `human_edit_diff` covers episode
+deliverables too.
+
+The seat's outputs — the artifact links and any workspace nodes its tools wrote —
+ride the seat's next row on the desk, with the card as the row's `task_id`. A row
+the seat writes into a private conversation does not carry them. A turn that
+published and said nothing on the desk gets an outputs-only row of its own once
+its wave has committed everything it will; that row has no text, so seats'
+briefs skip it. A turn that failed files nothing, and the seat is told so on the
+desk.
+
 ## Storage
 
 Versions are append-only and each republish appends a full body. The whole
