@@ -126,6 +126,23 @@ describe("RoundBand", () => {
     expect(lanes[1].textContent).toContain("Private note");
   });
 
+  it("names an unnamed seat a teammate and words an unknown act plainly, never raw", () => {
+    const value = round({
+      status: "committed",
+      seats: [
+        { agentId: "stranger-5e0d", status: "committed", utterance: { kind: "post" } },
+        { agentId: "ceo", status: "committed", utterance: { kind: "handoff" as never } },
+      ],
+    });
+    const { band } = render(value, episode([value]));
+    const lanes = [...band.querySelectorAll<HTMLElement>('[data-testid="round-seat"]')];
+    expect(lanes[0].textContent).toContain("a teammate");
+    expect(lanes[0].textContent).not.toContain("stranger-5e0d");
+    expect(lanes[0].title).toBe("a teammate: done");
+    expect(lanes[1].textContent).toContain("Replied");
+    expect(lanes[1].textContent).not.toContain("handoff");
+  });
+
   it("words a seat that ended without speaking", () => {
     const value = round({
       status: "committed",
