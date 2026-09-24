@@ -39,6 +39,8 @@
 //! | `a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice` | `companies/hive_demo`: both episodes complete, brackets overlap across desks, never for the same agent |
 //! | `a_checkpoint_replays_the_rows_after_it_as_a_no_op` | the round-0 checkpoint plus the rows after it fold to the final state; folding them again changes nothing |
 //! | `a_desk_remembers_across_episodes_through_its_memory_tools` | `memory_store` on the seat's own belt in one episode, `memory_recall` in the next, the recorded part cites what came back |
+//! | `a_seat_publishes_a_deliverable_the_operator_can_edit` | a seat's `publish_artifact` is filed on a card, its recorded part links the artifact, and an operator edit lands as version 2 |
+//! | `a_turn_that_only_publishes_hands_over_on_a_row_of_its_own` | a turn that published and said nothing hands the artifact over on an outputs-only row when its wave ends |
 //!
 //! Every company gets a unique id: the runtime keeps one `Agent` per
 //! `(company, agent)` for the life of the process, so two tests naming the
@@ -2284,4 +2286,260 @@ async fn a_parked_episode_resumes_from_its_checkpoint_after_a_restart() {
         "the same episode completes, resumed rather than reopened"
     );
     assert_eq!(told(&script, "approved your request: Email the client"), 1);
+}
+
+// ---------------------------------------------------------------------------
+// 10: a seat hands over a deliverable the operator can edit
+// ---------------------------------------------------------------------------
+
+const OUTLINE_PATH: &str = "pilot-outline.md";
+const OUTLINE_TITLE: &str = "Pilot slide outline";
+const OUTLINE: &str = "# Pilot slide outline\n\n1. Why now\n2. The pilot\n3. What it costs\n";
+
+/// The engineer writes the outline, publishes it, and records its part.
+fn write_publish_then_record(seat: &Seat) -> Reply {
+    if seat.speaker != ENGINEER {
+        return record_part(seat);
+    }
+    if !seat.called("file_write") {
+        return Reply::Call {
+            tool: "file_write",
+            args: json!({ "path": OUTLINE_PATH, "content": OUTLINE }),
+        };
+    }
+    if !seat.called("publish_artifact") {
+        return Reply::Call {
+            tool: "publish_artifact",
+            args: json!({ "path": OUTLINE_PATH, "title": OUTLINE_TITLE }),
+        };
+    }
+    complete(seat, "The pilot slide outline is published.")
+}
+
+/// Boots the in-test company with every tool on the belt, so a seat can
+/// write a file and publish it.
+async fn boot_tooled(home: &Path, base_url: &str) -> (SocketAddr, Arc<CompanyRuntime>) {
+    let id = unique("hive-publish");
+    let tooled = manifest(&id, base_url).replace("[tools]\nallow = []", "[tools]\nallow = [\"*\"]");
+    assert!(
+        tooled.contains("allow = [\"*\"]"),
+        "the file tools are on the belt"
+    );
+    let manifest = CompanyManifest::from_stored_toml(&tooled).expect("the manifest parses");
+    boot(home, &id, manifest).await
+}
+
+/// The engineer's replies on `chat`, as `(kind, text, outputs, task_id)`.
+fn delivered_rows(
+    rows: &[StoredEvent],
+    chat: &str,
+) -> Vec<(Option<UtteranceKind>, String, Value, Option<String>)> {
+    rows.iter()
+        .filter_map(|row| match &row.event {
+            CompanyEvent::AgentReply {
+                chat_id,
+                agent_id,
+                text,
+                outputs,
+                task_id,
+                episode,
+                ..
+            } if chat_id == chat && agent_id == ENGINEER => Some((
+                episode.as_ref().map(|episode| episode.kind),
+                text.clone(),
+                serde_json::to_value(outputs).unwrap(),
+                task_id.clone(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_seat_publishes_a_deliverable_the_operator_can_edit() {
+    let home = tempfile::tempdir().unwrap();
+    let (base_url, script) = spawn_script_with_latency(
+        seat_script("Noted.", write_publish_then_record),
+        Duration::from_millis(30),
+    )
+    .await;
+    let (address, runtime) = boot_tooled(home.path(), &base_url).await;
+    let client = Client::new(address);
+    client.sign_in(ADMIN).await;
+
+    client
+        .say(ENGINEERING, "Draft the slide outline for the pilot.")
+        .await;
+    let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
+    dump(&rows, &script);
+
+    let receipts: Vec<String> = script
+        .asks()
+        .iter()
+        .filter_map(seat_of)
+        .filter(|seat| seat.speaker == ENGINEER)
+        .flat_map(|seat| {
+            seat.calls
+                .into_iter()
+                .zip(seat.turn_tools)
+                .filter(|(call, _)| call == "publish_artifact")
+                .map(|(_, output)| output)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        receipts
+            .iter()
+            .any(|output| output.contains("filed on a board card for this room")),
+        "the seat is told where its file went, not refused: {receipts:?}"
+    );
+
+    let delivered = delivered_rows(&rows, ENGINEERING);
+    let (kind, text, outputs, task_id) = delivered
+        .iter()
+        .find(|(kind, ..)| *kind == Some(UtteranceKind::CompleteEpisode))
+        .cloned()
+        .unwrap_or_else(|| panic!("the engineer recorded its part: {delivered:?}"));
+    assert_eq!(kind, Some(UtteranceKind::CompleteEpisode));
+    assert!(text.contains("published"), "{text}");
+    let card = task_id.expect("the row links the card the file was filed on");
+    let artifact = outputs
+        .as_array()
+        .and_then(|outputs| {
+            outputs
+                .iter()
+                .find(|output| output["kind"] == "artifact")
+                .cloned()
+        })
+        .unwrap_or_else(|| panic!("the row carries the artifact: {outputs}"));
+    assert_eq!(artifact["taskId"], json!(card));
+    assert_eq!(artifact["version"], json!(1));
+    assert_eq!(
+        delivered
+            .iter()
+            .filter(|(.., outputs, _)| outputs
+                .as_array()
+                .is_some_and(|outputs| !outputs.is_empty()))
+            .count(),
+        1,
+        "handed over on one row: {delivered:?}"
+    );
+
+    let (status, history) = client
+        .get(&format!("/api/v1/company/chat/history?desk={ENGINEERING}"))
+        .await;
+    assert_eq!(status, 200, "{history}");
+    let shown = history
+        .as_array()
+        .and_then(|messages| {
+            messages
+                .iter()
+                .find(|message| message["taskId"] == json!(card))
+                .cloned()
+        })
+        .unwrap_or_else(|| panic!("the console reads the linked row: {history}"));
+    assert_eq!(shown["outputs"][0]["targetId"], artifact["targetId"]);
+
+    let (status, listed) = client
+        .get(&format!("/api/v1/company/tasks/{card}/artifacts"))
+        .await;
+    assert_eq!(status, 200, "{listed}");
+    let listed = listed.as_array().cloned().unwrap_or_default();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0]["id"], artifact["targetId"]);
+    assert_eq!(listed[0]["title"], json!(OUTLINE_TITLE));
+    assert_eq!(listed[0]["versions"][0]["body"], json!(OUTLINE));
+
+    let edited = OUTLINE.replace("What it costs", "What it saves");
+    let (status, revised) = client
+        .post(
+            &format!(
+                "/api/v1/company/artifacts/{}/versions",
+                artifact["targetId"].as_str().unwrap()
+            ),
+            json!({ "body": edited }),
+        )
+        .await;
+    assert_eq!(status, 200, "{revised}");
+    assert_eq!(revised["versions"][1]["author"], json!("operator"));
+    assert_eq!(revised["humanEditDiff"]["fromVersion"], json!(1));
+    assert_eq!(revised["humanEditDiff"]["toVersion"], json!(2));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_turn_that_only_publishes_hands_over_on_a_row_of_its_own() {
+    let home = tempfile::tempdir().unwrap();
+    let published = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let marked = Arc::clone(&published);
+    let (base_url, script) = spawn_script_with_latency(
+        seat_script("Noted.", move |seat| {
+            if seat.speaker != ENGINEER {
+                return record_part(seat);
+            }
+            if marked.load(std::sync::atomic::Ordering::SeqCst) {
+                return complete(seat, "The outline is on its card.");
+            }
+            if !seat.called("file_write") {
+                return Reply::Call {
+                    tool: "file_write",
+                    args: json!({ "path": OUTLINE_PATH, "content": OUTLINE }),
+                };
+            }
+            if !seat.called("publish_artifact") {
+                return Reply::Call {
+                    tool: "publish_artifact",
+                    args: json!({ "path": OUTLINE_PATH, "title": OUTLINE_TITLE }),
+                };
+            }
+            marked.store(true, std::sync::atomic::Ordering::SeqCst);
+            Reply::Say(DONE.to_string())
+        }),
+        Duration::from_millis(30),
+    )
+    .await;
+    let (address, runtime) = boot_tooled(home.path(), &base_url).await;
+    let client = Client::new(address);
+    client.sign_in(ADMIN).await;
+
+    client
+        .say(ENGINEERING, "Draft the slide outline for the pilot.")
+        .await;
+    let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
+    dump(&rows, &script);
+    assert!(published.load(std::sync::atomic::Ordering::SeqCst));
+
+    let delivered = delivered_rows(&rows, ENGINEERING);
+    let handed: Vec<_> = delivered
+        .iter()
+        .filter(|(.., outputs, _)| {
+            outputs
+                .as_array()
+                .is_some_and(|outputs| !outputs.is_empty())
+        })
+        .collect();
+    assert_eq!(handed.len(), 1, "handed over once: {delivered:?}");
+    let (kind, text, outputs, task_id) = handed[0];
+    assert!(
+        text.is_empty(),
+        "a row of its own, with nothing said: {text}"
+    );
+    assert_eq!(
+        *kind,
+        Some(UtteranceKind::Post),
+        "it belongs to the episode"
+    );
+    assert_eq!(outputs[0]["kind"], json!("artifact"));
+    assert_eq!(outputs[0]["taskId"], json!(task_id.clone().unwrap()));
+    let recorded = delivered
+        .iter()
+        .position(|(kind, ..)| *kind == Some(UtteranceKind::CompleteEpisode))
+        .expect("the engineer recorded its part on a later turn");
+    let handed_at = delivered
+        .iter()
+        .position(|(_, text, ..)| text.is_empty())
+        .unwrap();
+    assert!(
+        handed_at < recorded,
+        "handed over when its turn's wave ended"
+    );
 }
