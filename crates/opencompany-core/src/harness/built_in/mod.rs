@@ -705,6 +705,9 @@ pub struct CompanyAgent {
     /// The runtime agent. Shared, not locked: see the type docs.
     agent: openhuman_embed::Agent,
     /// Serialises this agent's turns.
+    /// Belts episodes have lent this teammate, by conversation. The same map
+    /// the belt factory reads, so what a host lends here reaches the turn.
+    seating: crate::hive::seating::EpisodeBelts,
     turn_lock: Arc<Mutex<()>>,
     /// The loopback route this agent's model is served on, and the usage tap
     /// its attempts are metered from. See [`model_bridge`](crate::harness::model_bridge).
@@ -1232,19 +1235,34 @@ impl CompanyAgent {
         )?;
         let mcp = crate::hive::mcp_server::global();
         let mcp_bearer = crate::hive::mcp_server::McpAgent::mint_bearer();
-        // The served catalogue: the belt minus what OpenHuman runs itself.
-        let served_names: Vec<String> = blueprint
-            .tools
-            .iter()
-            .map(|tool| tool.name().to_string())
-            .filter(|name| !build::OPENHUMAN_NATIVE_TOOLS.contains(&name.as_str()))
-            .collect();
-        let mut allow_tools: Vec<String> = crate::hive::tools::speech_tool_names()
+        // The speech tools stay on the MCP server; this crate's own tools do
+        // not, so they leave the served catalogue with them.
+        let allow_tools: Vec<String> = crate::hive::tools::served_speech_tool_names()
             .iter()
             .map(|name| (*name).to_string())
             .collect();
-        allow_tools.extend(served_names.iter().cloned());
         let served_catalogue = allow_tools.clone();
+        // Shared once, here, and handed to the spec as a factory that mints
+        // owned handles per turn. OpenHuman's own tools are filtered out: it
+        // runs those itself, and handing them back would register each twice.
+        let mut blueprint = blueprint;
+        let step_labels = steps::StepLabels::from_tools(&blueprint.tools);
+        let belt_names: Vec<String> = blueprint
+            .tools
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect();
+        let gate = Arc::clone(&blueprint.policy);
+        let native_belt: Arc<Vec<Arc<dyn tinytools::Tool>>> =
+            Arc::new(crate::hive::tools::share_belt(
+                std::mem::take(&mut blueprint.tools)
+                    .into_iter()
+                    .filter(|tool| !build::OPENHUMAN_NATIVE_TOOLS.contains(&tool.name()))
+                    .collect(),
+            ));
+        // Created before the agent, because the belt factory closes over it at
+        // registration and an episode writes to it long afterwards.
+        let seating = crate::hive::seating::EpisodeBelts::default();
         let base_id = crate::session_key::runtime_agent_id(company, agent_id);
         let mut runtime_id = base_id.clone();
         let mut attempt = 0u32;
@@ -1256,8 +1274,15 @@ impl CompanyAgent {
                     allow_tools: allow_tools.clone(),
                 }
             });
-            let spec =
-                build::agent_spec_for(&blueprint, &runtime_id, bridge.provider(), attach.as_ref());
+            let spec = build::agent_spec_for(
+                &blueprint,
+                &runtime_id,
+                bridge.provider(),
+                attach.as_ref(),
+                Some(&native_belt),
+                Some(&gate),
+                Some(&seating),
+            );
             match runtime.agent(spec) {
                 Ok(agent) => break agent,
                 Err(openhuman_embed::AgentError::DuplicateId(_)) if attempt < 64 => {
@@ -1284,33 +1309,21 @@ impl CompanyAgent {
                 "[harness] runtime id was taken; registered under a numbered suffix"
             );
         }
-        let step_labels = steps::StepLabels::from_tools(&blueprint.tools);
-        let belt_names: Vec<String> = blueprint
-            .tools
-            .iter()
-            .map(|tool| tool.name().to_string())
-            .collect();
         let build::AgentBlueprint {
-            tools,
-            policy,
             workspace,
             chat_model,
             ..
         } = blueprint;
-        let served: Vec<Arc<dyn tinytools::Tool>> = crate::hive::tools::share_belt(
-            tools
-                .into_iter()
-                .filter(|tool| !build::OPENHUMAN_NATIVE_TOOLS.contains(&tool.name()))
-                .collect(),
-        );
+        // No `.tools(..)`: the belt is the agent's own now. The server still
+        // serves the speech tools, and still holds the policy and workspace
+        // those calls are admitted and sandboxed against.
         let mut entry = crate::hive::mcp_server::McpAgent::new(
             company.clone(),
             agent_id,
             runtime_id.clone(),
             mcp_bearer.clone(),
         )
-        .tools(served.clone())
-        .policy(Arc::new(policy))
+        .policy(Arc::clone(&gate))
         .workspace(workspace.clone());
         if let Some(events) = events {
             entry = entry.events(events);
@@ -1325,10 +1338,11 @@ impl CompanyAgent {
             mcp_bearer,
             company: company.clone(),
             agent,
+            seating,
             turn_lock: Arc::new(Mutex::new(())),
             bridge,
             step_labels,
-            tools: Arc::new(served),
+            tools: native_belt,
             belt_names,
             mcp,
             workspace,
@@ -1399,6 +1413,12 @@ impl CompanyAgent {
     /// this agent is bound into, so two desks cannot run it at once.
     pub fn turn_lock(&self) -> Arc<Mutex<()>> {
         self.turn_lock.clone()
+    }
+
+    /// Where an episode lends this teammate its belt.
+    #[must_use]
+    pub fn seating(&self) -> &crate::hive::seating::EpisodeBelts {
+        &self.seating
     }
 
     /// The names of every tool this agent's belt wires, in belt order — the
@@ -1780,8 +1800,31 @@ impl CompanyAgent {
             .any(|usage| usage.is_zero() || usage.cost_usd == 0.0)
         {
             let segments = progress_pump::attempt_event_segments(&events, usages.len());
+            // **The price when nothing marks where an attempt began.**
+            //
+            // `attempt_event_segments` splits on `AgentProgress::TurnStarted`,
+            // which is declared and never emitted -- a real stream opens
+            // `IterationStarted`. So every segment comes back empty and the
+            // `else { continue }` below skipped silently: a provider that
+            // reported tokens but no price (every scripted double, and a BYOK
+            // route per the note above) kept `cost_usd` at zero, and the spend
+            // a halt announced was zero with it.
+            //
+            // `TurnCostUpdated` is a cumulative rollup, so the stream's last
+            // one prices the turn. It supplies the **price only**, and only to
+            // an attempt that burned something: a turn that burned nothing must
+            // not inherit a total, which is what `zero_usage_turn_writes_nothing`
+            // and its two neighbours exist to hold.
+            let rollup = progress_pump::last_observed_turn_cost(&events);
             for (usage, segment) in usages.iter_mut().zip(segments) {
                 let Some(observed) = progress_pump::last_observed_turn_cost(segment) else {
+                    if !usage.is_zero()
+                        && usage.cost_usd == 0.0
+                        && let Some(rollup) = rollup.as_ref()
+                        && rollup.cost_usd > 0.0
+                    {
+                        usage.cost_usd = rollup.cost_usd;
+                    }
                     continue;
                 };
                 if usage.is_zero() {
@@ -4812,9 +4855,9 @@ impl HarnessPool {
         // (`delegation::seat_turn`), never through the reply text: on a hive
         // seat turn the reply is the seat's own thinking, and on every other
         // turn there is no speech tool to call.
-        let (outcome, turn_costs) = crate::runtime::delegation::with_task_hint(
-            crate::runtime::delegation::operator_words(message).to_string(),
-            deps.approval_requests.turn_scoped(agent.run_with_steer(
+        let (outcome, turn_costs) = deps
+            .approval_requests
+            .turn_scoped(agent.run_with_steer(
                 &augmented,
                 steer,
                 stream_ctx,
@@ -4822,9 +4865,8 @@ impl HarnessPool {
                 // The caller's own, not read off `live` (#1890 I). A turn can
                 // have a conversation and stream nothing.
                 chat,
-            )),
-        )
-        .await;
+            ))
+            .await;
         // Issue B-120: bank what the turn spent BEFORE its result is unwrapped.
         //
         // Both consumers of `turn_costs` used to sit below a `?` on this very
@@ -5754,12 +5796,11 @@ pub(crate) fn agent_policy_for(
 /// [`OpenCompanyError::Config`] when the company seats no teammate by that
 /// name, or whatever stops the session being built.
 #[cfg(feature = "openhuman")]
-pub(crate) fn build_episode_seat(
+pub(crate) fn seat_persona(
     company: &CompanyRecord,
     deps: &HarnessDeps,
     seat: &str,
-    belt: tinyhivemind_openhuman::EpisodeBelt,
-) -> crate::Result<(oh::agent::OpenHumanSessionHost, String)> {
+) -> crate::Result<String> {
     let effective = company.effective_policy();
     let live_roster = company.effective_agents();
     let manifest_agent = live_roster
@@ -5784,19 +5825,17 @@ pub(crate) fn build_episode_seat(
             &grants,
         )
     };
-    // Built twice, from the same inputs, because the two consumers own their
-    // copy: the session's own policy rides the blueprint, and the episode's
-    // admission holds the one it falls back to. `ApprovalPolicy` carries a
-    // gate handle and a spend meter rather than state of its own, so the two
-    // decide alike.
+    // One copy now. It used to be built twice -- once for the blueprint, once
+    // for the episode's admission to fall back to -- because a seat was its
+    // own session with its own policy. The seat is the pool's agent now, and
+    // the admission composes over the gate that agent already carries.
     let policy = approval();
-    let behind = approval();
     let instructions = company.effective_instructions(&manifest_agent.id);
     let blueprint = build::build_agent_with_model(
         &company.id,
         &company.manifest.company.name,
         manifest_agent,
-        policy,
+        Arc::new(policy),
         deps,
         &grants,
         // An episode seat carries no skill deltas and no routed context: it
@@ -5865,20 +5904,14 @@ pub(crate) fn build_episode_seat(
         }
     }
 
-    // The episode's own tools are admitted by name; everything else is this
-    // company's policy to decide, and can still park for the operator.
+    // The persona is all this builds now.
     //
-    // Passing `None` here instead would deny every call the episode does not
-    // serve -- the teammate's whole belt, memory, ledgers, skills -- and the
-    // seat would be told its own tools are "not on this seat's belt".
-    let gate = belt.admit(Some(Arc::new(behind)));
-    // The persona travels back out with the session. A seat's turns after
-    // its first are seeded rather than composed, and a seeded turn renders
-    // no system prompt, so the host has to put this back at the head of the
-    // seed -- see `EpisodeHost::persona`.
-    let persona = blueprint.system_prompt.clone();
-    let session = build::episode_seat(&company.id, seat, blueprint, belt.tools, gate)?;
-    Ok((session, persona))
+    // A seat used to be a second session built around the episode's belt;
+    // it is the pool's own agent now, and the belt reaches it per turn
+    // through `EpisodeBelts`. What cannot travel that way is the standing
+    // prompt: a seeded turn is not cold and composes none, so the host puts
+    // this back at the head of the seed -- see `EpisodeHost::persona`.
+    Ok(blueprint.system_prompt)
 }
 
 /// The roster tools an episode seat is **not** built with.
@@ -5886,7 +5919,7 @@ pub(crate) fn build_episode_seat(
 /// Every one of these queues work for the [`HarnessBrain`] to drain, and no
 /// brain drains inside an episode. See `build_episode_seat` for why they are
 /// withheld rather than left to refuse.
-const EPISODE_WITHHELD_TOOLS: [&str; 3] =
+pub(crate) const EPISODE_WITHHELD_TOOLS: [&str; 3] =
     ["spawn_task", "delegate_to_desk", "delegate_to_teammate"];
 
 pub(crate) fn build_roster(
@@ -6001,7 +6034,7 @@ pub(crate) fn build_roster(
             &company.id,
             company_name,
             manifest_agent,
-            agent_policy,
+            Arc::new(agent_policy),
             deps,
             &grants,
             skill_deltas,
@@ -6090,7 +6123,7 @@ pub(crate) fn build_roster(
             &company.id,
             company_name,
             &manifest_agent,
-            agent_policy,
+            Arc::new(agent_policy),
             deps,
             &grants,
             skill_deltas,

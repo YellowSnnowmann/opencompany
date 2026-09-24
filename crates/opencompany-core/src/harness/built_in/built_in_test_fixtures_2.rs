@@ -516,7 +516,7 @@ pub(super) fn belt(grants: &[&str], is_orchestrator: bool, wire_everything: bool
         &CompanyId::new("acme"),
         "Acme",
         &manifest_agent,
-        policy,
+        std::sync::Arc::new(policy),
         &deps,
         &grants,
         &[],

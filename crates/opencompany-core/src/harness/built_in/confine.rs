@@ -304,7 +304,7 @@ pub fn build_confined_agent(
         chat_model: deps.provider.clone(),
         model,
         workspace,
-        policy,
+        policy: std::sync::Arc::new(policy),
         definition_name: CONFINED_AGENT_ID.to_string(),
     })
 }
