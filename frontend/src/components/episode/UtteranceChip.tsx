@@ -44,12 +44,33 @@ export function utteranceLead(kind: UtteranceKind, hasRecipients: boolean): stri
   return kind === "dm" ? "Sent to" : `${label} to`;
 }
 
-/** Recipients by display name, never by roster id. */
+/**
+ * Recipients by display name, never by roster id.
+ *
+ * Deduplicated by id, not by the name it resolves to — two distinct
+ * teammates sharing a display name are two recipients, not one. Unnamed ids
+ * still collapse to a single "a teammate" entry rather than repeating it.
+ */
 export function recipientNames(
   ids: readonly string[],
   agentNames?: Readonly<Record<string, string>>,
 ): string[] {
-  return [...new Set(ids.map((id) => teammateName(id, agentNames)))];
+  const seenIds = new Set<string>();
+  const names: string[] = [];
+  let unnamedAdded = false;
+
+  for (const id of ids) {
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    if (agentNames?.[id] === undefined) {
+      if (unnamedAdded) continue;
+      unnamedAdded = true;
+    }
+    names.push(teammateName(id, agentNames));
+  }
+
+  return names;
 }
 
 export function roundTitle(revision: number): string {

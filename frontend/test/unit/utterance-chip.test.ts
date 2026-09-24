@@ -57,6 +57,19 @@ describe("utterance chip wording", () => {
     expect(recipientNames(["writer-7f3a"], { engineer: "Engineer" })).toEqual(["a teammate"]);
     expect(recipientNames(["writer-7f3a", "editor-9b2c"])).toEqual(["a teammate"]);
   });
+
+  it("keeps two distinct recipients apart even when they share a configured name", () => {
+    expect(
+      recipientNames(["engineer-1", "engineer-2"], { "engineer-1": "Sam", "engineer-2": "Sam" }),
+    ).toEqual(["Sam", "Sam"]);
+  });
+
+  it("does not drop a named recipient that repeats after an unnamed one", () => {
+    expect(recipientNames(["writer-7f3a", "engineer"], { engineer: "Engineer" })).toEqual([
+      "a teammate",
+      "Engineer",
+    ]);
+  });
 });
 
 describe("UtteranceChip", () => {
