@@ -122,8 +122,8 @@ describe("RoundBand", () => {
     expect(band.textContent).toContain("2/2 seats");
     // A committed seat's lane names its speech act.
     const lanes = [...band.querySelectorAll<HTMLElement>('[data-testid="round-seat"]')];
-    expect(lanes[0].textContent).toContain("post");
-    expect(lanes[1].textContent).toContain("dm");
+    expect(lanes[0].textContent).toContain("Posted");
+    expect(lanes[1].textContent).toContain("Private note");
   });
 
   it("words a seat that ended without speaking", () => {

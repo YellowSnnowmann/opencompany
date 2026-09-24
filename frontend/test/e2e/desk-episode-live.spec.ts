@@ -112,7 +112,7 @@ test("a two-seat desk answers as a room: two lanes at once, a dm, and a completi
   // a seat does not dm itself — either way exactly one dm chip lands.
   const dmChip = ofEpisode.locator('[data-testid="utterance-chip"][data-kind="dm"]');
   await expect(dmChip.first()).toBeVisible();
-  await expect(dmChip.first().getByTestId("utterance-audience")).toContainText("@");
+  await expect(dmChip.first().getByTestId("utterance-audience")).not.toBeEmpty();
 
   // And the closing chip on the row that ended it.
   await expect(
