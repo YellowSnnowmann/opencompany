@@ -53,9 +53,10 @@ pub mod referral;
 /// desk-routing wire shapes (plan Phase 4).
 pub mod routing;
 pub mod session_log;
-#[cfg(test)]
-pub(crate) mod test_support;
 /// The in-flight turn registry, the speech fold and the tool adapter the
 /// server dispatches through (plan Phase 3).
 #[cfg(feature = "openhuman")]
+pub mod shared_tool;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod tools;
