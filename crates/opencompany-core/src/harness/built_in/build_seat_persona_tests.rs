@@ -78,3 +78,35 @@ fn the_seat_persona_is_the_cold_turns_prompt() {
         "the style block is read from the seat's own workspace, as a cold turn reads it"
     );
 }
+
+#[test]
+fn the_reader_brief_reaches_pooled_and_seated_prompts_exactly_once() {
+    for is_orchestrator in [false, true] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let agent = blueprint(dir.path(), is_orchestrator);
+        let seat = rendered_seat_persona(&agent).expect("renders");
+        for (surface, prompt) in [("pooled", &agent.system_prompt), ("seat", &seat)] {
+            assert_eq!(
+                prompt.matches(READER_BRIEF).count(),
+                1,
+                "{surface} prompt (orchestrator: {is_orchestrator}): {prompt}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_reader_brief_sets_the_audience_not_a_length_budget() {
+    assert!(READER_BRIEF.contains("A person reads what you post"));
+    assert!(READER_BRIEF.contains("belong in tool calls"));
+    assert!(
+        !READER_BRIEF.contains('—'),
+        "OpenHuman's style forbids em-dashes"
+    );
+    for budget in ["word limit", "at most", "no more than", "concise"] {
+        assert!(
+            !READER_BRIEF.to_lowercase().contains(budget),
+            "`{budget}` reads as a length rule: {READER_BRIEF}"
+        );
+    }
+}

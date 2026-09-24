@@ -232,6 +232,16 @@ referring to them — \"qa_engineer has the failing case\". An `@` in your reply
 nothing more: it notifies nobody and starts no work, so it cannot hand anything over. Reaching for \
 `@` to make somebody pick something up does not make them pick it up. ";
 
+/// Who reads what an agent writes, and what belongs in a tool call instead.
+///
+/// Every agent, pooled or seated: a reply, a desk post and a relayed answer
+/// all land in front of a person. States the audience and the ordering, not a
+/// length budget; OpenHuman's own style rules own tone.
+pub(crate) const READER_BRIEF: &str = " A person reads what you post. Lead with the answer in \
+plain words, usually a few short sentences; offer detail rather than dump it. Refer to teammates, \
+desks and work by name. Ids, tool names, card, run and sequence numbers, and JSON belong in tool \
+calls, never in what you write. ";
+
 /// The persona system prompt for a company agent.
 ///
 /// Frames the agent as its manifest role at the company, in the first person.
@@ -941,6 +951,7 @@ pub fn build_agent_with_model(
     // Every agent, granted tools or not: an `@` is something any of them can
     // write, and what it does is not guessable from the fact that it renders.
     persona.push_str(MENTION_BRIEF);
+    persona.push_str(READER_BRIEF);
 
     // How this company talks, when it talks by calling a tool.
     //

@@ -165,6 +165,9 @@ const STYLE_HEADING: &str = "# Writing style";
 /// The heading OpenHuman's grounding contract opens with.
 const GROUNDING_HEADING: &str = "## Grounding and tool use";
 
+/// The opening of the brief that tells every agent a person reads its words.
+const READER_BRIEF: &str = "A person reads what you post";
+
 /// Every system message on a request, joined.
 fn system_messages(ask: &Ask) -> String {
     ask.messages
@@ -175,8 +178,9 @@ fn system_messages(ask: &Ask) -> String {
         .join("\n")
 }
 
-/// Every seat request carries the grounding contract and the writing-style
-/// rules exactly once, cold or seeded. Returns how many were seeded.
+/// Every seat request carries the grounding contract, the writing-style rules
+/// and the reader brief exactly once, cold or seeded. Returns how many were
+/// seeded.
 fn every_seat_turn_is_grounded_and_styled(asks: &[Ask]) -> usize {
     let seat_asks: Vec<&Ask> = asks.iter().filter(|ask| seat_of(ask).is_some()).collect();
     assert!(!seat_asks.is_empty(), "no seat turns were captured");
@@ -191,7 +195,7 @@ fn every_seat_turn_is_grounded_and_styled(asks: &[Ask]) -> usize {
         {
             seeded += 1;
         }
-        for heading in [STYLE_HEADING, GROUNDING_HEADING] {
+        for heading in [STYLE_HEADING, GROUNDING_HEADING, READER_BRIEF] {
             assert_eq!(
                 system.matches(heading).count(),
                 1,
