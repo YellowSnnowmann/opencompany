@@ -32,8 +32,9 @@ if [[ -z "$url" || -z "${OPENCOMPANY_INFERENCE_KEY:-}" || -z "${OPENCOMPANY_INFE
   echo "[readable] set OPENCOMPANY_INFERENCE_URL, OPENCOMPANY_INFERENCE_KEY and OPENCOMPANY_INFERENCE_MODEL for a staging model." >&2
   exit 96
 fi
-if [[ "$url" == *tinyhumans.ai* && "$url" != *staging* ]]; then
-  echo "[readable] refusing $url: this eval runs against staging, never production." >&2
+host="$(printf '%s' "$url" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/@]*@)?([^/:]+).*#\2#')"
+if [[ "$host" != staging*.tinyhumans.ai ]]; then
+  echo "[readable] refusing $url: this eval runs only against a staging*.tinyhumans.ai host, got host $host." >&2
   exit 95
 fi
 
