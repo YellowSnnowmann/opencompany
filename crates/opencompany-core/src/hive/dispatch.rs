@@ -24,7 +24,7 @@ use tinyhivemind_embed::Router;
 use crate::hive::conducted::{EpisodeReport, HiveDispatcher, Trigger};
 use crate::hive::graph::desk_hives;
 use crate::ports::events::EventLog;
-use crate::ports::types::{CompanyEvent, CompanyRecord, EventSeq, Mention};
+use crate::ports::types::{CompanyRecord, EventSeq, Mention};
 
 /// The surface a chat message landed on.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -284,82 +284,4 @@ mod dm_surface_tests {
             assert!(dm_episodes_enabled(&Env(Some(on))), "`{on}` is on");
         }
     }
-}
-
-/// A teammate tells the operator it is taking something on, in its own line.
-///
-/// # Why the askee speaks, and not the asker
-///
-/// The obvious shape is the other way round: the teammate holding the
-/// conversation pushes the question into the other's line and steps back. It
-/// does not work, and the reason is structural rather than incidental. An
-/// episode opens when a message arrives *through the cycle* -- that is the one
-/// call site of `spawn_episode`. A row appended straight to the journal is the
-/// record of a message, not the delivery of one: nobody reads for it, and the
-/// teammate it was addressed to never wakes.
-///
-/// Inverting it removes the problem instead of working around it. The askee is
-/// **already running** -- it was asked, so it has a turn. It does not need one
-/// started for it; it needs somewhere to say so. And the operator's reply is an
-/// ordinary message on an ordinary chat, so it comes through the cycle like any
-/// other and opens that teammate's episode by the normal door.
-///
-/// It also makes the transfer consensual. A hand-off pushed at someone is work
-/// they have not agreed to; this is a teammate saying it has the thing, which
-/// is the only version an operator can rely on.
-///
-/// # What the operator sees
-///
-/// A row in `dm:{agent}` -- the same console channel a parked blocker stamps
-/// (`blocker_sender::dm_thread`). From then on that line is where the work is
-/// discussed, and a reply there reaches this teammate rather than whoever the
-/// operator first wrote to.
-///
-/// # Errors
-///
-/// Whatever stops the journal accepting the row.
-pub async fn announce_takeover(
-    events: &dyn EventLog,
-    company: &crate::ports::types::CompanyId,
-    agent: &str,
-    saying: &str,
-) -> crate::Result<(String, EventSeq)> {
-    let chat = crate::company::blocker_sender::dm_thread(agent);
-    let seq = events
-        .append(
-            company,
-            CompanyEvent::AgentReply {
-                chat_id: chat.clone(),
-                agent_id: agent.to_owned(),
-                text: saying.to_owned(),
-                steps: Vec::new(),
-                outputs: Vec::new(),
-                task_id: None,
-                parent: None,
-                mentions: Vec::new(),
-                mention_depth: 0,
-                audience: Default::default(),
-                // Not an episode's row. The announcement outlives whatever
-                // episode prompted it -- the operator can come back to this
-                // line tomorrow, and the episode will be long closed.
-                episode: None,
-            },
-        )
-        .await?;
-    Ok((chat, seq))
-}
-
-/// What the teammate that handed work on tells the operator, if it says
-/// anything at all.
-///
-/// Fixed wording. The tool that handed work over used to return a sentence for
-/// the agent to paraphrase, and it paraphrased it into a promise -- "they will
-/// answer this turn" -- that nothing could keep. What is true is that somebody
-/// else has it and where they will be reached; that is what this says.
-#[must_use]
-pub fn hand_off_notice(to: &str, chat: &str) -> String {
-    format!(
-        "@{to} has picked this up. Their line with you ({chat}) is where they \
-         will reply."
-    )
 }
