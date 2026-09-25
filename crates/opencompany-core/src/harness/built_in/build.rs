@@ -1773,6 +1773,53 @@ fn opencompany_mcp_brief(tools: &[String]) -> String {
     brief
 }
 
+/// `blueprint.system_prompt` rendered the way OpenHuman renders an agent's standing
+/// prompt: the body, then the shared grounding contract and the writing-style
+/// block read from `blueprint.workspace`.
+///
+/// A seat's every turn is seeded, and a seeded session is never cold, so the
+/// runtime composes no prompt of its own for it. The text returned here is
+/// the only system prompt such a turn carries.
+///
+/// # Errors
+///
+/// A prompt section failing to render.
+#[cfg(feature = "openhuman")]
+pub fn rendered_seat_persona(blueprint: &AgentBlueprint) -> crate::Result<String> {
+    let tools = Vec::new();
+    let visible = std::collections::HashSet::new();
+    let context = oh::agent::prompts::PromptContext {
+        workspace_dir: &blueprint.workspace,
+        model_name: &blueprint.model,
+        agent_id: &blueprint.definition_name,
+        tools: &tools,
+        workflows: &[],
+        dispatcher_instructions: "",
+        learned: oh::agent::prompts::LearnedContextData::default(),
+        visible_tool_names: &visible,
+        tool_call_format: oh::agent::prompts::ToolCallFormat::Native,
+        connected_integrations: &[],
+        connected_identities_md: String::new(),
+        include_profile: false,
+        include_memory_md: false,
+        curated_snapshot: None,
+        user_identity: None,
+        personality_roster: Vec::new(),
+        agents_md_global: None,
+        agents_md_local: None,
+    };
+    let rendered =
+        oh::agent::prompts::SystemPromptBuilder::from_final_body(blueprint.system_prompt.clone())
+            .build(&context)
+            .map_err(|error| crate::error::OpenCompanyError::Harness(error.to_string()))?;
+    tracing::debug!(
+        agent = %blueprint.definition_name,
+        bytes = rendered.len(),
+        "[harness] rendered seat persona"
+    );
+    Ok(rendered)
+}
+
 /// The catalogue brief again, on a turn's text, for a session whose pinned
 /// system prompt may name an older one — the roster was rebuilt under it
 /// (see `CompanyAgent::catalogue_brief_stale`). The same block

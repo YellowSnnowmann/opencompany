@@ -5782,14 +5782,12 @@ pub(crate) fn agent_policy_for(
     agent_policy
 }
 
-/// Build one teammate as a seat of a running completion episode.
+/// The standing prompt one teammate carries as a seat of a running episode.
 ///
-/// The same teammate [`build_roster`] would build -- same persona, same
-/// belt, same policy, same model -- as a session host rather than a spec,
-/// with the episode's tools added to that belt and its gate in front of
-/// the policy. A spec cannot take them: it names its tools from the
-/// runtime's registry, and an episode's tools are bound to one seat of one
-/// episode.
+/// The persona [`build_roster`] would build for that teammate, less the
+/// hand-off tools and their briefs, rendered with OpenHuman's grounding and
+/// writing-style blocks so a seeded seat turn reads the prompt a cold turn
+/// would have composed.
 ///
 /// # Errors
 ///
@@ -5904,14 +5902,12 @@ pub(crate) fn seat_persona(
         }
     }
 
-    // The persona is all this builds now.
-    //
-    // A seat used to be a second session built around the episode's belt;
-    // it is the pool's own agent now, and the belt reaches it per turn
-    // through `EpisodeBelts`. What cannot travel that way is the standing
-    // prompt: a seeded turn is not cold and composes none, so the host puts
-    // this back at the head of the seed -- see `EpisodeHost::persona`.
-    Ok(blueprint.system_prompt)
+    // The belt reaches the pooled agent per turn through `EpisodeBelts`; the
+    // standing prompt cannot, because a seeded turn is not cold and composes
+    // none. The host puts this at the head of the seed instead -- see
+    // `EpisodeHost::persona` -- so it has to be the rendered prompt, not the
+    // bare body.
+    build::rendered_seat_persona(&blueprint)
 }
 
 /// The roster tools an episode seat is **not** built with.
