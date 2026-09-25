@@ -346,3 +346,41 @@ fn a_dm_seat_learns_whether_the_line_is_its_own() {
         "a desk needs no correction -- `desk` is the right word there"
     );
 }
+
+#[test]
+fn a_seat_is_named_by_its_roster_name_then_its_role() {
+    let mut record = crate::hive::test_support::record(
+        r#"
+[company]
+name = "Acme"
+
+[[agent]]
+id = "brand_strategist"
+role = "Brand Strategist"
+
+[[agent]]
+id = "copywriter"
+role = "Copywriter"
+"#,
+    );
+    record
+        .overlay_agent_edits
+        .push(crate::ports::types::AgentOverride {
+            agent_id: "brand_strategist".to_string(),
+            name: Some("Tess".to_string()),
+            ..Default::default()
+        });
+    assert_eq!(
+        super::seat_display_name(Some(&record), "brand_strategist"),
+        "Tess"
+    );
+    assert_eq!(
+        super::seat_display_name(Some(&record), "copywriter"),
+        "Copywriter"
+    );
+    assert_eq!(
+        super::seat_display_name(Some(&record), "stranger"),
+        "stranger"
+    );
+    assert_eq!(super::seat_display_name(None, "copywriter"), "copywriter");
+}
