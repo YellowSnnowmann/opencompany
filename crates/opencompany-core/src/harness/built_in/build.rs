@@ -227,10 +227,20 @@ pub fn model_for_tier(tier: Option<&str>) -> String {
 /// them, and pointing an agent at a tool it was not granted is the "a tool
 /// granted, unmentioned" problem pointed the other way. The agents that do
 /// have them are told in [`orchestrator::orchestrator_brief`].
-const MENTION_BRIEF: &str = " Naming a teammate: write their name or id as ordinary text when you are \
-referring to them — \"qa_engineer has the failing case\". An `@` in your reply renders a chip and \
+const MENTION_BRIEF: &str = " Naming a teammate: write their name as ordinary text when you are \
+referring to them: \"Quinn has the failing case\". An `@` in your reply renders a chip and \
 nothing more: it notifies nobody and starts no work, so it cannot hand anything over. Reaching for \
 `@` to make somebody pick something up does not make them pick it up. ";
+
+/// Who reads what an agent writes, and what belongs in a tool call instead.
+///
+/// Every agent, pooled or seated: a reply, a desk post and a relayed answer
+/// all land in front of a person. States the audience and the ordering, not a
+/// length budget; OpenHuman's own style rules own tone.
+pub(crate) const READER_BRIEF: &str = " A person reads what you post. Lead with the answer in \
+plain words, usually a few short sentences; offer detail rather than dump it. Refer to teammates, \
+desks and work by name. Ids, tool names, card, run and sequence numbers, and JSON belong in tool \
+calls, never in what you write. ";
 
 /// The persona system prompt for a company agent.
 ///
@@ -367,6 +377,8 @@ pub fn build_agent_with_model(
     // Deliberate-memory tools, oc-authored over this company's own context
     // port — see `memory_tools`'s doc comment for why not the vendored ones.
     let mut tools: Vec<Box<dyn Tool>> = memory_tools(deps, company, &manifest_agent.id);
+    // Belt tools this agent keeps but is not offered — see AgentBlueprint::unadvertised.
+    let mut unadvertised: Vec<String> = Vec::new();
     // Approvals are an explicit agent action, not a policy side effect. Every
     // roster agent gets this intrinsic tool regardless of external grants.
     tools.push(Box::new(
@@ -503,10 +515,18 @@ pub fn build_agent_with_model(
     // node through `park_gated_calls`. There is no belt on which the question
     // would stage into a queue nothing empties — the `media` failure mode the
     // publish gate below guards against.
+    let agent_label = manifest_agent
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(manifest_agent.role.trim())
+        .to_string();
     tools.push(Box::new(
         crate::harness::built_in::blockers::EscalateToHumanTool::new(
             deps.approval_requests.clone(),
             manifest_agent.id.clone(),
+            agent_label,
         ),
     ));
 
@@ -941,6 +961,7 @@ pub fn build_agent_with_model(
     // Every agent, granted tools or not: an `@` is something any of them can
     // write, and what it does is not guessable from the fact that it renders.
     persona.push_str(MENTION_BRIEF);
+    persona.push_str(READER_BRIEF);
 
     // How this company talks, when it talks by calling a tool.
     //
@@ -1214,6 +1235,22 @@ pub fn build_agent_with_model(
     // `orchestrator_tools` above, and wiring a second, scoped copy beside its
     // unrestricted one would put two tools with the same name on one belt.
     else {
+        // **Kept on the belt, withheld from the model.**
+        //
+        // `ask` replaced these for a teammate, and they were never honestly
+        // available to one: a hive seat has them stripped per turn
+        // (`EPISODE_WITHHELD_TOOLS`), because the queue they fill is drained
+        // by a brain that does not run inside an episode — while the prompt
+        // went on naming them. Observed live: a copywriter read "Never tell
+        // anyone a teammate is out of reach — you can, with
+        // `delegate_to_teammate`" on a turn where the tool was not on its
+        // belt, and answered by broadcasting a hand-off that transferred
+        // nothing to a teammate that never ran.
+        //
+        // The orchestrator and workflow nodes are untouched: they delegate by
+        // design, and this is the member branch.
+        unadvertised.push(crate::runtime::delegation_tools::DELEGATE_TO_DESK_TOOL.to_owned());
+        unadvertised.push(crate::runtime::delegation_tools::DELEGATE_TO_TEAMMATE_TOOL.to_owned());
         persona.push_str(&orchestrator::member_delegation_brief());
         tools.extend(orchestrator::member_delegation_tools(
             &deps.delegations,
@@ -1311,6 +1348,7 @@ pub fn build_agent_with_model(
         system_prompt: persona,
         tools,
         native_tool_names,
+        unadvertised,
         #[cfg(feature = "mcp")]
         company_mcp_servers,
         chat_model,
@@ -1339,6 +1377,19 @@ pub struct AgentBlueprint {
     pub tools: Vec<Box<dyn Tool>>,
     /// The belt's OpenHuman-native tool names — the spec's `ToolScopeSpec`.
     pub native_tool_names: Vec<String>,
+    /// Belt tools this agent keeps but is **not** offered.
+    ///
+    /// `ToolScopeSpec::Named` is the advertisement, so a name left off it is
+    /// dropped before the model sees it — the tool, its queue and its drain
+    /// are untouched, and any caller that still reaches for one works as
+    /// before.
+    ///
+    /// Carried per agent rather than as a constant because the answer is not
+    /// the same for everyone: the orchestrator and a workflow agent node
+    /// delegate as a matter of design, and a workflow run that could not hand
+    /// work on would lose the notice that says so
+    /// (`an_ungrounded_hand_off_surfaces_on_the_runs_own_notices`).
+    pub unadvertised: Vec<String>,
     /// This agent's own granted MCP servers (issue: company servers were
     /// unreachable once the native-dispatch builder was removed — see
     /// `embed_servers_for_agent`'s doc comment), attached directly to the
@@ -1537,6 +1588,9 @@ pub fn agent_spec_for(
     if let Some(belt) = belt {
         for tool in belt.iter() {
             let name = tool.name().to_string();
+            if blueprint.unadvertised.contains(&name) {
+                continue;
+            }
             if !tool_names.contains(&name) {
                 tool_names.push(name);
             }
@@ -1601,6 +1655,13 @@ pub fn agent_spec_for(
         // stop applying.
         let gate = gate.map(Arc::clone);
         let seating = seating.cloned().unwrap_or_default();
+        // Withheld from the model but kept on the belt. `ToolScopeSpec::Named`
+        // is not enough on its own: a per-turn belt carries its own `visible`
+        // set, and `HostTurnTools::advertised` fills that with *every* name it
+        // holds — so a name dropped from the registration scope is advertised
+        // again the moment the factory runs. Observed live: a member's pooled
+        // turn was still offered both delegate verbs.
+        let unadvertised = blueprint.unadvertised.clone();
         spec = spec.tools(move |turn| {
             let mut tools = crate::hive::shared_tool::owned_belt(&belt);
             // **A seated turn carries the episode's tools too.**
@@ -1612,7 +1673,16 @@ pub fn agent_spec_for(
             // operator and sit in a room without being two agents.
             let seated = seating.lent_to(turn.session_id());
             let Some(loan) = seated else {
-                let belt = openhuman_embed::HostTurnTools::advertised(tools);
+                let visible: std::collections::HashSet<String> = tools
+                    .iter()
+                    .map(|tool| tool.name().to_owned())
+                    .filter(|name| !unadvertised.contains(name))
+                    .collect();
+                let belt = openhuman_embed::HostTurnTools {
+                    tools,
+                    visible,
+                    policy: None,
+                };
                 return match &gate {
                     Some(gate) => belt.with_policy(
                         Arc::clone(gate) as Arc<dyn oh::agent::tool_policy::ToolPolicy>
@@ -1752,6 +1822,53 @@ fn opencompany_mcp_brief(tools: &[String]) -> String {
     brief.push_str(&tools.join(", "));
     brief.push('\n');
     brief
+}
+
+/// `blueprint.system_prompt` rendered the way OpenHuman renders an agent's standing
+/// prompt: the body, then the shared grounding contract and the writing-style
+/// block read from `blueprint.workspace`.
+///
+/// A seat's every turn is seeded, and a seeded session is never cold, so the
+/// runtime composes no prompt of its own for it. The text returned here is
+/// the only system prompt such a turn carries.
+///
+/// # Errors
+///
+/// A prompt section failing to render.
+#[cfg(feature = "openhuman")]
+pub fn rendered_seat_persona(blueprint: &AgentBlueprint) -> crate::Result<String> {
+    let tools = Vec::new();
+    let visible = std::collections::HashSet::new();
+    let context = oh::agent::prompts::PromptContext {
+        workspace_dir: &blueprint.workspace,
+        model_name: &blueprint.model,
+        agent_id: &blueprint.definition_name,
+        tools: &tools,
+        workflows: &[],
+        dispatcher_instructions: "",
+        learned: oh::agent::prompts::LearnedContextData::default(),
+        visible_tool_names: &visible,
+        tool_call_format: oh::agent::prompts::ToolCallFormat::Native,
+        connected_integrations: &[],
+        connected_identities_md: String::new(),
+        include_profile: false,
+        include_memory_md: false,
+        curated_snapshot: None,
+        user_identity: None,
+        personality_roster: Vec::new(),
+        agents_md_global: None,
+        agents_md_local: None,
+    };
+    let rendered =
+        oh::agent::prompts::SystemPromptBuilder::from_final_body(blueprint.system_prompt.clone())
+            .build(&context)
+            .map_err(|error| crate::error::OpenCompanyError::Harness(error.to_string()))?;
+    tracing::debug!(
+        agent = %blueprint.definition_name,
+        bytes = rendered.len(),
+        "[harness] rendered seat persona"
+    );
+    Ok(rendered)
 }
 
 /// The catalogue brief again, on a turn's text, for a session whose pinned

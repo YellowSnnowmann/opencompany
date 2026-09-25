@@ -67,10 +67,43 @@ pub fn surface_of(
             Surface::Single
         };
     }
-    match record.resolve_desk_id(chat) {
-        Some(desk_id) if hives.contains_key(&desk_id) => Surface::Room { desk_id },
-        _ => Surface::Single,
+    // A declared desk owns its key outright, hive or no hive.
+    //
+    // The `else` is not dead: `desk_hives` builds nothing for a desk with
+    // nobody to deliberate with, and skips one whose members would not bind.
+    // Falling through on that would hand a DESK's message to the DM arm below
+    // and, where a teammate shares the id (issue #1743), run it as that
+    // teammate's private episode. `Single` is what this answered before the DM
+    // arm existed, and it stays the answer (tinysweeper on #2484).
+    if let Some(desk_id) = record.resolve_desk_id(chat) {
+        return if hives.contains_key(&desk_id) {
+            Surface::Room { desk_id }
+        } else {
+            Surface::Single
+        };
     }
+    // The same DM, addressed the way the console addresses it.
+    //
+    // `dmThreadId` (`views/room/channels.ts`) posts an ordinary teammate's DM
+    // under the **bare** teammate id; only a teammate whose id is a General
+    // spelling is addressed `dm:<id>`. The arm above is keyed on the prefixed
+    // form alone, so every DM the console sends fell through to `Single` and
+    // took the pooled path -- DM episodes were unreachable from the console
+    // whatever `OPENCOMPANY_DM_EPISODES` said, and a seat that never ran never
+    // had `ask`, so a teammate asked to consult somebody wrote the consultation
+    // into the operator's own line instead of holding one.
+    //
+    // Resolved through the roster exactly as `chat_responder` resolves the two
+    // spellings (`runtime::delegation_tools`), and **after** `resolve_desk_id`,
+    // so a declared desk still wins the key it shares with a teammate (issue
+    // #1743) and only a non-desk key can reach a DM hive.
+    if let Some(agent) = record.resolve_roster_agent_id(chat) {
+        let key = format!("{}{agent}", crate::runtime::assignee::DM_PREFIX);
+        if hives.contains_key(&key) {
+            return Surface::Room { desk_id: key };
+        }
+    }
+    Surface::Single
 }
 
 /// Builds the company's hives over the agents `bind` resolves.

@@ -5743,17 +5743,26 @@ pub(crate) fn grants_for_policy(
     agent_scoped_grants(allow, &desk_allows, manifest_agent.tools.as_deref())
 }
 
+/// The MCP `(server, tool)` pairs a teammate's gate lets run without parking.
+///
+/// Resolved through each server's stored tool policy, so an operator's
+/// refusal or approval requirement wins over the manifest declaration. Every
+/// teammate policy takes its read set from here, whether it serves the chat
+/// roster or an episode seat.
+pub(crate) fn agent_mcp_reads(deps: &HarnessDeps) -> crate::policy::McpReadSet {
+    crate::company::mcp_policy::mcp_allow_set(&deps.mcp_servers)
+}
+
 /// The approval policy one teammate is built with.
 ///
 /// Extracted from [`build_roster`] so an episode seat is gated exactly as
 /// the roster agent of the same name is: the same budget, emergency gate,
-/// workspace, meter, read-only MCP declaration and Composio deflection.
+/// workspace, meter, MCP read set and Composio deflection.
 pub(crate) fn agent_policy_for(
     company: &CompanyRecord,
     deps: &HarnessDeps,
     manifest_agent: &ManifestAgent,
     policy: &Policy,
-    mcp_reads: &crate::policy::McpReadSet,
     effective_budget: Option<f64>,
     #[cfg_attr(not(feature = "composio"), allow(unused_variables))] grants: &[String],
 ) -> ApprovalPolicy {
@@ -5763,9 +5772,7 @@ pub(crate) fn agent_policy_for(
         // Issue #243: stamp who the parked effect belongs to, so approving it
         // can hand the grant back to this agent rather than to nobody.
         .with_agent(manifest_agent.id.clone())
-        // Issue #1124: the per-server read-only MCP declaration, so a
-        // server-declared read-only bridge call does not park under `auto`.
-        .with_mcp_reads(mcp_reads.clone());
+        .with_mcp_reads(agent_mcp_reads(deps));
     if let Some(gate) = deps.emergency_gate.as_ref() {
         agent_policy = agent_policy.with_emergency_gate(gate.clone());
     }
@@ -5782,14 +5789,31 @@ pub(crate) fn agent_policy_for(
     agent_policy
 }
 
-/// Build one teammate as a seat of a running completion episode.
+/// The approval policy an episode seat is built with: the roster agent's
+/// policy, resolved from the company's policy and budget in force.
+#[cfg(feature = "openhuman")]
+pub(crate) fn seat_policy(
+    company: &CompanyRecord,
+    deps: &HarnessDeps,
+    manifest_agent: &ManifestAgent,
+    grants: &[String],
+) -> ApprovalPolicy {
+    agent_policy_for(
+        company,
+        deps,
+        manifest_agent,
+        &company.effective_policy(),
+        company.effective_budget(&manifest_agent.id),
+        grants,
+    )
+}
+
+/// The standing prompt one teammate carries as a seat of a running episode.
 ///
-/// The same teammate [`build_roster`] would build -- same persona, same
-/// belt, same policy, same model -- as a session host rather than a spec,
-/// with the episode's tools added to that belt and its gate in front of
-/// the policy. A spec cannot take them: it names its tools from the
-/// runtime's registry, and an episode's tools are bound to one seat of one
-/// episode.
+/// The persona [`build_roster`] would build for that teammate, less the
+/// hand-off tools and their briefs, rendered with OpenHuman's grounding and
+/// writing-style blocks so a seeded seat turn reads the prompt a cold turn
+/// would have composed.
 ///
 /// # Errors
 ///
@@ -5801,7 +5825,6 @@ pub(crate) fn seat_persona(
     deps: &HarnessDeps,
     seat: &str,
 ) -> crate::Result<String> {
-    let effective = company.effective_policy();
     let live_roster = company.effective_agents();
     let manifest_agent = live_roster
         .iter()
@@ -5812,24 +5835,7 @@ pub(crate) fn seat_persona(
             ))
         })?;
     let grants = grants_for_policy(company, &company.manifest.tools.allow, manifest_agent);
-    let mcp_read = crate::company::mcp::mcp_read_set(&deps.mcp_servers);
-    let budget = company.effective_budget(&manifest_agent.id);
-    let approval = || {
-        agent_policy_for(
-            company,
-            deps,
-            manifest_agent,
-            &effective,
-            &mcp_read,
-            budget,
-            &grants,
-        )
-    };
-    // One copy now. It used to be built twice -- once for the blueprint, once
-    // for the episode's admission to fall back to -- because a seat was its
-    // own session with its own policy. The seat is the pool's agent now, and
-    // the admission composes over the gate that agent already carries.
-    let policy = approval();
+    let policy = seat_policy(company, deps, manifest_agent, &grants);
     let instructions = company.effective_instructions(&manifest_agent.id);
     let blueprint = build::build_agent_with_model(
         &company.id,
@@ -5844,7 +5850,7 @@ pub(crate) fn seat_persona(
         &[],
         instructions.as_deref(),
         orchestrator::orchestrator_id(&live_roster).as_deref() == Some(manifest_agent.id.as_str()),
-        &crate::company::team_brief::team_section(company, &manifest_agent.id),
+        &crate::company::team_brief::seat_team_section(company, &manifest_agent.id),
     )?;
     // **The hand-off tools come off an episode seat's belt.**
     //
@@ -5904,14 +5910,12 @@ pub(crate) fn seat_persona(
         }
     }
 
-    // The persona is all this builds now.
-    //
-    // A seat used to be a second session built around the episode's belt;
-    // it is the pool's own agent now, and the belt reaches it per turn
-    // through `EpisodeBelts`. What cannot travel that way is the standing
-    // prompt: a seeded turn is not cold and composes none, so the host puts
-    // this back at the head of the seed -- see `EpisodeHost::persona`.
-    Ok(blueprint.system_prompt)
+    // The belt reaches the pooled agent per turn through `EpisodeBelts`; the
+    // standing prompt cannot, because a seeded turn is not cold and composes
+    // none. The host puts this at the head of the seed instead -- see
+    // `EpisodeHost::persona` -- so it has to be the rendered prompt, not the
+    // bare body.
+    build::rendered_seat_persona(&blueprint)
 }
 
 /// The roster tools an episode seat is **not** built with.
@@ -5947,13 +5951,6 @@ pub(crate) fn build_roster(
     // orchestrator, and it is the next one — not a teammate that is not built.
     let live_roster = company.effective_agents();
     let orchestrator = orchestrator::orchestrator_id(&live_roster);
-
-    // The company's per-server tool policy, resolved once and installed on every
-    // agent's policy so a bridge call the operator allows does not park under
-    // `auto`. Built from the same effective MCP servers the harness wires tools
-    // from, so the gate and the toolbelt cannot disagree about which server
-    // allows what.
-    let mcp_reads = crate::company::mcp_policy::mcp_allow_set(&deps.mcp_servers);
 
     let mut roster =
         Vec::with_capacity(company.manifest.agents.len() + company.overlay_agents.len());
@@ -5996,7 +5993,6 @@ pub(crate) fn build_roster(
             deps,
             manifest_agent,
             policy,
-            &mcp_reads,
             effective_budget,
             &grants,
         );
@@ -6084,30 +6080,21 @@ pub(crate) fn build_roster(
         // operator set an override for it — and an override wins uniformly, the
         // one reason `overlay_agent_to_manifest` can keep `prompt: None`.
         let effective_instructions = company.effective_instructions(&manifest_agent.id);
-        let mut agent_policy = ApprovalPolicy::new(policy, effective_budget)
-            .with_policy_hitl_disabled()
-            .with_requests(deps.approval_requests.clone())
-            // An overlay teammate is a real roster agent and re-dispatches the
-            // same way a manifest one does (issue #243).
-            .with_agent(manifest_agent.id.clone())
-            // Issue #1124: the same per-server read-only MCP declaration the
-            // manifest agents get — an overlay teammate calls the same servers.
-            .with_mcp_reads(mcp_reads.clone());
-        if let Some(gate) = deps.emergency_gate.as_ref() {
-            agent_policy = agent_policy.with_emergency_gate(gate.clone());
-        }
-        if let Some(workspace) = deps.workspace.as_ref() {
-            agent_policy = agent_policy.with_workspace(workspace.clone(), company.id.clone());
-        }
-        if let Some(meter) = deps.meter.as_ref() {
-            agent_policy = agent_policy.with_spend(meter.clone(), company.id.clone());
-        }
         // An overlay teammate is scoped by its desks the same as a manifest one:
         // it can be seated on a desk, and a desk ceiling that applied to only
         // half its members would not be a ceiling.
         let desk_tools = company.agent_desk_tools(&manifest_agent.id);
         let desk_allows: Vec<&[String]> = desk_tools.iter().map(Vec::as_slice).collect();
         let grants = agent_scoped_grants(allow, &desk_allows, manifest_agent.tools.as_deref());
+        #[cfg_attr(not(feature = "composio"), allow(unused_mut))]
+        let mut agent_policy = agent_policy_for(
+            company,
+            deps,
+            &manifest_agent,
+            policy,
+            effective_budget,
+            &grants,
+        );
         // Issue #1759 (S2): same Composio deflection wiring as the manifest loop
         // — an overlay teammate that holds the Composio grant is guarded on the
         // same terms, including the `composio_capability_admits` check (PR
@@ -6342,3 +6329,6 @@ mod built_in_tests_part09;
 #[cfg(test)]
 #[path = "built_in_tests_part10.rs"]
 mod built_in_tests_part10;
+#[cfg(all(test, feature = "openhuman"))]
+#[path = "mcp_reads_tests.rs"]
+mod mcp_reads_tests;
