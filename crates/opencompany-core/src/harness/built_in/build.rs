@@ -1636,6 +1636,13 @@ pub fn agent_spec_for(
         // stop applying.
         let gate = gate.map(Arc::clone);
         let seating = seating.cloned().unwrap_or_default();
+        // Withheld from the model but kept on the belt. `ToolScopeSpec::Named`
+        // is not enough on its own: a per-turn belt carries its own `visible`
+        // set, and `HostTurnTools::advertised` fills that with *every* name it
+        // holds — so a name dropped from the registration scope is advertised
+        // again the moment the factory runs. Observed live: a member's pooled
+        // turn was still offered both delegate verbs.
+        let unadvertised = blueprint.unadvertised.clone();
         spec = spec.tools(move |turn| {
             let mut tools = crate::hive::shared_tool::owned_belt(&belt);
             // **A seated turn carries the episode's tools too.**
@@ -1647,7 +1654,16 @@ pub fn agent_spec_for(
             // operator and sit in a room without being two agents.
             let seated = seating.lent_to(turn.session_id());
             let Some(loan) = seated else {
-                let belt = openhuman_embed::HostTurnTools::advertised(tools);
+                let visible: std::collections::HashSet<String> = tools
+                    .iter()
+                    .map(|tool| tool.name().to_owned())
+                    .filter(|name| !unadvertised.contains(name))
+                    .collect();
+                let belt = openhuman_embed::HostTurnTools {
+                    tools,
+                    visible,
+                    policy: None,
+                };
                 return match &gate {
                     Some(gate) => belt.with_policy(
                         Arc::clone(gate) as Arc<dyn oh::agent::tool_policy::ToolPolicy>
