@@ -67,6 +67,11 @@ for name in HOME PATH TMPDIR TZ LANG LC_ALL RUST_LOG RUST_BACKTRACE; do
   if [[ -n "${!name+x}" ]]; then host_env+=("$name=${!name}"); fi
 done
 
+if curl -fsS "http://$bind/healthz" >/dev/null 2>&1; then
+  echo "[readable] something already answers at http://$bind; pick a free READABLE_BIND" >&2
+  exit 97
+fi
+
 pid=""
 cleanup() { [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true; }
 trap cleanup EXIT
@@ -77,6 +82,10 @@ pid=$!
 
 tries=0
 until curl -fsS "http://$bind/healthz" >/dev/null 2>&1; do
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "[readable] host exited before it answered at http://$bind/healthz" >&2
+    exit 97
+  fi
   tries=$((tries + 1))
   if (( tries > 120 )); then
     echo "[readable] host never answered at http://$bind/healthz" >&2
