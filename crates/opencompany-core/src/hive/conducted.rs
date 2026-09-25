@@ -217,6 +217,7 @@ async fn conduct(
             .await
         }
     };
+    host.flush_deliveries();
     if let Err(tinyhivemind_openhuman::Error::Conduct(tinyhivemind_driver::Error::Parked {
         seats,
     })) = &outcome

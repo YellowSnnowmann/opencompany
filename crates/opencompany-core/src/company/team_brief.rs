@@ -130,7 +130,11 @@ fn render(record: &CompanyRecord, agent_id: &str, audience: Audience) -> String 
         roster.len(),
     ));
     match audience {
-        Audience::Roster => {
+        Audience::Seat => out.push_str(
+            "Every teammate below is a real agent at this company. Call them by name when you \
+             write; an id is for a tool call.\n\nTeammates (name, role: mandate):\n",
+        ),
+        Audience::Roster if orchestrator.as_deref() == Some(agent_id) => {
             out.push_str(match narrowed {
                 false => {
                     "Every teammate below is a real agent you can hand work to: they run it and \
@@ -149,9 +153,13 @@ fn render(record: &CompanyRecord, agent_id: &str, audience: Audience) -> String 
                  them by name when you write.\n"
             ));
         }
-        Audience::Seat => out.push_str(
-            "Every teammate below is a real agent at this company. Call them by name when you \
-             write; an id is for a tool call.\n\nTeammates (name, role: mandate):\n",
+        Audience::Roster => out.push_str(
+            "Every teammate below is a real agent. When you are in a room with one — a desk, or \
+             a conversation somebody opened with you — you can ask them directly and their \
+             answer reaches you there. Otherwise the way to put work on a teammate is to open a \
+             card for it with `spawn_task`, naming them; never say a teammate is out of \
+             reach. Call them by name when you write; an id is for a tool call.\n\nTeammates \
+             (name, role: mandate):\n",
         ),
     }
     for agent in &others {

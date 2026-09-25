@@ -296,6 +296,8 @@ pub fn build_confined_agent(
 
     super::tool_posture::declare();
     Ok(AgentBlueprint {
+        // A confined turn delegates nothing; nothing to withhold.
+        unadvertised: Vec::new(),
         system_prompt: confined_persona(company_name, confinement),
         tools,
         native_tool_names: Vec::new(),

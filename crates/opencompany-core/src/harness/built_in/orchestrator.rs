@@ -1631,7 +1631,7 @@ impl Tool for QueryCompanyTool {
             .unwrap_or_default();
         md.push_str("\n## Desks\n");
         if desks.is_empty() {
-            md.push_str("_No desks. Answer directly rather than delegating._\n");
+            md.push_str("_No desks._\n");
         } else {
             for (id, lead) in &desks {
                 let label = record.as_ref().map_or_else(
@@ -1640,10 +1640,7 @@ impl Tool for QueryCompanyTool {
                 );
                 md.push_str(&format!("- **{label}** (id `{id}` for tool calls) — "));
                 match lead {
-                    Some(lead) => md.push_str(&format!(
-                        "lead: {}; hand work with `delegate_to_desk`\n",
-                        roster_name(&roster, lead)
-                    )),
+                    Some(lead) => md.push_str(&format!("lead: {}\n", roster_name(&roster, lead))),
                     // A leadless answer is two different facts (issue #1835):
                     // an `auto` channel has members but no lead by design —
                     // "cannot be handed work" would be a lie about a staffed
@@ -1653,9 +1650,7 @@ impl Tool for QueryCompanyTool {
                         .as_ref()
                         .is_some_and(|r| !r.desk_responder_mode(id).is_lead()) =>
                     {
-                        md.push_str(
-                            "channel without a lead; who answers is picked per message. `delegate_to_desk` cannot target it — use `delegate_to_teammate` with one of its members\n",
-                        )
+                        md.push_str("channel without a lead; who answers is picked per message\n")
                     }
                     None => md.push_str("no member on the roster, so it cannot be handed work\n"),
                 }
@@ -3763,23 +3758,18 @@ pub fn member_delegation_tools(
 pub fn member_delegation_brief() -> String {
     "\n\n## Handing work on, and tracking it\n\nDo what is yours yourself. When a slice of the ask \
 belongs to a teammate's specialism — a design question to the designer, a security check to the \
-security engineer, a question only the orchestrator can settle — hand that slice to them with \
-`delegate_to_teammate` (naming their roster id from Your team above), or to a whole desk with \
-`delegate_to_desk`, and fold their answer into yours. They run in this turn and their reply comes \
-back to you; the operator hears from you, so relay what they said rather than saying you asked. \
-Every hand-off costs another turn: hand on the part somebody else is genuinely better placed to \
-do, not the whole ask, and never decline something as \"not mine\" when a teammate who owns it is \
-one call away. The chain is bounded: if you are told the work has already been handed on as far \
-as this company allows, that is final, so do what you can and say plainly what is left rather \
-than calling the tool again. You cannot hand work back to where it came from, to yourself, or to \
-somebody it already passed through.\n\nNothing said to you in chat is on the board unless \
-somebody puts it there — a card exists because an agent or the operator opened one, never \
-because a message was sent. Answer questions, discussion and quick asks directly, with no card. \
-When an ask is real work that should be visible and followed up — something you are taking on \
-that outlasts this reply, something for later, or something for somebody else — open a card for \
-it with `spawn_task` (a title, a note with the brief, and the roster id of whoever will do it) \
-and say that you did. A hand-off you make with `delegate_to_teammate` or `delegate_to_desk` \
-opens its own card automatically, so never open a second one for the same work.\n"
+security engineer — and you are in a room with them, `ask` them for it. Asking ends your turn: \
+their answer reaches you in a later brief, not this one. So say you have asked and what you are \
+waiting on; never write as though you already had the answer. When it arrives, fold it in and \
+relay what they said rather than saying you asked. Ask for the part somebody else is genuinely \
+better placed to answer, not the whole ask, and never decline something as \"not mine\" when a \
+teammate who owns it is one question away.\n\nNothing said to you in chat is on \
+the board unless somebody puts it there — a card exists because an agent or the operator opened \
+one, never because a message was sent. Answer questions, discussion and quick asks directly, \
+with no card. When an ask is real work that should be visible and followed up — something you \
+are taking on that outlasts this reply, something for later, or something for somebody else — \
+open a card for it with `spawn_task` (a title, a note with the brief, and the roster id of \
+whoever will do it) and say that you did.\n"
         .to_string()
 }
 
