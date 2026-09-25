@@ -137,13 +137,18 @@ function leakPatterns(ids) {
 /** Lines outside fenced code, which is where a leak counts. */
 function proseLines(text) {
   const out = [];
-  let fenced = false;
+  let open = null;
   for (const line of text.split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) {
-      fenced = !fenced;
-      continue;
+    const fence = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (open === null) {
+      if (fence && !(fence[1][0] === "`" && fence[2].includes("`"))) {
+        open = fence[1];
+        continue;
+      }
+      out.push(line);
+    } else if (fence && fence[1][0] === open[0] && fence[1].length >= open.length && fence[2].trim() === "") {
+      open = null;
     }
-    if (!fenced) out.push(line);
   }
   return out;
 }
