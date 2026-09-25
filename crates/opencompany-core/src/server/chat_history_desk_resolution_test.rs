@@ -172,3 +172,56 @@ async fn resolve_unmatched_selector_passes_through_verbatim() {
         ("ad-hoc-thread".to_string(), "ad-hoc-thread".to_string())
     );
 }
+
+/// A DM resolves to **both** spellings it is journaled under.
+///
+/// The two are not interchangeable in the journal and both are correct: the
+/// console posts an ordinary teammate's DM under the bare id (`dmThreadId`),
+/// while a DM hive keys its episode -- and so every row that episode journals
+/// -- under `dm:<id>`. A reader handed one spelling and matching only it saw
+/// half its own conversation, which is what made an episode's transcript
+/// vanish on reload while the company stayed blocked on an approval raised in
+/// it.
+///
+/// The sibling rides in the **name** slot because `owns` compares either slot
+/// and renders neither.
+#[tokio::test]
+async fn a_dm_resolves_to_both_spellings_it_is_journaled_under() {
+    let store = RecordStore(Some(record_with_group_chat("eng-123", "Engineering")));
+    assert_eq!(
+        resolve(store, Some("ceo")).await,
+        ("ceo".to_string(), "dm:ceo".to_string()),
+        "asked bare, it still owns the rows its episode journaled prefixed"
+    );
+
+    let store = RecordStore(Some(record_with_group_chat("eng-123", "Engineering")));
+    assert_eq!(
+        resolve(store, Some("dm:ceo")).await,
+        ("dm:ceo".to_string(), "ceo".to_string()),
+        "and asked prefixed, it still owns what the console posted bare"
+    );
+}
+
+/// The sibling is a teammate's, and nobody else's.
+#[test]
+fn only_a_roster_teammate_has_a_sibling_spelling() {
+    let record = record_with_group_chat("eng-123", "Engineering");
+
+    assert_eq!(dm_sibling(&record, "ceo").as_deref(), Some("dm:ceo"));
+    assert_eq!(dm_sibling(&record, "dm:ceo").as_deref(), Some("ceo"));
+    assert_eq!(
+        dm_sibling(&record, "ad-hoc-thread"),
+        None,
+        "an ad-hoc thread owns its exact string and nothing else"
+    );
+    assert_eq!(
+        dm_sibling(&record, "eng-123"),
+        None,
+        "a desk is not a DM, so it grows no second key"
+    );
+    assert_eq!(
+        dm_sibling(&record, "dm:nobody"),
+        None,
+        "and a prefixed key naming no teammate folds to nothing"
+    );
+}
