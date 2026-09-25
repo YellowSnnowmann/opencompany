@@ -1,0 +1,210 @@
+# Publish this repo's OWN image (the tenant workload) to GitHub Container
+# Registry so boat.dev sandboxes can pull it.
+#
+# boat.dev sandboxes pull the tenant image directly, the way they already pull
+# `cortexdb/cortexdb`. That pull is anonymous: the sandbox holds no GHCR
+# credential, so the package this workflow pushes MUST be made **public** in the
+# repository's package settings (Packages -> opencompany-tenant -> Package
+# settings -> Change visibility -> Public) — or boat.dev must be handed a pull
+# credential — or every pull gets `denied: denied` and the sandbox cannot start.
+# A freshly created GHCR package is private by default; publishing succeeds while
+# pulling silently fails until that flip is done, so it is called out here rather
+# than left to be discovered from a sandbox that will not boot.
+#
+# This is the same image `deploy-staging.yml` builds for private ECR — same
+# Dockerfile, same feature set, same build-args — and the build recipe here is a
+# deliberate copy of that job's. What this workflow does NOT do: it has no AWS,
+# no OIDC role, no kubectl and no SSH. It publishes to GHCR and stops. Staging
+# deployment stays entirely in `deploy-staging.yml`; this is only the registry
+# half that makes the workload pullable outside the private cluster.
+#
+# Issue #590. Every `uses:` below is a full commit SHA with the resolved version
+# in a trailing comment — `actions/*` included, no exemptions. The rationale is
+# at the top of `ci.yml`; the `Actions pinned` job there fails this workflow if
+# any `uses:` names a tag instead of a 40-hex SHA. The SHAs shared with
+# `deploy-staging.yml` are copied from it so a Dependabot bump moves both
+# together; re-resolve any hand edit with
+# `gh api repos/<owner>/<action>/commits/<tag> --jq .sha`.
+name: Publish tenant image to GHCR
+
+on:
+  push:
+    branches: [main]
+    # Every path the image is actually built from — kept identical to
+    # `deploy-staging.yml`, because both jobs build the same image from the same
+    # context. A file that reaches the image but is absent here merges to main
+    # and changes nothing that GHCR serves until some unrelated selected path
+    # happens to move, so the rule for adding one is the same: is it `COPY`ed by
+    # the Dockerfile, or read by something that is?
+    paths:
+      - 'crates/opencompany-core/**' # the host crate: manifest, build.rs and sources
+      - 'crates/opencompany-tui/**' # a workspace member the builder has to COPY
+      - 'frontend/**'
+      - 'companies/**'
+      - 'deploy/Dockerfile'
+      - 'deploy/Dockerfile.dockerignore'
+      - 'deploy/entrypoint.sh' # COPYed in, and the container's ENTRYPOINT
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml' # COPYed into the builder; it picks the compiler
+      - 'vendor/**'
+      - '.github/workflows/publish-tenant-image.yml'
+  workflow_dispatch: {}
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write # push the tenant image to GHCR under this repository's owner
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      # Path-limited on purpose, exactly as `deploy-staging.yml` does it.
+      # `--features openhuman` compiles the vendored openhuman crate and its
+      # nested graph, and cargo must be able to read the manifests behind
+      # [patch.crates-io], so both of these must be present. Recursing from the
+      # repo root instead would also drag in openhuman's desktop-only submodules
+      # (tauri-cef is a heavy CEF checkout) that no server build compiles.
+      #
+      # `vendor/tinyhivemind` is also required even though it is a top-level
+      # submodule, not one nested under `vendor/openhuman`: `tinyhivemind-hive`
+      # is an unconditional path dependency in `Cargo.toml`, so Cargo must read
+      # its manifest to resolve the dependency graph on every build. This job
+      # uses `submodules: false` and fetches everything it needs explicitly, so
+      # it must fetch this one too.
+      - name: Fetch build vendor submodules
+        run: |
+          git submodule update --init vendor/openhuman vendor/tinyhivemind
+          scripts/ci/init-vendored-submodules.sh
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # ${{ github.actor }} + the run's GITHUB_TOKEN authenticate the push to
+      # GHCR. The token's `packages: write` (granted above) is scoped to this
+      # repository's owner, which is exactly where the image is published below.
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR requires a lowercase image path. `github.repository_owner` is the
+      # org/user name and can carry uppercase; lowercasing it here keeps the
+      # image name valid whoever owns the fork.
+      #
+      # Three tags:
+      #   - `sha-<commit>`  immutable, always pushed. This is the tag a sandbox
+      #                     pins to when it wants a specific build.
+      #   - `latest`        only on the default branch, so a release build or a
+      #                     push to another branch never silently claims it.
+      #   - `<version>`     the workspace crate version, read below. It moves as
+      #                     the crate is released and is the human-readable
+      #                     handle alongside the immutable sha tag.
+      #
+      # The crate inherits its version from `[workspace.package]` in the root
+      # `Cargo.toml` (`crates/opencompany-core/Cargo.toml` says
+      # `version.workspace = true`), so the literal semver lives there and that
+      # is the file grepped. `cargo metadata` would resolve it too but needs the
+      # full manifest graph fetched first; the grep needs nothing and cannot
+      # fail the build on a cold checkout.
+      - name: Compute image name and tags
+        id: meta
+        run: |
+          set -euo pipefail
+          OWNER=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/${OWNER}/opencompany-tenant"
+
+          VERSION=$(grep -A5 '^\[workspace.package\]' Cargo.toml \
+            | grep -m1 '^version' \
+            | sed -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+          if [ -z "${VERSION}" ]; then
+            echo "::error::could not read the workspace crate version from Cargo.toml [workspace.package]" >&2
+            exit 1
+          fi
+
+          {
+            echo "${IMAGE}:sha-${{ github.sha }}"
+            echo "${IMAGE}:${VERSION}"
+            if [ "${{ github.ref }}" = "refs/heads/${{ github.event.repository.default_branch }}" ]; then
+              echo "${IMAGE}:latest"
+            fi
+          } > /tmp/tags.txt
+
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          {
+            echo 'tags<<TAGS_EOF'
+            cat /tmp/tags.txt
+            echo 'TAGS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image to GHCR
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          # Build-args copied verbatim from `deploy-staging.yml` so this image is
+          # byte-for-byte the workload staging ships, differing only in registry.
+          #
+          # `OPENCOMPANY_BUILD_COMMIT` / `VITE_BUILD_COMMIT`:
+          # `deploy/Dockerfile.dockerignore` excludes `.git` and `GITHUB_SHA`
+          # does not cross into a build context, so the build script has no way to
+          # work out which revision it is compiling — every hosted tenant would
+          # report `unknown` forever. `actions/checkout` checked out
+          # `github.sha`, so this names the commit that was actually built, and
+          # both surfaces take the same value so they compute one
+          # `opencompany@<version>+<commit>` release string.
+          #
+          # The `VITE_SENTRY_*` / `SENTRY_*` args and the `sentry_auth_token`
+          # secret are the crash-reporting inputs, all sourced from repository
+          # variables/secrets exactly as `deploy-staging.yml` sources them. They
+          # are optional by construction: unset means an empty build-arg, which
+          # keeps the console silent rather than failing the build — the same "no
+          # DSN, no client" gate every local `npm run build` already takes. This
+          # job deliberately adds no "validate Sentry" gate, so a fork without
+          # those settings still publishes a working image.
+          build-args: |
+            FEATURES=mongodb,openhuman,tinyplace,github,smtp,dns,tinyhumans,webhooks,platform-jwt,export,mcp,media,composio,imap,medulla,sidecar,chargebee,paypal,tinymemory,analytics,crash-reporting
+            OPENCOMPANY_BUILD_COMMIT=${{ github.sha }}
+            VITE_SENTRY_DSN=${{ vars.OPENCOMPANY_REACT_SENTRY_DSN }}
+            VITE_BUILD_COMMIT=${{ github.sha }}
+            VITE_SENTRY_ENVIRONMENT=${{ vars.OPENCOMPANY_SENTRY_ENVIRONMENT || 'hosted-tenant' }}
+            VITE_SENTRY_TRACES_SAMPLE_RATE=${{ vars.OPENCOMPANY_SENTRY_TRACES_SAMPLE_RATE }}
+            SENTRY_URL=${{ vars.SENTRY_URL }}
+            SENTRY_ORG=${{ vars.SENTRY_ORG }}
+            SENTRY_PROJECT_REACT=${{ vars.SENTRY_PROJECT_REACT }}
+            SENTRY_PROJECT_RUST=${{ vars.SENTRY_PROJECT_RUST }}
+          secrets: |
+            sentry_auth_token=${{ secrets.SENTRY_AUTH_TOKEN }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summarize published image
+        run: |
+          {
+            echo '## Tenant image published to GHCR'
+            echo
+            echo "Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo
+            echo 'Tags:'
+            echo '```'
+            printf '%s\n' "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
