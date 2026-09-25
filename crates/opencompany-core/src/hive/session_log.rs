@@ -216,7 +216,7 @@ impl EventLogSessionLog {
         let sequence = Sequence(stored.seq.value());
         match stored.event {
             CompanyEvent::OperatorMessage { text, chat, .. }
-                if self.addresses_desk(chat.as_deref()) =>
+                if self.addresses_desk(chat.as_deref()) && !text.trim().is_empty() =>
             {
                 Some(LogMessage {
                     sequence,
