@@ -164,8 +164,8 @@ impl DeskHost {
                 ..
             } = &mut event
             {
-                *outputs = delivery.outputs;
-                *task_id = delivery.task_id;
+                *outputs = delivery.outputs.clone();
+                *task_id = delivery.task_id.clone();
                 *episode = Some(ReplyEpisode {
                     id: self.episode_id.clone(),
                     revision: self.wave_of(&seat),
@@ -182,13 +182,16 @@ impl DeskHost {
                     seq = seq.value(),
                     "[hive] a seat's outputs got a row of their own"
                 ),
-                Err(error) => tracing::error!(
-                    company = %self.company,
-                    episode = %self.episode_id,
-                    %seat,
-                    %error,
-                    "[hive] could not journal a seat's outputs"
-                ),
+                Err(error) => {
+                    tracing::error!(
+                        company = %self.company,
+                        episode = %self.episode_id,
+                        %seat,
+                        %error,
+                        "[hive] could not journal a seat's outputs; holding them for the next flush"
+                    );
+                    self.hold_delivery(&seat, delivery);
+                }
             }
         }
     }

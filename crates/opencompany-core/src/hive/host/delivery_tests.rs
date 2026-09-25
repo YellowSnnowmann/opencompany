@@ -2,6 +2,9 @@
 
 use std::sync::Arc;
 
+use std::sync::atomic::AtomicBool;
+
+use async_trait::async_trait;
 use tinyhivemind::aside::Viewer;
 use tinyhivemind::{Conversation, SESSION_WINDOW, SessionQuery, project_session};
 use tinyhivemind_driver::Commit;
@@ -12,8 +15,55 @@ use crate::harness::built_in::policy::ApprovalRequestQueue;
 use crate::harness::built_in::publish::{PendingPublish, PublishPayload};
 use crate::hive::test_support::MemoryLog;
 use crate::ports::artifacts::ArtifactKind;
-use crate::ports::events::EventLog;
+use crate::ports::events::{EventLog, EventStreamItem};
 use crate::ports::types::{ChatOutput, ChatOutputKind, CompanyId, EventSeq, StoredEvent};
+use crate::{OpenCompanyError, Result};
+
+/// A journal that refuses the first append whose event matches `refuse_when`,
+/// then behaves like an ordinary [`MemoryLog`] afterwards.
+struct FlakyLog {
+    inner: MemoryLog,
+    refused: AtomicBool,
+}
+
+impl FlakyLog {
+    fn new() -> Self {
+        Self {
+            inner: MemoryLog::default(),
+            refused: AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait]
+impl EventLog for FlakyLog {
+    async fn append(&self, id: &CompanyId, event: CompanyEvent) -> Result<EventSeq> {
+        let is_standalone_delivery_row = matches!(
+            &event,
+            CompanyEvent::AgentReply { text, outputs, .. }
+                if text.is_empty() && !outputs.is_empty()
+        );
+        if is_standalone_delivery_row && !self.refused.swap(true, Ordering::SeqCst) {
+            return Err(OpenCompanyError::Harness(
+                "journal refused the write (test)".to_owned(),
+            ));
+        }
+        self.inner.append(id, event).await
+    }
+
+    async fn read_from(
+        &self,
+        id: &CompanyId,
+        seq: EventSeq,
+        limit: usize,
+    ) -> Result<Vec<StoredEvent>> {
+        self.inner.read_from(id, seq, limit).await
+    }
+
+    fn subscribe(&self, id: &CompanyId) -> futures::stream::BoxStream<'static, EventStreamItem> {
+        self.inner.subscribe(id)
+    }
+}
 
 fn host(events: Arc<dyn EventLog>) -> DeskHost {
     DeskHost::new(
@@ -237,4 +287,26 @@ async fn a_row_that_only_carries_outputs_is_not_shown_to_seats_as_speech() {
     let readable: Vec<&str> = shown.iter().filter_map(|row| row.readable()).collect();
     assert_eq!(readable, vec!["the plan is on the desk"]);
     assert_eq!(replies(&log).await.len(), 2, "the row is still journaled");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delivery_survives_a_failed_journal_write_and_is_retried() {
+    let log = Arc::new(FlakyLog::new());
+    let host = host(log.clone() as Arc<dyn EventLog>);
+    host.hold_delivery("one", delivered("a-1"));
+
+    host.flush_deliveries();
+    assert!(
+        replies(&log.inner).await.is_empty(),
+        "a refused write must not be recorded, and the delivery must not be dropped"
+    );
+
+    host.flush_deliveries();
+    let rows = replies(&log.inner).await;
+    assert_eq!(rows.len(), 1, "the retried flush lands the row: {rows:?}");
+    assert_eq!(
+        rows[0].2,
+        vec![artifact("a-1")],
+        "the outputs survive the retry"
+    );
 }
