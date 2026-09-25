@@ -393,6 +393,15 @@ impl PublishFiling<'_> {
         chat: ChatTarget<'_>,
         published: Vec<publish::PendingPublish>,
     ) -> crate::Result<String> {
+        if published.is_empty() {
+            // Every known caller filters this out before reaching here; this
+            // stays unreachable the same way the check below does, so a
+            // future caller cannot mint a card for a deliverable that is not
+            // there.
+            return Err(crate::OpenCompanyError::Harness(
+                "a conversation minted a card with nothing published".to_string(),
+            ));
+        }
         let Some(tasks) = self.deps.tasks.as_ref() else {
             // Unreachable while the claim is only taken with both stores wired,
             // and an error rather than a silent `Ok` so it stays unreachable:

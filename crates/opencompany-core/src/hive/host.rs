@@ -20,7 +20,7 @@
 //! episode does not serve still reaches that policy and can still park.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use openhuman_core::agent::tinyagents::host::LastTurnUsage;
@@ -137,6 +137,10 @@ pub struct DeskHost {
     /// The pool handles this episode's seats run on, resolved before the
     /// runner is built because `build_seat` is sync and the pool is not.
     seated: Mutex<BTreeMap<String, Arc<crate::harness::built_in::CompanyAgent>>>,
+    /// What each seat's last turn handed over, until a row carries it.
+    deliveries: Mutex<BTreeMap<String, seat_park::Delivery>>,
+    /// Whether a row was committed since the last checkpoint.
+    committed: AtomicBool,
 }
 
 /// What a host does with the approvals one seat's turn raised.
@@ -207,6 +211,8 @@ impl DeskHost {
             parked_ids: Mutex::new(BTreeMap::new()),
             parked_lanes: Mutex::new(BTreeMap::new()),
             seated: Mutex::new(BTreeMap::new()),
+            deliveries: Mutex::new(BTreeMap::new()),
+            committed: AtomicBool::new(false),
         }
     }
 
@@ -637,6 +643,7 @@ impl Journal for DeskHost {
         {
             stored.clone_from(&mentions);
         }
+        self.attach_delivery(&chat, &mut event);
         let seq = self.append(event).map_err(|error| refused(&error))?;
         self.notify(&mentions, seq);
         Ok(Sequence(seq.value()))
@@ -662,6 +669,7 @@ impl Journal for DeskHost {
         &self,
         state: &tinyhivemind_driver::ConductorState,
     ) -> tinyhivemind_openhuman::Result<()> {
+        self.settle_deliveries();
         let revision = self.wave.fetch_add(1, Ordering::SeqCst);
         let state = serde_json::to_value(state).map_err(|error| {
             tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!(
@@ -1214,6 +1222,7 @@ impl Bracket<'_> {
     }
 }
 
+mod delivery;
 mod seat_park;
 
 #[cfg(test)]

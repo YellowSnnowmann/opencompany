@@ -197,7 +197,8 @@ impl EventLogSessionLog {
         self.seats.iter().any(|seat| seat == one) && self.seats.iter().any(|seat| seat == two)
     }
 
-    /// One journal entry as a session row, or `None` when it is not desk chat.
+    /// One journal entry as a session row, or `None` when it is not desk chat
+    /// or says nothing.
     ///
     /// Authorship is the whole point of the conversion, and it is three-way:
     ///
@@ -215,7 +216,7 @@ impl EventLogSessionLog {
         let sequence = Sequence(stored.seq.value());
         match stored.event {
             CompanyEvent::OperatorMessage { text, chat, .. }
-                if self.addresses_desk(chat.as_deref()) =>
+                if self.addresses_desk(chat.as_deref()) && !text.trim().is_empty() =>
             {
                 Some(LogMessage {
                     sequence,
@@ -236,14 +237,16 @@ impl EventLogSessionLog {
                 audience,
                 episode,
                 ..
-            } if self.addresses_desk(Some(&chat_id)) => Some(LogMessage {
-                sequence,
-                chat_id: Some(self.reported_chat(&chat_id)),
-                parent: self.conversation_root(&chat_id, parent, episode.map(|e| e.kind)),
-                author: author_of(&agent_id),
-                content: text,
-                audience: self.audience_of(&chat_id, &agent_id, audience),
-            }),
+            } if self.addresses_desk(Some(&chat_id)) && !text.trim().is_empty() => {
+                Some(LogMessage {
+                    sequence,
+                    chat_id: Some(self.reported_chat(&chat_id)),
+                    parent: self.conversation_root(&chat_id, parent, episode.map(|e| e.kind)),
+                    author: author_of(&agent_id),
+                    content: text,
+                    audience: self.audience_of(&chat_id, &agent_id, audience),
+                })
+            }
             _ => None,
         }
     }

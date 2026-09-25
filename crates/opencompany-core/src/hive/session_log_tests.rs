@@ -663,3 +663,40 @@ async fn a_party_reads_every_reply_of_its_own_conversation() {
     assert_eq!(readable, vec![1], "the researcher reads only the desk");
     assert!(!elided.is_empty(), "the aside is a stub, not absent");
 }
+
+/// An operator message that says nothing is omitted from the port's own
+/// page, the same as an agent reply that says nothing — the row's own doc
+/// says "or says nothing" without carving out which author it applies to.
+///
+/// Read through `SessionLog::read_before` directly rather than through
+/// `project_session`: the library's own projection already collapses
+/// blank-content rows for every caller, so a regression in `row()` itself
+/// would be invisible behind that second filter.
+#[tokio::test]
+async fn a_blank_operator_message_is_omitted_like_a_blank_agent_reply() {
+    let log = Arc::new(MemoryLog::default());
+    let company = MemoryLog::company();
+    log.append(&company, operator_message("eng", "   ", None))
+        .await
+        .unwrap();
+    let real = log
+        .append(&company, operator_message("eng", "Ship it.", None))
+        .await
+        .unwrap();
+    log.append(&company, agent_reply("eng", "planner", "   "))
+        .await
+        .unwrap();
+
+    let adapter = adapter(&log);
+    let page = SessionLog::read_before(&adapter, None, 8)
+        .await
+        .expect("a page");
+
+    assert_eq!(
+        page.messages.len(),
+        1,
+        "both blank rows are omitted: {:?}",
+        page.messages
+    );
+    assert_eq!(page.messages[0].sequence, Sequence(real.value()));
+}

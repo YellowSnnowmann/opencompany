@@ -260,8 +260,8 @@ pub enum PublishDestination {
     /// A conversation turn drains this, and publishing **mints the card** that
     /// carries the artifact.
     Conversation,
-    /// A hive episode seat turn drains this, filing each publish in the room's
-    /// episode.
+    /// A hive episode seat turn drains this, filing each publish on a card
+    /// minted for the room, as a conversation does.
     Episode {
         /// The desk the episode runs on.
         desk_id: String,
@@ -288,9 +288,10 @@ impl PublishDestination {
                  for this conversation when your turn finishes — the operator opens it from that \
                  card's Artifacts tab.",
             ),
-            Self::Episode { .. } => {
-                Some("It is filed with this room's conversation when your turn finishes.")
-            }
+            Self::Episode { .. } => Some(
+                "When your turn finishes it is filed on a board card for this room and linked \
+                 from your message here — the operator opens it from that card's Artifacts tab.",
+            ),
         }
     }
 }
