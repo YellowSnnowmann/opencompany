@@ -123,7 +123,7 @@ describe("episode seat waiting on an approval", () => {
     for (const raw of ["ceo", "ep-1", "ap-1"]) expect(text).not.toContain(raw);
   });
 
-  it("splits one blocker group across two episodes into a card per episode", () => {
+  it("keeps one blocker card across two episodes, outside either band", () => {
     const rows = ROWS.slice(0, 1);
     const first = approval({ id: "ap-7", at_millis: 15, group_key: "gmail", episode: { id: "ep-2", seat: "engineer" } });
     const second = approval({ id: "ap-8", at_millis: 16, group_key: "gmail", episode: { id: "ep-3", seat: "ceo" } });
@@ -133,11 +133,10 @@ describe("episode seat waiting on an approval", () => {
       {},
       foldEpisodes(rows, undefined, "engineering"),
     );
+    const cards = list.filter((i) => i.kind === "approval");
+    expect(cards.map((i) => i.key)).toEqual(["approval:group:gmail"]);
     const bands = list.filter((i): i is Extract<TimelineItem, { kind: "round" }> => i.kind === "round");
-    expect(bands.map((b) => [b.episode.id, b.items.map((i) => i.key)])).toEqual([
-      ["ep-2", ["approval:group:gmail@ep-2"]],
-      ["ep-3", ["approval:group:gmail@ep-3"]],
-    ]);
+    expect(bands.flatMap((b) => b.items.map((i) => i.key))).not.toContain("approval:group:gmail");
     expect(waiting(list).map((w) => w.episode.id)).toEqual(["ep-2", "ep-3"]);
   });
 

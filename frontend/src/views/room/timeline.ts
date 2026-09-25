@@ -660,7 +660,9 @@ export interface WaitingSeat {
 
 /** The episode an approval item was raised in, when a seat raised it. */
 function approvalEpisodeId(item: Extract<TimelineItem, { kind: "approval" }>): string | undefined {
-  return item.approvals.find((approval) => approval.episode?.id)?.episode?.id;
+  const ids = new Set(item.approvals.map((approval) => approval.episode?.id));
+  if (ids.size !== 1) return undefined;
+  return [...ids][0];
 }
 
 /**
@@ -771,18 +773,9 @@ export function buildTimelineItems(
   // pending feed followed by the settled ones, so an item decided on the
   // Approvals page rejoins the card it was raised in instead of opening a
   // second one below it.
-  const episodesByBatch = new Map<string, Set<string>>();
-  for (const approval of approvals) {
-    const key = approvalBatchKey(approval);
-    const seen = episodesByBatch.get(key) ?? new Set<string>();
-    seen.add(approval.episode?.id ?? "");
-    episodesByBatch.set(key, seen);
-  }
   const batches = new Map<string, ApprovalSummary[]>();
   for (const approval of approvals) {
-    const batch = approvalBatchKey(approval);
-    const key =
-      (episodesByBatch.get(batch)?.size ?? 0) > 1 ? `${batch}@${approval.episode?.id ?? ""}` : batch;
+    const key = approvalBatchKey(approval);
     const bucket = batches.get(key);
     if (bucket) bucket.push(approval);
     else batches.set(key, [approval]);
@@ -840,7 +833,7 @@ function parkedOnlyEpisodes(
         rounds: [{ episodeId: ref.id, revision: 0, status: "open", seats: [], messageIds: [] }],
         messageIds: [],
         openedAt: approval.at_millis,
-        roundCount: 0,
+        roundCount: 1,
         referrals: [],
         conversations: [],
         live: false,
