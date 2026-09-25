@@ -23,7 +23,8 @@
 //! The adapter therefore keeps reading raw chunks until it has at least one
 //! qualifying row or the journal runs out.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use tinyhivemind::{LogMessage, Sequence, SessionAuthor, SessionFuture, SessionLog, SessionPage};
 use tinyhivemind_core::aside::Audience;
@@ -71,6 +72,18 @@ pub struct EventLogSessionLog {
     /// every one of them look like a row of this room. Empty by default, so
     /// a log that is not told about them behaves exactly as it always did.
     elsewhere: Vec<(String, String)>,
+    /// The episode these rows are being read for, when one is running.
+    ///
+    /// Rows of a *different* episode that has not completed are withheld —
+    /// see [`settled_elsewhere`](Self::settled_elsewhere).
+    episode: Option<String>,
+    /// Episodes seen to have completed, accumulated as the journal is paged.
+    ///
+    /// Monotonic, and interior-mutable because the library pages through
+    /// several `read_before` calls and what one page learned must still be
+    /// known to the next. `read_before` walks newest-first, so an
+    /// `EpisodeCompleted` is always scanned *before* the rows it settles.
+    completed: Arc<Mutex<HashSet<String>>>,
 }
 
 impl std::fmt::Debug for EventLogSessionLog {
@@ -100,6 +113,8 @@ impl EventLogSessionLog {
             desk_name,
             seats,
             elsewhere: Vec::new(),
+            episode: None,
+            completed: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -143,6 +158,49 @@ impl EventLogSessionLog {
             desk_name: self.desk_name.clone(),
             thread_root,
         }
+    }
+
+    /// Reads this log for `episode`, withholding the rows of any other
+    /// episode still open.
+    pub fn set_episode(&mut self, episode: impl Into<String>) {
+        self.episode = Some(episode.into());
+    }
+
+    /// Whether a row belongs to another episode that has not finished.
+    ///
+    /// # Why open, and not merely other
+    ///
+    /// Because a desk is a room, not a series of meetings. A *completed*
+    /// episode's rows are settled desk history and a later seat should read
+    /// them — scoping by episode identity would make every episode start
+    /// amnesiac and sever the referral and pair context the log deliberately
+    /// admits. What must not cross is a conversation still in flight: a
+    /// second question on the same desk was pulling the first episode's
+    /// parked request into itself, because episodes are keyed
+    /// `(desk, thread_root)` and a threaded one and a channel one coexist
+    /// while the fold narrowed by desk alone.
+    ///
+    /// Unstamped rows — operator messages, announcements, notes — are never
+    /// withheld: they are what the episode is *about*.
+    fn settled_elsewhere(&self, episode: Option<&str>) -> bool {
+        let Some(id) = episode else {
+            return false;
+        };
+        // Only a seat withholds. A reader that is not running an episode --
+        // the console, a plain desk read -- is not a rival to anything and
+        // must see the room whole; withholding there would blank every
+        // episode-stamped row in the transcript.
+        let Some(mine) = self.episode.as_deref() else {
+            return false;
+        };
+        if mine == id {
+            return false;
+        }
+        !self
+            .completed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(id)
     }
 
     /// Whether a stored chat key addresses this desk, or one of the private
@@ -237,7 +295,10 @@ impl EventLogSessionLog {
                 audience,
                 episode,
                 ..
-            } if self.addresses_desk(Some(&chat_id)) && !text.trim().is_empty() => {
+            } if self.addresses_desk(Some(&chat_id))
+                && !text.trim().is_empty()
+                && !self.settled_elsewhere(episode.as_ref().map(|e| e.id.as_str())) =>
+            {
                 Some(LogMessage {
                     sequence,
                     chat_id: Some(self.reported_chat(&chat_id)),
@@ -366,6 +427,16 @@ impl SessionLog for EventLogSessionLog {
                 // Newest-first, so the last entry read is the oldest one seen.
                 cursor = raw.last().map(|stored| stored.seq);
                 for stored in raw {
+                    // Learn completions before the rows they settle. The scan
+                    // is newest-first, so an `EpisodeCompleted` is always seen
+                    // above the episode it closes — which is what lets a row
+                    // be judged settled or in-flight as it is read.
+                    if let CompanyEvent::EpisodeCompleted { episode_id, .. } = &stored.event {
+                        self.completed
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .insert(episode_id.clone());
+                    }
                     if messages.len() == limit {
                         break;
                     }

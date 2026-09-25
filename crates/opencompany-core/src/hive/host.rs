@@ -280,6 +280,9 @@ impl DeskHost {
     #[must_use]
     pub fn episode(mut self, episode_id: impl Into<String>) -> Self {
         self.episode_id = episode_id.into();
+        // The log withholds the rows of any *other* episode still open, so it
+        // has to know which one this is.
+        self.log.set_episode(self.episode_id.clone());
         self
     }
 
