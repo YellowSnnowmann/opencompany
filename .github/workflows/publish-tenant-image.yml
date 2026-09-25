@@ -48,6 +48,7 @@ on:
       - 'Cargo.lock'
       - 'rust-toolchain.toml' # COPYed into the builder; it picks the compiler
       - 'vendor/**'
+      - 'scripts/ci/init-vendored-submodules.sh' # run by the build to fetch nested vendored crates
       - '.github/workflows/publish-tenant-image.yml'
   workflow_dispatch: {}
   release:
@@ -57,13 +58,29 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+# Least privilege at workflow scope: read only. The one job that pushes to GHCR
+# widens to `packages: write` on its own `permissions:` block, so a token
+# capable of publishing a package never leaks to any other job or to steps that
+# run repository-controlled scripts.
 permissions:
   contents: read
-  packages: write # push the tenant image to GHCR under this repository's owner
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # `packages: write` is scoped to this job alone — see the workflow-level
+    # `permissions:` note above.
+    permissions:
+      contents: read
+      packages: write # push the tenant image to GHCR under this repository's owner
+    # Publish only from trusted refs. A `workflow_dispatch` (or any run) from an
+    # arbitrary branch or tag would otherwise check that ref out, run its
+    # branch-controlled workflow/Dockerfile/build scripts, and still hold a
+    # `packages: write` token plus `SENTRY_AUTH_TOKEN` — so the guard allows a
+    # published release, or a run whose ref is the repository default branch
+    # (which is all a `push` to `main` or a default-branch dispatch can be).
+    # Any other ref is refused before checkout.
+    if: github.event_name == 'release' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
 
     steps:
       - name: Checkout
@@ -93,8 +110,9 @@ jobs:
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       # ${{ github.actor }} + the run's GITHUB_TOKEN authenticate the push to
-      # GHCR. The token's `packages: write` (granted above) is scoped to this
-      # repository's owner, which is exactly where the image is published below.
+      # GHCR. The token's `packages: write` (granted on this job above) is scoped
+      # to this repository's owner, which is exactly where the image is published
+      # below.
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -106,14 +124,27 @@ jobs:
       # org/user name and can carry uppercase; lowercasing it here keeps the
       # image name valid whoever owns the fork.
       #
-      # Three tags:
-      #   - `sha-<commit>`  immutable, always pushed. This is the tag a sandbox
-      #                     pins to when it wants a specific build.
-      #   - `latest`        only on the default branch, so a release build or a
-      #                     push to another branch never silently claims it.
-      #   - `<version>`     the workspace crate version, read below. It moves as
-      #                     the crate is released and is the human-readable
-      #                     handle alongside the immutable sha tag.
+      # Every `github.*` / `steps.*` value this step needs is passed through the
+      # step `env:` block and read as a quoted shell variable — never
+      # interpolated into the script text with `${{ ... }}`. A ref or a
+      # workspace version carrying shell metacharacters is then inert data, not
+      # command source, so a crafted ref or manifest cannot execute on the
+      # runner (GitHub's "understanding the risk of script injections").
+      #
+      # Three tags, and which run publishes each is deliberate — GHCR tags are
+      # MUTABLE by default, so a name alone is not a guarantee of content:
+      #   - `sha-<commit>`  always pushed. A convenient commit-scoped reference,
+      #                     not an immutable one. Deployments that need a fixed
+      #                     artifact should pin by IMAGE DIGEST (the digest the
+      #                     summary step records, `@sha256:...`), which the
+      #                     manager's update path already supports; the `sha-`
+      #                     tag is the human-readable handle onto that build.
+      #   - `latest`        only on a push to the default branch, so a release
+      #                     build or a run from another ref never claims it.
+      #   - `<version>`     the workspace crate version, published ONLY on a
+      #                     `release: published` run so a `main` push or a manual
+      #                     dispatch cannot overwrite a released version tag with
+      #                     a different build.
       #
       # The crate inherits its version from `[workspace.package]` in the root
       # `Cargo.toml` (`crates/opencompany-core/Cargo.toml` says
@@ -123,10 +154,16 @@ jobs:
       # fail the build on a cold checkout.
       - name: Compute image name and tags
         id: meta
+        env:
+          OWNER: ${{ github.repository_owner }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          OWNER=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          IMAGE="ghcr.io/${OWNER}/opencompany-tenant"
+          OWNER_LC=$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/${OWNER_LC}/opencompany-tenant"
 
           VERSION=$(grep -A5 '^\[workspace.package\]' Cargo.toml \
             | grep -m1 '^version' \
@@ -137,9 +174,11 @@ jobs:
           fi
 
           {
-            echo "${IMAGE}:sha-${{ github.sha }}"
-            echo "${IMAGE}:${VERSION}"
-            if [ "${{ github.ref }}" = "refs/heads/${{ github.event.repository.default_branch }}" ]; then
+            echo "${IMAGE}:sha-${SHA}"
+            if [ "$EVENT_NAME" = "release" ]; then
+              echo "${IMAGE}:${VERSION}"
+            fi
+            if [ "$EVENT_NAME" = "push" ] && [ "$REF" = "refs/heads/${DEFAULT_BRANCH}" ]; then
               echo "${IMAGE}:latest"
             fi
           } > /tmp/tags.txt
@@ -162,6 +201,16 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           # Build-args copied verbatim from `deploy-staging.yml` so this image is
           # byte-for-byte the workload staging ships, differing only in registry.
+          #
+          # FEATURES: `deploy-staging.yml` is the SOURCE OF TRUTH for this list
+          # (its `env.TENANT_FEATURES`). This value is a deliberate copy and
+          # MUST be kept in step with it — the two workflows build the same
+          # image, so a feature added there has to be added here too. It is not
+          # read from the staging env directly because `env` does not cross
+          # workflow files; de-duplicating would need a shared source both
+          # workflows read (a composite action or a checked-in file), which is a
+          # separate cross-workflow refactor touching `deploy-staging.yml` and is
+          # out of scope for this registry-half change.
           #
           # `OPENCOMPANY_BUILD_COMMIT` / `VITE_BUILD_COMMIT`:
           # `deploy/Dockerfile.dockerignore` excludes `.git` and `GITHUB_SHA`
@@ -197,14 +246,17 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Summarize published image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           {
             echo '## Tenant image published to GHCR'
             echo
-            echo "Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "Digest: \`${DIGEST}\`"
             echo
             echo 'Tags:'
             echo '```'
-            printf '%s\n' "${{ steps.meta.outputs.tags }}"
+            printf '%s\n' "${TAGS}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
