@@ -301,3 +301,31 @@ async fn a_parked_blocker_carries_nothing_an_executor_would_act_on() {
     })
     .await;
 }
+
+/// A caller with nothing published must not mint a card describing a
+/// deliverable that does not exist. Every known caller already filters this
+/// out before reaching `record_conversation_publishes`, so this pins the
+/// defensive guard for whichever caller does not: with both a task board and
+/// an artifact store wired, the pre-guard code would otherwise mint an
+/// orphaned in-review card.
+#[tokio::test]
+async fn record_conversation_publishes_rejects_an_empty_batch() {
+    use crate::runtime::delegation::ChatTarget;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (brain, tasks) = brain_with_artifacts(dir.path());
+
+    let error = brain
+        .record_conversation_publishes("maya", ChatTarget::in_thread(None, None), Vec::new())
+        .await
+        .expect_err("an empty batch must not mint a card");
+    assert!(error.to_string().contains("nothing published"), "{error}");
+    assert!(
+        tasks
+            .list(&CompanyId::new("acme"))
+            .await
+            .expect("list")
+            .is_empty(),
+        "no card must be minted for an empty batch"
+    );
+}
