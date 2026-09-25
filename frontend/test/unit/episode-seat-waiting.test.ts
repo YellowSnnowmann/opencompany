@@ -151,6 +151,7 @@ describe("episode seat waiting on an approval", () => {
     );
     const band = list.find((i): i is Extract<TimelineItem, { kind: "round" }> => i.kind === "round");
     expect(band?.episode.id).toBe("ep-2");
+    expect(band?.episode.roundCount).toBe(1);
     expect(band?.items.map((i) => i.key)).toEqual(["approval:solo:ap-9"]);
     expect(list.some((i) => i.kind === "approval")).toBe(false);
     expect(waiting(list).map((w) => w.seats)).toEqual([[{ agentId: "engineer", approvalIds: ["ap-9"] }]]);
