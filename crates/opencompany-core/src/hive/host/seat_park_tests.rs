@@ -305,3 +305,78 @@ async fn a_host_with_no_registry_releases_nobody() {
             .is_empty()
     );
 }
+
+/// A seat's publish is accepted, and lands in the episode's own bucket.
+///
+/// This is the whole of #2464 at the claim layer. The bucket used to be
+/// claimed as `Unclaimed`, which made `push` return `false` and the tool
+/// refuse in-turn — correct while nothing filed what a seat published, and
+/// the reason a seat that spent a turn producing a report could not hand it
+/// over. Naming the episode is what makes the file recordable; `settle`
+/// hands it to `park_seat`, which files it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_seat_turn_publishes_into_its_own_episode() {
+    let publishes = crate::harness::built_in::publish::PendingPublishQueue::default();
+    let events: Arc<dyn EventLog> = Arc::new(MemoryLog::default());
+    let host = host(events)
+        .claiming(ApprovalRequestQueue::default())
+        .publishing(publishes.clone());
+
+    let accepted = Arc::new(Mutex::new(None));
+    let seen = Arc::clone(&accepted);
+    let pushing = publishes.clone();
+    host.wrap_turn(
+        "one",
+        Box::pin(async move {
+            *seen.lock().unwrap() = Some(pushing.push(
+                crate::harness::built_in::publish::PendingPublish {
+                    agent: "one".to_owned(),
+                    source: "report.md".to_owned(),
+                    title: "Report".to_owned(),
+                    kind: crate::ports::artifacts::ArtifactKind::Markdown,
+                    note: None,
+                    payload: crate::harness::built_in::publish::PublishPayload::Text(
+                        "body".to_owned(),
+                    ),
+                },
+            ));
+            Ok("published".to_owned())
+        }),
+    )
+    .await
+    .expect("the turn runs");
+
+    assert_eq!(
+        *accepted.lock().unwrap(),
+        Some(true),
+        "a seat's publish is staged rather than refused"
+    );
+
+    // **Through the drain, not just the push.**
+    //
+    // Stopping at `push` would pass even if `settle` threw the files away.
+    // `after_turn` takes the claims and settles them, and `park_seat` is
+    // where they are filed -- so the assertion has to reach it.
+    let settled = host
+        .take_seat_claims("one")
+        .expect("the turn's claims were kept for `after_turn`")
+        .settle();
+    assert_eq!(
+        settled.publishes.len(),
+        1,
+        "settle hands the staged file on to be filed, rather than counting it"
+    );
+    assert_eq!(settled.publishes[0].source, "report.md");
+
+    // This host has no roster, so filing cannot succeed -- which is the path
+    // worth pinning: the seat must be told *which* file did not land, by
+    // name, because nothing else can recover it. A bare count would leave it
+    // reporting a number the operator cannot act on.
+    let held = host.park_seat("one", settled).await;
+    assert!(!held, "a failed filing does not hold the seat");
+    let told = readable_by(&host, "one").await;
+    assert!(
+        told.iter().any(|row| row.contains("report.md")),
+        "the seat is told which file could not be filed: {told:?}"
+    );
+}

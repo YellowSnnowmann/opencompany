@@ -1,96 +1,19 @@
 //! What a seat's turn hands over, and the row that carries it.
 //!
-//! A seat's publishes are filed when its turn ends, on a board card minted
-//! for the room the same way a conversation's are, and every output the turn
-//! produced rides the seat's next row on the desk. A turn that produced
-//! outputs and said nothing on the desk gets a row of its own once the wave
-//! has committed everything it will.
+//! A seat's publishes are filed when its turn ends (`seat_park::park_seat`),
+//! on a board card minted for the room the same way a conversation's are, and
+//! every output the turn produced rides the seat's next row on the desk. A
+//! turn that produced outputs and said nothing on the desk gets a row of its
+//! own once the wave has committed everything it will.
 
 use std::sync::PoisonError;
 use std::sync::atomic::Ordering;
 
 use super::DeskHost;
-use super::seat_park::{Delivery, SeatClaims};
-use crate::harness::built_in::publish::PublishDestination;
+use super::seat_park::Delivery;
 use crate::ports::types::{CompanyEvent, ReplyEpisode, UtteranceKind};
-use crate::runtime::delegation::ChatTarget;
 
 impl DeskHost {
-    /// Where a seat turn's publishes go: this episode, when the company has a
-    /// board and an artifact store to file them on.
-    pub(super) fn publish_destination(&self) -> PublishDestination {
-        match self.roster.as_ref() {
-            Some((_, deps)) if deps.files_conversation_publishes() => PublishDestination::Episode {
-                desk_id: self.desk_id.clone(),
-                episode_id: self.episode_id.clone(),
-                thread_root: self.thread_root,
-            },
-            _ => PublishDestination::Unclaimed,
-        }
-    }
-
-    /// Files what `seat`'s turn published, when the turn ran to its end.
-    pub(super) async fn file_publishes(&self, seat: &str, claims: &mut SeatClaims, ran: bool) {
-        let published = claims.published();
-        if published.is_empty() {
-            return;
-        }
-        let count = published.len();
-        let deps = match self.roster.as_ref() {
-            Some((_, deps)) if ran => deps,
-            _ => {
-                tracing::warn!(
-                    company = %self.company,
-                    episode = %self.episode_id,
-                    %seat,
-                    count,
-                    ran,
-                    "[hive] a seat's published files were not filed"
-                );
-                claims.not_filed(count);
-                return;
-            }
-        };
-        let publisher = published
-            .first()
-            .map(|publish| publish.agent.clone())
-            .filter(|agent| !agent.is_empty())
-            .unwrap_or_else(|| seat.to_owned());
-        let chat = ChatTarget::in_thread(Some(&self.desk_id), self.thread_root);
-        let filed = claims
-            .collecting(Box::pin(deps.record_conversation_publishes(
-                &self.company,
-                &publisher,
-                chat,
-                published,
-            )))
-            .await;
-        match filed {
-            Ok(card) => {
-                tracing::info!(
-                    company = %self.company,
-                    episode = %self.episode_id,
-                    %seat,
-                    task_id = %card,
-                    count,
-                    "[hive] filed a seat's published files"
-                );
-                claims.filed_on(card);
-            }
-            Err(error) => {
-                tracing::error!(
-                    company = %self.company,
-                    episode = %self.episode_id,
-                    %seat,
-                    count,
-                    %error,
-                    "[hive] a seat's published files could not be recorded"
-                );
-                claims.not_filed(count);
-            }
-        }
-    }
-
     /// Keeps what `seat`'s turn handed over for its next desk row.
     pub(super) fn hold_delivery(&self, seat: &str, delivery: Delivery) {
         if delivery.is_empty() {

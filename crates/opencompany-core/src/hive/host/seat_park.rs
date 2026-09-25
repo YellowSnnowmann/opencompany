@@ -6,8 +6,9 @@
 //! the explicit-request guard, a publish claim and an output claim. `after_turn`
 //! drains the approval bucket and parks it through the runtime's shared
 //! [`ApprovalParker`], under that same turn key, so the resolve path can find
-//! its way back to this episode. What the turn published and produced is
-//! filed when the turn ends (`delivery`).
+//! its way back to this episode. `park_seat` files what the turn published on
+//! a card minted for the room, and hands the outputs it produced, along with
+//! that card, to `delivery` to ride the seat's next row on the desk.
 
 use std::sync::PoisonError;
 
@@ -35,22 +36,33 @@ pub(crate) struct SeatQueues {
 }
 
 impl SeatQueues {
-    /// Opens one seat turn's claims, its publishes headed for `destination`.
+    /// Opens one seat turn's claims.
+    ///
+    /// The publish bucket names the **episode** it belongs to (#2464). It was
+    /// `Unclaimed` while nothing filed what a seat published, which refused
+    /// the call in-turn rather than staging into a queue nobody drained --
+    /// the right fail-safe, and the reason a seat that had spent a whole turn
+    /// producing a report could not hand it over. `settle` drains this bucket
+    /// and `park_seat` files it, so the destination is now a promise the host
+    /// keeps.
     pub(crate) fn claim(
         &self,
         episode_id: &str,
         seat: &str,
-        destination: PublishDestination,
+        desk_id: &str,
+        thread_root: Option<EventSeq>,
     ) -> SeatClaims {
         SeatClaims {
             approvals: self
                 .approvals
                 .claim(ApprovalScope::Seat(turn_key(episode_id, seat))),
             queue: self.approvals.clone(),
-            publish: self.publishes.claim(destination),
+            publish: self.publishes.claim(PublishDestination::Episode {
+                desk_id: desk_id.to_owned(),
+                episode_id: episode_id.to_owned(),
+                thread_root,
+            }),
             outputs: self.publishes.output_collector().claim(),
-            unfiled: 0,
-            task_id: None,
         }
     }
 }
@@ -61,15 +73,19 @@ pub(crate) struct SeatClaims {
     queue: ApprovalRequestQueue,
     publish: PublishClaim,
     outputs: TurnOutputClaim,
-    unfiled: usize,
-    task_id: Option<String>,
 }
 
 /// What a seat turn left behind once its claims are released.
 pub(crate) struct SettledTurn {
     requests: DrainedRequests,
-    unfiled: usize,
-    delivery: Delivery,
+    /// What the seat published, to be filed by `park_seat`. The files
+    /// themselves rather than a count: the count could only be apologised
+    /// for.
+    pub(super) publishes: Vec<PendingPublish>,
+    /// Still open, so filing (which records an artifact output) lands in the
+    /// same bucket as whatever the turn itself produced, before either is
+    /// read.
+    outputs: TurnOutputClaim,
 }
 
 /// What a seat turn hands over: the outputs it produced, and the card its
@@ -102,42 +118,14 @@ impl SeatClaims {
         .await
     }
 
-    /// Takes what the turn published, when its claim had somewhere to file it.
-    pub(crate) fn published(&self) -> Vec<PendingPublish> {
-        if self.publish.is_claimed() {
-            self.publish.drain()
-        } else {
-            Vec::new()
-        }
-    }
-
-    /// Runs `fut` so the outputs it records belong to this turn.
-    pub(crate) async fn collecting<F, T>(&self, fut: F) -> T
-    where
-        F: std::future::Future<Output = T>,
-    {
-        self.outputs.scoped(fut).await
-    }
-
-    /// Records that the turn's files were filed on `card`.
-    pub(crate) fn filed_on(&mut self, card: String) {
-        self.task_id = Some(card);
-    }
-
-    /// Records `count` published files that could not be filed.
-    pub(crate) fn not_filed(&mut self, count: usize) {
-        self.unfiled += count;
-    }
-
-    /// Drains the claims and releases them.
+    /// Releases the approval and publish claims, keeping the output claim
+    /// open for `park_seat` to file publishes and drain outputs inside one
+    /// bucket.
     pub(crate) fn settle(self) -> SettledTurn {
         SettledTurn {
             requests: self.approvals.drain(MAX_APPROVAL_REQUESTS_PER_TURN),
-            unfiled: self.unfiled + self.publish.drain().len(),
-            delivery: Delivery {
-                outputs: self.outputs.drain(),
-                task_id: self.task_id,
-            },
+            publishes: self.publish.drain(),
+            outputs: self.outputs,
         }
     }
 }
@@ -292,6 +280,22 @@ impl DeskHost {
         self
     }
 
+    /// Claims seat turns' publishes on `publishes` rather than the roster's.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn publishing(mut self, publishes: PendingPublishQueue) -> Self {
+        let approvals = self
+            .queues
+            .as_ref()
+            .map(|queues| queues.approvals.clone())
+            .unwrap_or_default();
+        self.queues = Some(SeatQueues {
+            approvals,
+            publishes,
+        });
+        self
+    }
+
     /// Takes decisions for parked seats from `releases`.
     #[must_use]
     pub fn releasing(mut self, releases: EpisodeReleases) -> Self {
@@ -313,22 +317,114 @@ impl DeskHost {
             .remove(seat)
     }
 
+    /// Files what one seat published, on a card minted for this episode.
+    ///
+    /// The card's origin is the desk and the thread the episode answers in,
+    /// so the operator opens the deliverable from the room that produced it
+    /// rather than from a card floating free of any conversation.
+    ///
+    /// # Errors
+    ///
+    /// Whatever stops the board or the artifact store recording it.
+    async fn file_seat_publishes(
+        &self,
+        seat: &str,
+        publishes: Vec<PendingPublish>,
+    ) -> crate::Result<String> {
+        let Some((_, deps)) = self.roster.as_ref() else {
+            return Err(crate::OpenCompanyError::Harness(
+                "a seat published a file but this host has no roster to file it with".to_string(),
+            ));
+        };
+        let card = crate::harness::publish::filing::PublishFiling {
+            company: &self.company,
+            deps,
+        }
+        .record_conversation_publishes(
+            seat,
+            crate::runtime::delegation::ChatTarget::in_thread(
+                Some(&self.desk_id),
+                self.thread_root,
+            ),
+            publishes,
+        )
+        .await?;
+        tracing::info!(
+            company = %self.company,
+            episode = %self.episode_id,
+            %seat,
+            task_id = %card,
+            "[hive] a seat published; minted a card to carry it"
+        );
+        Ok(card)
+    }
+
     /// Parks what a seat's turn raised, telling the seat about anything that
     /// did not reach the operator. `true` when something parked.
     pub(super) async fn park_seat(&self, seat: &str, settled: SettledTurn) -> bool {
         let SettledTurn {
             requests,
-            unfiled,
-            delivery,
+            publishes,
+            outputs,
         } = settled;
-        self.hold_delivery(seat, delivery);
         let mut problems = Vec::new();
-        if unfiled > 0 {
-            problems.push(format!(
-                "{unfiled} file(s) you published in this room were not filed anywhere. Tell \
-                 the operator plainly that they were not delivered."
-            ));
+        // **What the seat published, on a card that carries it (#2464).**
+        //
+        // This used to be an apology -- "not filed anywhere, tell the
+        // operator they were not delivered" -- because the bucket had no
+        // destination and nothing drained it. Now the claim names the
+        // episode and this is the drain, so the file becomes a card in the
+        // room it came out of. A failure here still gets the apology: the
+        // work ran, and a seat that is told nothing would report a delivery
+        // that did not happen.
+        let mut task_id = None;
+        if !publishes.is_empty() {
+            // **Named, not counted.**
+            //
+            // Nothing can durably retain these: the bucket belongs to a claim
+            // that `settle` has already released, and no later drain reaches
+            // an episode -- `push_refusal` files into the bucket the workflow
+            // runner drains, which is the "queue nobody empties" shape this
+            // whole area exists to avoid. What is recoverable is the file
+            // itself, still in the seat's sandbox under this path. So the
+            // seat is told which paths did not land, and can say so precisely
+            // rather than reporting a number the operator cannot act on.
+            let sources: Vec<String> = publishes
+                .iter()
+                .map(|staged| staged.source.clone())
+                .collect();
+            // Scoped by the turn's own output claim: `record_published_artifacts`
+            // registers the artifact through the same ambient collector a
+            // tool call writes to, and that registration is a no-op outside a
+            // claimed scope.
+            match outputs
+                .scoped(self.file_seat_publishes(seat, publishes))
+                .await
+            {
+                Ok(card) => task_id = Some(card),
+                Err(error) => {
+                    tracing::error!(
+                        company = %self.company,
+                        episode = %self.episode_id,
+                        %seat,
+                        %error,
+                        sources = sources.join(", "),
+                        "[hive] a seat published files that could not be recorded"
+                    );
+                    problems.push(format!(
+                        "These file(s) you published in this room could not be filed: {}. They \
+                         are still in your sandbox at those paths. Tell the operator plainly \
+                         that they were not delivered, and name them.",
+                        sources.join(", ")
+                    ));
+                }
+            }
         }
+        // What the turn produced rides its next row on the desk, or a row of
+        // its own once the wave has committed everything it will
+        // (`delivery.rs`).
+        let outputs = outputs.drain();
+        self.hold_delivery(seat, Delivery { outputs, task_id });
         if let Some(notice) = requests.overflow_notice() {
             problems.push(notice);
         }

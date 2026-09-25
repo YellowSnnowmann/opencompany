@@ -1,144 +1,31 @@
-//! Filing what a turn published: the board card a conversation's publishes
-//! land on, and the versioned artifacts on it.
+//! Filing a publish: the card it lands on and the artifact chain it extends.
 //!
-//! Chat turns, approval continuations and hive episode seats all file the
-//! same way, so the filing lives on [`HarnessDeps`] rather than on any one
-//! caller.
+//! Moved off `HarnessBrain` because a brain is no longer the only thing that
+//! finishes a turn. A hive episode's seat publishes inside a turn the brain
+//! never sees -- the episode is spawned detached and runs on its own task --
+//! so the code that records a deliverable cannot live on the one type that
+//! happens to run chat turns.
+//!
+//! What it needed was never the brain. Five references, all of them `deps` or
+//! the company id: [`PublishFiling`] is those two, and both callers hand them
+//! over. The bodies are unchanged from the methods they replace.
 
-use crate::Result;
+use super::super::*;
 use crate::company::artifact_mirror;
-use crate::harness::HarnessDeps;
-use crate::harness::publish::{self, PendingPublish};
 use crate::ports::artifacts::{ArtifactAuthor, ArtifactRecord};
 use crate::ports::tasks::{COLUMN_IN_REVIEW, TaskOutputArtifact};
-use crate::ports::types::CompanyId;
 use crate::ports::{TaskOrigin, TaskRecord, generate_id, now_millis};
 use crate::runtime::delegation::ChatTarget;
 
-impl HarnessDeps {
-    /// Whether a conversation's publishes have a card and an artifact store
-    /// to be filed on.
-    #[must_use]
-    pub fn files_conversation_publishes(&self) -> bool {
-        self.tasks.is_some() && self.artifacts.is_some()
-    }
+/// The stores a publish is filed into, for whoever is finishing the turn.
+pub(crate) struct PublishFiling<'a> {
+    /// The company the card and its artifacts belong to.
+    pub(crate) company: &'a CompanyId,
+    /// Where the task board and the artifact store are reached.
+    pub(crate) deps: &'a HarnessDeps,
+}
 
-    /// Records what a **conversation** turn published, minting the card that
-    /// carries it (issue #445). Returns that card's id.
-    ///
-    /// # Why a card, rather than a company-level artifact
-    ///
-    /// The issue allows either: a chat deliverable becomes an artifact attached
-    /// to no card, or the act of publishing mints the card. This path takes the
-    /// second, and the deciding argument is *reachability* — which is, after
-    /// all, the entire bug.
-    ///
-    /// An [`ArtifactRecord`] carries a non-optional `task_id`, `(task_id,
-    /// source)` **is** its identity, the only route that lists artifacts is
-    /// `GET /tasks/{task_id}/artifacts`, and the only console surface that
-    /// renders one is the per-task Artifacts tab. A card-less artifact would
-    /// therefore need an optional `task_id` (breaking the identity contract), a
-    /// new company-scoped route, and a new console view — and until that last
-    /// piece shipped, the artifact would be recorded and still unreachable,
-    /// which is precisely the failure being fixed, merely moved one layer down.
-    /// Minting the card reuses a path the operator can already open today.
-    ///
-    /// It is also honest about what happened rather than a workaround: an agent
-    /// that produced a deliverable did a unit of work, and a board that shows it
-    /// is more accurate than one that does not. The card lands in
-    /// [`COLUMN_IN_REVIEW`] because that is where the lifecycle already puts
-    /// finished agent work awaiting a person — `COLUMN_DONE` is reached only by
-    /// a human accepting it, and this fix does not get to decide that on their
-    /// behalf.
-    ///
-    /// # What it deliberately does not do
-    ///
-    /// No `output` stamp. That field pins a `run_id` and an attempt ordinal, and
-    /// a chat turn has neither — inventing one would put a fabricated attempt on
-    /// a card to make a field look populated. The artifacts are reachable
-    /// through the tab regardless; an invented run id would not be true.
-    pub(crate) async fn record_conversation_publishes(
-        &self,
-        company: &CompanyId,
-        responder: &str,
-        chat: ChatTarget<'_>,
-        published: Vec<PendingPublish>,
-    ) -> Result<String> {
-        if published.is_empty() {
-            // Every known caller filters this out before reaching here; this
-            // stays unreachable the same way the check below does, so a
-            // future caller cannot mint a card for a deliverable that is not
-            // there.
-            return Err(crate::OpenCompanyError::Harness(
-                "a conversation minted a card with nothing published".to_string(),
-            ));
-        }
-        let Some(tasks) = self.tasks.as_ref() else {
-            // Unreachable while the claim is only taken with both stores wired,
-            // and an error rather than a silent `Ok` so it stays unreachable:
-            // the caller surfaces this to the operator instead of dropping the
-            // deliverable the way #445 did.
-            return Err(crate::OpenCompanyError::Harness(
-                "a conversation published a file but no task board is wired".to_string(),
-            ));
-        };
-
-        let card = TaskRecord {
-            id: generate_id(),
-            title: crate::ports::tasks::TaskTitle::system(&publish::conversation_card_title(
-                &published,
-            )),
-            note: Some(publish::conversation_card_note(responder, &published)),
-            // Finished agent work a person has not accepted yet — the same
-            // landing `column_for_settled_run(Succeeded)` gives a dispatched run.
-            column: COLUMN_IN_REVIEW.to_string(),
-            priority: "medium".to_string(),
-            assignee: responder.to_string(),
-            updated_at_millis: now_millis(),
-            // The conversation this came out of, so the card points back at the
-            // thread that produced it (#151 §3.2's field, same meaning).
-            // Issue #1890 B: and the thread inside it, so a file published
-            // inside a thread leaves its card pointing at that thread rather
-            // than at the channel around it. `None` for the thread is the
-            // channel-level conversation, which is where every publish landed
-            // before threads were part of the key.
-            origin: TaskOrigin::new(chat.chat_id.map(str::to_string), chat.thread_root),
-            // A chat turn has no card in scope, so this is a lineage root —
-            // the same `None` a `spawn_task` from an ordinary chat turn writes.
-            parent_task_id: None,
-            output: None,
-            plan: None,
-            planning_attempts: Vec::new(),
-            deliverable: crate::ports::tasks::TaskDeliverable::Once,
-            workflow_proposal: None,
-            origin_run_id: None,
-            origin_workflow_id: None,
-            origin_message_seq: None,
-            bounced: None,
-        };
-        // The card is written **first**: an artifact's `task_id` must name a
-        // card that exists. If the artifact writes then fail, the failure
-        // direction is a visible card whose note explains what it was for —
-        // recoverable, and the operator is told below. The reverse order would
-        // leave artifacts pointing at a card that was never created, which is
-        // unreachable by every route and indistinguishable from the original
-        // bug.
-        tasks.upsert(company, &card).await?;
-
-        // No run id: there is no attempt row behind a chat turn, and
-        // `stamp_run` is skipped rather than given something invented.
-        let recorded = self
-            .record_published_artifacts(company, &card, responder, published, None)
-            .await?;
-        tracing::info!(
-            task_id = %card.id,
-            agent = %responder,
-            artifacts = recorded.len(),
-            "[publish] a conversation published files; minted a card to carry them"
-        );
-        Ok(card.id)
-    }
-
+impl PublishFiling<'_> {
     /// Records everything the run published as versioned artifacts, returning
     /// one reference per artifact **pinned at the version this run wrote**
     /// (issues #244, #339).
@@ -208,19 +95,18 @@ impl HarnessDeps {
     /// question with a different answer.
     pub(crate) async fn record_published_artifacts(
         &self,
-        company: &CompanyId,
         card: &TaskRecord,
         responder: &str,
-        published: Vec<PendingPublish>,
+        published: Vec<publish::PendingPublish>,
         run_id: Option<&str>,
-    ) -> Result<Vec<TaskOutputArtifact>> {
+    ) -> crate::Result<Vec<TaskOutputArtifact>> {
         if published.is_empty() {
             // The honest, common case: this run produced no file. There is no
             // artifact, and the run trace is the addressable record of what
             // happened.
             return Ok(Vec::new());
         }
-        let Some(artifacts) = self.artifacts.as_ref() else {
+        let Some(artifacts) = self.deps.artifacts.as_ref() else {
             tracing::warn!(
                 task_id = %card.id,
                 staged = published.len(),
@@ -230,7 +116,7 @@ impl HarnessDeps {
             return Ok(Vec::new());
         };
 
-        let mut on_card = artifacts.list(company, Some(&card.id)).await?;
+        let mut on_card = artifacts.list(self.company, Some(&card.id)).await?;
         let mut written = Vec::with_capacity(published.len());
         for pending in published {
             let at = now_millis();
@@ -322,7 +208,7 @@ impl HarnessDeps {
                 // the version pointing at the node that currently holds it.
                 record.stamp_workspace_node(node_id);
             }
-            artifacts.upsert(company, &record).await?;
+            artifacts.upsert(self.company, &record).await?;
 
             // **A failed mirror does not lose the deliverable.** An explicit
             // publish that could not be filed into the tree is still recorded
@@ -332,7 +218,7 @@ impl HarnessDeps {
             // tree is where people look) and leaves the version unlinked, which
             // is exactly what a pre-#552 record carries. The next publish of
             // the same source retries and heals it.
-            if let Some(workspace) = self.workspace.as_ref() {
+            if let Some(workspace) = self.deps.workspace.as_ref() {
                 let target = artifact_mirror::PublishTarget {
                     agent_id: author,
                     task_id: &card.id,
@@ -352,7 +238,7 @@ impl HarnessDeps {
                     },
                     existing_node_id: prior_node.as_deref(),
                 };
-                match artifact_mirror::materialize(workspace.as_ref(), company, target).await {
+                match artifact_mirror::materialize(workspace.as_ref(), self.company, target).await {
                     Ok(mirrored) => {
                         let node_id = mirrored.node_id;
                         // Issue #663/#668: the version body was composed before
@@ -398,7 +284,7 @@ impl HarnessDeps {
                         // discard the remaining publishes' records to report
                         // something the next publish repairs.
                         if (body_changed || relinked)
-                            && let Err(err) = artifacts.upsert(company, &record).await
+                            && let Err(err) = artifacts.upsert(self.company, &record).await
                         {
                             tracing::warn!(
                                 task_id = %card.id,
@@ -436,7 +322,7 @@ impl HarnessDeps {
                                 crate::harness::publish::PayloadStorage::Refused,
                             ),
                         );
-                        if let Err(err) = artifacts.upsert(company, &record).await {
+                        if let Err(err) = artifacts.upsert(self.company, &record).await {
                             tracing::error!(
                                 task_id = %card.id,
                                 source = %pending.source,
@@ -454,7 +340,7 @@ impl HarnessDeps {
                 title: record.title.clone(),
                 kind: record.kind,
             });
-            self.pending_publishes.output_collector().artifact(
+            self.deps.pending_publishes.output_collector().artifact(
                 record.id.clone(),
                 card.id.clone(),
                 version,
@@ -465,5 +351,120 @@ impl HarnessDeps {
             on_card.push(record);
         }
         Ok(written)
+    }
+
+    /// Records what a **conversation** turn published, minting the card that
+    /// carries it (issue #445). Returns that card's id.
+    ///
+    /// # Why a card, rather than a company-level artifact
+    ///
+    /// The issue allows either: a chat deliverable becomes an artifact attached
+    /// to no card, or the act of publishing mints the card. This path takes the
+    /// second, and the deciding argument is *reachability* — which is, after
+    /// all, the entire bug.
+    ///
+    /// An [`ArtifactRecord`] carries a non-optional `task_id`, `(task_id,
+    /// source)` **is** its identity, the only route that lists artifacts is
+    /// `GET /tasks/{task_id}/artifacts`, and the only console surface that
+    /// renders one is the per-task Artifacts tab. A card-less artifact would
+    /// therefore need an optional `task_id` (breaking the identity contract), a
+    /// new company-scoped route, and a new console view — and until that last
+    /// piece shipped, the artifact would be recorded and still unreachable,
+    /// which is precisely the failure being fixed, merely moved one layer down.
+    /// Minting the card reuses a path the operator can already open today.
+    ///
+    /// It is also honest about what happened rather than a workaround: an agent
+    /// that produced a deliverable did a unit of work, and a board that shows it
+    /// is more accurate than one that does not. The card lands in
+    /// [`COLUMN_IN_REVIEW`] because that is where the lifecycle already puts
+    /// finished agent work awaiting a person — `COLUMN_DONE` is reached only by
+    /// a human accepting it, and this fix does not get to decide that on their
+    /// behalf.
+    ///
+    /// # What it deliberately does not do
+    ///
+    /// No `output` stamp. That field pins a `run_id` and an attempt ordinal, and
+    /// a chat turn has neither — inventing one would put a fabricated attempt on
+    /// a card to make a field look populated. The artifacts are reachable
+    /// through the tab regardless; an invented run id would not be true.
+    pub(crate) async fn record_conversation_publishes(
+        &self,
+        responder: &str,
+        chat: ChatTarget<'_>,
+        published: Vec<publish::PendingPublish>,
+    ) -> crate::Result<String> {
+        if published.is_empty() {
+            // Every known caller filters this out before reaching here; this
+            // stays unreachable the same way the check below does, so a
+            // future caller cannot mint a card for a deliverable that is not
+            // there.
+            return Err(crate::OpenCompanyError::Harness(
+                "a conversation minted a card with nothing published".to_string(),
+            ));
+        }
+        let Some(tasks) = self.deps.tasks.as_ref() else {
+            // Unreachable while the claim is only taken with both stores wired,
+            // and an error rather than a silent `Ok` so it stays unreachable:
+            // the caller surfaces this to the operator instead of dropping the
+            // deliverable the way #445 did.
+            return Err(crate::OpenCompanyError::Harness(
+                "a conversation published a file but no task board is wired".to_string(),
+            ));
+        };
+
+        let card = TaskRecord {
+            id: generate_id(),
+            title: crate::ports::tasks::TaskTitle::system(&publish::conversation_card_title(
+                &published,
+            )),
+            note: Some(publish::conversation_card_note(responder, &published)),
+            // Finished agent work a person has not accepted yet — the same
+            // landing `column_for_settled_run(Succeeded)` gives a dispatched run.
+            column: COLUMN_IN_REVIEW.to_string(),
+            priority: "medium".to_string(),
+            assignee: responder.to_string(),
+            updated_at_millis: now_millis(),
+            // The conversation this came out of, so the card points back at the
+            // thread that produced it (#151 §3.2's field, same meaning).
+            // Issue #1890 B: and the thread inside it, so a file published
+            // inside a thread leaves its card pointing at that thread rather
+            // than at the channel around it. `None` for the thread is the
+            // channel-level conversation, which is where every publish landed
+            // before threads were part of the key.
+            origin: TaskOrigin::new(chat.chat_id.map(str::to_string), chat.thread_root),
+            // A chat turn has no card in scope, so this is a lineage root —
+            // the same `None` a `spawn_task` from an ordinary chat turn writes.
+            parent_task_id: None,
+            output: None,
+            plan: None,
+            planning_attempts: Vec::new(),
+            deliverable: crate::ports::tasks::TaskDeliverable::Once,
+            workflow_proposal: None,
+            origin_run_id: None,
+            origin_workflow_id: None,
+            origin_message_seq: None,
+            bounced: None,
+        };
+        // The card is written **first**: an artifact's `task_id` must name a
+        // card that exists. If the artifact writes then fail, the failure
+        // direction is a visible card whose note explains what it was for —
+        // recoverable, and the operator is told below. The reverse order would
+        // leave artifacts pointing at a card that was never created, which is
+        // unreachable by every route and indistinguishable from the original
+        // bug.
+        tasks.upsert(self.company, &card).await?;
+
+        // No run id: there is no attempt row behind a chat turn, and
+        // `stamp_run` is skipped rather than given something invented.
+        let recorded = self
+            .record_published_artifacts(&card, responder, published, None)
+            .await?;
+        tracing::info!(
+            task_id = %card.id,
+            agent = %responder,
+            artifacts = recorded.len(),
+            "[publish] a conversation published files; minted a card to carry them"
+        );
+        Ok(card.id)
     }
 }

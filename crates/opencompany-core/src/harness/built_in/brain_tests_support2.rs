@@ -1,5 +1,6 @@
 use super::*;
 use crate::ports::TaskStore;
+use crate::ports::artifacts::ArtifactRecord;
 
 // -- issue #552: the write ordering, proven by failure injection ---------
 

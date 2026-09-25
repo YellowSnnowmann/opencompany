@@ -1540,7 +1540,7 @@ pub fn declined_note(unpublished_files: &[String], reply: &str) -> String {
     )
 }
 
-mod filing;
+pub(crate) mod filing;
 
 #[cfg(test)]
 #[path = "publish/publish_test_helpers_tests.rs"]

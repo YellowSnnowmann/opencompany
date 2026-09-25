@@ -8,13 +8,10 @@ use async_trait::async_trait;
 use tinyhivemind::aside::Viewer;
 use tinyhivemind::{Conversation, SESSION_WINDOW, SessionQuery, project_session};
 use tinyhivemind_driver::Commit;
-use tinyhivemind_openhuman::{EpisodeHost, Journal};
+use tinyhivemind_openhuman::Journal;
 
 use super::*;
-use crate::harness::built_in::policy::ApprovalRequestQueue;
-use crate::harness::built_in::publish::{PendingPublish, PublishPayload};
 use crate::hive::test_support::MemoryLog;
-use crate::ports::artifacts::ArtifactKind;
 use crate::ports::events::{EventLog, EventStreamItem};
 use crate::ports::types::{ChatOutput, ChatOutputKind, CompanyId, EventSeq, StoredEvent};
 use crate::{OpenCompanyError, Result};
@@ -146,38 +143,6 @@ async fn replies(
             _ => None,
         })
         .collect()
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_seat_on_a_company_with_nowhere_to_file_is_refused_a_publish() {
-    let log = Arc::new(MemoryLog::default());
-    let host = host(log.clone() as Arc<dyn EventLog>).claiming(ApprovalRequestQueue::default());
-    assert_eq!(host.publish_destination(), PublishDestination::Unclaimed);
-    let publishes = host.seat_queues().expect("claiming").publishes;
-    let staged = host
-        .wrap_turn(
-            "one",
-            Box::pin(async move {
-                let staged = publishes.push(PendingPublish {
-                    agent: "one".to_owned(),
-                    source: "outline.md".to_owned(),
-                    title: "Slide outline".to_owned(),
-                    kind: ArtifactKind::Text,
-                    note: None,
-                    payload: PublishPayload::Text("# Outline".to_owned()),
-                });
-                Ok(staged.to_string())
-            }),
-        )
-        .await
-        .expect("the turn runs");
-    assert_eq!(staged, "false", "an unclaimed seat turn stages nothing");
-    host.after_turn("one", None).expect("the hook runs");
-    host.flush_deliveries();
-    assert!(
-        replies(&log).await.is_empty(),
-        "nothing was handed over, so nothing is written"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

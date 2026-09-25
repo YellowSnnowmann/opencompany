@@ -236,8 +236,6 @@ use crate::ports::types::{
     OutboundMessage, TokenUsage, TurnStep, TurnStepKind, TurnStepStatus, Verdict,
 };
 use crate::ports::{Cognition, TaskRecord, UsageMetering, now_millis};
-#[cfg(test)]
-use crate::ports::{TaskOrigin, artifacts::ArtifactRecord};
 
 /// A [`Brain`] that answers with a live openhuman agent turn.
 pub struct HarnessBrain {
@@ -2284,8 +2282,10 @@ impl HarnessBrain {
         }
     }
 
-    /// Records everything the run published as versioned artifacts on `card`,
-    /// through [`HarnessDeps::record_published_artifacts`].
+    /// Records published files as artifacts on `card`.
+    ///
+    /// Delegates to [`PublishFiling`](publish::filing::PublishFiling); see its
+    /// module docs for why the body no longer lives here.
     async fn record_published_artifacts(
         &self,
         card: &TaskRecord,
@@ -2293,9 +2293,12 @@ impl HarnessBrain {
         published: Vec<publish::PendingPublish>,
         run_id: Option<&str>,
     ) -> Result<Vec<TaskOutputArtifact>> {
-        self.deps
-            .record_published_artifacts(&self.record().id, card, responder, published, run_id)
-            .await
+        publish::filing::PublishFiling {
+            company: &self.record().id,
+            deps: &self.deps,
+        }
+        .record_published_artifacts(card, responder, published, run_id)
+        .await
     }
 
     /// Where a conversation turn's publishes go: a fresh card when both stores
@@ -2479,17 +2482,23 @@ impl HarnessBrain {
         Ok(card.id)
     }
 
-    /// Records what a conversation turn published on a card minted for it,
-    /// through [`HarnessDeps::record_conversation_publishes`].
+    /// Files a conversation's publishes, on a card minted to carry them.
+    ///
+    /// Delegates to [`PublishFiling`](publish::filing::PublishFiling), which a
+    /// hive episode's seat also uses; see its module docs for why the body no
+    /// longer lives here.
     async fn record_conversation_publishes(
         &self,
         responder: &str,
         chat: ChatTarget<'_>,
         published: Vec<publish::PendingPublish>,
     ) -> Result<String> {
-        self.deps
-            .record_conversation_publishes(&self.record().id, responder, chat, published)
-            .await
+        publish::filing::PublishFiling {
+            company: &self.record().id,
+            deps: &self.deps,
+        }
+        .record_conversation_publishes(responder, chat, published)
+        .await
     }
 
     /// Resolves which agent answers an operator message.
