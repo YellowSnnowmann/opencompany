@@ -554,9 +554,27 @@ fn refused(error: &crate::error::OpenCompanyError) -> tinyhivemind_openhuman::Er
     tinyhivemind_openhuman::Error::Harness(anyhow::anyhow!("{error}"))
 }
 
+/// What a person calls `seat`: its roster name, else its role, else the id.
+pub(crate) fn seat_display_name(record: Option<&CompanyRecord>, seat: &str) -> String {
+    record
+        .and_then(|record| {
+            crate::server::readable::DisplayNames::from_record(record)
+                .name_of(seat)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| seat.to_owned())
+}
+
 impl Journal for DeskHost {
     fn log(&self) -> &dyn SessionLog {
         &self.log
+    }
+
+    fn display_name(&self, seat: &str) -> String {
+        seat_display_name(
+            self.roster.as_ref().map(|(record, _)| record.as_ref()),
+            seat,
+        )
     }
 
     /// The other desks this seat sits at, for its brief's context.
