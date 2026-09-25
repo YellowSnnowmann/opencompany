@@ -1053,7 +1053,7 @@ impl EpisodeHost for DeskHost {
             let Some(queues) = self.seat_queues() else {
                 return self.locked_turn(seat, turn).await;
             };
-            let mut claims = queues.claim(&self.episode_id, seat);
+            let mut claims = queues.claim(&self.episode_id, seat, &self.desk_id, self.thread_root);
             let outcome = claims.run(self.locked_turn(seat, turn)).await;
             self.keep_seat_claims(seat, claims);
             outcome

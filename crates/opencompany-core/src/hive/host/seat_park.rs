@@ -19,7 +19,9 @@ use crate::harness::built_in::policy::{
     ApprovalClaim, ApprovalRequest, ApprovalRequestQueue, ApprovalScope, DrainedRequests,
     MAX_APPROVAL_REQUESTS_PER_TURN,
 };
-use crate::harness::built_in::publish::{PendingPublishQueue, PublishClaim, PublishDestination};
+use crate::harness::built_in::publish::{
+    PendingPublish, PendingPublishQueue, PublishClaim, PublishDestination,
+};
 use crate::harness::built_in::turn_outputs::TurnOutputClaim;
 use crate::ports::types::{ApprovalId, ChatOutput, CompanyEvent, CompanyId, EventSeq, StoredEvent};
 use crate::runtime::approval_park::{ApprovalParker, ParkSite};
@@ -35,13 +37,31 @@ pub(crate) struct SeatQueues {
 
 impl SeatQueues {
     /// Opens one seat turn's claims.
-    pub(crate) fn claim(&self, episode_id: &str, seat: &str) -> SeatClaims {
+    ///
+    /// The publish bucket names the **episode** it belongs to (#2464). It was
+    /// `Unclaimed` while nothing filed what a seat published, which refused
+    /// the call in-turn rather than staging into a queue nobody drained --
+    /// the right fail-safe, and the reason a seat that had spent a whole turn
+    /// producing a report could not hand it over. `settle` drains this bucket
+    /// and `park_seat` files it, so the destination is now a promise the host
+    /// keeps.
+    pub(crate) fn claim(
+        &self,
+        episode_id: &str,
+        seat: &str,
+        desk_id: &str,
+        thread_root: Option<EventSeq>,
+    ) -> SeatClaims {
         SeatClaims {
             approvals: self
                 .approvals
                 .claim(ApprovalScope::Seat(turn_key(episode_id, seat))),
             queue: self.approvals.clone(),
-            publish: self.publishes.claim(PublishDestination::Unclaimed),
+            publish: self.publishes.claim(PublishDestination::Episode {
+                desk_id: desk_id.to_owned(),
+                episode_id: episode_id.to_owned(),
+                thread_root,
+            }),
             outputs: self.publishes.output_collector().claim(),
             collected: Vec::new(),
         }
@@ -60,7 +80,10 @@ pub(crate) struct SeatClaims {
 /// What a seat turn left behind once its claims are released.
 pub(crate) struct SettledTurn {
     requests: DrainedRequests,
-    publishes: usize,
+    /// What the seat published, to be filed by `park_seat`. The files
+    /// themselves rather than a count: the count could only be apologised
+    /// for.
+    pub(super) publishes: Vec<PendingPublish>,
     outputs: usize,
 }
 
@@ -85,7 +108,7 @@ impl SeatClaims {
     pub(crate) fn settle(self) -> SettledTurn {
         SettledTurn {
             requests: self.approvals.drain(MAX_APPROVAL_REQUESTS_PER_TURN),
-            publishes: self.publish.drain().len(),
+            publishes: self.publish.drain(),
             outputs: self.collected.len(),
         }
     }
@@ -241,6 +264,22 @@ impl DeskHost {
         self
     }
 
+    /// Claims seat turns' publishes on `publishes` rather than the roster's.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn publishing(mut self, publishes: PendingPublishQueue) -> Self {
+        let approvals = self
+            .queues
+            .as_ref()
+            .map(|queues| queues.approvals.clone())
+            .unwrap_or_default();
+        self.queues = Some(SeatQueues {
+            approvals,
+            publishes,
+        });
+        self
+    }
+
     /// Takes decisions for parked seats from `releases`.
     #[must_use]
     pub fn releasing(mut self, releases: EpisodeReleases) -> Self {
@@ -262,6 +301,48 @@ impl DeskHost {
             .remove(seat)
     }
 
+    /// Files what one seat published, on a card minted for this episode.
+    ///
+    /// The card's origin is the desk and the thread the episode answers in,
+    /// so the operator opens the deliverable from the room that produced it
+    /// rather than from a card floating free of any conversation.
+    ///
+    /// # Errors
+    ///
+    /// Whatever stops the board or the artifact store recording it.
+    async fn file_seat_publishes(
+        &self,
+        seat: &str,
+        publishes: Vec<PendingPublish>,
+    ) -> crate::Result<()> {
+        let Some((_, deps)) = self.roster.as_ref() else {
+            return Err(crate::OpenCompanyError::Harness(
+                "a seat published a file but this host has no roster to file it with".to_string(),
+            ));
+        };
+        let card = crate::harness::publish::filing::PublishFiling {
+            company: &self.company,
+            deps,
+        }
+        .record_conversation_publishes(
+            seat,
+            crate::runtime::delegation::ChatTarget::in_thread(
+                Some(&self.desk_id),
+                self.thread_root,
+            ),
+            publishes,
+        )
+        .await?;
+        tracing::info!(
+            company = %self.company,
+            episode = %self.episode_id,
+            %seat,
+            task_id = %card,
+            "[hive] a seat published; minted a card to carry it"
+        );
+        Ok(())
+    }
+
     /// Parks what a seat's turn raised, telling the seat about anything that
     /// did not reach the operator. `true` when something parked.
     pub(super) async fn park_seat(&self, seat: &str, settled: SettledTurn) -> bool {
@@ -271,11 +352,46 @@ impl DeskHost {
             outputs,
         } = settled;
         let mut problems = Vec::new();
-        if publishes > 0 {
-            problems.push(format!(
-                "{publishes} file(s) you published in this room were not filed anywhere. Tell \
-                 the operator plainly that they were not delivered."
-            ));
+        // **What the seat published, on a card that carries it (#2464).**
+        //
+        // This used to be an apology -- "not filed anywhere, tell the
+        // operator they were not delivered" -- because the bucket had no
+        // destination and nothing drained it. Now the claim names the
+        // episode and this is the drain, so the file becomes a card in the
+        // room it came out of. A failure here still gets the apology: the
+        // work ran, and a seat that is told nothing would report a delivery
+        // that did not happen.
+        if !publishes.is_empty() {
+            // **Named, not counted.**
+            //
+            // Nothing can durably retain these: the bucket belongs to a claim
+            // that `settle` has already released, and no later drain reaches
+            // an episode -- `push_refusal` files into the bucket the workflow
+            // runner drains, which is the "queue nobody empties" shape this
+            // whole area exists to avoid. What is recoverable is the file
+            // itself, still in the seat's sandbox under this path. So the
+            // seat is told which paths did not land, and can say so precisely
+            // rather than reporting a number the operator cannot act on.
+            let sources: Vec<String> = publishes
+                .iter()
+                .map(|staged| staged.source.clone())
+                .collect();
+            if let Err(error) = self.file_seat_publishes(seat, publishes).await {
+                tracing::error!(
+                    company = %self.company,
+                    episode = %self.episode_id,
+                    %seat,
+                    %error,
+                    sources = sources.join(", "),
+                    "[hive] a seat published files that could not be recorded"
+                );
+                problems.push(format!(
+                    "These file(s) you published in this room could not be filed: {}. They are \
+                     still in your sandbox at those paths. Tell the operator plainly that they \
+                     were not delivered, and name them.",
+                    sources.join(", ")
+                ));
+            }
         }
         if outputs > 0 {
             tracing::debug!(
