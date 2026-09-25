@@ -5081,14 +5081,25 @@ async fn resolve_desk(
     };
     let record = runtime.store().load(runtime.id()).await?;
     let matched =
-        record.and_then(|record| {
-            record.manifest.group_chats.into_iter().find(|chat| {
+        record.as_ref().and_then(|record| {
+            record.manifest.group_chats.iter().find(|chat| {
                 chat.id.eq_ignore_ascii_case(desk) || chat.name.eq_ignore_ascii_case(desk)
             })
         });
     Ok(match matched {
-        Some(chat) => (chat.id, chat.name),
-        None => (desk.to_string(), desk.to_string()),
+        Some(chat) => (chat.id.clone(), chat.name.clone()),
+        // Not a declared desk. A DM is journaled under two spellings and this
+        // reader may have been handed either, so the sibling rides in the name
+        // slot -- `owns` matches either and renders neither. Without it the
+        // console, which addresses an ordinary DM by the bare teammate id, read
+        // none of the rows its episode journaled under `dm:<id>`.
+        None => {
+            let sibling = record
+                .as_ref()
+                .and_then(|record| crate::server::chat_history::dm_sibling(record, desk))
+                .unwrap_or_else(|| desk.to_string());
+            (desk.to_string(), sibling)
+        }
     })
 }
 
