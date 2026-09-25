@@ -115,7 +115,7 @@ fn desks_list_their_members_and_lead_and_the_agents_own_seat() {
 #[test]
 fn an_unrestricted_reach_is_stated_once_at_the_top_and_not_as_a_list() {
     // `designer` declares no `delegates_to`, so it may reach everyone.
-    let section = team_section(&record(TEAM), "designer");
+    let section = team_section(&record(TEAM), "pm");
     assert!(
         section.contains("Every teammate below is a real agent you can hand work to"),
         "{section}"
@@ -139,10 +139,22 @@ fn a_narrowed_reach_names_exactly_who_the_tool_would_accept() {
 
 #[test]
 fn the_section_names_the_tools_by_their_real_names() {
-    let section = team_section(&record(TEAM), "writer");
+    // The orchestrator delegates by design and is told the verb by name.
+    let orchestrator = team_section(&record(TEAM), "pm");
     assert!(
-        section.contains(&format!("`{DELEGATE_TO_TEAMMATE_TOOL}`")),
-        "{section}"
+        orchestrator.contains(&format!("`{DELEGATE_TO_TEAMMATE_TOOL}`")),
+        "{orchestrator}"
+    );
+    // A member is not offered it on any turn, so its section must not name
+    // it: the prompt is composed once and has to be true on every turn.
+    let member = team_section(&record(TEAM), "writer");
+    assert!(
+        !member.contains(&format!("`{DELEGATE_TO_TEAMMATE_TOOL}`")),
+        "a member is promised a verb it does not have: {member}"
+    );
+    assert!(
+        member.contains("`spawn_task`"),
+        "and is told what it does have instead: {member}"
     );
 }
 
@@ -226,8 +238,11 @@ fn a_manifest_teammates_operator_rename_is_the_name_other_agents_are_given() {
         section.contains("- `backend` — Johnny, Backend Engineer: Build the services."),
         "the live overlay name and canonical id must both reach the teammate prompt: {section}"
     );
+    // Still the point of the assertion — the prompt has to say how to reach
+    // Johnny — but a member's way is not `delegate_to_teammate`, which it is
+    // not offered on any turn.
     assert!(
-        section.contains("`delegate_to_teammate`"),
+        section.contains("ask them directly") && section.contains("`spawn_task`"),
         "the same prompt must say how to contact Johnny: {section}"
     );
 }

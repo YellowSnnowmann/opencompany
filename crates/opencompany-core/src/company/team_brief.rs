@@ -110,22 +110,45 @@ pub fn team_section(record: &CompanyRecord, agent_id: &str) -> String {
         "\n\nYou are one of {} teammates at {company}, and you are not working alone. ",
         roster.len(),
     ));
-    out.push_str(match narrowed {
-        false => {
-            "Every teammate below is a real agent you can hand work to: they run it and hand \
-             their answer back to you in this same turn. Never tell anyone a teammate is out of \
-             reach or that you cannot contact them — you can, with "
-        }
-        true => {
-            "Every teammate below is a real agent; the ones you may hand work to are named at \
-             the end of this section, and they hand their answer back to you in this same turn. \
-             The tool for that is "
-        }
-    });
-    out.push_str(&format!(
-        "`{DELEGATE_TO_TEAMMATE_TOOL}`.\n\nTeammates (roster id — role: mandate). Hand work to \
-         one with `{DELEGATE_TO_TEAMMATE_TOOL}`, naming the id exactly as written:\n"
-    ));
+    // **The verbs this agent actually has.**
+    //
+    // The prompt is composed once, when the agent is registered, while a belt
+    // is composed per turn — so this text has to be true on *every* turn the
+    // agent runs. It can be, because the decision is per agent rather than
+    // per turn: a roster member is not offered `delegate_to_teammate` on any
+    // turn (`AgentBlueprint::unadvertised`), and the orchestrator is offered
+    // it on all of them. Naming the same fact here is what keeps the prompt
+    // from promising a tool the belt withholds — the mismatch a live run
+    // caught, where a member read "you can, with `delegate_to_teammate`" on a
+    // turn without it and answered by announcing a hand-off that moved
+    // nothing.
+    let orchestrates = orchestrator.as_deref() == Some(agent_id);
+    if orchestrates {
+        out.push_str(match narrowed {
+            false => {
+                "Every teammate below is a real agent you can hand work to: they run it and \
+                 hand their answer back to you in this same turn. Never tell anyone a teammate \
+                 is out of reach or that you cannot contact them — you can, with "
+            }
+            true => {
+                "Every teammate below is a real agent; the ones you may hand work to are named \
+                 at the end of this section, and they hand their answer back to you in this \
+                 same turn. The tool for that is "
+            }
+        });
+        out.push_str(&format!(
+            "`{DELEGATE_TO_TEAMMATE_TOOL}`.\n\nTeammates (roster id — role: mandate). Hand work \
+             to one with `{DELEGATE_TO_TEAMMATE_TOOL}`, naming the id exactly as written:\n"
+        ));
+    } else {
+        out.push_str(
+            "Every teammate below is a real agent. When you are in a room with one — a desk, or \
+             a conversation somebody opened with you — you can ask them directly and their \
+             answer reaches you there. Otherwise the way to put work on a teammate is to open a \
+             card for it with `spawn_task`, naming them; never say a teammate is out of \
+             reach.\n\nTeammates (roster id — role: mandate):\n",
+        );
+    }
     for agent in &others {
         out.push_str("- `");
         out.push_str(agent.id);
