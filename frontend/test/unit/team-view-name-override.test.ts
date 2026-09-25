@@ -97,16 +97,16 @@ afterEach(async () => {
   container.remove();
 });
 
-function render(client: OpenCompanyClient) {
+function render(client: OpenCompanyClient, company = "acme", refreshKey = 0) {
   return act(async () => {
     root.render(
       createElement(TeamView, {
         client,
-        company: "acme",
+        company,
         sub: "ghost-agent",
         agentNames: {},
         onOpenAgent: vi.fn(),
-        refreshKey: 0,
+        refreshKey,
         onRunSetup: vi.fn(),
         onManageDesks: vi.fn(),
         onNavigateToDesk: vi.fn(),
@@ -127,5 +127,19 @@ describe("a rename reaches currentAgentNames even when members omits the agent",
     });
 
     expect(document.querySelector('[data-testid="agent-name"]')?.textContent).toBe("Renamed Ghost");
+  });
+
+  it("keeps the rename through a same-company refresh and drops it on a company switch", async () => {
+    const client = fakeClient();
+    await render(client);
+    await act(async () => {
+      document.querySelector<HTMLElement>('[data-testid="rename"]')?.click();
+    });
+
+    await render(client, "acme", 1);
+    expect(document.querySelector('[data-testid="agent-name"]')?.textContent).toBe("Renamed Ghost");
+
+    await render(client, "globex", 1);
+    expect(document.querySelector('[data-testid="agent-name"]')?.textContent).toBe("(unknown)");
   });
 });

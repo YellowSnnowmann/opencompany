@@ -277,6 +277,10 @@ export function TeamView({
   }, [client, company]);
 
   useEffect(() => {
+    setNameOverrides({});
+  }, [company]);
+
+  useEffect(() => {
     setLoad("loading");
     // Drop the previous read's workload before the new reads start. A stale
     // non-null map must never filter a roster it does not describe: on a
@@ -286,10 +290,6 @@ export function TeamView({
     // strand the roster mid-re-read.
     setWorkload(null);
     workloadRun.current += 1;
-    // A fresh roster read is the host's own current state, which already
-    // carries any rename the override above stood in for — so the override
-    // would only ever go stale from here, never add information.
-    setNameOverrides({});
     void boot();
     void loadWorkload();
     // `refreshKey` re-runs the read after setup staffs the company; without it
