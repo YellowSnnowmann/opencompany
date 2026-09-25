@@ -47,9 +47,15 @@ fn the_general_line_is_never_a_dm() {
     ));
 }
 
-/// The flag is off unless something says otherwise, and says it plainly.
+/// The flag is **on** unless something switches it off, and says so plainly.
+///
+/// Inverted deliberately: a DM running as an episode is the behaviour this
+/// work exists for, so an instance that says nothing gets it. The escape
+/// hatch stays exact — only an explicit off word restores the pooled turn,
+/// and junk is not one, because a typo silently reverting the main operator
+/// surface is the failure worth guarding against.
 #[test]
-fn dm_episodes_are_off_until_asked_for() {
+fn dm_episodes_are_on_unless_switched_off() {
     struct Env(Option<&'static str>);
     impl crate::app::config::EnvSource for Env {
         fn get_os(&self, _key: &str) -> Option<std::ffi::OsString> {
@@ -57,10 +63,15 @@ fn dm_episodes_are_off_until_asked_for() {
         }
     }
     use crate::hive::graph::dm_episodes_enabled;
-    assert!(!dm_episodes_enabled(&Env(None)), "unset is off");
-    assert!(!dm_episodes_enabled(&Env(Some("0"))), "0 is off");
-    assert!(!dm_episodes_enabled(&Env(Some("maybe"))), "junk is off");
+    assert!(dm_episodes_enabled(&Env(None)), "unset is on");
+    assert!(
+        dm_episodes_enabled(&Env(Some("maybe"))),
+        "junk is not an off word, so it does not silently revert the surface"
+    );
+    for off in ["0", "false", "no", "off", " off "] {
+        assert!(!dm_episodes_enabled(&Env(Some(off))), "`{off}` is off");
+    }
     for on in ["1", "true", "yes", "on", " true "] {
-        assert!(dm_episodes_enabled(&Env(Some(on))), "`{on}` is on");
+        assert!(dm_episodes_enabled(&Env(Some(on))), "`{on}` is still on");
     }
 }
