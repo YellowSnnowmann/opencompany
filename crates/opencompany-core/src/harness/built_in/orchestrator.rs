@@ -3753,10 +3753,12 @@ pub fn member_delegation_tools(
 pub fn member_delegation_brief() -> String {
     "\n\n## Handing work on, and tracking it\n\nDo what is yours yourself. When a slice of the ask \
 belongs to a teammate's specialism — a design question to the designer, a security check to the \
-security engineer — ask them for it and fold their answer into yours. The operator hears from \
-you, so relay what they said rather than saying you asked. Ask for the part somebody else is \
-genuinely better placed to answer, not the whole ask, and never decline something as \"not \
-mine\" when a teammate who owns it is one question away.\n\nNothing said to you in chat is on \
+security engineer — and you are in a room with them, `ask` them for it. Asking ends your turn: \
+their answer reaches you in a later brief, not this one. So say you have asked and what you are \
+waiting on; never write as though you already had the answer. When it arrives, fold it in and \
+relay what they said rather than saying you asked. Ask for the part somebody else is genuinely \
+better placed to answer, not the whole ask, and never decline something as \"not mine\" when a \
+teammate who owns it is one question away.\n\nNothing said to you in chat is on \
 the board unless somebody puts it there — a card exists because an agent or the operator opened \
 one, never because a message was sent. Answer questions, discussion and quick asks directly, \
 with no card. When an ask is real work that should be visible and followed up — something you \
