@@ -67,10 +67,20 @@ pub fn surface_of(
             Surface::Single
         };
     }
-    if let Some(desk_id) = record.resolve_desk_id(chat)
-        && hives.contains_key(&desk_id)
-    {
-        return Surface::Room { desk_id };
+    // A declared desk owns its key outright, hive or no hive.
+    //
+    // The `else` is not dead: `desk_hives` builds nothing for a desk with
+    // nobody to deliberate with, and skips one whose members would not bind.
+    // Falling through on that would hand a DESK's message to the DM arm below
+    // and, where a teammate shares the id (issue #1743), run it as that
+    // teammate's private episode. `Single` is what this answered before the DM
+    // arm existed, and it stays the answer (tinysweeper on #2484).
+    if let Some(desk_id) = record.resolve_desk_id(chat) {
+        return if hives.contains_key(&desk_id) {
+            Surface::Room { desk_id }
+        } else {
+            Surface::Single
+        };
     }
     // The same DM, addressed the way the console addresses it.
     //

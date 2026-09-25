@@ -123,13 +123,32 @@ pub async fn resolve_seed_desk(
 /// once `resolve_desk_id` has declined it.
 #[must_use]
 pub fn dm_sibling(record: &CompanyRecord, key: &str) -> Option<String> {
-    let prefix = crate::runtime::assignee::DM_PREFIX;
-    match key.strip_prefix(prefix) {
-        Some(bare) => record.resolve_roster_agent_id(bare),
-        None => record
-            .resolve_roster_agent_id(key)
-            .map(|agent| format!("{prefix}{agent}")),
+    // **A declared desk owns its key outright, and grows no second one.**
+    //
+    // Asserted here rather than assumed of the callers. `desk_aliases` does
+    // reach this only after `resolve_desk_id` declines, but `operator`'s own
+    // `resolve_desk` matches `manifest.group_chats` alone -- so an **overlay**
+    // desk, created from the console and absent from the manifest, arrives
+    // looking unmatched. Where one shares an id with a teammate, that desk's
+    // transcript would have taken the teammate's DM rows (tinysweeper on
+    // #2484). `resolve_desk_id` is the rule that knows about overlays, so it
+    // is the one asked.
+    if record.resolve_desk_id(key).is_some() {
+        return None;
     }
+    let prefix = crate::runtime::assignee::DM_PREFIX;
+    // **The exact id first, and only then the prefix.**
+    //
+    // A teammate may itself be named `dm:<something>` -- nothing forbids it,
+    // and this module already carries the mirror case of a teammate named for
+    // a General spelling. Stripping first would answer `dm:ceo` with `ceo`'s
+    // sibling while a teammate literally called `dm:ceo` sat in the roster,
+    // handing one teammate's DM the other's rows.
+    if let Some(agent) = record.resolve_roster_agent_id(key) {
+        return Some(format!("{prefix}{agent}"));
+    }
+    key.strip_prefix(prefix)
+        .and_then(|bare| record.resolve_roster_agent_id(bare))
 }
 
 /// [`resolve_seed_desk`] for a caller that already holds the record.

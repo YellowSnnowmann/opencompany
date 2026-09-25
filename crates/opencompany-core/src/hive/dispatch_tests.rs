@@ -193,4 +193,18 @@ members = ["engineering", "ceo"]
         matches!(&prefixed, Surface::Room { desk_id } if desk_id == "dm:engineering"),
         "and the teammate is still reachable, prefixed: {prefixed:?}"
     );
+
+    // **The desk keeps its key even with no hive of its own.**
+    //
+    // `desk_hives` builds nothing for a desk with nobody to deliberate with,
+    // and skips one whose members will not bind. With only the DM hives in the
+    // map, the desk arm finds nothing -- and must still answer `Single` rather
+    // than falling through to the teammate that shares the id, which would run
+    // a desk's message as that teammate's private episode.
+    let (dms_only, _) = crate::hive::graph::dm_hives(&record, 7, &bind);
+    let hiveless = surface_of(&record, &dms_only, Some("engineering"));
+    assert!(
+        matches!(hiveless, Surface::Single),
+        "a declared desk with no hive is a pooled turn, never the teammate's DM: {hiveless:?}"
+    );
 }
