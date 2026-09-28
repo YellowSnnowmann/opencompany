@@ -1,15 +1,17 @@
 # Animated mascot avatar — plan
 
-Planning only. No code in this PR. A tracking issue follows once this is reviewed.
+The plan, and its implementation, in one PR. A tracking issue follows once this
+is reviewed. The documents below began as the pre-code deep-dive; where the
+shipped design differs from what they first proposed, each says so in place.
 
 ## What this is
 
 An operator supplied a Rive file (`mascotprofile.riv`) exported from Figma's
 Rive plugin: an animated character ("the mascot") whose hands and skin can be
-recolored and which plays one of four animation states on demand. The ask is
+recolored and which plays one of nine costume animations on demand. The ask is
 to offer it as an alternate, editable face for a teammate — alongside the
 eleven static `tiny:` mascots and an uploaded image — that reacts to hover and
-(eventually) to the agent actively replying.
+to the agent actively replying.
 
 This directory is the deep-dive that preceded any code: what the `.riv` file
 actually contains, how it plugs into the console's closed avatar-reference
@@ -21,7 +23,8 @@ implementation starts.
 ## Documents
 
 - [`rive-parameters.md`](rive-parameters.md) — the `.riv` file's structure
-  (artboard, state machine, ViewModel) and the hard 4-state budget.
+  (artboard, state machine, ViewModel) and the nine costumes that superseded
+  the original "4-state budget".
 - [`avatar-grammar.md`](avatar-grammar.md) — the host + console changes to
   the closed `tiny:`/`blob:` avatar-reference grammar, and the test mirrors
   a third form needs.
@@ -29,7 +32,7 @@ implementation starts.
   (which of the ~30 avatar render sites get a live canvas) and the
   bundle/code-splitting plan.
 - [`state-mapping.md`](state-mapping.md) — where idle/hover/replying signals
-  come from, and what's in scope for v1 versus v1.5+.
+  come from, how the colors are chosen, and what "replying" looks like.
 - [`open-questions.md`](open-questions.md) — the empirical unknowns that
   need the actual Rive runtime, as an implementation checklist.
 

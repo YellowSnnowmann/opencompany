@@ -1,28 +1,29 @@
 # Driving the animation: idle, hover, replying
 
-## Colors: v1 ships one fixed colorway
+## Colors: chosen, never derived
 
 `handColor`/`skinColor` are the mascot's literal skin and hand color, not an
 abstract UI accent — they're a different kind of thing from `TEAM_TONES`
 (`frontend/src/lib/team.ts`), which tints a tile's background/initials.
-Reusing a teammate's hashed `tone` hue directly as their mascot's *skin
-color* risks looking wrong in a way no amount of engineering analysis can
-settle — e.g. a `rose`-toned teammate getting a pink-skinned mascot — and
-that's a call for whoever actually looks at it rendered, not something to
-bake into v1 code sight unseen.
+Reusing a teammate's hashed `tone` hue as their mascot's *skin color* would
+risk looking wrong in a way no analysis can settle (a `rose`-toned teammate
+getting a pink-skinned mascot), so nothing is derived.
 
-**v1 ships the `.riv` file's own defaults** (`handColor=#B4900B`,
-`skinColor=#F7D145`) for every teammate that picks `mascot:animated`. No
-palette-derivation logic, no new mapping table. Per-tone (or per-teammate)
-color variation is a real, clearly-scoped v1.5+ follow-up once there's
-something to look at.
+Each is a **per-agent choice from a closed list of six** (`MASCOT_SKIN_COLORS`,
+`MASCOT_HAND_COLORS` in `frontend/src/lib/avatar.ts`, mirrored and validated
+host-side by `company/mascot.rs`), set from the picker's mascot panel — on an
+existing teammate's page and in the Add-agent dialog. Unset means the `.riv`
+file's own defaults (`skinColor=#F7D145`, `handColor=#B4900B`). The picker's
+swatch hexes are the one documented raw-hex exception to the design-tokens
+rule: they are the mascot's actual paint, not a theme colour.
 
 ## Hover: no new plumbing needed
 
 Trivial everywhere it applies — a plain `onMouseEnter`/`onMouseLeave` on the
-wrapping element, setting `MascotAvatar`'s `state` prop to `"hover"`. Applies
-identically at both v1 call sites (the profile-sheet header, the
-avatar-picker preview/tile).
+wrapping element, setting `MascotAvatar`'s `state` prop to `"hover"`. On the
+small tiles the hover target is the enclosing interactive row and the reaction
+plays over a settled frame (`components/mascot-pose.tsx`); on the hero
+surfaces (the profile-sheet header, the picker preview) it is the live canvas.
 
 ## "Replying": shipped on the rows that already hold the signal
 
