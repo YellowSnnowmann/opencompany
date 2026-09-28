@@ -93,9 +93,12 @@ stills — each costume plays a rise-in on load and (all but two) an idle loop t
 ducks the mascot out of frame about every six seconds, so no arbitrary moment is
 "the resting frame" — and a paused instance redraws differently from a playing
 one. `prefers-reduced-motion` gets the same treatment. Hover and "replying"
-reactivity is not attached in static mode. **Animated** is the live canvas,
-reactive to hover at the hero surfaces, landing on the chosen costume as its
-baseline — `hover`/`replying` stay the two fixed `mascotAnimationNumber` values
+reactivity is not attached in static mode. **Animated** is a live canvas at
+the hero surfaces — looping, reactive to hover, landing on the chosen costume as
+its baseline — and, on every smaller tile, a settled frame that plays a one-shot
+reaction when its row is hovered (a per-surface `animate` trigger: `loop`,
+`hover`, `none`; small tiles default to `hover`, so they never blink out with the
+file's idle duck-out). `hover`/`replying` stay the two fixed `mascotAnimationNumber` values
 that reactivity already used before a costume choice existed, rather than
 following the chosen costume, so a chosen "look" reads as one outfit rather than
 one outfit at rest and a different one on hover. See

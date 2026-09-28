@@ -180,6 +180,15 @@ string table:
   loading file; may be corrupt!" on the *next* page, visible only when navigating
   without a reload.
 
+**Resolved 2026-09-28 — the blank cycle on small tiles.** The duck-out is the
+file's own idle design and cannot be removed from code, so small tiles no longer
+show a live instance at rest: they rest on a cached *settled* frame and react
+once on hover (`rendering-strategy.md`, "The reaction"). Measured on a ducking
+costume's sidebar tile: content share constant at 54% for 20 s with 0 canvases
+on the page, where the live tile went 52 → 0 → 52 every ~6.5 s. The hero surfaces
+still loop by design (and so still duck out) — removing the duck-out from the
+idle state in the Rive editor remains the only way to change that.
+
 Also open: the cost of holding the decoded asset is a fixed one that this pass
 does not release when nothing on screen is live — a release-after-idle would
 reclaim it, but renderer RSS was too noisy here (±100 MB run to run) to show

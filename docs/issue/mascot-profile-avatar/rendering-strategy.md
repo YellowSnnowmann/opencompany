@@ -36,16 +36,26 @@ mascot looks different in the sidebar than on their own profile sheet reads as
 broken, and the cached-snapshot variant of the plan captured blank frames (see
 "Why not a snapshot for everyone").
 
-One component, one path. `TeammateAvatar` mounts `MascotAvatar` for every
-`mascot:animated` teammate at every call site, with that teammate's own costume,
-colors and mode — carried on the roster read (`GET …/team`:
-`mascotCostume`, `mascotSkinColor`, `mascotHandColor`, `mascotMode`), the same
-values `GET …/team/{id}` returns, so a face is the same in a chat gutter as on
-its profile sheet. `markOnly` tiles (too small to read) keep the tone tile. The
-hero surfaces (profile sheet, agent detail header, avatar picker) mount
-`MascotAvatar` directly, because they also drive `state` from hover.
+One entry point, one look. `TeammateAvatar` draws every `mascot:animated`
+teammate at every call site, with that teammate's own costume, colors and mode —
+carried on the roster read (`GET …/team`: `mascotCostume`, `mascotSkinColor`,
+`mascotHandColor`, `mascotMode`), the same values `GET …/team/{id}` returns, so a
+face is the same in a chat gutter as on its profile sheet. `markOnly` tiles (too
+small to read) keep the tone tile.
 
-### What makes live-everywhere affordable
+*When* it animates is a per-surface parameter, `animate` (`"loop" | "hover" |
+"none"`, defined once in `lib/mascot-pose.ts`, default `"hover"`):
+
+| trigger | what the tile is | who uses it |
+|---|---|---|
+| `"hover"` | a settled frame (`<img>`, no canvas) that plays a one-shot reaction when the enclosing row is hovered or keyboard-focused | every mass-render surface by default — sidebar, header, intro card, message rows, members pane, Team cards, org chart |
+| `"loop"` | a live instance playing its idle loop | `TeammateAvatar animate="loop"`; the hero surfaces (profile sheet, agent detail header, avatar picker) mount `MascotAvatar` directly, which is the loop, and also drive `state` from hover |
+| `"none"` | the settled frame only | a surface that wants no motion |
+
+A teammate whose own `mascotMode` is `"static"`, and anyone under
+`prefers-reduced-motion`, is always `"none"` (`effectiveMascotTrigger`).
+
+### What keeps it affordable
 
 1. **One parsed file.** `useRive({ src })` fetches and parses the ~1.7 MB `.riv`
    and decodes its embedded raster assets once *per instance*. `MascotAvatar`
@@ -62,11 +72,15 @@ hero surfaces (profile sheet, agent detail header, avatar picker) mount
    the viewport (`IntersectionObserver`, released 1.5 s after leaving so a
    wobble at the edge does not rebuild it). A transcript has a tile per message;
    what matters is how many are near the screen, not how many exist.
-4. **Static and reduced-motion release the instance.** They play just long
-   enough to reach a settled pose, keep that exact frame as an `<img>`, and
-   unmount Rive — so a screenful of static teammates costs no live canvases.
+4. **Nothing is live at rest.** A `"hover"` or `"none"` tile is an `<img>` of a
+   *settled* frame, captured once per look (costume + both colors) by a hidden
+   live instance and shared by every tile with that look
+   (`lib/mascot-pose.ts`). At most six such captures run at once, hover-costume
+   ones (two at a time, background) yield to any tile still waiting for its
+   resting frame, and a capture that has not settled in 15 s is abandoned and
+   remembered as failed — its tiles keep their initials, never a blank.
 
-### Why not a snapshot for everyone
+### Why a snapshot is safe now, and was not before
 
 The mascot is not a set of stills. Every costume plays a rise-in on load — a peek
 to ~24% coverage that holds ~0.25 s, a pop to ~53%, an overshoot that settles by
@@ -87,7 +101,34 @@ duck-out — any visible frame is a valid pose. After it, only a frame that has
 stopped moving is trusted. Pausing the runtime on that frame does **not** work:
 a paused instance redraws differently from the playing one (every costume with a
 duck-out loop came back scaled and cropped), so the pixels are copied out
-instead.
+instead. That is `holdPoseOnceSettled`, and the pose cache uses it — the same
+rule that already produced the Static teammates' frames — where the earlier
+cache used "two frames after the write". The capture instance is portalled to
+the body at a fixed 96 px inside the viewport, invisible: Rive pauses anything
+geometrically outside the viewport (which yields a transparent frame), and a
+look first needed by a 20 px dot must not be captured at 20 px and reused at 48.
+
+### The reaction, and why it is not a live instance
+
+A fresh live instance always starts below the frame and rises in over ~1.3 s, so
+mounting one when the pointer arrives would blank the tile at the exact moment
+someone is looking at it. The reaction is built from settled frames instead: the
+tile's own resting frame and the hover costume's (the costume behind the fixed
+hover number the heroes swap to — `MASCOT_HOVER_COSTUME`, kept in step with
+`REACTIVE_NUMBERS.hover` by a unit test). On pointer-enter the tile pops (a
+~0.4 s scale pulse), crossfades to the hover costume over 150 ms, holds it for
+0.7 s and crossfades back to the identical resting frame; the whole reaction is
+~1 s and cannot restart until it has finished. It plays **once per entry**: a
+pointer that stays does not retrigger it, and it re-arms on leave. If the hover
+costume's frame has not been captured yet (it is captured in the background after
+the resting frame) only the pop plays; a teammate already in the hover costume
+gets the pop alone.
+
+The hover target is the enclosing row, not the 24 px face: an explicit
+`data-avatar-hover-scope` ancestor (message rows, members-pane rows, Team cards,
+thread rows), else the nearest `button, a, [role=button|option|menuitem|tab], li`
+(the sidebar DM row), else the tile itself. Keyboard focus that matches
+`:focus-visible` triggers it too; a click's focus does not.
 
 ### Measured
 
@@ -100,6 +141,12 @@ Chrome for Testing at DPR 1, scroll of the whole transcript over 3 s.
 | live, gated — 2 wearers | 13.2 MB | 4 | 17.0 / 18.2 ms / 5 of 176 |
 | live, gated — 9 wearers | 14.0 MB | 11 (13 mid-scroll) | 17.0 / 17.9 ms / 5 of 177 |
 | shipped — 8 animated + 1 static | 13.9 MB | 10 (12 mid-scroll) | 16.9 / 18.2 ms / 2 of 178 |
+| settled frame + hover (this pass), two full-transcript passes | 14.6 MB | 0 (0 mid-scroll) | 16.7 / 16.7 ms / 0 of 240 |
+
+The last row is the current build, measured the same way but on a longer
+transcript (9424 px) and via CDP `JSHeapUsedSize` after a forced GC. First visit to
+a roster of nine distinct looks peaks at 6 hidden capture canvases and has none by
+~8 s; after that a page holds none, whatever it scrolls past.
 
 Threshold, fixed before the live numbers were seen: p95 ≤ 20 ms, ≤ 5% of frames
 over 33 ms, and live canvases bounded by what is near the viewport rather than by
@@ -142,7 +189,7 @@ hero slots above don't jump layout while the chunk loads).
 (`build.rollupOptions.output.manualChunks` is absent entirely) — every
 existing split comes from these `lazy()` boundaries, not build config, so
 `MascotAvatar` should follow the identical pattern rather than introduce a
-new splitting mechanism. Concretely: `MascotAvatar` itself is the
+new splitting mechanism. Concretely: `MascotAvatar` (and `PoseMascot`, the trigger-aware tile, a 2 kB chunk that imports it) is the
 `lazy()`-loaded module, pulling in `@rive-app/react-canvas` and the `.riv`
 asset URL as its own dependencies — the two call sites above import
 `MascotAvatar` lazily, not `@rive-app/react-canvas` directly.
@@ -156,4 +203,7 @@ loop, so a canvas that never plays paints nothing at all (an earlier pass
 rendered reduced-motion users a blank tile). The same accessibility carve-out an
 animated GIF avatar already has to consider per `docs/spec/runtime/avatars.md`
 ("a moving one is more recognisable, not less" assumes the viewer can tolerate
-motion, which reduced-motion says they can't).
+motion, which reduced-motion says they can't). On the tiles it resolves to
+`animate="none"`: the cached settled frame, no hover reaction, and — because the
+reaction never plays — no motion anywhere on the page except a hero that the
+user has explicitly opened, which is itself a frozen frame under reduced motion.
