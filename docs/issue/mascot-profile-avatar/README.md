@@ -33,16 +33,18 @@ implementation starts.
 - [`open-questions.md`](open-questions.md) — the empirical unknowns that
   need the actual Rive runtime, as an implementation checklist.
 
-## Recommended approach, in one paragraph
+## Approach, as shipped, in one paragraph
 
-Add a third closed avatar-reference form, `mascot:animated`, that behaves
-like the existing `tiny:` mascots everywhere except the two hero surfaces
-that render it live: the agent profile sheet and the avatar picker. Every
-other of the ~30 places a `TeammateAvatar` renders — facepiles, the org
-chart, thread rows, mention pickers — keeps drawing the existing tone tile
-automatically, because a `mascot:` reference resolves to no static image and
-`TeammateAvatar` already falls back to the tile when there's nothing to draw.
-Ship one fixed colorway (the file's own defaults) and no live "replying"
-reactivity in v1; both are real but separable follow-ups. Load the Rive
+Add a third closed avatar-reference form, `mascot:animated`, and draw it the
+same way everywhere: `TeammateAvatar` mounts one `MascotAvatar` at every one of
+the ~30 places it renders, with the teammate's own costume, colors and mode
+(carried on the roster read, not just the detail read). An animated mascot is a
+live Rive canvas — sharing one parsed `.riv` between all of them and only held
+while its tile is near the viewport; a static (or reduced-motion) one plays just
+long enough to settle, is kept as an image, and releases its instance. The
+first draft of this plan kept every mass-render surface on the tone tile and
+went live at two hero spots only; that was reversed once the operator saw a
+teammate look different in the sidebar than on their own profile
+(`rendering-strategy.md` has the reasoning and the measurements). Load the Rive
 runtime and the ~1.8&nbsp;MB `.riv` asset lazily, the same way the console
 already isolates `recharts` and `@xyflow/react` from the main bundle.

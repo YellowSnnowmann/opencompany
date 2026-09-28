@@ -148,3 +148,40 @@ matches the plan's ~1.8&nbsp;MB estimate closely). The gzipped JS chunk cost
 of `@rive-app/react-canvas` plus its WASM runtime, once actually
 code-split via the `lazy()` boundary this component is meant to be the
 seam for, was not measured in this pass — still open.
+
+## 6. The animation's real timeline, and what "static" has to mean — found 2026-09-28
+
+Four things the operator's screenshots (blank tiles, a "static" mascot that kept
+moving) led to, each verified against the running file rather than read off the
+string table:
+
+- **Every costume plays a rise-in on load, and most then run an idle duck-out
+  loop.** Sampled every 60 ms, the share of the tile that is not background goes
+  0 → 6 → 13 → 18 → ~24% (a *peek*, held ~0.25 s) → ~53% (the pop) and then
+  overshoots and settles, frame-to-frame pixel difference 11.6 → 6.5 → 5.2 → 0.8
+  → 0.0 by ~1.3 s. From ~4 s the mascot ducks out of frame (0%) and returns
+  ~2–3 s later, repeating about every six seconds, in lockstep across tiles that
+  started together. Two costumes — headphones (2) and glass1 (5) — have no
+  duck-out; they bob continuously (difference 2–11 per 120 ms, touching ~0.2 at
+  the turnaround) and are never pixel-still.
+- **`mode="static"` did not freeze anything.** It set the costume baseline and
+  attached no hover handler, but the runtime kept playing, so a Static hero ran
+  the same 50% → 0% → 50% cycle. The earlier "static verified frozen" check only
+  compared one idle and one hover frame. It now keeps a settled frame as an
+  image (see `rendering-strategy.md`).
+- **Pausing the runtime is the wrong way to hold a pose.** `rive.pause()` on a
+  visible, pixel-still frame produced, for every costume with a duck-out loop,
+  a frame drawn scaled up and cropped to one corner of the tile — consistently,
+  so a check that the frozen frames *agreed with each other across reloads*
+  passed while they were all wrong. Correctness needed a reference (the playing
+  frame), not repeatability.
+- **A shared `RiveFile` is destroyed when its last user unmounts** unless the
+  module holds its own reference (`getInstance()`); the symptom was "Problem
+  loading file; may be corrupt!" on the *next* page, visible only when navigating
+  without a reload.
+
+Also open: the cost of holding the decoded asset is a fixed one that this pass
+does not release when nothing on screen is live — a release-after-idle would
+reclaim it, but renderer RSS was too noisy here (±100 MB run to run) to show
+that it is worth the extra state.
+

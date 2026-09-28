@@ -81,18 +81,26 @@ every other field on that struct already uses, validated by
 | `mascot_skin_color` | `MASCOT_SKIN_COLORS` — six ids | `"default"` |
 | `mascot_hand_color` | `MASCOT_HAND_COLORS` — six ids | `"default"` |
 
-**Static** renders one frozen frame — the chosen costume, at rest — with no
-hover or "replying" reactivity wired up at all. That is a fact about
-behaviour, not paint: the frontend does not attach the hover handlers in
-static mode rather than attach them and let `MascotAvatar` ignore the
-resulting state change, at every hero surface that mounts it (the profile
-sheet, the agent detail page's header, the avatar picker preview).
-**Animated** is what v1 originally shipped: the live canvas, reactive to
-hover, landing on the chosen costume as its baseline — `hover`/`replying`
-stay the two fixed `mascotAnimationNumber` values that reactivity already
-used before a costume choice existed, rather than following the chosen
-costume, so a chosen "look" reads as one outfit rather than one outfit at
-rest and a different one on hover.
+The four fields are read on **both** `GET …/team/{agent_id}` and the roster list
+`GET …/team` (absent when unset), so every surface built from the roster — the
+chat header, DM sidebar, members pane, org chart, message rows — draws a
+teammate's real look rather than the file's default.
+
+**Static** holds one pose: the mascot plays just long enough to reach a settled,
+clearly-visible frame, that exact frame is kept as an image, and the live
+instance is released. It is not "pause the runtime": the file is not a set of
+stills — each costume plays a rise-in on load and (all but two) an idle loop that
+ducks the mascot out of frame about every six seconds, so no arbitrary moment is
+"the resting frame" — and a paused instance redraws differently from a playing
+one. `prefers-reduced-motion` gets the same treatment. Hover and "replying"
+reactivity is not attached in static mode. **Animated** is the live canvas,
+reactive to hover at the hero surfaces, landing on the chosen costume as its
+baseline — `hover`/`replying` stay the two fixed `mascotAnimationNumber` values
+that reactivity already used before a costume choice existed, rather than
+following the chosen costume, so a chosen "look" reads as one outfit rather than
+one outfit at rest and a different one on hover. See
+`docs/issue/mascot-profile-avatar/rendering-strategy.md` for how a screenful of
+them is kept cheap.
 
 The nine costume ids and their `mascotAnimationNumber` values were not
 guessed from the `.riv` file's internal clip names (a typo'd, pre-runtime

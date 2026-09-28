@@ -1,16 +1,25 @@
-// The animated Rive mascot: an alternate teammate face, live at exactly the
-// hero surfaces that mount it (the agent profile sheet, the agent detail
-// page's header, the avatar picker). See `docs/issue/mascot-profile-avatar/`
-// for the deep-dive this was planned from.
+// The animated Rive mascot: a teammate's live face, and the one thing every
+// avatar surface draws for a `mascot:animated` wearer (`TeammateAvatar` for
+// every tile, this component directly for the hero surfaces that also react
+// to hover — the agent profile sheet, the agent detail page's header, the
+// avatar picker). See `docs/issue/mascot-profile-avatar/` for the deep-dive
+// this was planned from.
 //
-// Deliberately its own component rather than a `TeammateAvatar` variant: a
-// `mascot:` reference resolves to no static image (`staticAvatarSrc` in
-// `lib/avatar.ts`), so every other surface keeps drawing the tone tile with
-// zero changes, and only a caller that explicitly wants the live canvas reaches
-// for this.
+// There is deliberately **one** rendering path. An earlier pass drew tiles
+// from a cached `canvas.toDataURL()` snapshot and only heroes live; capturing
+// "whatever the canvas shows two frames after the write" raced the costume's
+// entry animation and cached blank or half-risen frames, and it left small
+// tiles static while big ones moved. What makes drawing it live everywhere
+// affordable instead is sharing the parsed `.riv` between every instance
+// (`useSharedMascotFile`) and only mounting a tile's canvas while it is near
+// the viewport (`TeammateAvatar`'s `MascotTile`).
 
 import { useEffect, useState } from "react";
 import {
+  type Event as RiveEvent,
+  EventType,
+  type Rive,
+  RiveFile,
   useRive,
   useViewModel,
   useViewModelInstance,
@@ -46,14 +55,235 @@ const REACTIVE_NUMBERS: Record<"hover" | "replying", number> = {
   replying: 3,
 };
 
+/**
+ * The parsed `.riv`, shared by every mascot on the page.
+ *
+ * `useRive({ src })` makes each instance fetch-and-parse the ~1.7 MB file and
+ * decode its embedded raster assets again; with a dozen mascots on screen that
+ * is a dozen copies of the same pixels. A `RiveFile` created once and handed to
+ * each `useRive({ riveFile })` is parsed once — each instance still gets its
+ * own artboard, state machine and ViewModel instance (see the
+ * `useViewModelInstance` call below for why that last one must be fresh).
+ *
+ * Module-level and never released (see the pinned reference below): the file
+ * is needed for as long as the page can draw a mascot, which is the life of the
+ * tab. A failed load clears the promise so the next mount retries rather than
+ * remembering the failure.
+ */
+let sharedMascotFile: Promise<RiveFile> | null = null;
+
+function loadSharedMascotFile(): Promise<RiveFile> {
+  if (!sharedMascotFile) {
+    const pending = new Promise<RiveFile>((resolve, reject) => {
+      const file = new RiveFile({
+        src: mascotSrc("animated"),
+        onLoad: () => {
+          // Pin it. A `RiveFile` starts at zero references, every instance that
+          // uses it adds one (`getInstance`) and gives it back on cleanup, and at
+          // zero the runtime releases the native file. Without this permanent
+          // reference the file dies the moment the last mascot on a page
+          // unmounts, and the next page's mascots get "Problem loading file; may
+          // be corrupt!" — which a reload-per-test never shows, because a reload
+          // makes a fresh file.
+          file.getInstance();
+          resolve(file);
+        },
+        onLoadError: () => reject(new Error("the mascot .riv failed to load")),
+      });
+      file.init().catch(reject);
+    });
+    pending.catch(() => {
+      if (sharedMascotFile === pending) sharedMascotFile = null;
+    });
+    sharedMascotFile = pending;
+  }
+  return sharedMascotFile;
+}
+
+function useSharedMascotFile(): RiveFile | null {
+  const [file, setFile] = useState<RiveFile | null>(null);
+  useEffect(() => {
+    let live = true;
+    loadSharedMascotFile()
+      .then((loaded) => {
+        if (live) setFile(loaded);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  return file;
+}
+
+/** Side of the square the canvas is downscaled to for probing; ample for "is anything moving". */
+const PROBE_SIZE = 16;
+
+/**
+ * A downscaled read of the canvas, or `null` while it has no size yet.
+ *
+ * Read through a small probe canvas so a probe costs almost nothing however big
+ * the tile is.
+ */
+function readProbe(
+  canvas: HTMLCanvasElement,
+  probe: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D,
+): Uint8ClampedArray | null {
+  if (!canvas.width || !canvas.height) return null;
+  ctx.clearRect(0, 0, probe.width, probe.height);
+  ctx.drawImage(canvas, 0, 0, probe.width, probe.height);
+  return ctx.getImageData(0, 0, probe.width, probe.height).data;
+}
+
+/**
+ * What share (0–100) of a probe is not its own background colour.
+ *
+ * The mascot sits on an opaque artboard fill, so "how much of this frame is
+ * something other than the corner pixel" says whether the character is on
+ * screen at all: ~0 when ducked out, roughly half when it is up.
+ */
+export function contentShare(px: Uint8ClampedArray): number {
+  let differing = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    const delta = Math.abs(px[i] - px[0]) + Math.abs(px[i + 1] - px[1]) + Math.abs(px[i + 2] - px[2]);
+    if (delta > 40) differing += 1;
+  }
+  return (differing / (px.length / 4)) * 100;
+}
+
+/** Mean per-channel difference (0–255) between two probes: 0 means the frame did not change. */
+export function motion(a: Uint8ClampedArray, b: Uint8ClampedArray): number {
+  let sum = 0;
+  let n = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    sum += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+    n += 3;
+  }
+  return sum / n;
+}
+
+/**
+ * A settled mascot covers about half its tile (48–61% across all nine costumes
+ * and every tile size seen); the rise-in's first stop, a peek, covers only
+ * ~21–24%, and a ducked-out frame ~0%.
+ */
+export const VISIBLE_SHARE = 38;
+/**
+ * Below this mean per-channel difference between two probes the frame counts as
+ * not moving. A costume at rest measures exactly 0.0; the tail of the rise-in
+ * measures 5–12.
+ */
+export const STILL_MOTION = 0.3;
+/** Consecutive still-and-visible probes (~0.36 s) it takes to call a pose settled. */
+export const STEADY_PROBES = 3;
+export const PROBE_EVERY_MS = 120;
+/**
+ * Never keep a frame before this much *animation* time has elapsed — the
+ * rise-in (peek, pop, overshoot, settle) takes ~1.3 s. Counted from Rive's own
+ * per-frame `advance` events rather than the wall clock: with many canvases
+ * starting at once the main thread stalls and Rive draws nothing for a few
+ * hundred ms, while the wall clock keeps running and the mascot has not moved.
+ */
+export const EARLIEST_KEEP_S = 1.8;
+/**
+ * Until this much animation time, any visible frame is a valid resting pose:
+ * the rise-in is over and the first duck-out (~4 s) has not started. After it,
+ * a visible frame might be the mascot half-way out of or into frame, so only a
+ * *still* one is trusted. (Stillness cannot be the rule from the start: two of
+ * the nine costumes, headphones and glass1, have a perpetual small bob and are
+ * never still.)
+ */
+export const QUIET_WINDOW_END_S = 3.5;
+/** Give up freezing (and just keep playing) rather than keep a frame that never settled visibly. */
+const GIVE_UP_AFTER_MS = 12_000;
+
+/**
+ * Whether this probe's frame is one worth keeping as the mascot's still pose.
+ *
+ * `animatedFor` is seconds of Rive animation time, `visible` whether the mascot
+ * is clearly on screen, `steady` how many consecutive probes have been visible
+ * and not moving. The three regions this encodes were each measured, not
+ * assumed: before {@link EARLIEST_KEEP_S} the mascot is still rising in (its
+ * first stop, a peek, is even *steady* — at ~24% coverage); from there until
+ * {@link QUIET_WINDOW_END_S} every visible frame is a fine resting pose, which
+ * is the only rule that works for the two costumes that never stop bobbing;
+ * after it a duck-out may be under way, so only a frame that has held still
+ * for {@link STEADY_PROBES} probes is trusted.
+ */
+export function shouldKeepFrame(animatedFor: number, visible: boolean, steady: number): boolean {
+  if (!visible || animatedFor < EARLIEST_KEEP_S) return false;
+  return animatedFor < QUIET_WINDOW_END_S || steady >= STEADY_PROBES;
+}
+
+/**
+ * Calls `onSettled` once, with the canvas, on the first frame where the mascot
+ * is on screen and has stopped moving. Returns the cancel function.
+ *
+ * The file is not a set of stills. Every costume plays a rise-in on load —
+ * peek, pop, overshoot, settle — and then an idle loop that ducks the mascot
+ * out of frame and back roughly every six seconds. "Hold one pose" therefore
+ * cannot mean "stop after N ms" or "grab whatever is on the canvas": either
+ * lands on a hidden, half-risen or still-zooming frame. It means waiting for a
+ * frame that is clearly visible ({@link VISIBLE_SHARE}), after the rise-in
+ * ({@link EARLIEST_KEEP_S}) and — once the first duck-out could have begun
+ * ({@link QUIET_WINDOW_END_S}) — stopped moving ({@link STILL_MOTION}), and then
+ * keeping *that frame*.
+ * Pausing the runtime on it is not the same thing: a paused instance redraws
+ * differently from the one that was playing (every costume with a duck-out
+ * loop came back scaled and cropped), so the caller copies the pixels out and
+ * lets the instance go.
+ */
+function holdPoseOnceSettled(
+  rive: Rive,
+  canvas: HTMLCanvasElement,
+  onSettled: (canvas: HTMLCanvasElement) => void,
+): () => void {
+  const probe = document.createElement("canvas");
+  probe.width = PROBE_SIZE;
+  probe.height = PROBE_SIZE;
+  const ctx = probe.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return () => {};
+  // Rive's own clock: seconds advanced since we started.
+  let animatedFor = 0;
+  const onAdvance = (event: RiveEvent) => {
+    animatedFor += typeof event.data === "number" ? event.data : 0;
+  };
+  rive.on(EventType.Advance, onAdvance);
+  const started = performance.now();
+  let previous: Uint8ClampedArray | null = null;
+  let steady = 0;
+  const timer = setInterval(() => {
+    if (performance.now() - started > GIVE_UP_AFTER_MS) {
+      clearInterval(timer);
+      return;
+    }
+    const current = readProbe(canvas, probe, ctx);
+    if (!current) return;
+    const visible = contentShare(current) >= VISIBLE_SHARE;
+    const still = previous !== null && motion(previous, current) <= STILL_MOTION;
+    previous = new Uint8ClampedArray(current);
+    steady = still && visible ? steady + 1 : 0;
+    if (shouldKeepFrame(animatedFor, visible, steady)) {
+      clearInterval(timer);
+      onSettled(canvas);
+    }
+  }, PROBE_EVERY_MS);
+  return () => {
+    clearInterval(timer);
+    rive.off(EventType.Advance, onAdvance);
+  };
+}
+
 interface Props {
   /**
-   * Whether the canvas plays at all. Defaults to `"animated"`, the file's own
-   * default and what every `mascot:animated` wearer already rendered.
-   * `"static"` freezes on the chosen costume's resting frame: no autoplay, and
-   * {@link Props.state} is ignored entirely — a static mascot does not react
-   * to hover or "replying", so callers should not wire those handlers up for
-   * it either (this only guards the canvas itself).
+   * Whether the mascot keeps moving. Defaults to `"animated"`, the file's own
+   * default: the costume's rise-in, then its idle loop (the mascot ducks out
+   * of frame and back about every six seconds), and the hover/replying swaps.
+   * `"static"` holds one pose — the first frame where the mascot is on screen
+   * and still (`holdPoseOnceSettled`), kept as an image — and {@link Props.state} is ignored
+   * entirely; a static mascot does not react to hover or "replying", so callers
+   * should not wire those handlers up for it either.
    */
   mode?: MascotMode | string;
   /**
@@ -77,15 +307,14 @@ interface Props {
   handColor?: MascotHandColor | string;
   className?: string;
   "data-testid"?: string;
+}
+
+interface LiveProps extends Props {
   /**
-   * Fires once the canvas has actually been given its chosen costume and
-   * colors — the same `ready` gate that controls this component's own
-   * opacity (see the module docs above it). `MascotWarmer`
-   * (`teammate-avatar.tsx`) is the caller: it is the signal that the canvas
-   * now holds a real, correctly-costumed frame worth capturing with
-   * `canvas.toDataURL()`, rather than the file's un-costumed default one.
+   * Called once, with a PNG of the settled pose, when a frozen (static or
+   * reduced-motion) mascot has reached it. Never called for an animated one.
    */
-  onReady?: () => void;
+  onSettled?: (dataUrl: string) => void;
 }
 
 /**
@@ -116,19 +345,8 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
-/**
- * The live animated mascot. Mount this instead of `TeammateAvatar` only at
- * the small number of hero surfaces that want it live — see
- * `docs/issue/mascot-profile-avatar/rendering-strategy.md` for which those
- * are and why every other avatar surface must not mount this.
- *
- * Callers should `lazy()`-load this module (mirroring the
- * `lazy(() => import(...).then((m) => ({ default: m.X })))` convention this
- * codebase already uses for `recharts`/`@xyflow/react`/`react-joyride`) rather
- * than importing `@rive-app/react-canvas` directly — this file is the
- * code-split boundary.
- */
-export function MascotAvatar({
+/** One live Rive instance. Everything that touches the runtime lives here. */
+function LiveMascot({
   mode = "animated",
   state = "idle",
   costume,
@@ -136,53 +354,64 @@ export function MascotAvatar({
   handColor,
   className,
   "data-testid": testId,
-  onReady,
-}: Props) {
+  onSettled,
+}: LiveProps) {
   const reducedMotion = usePrefersReducedMotion();
   const isStatic = mode === "static";
-  const { rive, RiveComponent } = useRive({
-    src: mascotSrc("animated"),
-    // The file has one *loadable* artboard, literally named "Artboard" —
-    // `useRive({ artboard: "Mascot" })` throws "Invalid artboard name or no
-    // default artboard", so `Mascot Instance` (seen in the object graph) is
-    // a node inside `Artboard`, not a separately loadable artboard; there is
-    // no nested artboard to route around. This omits `artboard` and lets the
-    // runtime use its default.
-    //
-    // `Artboard` carries three state machines (`rive.stateMachineNames`):
-    // `MascotProfileAnimations`, `animtionStatemachin`, and `State Machine
-    // 1`. The Rive editor's Data panel shows `mascotAnimationNumber` bound
-    // under `State Machine 1`, which is what an earlier pass loaded here —
-    // the ViewModel write round-tripped through its own getter, but the
-    // rendered artboard never moved (canvas-pixel sampling, byte-identical
-    // across states). `MascotProfileAnimations` is the one that actually
-    // drives the costume swap: loading *this* one instead, with the same
-    // ViewModel writes below unchanged, visibly swaps the mascot's cap for
-    // headphones on hover (confirmed both by pixel sampling and a
-    // screenshot). Both machines can apparently read the same bound
-    // ViewModel instance; only one of them acts on it. See
-    // `docs/issue/mascot-profile-avatar/open-questions.md` §3.
-    //
-    // `autoBind: true` lets the runtime perform its own default
-    // ViewModel-instance binding at load time, ahead of this component's own
-    // manual `useViewModel`/`useViewModelInstance` calls below.
-    stateMachine: "MascotProfileAnimations",
-    autoBind: true,
-    // `autoplay: false` does not mean "paint one frame and stop" — it means
-    // the Rive runtime never starts its render loop at all, so the canvas
-    // never paints *anything*, including the ViewModel-driven costume/color
-    // writes below (confirmed live: a static mascot rendered fully
-    // transparent, not a frozen cap). A static mascot's costume never
-    // transitions (the number this component writes for it never changes),
-    // so keeping the loop running costs nothing extra to look at — "static"
-    // is enforced by never changing `state`/the animation number and never
-    // wiring hover up (see this component's own module docs), not by
-    // stopping the runtime.
-    autoplay: !reducedMotion,
-  });
+  // Static, and reduced motion, both hold one pose (see `holdPoseOnceSettled`).
+  const frozen = isStatic || reducedMotion;
+  const riveFile = useSharedMascotFile();
+  // `null` until the shared file has parsed: the hook then creates no instance
+  // at all, and `RiveComponent` below still renders its (empty) canvas, so the
+  // caller's placeholder shows through exactly as it did while a per-instance
+  // `src` was loading.
+  const riveParams = riveFile
+    ? {
+        riveFile,
+        // The file has one *loadable* artboard, literally named "Artboard" —
+        // `useRive({ artboard: "Mascot" })` throws "Invalid artboard name or no
+        // default artboard", so `Mascot Instance` (seen in the object graph) is
+        // a node inside `Artboard`, not a separately loadable artboard; there is
+        // no nested artboard to route around. This omits `artboard` and lets the
+        // runtime use its default.
+        //
+        // `Artboard` carries three state machines (`rive.stateMachineNames`):
+        // `MascotProfileAnimations`, `animtionStatemachin`, and `State Machine
+        // 1`. The Rive editor's Data panel shows `mascotAnimationNumber` bound
+        // under `State Machine 1`, which is what an earlier pass loaded here —
+        // the ViewModel write round-tripped through its own getter, but the
+        // rendered artboard never moved (canvas-pixel sampling, byte-identical
+        // across states). `MascotProfileAnimations` is the one that actually
+        // drives the costume swap: loading *this* one instead, with the same
+        // ViewModel writes below unchanged, visibly swaps the mascot's cap for
+        // headphones on hover (confirmed both by pixel sampling and a
+        // screenshot). Both machines can apparently read the same bound
+        // ViewModel instance; only one of them acts on it. See
+        // `docs/issue/mascot-profile-avatar/open-questions.md` §3.
+        //
+        // `autoBind: true` lets the runtime perform its own default
+        // ViewModel-instance binding at load time, ahead of this component's own
+        // manual `useViewModel`/`useViewModelInstance` calls below.
+        stateMachine: "MascotProfileAnimations",
+        autoBind: true,
+        // Always `true`, including for a static or reduced-motion mascot.
+        // `autoplay: false` does not mean "paint one frame and stop" — it means
+        // the Rive runtime never starts its render loop at all, so the canvas
+        // never paints *anything*, including the ViewModel-driven costume/color
+        // writes below (confirmed live: a static mascot rendered fully
+        // transparent, and so did reduced motion). Holding a pose is done by
+        // keeping an already-painted, settled frame — see `holdPoseOnceSettled`
+        // and `MascotAvatar` — not by never starting.
+        autoplay: true,
+      }
+    : null;
+  const { rive, canvas, RiveComponent } = useRive(riveParams);
 
   const viewModel = useViewModel(rive, { useDefault: true });
-  const vmi = useViewModelInstance(viewModel, { useDefault: true, rive });
+  // A fresh instance per mascot, not the ViewModel's default one: with a shared
+  // file, `useDefault` hands every canvas the *same* instance, so one
+  // teammate's `skinColor` write would repaint every other mascot on the page.
+  const vmi = useViewModelInstance(viewModel, { useNew: true, rive });
 
   const { setValue: setAnimationNumber } = useViewModelInstanceNumber(
     "mascotAnimationNumber",
@@ -228,23 +457,25 @@ export function MascotAvatar({
         : REACTIVE_NUMBERS[state];
     setAnimationNumber(number);
     setReady(true);
-    if (!onReady) return;
-    // The ViewModel write above is not the paint: Rive applies it on its own
-    // render loop's next tick, and `canvas.toDataURL()` (what `onReady` exists
-    // for — see this component's own `Props.onReady` doc) needs a frame that
-    // has actually been drawn with it, not merely requested. One
-    // `requestAnimationFrame` is when the browser is about to paint; a second
-    // is the first opportunity to run *after* that paint has happened.
-    let raf2 = 0;
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => onReady());
-    });
-    return () => {
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(raf2);
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vmi, isStatic, state, reducedMotion, costume]);
+
+  // Hold the pose for a static / reduced-motion mascot: once it has settled,
+  // hand the parent a PNG of that exact frame. Declared after the effects above
+  // so their ViewModel writes have landed first.
+  useEffect(() => {
+    if (!frozen || !rive || !vmi || !canvas || !onSettled) return;
+    return holdPoseOnceSettled(rive, canvas, (settled) => {
+      try {
+        onSettled(settled.toDataURL("image/png"));
+      } catch {
+        // A canvas Rive draws into procedurally is never cross-origin-tainted,
+        // but `toDataURL` is specified to throw if it is. Staying live is
+        // the safe failure: the mascot keeps moving rather than vanishing.
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rive, canvas, vmi, frozen, costume, skinColor, handColor]);
 
   return (
     <div
@@ -288,4 +519,45 @@ export function MascotAvatar({
       />
     </div>
   );
+}
+
+/**
+ * The mascot. One component for every surface that draws a `mascot:animated`
+ * teammate — `TeammateAvatar` mounts it for every tile, the hero surfaces mount
+ * it directly (they also drive `state` from hover).
+ *
+ * An animated mascot is a live Rive instance. A static one (or any mascot under
+ * `prefers-reduced-motion`) plays just long enough to reach its settled pose,
+ * then becomes a plain `<img>` of that frame and the instance is released — so a
+ * screenful of static teammates costs no live canvases at all. Changing the
+ * costume, either color, or the mode starts it over.
+ *
+ * Callers should `lazy()`-load this module (mirroring the
+ * `lazy(() => import(...).then((m) => ({ default: m.X })))` convention this
+ * codebase already uses for `recharts`/`@xyflow/react`/`react-joyride`) rather
+ * than importing `@rive-app/react-canvas` directly — this file is the
+ * code-split boundary.
+ */
+export function MascotAvatar(props: Props) {
+  const reducedMotion = usePrefersReducedMotion();
+  const frozen = props.mode === "static" || reducedMotion;
+  const { costume, skinColor, handColor } = props;
+  const [settledUrl, setSettledUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSettledUrl(null);
+  }, [frozen, costume, skinColor, handColor]);
+
+  if (frozen && settledUrl) {
+    return (
+      <div
+        className={cn("overflow-hidden rounded-xl", props.className)}
+        data-testid={props["data-testid"]}
+        aria-hidden
+      >
+        <img src={settledUrl} alt="" className="size-full object-cover" />
+      </div>
+    );
+  }
+  return <LiveMascot {...props} onSettled={frozen ? setSettledUrl : undefined} />;
 }
