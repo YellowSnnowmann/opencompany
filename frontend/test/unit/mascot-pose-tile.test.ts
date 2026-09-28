@@ -72,7 +72,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   live.reduced = false;
   live.instances.length = 0;
-  animate.mockClear();
+  animate.mockReset();
   (HTMLElement.prototype as unknown as { animate: typeof animate }).animate = animate;
   pose.resetMascotPoses();
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -271,5 +271,119 @@ describe("cleanup", () => {
     root = createRoot(container);
     act(() => void el.dispatchEvent(new Event("pointerenter")));
     expect(animate).not.toHaveBeenCalled();
+  });
+});
+
+describe("replying", () => {
+  const REPLY = "data:image/png;base64,REPLY";
+  const replyKey = () => pose.mascotPoseKey(pose.MASCOT_REPLYING_COSTUME, undefined, undefined);
+  const bob = { cancel: vi.fn() };
+  const bobCalls = () => animate.mock.calls.filter(([, options]) => options?.iterations === Infinity);
+  const cachedRest = (costume = "glass2") => {
+    act(() => {
+      pose.publishMascotPose(restKey(costume), REST);
+      pose.publishMascotPose(hoverKey(), HOVER);
+    });
+  };
+
+  beforeEach(() => {
+    bob.cancel.mockReset();
+    animate.mockReturnValue(bob);
+  });
+
+  it("bobs for exactly as long as it is replying", () => {
+    cachedRest();
+    mount({ costume: "glass2", replying: true });
+    expect(tile().getAttribute("data-mascot-replying")).toBe("true");
+    expect(bobCalls()).toHaveLength(1);
+    expect(bob.cancel).not.toHaveBeenCalled();
+
+    mount({ costume: "glass2", replying: false });
+    expect(tile().getAttribute("data-mascot-replying")).toBe("false");
+    expect(bob.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the bob when the tile goes away mid-reply — the row that says replying unmounting cannot leave it running", () => {
+    cachedRest();
+    mount({ costume: "glass2", replying: true });
+    act(() => root.unmount());
+    root = createRoot(container);
+    expect(bob.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("wears the replying costume once its frame exists, and takes it off when the reply ends", () => {
+    cachedRest();
+    act(() => pose.publishMascotPose(replyKey(), REPLY));
+    mount({ costume: "glass2", replying: true });
+    expect(tile().getAttribute("data-mascot-pose")).toBe("replying");
+    const layer = imgs().find((i) => i.getAttribute("src") === REPLY)!;
+    expect(layer.className).toContain("opacity-100");
+
+    mount({ costume: "glass2", replying: false });
+    expect(tile().getAttribute("data-mascot-pose")).toBe("rest");
+    expect(imgs().find((i) => i.getAttribute("src") === REPLY)!.className).toContain("opacity-0");
+  });
+
+  it("asks for the replying frame only once someone is replying, not in the background — and keeps it", () => {
+    cachedRest();
+    mount({ costume: "glass2" });
+    expect(live.instances.map((i) => i.costume)).toEqual([]);
+
+    mount({ costume: "glass2", replying: true });
+    expect(live.instances.map((i) => i.costume)).toEqual([pose.MASCOT_REPLYING_COSTUME]);
+    // Until it exists the tile still bobs on its resting frame: never blank, never waiting silently.
+    expect(tile().getAttribute("data-mascot-pose")).toBe("rest");
+    expect(bobCalls()).toHaveLength(1);
+
+    act(() => live.instances[0].onSettled!(REPLY));
+    expect(liveCanvases()).toBe(0);
+    expect(tile().getAttribute("data-mascot-pose")).toBe("replying");
+  });
+
+  it("does not bob, or capture anything, before there is a resting frame to work from", () => {
+    mount({ costume: "glass2", replying: true });
+    expect(bobCalls()).toHaveLength(0);
+    expect(live.instances.map((i) => i.costume)).toEqual(["glass2"]); // only the resting capture
+    act(() => live.instances[0].onSettled!(REST));
+    expect(bobCalls()).toHaveLength(1);
+  });
+
+  it("for a teammate already in the replying costume, bobs but has nothing to swap to", () => {
+    act(() => pose.publishMascotPose(restKey(pose.MASCOT_REPLYING_COSTUME), REST));
+    mount({ costume: pose.MASCOT_REPLYING_COSTUME, replying: true });
+    expect(bobCalls()).toHaveLength(1);
+    expect(live.instances.some((i) => i.costume === pose.MASCOT_REPLYING_COSTUME)).toBe(false);
+    expect(tile().getAttribute("data-mascot-pose")).toBe("rest");
+  });
+
+  it("lets a hover reaction play over it, then goes back to replying", () => {
+    cachedRest();
+    act(() => pose.publishMascotPose(replyKey(), REPLY));
+    mount({ costume: "glass2", replying: true });
+    enter();
+    expect(tile().getAttribute("data-mascot-pose")).toBe("hover");
+    advance(900);
+    expect(tile().getAttribute("data-mascot-pose")).toBe("replying");
+  });
+
+  it.each([
+    ["a static teammate", { mode: "static" }],
+    ["a surface that asks for none", { animate: "none" }],
+  ])("never replies for %s", (_label, props) => {
+    cachedRest();
+    act(() => pose.publishMascotPose(replyKey(), REPLY));
+    mount({ costume: "glass2", replying: true, ...props });
+    expect(tile().getAttribute("data-mascot-replying")).toBe("false");
+    expect(tile().getAttribute("data-mascot-pose")).toBe("rest");
+    expect(bobCalls()).toHaveLength(0);
+  });
+
+  it("never replies under reduced motion — no bob, and no capture of a costume it will never show", () => {
+    live.reduced = true;
+    cachedRest();
+    mount({ costume: "glass2", replying: true });
+    expect(tile().getAttribute("data-mascot-replying")).toBe("false");
+    expect(bobCalls()).toHaveLength(0);
+    expect(liveCanvases()).toBe(0);
   });
 });

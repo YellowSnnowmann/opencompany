@@ -33,7 +33,7 @@ vi.mock("@rive-app/react-canvas", () => ({
 }));
 
 const { MascotAvatar, REACTIVE_NUMBERS } = await import("@/components/mascot-avatar");
-const { MASCOT_HOVER_COSTUME } = await import("@/lib/mascot-pose");
+const { MASCOT_HOVER_COSTUME, MASCOT_REPLYING_COSTUME } = await import("@/lib/mascot-pose");
 const { mascotCostumeNumber } = await import("@/lib/avatar");
 
 let container: HTMLDivElement;
@@ -94,6 +94,12 @@ describe("MascotAvatar", () => {
     // `lib/mascot-pose.ts` cannot import this module (it would drag the Rive
     // runtime into the main bundle), so the two are kept in step here.
     expect(mascotCostumeNumber(MASCOT_HOVER_COSTUME)).toBe(REACTIVE_NUMBERS.hover);
+  });
+
+  it("a replying tile wears the same costume the live replying state shows", () => {
+    // Same reason as the hover pin above: a tile draws the costume behind the
+    // fixed replying number from settled frames, so the two must not drift.
+    expect(mascotCostumeNumber(MASCOT_REPLYING_COSTUME)).toBe(REACTIVE_NUMBERS.replying);
   });
 
   it("writes 1 (cap) for idle, 2 for hover, 3 for replying — the file's own default costume", () => {

@@ -98,7 +98,9 @@ the hero surfaces — looping, reactive to hover, landing on the chosen costume 
 its baseline — and, on every smaller tile, a settled frame that plays a one-shot
 reaction when its row is hovered (a per-surface `animate` trigger: `loop`,
 `hover`, `none`; small tiles default to `hover`, so they never blink out with the
-file's idle duck-out). `hover`/`replying` stay the two fixed `mascotAnimationNumber` values
+file's idle duck-out). While its teammate has a turn in progress — the chat's live
+receipt, working and typing rows, and not a queued or stalled one — a small tile
+also bobs and wears the headband costume. `hover`/`replying` stay the two fixed `mascotAnimationNumber` values
 that reactivity already used before a costume choice existed, rather than
 following the chosen costume, so a chosen "look" reads as one outfit rather than
 one outfit at rest and a different one on hover. See

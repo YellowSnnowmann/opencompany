@@ -222,6 +222,10 @@ export function ChatLiveReceipt({
         mascotSkinColor={channel.member?.mascotSkinColor}
         mascotHandColor={channel.member?.mascotHandColor}
         mascotMode={channel.member?.mascotMode}
+        // Working, not merely waiting: a queued turn is not progressing (the dot
+        // above stills for the same reason) and a stalled one has gone quiet, so
+        // neither should look busy.
+        replying={!queued && !stalled}
         company={channel.kind === "channel" && channel.id === "main"}
         className="size-9 shrink-0"
       />

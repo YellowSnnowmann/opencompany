@@ -772,6 +772,9 @@ function LiveTurnRow({
         mascotSkinColor={channel.member?.mascotSkinColor}
         mascotHandColor={channel.member?.mascotHandColor}
         mascotMode={channel.member?.mascotMode}
+        // This row exists only while the turn is open, so it is the teammate
+        // replying for exactly as long as it is on screen.
+        replying
         company={channel.kind === "channel" && channel.id === "main"}
         className="size-9 shrink-0"
       />
@@ -817,6 +820,8 @@ function TypingRow({
         mascotSkinColor={channel.member?.mascotSkinColor}
         mascotHandColor={channel.member?.mascotHandColor}
         mascotMode={channel.member?.mascotMode}
+        // A queued turn is waiting for its turn, not replying.
+        replying={!queued}
         company={channel.kind === "channel" && channel.id === "main"}
         className="size-9"
       />

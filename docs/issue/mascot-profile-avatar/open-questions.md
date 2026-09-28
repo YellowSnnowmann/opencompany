@@ -51,13 +51,13 @@ numbers either the string table nor the sequential walk found.
 Superseded by the above but kept for history: `mascotAnimationNumber = 1`
 renders the mascot wearing its cap (idle); `= 2` swaps it to headphones
 (hover) — both still true, just no longer the *only* two confirmed numbers.
-`replying = 3` (headband) is wired the same way `hover` is, but whether it
-reads as a *meaningful* "replying" cue rather than an arbitrary third number
-remains unconfirmed and is unchanged by this update — animated mode keeps
+`replying = 3` (headband) is wired the same way `hover` is. Whether it reads as a
+*meaningful* "replying" cue was answered by watching it (see `state-mapping.md`):
+a dark bandana headband with a side knot, crossfaded in over a gentle bob, reads
+as "getting to work" at 36 px and 96 px in both themes, and is what a small tile
+wears while its teammate has a turn in progress. Animated mode keeps
 `hover`/`replying` as these two fixed numbers regardless of a teammate's
-chosen costume (see `mascot-avatar.tsx`'s module docs for why), so this
-question is about their own visual, not about what a chosen costume does to
-them.
+chosen costume (see `mascot-avatar.tsx`'s module docs for why).
 
 ## 2. What the "copy" clips actually do — still unconfirmed, no longer blocked
 
@@ -134,8 +134,8 @@ canvas-pixel sampling and screenshots, not just a round-tripped getter.
 
 ## 4. The Number input's real valid range and behavior — partially confirmed
 
-`1` and `2` are confirmed to render distinct, correct costumes (§1). `3`
-("replying") is written the same way but its visual is unconfirmed.
+`1`, `2` and `3` are confirmed to render distinct, correct costumes (§1) — cap,
+headphones (hover) and headband (replying, watched in `state-mapping.md`).
 Auto-loop/auto-return behavior between costumes (whether leaving `hover`
 plays a `copy` reverse clip back to idle, or jump-cuts) was not directly
 observed — see §2.

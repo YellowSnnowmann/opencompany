@@ -88,6 +88,14 @@ interface Props {
    * directly, which is the loop.
    */
   animate?: MascotTrigger;
+  /**
+   * This teammate has a turn open right now — passed by the rows that exist
+   * exactly while one does (the live receipt, the working row, the typing row).
+   * A mascot bobs and wears its replying costume for as long as it is true; it
+   * composes with {@link animate}, so `"none"`, a static teammate and reduced
+   * motion never reply. Ignored for an avatar that is not a mascot.
+   */
+  replying?: boolean;
   className?: string;
   /**
    * Forwarded to the tile so a spec can name one avatar among several on a page.
@@ -118,6 +126,7 @@ export function TeammateAvatar({
   mascotHandColor,
   mascotMode,
   animate = DEFAULT_MASCOT_TRIGGER,
+  replying,
   className,
   "data-testid": testId,
 }: Props) {
@@ -164,6 +173,7 @@ export function TeammateAvatar({
       mascotHandColor={mascotHandColor}
       mascotMode={mascotMode}
       animate={animate}
+      replying={replying}
       className={className}
       testId={testId}
     />
@@ -187,6 +197,7 @@ function AvatarTile({
   mascotHandColor,
   mascotMode,
   animate,
+  replying,
   className,
   testId,
 }: {
@@ -198,6 +209,7 @@ function AvatarTile({
   mascotHandColor?: string;
   mascotMode?: string;
   animate: MascotTrigger;
+  replying?: boolean;
   className?: string;
   testId?: string;
 }) {
@@ -231,6 +243,7 @@ function AvatarTile({
           handColor={mascotHandColor}
           mode={mascotMode}
           animate={animate}
+          replying={replying}
           className="absolute inset-0 rounded-none"
         />
       ) : (
@@ -316,6 +329,7 @@ function MascotTile({
   handColor,
   mode,
   animate,
+  replying,
   className,
 }: {
   costume?: string;
@@ -323,6 +337,7 @@ function MascotTile({
   handColor?: string;
   mode?: string;
   animate: MascotTrigger;
+  replying?: boolean;
   className?: string;
 }) {
   const [ref, near] = useNearViewport();
@@ -336,11 +351,13 @@ function MascotTile({
               skinColor={skinColor}
               handColor={handColor}
               mode={mode}
+              state={replying ? "replying" : "idle"}
               className="size-full rounded-none"
             />
           ) : (
             <LazyPoseMascot
               animate={animate}
+              replying={replying}
               costume={costume}
               skinColor={skinColor}
               handColor={handColor}

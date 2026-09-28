@@ -71,6 +71,13 @@ export function effectiveMascotTrigger(
 export const MASCOT_HOVER_COSTUME: MascotCostume = "headphones";
 
 /**
+ * The costume a tile wears while its teammate is replying — the one behind the
+ * fixed replying number (`REACTIVE_NUMBERS.replying` in `mascot-avatar.tsx`,
+ * kept in step by a unit test). See `PoseMascot` for how it is shown.
+ */
+export const MASCOT_REPLYING_COSTUME: MascotCostume = "headband";
+
+/**
  * The identity of a settled pose: the costume's `mascotAnimationNumber` and both
  * resolved colors. Anything that resolves to the same three draws the same frame,
  * so an unrecognised costume id and the default share a key, and two teammates

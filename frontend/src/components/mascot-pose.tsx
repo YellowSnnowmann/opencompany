@@ -17,6 +17,12 @@
 // on the pointer's first frame. If the hover costume's frame has not been
 // captured yet (it is captured in the background after the resting frame), only
 // the pop plays. A teammate already in the hover costume gets the pop alone.
+//
+// "Replying" is the same idea held for as long as a turn is open: the tile bobs
+// gently and wears the replying costume (headband), a settled frame captured on
+// demand the first time someone replies — until it exists the tile bobs on its
+// resting frame, so it is never blank. Nothing outlives the `replying` prop: the
+// bob's cleanup cancels it, and the headband layer stays mounted only to fade out.
 
 import {
   useCallback,
@@ -31,6 +37,7 @@ import { LiveMascot, usePrefersReducedMotion } from "@/components/mascot-avatar"
 import { POSE_CAPTURE_PX } from "@/lib/mascot-frame";
 import {
   MASCOT_HOVER_COSTUME,
+  MASCOT_REPLYING_COSTUME,
   effectiveMascotTrigger,
   getMascotPose,
   mascotPoseKey,
@@ -48,6 +55,8 @@ const HOLD_MS = 700;
 /** The whole reaction; a new one cannot start until this has passed. */
 const REACTION_MS = CROSSFADE_MS + HOLD_MS + CROSSFADE_MS;
 const POP_MS = 420;
+/** One breath of the "replying" bob. */
+const BOB_MS = 1400;
 
 /**
  * The frame for a pose key, or `undefined` until it has been captured. `null`
@@ -131,6 +140,13 @@ function PoseCapture({
 interface Props {
   /** `"hover"` (the default) or `"none"`; `"loop"` is `MascotAvatar`, not this component. */
   animate?: Exclude<MascotTrigger, "loop">;
+  /**
+   * The teammate has a turn open right now. While true (and only while — nothing
+   * outlives the prop) the tile bobs gently and, once its frame exists, wears
+   * the replying costume. Composes with `animate`: `"none"`, a static teammate
+   * and reduced motion all mean no motion, so none of them replies either.
+   */
+  replying?: boolean;
   /** The teammate's own mode: `"static"` never reacts, whatever `animate` says. */
   mode?: string;
   costume?: string;
@@ -142,6 +158,7 @@ interface Props {
 
 export function PoseMascot({
   animate = "hover",
+  replying = false,
   mode,
   costume,
   skinColor,
@@ -156,12 +173,21 @@ export function PoseMascot({
   const hoverKey = mascotPoseKey(MASCOT_HOVER_COSTUME, skinColor, handColor);
   const swaps = trigger === "hover" && hoverKey !== restKey;
 
+  // Replying is motion, so it is only ever on where a hover reaction would be.
+  const working = replying && trigger !== "none";
+  const replyKey = mascotPoseKey(MASCOT_REPLYING_COSTUME, skinColor, handColor);
+  const wearsReply = working && replyKey !== restKey;
+
   const rest = useMascotPose(restKey);
   const hover = useMascotPose(swaps ? hoverKey : null);
+  const reply = useMascotPose(wearsReply ? replyKey : null);
 
   const captureRest = useCaptureGrant(restKey, "rest", rest === undefined);
   // The hover costume waits for the resting frame: the tile is useful without it.
   const captureHover = useCaptureGrant(hoverKey, "hover", swaps && rest !== undefined && hover === undefined);
+  // The replying costume is captured only once someone is actually replying —
+  // it is wanted now, not in the background, and it is kept for the next reply.
+  const captureReply = useCaptureGrant(replyKey, "rest", wearsReply && rest !== undefined && reply === undefined);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const [swapped, setSwapped] = useState(false);
@@ -205,18 +231,57 @@ export function PoseMascot({
     [],
   );
 
+  // The bob lives exactly as long as `working` does: the effect's cleanup is
+  // what stops it, so a reply that ends, errors or is abandoned — the row that
+  // passes `replying` unmounts, or the prop drops — cannot leave it running.
+  const bobbing = working && rest !== undefined;
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!bobbing || !el || typeof el.animate !== "function") return;
+    const bob = el.animate(
+      [
+        { transform: "translateY(0) scale(1)" },
+        { transform: "translateY(-4%) scale(1.05)" },
+        { transform: "translateY(0) scale(1)" },
+      ],
+      { duration: BOB_MS, iterations: Infinity, easing: "ease-in-out" },
+    );
+    return () => bob.cancel();
+  }, [bobbing]);
+
   const showingHover = swapped && hover !== undefined;
+  const showingReply = working && reply !== undefined;
+  // The replying frame is only subscribed to while replying, so it is held here
+  // once seen: when the reply ends the layer has to still be mounted to fade
+  // out, rather than vanishing the instant `working` drops.
+  const lastReply = useRef<string>();
+  if (reply !== undefined) lastReply.current = reply;
+  const replySrc = reply ?? lastReply.current;
   return (
     <div
       ref={rootRef}
       className={cn("relative overflow-hidden rounded-xl", className)}
       data-testid={testId}
       data-mascot-trigger={trigger}
-      data-mascot-pose={rest === undefined ? "pending" : showingHover ? "hover" : "rest"}
+      data-mascot-replying={working ? "true" : "false"}
+      data-mascot-pose={
+        rest === undefined ? "pending" : showingHover ? "hover" : showingReply ? "replying" : "rest"
+      }
       aria-hidden
     >
       {rest !== undefined && (
         <img src={rest} alt="" draggable={false} className="absolute inset-0 size-full object-cover" />
+      )}
+      {replySrc !== undefined && (
+        <img
+          src={replySrc}
+          alt=""
+          draggable={false}
+          className={cn(
+            "absolute inset-0 size-full object-cover transition-opacity duration-150",
+            showingReply ? "opacity-100" : "opacity-0",
+          )}
+        />
       )}
       {hover !== undefined && (
         <img
@@ -236,6 +301,14 @@ export function PoseMascot({
         <PoseCapture
           poseKey={hoverKey}
           costume={MASCOT_HOVER_COSTUME}
+          skinColor={skinColor}
+          handColor={handColor}
+        />
+      )}
+      {captureReply && (
+        <PoseCapture
+          poseKey={replyKey}
+          costume={MASCOT_REPLYING_COSTUME}
           skinColor={skinColor}
           handColor={handColor}
         />
