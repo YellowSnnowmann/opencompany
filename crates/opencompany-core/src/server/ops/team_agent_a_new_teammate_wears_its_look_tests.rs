@@ -1,3 +1,8 @@
+//! `POST …/team` and a mascot look: a teammate is born wearing the look it was
+//! created with, every field is validated against the same closed lists as
+//! `PATCH …/team/{agent_id}` before anything is written, and a request that
+//! carries none of the fields behaves exactly as it did before they existed.
+
 use axum::http::StatusCode;
 use serde_json::json;
 

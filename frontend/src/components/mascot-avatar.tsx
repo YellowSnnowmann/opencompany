@@ -1,18 +1,20 @@
-// The animated Rive mascot: a teammate's live face, and the one thing every
-// avatar surface draws for a `mascot:animated` wearer (`TeammateAvatar` for
-// every tile, this component directly for the hero surfaces that also react
-// to hover — the agent profile sheet, the agent detail page's header, the
-// avatar picker). See `docs/issue/mascot-profile-avatar/` for the deep-dive
-// this was planned from.
+// The animated Rive mascot: a teammate's live canvas. `TeammateAvatar` mounts
+// it directly only for the hero surfaces that stay live and react to hover —
+// the agent profile sheet, the agent detail page's header, the avatar picker's
+// preview. Every small tile is drawn from a *settled frame* instead
+// (`components/mascot-pose.tsx`, `lib/mascot-pose.ts`), which is captured by a
+// hidden instance of this component and kept across reloads
+// (`lib/mascot-pose-store.ts`). See `docs/issue/mascot-profile-avatar/` for the
+// deep-dive this was planned from.
 //
-// There is deliberately **one** rendering path. An earlier pass drew tiles
-// from a cached `canvas.toDataURL()` snapshot and only heroes live; capturing
-// "whatever the canvas shows two frames after the write" raced the costume's
-// entry animation and cached blank or half-risen frames, and it left small
-// tiles static while big ones moved. What makes drawing it live everywhere
-// affordable instead is sharing the parsed `.riv` between every instance
-// (`useSharedMascotFile`) and only mounting a tile's canvas while it is near
-// the viewport (`TeammateAvatar`'s `MascotTile`).
+// Why tiles are not live canvases: every costume rises in over ~1.3 s and most
+// duck out of frame about every six seconds, so a dozen live tiles would blink
+// in and out, each a running canvas. Why the frame is
+// captured only once it has *settled* (`holdPoseOnceSettled`): capturing
+// "whatever the canvas shows two frames after the write" raced the entry
+// animation and cached blank or half-risen frames. What keeps the live canvases
+// that remain cheap is sharing the parsed `.riv` between every instance
+// (`useSharedMascotFile`) and only holding one while it is near the viewport.
 
 import { useEffect, useState } from "react";
 import {

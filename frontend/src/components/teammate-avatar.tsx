@@ -267,14 +267,16 @@ function AvatarTile({
 }
 
 /**
- * How far past the viewport edge a mascot tile still holds its live canvas, and
- * how long after leaving that range it lets go.
+ * How far past the viewport edge a mascot tile still holds what it draws with,
+ * and how long after leaving that range it lets go.
  *
- * The mascot is one Rive instance (artboard + state machine + render loop) per
- * tile. A long transcript has a tile per message, so the count that matters is
- * "how many are near the screen", not "how many exist" — a tile that has been
- * out of range for a second or two is unmounted and its instance freed, and
- * remounts (from the shared parsed file, so cheaply) when it comes back. The
+ * A live (`animate="loop"`) tile is one Rive instance (artboard + state machine
+ * + render loop); a settled-frame tile holds a frame subscription and, on a
+ * cold look, a slot in the capture queue. A long transcript has a tile per
+ * message, so the count that matters is "how many are near the screen", not
+ * "how many exist" — a tile that has been out of range for a second or two is
+ * unmounted and its instance or subscription freed, and remounts (from the
+ * shared parsed file and the frame cache, so cheaply) when it comes back. The
  * grace period keeps a tile that is scrolled just past the edge and back from
  * being torn down and rebuilt on every wobble.
  */
