@@ -2502,6 +2502,9 @@ mod tests_a_manifest_teammates_tools;
 #[path = "team_agent_a_member_may_change_tests.rs"]
 mod tests_a_member_may_change;
 #[cfg(test)]
+#[path = "team_agent_a_new_teammate_wears_its_look_tests.rs"]
+mod tests_a_new_teammate_wears_its_look;
+#[cfg(test)]
 #[path = "team_agent_harness_and_model_persist_tests.rs"]
 mod tests_harness_and_model_persist;
 #[cfg(test)]

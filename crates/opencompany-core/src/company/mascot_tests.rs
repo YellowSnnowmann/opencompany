@@ -87,3 +87,84 @@ fn default_swatches_are_named_entries() {
     assert!(MASCOT_SKIN_COLORS.contains(&"default"));
     assert!(MASCOT_HAND_COLORS.contains(&"default"));
 }
+
+#[test]
+fn a_full_set_of_choices_parses_and_is_trimmed() {
+    let choices = parse_choices(
+        Some(" static "),
+        Some("habibi"),
+        Some("mint"),
+        Some(" charcoal "),
+    )
+    .unwrap();
+    assert_eq!(choices.mode.as_deref(), Some("static"));
+    assert_eq!(choices.costume.as_deref(), Some("habibi"));
+    assert_eq!(choices.skin_color.as_deref(), Some("mint"));
+    assert_eq!(choices.hand_color.as_deref(), Some("charcoal"));
+    assert!(!choices.is_empty());
+}
+
+#[test]
+fn absent_and_blank_choices_are_no_choice_never_a_stored_empty_string() {
+    assert!(parse_choices(None, None, None, None).unwrap().is_empty());
+    let blank = parse_choices(Some(""), Some("   "), None, Some("\t")).unwrap();
+    assert!(blank.is_empty(), "{blank:?}");
+    // A partial look keeps only what was chosen.
+    let partial = parse_choices(None, Some("cap"), None, None).unwrap();
+    assert_eq!(partial.costume.as_deref(), Some("cap"));
+    assert!(partial.mode.is_none() && partial.skin_color.is_none() && partial.hand_color.is_none());
+}
+
+#[test]
+fn every_costume_and_swatch_the_patch_route_accepts_is_accepted_here_too() {
+    for costume in MASCOT_COSTUMES {
+        assert!(
+            parse_choices(None, Some(costume), None, None).is_ok(),
+            "{costume}"
+        );
+    }
+    for color in MASCOT_SKIN_COLORS {
+        assert!(
+            parse_choices(None, None, Some(color), None).is_ok(),
+            "{color}"
+        );
+    }
+    for color in MASCOT_HAND_COLORS {
+        assert!(
+            parse_choices(None, None, None, Some(color)).is_ok(),
+            "{color}"
+        );
+    }
+    for mode in MASCOT_MODES {
+        assert!(
+            parse_choices(Some(mode), None, None, None).is_ok(),
+            "{mode}"
+        );
+    }
+}
+
+#[test]
+fn one_bad_choice_refuses_the_whole_set_and_names_the_accepted_values() {
+    // The order of the arguments is mode, costume, skin, hand: each bad value
+    // is refused with the sentence the `PATCH` route gives for that field.
+    let cases: [(&str, [Option<&str>; 4], &str); 4] = [
+        ("mode", [Some("paused"), Some("cap"), None, None], "static"),
+        (
+            "costume",
+            [None, Some("face_mask"), None, None],
+            "cardboard_mask",
+        ),
+        ("skin", [None, None, Some("chartreuse"), None], "mint"),
+        (
+            "hand",
+            [None, Some("cap"), None, Some("#ff0000")],
+            "charcoal",
+        ),
+    ];
+    for (field, [mode, costume, skin, hand], accepted) in cases {
+        let err = parse_choices(mode, costume, skin, hand).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains(accepted), "{field}: {message}");
+        assert!(message.contains("Pick one of"), "{field}: {message}");
+    }
+}

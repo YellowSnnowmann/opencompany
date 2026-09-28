@@ -150,11 +150,31 @@ one would reintroduce, inside a file, precisely what refusing URLs keeps out.
 | Subject | Field | Written by |
 |---|---|---|
 | A teammate | `AgentOverride::avatar` on the company record | `PATCH …/team/{agent_id}`, `POST …/team` |
-| A teammate's mascot mode | `AgentOverride::mascot_mode` | `PATCH …/team/{agent_id}` |
-| A teammate's mascot costume | `AgentOverride::mascot_costume` | `PATCH …/team/{agent_id}` |
-| A teammate's mascot skin color | `AgentOverride::mascot_skin_color` | `PATCH …/team/{agent_id}` |
-| A teammate's mascot hand color | `AgentOverride::mascot_hand_color` | `PATCH …/team/{agent_id}` |
+| A teammate's mascot mode | `AgentOverride::mascot_mode` | `PATCH …/team/{agent_id}`, `POST …/team` |
+| A teammate's mascot costume | `AgentOverride::mascot_costume` | `PATCH …/team/{agent_id}`, `POST …/team` |
+| A teammate's mascot skin color | `AgentOverride::mascot_skin_color` | `PATCH …/team/{agent_id}`, `POST …/team` |
+| A teammate's mascot hand color | `AgentOverride::mascot_hand_color` | `PATCH …/team/{agent_id}`, `POST …/team` |
 | A person | `UserRecord::avatar` | `PATCH …/auth/me` |
+
+### Born wearing it
+
+`POST …/team` takes the same four mascot fields as `PATCH …/team/{agent_id}`
+(`mascotMode`, `mascotCostume`, `mascotSkinColor`, `mascotHandColor`), so a
+teammate is created already wearing the look chosen in the Add-agent dialog —
+the dialog reuses the picker's mascot panel. Validation is the one
+`company::mascot::parse_choices`, over the same closed lists as the `PATCH`
+route, and it runs **before** anything is written: a bad value is a `400`
+naming the accepted set ("Pick one of: …") and creates nobody. A field that is
+absent, `null` or blank means "the file's own default" and stores nothing. The
+response echoes what was stored.
+
+The console sends the look on the create request and, for a host that predates
+the fields (unknown keys are ignored, so it answers without echoing them),
+writes only the fields the response did not echo with a follow-up `PATCH`
+(`frontend/src/lib/new-member-look.ts`, shared by the roster, the chat pane and
+the org chart). Those last two used to drop the face on the floor; only the
+roster wrote it. A console with no host to write to keeps the look on the local
+row (`newMember` in `lib/team.ts`) for as long as that row lives.
 
 A teammate's face rides on the **override** row rather than on `OverlayAgent`,
 so one field answers for both kinds of teammate: an override may name a

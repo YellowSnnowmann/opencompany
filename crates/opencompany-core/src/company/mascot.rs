@@ -60,8 +60,9 @@ pub const MASCOT_MODES: [&str; 2] = ["animated", "static"];
 
 /// The nine costumes a `mascot:animated` wearer may land on, by id.
 ///
-/// **Must stay in step with `MASCOT_COSTUMES` in `frontend/src/lib/
-/// mascot.ts`**, the same twinning [`crate::company::avatar::TINY_FLAVOURS`]
+/// **Must stay in step with `MASCOT_COSTUMES` in `frontend/src/lib/avatar.ts`**
+/// (a unit test reads this file and compares), the same twinning
+/// [`crate::company::avatar::TINY_FLAVOURS`]
 /// needs with its frontend counterpart: an id accepted here with no frontend
 /// entry has nothing to render, an id the frontend offers that this list
 /// refuses is a `400` the console never explains. See the module docs for
@@ -82,7 +83,7 @@ pub const MASCOT_COSTUMES: [&str; 9] = [
 /// The `mascotAnimationNumber` ViewModel value for each [`MASCOT_COSTUMES`]
 /// entry, in the same order. A parallel array rather than a struct-valued
 /// list because the Rust side only ever validates the id — the number is a
-/// frontend-only fact (`frontend/src/lib/mascot.ts` carries the same pairing
+/// frontend-only fact (`frontend/src/lib/avatar.ts` carries the same pairing
 /// for the one caller that actually drives the canvas), but keeping it here
 /// too is what let the module doc above cite one number and mean the same
 /// thing on both sides.
@@ -204,6 +205,63 @@ pub fn parse_hand_color(value: &str) -> Result<&str> {
             MASCOT_HAND_COLORS.join(", ")
         )))
     }
+}
+
+/// The four mascot choices a create-teammate request may carry, each already
+/// checked against its closed list. `None` is "nobody chose", which every
+/// reader resolves to the file's own default — never a stored empty string.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MascotChoices {
+    /// The display mode, one of [`MASCOT_MODES`].
+    pub mode: Option<String>,
+    /// The costume id, one of [`MASCOT_COSTUMES`].
+    pub costume: Option<String>,
+    /// The skin color id, one of [`MASCOT_SKIN_COLORS`].
+    pub skin_color: Option<String>,
+    /// The hand color id, one of [`MASCOT_HAND_COLORS`].
+    pub hand_color: Option<String>,
+}
+
+impl MascotChoices {
+    /// Whether nothing was chosen, so there is no override row to write.
+    pub fn is_empty(&self) -> bool {
+        self.mode.is_none()
+            && self.costume.is_none()
+            && self.skin_color.is_none()
+            && self.hand_color.is_none()
+    }
+}
+
+/// Checks one optional choice: blank or absent is "no choice", anything else
+/// must pass `parse`.
+fn choose(value: Option<&str>, parse: fn(&str) -> Result<&str>) -> Result<Option<String>> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => parse(value).map(|parsed| Some(parsed.to_string())),
+        None => Ok(None),
+    }
+}
+
+/// Validates the mascot choices on a create-teammate request against the same
+/// closed lists the `PATCH` route uses ([`parse_mode`], [`parse_costume`],
+/// [`parse_skin_color`], [`parse_hand_color`]), so a teammate can be born
+/// wearing its look instead of needing a second write.
+///
+/// At creation there is nothing to reset to, so a missing, `null` and blank
+/// value are all the same "no choice" — the counterpart of the plain `Option`
+/// `avatar` is on the same request. A value outside its list is refused with the
+/// same sentence naming the accepted set the `PATCH` route gives.
+pub fn parse_choices(
+    mode: Option<&str>,
+    costume: Option<&str>,
+    skin_color: Option<&str>,
+    hand_color: Option<&str>,
+) -> Result<MascotChoices> {
+    Ok(MascotChoices {
+        mode: choose(mode, parse_mode)?,
+        costume: choose(costume, parse_costume)?,
+        skin_color: choose(skin_color, parse_skin_color)?,
+        hand_color: choose(hand_color, parse_hand_color)?,
+    })
 }
 
 #[cfg(test)]

@@ -316,6 +316,28 @@ struct AddMember {
     /// the hashed default.
     #[serde(default)]
     avatar: Option<String>,
+    /// The mascot's display mode, costume and two colors this teammate is born
+    /// wearing (`docs/spec/runtime/avatars.md`), so the create dialog's look is
+    /// one write rather than a create and a `PATCH`. Each is validated against
+    /// the same closed list the `PATCH` route uses
+    /// ([`crate::company::mascot::parse_choices`]); a plain `Option` for the same
+    /// reason `avatar` is one — at creation there is nothing to reset to, so
+    /// `null`, omitted and blank all mean the file's own default. Meaningful
+    /// only alongside a `mascot:` `avatar`, but not refused without one, the
+    /// same latitude the `PATCH` gives a picker previewing a look. Open to any
+    /// member, like `avatar`: they decide nothing about what the company can
+    /// reach.
+    #[serde(default)]
+    mascot_mode: Option<String>,
+    /// See [`Self::mascot_mode`].
+    #[serde(default)]
+    mascot_costume: Option<String>,
+    /// See [`Self::mascot_mode`].
+    #[serde(default)]
+    mascot_skin_color: Option<String>,
+    /// See [`Self::mascot_mode`].
+    #[serde(default)]
+    mascot_hand_color: Option<String>,
     /// The job shape that decides this teammate's tool belt, sent by the
     /// first-run setup build-out (issue #1674). When present it derives the
     /// grant list through
@@ -658,6 +680,17 @@ async fn add_member(
         None => None,
     };
 
+    // The mascot look needs no I/O to validate — four closed, in-memory lists —
+    // so it is checked here, before the lock and before anything is written: a
+    // refused value must not leave a teammate behind wearing none of it.
+    let mascot = crate::company::mascot::parse_choices(
+        body.mascot_mode.as_deref(),
+        body.mascot_costume.as_deref(),
+        body.mascot_skin_color.as_deref(),
+        body.mascot_hand_color.as_deref(),
+    )
+    .map_err(|e| ApiError(e).into_response())?;
+
     // Serialize per-company writes so concurrent console POST /team and
     // orchestrator add_agent calls can't clobber each other's overlay_agents.
     let write_lock = company_write_lock(company.id());
@@ -796,6 +829,19 @@ async fn add_member(
             ..Default::default()
         });
     }
+    // The look, in the same atomic save as the teammate and its face. Fields
+    // left `None` are left alone by the upsert, so a partial look writes only
+    // what was chosen.
+    if !mascot.is_empty() {
+        record.upsert_agent_override(AgentOverride {
+            agent_id: agent.id.clone(),
+            mascot_mode: mascot.mode.clone(),
+            mascot_costume: mascot.costume.clone(),
+            mascot_skin_color: mascot.skin_color.clone(),
+            mascot_hand_color: mascot.hand_color.clone(),
+            ..Default::default()
+        });
+    }
     company.runtime.store().save(&record).await?;
     // The audit row for a teammate coming into existence.
     //
@@ -860,13 +906,13 @@ async fn add_member(
         budget_set_by: attribution.as_ref().map(|entry| entry.set_by.id.clone()),
         budget_set_at_millis: attribution.as_ref().map(|entry| entry.at_millis),
         avatar: resolved_avatar,
-        // A brand-new teammate has no mascot costume/color chosen yet — there
-        // is no override row to read one from, same reasoning as `avatar`
-        // above having only `resolved_avatar` to offer.
-        mascot_costume: None,
-        mascot_mode: None,
-        mascot_skin_color: None,
-        mascot_hand_color: None,
+        // What this request chose, echoed the way `avatar` is, so the console can
+        // tell the host took them (an older host echoes none, and the console
+        // then falls back to a `PATCH`) and draws the new card in its own look.
+        mascot_costume: mascot.costume,
+        mascot_mode: mascot.mode,
+        mascot_skin_color: mascot.skin_color,
+        mascot_hand_color: mascot.hand_color,
         // An operator just created this one, so it is by construction not from
         // the baseline — the merge only ever appends to the manifest roster.
         // It is also exactly the write that closes the first-run gate.
