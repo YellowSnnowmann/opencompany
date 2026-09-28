@@ -1394,6 +1394,18 @@ export class OpenCompanyClient {
        * permission boundary. Omitted on every other add path.
        */
       focus?: string;
+      /**
+       * The look this teammate is born wearing: a face (`avatar`) and, for a
+       * mascot, its display mode, costume and two colors. Validated by the host
+       * against the same closed lists as `updateAgent`. A host that predates them
+       * ignores them and does not echo them back, which is how `writeUnechoedLook`
+       * (`lib/new-member-look.ts`) knows to write them the old way.
+       */
+      avatar?: string;
+      mascotMode?: string;
+      mascotCostume?: string;
+      mascotSkinColor?: string;
+      mascotHandColor?: string;
     },
     company?: string | null,
   ): Promise<TeamMemberDto> {

@@ -52,9 +52,11 @@ import { readLastChannel } from "@/lib/last-channel";
 import { connectionsHref } from "@/views/connection-pages";
 import {
   addMemberFailure,
+  addOutcome,
   reportAddMember,
   type AddMemberOutcome,
 } from "@/lib/member-feedback";
+import { birthLook, writeUnechoedLook } from "@/lib/new-member-look";
 import { fromDto, newMember, type TeamMember } from "@/lib/team";
 import { personAvatar } from "@/lib/person";
 import { useAskerNames } from "@/components/approval-card";
@@ -2642,6 +2644,9 @@ export function RoomView({
           // born complete. Omitted by the full form, which collects none — an
           // absent key leaves the blueprint's own wording in force.
           instructions: fields.instructions?.trim() || undefined,
+          // The look the dialog collected rides the create, so the teammate is
+          // born wearing it. This path used to drop the icon entirely.
+          ...birthLook(fields),
         },
         company,
       );
@@ -2668,7 +2673,12 @@ export function RoomView({
       // `boot`) — flip it so this and later actions target the host instead of
       // refusing on a now-stale local-only guard.
       setFromHost(true);
-      outcome = { kind: "added", name: fields.name };
+      // Only what a host that predates the look did not echo is written now.
+      outcome = (await writeUnechoedLook(client, company, created, fields))
+        ? { kind: "added", name: fields.name }
+        : addOutcome(fields.name, [
+            { what: "their icon couldn't be set", fix: "Pick one again from their profile." },
+          ]);
     } else {
       outcome = { kind: "console-only", name: fields.name };
     }

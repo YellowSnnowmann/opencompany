@@ -5,6 +5,7 @@
 
 import type { AgentDeskDto, TeamMemberDto } from "@/api/types";
 import { avatarRef, hashedFlavour } from "@/lib/avatar";
+import { birthLook, type NewMemberLook } from "@/lib/new-member-look";
 
 /** A desk a teammate sits on, as the roster read reports it. */
 export type TeamMemberDesk = AgentDeskDto;
@@ -335,16 +336,25 @@ function roleHash(role: string): string {
  * The starter roster keys on role because that is what distinguishes its
  * fabricated rows.
  */
-export function newMember(fields: { name: string; role: string; description: string }): TeamMember {
+export function newMember(
+  fields: { name: string; role: string; description: string } & NewMemberLook,
+): TeamMember {
   const memberId = localMemberId(fields.name);
+  const look = birthLook(fields);
   return {
     id: memberId,
     name: fields.name.trim(),
     role: fields.role.trim(),
     description: fields.description.trim(),
     tone: toneFor(memberId),
-    // Nobody has chosen a face for a teammate that was created a moment ago.
-    avatar: avatarFor(memberId),
+    // The face the operator picked in the dialog, else the one hashed from the
+    // id. With no host to write it to, this row is the only place the look
+    // lives — for as long as the row does, which is until the next reload.
+    avatar: look.avatar ?? avatarFor(memberId),
+    mascotMode: look.mascotMode,
+    mascotCostume: look.mascotCostume,
+    mascotSkinColor: look.mascotSkinColor,
+    mascotHandColor: look.mascotHandColor,
     inboxEnabled: false,
     // Nothing on a host has granted this teammate anything or seated it
     // anywhere yet, so both are stated empty rather than guessed.

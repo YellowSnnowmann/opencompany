@@ -292,3 +292,87 @@ describe("the Add-agent dialog", () => {
     expect(patched).toHaveLength(0);
   });
 });
+
+describe("the Add-agent dialog's mascot look", () => {
+  /** Chooses the mascot face, then tunes it, the way the operator would. */
+  async function tuneMascot() {
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-animated"]'));
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-mode-static"]'));
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-costume-headband"]'));
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-skin-peach"]'));
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-hand-charcoal"]'));
+  }
+
+  async function create() {
+    type("agent-add-name", "Growth");
+    type("agent-add-role", "Growth Marketer");
+    await act(async () => {
+      submit().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+  }
+
+  it("offers no mascot options until the face is a mascot", async () => {
+    await mount();
+    await openDialog();
+    expect(document.querySelector('[data-testid="avatar-mascot-appearance"]')).toBeNull();
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-animated"]'));
+    expect(document.querySelector('[data-testid="avatar-mascot-appearance"]')).not.toBeNull();
+  });
+
+  it("sends the chosen look on the create request itself", async () => {
+    await mount();
+    await openDialog();
+    await tuneMascot();
+    await create();
+
+    expect(added).toHaveLength(1);
+    expect(added[0]).toMatchObject({
+      avatar: "mascot:animated",
+      mascotMode: "static",
+      mascotCostume: "headband",
+      mascotSkinColor: "peach",
+      mascotHandColor: "charcoal",
+    });
+  });
+
+  it("writes only what the host did not echo, for a host that predates the fields", async () => {
+    // `fakeClient` answers without echoing any look — an older host.
+    await mount();
+    await openDialog();
+    await tuneMascot();
+    await create();
+
+    expect(patched).toHaveLength(1);
+    expect(patched[0].id).toBe("growth");
+    expect(patched[0].patch).toMatchObject({
+      avatar: "mascot:animated",
+      mascotMode: "static",
+      mascotCostume: "headband",
+    });
+  });
+
+  it("sends no mascot field for a shipped face chosen after tuning a mascot", async () => {
+    await mount();
+    await openDialog();
+    await tuneMascot();
+    click(document.querySelector<HTMLElement>('[data-testid^="avatar-flavour-"]'));
+    await create();
+
+    expect(added[0].avatar).toMatch(/^tiny:/);
+    expect(added[0].mascotMode).toBeUndefined();
+    expect(added[0].mascotCostume).toBeUndefined();
+    expect(added[0].mascotSkinColor).toBeUndefined();
+    expect(added[0].mascotHandColor).toBeUndefined();
+  });
+
+  it("sends nothing when the mascot was picked but not tuned", async () => {
+    await mount();
+    await openDialog();
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-animated"]'));
+    await create();
+
+    expect(added[0].avatar).toBe("mascot:animated");
+    expect(added[0].mascotCostume).toBeUndefined();
+    expect(added[0].mascotMode).toBeUndefined();
+  });
+});
