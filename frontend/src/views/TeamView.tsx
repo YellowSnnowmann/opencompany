@@ -799,7 +799,15 @@ function MemberCard({
             44px, comfortably above the ~24px floor under which a mascot is a
             smudge and the bare tone tile is the honest fallback.
           */}
-          <TeammateAvatar name={member.name} tone={member.tone} avatar={member.avatar} className="size-11 rounded-xl text-sm" />
+          <TeammateAvatar
+            name={member.name}
+            tone={member.tone}
+            avatar={member.avatar}
+            mascotCostume={member.mascotCostume}
+            mascotSkinColor={member.mascotSkinColor}
+            mascotHandColor={member.mascotHandColor}
+            className="size-11 rounded-xl text-sm"
+          />
           {onOpen ? (
             <button
               type="button"

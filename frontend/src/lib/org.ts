@@ -63,6 +63,19 @@ export interface OrgSeat {
    */
   avatar: string;
   /**
+   * The mascot's chosen costume and colors, carried through from
+   * `TeamMember` for the same reason `avatar` is: a chart that resolved a
+   * seat's face but not its look would draw the file's default mascot for
+   * every wearer instead of what they actually chose. Undefined for a seat
+   * the roster cannot resolve, same as `avatar` falls back to the hashed
+   * default there.
+   */
+  mascotCostume?: string;
+  /** See {@link mascotCostume}. */
+  mascotSkinColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotHandColor?: string;
+  /**
    * Whether this seat leads the desk. True for exactly one seat per non-empty
    * desk — `DeskDto.members[0]`, which is the host's routing target.
    */
@@ -167,6 +180,12 @@ export function buildOrgTree(
           // reads as a rendering bug rather than as the missing teammate the
           // flag is there to report.
           avatar: member?.avatar ?? avatarFor(id),
+          // An unresolved seat has no chosen look to carry either — it is
+          // already drawing the hashed default above, which has no costume or
+          // color of its own.
+          mascotCostume: member?.mascotCostume,
+          mascotSkinColor: member?.mascotSkinColor,
+          mascotHandColor: member?.mascotHandColor,
           // The host's order carries the hierarchy: index 0 is the lead. Read
           // the position, never re-derive the lead by sorting or by name.
           // Unless the desk is an `auto` channel (issue #1835): there

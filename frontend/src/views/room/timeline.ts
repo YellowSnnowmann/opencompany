@@ -146,6 +146,18 @@ export interface Sender {
    */
   avatar?: string;
   /**
+   * The mascot's chosen costume and colors, carried through from the matched
+   * `TeamMember` for the same reason `avatar` is: a message row that drew the
+   * right mascot but the wrong costume was still showing a stranger's face.
+   * Undefined for "system", for "you", and for an agent voice `senderOf`
+   * could not match against the roster.
+   */
+  mascotCostume?: string;
+  /** See {@link mascotCostume}. */
+  mascotSkinColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotHandColor?: string;
+  /**
    * The roster agent id behind this voice, when there is one — what a click on
    * the face opens the profile panel on (issue #1653).
    *
@@ -198,6 +210,9 @@ export function senderOf(
       kind: "agent",
       tone: named,
       avatar: agent?.avatar,
+      mascotCostume: agent?.mascotCostume,
+      mascotSkinColor: agent?.mascotSkinColor,
+      mascotHandColor: agent?.mascotHandColor,
       agentId: agent?.id,
     };
   }
@@ -211,6 +226,9 @@ export function senderOf(
     kind: channel.kind === "dm" || channel.tone ? "agent" : "company",
     tone: channel.tone,
     avatar: channel.member?.avatar,
+    mascotCostume: channel.member?.mascotCostume,
+    mascotSkinColor: channel.member?.mascotSkinColor,
+    mascotHandColor: channel.member?.mascotHandColor,
     // A DM's other end is a roster teammate; a desk channel's voice is the desk
     // itself, which has no profile of its own to open.
     agentId: channel.member?.id,

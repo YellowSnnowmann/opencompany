@@ -756,16 +756,29 @@ function sentence(s: string): string {
  * `channel.name`: a teammate's face must survive a rename, and `TeamMember`
  * already carries the seed that does that. `tone` needs no such rerouting;
  * `buildChannels` already sets it from `member.tone`, which was id-seeded from
- * the start.
+ * the start. The three mascot fields ride along the same way, for the same
+ * reason: without them the header and the rail drew the file's default
+ * costume for every mascot wearer, while the profile sheet opened by clicking
+ * that very face showed the real one.
  */
 export function dmFace(
   channel: Channel,
-): { name: string; tone?: string; avatar?: string } | null {
+): {
+  name: string;
+  tone?: string;
+  avatar?: string;
+  mascotCostume?: string;
+  mascotSkinColor?: string;
+  mascotHandColor?: string;
+} | null {
   if (channel.kind !== "dm" || !channel.member) return null;
   return {
     name: channel.name,
     tone: channel.tone,
     avatar: channel.member.avatar,
+    mascotCostume: channel.member.mascotCostume,
+    mascotSkinColor: channel.member.mascotSkinColor,
+    mascotHandColor: channel.member.mascotHandColor,
   };
 }
 

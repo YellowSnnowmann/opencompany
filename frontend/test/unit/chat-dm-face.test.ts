@@ -59,6 +59,32 @@ describe("dmFace", () => {
     expect(face!.avatar).toBe(avatarFor("agent_backend"));
   });
 
+  it("carries the teammate's chosen mascot costume and colors, not just the avatar", () => {
+    // Found live 2026-09-26: the header and the rail row both draw through
+    // `dmFace`, and until this it handed back `avatar` alone — so a DM with
+    // an actual costume and colors chosen still drew the file's default look
+    // at both surfaces, while the same teammate's profile sheet (opened by
+    // clicking that very avatar) showed the real one.
+    const ada = member({
+      id: "agent_ada",
+      name: "Ada",
+      tone: "violet",
+      avatar: "mascot:animated",
+      mascotCostume: "beanie",
+      mascotSkinColor: "blue",
+      mascotHandColor: "amber",
+    });
+    const face = dmFace(dmFor(ada));
+    expect(face).toEqual({
+      name: "Ada",
+      tone: "violet",
+      avatar: "mascot:animated",
+      mascotCostume: "beanie",
+      mascotSkinColor: "blue",
+      mascotHandColor: "amber",
+    });
+  });
+
   it("seeds on the id, not the name — a rename must not change the face", () => {
     // Two roster rows sharing an id but not a name — the rename case this
     // exists to protect — resolve to the *same* avatar, and it's the id's.

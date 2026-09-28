@@ -242,6 +242,29 @@ struct TeamMemberDto {
     /// no way to offer "reset to the default face".
     #[serde(skip_serializing_if = "Option::is_none")]
     avatar: Option<String>,
+    /// The mascot costume this teammate wears, when somebody has chosen one —
+    /// the same field, from the same helper, as `GET …/team/{agent_id}`
+    /// (`docs/spec/runtime/avatars.md`).
+    ///
+    /// Absent means the file's own default costume. Carried on the roster read
+    /// for the reason `avatar` itself is: every mass-render surface built from
+    /// this list — the chat header, the DM sidebar, the org chart, the members
+    /// pane, a message row — drew the id-hashed default costume for *every*
+    /// mascot wearer until this shipped, because `avatar` alone told a caller
+    /// "this is a mascot" but not which one. Only `GET …/team/{agent_id}`
+    /// (opened by clicking that very avatar) carried the real look, so a
+    /// teammate's face changed the moment its own detail page opened — the gap
+    /// this field closes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_costume: Option<String>,
+    /// The mascot's skin (body) color, when somebody has chosen one. See
+    /// [`Self::mascot_costume`] for why this is on the list read at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_skin_color: Option<String>,
+    /// The mascot's hand/accent color, when somebody has chosen one. See
+    /// [`Self::mascot_costume`] for why this is on the list read at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_hand_color: Option<String>,
     /// Whether this teammate came from the **global baseline**
     /// (`docs/spec/runtime/globals.md`) rather than from this company — the
     /// same `Agent::global` marker the merge itself sets (issue #1404).
@@ -487,6 +510,13 @@ fn member_row(
         // alike, so both arms of the list above get the chosen face with no
         // second lookup to keep in step.
         avatar: record.effective_avatar(agent_id),
+        // Same three helpers `GET …/team/{agent_id}` resolves its own
+        // mascot_costume/skin_color/hand_color from (issue: mass-render
+        // surfaces showed the default look while the detail page — reading
+        // these same helpers already — showed the real one).
+        mascot_costume: record.effective_mascot_costume(agent_id),
+        mascot_skin_color: record.effective_mascot_skin_color(agent_id),
+        mascot_hand_color: record.effective_mascot_hand_color(agent_id),
         // Through the same helper as the four above, for the same reason: the
         // roster read is what the first-run gate is decided on, so a second
         // copy of the provenance rule here is a second thing to forget.
@@ -823,6 +853,12 @@ async fn add_member(
         budget_set_by: attribution.as_ref().map(|entry| entry.set_by.id.clone()),
         budget_set_at_millis: attribution.as_ref().map(|entry| entry.at_millis),
         avatar: resolved_avatar,
+        // A brand-new teammate has no mascot costume/color chosen yet — there
+        // is no override row to read one from, same reasoning as `avatar`
+        // above having only `resolved_avatar` to offer.
+        mascot_costume: None,
+        mascot_skin_color: None,
+        mascot_hand_color: None,
         // An operator just created this one, so it is by construction not from
         // the baseline — the merge only ever appends to the manifest roster.
         // It is also exactly the write that closes the first-run gate.

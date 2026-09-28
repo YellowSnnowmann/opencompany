@@ -23,6 +23,25 @@ export interface TeamMember {
    */
   avatar: string;
   /**
+   * The mascot's chosen costume and colors, when `avatar` names a mascot and
+   * somebody has chosen a look. Undefined means the file's own default —
+   * exactly the `avatar`/no-choice rule, carried on three more fields instead
+   * of folded into one.
+   *
+   * Carried through untouched from `TeamMemberDto` so every mass-render
+   * surface built from a `TeamMember` — the roster grid, the org chart, the
+   * members pane, a DM sidebar row, a message row — draws the teammate's real
+   * look instead of the file's default, the same way the detail page already
+   * does. Before the host started sending these, `avatar` alone told this
+   * component "draw a mascot" without saying which one, and every one of
+   * those surfaces rendered the default costume for every mascot wearer.
+   */
+  mascotCostume?: string;
+  /** See {@link mascotCostume}. */
+  mascotSkinColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotHandColor?: string;
+  /**
    * Whether this teammate has an inbox on the host. Read from `GET …/team` and
    * written by `PUT …/team/{id}/inbox` — never guessed client-side, so the Inbox
    * page and this toggle agree on the same `InboxStore` state (issue #173).
@@ -221,6 +240,12 @@ export function fromDto(dto: TeamMemberDto): TeamMember {
     // needs "chosen" and "default" kept apart and reads the detail DTO, which
     // carries the raw field.
     avatar: avatarRef(dto.avatar, dto.id || name),
+    // Carried through as-is, same rule as `avatar` itself: `undefined` means
+    // "nobody has chosen" (or a host predating the field), and coalescing it
+    // to a picked look here would be a fabrication the picker never made.
+    mascotCostume: dto.mascotCostume,
+    mascotSkinColor: dto.mascotSkinColor,
+    mascotHandColor: dto.mascotHandColor,
     inboxEnabled: dto.inboxEnabled ?? false,
     global: dto.global,
     // Carried through as-is: `undefined` means uncapped and must stay

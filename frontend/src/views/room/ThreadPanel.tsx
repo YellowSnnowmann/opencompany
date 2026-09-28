@@ -554,6 +554,9 @@ function Line({
         name={sender.name}
         tone={sender.tone}
         avatar={sender.avatar}
+        mascotCostume={sender.mascotCostume}
+        mascotSkinColor={sender.mascotSkinColor}
+        mascotHandColor={sender.mascotHandColor}
         company={sender.kind === "company"}
         className="size-8"
         // Named by whose line it is, so a spec can assert that your face and

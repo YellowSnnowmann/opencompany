@@ -293,7 +293,15 @@ function MemberRow({
           opens who this agent is (issue #1653), the row opens a line to
           them. */}
       <AgentAvatarButton agentId={member.id} name={member.name}>
-        <TeammateAvatar name={member.name} tone={member.tone} avatar={member.avatar} className="size-8" />
+        <TeammateAvatar
+          name={member.name}
+          tone={member.tone}
+          avatar={member.avatar}
+          mascotCostume={member.mascotCostume}
+          mascotSkinColor={member.mascotSkinColor}
+          mascotHandColor={member.mascotHandColor}
+          className="size-8"
+        />
       </AgentAvatarButton>
       <button
         type="button"

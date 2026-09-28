@@ -280,6 +280,9 @@ export function DeskCreateDialog({
                       <TeammateAvatar
                         name={memberName}
                         avatar={avatarRef(member.avatar, member.id ?? member.name ?? "")}
+                        mascotCostume={member.mascotCostume}
+                        mascotSkinColor={member.mascotSkinColor}
+                        mascotHandColor={member.mascotHandColor}
                         tone={toneFor(member.id ?? member.name ?? "")}
                         className="size-5 shrink-0"
                       />

@@ -1087,6 +1087,9 @@ function DeskNode({
                         <TeammateAvatar
                           name={member.name}
                           avatar={member.avatar}
+                          mascotCostume={member.mascotCostume}
+                          mascotSkinColor={member.mascotSkinColor}
+                          mascotHandColor={member.mascotHandColor}
                           tone={member.tone}
                           className="size-5 shrink-0"
                         />
@@ -1225,6 +1228,9 @@ function Seat({
       <TeammateAvatar
         name={seat.name}
         avatar={seat.avatar}
+        mascotCostume={seat.mascotCostume}
+        mascotSkinColor={seat.mascotSkinColor}
+        mascotHandColor={seat.mascotHandColor}
         tone={toneFor(seat.id)}
         className="size-5 shrink-0"
       />
@@ -1380,6 +1386,9 @@ function Unplaced({ tree }: { tree: OrgTree }) {
                       <TeammateAvatar
                         name={member.name}
                         avatar={member.avatar}
+                        mascotCostume={member.mascotCostume}
+                        mascotSkinColor={member.mascotSkinColor}
+                        mascotHandColor={member.mascotHandColor}
                         tone={member.tone}
                         className="size-5 shrink-0"
                       />
@@ -1394,6 +1403,9 @@ function Unplaced({ tree }: { tree: OrgTree }) {
                       <TeammateAvatar
                         name={member.name}
                         avatar={member.avatar}
+                        mascotCostume={member.mascotCostume}
+                        mascotSkinColor={member.mascotSkinColor}
+                        mascotHandColor={member.mascotHandColor}
                         tone={member.tone}
                         className="size-5 shrink-0"
                       />

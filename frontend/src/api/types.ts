@@ -1491,6 +1491,24 @@ export interface TeamMemberDto {
    */
   avatar?: string;
   /**
+   * The mascot costume this teammate wears, when somebody has chosen one — the
+   * same field, from the same host-side helper, as `AgentDetailDto.mascotCostume`.
+   *
+   * Absent means the file's own default costume. Added alongside the two color
+   * fields below to close a real fidelity gap: every mass-render surface built
+   * from this list (the chat header, the DM sidebar, the org chart, the members
+   * pane, a message row) used to draw the id-hashed default look for a mascot
+   * wearer, because `avatar` alone said "this is a mascot" without saying which
+   * one — only the detail read (opened by clicking that very avatar) carried
+   * the chosen look. A host predating this field sends nothing, same rollout
+   * skew as `avatar` itself.
+   */
+  mascotCostume?: string;
+  /** See {@link mascotCostume}. */
+  mascotSkinColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotHandColor?: string;
+  /**
    * Whether this teammate has an enabled inbox, as the host's `InboxStore` sees
    * it. Absent on hosts predating the field; the console reads that as `false`.
    */

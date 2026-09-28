@@ -322,6 +322,9 @@ export function MessageRow({
               name={sender.name}
               tone={sender.tone}
               avatar={sender.avatar}
+              mascotCostume={sender.mascotCostume}
+              mascotSkinColor={sender.mascotSkinColor}
+              mascotHandColor={sender.mascotHandColor}
               company={sender.kind === "company"}
               className="size-9"
             />
@@ -946,6 +949,9 @@ function ReplyFacepile({ senders }: { senders: Sender[] }) {
           name={s.name}
           tone={s.tone}
           avatar={s.avatar}
+          mascotCostume={s.mascotCostume}
+          mascotSkinColor={s.mascotSkinColor}
+          mascotHandColor={s.mascotHandColor}
           company={s.kind === "company"}
           className="size-5 rounded-[4px] text-3xs ring-1 ring-background"
         />
