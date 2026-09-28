@@ -1508,6 +1508,8 @@ export interface TeamMemberDto {
   mascotSkinColor?: string;
   /** See {@link mascotCostume}. */
   mascotHandColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotMode?: string;
   /**
    * Whether this teammate has an enabled inbox, as the host's `InboxStore` sees
    * it. Absent on hosts predating the field; the console reads that as `false`.

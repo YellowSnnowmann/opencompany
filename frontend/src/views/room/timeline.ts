@@ -157,6 +157,8 @@ export interface Sender {
   mascotSkinColor?: string;
   /** See {@link mascotCostume}. */
   mascotHandColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotMode?: string;
   /**
    * The roster agent id behind this voice, when there is one — what a click on
    * the face opens the profile panel on (issue #1653).
@@ -213,6 +215,7 @@ export function senderOf(
       mascotCostume: agent?.mascotCostume,
       mascotSkinColor: agent?.mascotSkinColor,
       mascotHandColor: agent?.mascotHandColor,
+      mascotMode: agent?.mascotMode,
       agentId: agent?.id,
     };
   }
@@ -229,6 +232,7 @@ export function senderOf(
     mascotCostume: channel.member?.mascotCostume,
     mascotSkinColor: channel.member?.mascotSkinColor,
     mascotHandColor: channel.member?.mascotHandColor,
+    mascotMode: channel.member?.mascotMode,
     // A DM's other end is a roster teammate; a desk channel's voice is the desk
     // itself, which has no profile of its own to open.
     agentId: channel.member?.id,

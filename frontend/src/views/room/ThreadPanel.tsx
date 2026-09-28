@@ -557,6 +557,7 @@ function Line({
         mascotCostume={sender.mascotCostume}
         mascotSkinColor={sender.mascotSkinColor}
         mascotHandColor={sender.mascotHandColor}
+        mascotMode={sender.mascotMode}
         company={sender.kind === "company"}
         className="size-8"
         // Named by whose line it is, so a spec can assert that your face and

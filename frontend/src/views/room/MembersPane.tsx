@@ -300,6 +300,7 @@ function MemberRow({
           mascotCostume={member.mascotCostume}
           mascotSkinColor={member.mascotSkinColor}
           mascotHandColor={member.mascotHandColor}
+          mascotMode={member.mascotMode}
           className="size-8"
         />
       </AgentAvatarButton>

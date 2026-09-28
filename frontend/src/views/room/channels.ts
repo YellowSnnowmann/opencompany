@@ -770,6 +770,7 @@ export function dmFace(
   mascotCostume?: string;
   mascotSkinColor?: string;
   mascotHandColor?: string;
+  mascotMode?: string;
 } | null {
   if (channel.kind !== "dm" || !channel.member) return null;
   return {
@@ -779,6 +780,7 @@ export function dmFace(
     mascotCostume: channel.member.mascotCostume,
     mascotSkinColor: channel.member.mascotSkinColor,
     mascotHandColor: channel.member.mascotHandColor,
+    mascotMode: channel.member.mascotMode,
   };
 }
 

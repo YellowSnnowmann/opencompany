@@ -257,6 +257,12 @@ struct TeamMemberDto {
     /// this field closes.
     #[serde(skip_serializing_if = "Option::is_none")]
     mascot_costume: Option<String>,
+    /// Whether the mascot moves (`"animated"`) or holds one pose (`"static"`),
+    /// when somebody has chosen one. See [`Self::mascot_costume`] for why this
+    /// is on the list read: a teammate set to `static` must hold still in a chat
+    /// gutter too, not only on its profile sheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_mode: Option<String>,
     /// The mascot's skin (body) color, when somebody has chosen one. See
     /// [`Self::mascot_costume`] for why this is on the list read at all.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -515,6 +521,7 @@ fn member_row(
         // surfaces showed the default look while the detail page — reading
         // these same helpers already — showed the real one).
         mascot_costume: record.effective_mascot_costume(agent_id),
+        mascot_mode: record.effective_mascot_mode(agent_id),
         mascot_skin_color: record.effective_mascot_skin_color(agent_id),
         mascot_hand_color: record.effective_mascot_hand_color(agent_id),
         // Through the same helper as the four above, for the same reason: the
@@ -857,6 +864,7 @@ async fn add_member(
         // is no override row to read one from, same reasoning as `avatar`
         // above having only `resolved_avatar` to offer.
         mascot_costume: None,
+        mascot_mode: None,
         mascot_skin_color: None,
         mascot_hand_color: None,
         // An operator just created this one, so it is by construction not from

@@ -221,6 +221,7 @@ export function ChatLiveReceipt({
         mascotCostume={channel.member?.mascotCostume}
         mascotSkinColor={channel.member?.mascotSkinColor}
         mascotHandColor={channel.member?.mascotHandColor}
+        mascotMode={channel.member?.mascotMode}
         company={channel.kind === "channel" && channel.id === "main"}
         className="size-9 shrink-0"
       />

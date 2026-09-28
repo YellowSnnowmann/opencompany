@@ -771,6 +771,7 @@ function LiveTurnRow({
         mascotCostume={channel.member?.mascotCostume}
         mascotSkinColor={channel.member?.mascotSkinColor}
         mascotHandColor={channel.member?.mascotHandColor}
+        mascotMode={channel.member?.mascotMode}
         company={channel.kind === "channel" && channel.id === "main"}
         className="size-9 shrink-0"
       />
@@ -815,6 +816,7 @@ function TypingRow({
         mascotCostume={channel.member?.mascotCostume}
         mascotSkinColor={channel.member?.mascotSkinColor}
         mascotHandColor={channel.member?.mascotHandColor}
+        mascotMode={channel.member?.mascotMode}
         company={channel.kind === "channel" && channel.id === "main"}
         className="size-9"
       />

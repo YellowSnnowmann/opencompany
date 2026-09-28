@@ -424,6 +424,7 @@ async fn the_roster_list_carries_the_chosen_mascot_costume_and_colors() {
         json!({
             "avatar": "tiny:teal",
             "mascotCostume": "headphones",
+            "mascotMode": "static",
             "mascotSkinColor": "coral",
             "mascotHandColor": "forest",
         }),
@@ -431,6 +432,7 @@ async fn the_roster_list_carries_the_chosen_mascot_costume_and_colors() {
     .await;
     assert_eq!(status, StatusCode::OK, "{worn}");
     assert_eq!(worn["mascotCostume"], "headphones", "{worn}");
+    assert_eq!(worn["mascotMode"], "static", "{worn}");
     assert_eq!(worn["mascotSkinColor"], "coral", "{worn}");
     assert_eq!(worn["mascotHandColor"], "forest", "{worn}");
 
@@ -447,6 +449,7 @@ async fn the_roster_list_carries_the_chosen_mascot_costume_and_colors() {
         .expect("the ceo is on the roster");
     assert_eq!(row["avatar"], "tiny:teal", "{row}");
     assert_eq!(row["mascotCostume"], "headphones", "{row}");
+    assert_eq!(row["mascotMode"], "static", "{row}");
     assert_eq!(row["mascotSkinColor"], "coral", "{row}");
     assert_eq!(row["mascotHandColor"], "forest", "{row}");
 
@@ -458,6 +461,7 @@ async fn the_roster_list_carries_the_chosen_mascot_costume_and_colors() {
         "ceo",
         json!({
             "mascotCostume": null,
+            "mascotMode": null,
             "mascotSkinColor": null,
             "mascotHandColor": null,
         }),
@@ -465,6 +469,7 @@ async fn the_roster_list_carries_the_chosen_mascot_costume_and_colors() {
     .await;
     assert_eq!(status, StatusCode::OK, "{bare}");
     assert!(bare.get("mascotCostume").is_none(), "{bare}");
+    assert!(bare.get("mascotMode").is_none(), "{bare}");
     assert!(bare.get("mascotSkinColor").is_none(), "{bare}");
     assert!(bare.get("mascotHandColor").is_none(), "{bare}");
 
@@ -476,6 +481,7 @@ async fn the_roster_list_carries_the_chosen_mascot_costume_and_colors() {
         .find(|m| m["id"] == "ceo")
         .expect("the ceo is on the roster");
     assert!(row_after.get("mascotCostume").is_none(), "{row_after}");
+    assert!(row_after.get("mascotMode").is_none(), "{row_after}");
     assert!(row_after.get("mascotSkinColor").is_none(), "{row_after}");
     assert!(row_after.get("mascotHandColor").is_none(), "{row_after}");
 }

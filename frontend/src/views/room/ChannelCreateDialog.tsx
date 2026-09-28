@@ -229,6 +229,7 @@ export function ChannelCreateDialog({
                         mascotCostume={member.mascotCostume}
                         mascotSkinColor={member.mascotSkinColor}
                         mascotHandColor={member.mascotHandColor}
+                        mascotMode={member.mascotMode}
                         tone={member.tone}
                         className="size-5 shrink-0"
                       />

@@ -41,6 +41,8 @@ export interface TeamMember {
   mascotSkinColor?: string;
   /** See {@link mascotCostume}. */
   mascotHandColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotMode?: string;
   /**
    * Whether this teammate has an inbox on the host. Read from `GET …/team` and
    * written by `PUT …/team/{id}/inbox` — never guessed client-side, so the Inbox
@@ -246,6 +248,7 @@ export function fromDto(dto: TeamMemberDto): TeamMember {
     mascotCostume: dto.mascotCostume,
     mascotSkinColor: dto.mascotSkinColor,
     mascotHandColor: dto.mascotHandColor,
+    mascotMode: dto.mascotMode,
     inboxEnabled: dto.inboxEnabled ?? false,
     global: dto.global,
     // Carried through as-is: `undefined` means uncapped and must stay

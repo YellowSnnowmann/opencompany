@@ -75,6 +75,8 @@ export interface OrgSeat {
   mascotSkinColor?: string;
   /** See {@link mascotCostume}. */
   mascotHandColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotMode?: string;
   /**
    * Whether this seat leads the desk. True for exactly one seat per non-empty
    * desk — `DeskDto.members[0]`, which is the host's routing target.
@@ -186,6 +188,7 @@ export function buildOrgTree(
           mascotCostume: member?.mascotCostume,
           mascotSkinColor: member?.mascotSkinColor,
           mascotHandColor: member?.mascotHandColor,
+          mascotMode: member?.mascotMode,
           // The host's order carries the hierarchy: index 0 is the lead. Read
           // the position, never re-derive the lead by sorting or by name.
           // Unless the desk is an `auto` channel (issue #1835): there

@@ -806,6 +806,7 @@ function MemberCard({
             mascotCostume={member.mascotCostume}
             mascotSkinColor={member.mascotSkinColor}
             mascotHandColor={member.mascotHandColor}
+            mascotMode={member.mascotMode}
             className="size-11 rounded-xl text-sm"
           />
           {onOpen ? (

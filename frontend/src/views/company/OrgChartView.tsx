@@ -1090,6 +1090,7 @@ function DeskNode({
                           mascotCostume={member.mascotCostume}
                           mascotSkinColor={member.mascotSkinColor}
                           mascotHandColor={member.mascotHandColor}
+                          mascotMode={member.mascotMode}
                           tone={member.tone}
                           className="size-5 shrink-0"
                         />
@@ -1231,6 +1232,7 @@ function Seat({
         mascotCostume={seat.mascotCostume}
         mascotSkinColor={seat.mascotSkinColor}
         mascotHandColor={seat.mascotHandColor}
+        mascotMode={seat.mascotMode}
         tone={toneFor(seat.id)}
         className="size-5 shrink-0"
       />
@@ -1389,6 +1391,7 @@ function Unplaced({ tree }: { tree: OrgTree }) {
                         mascotCostume={member.mascotCostume}
                         mascotSkinColor={member.mascotSkinColor}
                         mascotHandColor={member.mascotHandColor}
+                        mascotMode={member.mascotMode}
                         tone={member.tone}
                         className="size-5 shrink-0"
                       />
@@ -1406,6 +1409,7 @@ function Unplaced({ tree }: { tree: OrgTree }) {
                         mascotCostume={member.mascotCostume}
                         mascotSkinColor={member.mascotSkinColor}
                         mascotHandColor={member.mascotHandColor}
+                        mascotMode={member.mascotMode}
                         tone={member.tone}
                         className="size-5 shrink-0"
                       />
