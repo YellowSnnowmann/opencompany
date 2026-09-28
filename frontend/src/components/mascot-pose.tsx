@@ -28,6 +28,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { LiveMascot, usePrefersReducedMotion } from "@/components/mascot-avatar";
+import { POSE_CAPTURE_PX } from "@/lib/mascot-frame";
 import {
   MASCOT_HOVER_COSTUME,
   effectiveMascotTrigger,
@@ -107,7 +108,13 @@ function PoseCapture({
 }) {
   if (typeof document === "undefined") return null;
   return createPortal(
-    <div aria-hidden className="pointer-events-none fixed bottom-0 left-0 size-24 opacity-0">
+    // The size is `POSE_CAPTURE_PX`, not a class: a stored frame is checked
+    // against `POSE_CAPTURE_PX × devicePixelRatio`, so the two must not drift.
+    <div
+      aria-hidden
+      className="pointer-events-none fixed bottom-0 left-0 opacity-0"
+      style={{ width: POSE_CAPTURE_PX, height: POSE_CAPTURE_PX }}
+    >
       <LiveMascot
         mode="static"
         costume={costume}

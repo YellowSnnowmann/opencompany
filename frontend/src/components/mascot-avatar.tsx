@@ -38,6 +38,7 @@ import {
   type MascotMode,
   type MascotSkinColor,
 } from "@/lib/avatar";
+import { contentShare } from "@/lib/mascot-frame";
 import { cn } from "@/lib/utils";
 
 export type MascotState = "idle" | "hover" | "replying";
@@ -136,21 +137,9 @@ function readProbe(
   return ctx.getImageData(0, 0, probe.width, probe.height).data;
 }
 
-/**
- * What share (0–100) of a probe is not its own background colour.
- *
- * The mascot sits on an opaque artboard fill, so "how much of this frame is
- * something other than the corner pixel" says whether the character is on
- * screen at all: ~0 when ducked out, roughly half when it is up.
- */
-export function contentShare(px: Uint8ClampedArray): number {
-  let differing = 0;
-  for (let i = 0; i < px.length; i += 4) {
-    const delta = Math.abs(px[i] - px[0]) + Math.abs(px[i + 1] - px[1]) + Math.abs(px[i + 2] - px[2]);
-    if (delta > 40) differing += 1;
-  }
-  return (differing / (px.length / 4)) * 100;
-}
+// `contentShare` lives in `lib/mascot-frame.ts` (the stored-frame check uses it
+// too, from the main bundle); re-exported so this module's callers are unchanged.
+export { contentShare };
 
 /** Mean per-channel difference (0–255) between two probes: 0 means the frame did not change. */
 export function motion(a: Uint8ClampedArray, b: Uint8ClampedArray): number {

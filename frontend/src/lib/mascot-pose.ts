@@ -12,6 +12,12 @@
 // A small tile therefore rests on a *settled* frame instead — captured once per
 // look (costume + colors) by a hidden live instance that waits for the pose to
 // settle (`holdPoseOnceSettled`), then shared by every tile with that look.
+//
+// Frames are also kept across reloads (`lib/mascot-pose-store.ts`). A key's
+// stored frame is restored — and its pixels checked, `lib/mascot-frame.ts` —
+// before any capture for it is allowed to start, so a returning visit shows the
+// mascots at once instead of re-settling every look, and a stored frame that
+// fails its checks is deleted and re-captured rather than trusted.
 
 import {
   mascotCostumeNumber,
@@ -19,6 +25,8 @@ import {
   mascotSkinColorHex,
   type MascotCostume,
 } from "@/lib/avatar";
+import { domFrameProbe, frameIsGood, type FrameProbe } from "@/lib/mascot-frame";
+import { readStoredPose, removeStoredPose, touchStoredPose, writeStoredPose } from "@/lib/mascot-pose-store";
 
 /**
  * When a mascot avatar animates. The one place this vocabulary is defined.
@@ -83,13 +91,57 @@ export function mascotPoseKey(
 const poses = new Map<string, string>();
 const poseListeners = new Map<string, Set<() => void>>();
 
-/** The settled frame (a PNG data URL) for a pose key, once it has been captured. */
+// Frames kept from an earlier visit (`lib/mascot-pose-store.ts`). A key is
+// restored at most once per page, and a restored frame is shown only after its
+// pixels have been checked — so `restoring` is what keeps a tile from starting
+// a hidden capture for a look whose stored frame is a few milliseconds away.
+const restoring = new Set<string>();
+const restoreAttempted = new Set<string>();
+let frameProbe: FrameProbe = domFrameProbe;
+
+/** Test seam: how a frame's pixels are read for validation (the browser's canvas by default). */
+export function setMascotFrameProbe(probe: FrameProbe | null): void {
+  frameProbe = probe ?? domFrameProbe;
+}
+
+function devicePixelRatio(): number {
+  return typeof window !== "undefined" && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+}
+
+/**
+ * Starts restoring `key`'s frame from storage, if there is one. Synchronous
+ * checks (the entry parses, the PNG is the right size) decide whether there is
+ * anything to validate; the pixel check is asynchronous. Whichever way it goes,
+ * a tile waiting on this key hears about it: a good frame is published like any
+ * capture, a bad one is deleted and the queued capture is let through.
+ */
+function beginRestore(key: string): void {
+  if (poses.has(key) || restoring.has(key) || restoreAttempted.has(key)) return;
+  restoreAttempted.add(key);
+  const dpr = devicePixelRatio();
+  const stored = readStoredPose(key, dpr);
+  if (stored === null) return;
+  restoring.add(key);
+  void frameIsGood(stored, dpr, frameProbe).then((good) => {
+    restoring.delete(key);
+    if (good && !poses.has(key)) {
+      setPose(key, stored);
+      touchStoredPose(key, dpr);
+    } else {
+      if (!good) removeStoredPose(key, dpr);
+      pump();
+    }
+  });
+}
+
+/** The settled frame (a PNG data URL) for a pose key, once it has been captured or restored. */
 export function getMascotPose(key: string): string | undefined {
   return poses.get(key);
 }
 
 /** Subscribes to one key's frame arriving. Returns the unsubscribe. */
 export function subscribeMascotPose(key: string, notify: () => void): () => void {
+  beginRestore(key);
   let set = poseListeners.get(key);
   if (!set) {
     set = new Set();
@@ -102,8 +154,8 @@ export function subscribeMascotPose(key: string, notify: () => void): () => void
   };
 }
 
-/** Records a captured frame, wakes everything waiting on it and frees its capture slot. */
-export function publishMascotPose(key: string, url: string): void {
+/** Makes a frame the one for `key`, wakes everything waiting on it and frees its capture slot. */
+function setPose(key: string, url: string): void {
   poses.set(key, url);
   failed.delete(key);
   for (const request of [...active]) {
@@ -111,6 +163,19 @@ export function publishMascotPose(key: string, url: string): void {
   }
   poseListeners.get(key)?.forEach((notify) => notify());
   pump();
+}
+
+/**
+ * Records a freshly captured frame. It is also stored for the next visit — but
+ * only once its pixels check out, so nothing that would not be trusted on the
+ * way back out is ever written.
+ */
+export function publishMascotPose(key: string, url: string): void {
+  setPose(key, url);
+  const dpr = devicePixelRatio();
+  void frameIsGood(url, dpr, frameProbe).then((good) => {
+    if (good) writeStoredPose(key, dpr, url);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +237,9 @@ function pump() {
     if (active.size >= MAX_ACTIVE_CAPTURES) return;
     // One capture per look at a time; another tile with the same look waits for it.
     if (keyIsActive(request.key)) continue;
+    // A stored frame for this look is being checked: if it is good no capture is
+    // needed, and if not `beginRestore` calls `pump` again.
+    if (restoring.has(request.key)) continue;
     if (request.priority === "hover") {
       // Background work yields to any tile still waiting for its resting frame.
       const restWaiting = queue.some((r) => r.priority === "rest" && !keyIsActive(r.key));
@@ -205,6 +273,7 @@ export function requestMascotPoseCapture(
   grant: () => void,
   revoke: () => void = () => {},
 ): () => void {
+  beginRestore(key);
   if (poses.has(key) || failed.has(key)) return () => {};
   const request: CaptureRequest = { key, priority, grant, revoke };
   queue.push(request);
@@ -217,7 +286,10 @@ export function requestMascotPoseCapture(
   };
 }
 
-/** Test seam: forget every frame, queued request and failure. */
+/**
+ * Test seam: forget every in-memory frame, queued request, failure and restore
+ * attempt — what a page reload does. Stored frames are left alone.
+ */
 export function resetMascotPoses(): void {
   for (const request of active) clearTimeout(request.timer);
   active.clear();
@@ -225,6 +297,8 @@ export function resetMascotPoses(): void {
   failed.clear();
   poses.clear();
   poseListeners.clear();
+  restoring.clear();
+  restoreAttempted.clear();
 }
 
 // ---------------------------------------------------------------------------

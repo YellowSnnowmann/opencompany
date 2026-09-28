@@ -130,6 +130,48 @@ thread rows), else the nearest `button, a, [role=button|option|menuitem|tab], li
 (the sidebar DM row), else the tile itself. Keyboard focus that matches
 `:focus-visible` triggers it too; a click's focus does not.
 
+### Frames across reloads
+
+Without persistence every hard reload showed the initials for ~2–4 s while a
+hidden instance re-settled each look. The settled frames (resting, and the hover
+costume's) are now kept in `localStorage` (`lib/mascot-pose-store.ts`) and shown
+on the next visit. It is `localStorage`, not IndexedDB, because it is
+synchronous — a stored frame is on the first render, not a promise later — and
+the whole cache is ~110 kB for a nine-teammate roster at DPR 1.
+
+The reason this was not done earlier is that a *bad* stored frame comes back on
+every reload until something notices, so the safeguards are the design:
+
+- **Keyed by what drew it.** The key carries the capture-logic version, the first
+  12 hex digits of the `.riv`'s SHA-256, the Rive package versions and the device
+  pixel ratio. Frames stored under any other version are deleted, not just
+  ignored. A unit test hashes the shipped `.riv` and reads the installed package
+  versions, so editing the animation or bumping Rive cannot ship with old frames
+  still trusted — the constant has to change on purpose.
+- **Validated on the way in and the way out** (`lib/mascot-frame.ts`): a PNG of
+  exactly `96 px × DPR` (±2), that decodes, with at least 30% of its pixels not
+  the background colour (settled ≈ 48–61%, the rise-in's peek ≈ 21–24%, blank
+  0%). A stored frame is *not shown* until that check passes — a few
+  milliseconds — and a capture for that look is held back meanwhile, so a good
+  frame costs no hidden instance and a bad one is deleted and re-captured. (The
+  test that catches a blank frame is the background comparison; counting opaque
+  pixels reads 4096/4096 on an empty tile.)
+- **Bounded, least-recently-used first**: at most 64 frames and ~1.5 M
+  characters; recency updates are batched 1.5 s after the page settles. A full
+  quota drops the older half and retries once; storage that is missing, full or
+  throws on access leaves the in-memory behaviour, unchanged.
+
+Measured (headless Chrome for Testing, DPR 1, nine DM rows, time from reload to
+a data-URL frame in every row): **cold 2234 ms to the first, 4310 ms to all
+nine; warm 94–248 ms to all nine** over three reloads, with the stored entry
+count steady at 18. Five planted entries — a blank PNG of exactly the right
+size, a garbage PNG, a non-URL, truncated JSON, a wrong-size PNG — were all
+replaced by fresh captures, and across 417 polls at ~25 ms a poisoned image was
+on screen **0** times. Moving every entry under a stale `.riv` fingerprint
+deleted all 19 and re-captured (cold timing); an unrelated key survived. With
+`localStorage` access throwing `SecurityError` the page still loaded and all nine
+mascots appeared in the cold time, no console errors.
+
 ### Measured
 
 A 30-message transcript (60 rows in the DOM), fresh browser each run, headless
