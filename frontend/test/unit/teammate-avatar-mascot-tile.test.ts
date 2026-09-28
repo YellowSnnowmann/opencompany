@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 //
-// What `TeammateAvatar` does with a `mascot:animated` teammate: mount the one
-// mascot component with that teammate's own look, but only while the tile is
-// near the viewport — a transcript has a tile per message, so the number that
-// matters is how many are near the screen, not how many exist.
+// What `TeammateAvatar` does with a `mascot:animated` teammate: mount a mascot
+// component with that teammate's own look, but only while the tile is near the
+// viewport — a transcript has a tile per message, so the number that matters is
+// how many are near the screen, not how many exist — and pick which one by the
+// surface's `animate` trigger (the settled-frame tile by default, the live loop
+// only when asked for).
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -11,9 +13,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const seen = vi.hoisted(() => ({ props: [] as Record<string, unknown>[] }));
 
+// Both mascot components record what they were given and mount the same marker;
+// `via` says which one the tile chose, which is the `animate` contract under test.
 vi.mock("@/components/mascot-avatar", () => ({
   MascotAvatar: (props: Record<string, unknown>) => {
-    seen.props.push(props);
+    seen.props.push({ ...props, via: "loop" });
+    return createElement("span", { "data-testid": "mascot" });
+  },
+}));
+
+vi.mock("@/components/mascot-pose", () => ({
+  PoseMascot: (props: Record<string, unknown>) => {
+    seen.props.push({ ...props, via: "pose" });
     return createElement("span", { "data-testid": "mascot" });
   },
 }));
@@ -188,5 +199,31 @@ describe("a mascot tile shows the teammate's own look", () => {
     expect(mounted()).toBe(false);
     await render({ ...mascotProps, markOnly: true });
     expect(mounted()).toBe(false);
+  });
+});
+
+describe("a mascot tile picks its component by the surface's animate trigger", () => {
+  it("defaults to the settled-frame tile that reacts on hover", async () => {
+    await render({ name: "Nova", avatar: "mascot:animated" });
+    expect(seen.props.at(-1)).toMatchObject({ via: "pose", animate: "hover" });
+  });
+
+  it("animate=\"loop\" mounts the live looping mascot, with no trigger passed down", async () => {
+    await render({ name: "Nova", avatar: "mascot:animated", animate: "loop" });
+    const last = seen.props.at(-1)!;
+    expect(last.via).toBe("loop");
+    expect(last.animate).toBeUndefined();
+  });
+
+  it("animate=\"none\" is the settled frame with no reaction", async () => {
+    await render({ name: "Nova", avatar: "mascot:animated", animate: "none" });
+    expect(seen.props.at(-1)).toMatchObject({ via: "pose", animate: "none" });
+  });
+
+  it("passes the teammate's own mode down either way, so a static teammate can stay still", async () => {
+    await render({ ...mascotProps });
+    expect(seen.props.at(-1)).toMatchObject({ via: "pose", mode: "static" });
+    await render({ ...mascotProps, animate: "loop" });
+    expect(seen.props.at(-1)).toMatchObject({ via: "loop", mode: "static" });
   });
 });

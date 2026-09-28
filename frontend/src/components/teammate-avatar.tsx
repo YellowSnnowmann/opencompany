@@ -11,6 +11,7 @@ import {
   subscribeAvatarNode,
   isMascotRef,
 } from "@/lib/avatar";
+import { DEFAULT_MASCOT_TRIGGER, type MascotTrigger } from "@/lib/mascot-pose";
 import { TEAM_TONES, avatarFor, initials } from "@/lib/team";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +23,15 @@ import { cn } from "@/lib/utils";
  */
 const LazyMascotAvatar = lazy(() =>
   import("@/components/mascot-avatar").then((m) => ({ default: m.MascotAvatar })),
+);
+
+/**
+ * The mascot tile that rests on a settled frame and reacts once on hover — every
+ * mascot tile that is not `animate="loop"`. Same chunk as `MascotAvatar` (it
+ * imports it), so it costs nothing extra on the wire.
+ */
+const LazyPoseMascot = lazy(() =>
+  import("@/components/mascot-pose").then((m) => ({ default: m.PoseMascot })),
 );
 
 interface Props {
@@ -66,6 +76,18 @@ interface Props {
    * `MascotAvatar`'s own `mode` prop for what each does.
    */
   mascotMode?: string;
+  /**
+   * When a mascot animates on this surface (`MascotTrigger`, `lib/mascot-pose.ts`).
+   * Defaults to `"hover"`: a settled frame that plays once when the enclosing
+   * row is hovered or focused, and no live canvas at rest — right for the
+   * sidebar, chat header, message rows, member lists and the like, where a
+   * looping mascot would blank a third of the time and animate in lockstep.
+   * `"loop"` keeps a live instance playing; `"none"` is the settled frame only.
+   * A static teammate and `prefers-reduced-motion` are always `"none"`. Ignored
+   * for an avatar that is not a mascot. The hero surfaces mount `MascotAvatar`
+   * directly, which is the loop.
+   */
+  animate?: MascotTrigger;
   className?: string;
   /**
    * Forwarded to the tile so a spec can name one avatar among several on a page.
@@ -95,6 +117,7 @@ export function TeammateAvatar({
   mascotSkinColor,
   mascotHandColor,
   mascotMode,
+  animate = DEFAULT_MASCOT_TRIGGER,
   className,
   "data-testid": testId,
 }: Props) {
@@ -140,6 +163,7 @@ export function TeammateAvatar({
       mascotSkinColor={mascotSkinColor}
       mascotHandColor={mascotHandColor}
       mascotMode={mascotMode}
+      animate={animate}
       className={className}
       testId={testId}
     />
@@ -162,6 +186,7 @@ function AvatarTile({
   mascotSkinColor,
   mascotHandColor,
   mascotMode,
+  animate,
   className,
   testId,
 }: {
@@ -172,6 +197,7 @@ function AvatarTile({
   mascotSkinColor?: string;
   mascotHandColor?: string;
   mascotMode?: string;
+  animate: MascotTrigger;
   className?: string;
   testId?: string;
 }) {
@@ -204,6 +230,7 @@ function AvatarTile({
           skinColor={mascotSkinColor}
           handColor={mascotHandColor}
           mode={mascotMode}
+          animate={animate}
           className="absolute inset-0 rounded-none"
         />
       ) : (
@@ -288,12 +315,14 @@ function MascotTile({
   skinColor,
   handColor,
   mode,
+  animate,
   className,
 }: {
   costume?: string;
   skinColor?: string;
   handColor?: string;
   mode?: string;
+  animate: MascotTrigger;
   className?: string;
 }) {
   const [ref, near] = useNearViewport();
@@ -301,13 +330,24 @@ function MascotTile({
     <span ref={ref} className={cn("block", className)}>
       {near && (
         <Suspense fallback={null}>
-          <LazyMascotAvatar
-            costume={costume}
-            skinColor={skinColor}
-            handColor={handColor}
-            mode={mode}
-            className="size-full rounded-none"
-          />
+          {animate === "loop" ? (
+            <LazyMascotAvatar
+              costume={costume}
+              skinColor={skinColor}
+              handColor={handColor}
+              mode={mode}
+              className="size-full rounded-none"
+            />
+          ) : (
+            <LazyPoseMascot
+              animate={animate}
+              costume={costume}
+              skinColor={skinColor}
+              handColor={handColor}
+              mode={mode}
+              className="size-full rounded-none"
+            />
+          )}
         </Suspense>
       )}
     </span>

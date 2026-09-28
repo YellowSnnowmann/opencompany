@@ -50,7 +50,7 @@ export type MascotState = "idle" | "hover" | "replying";
  * reactive states stay these two fixed numbers regardless of that choice —
  * see the module docs on {@link MascotAvatar} for why.
  */
-const REACTIVE_NUMBERS: Record<"hover" | "replying", number> = {
+export const REACTIVE_NUMBERS: Record<"hover" | "replying", number> = {
   hover: 2,
   replying: 3,
 };
@@ -328,7 +328,7 @@ interface LiveProps extends Props {
  * `RevealSelectedNode`) already each keep their own copy of this exact hook
  * rather than a shared one, so this follows the established convention.
  */
-function usePrefersReducedMotion(): boolean {
+export function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
     const mql = window.matchMedia?.("(prefers-reduced-motion: reduce)");
@@ -346,7 +346,7 @@ function usePrefersReducedMotion(): boolean {
 }
 
 /** One live Rive instance. Everything that touches the runtime lives here. */
-function LiveMascot({
+export function LiveMascot({
   mode = "animated",
   state = "idle",
   costume,

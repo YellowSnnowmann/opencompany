@@ -32,7 +32,9 @@ vi.mock("@rive-app/react-canvas", () => ({
   }),
 }));
 
-const { MascotAvatar } = await import("@/components/mascot-avatar");
+const { MascotAvatar, REACTIVE_NUMBERS } = await import("@/components/mascot-avatar");
+const { MASCOT_HOVER_COSTUME } = await import("@/lib/mascot-pose");
+const { mascotCostumeNumber } = await import("@/lib/avatar");
 
 let container: HTMLDivElement;
 let root: Root;
@@ -88,6 +90,12 @@ function render(props: Record<string, any>) {
 }
 
 describe("MascotAvatar", () => {
+  it("a hovered tile swaps to the same costume the hero surfaces swap to on hover", () => {
+    // `lib/mascot-pose.ts` cannot import this module (it would drag the Rive
+    // runtime into the main bundle), so the two are kept in step here.
+    expect(mascotCostumeNumber(MASCOT_HOVER_COSTUME)).toBe(REACTIVE_NUMBERS.hover);
+  });
+
   it("writes 1 (cap) for idle, 2 for hover, 3 for replying — the file's own default costume", () => {
     render({ state: "idle" });
     expect(rive.setNumber).toHaveBeenLastCalledWith(1);
