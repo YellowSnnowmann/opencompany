@@ -783,6 +783,7 @@ function MemberCard({
   return (
     <Card
       data-testid="team-card"
+      data-avatar-hover-scope
       className={cn(
         "relative transition-colors",
         onOpen && "cursor-pointer hover:border-primary/40 hover:shadow-sm",

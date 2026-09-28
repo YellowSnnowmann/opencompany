@@ -297,6 +297,9 @@ export function MessageRow({
   return (
     <article
       data-message-id={message.id}
+      // The whole line is the hover target for the sender's mascot, not the
+      // 36px face button inside it (`lib/mascot-pose.ts`, `hoverScopeFor`).
+      data-avatar-hover-scope
       className={cn(
         "group/message relative flex gap-2.5 px-4 transition-colors hover:bg-muted/40",
         continuation ? "py-0.5" : "pb-0.5 pt-2",

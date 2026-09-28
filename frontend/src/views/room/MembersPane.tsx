@@ -287,7 +287,10 @@ function MemberRow({
   const roleLine = roleSubtitle(member.name, member.role);
 
   return (
-    <div className="group/member flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-accent/60">
+    <div
+      data-avatar-hover-scope
+      className="group/member flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-accent/60"
+    >
       {/* Outside the row button, not inside it: a button inside a button is
           invalid HTML, and the two want different things anyway — the face
           opens who this agent is (issue #1653), the row opens a line to
