@@ -216,17 +216,9 @@ impl MentionSeam {
                         _ => {}
                     }
                 }
-                // A general-chat spelling — `"General"` (the default for an
-                // unaddressed message), `"main"`, or `""` — still names the
-                // General desk, the console's default thread, so it has to file
-                // under the console's canonical main-thread id, which the rail
-                // aliases onto its first rendered desk channel
-                // ([`crate::server::chat_history::is_general_chat`], issue #65).
-                // Anything else is honestly the string as written: it may badge
-                // nowhere, but it is not a lie.
                 let probe = bare.unwrap_or(desk);
-                if crate::server::chat_history::is_general_chat(Some(probe)) {
-                    crate::server::chat_history::MAIN_THREAD_ID.to_string()
+                if crate::ports::general_channel::is_general_spelling(probe) {
+                    crate::ports::general_channel::GENERAL_CHANNEL_ID.to_string()
                 } else {
                     desk.to_string()
                 }

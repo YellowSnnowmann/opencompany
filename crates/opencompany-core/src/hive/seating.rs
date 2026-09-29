@@ -72,6 +72,13 @@ pub struct SeatLoan {
     /// Whether this episode runs in an operator's direct line rather than on
     /// a desk. See [`broadcast_withheld_in`].
     pub dm: bool,
+    /// Whether this is the closing turn a settled episode routes to one seat.
+    ///
+    /// Set only by [`crate::hive::conclude`], and it withholds `broadcast`
+    /// for a different reason than `dm` does: the seat is there to assemble
+    /// what the others produced, and a hand-off is the one move that would
+    /// reopen the room instead of closing it.
+    pub concluding: bool,
 }
 
 /// The episode tool a seat does **not** get in an operator's direct line.
@@ -93,9 +100,19 @@ pub struct SeatLoan {
 /// to reach a teammate, which is the way that actually transfers anything.
 ///
 /// A desk keeps it: a desk is a real room, and that is what it is for.
+///
+/// # Why a concluding seat loses it too
+///
+/// A settled episode routes one closing turn to one seat
+/// ([`crate::hive::conclude`]). That seat holds every lane's finding and one
+/// job: say what they add up to. `broadcast` would route the assembly to
+/// somebody else and reopen the room, which is the branching that costs a
+/// desk its extra waves -- six of them in one live run. Withholding it leaves
+/// `complete_episode` as the only exit, which is the constraint that makes an
+/// operator's line synthesise every time.
 #[must_use]
-pub fn broadcast_withheld_in(dm: bool, prefix: &str) -> Option<String> {
-    dm.then(|| format!("{prefix}broadcast"))
+pub fn broadcast_withheld_in(withheld: bool, prefix: &str) -> Option<String> {
+    withheld.then(|| format!("{prefix}broadcast"))
 }
 
 /// The belts episodes have lent one teammate, by conversation.

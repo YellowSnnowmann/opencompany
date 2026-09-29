@@ -48,7 +48,7 @@ use crate::server::chat_history::{
 };
 use crate::server::error::ApiError;
 use crate::server::graphql::auth::GqlAuth;
-use crate::server::ops::language::{self, DEFAULT_DESK};
+use crate::server::ops::language::{self, GENERAL_CHANNEL_ID};
 use crate::server::ops::{AdminScopedCompany, ScopedCompany, scoped};
 use crate::server::platform_auth::{CompanyAuth, authorize_address, refuse_until_password_changed};
 use crate::server::provision::{emit_cycle_webhooks, emit_feedback_webhook};
@@ -130,11 +130,6 @@ pub fn router() -> Router<AppState> {
         // Desk member ordering / hierarchy (issue #131): set the operator's
         // explicit member order for a desk. Registered under both scope forms.
         .merge(scoped("/desks/{desk_id}/order", put(set_desk_order)))
-        // The always-present, durable Operator feed — its own surface, not a
-        // desk (issue #1757 rework). Read-only identity lookup: the console
-        // pins it below a divider in the chat rail rather than folding it
-        // into `GET {scope}/desks`.
-        .merge(scoped("/operator-channel", get(operator_channel)))
         // The company → operator attention feed (issue #66): a live SSE stream of
         // the attention-worthy events already on the company's event log, under
         // both scope forms.
@@ -167,6 +162,11 @@ fn with_review_routes(router: Router<AppState>) -> Router<AppState> {
 struct DeskDto {
     /// The desk id (the group-chat id; used as the chat thread id).
     id: String,
+    /// `"general"` for the company-wide #general channel, `"desk"` otherwise.
+    kind: DeskKind,
+    /// Whether the console may edit this channel's membership, order or
+    /// existence. False only for #general, whose membership is the roster.
+    mutable: bool,
     /// The desk's display name.
     name: String,
     /// An optional description.
@@ -206,6 +206,14 @@ struct DeskDto {
     routing: Option<crate::hive::routing::DeskRoutingSummaryDto>,
 }
 
+/// Which kind of channel a [`DeskDto`] describes.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum DeskKind {
+    General,
+    Desk,
+}
+
 /// The compact routing summary a desk carries on the list, or `None` for a
 /// desk of one, which opens no episode.
 fn desk_routing_summary(
@@ -229,22 +237,15 @@ async fn list_desks(scope: ScopedCompany) -> Result<Json<Vec<DeskDto>>, crate::s
     let record = scope.runtime.store().load(scope.id()).await?;
     let desks = record
         .map(|record| {
-            // Manifest (blueprint) desks first, then operator-created overlay
-            // desks — the same order the harness `desk_lead` resolver searches.
-            // The general desk is not listed beside General — it IS General.
-            // `[company].general_desk` names the desk the company's own line
-            // resolves to, so projecting it as its own channel puts the same
-            // room in the sidebar twice: once as the main thread everybody
-            // already has, once under whatever id the manifest gave it. Same
-            // reasoning, and same `is_general_chat` shape, as the overlay-desk
-            // exclusion below.
-            let general_desk = record.manifest.company.general_desk.clone();
+            // #general first, then manifest (blueprint) desks, then
+            // operator-created overlay desks — the same order the harness
+            // `desk_lead` resolver searches.
             let router = crate::hive::routing::host_router();
             let manifest_desks = record
                 .manifest
                 .group_chats
                 .iter()
-                .filter(move |chat| general_desk.as_deref() != Some(chat.id.as_str()))
+                .filter(|chat| !crate::ports::general_channel::is_general_spelling(&chat.id))
                 .map(|chat| {
                     let members = record.effective_desk_members(&chat.id);
                     // The overlay subset: effective members not declared in the
@@ -256,6 +257,8 @@ async fn list_desks(scope: ScopedCompany) -> Result<Json<Vec<DeskDto>>, crate::s
                         .collect();
                     DeskDto {
                         id: chat.id.clone(),
+                        kind: DeskKind::Desk,
+                        mutable: true,
                         name: chat.name.clone(),
                         description: chat.description.clone(),
                         members,
@@ -267,24 +270,12 @@ async fn list_desks(scope: ScopedCompany) -> Result<Json<Vec<DeskDto>>, crate::s
                         routing: desk_routing_summary(&record, &chat.id, router),
                     }
                 });
-            // An overlay desk whose own **id** is a General spelling is not
-            // projected (issue #1781 review, Codex P2) — the grandfathered
-            // shape `POST .../desks` accepted `general` / `main` ids under
-            // before issue #1743 reserved them. `CompanyRecord::resolve_desk_id`
-            // already excludes exactly this desk from routing (see its own
-            // filter, same `is_general_chat(Some(&d.id))` check), so listing it
-            // here would show the console a desk `buildChannels` treats as the
-            // company-wide line — offering edit/delete controls and a member
-            // list that has nothing to do with where a message to it actually
-            // routes (the built-in `#general`, per `resolve_desk_id`'s
-            // fallback). Nothing is lost by hiding it: its transcript is
-            // already folded into `#general` by `is_general_chat`, and that
-            // channel's membership is the whole roster, a superset of whatever
-            // this desk held.
+            // An overlay desk whose id is a legacy General spelling predates
+            // the reserved-id guard and routes to #general, so it is hidden.
             let overlay_desks = record
                 .overlay_desks
                 .iter()
-                .filter(|desk| !crate::server::chat_history::is_general_chat(Some(&desk.id)))
+                .filter(|desk| !crate::ports::general_channel::is_general_spelling(&desk.id))
                 .map(|desk| {
                     let members = record.effective_desk_members(&desk.id);
                     // For an overlay desk the founding members are `desk.members`;
@@ -296,6 +287,8 @@ async fn list_desks(scope: ScopedCompany) -> Result<Json<Vec<DeskDto>>, crate::s
                         .collect();
                     DeskDto {
                         id: desk.id.clone(),
+                        kind: DeskKind::Desk,
+                        mutable: true,
                         name: desk.name.clone(),
                         description: desk.description.clone(),
                         members,
@@ -305,101 +298,34 @@ async fn list_desks(scope: ScopedCompany) -> Result<Json<Vec<DeskDto>>, crate::s
                         routing: desk_routing_summary(&record, &desk.id, router),
                     }
                 });
-            manifest_desks.chain(overlay_desks).collect()
+            let general = &record.general_channel;
+            let general = DeskDto {
+                id: general.id.clone(),
+                kind: DeskKind::General,
+                mutable: false,
+                name: general.name.clone(),
+                description: None,
+                members: general.members.clone(),
+                overlay_members: Vec::new(),
+                responder: ResponderMode::Lead,
+                overlay_created: false,
+                routing: None,
+            };
+            std::iter::once(general)
+                .chain(manifest_desks)
+                .chain(overlay_desks)
+                .collect()
         })
         // A company that failed to load surfaces no desks — the console falls
-        // back to its static default threads (issue #1757 rework: the Operator
-        // feed is its own surface now, fetched through `GET
-        // {scope}/operator-channel` rather than injected here).
+        // back to its static default threads.
         .unwrap_or_default();
     Ok(Json(desks))
 }
 
-/// The identity of the company's always-present, durable Operator feed
-/// (issue #1757 rework). Mirrors `OperatorChannelDto` in
-/// `frontend/src/api/types.ts`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OperatorChannelDto {
-    /// The channel id — the `desk` query param `GET
-    /// {scope}/chat/history?desk=<id>` reads its transcript through.
-    id: String,
-    /// Always "Operator" — the console's pinned-row label.
-    name: String,
-    /// The channel's purpose line, shown under the name in the pinned row.
-    description: String,
-}
-
-/// `GET {scope}/operator-channel` — the identity of the company's dedicated,
-/// durable Operator feed: where "what happened and what needs you" workflow
-/// reports and the owner/no-mailbox fallback land. A pinned surface, not a
-/// desk — the console renders it as its own row below a divider rather than
-/// folding it into `GET {scope}/desks`, and it carries no member or mutation
-/// routes.
-///
-/// `id` resolves through
-/// [`CompanyRecord::operator_feed_channel`](crate::ports::types::CompanyRecord::operator_feed_channel)
-/// — ordinarily [`OPERATOR_CHANNEL`](crate::runtime::OPERATOR_CHANNEL), or
-/// [`OPERATOR_CHANNEL_COLLISION_FALLBACK`](crate::runtime::OPERATOR_CHANNEL_COLLISION_FALLBACK)
-/// for the one grandfathered company shape where a roster teammate already
-/// owns that id — so this and delivery
-/// (`workflows::delivery::send_to_channel_adapter`) always agree on where the
-/// feed lives. A company with no record yet still gets the default id, so the
-/// console always has a channel to point its history read at — but a store
-/// read failure is propagated as an error rather than silently answered with
-/// the default id: for the grandfathered collision-fallback company, treating
-/// a transient failure as "no record" would label the operator's real
-/// `operator-feed` transcript as `operator` while delivery keeps targeting the
-/// collision-aware address once the store recovers.
-async fn operator_channel(
-    scope: ScopedCompany,
-) -> Result<Json<OperatorChannelDto>, crate::server::Rejection> {
-    let id = scope
-        .runtime
-        .store()
-        .load(scope.id())
-        .await?
-        .map(|record| record.operator_feed_channel().to_string())
-        .unwrap_or_else(|| crate::runtime::OPERATOR_CHANNEL.to_string());
-    Ok(Json(OperatorChannelDto {
-        id,
-        name: "Operator".to_string(),
-        description: "Workflow reports and notifications — what happened and what needs you"
-            .to_string(),
-    }))
-}
-
-/// Whether `desk_id` names the built-in `#general` channel rather than a desk
-/// (issue #1743; restored PR #1781 review, CodeRabbit P2 — see below).
-///
-/// `#general` is the company-wide conversation this host has always folded
-/// every General spelling into — `general`, `General`, `main`, and the empty
-/// string all name it, which is exactly what
-/// [`is_general_chat`](crate::server::chat_history::is_general_chat) decides.
-/// It is deliberately **not** a desk: it has no lead, no hierarchy, and its
-/// membership is the whole roster derived at read time, so there is nothing
-/// for a desk mutation to change.
-///
-/// Guarded on **manifest** desks only, not `desk_exists` (id in manifest *or*
-/// overlay) as this predicate's original `da98130c1` shape checked: a company
-/// whose blueprint really does declare a `[[group_chat]]` with one of those
-/// ids keeps behaving exactly as it did, but an *overlay* desk can only ever
-/// hold a reserved id by predating the id/name guards `create_desk` has
-/// carried since `da98130c1` and `16dcce235` — the exact grandfathered shape
-/// `list_desks` and [`CompanyRecord::resolve_desk_id`] already keep out of the
-/// desk list and out of routing (`0c07873db`). Treating it as a real,
-/// mutable desk here would contradict that: every other surface already
-/// agrees it shadows General, not that it is a desk.
-///
-/// That read/list-side exclusion (`0c07873db`) is where the gap actually
-/// starts: this mutation-side guard (originally `da98130c1`) was dropped by
-/// an unrelated refactor (`3cbdb7a5f`) and never restored alongside it — a
-/// direct `POST`/`DELETE`/`PUT` to `.../desks/{id}` could still staff,
-/// reorder, or delete a desk no read surface exposes, and a write against a
-/// bare General spelling with no legacy overlay row regressed from this 409
-/// to a misleading 404.
+/// Whether `desk_id` names #general, whose membership, order and existence
+/// are not editable. Legacy General spellings name it too.
 fn is_general_channel(record: &CompanyRecord, desk_id: &str) -> bool {
-    crate::server::chat_history::is_general_chat(Some(desk_id))
+    crate::ports::general_channel::is_general_spelling(desk_id)
         && !record.manifest.group_chats.iter().any(|c| c.id == desk_id)
 }
 
@@ -1017,11 +943,9 @@ async fn create_desk(
     // The **display name** is reserved for the same reason and not a weaker
     // one: `resolve_desk_id` matches a desk by id *or* by case-insensitive
     // name, so `{"id": "ops", "name": "General"}` shadows the channel just as
-    // thoroughly — `everyone_desk` folds the built-in `main` thread to
-    // `General`, that lookup then selects this desk, and `@everyone` on the
-    // company-wide line expands to its members instead of the roster.
-    if crate::server::chat_history::is_general_chat(Some(&id))
-        || crate::server::chat_history::is_general_chat(Some(&name))
+    // thoroughly.
+    if crate::ports::general_channel::is_general_spelling(&id)
+        || crate::ports::general_channel::is_general_spelling(&name)
     {
         return Err(ApiError(OpenCompanyError::Conflict(
             language::GENERAL_CHANNEL_RESERVED.to_string(),
@@ -1055,24 +979,12 @@ async fn create_desk(
     // straight through. Fixed (issue #1781 review, Codex P1 follow-up):
     // `ensure_desk_writable` now resolves the raw selector through
     // `resolve_desk_id` first, so it agrees with the read path on which desk
-    // a caller meant. The fallback address
-    // (`OPERATOR_CHANNEL_COLLISION_FALLBACK`, "operator-feed")
-    // is reserved by name for the identical reason `316bc9229` reserved it on
-    // the manifest side — `resolve_desk` folds a `?desk=` selector against it
-    // the same way — but not by id: `is_valid_desk_id` above already rejects
-    // any hyphen, so no `id` can ever equal the hyphenated fallback constant.
+    // a caller meant.
     if id == crate::runtime::OPERATOR_CHANNEL
         || name.eq_ignore_ascii_case(crate::runtime::OPERATOR_CHANNEL)
     {
         return Err(ApiError(OpenCompanyError::Conflict(
             "the id \"operator\" is reserved for the built-in Operator channel — choose a different id"
-                .to_string(),
-        )));
-    }
-    if name.eq_ignore_ascii_case(crate::runtime::OPERATOR_CHANNEL_COLLISION_FALLBACK) {
-        return Err(ApiError(OpenCompanyError::Conflict(
-            "the name \"operator-feed\" is reserved for the built-in Operator channel's \
-             fallback feed — choose a different name"
                 .to_string(),
         )));
     }
@@ -1139,6 +1051,8 @@ async fn create_desk(
         StatusCode::CREATED,
         Json(DeskDto {
             id,
+            kind: DeskKind::Desk,
+            mutable: true,
             name,
             description,
             members: effective,
@@ -1191,18 +1105,6 @@ async fn delete_desk(
         return Err(ApiError(OpenCompanyError::Conflict(
             language::MANIFEST_DESK_DELETE.to_string(),
         )));
-    }
-    // Tombstone the operator-feed divert before it can be lost (issue #1781
-    // review, Codex P2): `operator_feed_channel` currently diverts only while
-    // *something* live holds the id or display name `operator`, and the desk
-    // this call is about to remove may be that something. Recorded here,
-    // before the removal, while the live check can still see it — see
-    // `CompanyRecord::divert_operator_feed_permanently`'s doc for why this
-    // has to survive the desk being gone.
-    if record.operator_feed_channel()
-        == crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK
-    {
-        record.divert_operator_feed_permanently();
     }
     let before = record.overlay_desks.len();
     record.overlay_desks.retain(|d| d.id != desk_id);
@@ -2652,7 +2554,8 @@ struct ChatMessage {
     /// The operator's message text.
     #[serde(alias = "message")]
     text: String,
-    /// The desk the message is addressed to. Defaults to the "General" desk.
+    /// The desk the message is addressed to. Absent, empty, or any spelling
+    /// of `#general` is normalized to `"general"` by `chat_and_emit`.
     #[serde(default)]
     chat: Option<String>,
     /// The message this one replies to, by its id (issue #364) — a thread reply
@@ -3137,10 +3040,9 @@ async fn run_chat(
                 audience: Vec::new(),
                 episode: None,
                 parent: reply_thread(accepted.thread_root(), accepted.message_seq),
-                chat_id: message
-                    .chat
-                    .clone()
-                    .unwrap_or_else(|| crate::server::ops::language::DEFAULT_DESK.to_string()),
+                chat_id: message.chat.clone().unwrap_or_else(|| {
+                    crate::server::ops::language::GENERAL_CHANNEL_ID.to_string()
+                }),
                 agent_id: crate::ports::SYSTEM_AUTHOR.to_string(),
                 text: "This should have opened a task card, but the card could not be saved. \
                        Nothing else was lost — send the message again, or open the card by hand."
@@ -3794,14 +3696,14 @@ async fn chat_and_emit(
     state: &AppState,
     id: &CompanyId,
     runtime: Arc<CompanyRuntime>,
-    message: ChatMessage,
+    mut message: ChatMessage,
     by: Option<Actor>,
 ) -> Result<ChatOk, ApiError> {
-    // The default desk for an unaddressed message.
-    let desk = message
-        .chat
-        .clone()
-        .unwrap_or_else(|| crate::server::ops::language::DEFAULT_DESK.to_string());
+    let desk = crate::ports::general_channel::decode_general_chat_id(
+        message.chat.take().unwrap_or_default(),
+    );
+    tracing::debug!(company = %id, chat = %desk, "[chat] accepted chat address");
+    message.chat = Some(desk.clone());
     // Issue #1757: the Operator channel is a **read-only** aggregation surface —
     // a "what happened" feed of workflow reports, not a conversation. Refuse a
     // send addressed to it rather than journaling an `OperatorMessage` under the
@@ -5072,15 +4974,18 @@ impl From<MessageView> for ChatHistoryMessageDto {
 /// GraphQL `chat(id:)` lookup. An unmatched selector (an ad hoc thread id the
 /// console addresses with no backing manifest entry, e.g. a static default
 /// thread) passes through as both id and name, so history still finds
-/// whatever was journaled under that exact string. Omitted resolves to the
-/// synthetic General/operator desk.
+/// whatever was journaled under that exact string. Omitted, and every legacy
+/// General spelling, resolves to #general.
 async fn resolve_desk(
     runtime: &CompanyRuntime,
     desk: Option<&str>,
 ) -> Result<(String, String), OpenCompanyError> {
-    let Some(desk) = desk else {
-        return Ok((DEFAULT_DESK.to_string(), DEFAULT_DESK.to_string()));
-    };
+    let desk =
+        crate::ports::general_channel::decode_general_chat_id(desk.unwrap_or_default().to_string());
+    if desk == GENERAL_CHANNEL_ID {
+        return Ok((desk.clone(), desk));
+    }
+    let desk = desk.as_str();
     let record = runtime.store().load(runtime.id()).await?;
     let matched =
         record.as_ref().and_then(|record| {

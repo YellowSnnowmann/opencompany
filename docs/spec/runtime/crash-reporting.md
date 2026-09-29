@@ -9,12 +9,20 @@ never reports, and how an operator turns it on and proves it works.
 
 The short version, and the only four sentences most readers need:
 
-- **Nothing is reported unless an operator configures a DSN.** Not "nothing by
-  default" in the sense of a flag someone might flip: with no DSN there is no
-  client, and in a build without the `crash-reporting` cargo feature there is no
-  code that could construct one.
-- The destination is **the operator's own Sentry project**, in the operator's
-  own organisation. This is not [analytics](analytics.md), which reports to a
+- **A self-hosted *host* reports nothing unless an operator configures a
+  DSN.** With no DSN there is no client, and in a build without the
+  `crash-reporting` cargo feature there is no code that could construct one.
+  The official TinyHumans builds carry **compiled-in DSNs** for their own
+  projects: a hosted tenant's host (`opencompany-core`), the desktop shell
+  (`opencompany-tauri`) and the production console bundle
+  (`opencompany-frontend`) — **including a self-hosted operator's console**,
+  unless its build set `VITE_SENTRY_DSN=off` (as `deploy/docker-compose.yml`
+  and CI do). See [Who supplies each variable, per
+  deployment](#who-supplies-each-variable-per-deployment) for the console/host
+  split. A configured DSN always wins, and `OPENCOMPANY_SENTRY=off` /
+  `VITE_SENTRY_DSN=off` silence them.
+- For a self-hosted install the destination is **the operator's own Sentry
+  project**. This is not [analytics](analytics.md), which reports to a
   collector *this* project runs and is therefore hosted-tenant-only and
   payload-constrained.
 - What is sent is **errors and panics**: the message, the stack trace, and the
@@ -58,7 +66,7 @@ that an operator opted into for their own install.
 
 | Variable | Meaning |
 |---|---|
-| `OPENCOMPANY_SENTRY_DSN` | The DSN. **Configuration, never a compiled-in constant** — a DSN baked into a public binary is an ingest endpoint everyone can write to, and it decides whose organisation an install's crashes land in. |
+| `OPENCOMPANY_SENTRY_DSN` | The DSN. When unset or blank, a **hosted tenant** (`OPENCOMPANY_DEPLOYMENT=hosted-tenant`, or `OPENCOMPANY_TENANT_ID` set) falls back to the compiled-in `observability::config::DEFAULT_HOSTED_TENANT_DSN` (the TinyHumans `opencompany-core` project); every other deployment stays silent. The default is gated on the deployment, not only on the feature, because `crash-reporting` is also compiled into the desktop app and can be compiled into a self-hosted image via `OPENCOMPANY_FEATURES`. The desktop has its own default; see [The desktop shell](#the-desktop-shell). |
 | `OPENCOMPANY_SENTRY` | `off` forbids reporting and outranks everything else. `on` is accepted and means only "not off": without a DSN there is nowhere to send, so there is nothing to force. |
 | `OPENCOMPANY_SENTRY_ENVIRONMENT` | Overrides the `environment` tag. Defaults to the deployment kind — `desktop`, `self-hosted`, `hosted-tenant` (see [`app::deployment`](../../../src/app/deployment.rs)). |
 | `OPENCOMPANY_SENTRY_TRACES_SAMPLE_RATE` | Fraction of requests recorded as performance transactions, `0`–`1`. **Defaults to `0`.** See [tracing.md](tracing.md), including what a rate costs. |
@@ -67,8 +75,10 @@ Reporting happens only when **all** of these hold:
 
 1. the binary was built with `--features crash-reporting`;
 2. `OPENCOMPANY_SENTRY` is not `off`, and is not some third value;
-3. `OPENCOMPANY_SENTRY_DSN` is set;
-4. that value is a usable Sentry DSN.
+3. `OPENCOMPANY_SENTRY_DSN` is set, or the deployment is a hosted tenant (which
+   falls back to the compiled-in DSN);
+4. that value is a usable Sentry DSN. A set-but-malformed value is refused,
+   never replaced by the default.
 
 Condition 4 is checked with `url` — the same parser the transport is handed the
 string with — plus the four things that make a URL a *Sentry* DSN: an
@@ -100,15 +110,15 @@ built, not when the host runs.
 
 | Variable | Meaning |
 |---|---|
-| `VITE_SENTRY_DSN` | The console's DSN. Usually a *different* Sentry project from the host's: a browser bundle's DSN is public by construction, and mixing it with a server project means anyone who opens the console can write to it. |
+| `VITE_SENTRY_DSN` | The console's DSN. Unset or blank means the compiled-in `DEFAULT_CONSOLE_SENTRY_DSN` (the TinyHumans `opencompany-frontend` project) in a production build and silence under `vite dev`; `off` means silence (CI and `deploy/docker-compose.yml` pass `off`). A *different* project from the host's: a browser bundle's DSN is public by construction. |
 | `VITE_SENTRY_ENVIRONMENT` | Overrides the `environment` tag. Defaults to `development` under `vite dev` and `production` otherwise. Set it to the host's value when the two surfaces should line up in one filter. |
 | `VITE_SENTRY_SMOKE_TEST` | Exactly `true` fires one `console-sentry-smoke-test` event at init. See [Verifying it works](#verifying-it-works). |
 | `VITE_SENTRY_TRACES_SAMPLE_RATE` | Fraction of page loads traced, `0`–`1`. **Defaults to `0`**, which installs no tracing integration at all. See [tracing.md](tracing.md). |
 | `VITE_SENTRY_TRACE_PROPAGATION_TARGETS` | Extra origins that may receive `sentry-trace` headers, comma-separated. Same-origin always may. See [tracing.md](tracing.md). |
 | `VITE_BUILD_COMMIT` | The commit for the release tag, shortened to twelve characters. The frontend's spelling of `OPENCOMPANY_BUILD_COMMIT`. |
 
-There is no `VITE_SENTRY=off`: a bundle is built with a DSN or without one, and
-removing the variable is the same action as setting a switch.
+`VITE_SENTRY_DSN=off` is the console's switch: a bundle is decided at build
+time, so there is nothing to turn off at run time.
 
 ### Source-map upload (CI only)
 
@@ -147,6 +157,26 @@ the hosted-image and desktop release pipelines, using the same organization
 token as the console source-map upload. Missing credentials or a failed upload
 fail the release rather than silently shipping unsymbolicated stack traces.
 
+### The desktop shell
+
+A double-clicked `.app` has no environment, so the desktop shell carries a
+fallback: the `DESKTOP_DSN` constant in `crates/opencompany-app/src/crash.rs`.
+It names the **desktop's own** Sentry project (`opencompany-tauri`), never the
+host's, because anyone who unzips the `.dmg` can read it and a project that
+exists only for this binary is the only one it may write to.
+
+- `OPENCOMPANY_SENTRY_DSN`, when set and non-blank, still wins.
+- `OPENCOMPANY_SENTRY=off` is resolved before any DSN and silences both.
+- Every desktop build carries it, including a source build or `cargo run`; set
+  `OPENCOMPANY_SENTRY=off` to silence one.
+- `opencompany-desktop sentry-test [--message …]` sends one event through the
+  same decision and client and prints its id, without opening a window.
+
+The shell's Rust debug symbols are uploaded to `opencompany-tauri`. The Sentry
+URL (`https://sentry.tinyhumans.ai`), org (`tinyhumans`) and project slugs
+(`opencompany-frontend`, `opencompany-core`, `opencompany-tauri`) are hardcoded
+in the workflows; only `SENTRY_AUTH_TOKEN` is a secret.
+
 ### Who supplies each variable, per deployment
 
 Every variable above is read from *somewhere*, and "somewhere" differs per
@@ -156,18 +186,15 @@ than a variable set wrong (issue #2392).
 
 | Surface | Host DSN comes from | Console DSN comes from |
 |---|---|---|
-| Hosted tenant (staging) | the manager's per-tenant env | `deploy-staging.yml` build-args, baked by Vite into the image |
-| Hosted tenant (production, Firecracker) | `OCM_TENANT_ENV_OVERRIDES_FILE` on the fleet host — the manager's own template does **not** carry Sentry variables | the console bundle inside the tenant rootfs, so it is fixed when that rootfs is built |
-| Desktop | the shell's process env — **nothing supplies it today**, see the limitation below | `build-desktop.yml` build-args |
-| Self-hosted | the operator, by design | the operator's own console build |
+| Hosted tenant | the tenant env if set, else the compiled-in `opencompany-core` DSN — **only if the process knows it is a hosted tenant** (`OPENCOMPANY_DEPLOYMENT=hosted-tenant` or `OPENCOMPANY_TENANT_ID`) | the compiled-in `opencompany-frontend` DSN, baked by Vite into the image |
+| Desktop | the shell's process env, else the compiled-in `opencompany-tauri` DSN | the compiled-in `opencompany-frontend` DSN |
+| Self-hosted | the operator, by design | the operator's build: `off` under Compose, else the compiled-in default unless set |
 
 Two consequences worth stating rather than deriving.
 
 **A hosted tenant's console DSN is decided when its image is built, and cannot
 be changed afterwards.** Vite inlines it; an `OPENCOMPANY_SENTRY_DSN` set on a
-running tenant reaches the host and not the bundle. On Firecracker that means
-the tenant rootfs, not the tenant's env file — rolling a DSN onto the console
-half is a rootfs rebuild.
+running tenant reaches the host and not the bundle.
 
 **A host DSN, by contrast, takes effect at the next process start** — which on
 Firecracker means the next *cold* boot, because a parked tenant resumes from a
@@ -287,7 +314,7 @@ option. `frontend/src/lib/sentry.ts` re-adds it by hand for that reason.
 | Seam | File | Why there |
 |---|---|---|
 | `sentry::init` | `src/bin/opencompany.rs`, first statement of `async_main` | The panic hook is installed here, so anything that panics earlier panics unobserved — and a malformed data root or an unlockable home are exactly the early panics worth reporting. |
-| desktop `sentry::init` | `crates/opencompany-app/src/lib.rs`, before the subscriber and Tauri runtime | The shell and every embedded host share the core's client, scrubber, panic hook and tracing bridge. |
+| desktop `sentry::init` | `crates/opencompany-app/src/lib.rs`, before the subscriber and Tauri runtime | The shell and every embedded host share the core's client, scrubber, panic hook and tracing bridge. The environment is wrapped in `crash::DesktopEnv`, which supplies the compiled-in desktop DSN only when none is set. |
 | the `tracing` bridge | `observability::tracing_layer`, added to the subscriber | One seam for every `tracing::error!` in the tree, rather than a reporting call at each. |
 | scope identity | `observability::scope::identify`, from the `serve` arm after the port is bound | The instance id and the storage backend are not known until the companies are registered — the same reason `analytics::boot::install` runs there. |
 | flush | `src/bin/opencompany.rs`, after the bound host stops serving | The error that took the host down is queued at the moment it stops. Bounded at 2s (`observability::FLUSH_TIMEOUT`), sized like `analytics`'s: the collector is a third party, and a drain that overruns Kubernetes' 30s grace buys a `SIGKILL` in the middle of the shutdown those seconds protect. |
@@ -397,22 +424,14 @@ Named so they are countable rather than implied.
 - **No debug-file upload for the host.** A stripped release binary's stack
   traces stay unsymbolicated until a `sentry-cli upload-dif` step exists. See
   the note under [Source-map upload](#source-map-upload-ci-only).
-- **The desktop shell's Rust half reports nothing, and cannot yet.** The
-  `crash-reporting` feature is compiled into `crates/opencompany-app` and
-  `run()` initialises the client, so everything is in place except the DSN —
-  which is read from the process env, and a double-clicked `.app` has none.
-  Nothing in `build-desktop.yml` supplies one, and nothing may simply be baked
-  in: the console's DSN is public by construction, but the host's names a
-  *server* project, and shipping it inside a downloadable bundle hands that
-  project's ingest to anyone who unzips the `.dmg`. Delivery therefore needs a
-  decision — its own desktop project, or a value fetched after sign-in — not
-  just a build-arg. Until it lands, a desktop crash is invisible: the console
-  half of the same app reports, so Sentry shows desktop traffic and the silence
-  looks like reliability. Tracked by issue #2392.
+- **The compiled-in DSNs are readable from the binaries.** Anyone with the
+  `.dmg`, the tenant image or the console bundle can post to those projects.
+  That is why each is a project of its own: abuse costs that project's quota
+  and nothing else, and rotating a key is a rebuild.
 - **Desktop reporting uses the project Sentry origin only.** The release
-  workflow supplies the console DSN and the shell uses its own
-  `OPENCOMPANY_SENTRY_DSN`; `crates/opencompany-app/tauri.conf.json` therefore
-  permits `https://sentry.tinyhumans.ai` in `connect-src`. It remains a narrow
+  workflow supplies the console DSN, whose events leave from the webview;
+  `crates/opencompany-app/tauri.conf.json` therefore permits
+  `https://sentry.tinyhumans.ai` in `connect-src`. It remains a narrow
   allowlist: OpenPanel stays unavailable in Tauri and a different Sentry host
   requires an explicit CSP review alongside the release configuration.
 - **Host cognition is not tagged per company.** A multi-company host reports one
@@ -433,7 +452,9 @@ Named so they are countable rather than implied.
   and accepted-outcome stats in Sentry itself; nothing in the boot line or
   `sentry-test` will say.
 
-  The one place this *is* now caught is `release-production.yml`, which reads
+  The one place this *is* now caught is `release-production.yml`, which runs
+  the release image as a hosted tenant with **no DSN set** (so the compiled-in
+  default is what is tested), waits up to 15s for the send, and reads
   the event back through `/api/0/organizations/{org}/eventids/{id}/` after
   sending and fails the release if it was never stored. That is the only check
   in this repository that distinguishes "the ingest answered" from "the event

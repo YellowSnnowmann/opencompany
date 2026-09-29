@@ -43,7 +43,7 @@ fn reply_naming(task_id: &str) -> CompanyEvent {
         parent: None,
         task_id: Some(task_id.to_string()),
         outputs: Vec::new(),
-        chat_id: MAIN_THREAD_ID.to_string(),
+        chat_id: GENERAL_CHANNEL_ID.to_string(),
         agent_id: "ceo".to_string(),
         text: "Opened a card for that.".to_string(),
         steps: Vec::new(),
@@ -85,8 +85,8 @@ async fn a_reply_keeps_its_card_while_the_card_exists() {
 
     let history = history_for_desk(
         &runtime,
-        MAIN_THREAD_ID,
-        MAIN_THREAD_ID,
+        GENERAL_CHANNEL_ID,
+        GENERAL_CHANNEL_ID,
         &Viewer::Operator,
         None,
         50,
@@ -137,8 +137,8 @@ async fn a_reply_loses_its_card_once_the_card_is_deleted() {
 
     let history = history_for_desk(
         &runtime,
-        MAIN_THREAD_ID,
-        MAIN_THREAD_ID,
+        GENERAL_CHANNEL_ID,
+        GENERAL_CHANNEL_ID,
         &Viewer::Operator,
         None,
         50,
@@ -180,7 +180,7 @@ async fn a_transcript_with_no_cards_is_untouched() {
                 parent: None,
                 task_id: None,
                 outputs: Vec::new(),
-                chat_id: MAIN_THREAD_ID.to_string(),
+                chat_id: GENERAL_CHANNEL_ID.to_string(),
                 agent_id: "ceo".to_string(),
                 text: "just talking".to_string(),
                 steps: Vec::new(),
@@ -192,8 +192,8 @@ async fn a_transcript_with_no_cards_is_untouched() {
 
     let history = history_for_desk(
         &runtime,
-        MAIN_THREAD_ID,
-        MAIN_THREAD_ID,
+        GENERAL_CHANNEL_ID,
+        GENERAL_CHANNEL_ID,
         &Viewer::Operator,
         None,
         50,

@@ -1176,6 +1176,14 @@ interface Options {
     event: Extract<CompanyStreamEvent, { type: "desk_routing_configured" }>,
   ) => void;
   /**
+   * Called for each `teammate_added` and `desk_members_changed` frame, so a
+   * surface showing desk membership — `#general`'s is the whole roster —
+   * re-reads it. Silent, like the routing tick.
+   */
+  onRosterChanged?: (
+    event: Extract<CompanyStreamEvent, { type: "teammate_added" | "desk_members_changed" }>,
+  ) => void;
+  /**
    * Called for each `desk_task_completed` frame (issue #377) so the shell can
    * post a card-linked system marker into the channel the card was raised in.
    *
@@ -1325,6 +1333,7 @@ export function useEvents(
     onEpisodeEvent,
     onTurnBracket,
     onDeskRoutingConfigured,
+    onRosterChanged,
     onDispatchTerminal,
     isViewingTaskOrigin,
     onWorkspaceEvent,
@@ -1369,6 +1378,10 @@ export function useEvents(
   useEffect(() => {
     onDeskRoutingConfiguredRef.current = onDeskRoutingConfigured;
   }, [onDeskRoutingConfigured]);
+  const onRosterChangedRef = useRef(onRosterChanged);
+  useEffect(() => {
+    onRosterChangedRef.current = onRosterChanged;
+  }, [onRosterChanged]);
   const onDispatchTerminalRef = useRef(onDispatchTerminal);
   useEffect(() => {
     onDispatchTerminalRef.current = onDispatchTerminal;
@@ -1501,6 +1514,7 @@ export function useEvents(
             onEpisodeEvent: onEpisodeEventRef.current,
             onTurnBracket: onTurnBracketRef.current,
             onDeskRoutingConfigured: onDeskRoutingConfiguredRef.current,
+            onRosterChanged: onRosterChangedRef.current,
             onDispatchTerminal: onDispatchTerminalRef.current,
             isViewingTaskOrigin: isViewingTaskOriginRef.current,
             onWorkspaceEvent: onWorkspaceEventRef.current,
@@ -1561,6 +1575,7 @@ export function handleEvent(
     onEpisodeEvent,
     onTurnBracket,
     onDeskRoutingConfigured,
+    onRosterChanged,
     onDispatchTerminal,
     isViewingTaskOrigin,
     onWorkspaceEvent,
@@ -1683,11 +1698,14 @@ export function handleEvent(
     case "turn_settled":
       onTurnBracket?.(event);
       break;
-    // Structural, like `desk_members_changed` beside it, and silent: the
-    // editor that shows the block re-reads it. No toast — an operator who
-    // just pressed Save already saw the result land.
+    // Structural and silent: the editor that shows the block re-reads it. No
+    // toast — an operator who just pressed Save already saw the result land.
     case "desk_routing_configured":
       onDeskRoutingConfigured?.(event);
+      break;
+    case "teammate_added":
+    case "desk_members_changed":
+      onRosterChanged?.(event);
       break;
     case "desk_task_completed":
       onTaskEvent?.(event);

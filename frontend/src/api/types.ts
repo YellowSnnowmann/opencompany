@@ -266,6 +266,17 @@ export interface DeskDto {
    */
   overlayCreated?: boolean;
   /**
+   * `"general"` for the company-wide `#general` channel, listed first; `"desk"`
+   * for every other entry. Absent on an older host, which means `"desk"`.
+   */
+  kind?: "general" | "desk";
+  /**
+   * Whether membership, order and delete writes are accepted. `false` for
+   * `#general`, whose membership the host keeps equal to the roster (writes
+   * answer 409). Absent on an older host, which means `true`.
+   */
+  mutable?: boolean;
+  /**
    * How this desk paces the episodes it opens — the numbers in force, not the
    * editable block (see {@link DeskRoutingDto}). Absent on a host predating
    * desk routing, and on a leadless or single-member desk that runs none.
@@ -450,23 +461,6 @@ export type EpisodeCompletionReason =
   | "timeout"
   | "failed"
   | "membership_changed";
-
-/**
- * `GET {scope}/operator-channel` — the identity of the company's
- * always-present, durable Operator feed (issue #1757 rework): a read-only
- * "what happened" feed aggregating workflow-run reports and the owner/
- * no-mailbox fallback. Its own surface, not a desk — the console pins it
- * below a divider in the chat rail instead of folding it into `GET
- * {scope}/desks`. Mirrors `OperatorChannelDto` in `src/server/operator.rs`.
- */
-export interface OperatorChannelDto {
-  /** The channel id — the `desk` query param `chat/history` reads through. */
-  id: string;
-  /** Always "Operator" — the console's pinned-row label. */
-  name: string;
-  /** The channel's purpose line, shown under the name in the pinned row. */
-  description: string;
-}
 
 /**
  * Body for `POST {scope}/desks` — create a desk. `name` is required; `id` is

@@ -222,6 +222,7 @@ async fn a_private_dm_relay_is_authored_by_the_dm_agent_not_the_orchestrator() {
     // exactly as `HarnessBrain` would. Journaling never reads it; it only
     // drives `relay_speaker`.
     let record = crate::ports::types::CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
@@ -364,10 +365,7 @@ async fn journal_dispatch_replies_only_touches_relay_shaped_responses() {
                 reply_to: None,
                 steps: Vec::new(),
             },
-            // A `reply_to` naming an empty chat id — not degenerate:
-            // `origin_chat_id` preserves `Some("")` for a card spawned
-            // from General, and `chat_history::same_conversation` treats
-            // "" as an alias for General, so this must still journal.
+            // A legacy empty chat id is #general, so this must still journal.
             OutboundMessage {
                 message_id: None,
                 task_id: Some("t-2".to_string()),
@@ -438,15 +436,15 @@ async fn journal_dispatch_replies_only_touches_relay_shaped_responses() {
     let CompanyEvent::AgentReply { chat_id, .. } = relays
         .iter()
         .find(
-            |event| matches!(event, CompanyEvent::AgentReply { chat_id, .. } if chat_id.is_empty()),
+            |event| matches!(event, CompanyEvent::AgentReply { chat_id, .. } if chat_id == "general"),
         )
         .expect("the empty-chat_id General relay must be present")
     else {
         unreachable!()
     };
     assert_eq!(
-        chat_id, "",
-        "General's own empty chat_id must be preserved verbatim"
+        chat_id, "general",
+        "a legacy empty chat_id reads back as #general"
     );
 }
 

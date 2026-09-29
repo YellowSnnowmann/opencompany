@@ -7,11 +7,8 @@
 //! runs and webhook receipts as well as chat, and an episode may only fold what
 //! was actually said on its desk.
 //!
-//! Moved from `src/hivemind/log.rs` (plan hive-desks, Phase 4) without the
-//! per-episode fold scope it carried: two episodes can no longer run in one
-//! thread (`episode_store::open_episode_for` joins the second message to the
-//! first's room), and what a seat has already seen is the sharing watermark
-//! `hive::prompt` keeps per seat, not a boundary on the log.
+//! There is no per-episode fold scope: what a seat has already seen is the
+//! sharing watermark `hive::prompt` keeps per seat, not a boundary on the log.
 //!
 //! # Why the read loops
 //!
@@ -278,10 +275,12 @@ impl EventLogSessionLog {
 
     /// Whether `chat` is the pair channel of two seats of this desk.
     fn addresses_a_seat_pair(&self, chat: &str) -> bool {
-        let Some((one, two)) = super::referral::pair_seats(chat) else {
+        let Some(members) = super::referral::conversation_seats(chat) else {
             return false;
         };
-        self.seats.iter().any(|seat| seat == one) && self.seats.iter().any(|seat| seat == two)
+        members
+            .iter()
+            .all(|member| self.seats.iter().any(|seat| seat == member))
     }
 
     /// One journal entry as a session row, or `None` when it is not desk chat
@@ -389,8 +388,8 @@ impl EventLogSessionLog {
     /// transcript, and once the ask is a root its first reply is promoted.
     fn audience_of(&self, chat: &str, author: &str, stored: Vec<String>) -> Audience {
         let mut members = stored;
-        if let Some((one, two)) = super::referral::pair_seats(chat) {
-            for seat in [one, two] {
+        if let Some(seats) = super::referral::conversation_seats(chat) {
+            for seat in seats {
                 if seat != author && !members.iter().any(|member| member == seat) {
                     members.push(seat.to_owned());
                 }

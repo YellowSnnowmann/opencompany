@@ -19,7 +19,11 @@ use std::ops::Range;
 use serde::{Deserialize, Serialize};
 
 use crate::company::{CompanyManifest, POLICY_MODES, Policy};
+pub use crate::ports::general_channel::{
+    GENERAL_CHANNEL_ID, GENERAL_CHANNEL_NAME, GeneralChannel, GeneralMembershipDelta,
+};
 use crate::ports::ids::{agent_slug, generate_id, now_millis};
+use crate::ports::skills_state::SkillTier;
 use crate::ports::workflow_runner::{
     DeliveryReport, WorkflowBlockedNode, WorkflowRunApprovalRow, WorkflowRunBoardRow,
 };
@@ -269,6 +273,19 @@ pub enum ActorKind {
     /// Fieldless on purpose: `ActorKind` is `Copy`, and a variant carrying a
     /// `String` would silently take that away from every existing holder.
     User,
+}
+
+/// What happened to a skill delta in a [`CompanyEvent::SkillChanged`] row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillChange {
+    /// A skill was installed from the shared registry or authored in the
+    /// console.
+    Installed,
+    /// An existing install was re-pinned to the library's current document.
+    Updated,
+    /// The delta was removed.
+    Removed,
 }
 
 /// An identified actor.
@@ -914,7 +931,14 @@ pub enum CompanyEvent {
         /// before this field existed. Like `by`, `skip_serializing_if` keeps a
         /// pre-existing event byte-identical, so no stored record needs
         /// migrating.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ///
+        /// Decoded on read: every legacy spelling of `#general` loads as
+        /// `"general"`. Absent means an unaddressed post, which is #general.
+        #[serde(
+            default,
+            deserialize_with = "crate::ports::general_channel::deserialize_general_chat_opt",
+            skip_serializing_if = "Option::is_none"
+        )]
         chat: Option<String>,
         /// The message this one replies to, as that message's own sequence
         /// position (issue #364) — what makes a thread reply survive a reload.
@@ -1064,7 +1088,11 @@ pub enum CompanyEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_id: Option<String>,
         /// The desk the turn answered on.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            deserialize_with = "crate::ports::general_channel::deserialize_general_chat_opt",
+            skip_serializing_if = "Option::is_none"
+        )]
         chat_id: Option<String>,
         /// The episode the seat turn ran for.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1092,7 +1120,11 @@ pub enum CompanyEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_id: Option<String>,
         /// The desk the turn answered on (plan hive-desks, Phase 4).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            deserialize_with = "crate::ports::general_channel::deserialize_general_chat_opt",
+            skip_serializing_if = "Option::is_none"
+        )]
         chat_id: Option<String>,
         /// The episode the seat turn ran for.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1282,6 +1314,7 @@ pub enum CompanyEvent {
     /// alongside the operator messages that prompted them.
     AgentReply {
         /// The desk / group-chat the reply belongs to.
+        #[serde(deserialize_with = "crate::ports::general_channel::deserialize_general_chat")]
         chat_id: String,
         /// The agent that produced the reply.
         agent_id: String,
@@ -1686,6 +1719,45 @@ pub enum CompanyEvent {
         desk_id: String,
         /// True when the override was dropped and the manifest restored.
         reset: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<Actor>,
+    },
+    /// A skill delta was installed, re-pinned to the library's current
+    /// document, or removed.
+    ///
+    /// Journaled because nothing else answers "when did this skill change, and
+    /// who changed it". The store holds one row per slug and rewrites it in
+    /// place, so an install, every later update and the uninstall all land on
+    /// the same row and only the last one survives — the record of the change
+    /// exists nowhere but here.
+    ///
+    /// **The document is deliberately NOT carried**, the same rule
+    /// [`WorkflowUpdated`](Self::WorkflowUpdated) and
+    /// [`DeskRoutingConfigured`](Self::DeskRoutingConfigured) follow. A skill
+    /// body is instructions an agent will read, and the journal is one
+    /// append-only log shared by chat, audit and run history whose readers have
+    /// no business holding it. `digest` is what an audit reader actually needs:
+    /// it pins *which* document without reproducing it, and it is the same
+    /// value the install recorded, so a row and a pin can be matched.
+    ///
+    /// Permanent under the retention rule, for the reason its structural
+    /// siblings above are: it is evidence, and low-cardinality by construction
+    /// because an operator authors these by hand.
+    SkillChanged {
+        /// The skill's slug.
+        slug: String,
+        /// What happened to it.
+        change: SkillChange,
+        /// The trust tier the skill carried at the moment of the change, so a
+        /// reader can tell a library install from a document the client wrote
+        /// without resolving the slug against a registry that has since moved.
+        tier: SkillTier,
+        /// Lowercase-hex SHA-256 of the document written. `None` on a removal,
+        /// which writes no document.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        digest: Option<String>,
+        /// Who did it, when known. `None` from a surface that carries no
+        /// attributed actor.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         by: Option<Actor>,
     },
@@ -2105,7 +2177,11 @@ pub enum CompanyEvent {
         /// Additive: `#[serde(default)]` so every journal line written before
         /// this field existed still replays, and skipped when absent so a
         /// board-created card adds nothing to the log.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            deserialize_with = "crate::ports::general_channel::deserialize_general_chat_opt",
+            skip_serializing_if = "Option::is_none"
+        )]
         origin_chat_id: Option<String>,
         /// The thread within [`origin_chat_id`](Self::DeskTaskCompleted::origin_chat_id)
         /// the card was raised in (issue #1890 B) —
@@ -2692,6 +2768,7 @@ impl CompanyEvent {
             Self::DeskDeleted { .. } => "DeskDeleted",
             Self::DeskMembersChanged { .. } => "DeskMembersChanged",
             Self::DeskRoutingConfigured { .. } => "DeskRoutingConfigured",
+            Self::SkillChanged { .. } => "SkillChanged",
             Self::EpisodeOpened { .. } => "EpisodeOpened",
             Self::RoundStarted { .. } => "RoundStarted",
             Self::RoundCommitted { .. } => "RoundCommitted",
@@ -2863,6 +2940,7 @@ impl CompanyEvent {
             | Self::DeskDeleted { .. }
             | Self::DeskMembersChanged { .. }
             | Self::DeskRoutingConfigured { .. }
+            | Self::SkillChanged { .. }
             // Plan hive-desks, Phase 4: the episode record. Together with the
             // `AgentReply` rows they bracket these ARE what a room did, and
             // `EpisodeStateSaved` is the checkpoint a resume reads.
@@ -4983,6 +5061,10 @@ pub struct OverlayBlob {
     /// [`CompanyStore::activation_gate_seen`]: crate::ports::store::CompanyStore::activation_gate_seen
     #[serde(default)]
     pub activation_gate_seen: bool,
+    /// The company-wide `#general` channel. Absent on rows written before it
+    /// was stored, which the record then defaults and the builder backfills.
+    #[serde(default)]
+    pub general_channel: Option<GeneralChannel>,
 }
 
 impl OverlayBlob {
@@ -5025,6 +5107,7 @@ impl OverlayBlob {
             activation_completed_at: record.activation_completed_at,
             created_at_millis: record.created_at_millis,
             activation_gate_seen,
+            general_channel: Some(record.general_channel.clone()),
         }
     }
 
@@ -5074,6 +5157,7 @@ impl OverlayBlob {
                     // has never been seen by activation-aware code — exactly
                     // what `false` means here.
                     activation_gate_seen: false,
+                    general_channel: None,
                 })
                 .map_err(|_| original),
         }
@@ -5098,31 +5182,15 @@ impl OverlayBlob {
 /// [`CONFINED_AGENT_ID`](crate::ports::CONFINED_AGENT_ID), unmintable by
 /// construction because slugs never emit a hyphen.
 ///
-/// [`MAIN_THREAD_ID`](tinyhivemind_core::chat::MAIN_THREAD_ID) and
-/// [`GENERAL_DESK`](tinyhivemind_core::chat::GENERAL_DESK) join them for
-/// issue #1743, and both are ordinary slugs — a teammate named "Main" or
-/// "General" mints straight onto one. That id is a chat address: `responder_for`
-/// checks roster ids before it falls back to the orchestrator, so the teammate
-/// would answer every unaddressed message on the company-wide line, and the
-/// console would render the line's transcript as that teammate's DM. Desk ids
-/// and names are already excluded a few lines below; these are the two keys
-/// that route like a desk without being one.
-///
-/// The General entry is the **identity** constant, not
-/// `server::ops::language::DEFAULT_DESK`, the operator-facing glossary word
-/// that happens to be the same literal. What is reserved here is a chat
-/// address, and this is the port layer: a port naming a server constant is the
-/// upward reach the shared crate exists to remove. The two cannot drift — a
-/// `const` assertion in [`crate::server::chat_history`] pins them together at
-/// compile time — so the reservation still covers a teammate named "General"
-/// however the host chooses to spell that word.
+/// [`GENERAL_CHANNEL_ID`] and the legacy `main` spelling join them: a teammate
+/// minted onto either would be addressed like #general.
 pub const RESERVED_AGENT_IDS: [&str; 6] = [
     crate::runtime::OPERATOR_CHANNEL,
     crate::company::workspace_scaffold::AGENTS_ROOT,
     crate::company::workspace_scaffold::DESKS_ROOT,
     crate::ports::SYSTEM_AUTHOR,
-    tinyhivemind_core::chat::MAIN_THREAD_ID,
-    tinyhivemind_core::chat::GENERAL_DESK,
+    "main",
+    GENERAL_CHANNEL_ID,
 ];
 
 /// A durable company record: charter/roster (manifest) plus ledger and
@@ -5138,8 +5206,12 @@ pub struct CompanyRecord {
     /// Lifecycle state, e.g. `running`, `paused`, `archived`.
     pub lifecycle: String,
     /// Operator-added teammates not present in the manifest (the team overlay).
+    ///
+    /// Written only through [`Self::hire_overlay_agent`],
+    /// [`Self::remove_overlay_agent`] and [`Self::install_roster_overlay`],
+    /// which keep `#general`'s membership in step.
     #[serde(default)]
-    pub overlay_agents: Vec<OverlayAgent>,
+    pub(crate) overlay_agents: Vec<OverlayAgent>,
     /// Operator-added desk memberships not present in the manifest (the desk
     /// overlay). Merged into a desk's effective membership at read time.
     #[serde(default)]
@@ -5218,8 +5290,11 @@ pub struct CompanyRecord {
     /// An id listed here that names nobody is inert, which is what makes the
     /// tombstone safe to keep across a redeploy that removes the teammate from
     /// the blueprint too.
+    ///
+    /// Written only through [`Self::retire_agent`] and
+    /// [`Self::install_roster_overlay`], which keep `#general` in step.
     #[serde(default)]
-    pub overlay_retired_agents: Vec<String>,
+    pub(crate) overlay_retired_agents: Vec<String>,
     /// The operator's `[policy]` override, if one is set (issue #562).
     ///
     /// `None` — the manifest's `[policy]` applies, exactly as before this
@@ -5366,6 +5441,10 @@ pub struct CompanyRecord {
     /// is the same backward-compat fallback the two fields above use.
     #[serde(default)]
     pub created_at_millis: Option<u64>,
+    /// The company-wide `#general` channel. Absent on records written before
+    /// it was stored; `RuntimeBuilder::build` creates it and syncs its members.
+    #[serde(default)]
+    pub general_channel: GeneralChannel,
 }
 
 /// What a teammate key an operator or a model typed resolves to on a company's
@@ -5414,7 +5493,7 @@ impl CompanyRecord {
     /// desks, budgets, policy, setup) starts absent here, exactly as it does
     /// for a company that has just been loaded from its bundle.
     pub fn from_manifest(id: CompanyId, manifest: CompanyManifest) -> Self {
-        Self {
+        let mut record = Self {
             id,
             manifest,
             ledger: Vec::new(),
@@ -5437,7 +5516,10 @@ impl CompanyRecord {
             activation_completed_at: None,
             created_at_millis: None,
             name_confirmed: false,
-        }
+            general_channel: GeneralChannel::default(),
+        };
+        record.sync_general_members();
+        record
     }
 
     /// The effective member ids of a desk: the desk's declared members first
@@ -5457,42 +5539,8 @@ impl CompanyRecord {
     /// them. With no order override the base order is returned unchanged, so the
     /// first declared member stays the lead by default.
     pub fn effective_desk_members(&self, desk_id: &str) -> Vec<String> {
-        // **The general desk seats the whole roster, and keeps doing so.**
-        //
-        // It is a desk like any other except in one respect: who belongs to it
-        // is not a list somebody maintains, it is "everyone who works here".
-        // `POST {scope}/team` adds a teammate and touches no desk at all, so a
-        // fixed `members = [...]` would be right on the day it was written and
-        // wrong from the next hire onward — the newest teammate would be the one
-        // person unable to speak on the company's own line.
-        //
-        // Deriving it from the roster makes that unmaintainable-by-construction
-        // rather than merely maintained, and it is what `[company].general_desk`
-        // is for: the manifest names WHICH desk owns the line, and the runtime
-        // keeps its membership current.
-        if self
-            .manifest
-            .company
-            .general_desk
-            .as_deref()
-            .is_some_and(|named| named == desk_id)
-        {
-            // The same two sources `is_roster_agent` consults, manifest before
-            // overlay, so who the room seats and who the roster says works here
-            // cannot drift.
-            let mut all: Vec<String> = Vec::new();
-            for id in self
-                .manifest
-                .agents
-                .iter()
-                .map(|a| a.id.clone())
-                .chain(self.overlay_agents.iter().map(|a| a.id.clone()))
-            {
-                if !self.is_retired(&id) && !all.contains(&id) {
-                    all.push(id);
-                }
-            }
-            return all;
+        if desk_id == GENERAL_CHANNEL_ID {
+            return self.general_channel.members.clone();
         }
         let mut members: Vec<String> = self
             .manifest
@@ -5607,9 +5655,6 @@ impl CompanyRecord {
     /// still routes normally under its own non-General id — this narrows one
     /// question, it does not retire a desk.
     ///
-    /// A desk the *manifest* declares is matched first and is unaffected: a
-    /// blueprint that authored the company's General desk keeps it, which is
-    /// the grandfathering this host has always honoured.
     pub fn resolve_desk_id(&self, key: &str) -> Option<String> {
         // **Exact ids win over display-name aliases, everywhere** (issue #1862
         // review). Desk creation enforces id uniqueness but not name
@@ -5625,39 +5670,11 @@ impl CompanyRecord {
         if let Some(exact) = self.manifest.group_chats.iter().find(|c| c.id == key) {
             return Some(exact.id.clone());
         }
-        // **The company's own line, pointed at a desk that owns it.**
-        //
-        // Without this, General resolves to nothing: the desk selector bails
-        // out and the message falls to a *root* agent picked off the fallback
-        // ladder — in practice whichever agent file sorts first. Observed: a
-        // delivered-order case answered by the pending-order seat, holding
-        // three write tools and no tool for the job.
-        //
-        // The target is required to exist and is required NOT to be a General
-        // spelling itself. tinyhivemind refuses an episode on a desk whose id
-        // or name is one, so resolving General onto such a desk would trade a
-        // message answered by the wrong agent for a message that fails
-        // outright. Silently declining leaves the historical behaviour, which
-        // is the same thing every other rung of this function does.
-        if tinyhivemind_core::chat::is_general_chat(Some(key))
-            && let Some(target) = self.manifest.company.general_desk.as_deref()
-            && let Some(desk) = self
-                .manifest
-                .group_chats
-                .iter()
-                .find(|c| c.id == target)
-                .filter(|c| {
-                    !tinyhivemind_core::chat::is_general_chat(Some(&c.id))
-                        && !tinyhivemind_core::chat::is_general_chat(Some(&c.name))
-                })
-        {
-            return Some(desk.id.clone());
-        }
-        if !tinyhivemind_core::chat::is_general_chat(Some(key))
+        if !crate::ports::general_channel::is_general_spelling(key)
             && let Some(exact) = self
                 .overlay_desks
                 .iter()
-                .filter(|d| !tinyhivemind_core::chat::is_general_chat(Some(&d.id)))
+                .filter(|d| !crate::ports::general_channel::is_general_spelling(&d.id))
                 .find(|d| d.id == key)
         {
             return Some(exact.id.clone());
@@ -5669,7 +5686,7 @@ impl CompanyRecord {
             .find(|c| c.id == key || c.name.eq_ignore_ascii_case(key))
             .map(|c| c.id.clone())
             .or_else(|| {
-                if tinyhivemind_core::chat::is_general_chat(Some(key)) {
+                if crate::ports::general_channel::is_general_spelling(key) {
                     return None;
                 }
                 self.overlay_desks
@@ -5682,7 +5699,7 @@ impl CompanyRecord {
                     // that every desk mutation refuses. Its lead would answer,
                     // and the reply would be journaled under a thread the
                     // console renders no channel for.
-                    .filter(|d| !tinyhivemind_core::chat::is_general_chat(Some(&d.id)))
+                    .filter(|d| !crate::ports::general_channel::is_general_spelling(&d.id))
                     .find(|d| d.id == key || d.name.eq_ignore_ascii_case(key))
                     .map(|d| d.id.clone())
             })
@@ -5709,11 +5726,10 @@ impl CompanyRecord {
     /// overlay tier only when the manifest has no match at all.
     pub fn desk_alias_is_ambiguous(&self, key: &str) -> bool {
         if self.manifest.group_chats.iter().any(|c| c.id == key)
-            || (!tinyhivemind_core::chat::is_general_chat(Some(key))
-                && self
-                    .overlay_desks
-                    .iter()
-                    .any(|d| d.id == key && !tinyhivemind_core::chat::is_general_chat(Some(&d.id))))
+            || (!crate::ports::general_channel::is_general_spelling(key)
+                && self.overlay_desks.iter().any(|d| {
+                    d.id == key && !crate::ports::general_channel::is_general_spelling(&d.id)
+                }))
         {
             return false;
         }
@@ -5726,12 +5742,12 @@ impl CompanyRecord {
         if manifest_matches > 0 {
             return manifest_matches > 1;
         }
-        if tinyhivemind_core::chat::is_general_chat(Some(key)) {
+        if crate::ports::general_channel::is_general_spelling(key) {
             return false;
         }
         self.overlay_desks
             .iter()
-            .filter(|d| !tinyhivemind_core::chat::is_general_chat(Some(&d.id)))
+            .filter(|d| !crate::ports::general_channel::is_general_spelling(&d.id))
             .filter(|d| d.name.eq_ignore_ascii_case(key))
             .count()
             > 1
@@ -5768,132 +5784,6 @@ impl CompanyRecord {
         !self.is_retired(agent_id)
             && (self.manifest.agents.iter().any(|a| a.id == agent_id)
                 || self.overlay_agents.iter().any(|a| a.id == agent_id))
-    }
-
-    /// The chat id the durable Operator system feed journals under for this
-    /// company (issue #1781 review — CodeRabbit Major + Codex P2; stability
-    /// after removal — Codex P2 follow-up; desk-collision divert — CodeRabbit
-    /// P2 follow-up).
-    ///
-    /// Ordinarily [`OPERATOR_CHANNEL`](crate::runtime::OPERATOR_CHANNEL)
-    /// itself. Diverted to
-    /// [`OPERATOR_CHANNEL_COLLISION_FALLBACK`](crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK)
-    /// whenever anything grandfathered already holds the literal id **or
-    /// display name** `operator`: a roster **teammate** — `is_roster_agent`
-    /// true (still on the roster) **or** [`is_retired`](Self::is_retired)
-    /// true (removed since) — or a real **desk**
-    /// ([`resolve_desk_id`](Self::resolve_desk_id) matches it, by id or
-    /// case-insensitive name). Using
-    /// `OPERATOR_CHANNEL` for either would put that other surface's own
-    /// transcript and the public "what happened" system feed on one address:
-    /// for a teammate, a post to the visible read-only feed could reach
-    /// them, and a delivered report would be indistinguishable from their own
-    /// words; for a desk, `server::operator::operator_channel` hands this id
-    /// straight to the console as the pinned Operator row, appended
-    /// (`operatorSection`, `frontend/src/views/ChatView.tsx`) *after* the
-    /// desk's own section — so `findChannel`, which returns the first
-    /// section match, would always resolve the pinned row to the desk
-    /// instead, and `send_to_channel_adapter` would journal every workflow
-    /// report onto the desk's own `chat_id`, mixing "Workflow report — …"
-    /// rows into its ordinary conversation.
-    ///
-    /// The `is_retired` half matters because the divert has to **stay put**
-    /// once it has ever applied: removing a manifest teammate always tombstones
-    /// its id in [`overlay_retired_agents`](Self::overlay_retired_agents)
-    /// (`server::ops::team::remove_member`) rather than rewriting
-    /// `company.toml`, and that tombstone never clears. Checking
-    /// `is_roster_agent` alone flips the address back to `OPERATOR_CHANNEL`
-    /// the moment the teammate is retired — orphaning every report already
-    /// journaled under the fallback from `/desks`, and letting the retired
-    /// teammate's own historical DM rows (stored under `chat_id ==
-    /// "operator"`) surface as if they belonged to the "new" system feed.
-    /// Diverting is collision-impossible by construction (see the fallback
-    /// constant's doc for why nothing can ever mint that id) and, with the
-    /// tombstone check, permanent by construction too — nothing already
-    /// stored is renamed, and where NEW system-feed content lands never moves
-    /// back.
-    ///
-    /// This method only decides where the *feed* journals — it never changes
-    /// what a client can address by typing `operator` itself. A desk that
-    /// owns the id stays reachable and writable through it exactly as before:
-    /// [`CompanyRuntime::ensure_desk_writable`](crate::company::runtime::CompanyRuntime::ensure_desk_writable)
-    /// resolves `OPERATOR_CHANNEL` against `desk_exists`/`is_roster_agent`
-    /// directly, independent of this divert.
-    ///
-    /// Checking `desk_exists` alone (id only) missed a desk grandfathered
-    /// under a harmless id but the display name `Operator` — the validator
-    /// reserves that name outright for new manifests
-    /// (`CompanyManifest::validate`), but `from_path_for_reload` admits an
-    /// existing one (issue #1757 postdates real companies, same carve-out as
-    /// the id case above), and `server::operator::resolve_desk` matches a
-    /// `?desk=` selector by id *or* case-insensitive name — the same rule
-    /// [`resolve_desk_id`](Self::resolve_desk_id) implements. Left
-    /// undiverted, the pinned console row's `?desk=operator` read would
-    /// resolve to that desk's own transcript instead of the system feed
-    /// (issue #1781 review, CodeRabbit P2 follow-up).
-    ///
-    /// Diverting to [`OPERATOR_CHANNEL_COLLISION_FALLBACK`](crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK) does not itself
-    /// re-check whether *that* address is free — see
-    /// [`operator_feed_channel_fallback_shadowed`](Self::operator_feed_channel_fallback_shadowed)
-    /// for the residual double-collision this leaves and why it is logged
-    /// rather than resolved here.
-    ///
-    /// The **desk** half of the collision needs the identical stay-put
-    /// treatment `is_retired` gives the agent half, for the identical reason:
-    /// `desk_exists`/`resolve_desk_id` are live checks, so `delete_desk`
-    /// removing the colliding overlay desk would otherwise flip this back to
-    /// `OPERATOR_CHANNEL` on its own, orphaning reports already journaled
-    /// under the fallback and letting the deleted desk's own transcript
-    /// resurface as system-feed content — unlike the agent-removal path,
-    /// `delete_desk` had no tombstone at all (issue #1781 review, Codex P2
-    /// follow-up). [`Self::is_operator_feed_diverted`], set from
-    /// `delete_desk` via [`Self::divert_operator_feed_permanently`], closes
-    /// this the same way: sticky once true, checked here alongside
-    /// `is_retired`.
-    pub fn operator_feed_channel(&self) -> &'static str {
-        if self.desk_exists(crate::runtime::OPERATOR_CHANNEL)
-            || self
-                .resolve_desk_id(crate::runtime::channel::OPERATOR_CHANNEL)
-                .is_some()
-            || self.is_roster_agent(crate::runtime::channel::OPERATOR_CHANNEL)
-            || self.is_retired(crate::runtime::channel::OPERATOR_CHANNEL)
-            || self.is_operator_feed_diverted()
-        {
-            crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK
-        } else {
-            crate::runtime::channel::OPERATOR_CHANNEL
-        }
-    }
-
-    /// Whether [`operator_feed_channel`](Self::operator_feed_channel) has
-    /// diverted to [`OPERATOR_CHANNEL_COLLISION_FALLBACK`](crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK) ("operator-feed")
-    /// and that address is *itself* shadowed by a second grandfathered desk
-    /// name (issue #1781 review, CodeRabbit P2 follow-up to `316bc9229`).
-    ///
-    /// `resolve_desk_id`'s name match makes this theoretically reachable: a
-    /// manifest desk cannot claim the fallback by **id** (`is_valid_desk_id`
-    /// rejects the hyphen, so nothing can ever mint it — see the constant's
-    /// own doc), but a *different* desk's display **name** can, the same way
-    /// a desk named `Operator` shadows the primary address above. `316bc9229`
-    /// and `16dcce235` already close every creation path going forward — a
-    /// manifest authored through `opencompany check`/`from_path`, or an
-    /// overlay desk created through `POST .../desks`, can never be named
-    /// "operator-feed" again — so this can only happen to a manifest edited
-    /// outside those paths (hand-authored `company.toml` on disk) and loaded
-    /// through [`CompanyManifest::from_path_for_reload`], the same
-    /// grandfathering that makes the *primary* collision reachable at all.
-    ///
-    /// There is no third, similarly collision-proof address to divert to —
-    /// picking one would only shrink this residual gap, not close it, the
-    /// same way the fallback itself does not fully close the primary's. This
-    /// predicate exists so the delivery layer can at least log the double
-    /// collision instead of misrouting a report with no trace: see its call
-    /// site in `workflows::delivery::send_to_channel_adapter`.
-    pub fn operator_feed_channel_fallback_shadowed(&self) -> bool {
-        self.operator_feed_channel() == crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK
-            && self
-                .resolve_desk_id(crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK)
-                .is_some()
     }
 
     /// Mints the roster id for a teammate about to be added under
@@ -6295,48 +6185,13 @@ impl CompanyRecord {
     /// a second tombstone for one teammate changes nothing about the roster but
     /// does move the harness's overlay fingerprint, which would drop every live
     /// agent session for a delete that had already happened.
-    pub fn retire_agent(&mut self, agent_id: &str) {
+    ///
+    /// Takes the teammate out of `#general` in the same step.
+    pub fn retire_agent(&mut self, agent_id: &str) -> GeneralMembershipDelta {
         if !self.is_retired(agent_id) {
             self.overlay_retired_agents.push(agent_id.to_string());
         }
-    }
-
-    /// Whether [`operator_feed_channel`](Self::operator_feed_channel) has ever
-    /// diverted because a **desk** (as opposed to a roster agent — see
-    /// [`Self::is_retired`] for that half) occupied the id or display name
-    /// `operator` (issue #1781 review, Codex P2).
-    ///
-    /// Backed by [`Self::overlay_retired_agents`] — the same tombstone list
-    /// [`Self::is_retired`] reads — keyed on
-    /// [`OPERATOR_CHANNEL_COLLISION_FALLBACK`](crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK)
-    /// ("operator-feed") rather than on any agent id. That key can never
-    /// collide with a real manifest agent id: agent ids, like desk ids, are
-    /// restricted to lowercase ascii/digits/underscore (`into_validated`'s
-    /// id rule), and "operator-feed" fails it on the hyphen alone — the same
-    /// reasoning [`OPERATOR_CHANNEL_COLLISION_FALLBACK`]'s own doc gives for
-    /// why nothing can ever *mint* that id. Reusing the list instead of a new
-    /// field keeps this sticky-tombstone semantics free of a second field to
-    /// thread through every store backend (fs/sqlite/mongodb) and the ~100
-    /// existing `CompanyRecord` literals across the crate.
-    pub fn is_operator_feed_diverted(&self) -> bool {
-        self.is_retired(crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK)
-    }
-
-    /// Records that the operator feed has diverted because of a **desk**
-    /// collision, permanently and idempotently (issue #1781 review, Codex
-    /// P2).
-    ///
-    /// Call this before removing whatever desk is holding
-    /// [`operator_feed_channel`](Self::operator_feed_channel) on the fallback
-    /// address — `desk_exists`/`resolve_desk_id` are live checks, so once the
-    /// desk is gone the divert would otherwise revert on its own: existing
-    /// reports already journaled under the fallback would vanish from the
-    /// pinned feed, and the deleted desk's own historical transcript (stored
-    /// under `chat_id == "operator"`) would resurface as if it were system-feed
-    /// content. See [`Self::retire_agent`] for the identical reasoning on the
-    /// agent-collision half, which this mirrors.
-    pub fn divert_operator_feed_permanently(&mut self) {
-        self.retire_agent(crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK);
+        self.sync_general_members()
     }
 
     /// One manifest roster row with the operator's edits applied — who this
@@ -6867,6 +6722,9 @@ mod tests_overlay_and_run;
 #[cfg(test)]
 #[path = "types_run_events_tests.rs"]
 mod tests_run_events;
+#[cfg(test)]
+#[path = "types_skill_events_tests.rs"]
+mod tests_skill_events;
 #[cfg(test)]
 #[path = "types_task_discussion_effects_tests.rs"]
 mod tests_task_discussion_effects;

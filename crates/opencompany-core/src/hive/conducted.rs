@@ -25,6 +25,8 @@ use tinyhivemind_tools::EpisodeTools;
 
 use crate::error::{OpenCompanyError, Result};
 use crate::harness::built_in::{HarnessDeps, HarnessPool};
+mod closing;
+
 use crate::hive::episode_store;
 use crate::hive::graph::DeskHive;
 use crate::hive::host::{DeskHost, EpisodeSeatParking, SeatParking};
@@ -63,6 +65,9 @@ pub struct Episode<'a> {
     /// The seats the opening routing plan named. Empty starts the desk's
     /// first member.
     pub starters: Vec<String>,
+    /// Whether this is a settled episode's closing turn rather than the
+    /// episode proper. See [`crate::hive::conclude`].
+    pub concluding: bool,
     /// What this company does with the approvals a turn raised.
     pub parking: Option<Arc<dyn SeatParking>>,
     /// How a desk reply's mentions are resolved and notified (#2441).
@@ -125,6 +130,7 @@ async fn conduct(
         .episode(episode.episode_id.clone())
         .seating(Arc::clone(&episode.record), Arc::clone(&episode.deps))
         .locking(Arc::clone(&episode.pool));
+        host = host.concluding(episode.concluding);
         if let Some(parking) = episode.parking.clone() {
             host = host.parking(parking);
         }
@@ -326,6 +332,10 @@ pub struct HiveDispatcher {
     pub hives: HashMap<String, Arc<DeskHive>>,
     /// The semantic router, when a credential resolved one.
     pub router: Option<Arc<dyn Router>>,
+    /// What the closing decision asks: whether a settled episode still needs
+    /// assembling, and which seat should do it. `None` falls back to the desk
+    /// lead and concludes unconditionally — see [`crate::hive::conclude`].
+    pub oracle: Option<Arc<crate::hive::jev::TinyHumansSystemOne>>,
     /// What its agents are built from.
     pub deps: Arc<HarnessDeps>,
     /// The pool they live in, for the lock a turn holds.
@@ -374,12 +384,6 @@ impl HiveDispatcher {
         self.hives.get(desk_id).cloned()
     }
 
-    /// Whether `desk_id` runs episodes at all.
-    #[must_use]
-    pub fn runs_episodes(&self, desk_id: &str) -> bool {
-        self.hives.contains_key(desk_id)
-    }
-
     /// Open one episode for an operator message and run it to quiescence.
     ///
     /// # Errors
@@ -413,6 +417,10 @@ impl HiveDispatcher {
         })?;
         let thread_root = trigger.parent.unwrap_or(trigger.seq);
         let routing = desk_routing(&self.record, desk_id);
+        // Kept before `opening` borrows the trigger: the closing turn's router
+        // call needs the operator's own words, and a summary of a summary is
+        // not what it should be scoring.
+        let request = trigger.text.clone();
         let (starters, plan_dto) = self.opening(&desk, &routing, &trigger, thread_root).await?;
         self.events
             .append(
@@ -449,11 +457,34 @@ impl HiveDispatcher {
             thread_root: Some(thread_root),
             opened_at: trigger.seq,
             starters,
+            concluding: false,
             parking: self.seat_parking(&desk.desk_id, Some(thread_root), &episode_id),
             mentions: self.mentions.clone(),
         })
         .await?;
-        self.complete(&desk.desk_id, &episode_id, &report).await?;
+        // The settle point. `run` returns only once every seat has recorded
+        // its part, which is exactly when a desk has everything to assemble
+        // and nobody assigned to assemble it -- see `conclude` for the six
+        // live runs that measured the gap.
+        let conclusion = if crate::hive::conclude::eligible(
+            &desk.desk_id,
+            crate::ports::types::EpisodeReason::CompleteEpisode,
+            report.settled,
+        ) {
+            self.conclusion(
+                &desk,
+                &routing,
+                &episode_id,
+                Some(thread_root),
+                trigger.seq,
+                &request,
+            )
+            .await
+        } else {
+            None
+        };
+        self.complete(&desk.desk_id, &episode_id, &report, conclusion.as_ref())
+            .await?;
         Ok(EpisodeReport::of(episode_id, report))
     }
 
@@ -506,6 +537,7 @@ impl HiveDispatcher {
                 thread_root: saved.thread_root,
                 opened_at: saved.thread_root.unwrap_or(EventSeq::new(0)),
                 starters: Vec::new(),
+                concluding: false,
                 parking: self.seat_parking(&desk.desk_id, saved.thread_root, episode_id),
                 mentions: self.mentions.clone(),
             },
@@ -514,12 +546,25 @@ impl HiveDispatcher {
             saved.revision,
         )
         .await?;
-        self.complete(&desk.desk_id, episode_id, &report).await?;
+        // A resumed episode is not concluded here. It reaches this point after
+        // an operator decision released it, and the trigger that opened it --
+        // the request a closing turn would answer -- is not in hand on this
+        // path. Left for when `resume` carries it.
+        self.complete(&desk.desk_id, episode_id, &report, None)
+            .await?;
         Ok(Some(EpisodeReport::of(episode_id, report)))
     }
 
     /// Journals an episode's closing row.
-    async fn complete(&self, desk_id: &str, episode_id: &str, report: &Report) -> Result<()> {
+    async fn complete(
+        &self,
+        desk_id: &str,
+        episode_id: &str,
+        report: &Report,
+        conclusion: Option<&crate::hive::conclude::Conclusion>,
+    ) -> Result<()> {
+        let closing_waves = conclusion.map_or(0, |done| done.waves);
+        let closing_turns = conclusion.map_or(0, |done| done.turns);
         // The episode's closing row. `run_episode` returns only once every
         // seat has recorded its part -- a wall, a stall or a fold it could
         // not explain comes back as an error instead, and is journaled by
@@ -534,21 +579,30 @@ impl HiveDispatcher {
                 CompanyEvent::EpisodeCompleted {
                     chat_id: desk_id.to_owned(),
                     episode_id: episode_id.to_owned(),
-                    revision: report.waves,
-                    // The library reports what happened, not who spoke last:
-                    // every seat completed, so no one seat closed it.
-                    completed_by: None,
-                    rounds: u32::try_from(report.waves).unwrap_or(u32::MAX),
+                    // Plus the closing round's, which ran on its own
+                    // conductor: see `Conclusion::turns` for why they arrive
+                    // separately and must not be dropped here.
+                    revision: report.waves + closing_waves,
+                    // Who closed it, when a closing turn ran. The library
+                    // cannot name a seat -- every seat completed, so none of
+                    // them closed it on the driver's terms -- but a desk that
+                    // routed its assembly to one seat has an answer, and the
+                    // console has been reading these two fields since before
+                    // anything wrote them. `None` keeps the old shape for a
+                    // DM, a one-seat episode, and any episode that did not
+                    // settle cleanly (`conclude::eligible`).
+                    completed_by: conclusion.as_ref().map(|done| done.seat.clone()),
+                    rounds: u32::try_from(report.waves + closing_waves).unwrap_or(u32::MAX),
                     reason: crate::ports::types::EpisodeReason::CompleteEpisode,
-                    summary_seq: None,
+                    summary_seq: conclusion.as_ref().and_then(|done| done.summary_seq),
                 },
             )
             .await?;
         tracing::info!(
             desk = %desk_id,
             episode = %episode_id,
-            turns = report.turns,
-            waves = report.waves,
+            turns = report.turns + closing_turns,
+            waves = report.waves + closing_waves,
             "[hive] episode finished"
         );
         Ok(())
@@ -629,6 +683,3 @@ impl HiveDispatcher {
         Ok((starters, dto))
     }
 }
-
-/// The journal as the episode store, for a follow-up that joins an open one.
-pub use episode_store::open_episode_for;

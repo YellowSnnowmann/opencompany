@@ -580,10 +580,26 @@ async fn desk_lifecycle_is_journaled() {
         2,
         "one row for install and one for reset: {kinds:?}"
     );
+    let desk_seat_rows = rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                &row.event,
+                CompanyEvent::DeskMembersChanged { desk_id, .. } if desk_id != "general"
+            )
+        })
+        .count();
     assert_eq!(
-        kinds.iter().filter(|k| **k == "DeskMembersChanged").count(),
-        2,
+        desk_seat_rows, 2,
         "one row for the add and one for the remove: {kinds:?}"
+    );
+    assert!(
+        rows.iter().any(|row| matches!(
+            &row.event,
+            CompanyEvent::DeskMembersChanged { desk_id, added, .. }
+                if desk_id == "general" && !added.is_empty()
+        )),
+        "the new teammate joins #general: {kinds:?}"
     );
 }
 

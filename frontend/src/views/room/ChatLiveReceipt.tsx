@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { TurnStep } from "@/api/types";
+import { GENERAL_CHANNEL_ID } from "@/lib/chat";
 import { cn } from "@/lib/utils";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { StepTimeline } from "./StepTimeline";
@@ -226,7 +227,7 @@ export function ChatLiveReceipt({
         // above stills for the same reason) and a stalled one has gone quiet, so
         // neither should look busy.
         replying={!queued && !stalled}
-        company={channel.kind === "channel" && channel.id === "main"}
+        company={channel.kind === "channel" && channel.id === GENERAL_CHANNEL_ID}
         className="size-9 shrink-0"
       />
       <div className="min-w-0 flex-1 space-y-1.5">

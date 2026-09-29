@@ -83,7 +83,7 @@ pub fn desk_hives(
     let mut hives = HashMap::new();
     let mut errors = Vec::new();
     for desk in desks.iter() {
-        if crate::server::chat_history::is_general_chat(Some(&desk.id)) {
+        if crate::ports::general_channel::is_general_spelling(&desk.id) {
             continue;
         }
         let Ok(members) = desks.members(&desk.id) else {

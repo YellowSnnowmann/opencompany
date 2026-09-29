@@ -82,6 +82,12 @@ pub struct DeskHost {
     /// approval queue into the operator's inbox -- so it arrives as a hook
     /// rather than as something this type reaches for itself.
     parking: Option<Arc<dyn SeatParking>>,
+    /// Set for the closing turn a settled episode routes to one seat.
+    ///
+    /// Withholds `broadcast` and adds [`crate::hive::conclude::PERSONA_NOTE`]
+    /// to that seat's persona, so the only way out of the turn is to say
+    /// what the episode added up to.
+    concluding: bool,
     /// How a desk reply's mentions are resolved and notified (#2441).
     ///
     /// A reply that names `@someone` is resolved against the company's own
@@ -201,6 +207,7 @@ impl DeskHost {
             episode_id: String::new(),
             wave: AtomicU64::new(0),
             parking: None,
+            concluding: false,
             mentions: None,
             conversations: Mutex::new(BTreeMap::new()),
             turn_waves: Mutex::new(BTreeMap::new()),
@@ -244,7 +251,7 @@ impl DeskHost {
         let elsewhere: Vec<(String, String)> = desks
             .iter()
             .filter(|desk| desk.id != self.desk_id)
-            .filter(|desk| !crate::server::chat_history::is_general_chat(Some(&desk.id)))
+            .filter(|desk| !crate::ports::general_channel::is_general_spelling(&desk.id))
             .filter(|desk| {
                 desks.members(&desk.id).is_ok_and(|members| {
                     members
@@ -263,6 +270,18 @@ impl DeskHost {
     #[must_use]
     pub fn parking(mut self, parking: Arc<dyn SeatParking>) -> Self {
         self.parking = Some(parking);
+        self
+    }
+
+    /// Mark this host as running a settled episode's closing turn.
+    ///
+    /// Withholds `broadcast` from the one seat it lends and adds
+    /// [`crate::hive::conclude::PERSONA_NOTE`] to that seat's persona, so the
+    /// turn can only end by saying what the episode added up to. See
+    /// [`crate::hive::conclude`] for what the desk runs without it.
+    #[must_use]
+    pub fn concluding(mut self, concluding: bool) -> Self {
+        self.concluding = concluding;
         self
     }
 
@@ -377,7 +396,10 @@ impl DeskHost {
     /// prevent.
     fn channel_for(&self, commit: &Commit) -> Result<String, String> {
         if let tinyhivemind::speech::Utterance::Ask { to, .. } = &commit.utterance {
-            return Ok(crate::hive::referral::pair_conversation(&commit.author, to));
+            return Ok(crate::hive::referral::conversation_channel(
+                &commit.author,
+                to,
+            ));
         }
         // **A conclusion belongs to the conversation it concludes.**
         //
@@ -536,15 +558,11 @@ impl DeskHost {
         author: &str,
         text: String,
         thread: Option<Sequence>,
-        only_for: Option<&str>,
+        only_for: &[String],
     ) -> CompanyEvent {
-        let mut audience: Vec<String> = only_for
-            .map(|seat| vec![seat.to_owned()])
-            .into_iter()
-            .flatten()
-            .collect();
-        if let Some((one, two)) = crate::hive::referral::pair_seats(chat) {
-            for seat in [one, two] {
+        let mut audience: Vec<String> = only_for.to_vec();
+        if let Some(seats) = crate::hive::referral::conversation_seats(chat) {
+            for seat in seats {
                 if seat != author && !audience.iter().any(|member| member == seat) {
                     audience.push(seat.to_owned());
                 }
@@ -614,9 +632,19 @@ fn recipients(utterance: &tinyhivemind::speech::Utterance) -> Vec<String> {
     use tinyhivemind::speech::Utterance;
     match utterance {
         Utterance::Dm { to, .. } => to.clone(),
-        Utterance::Ask { to, .. } => vec![to.clone()],
+        Utterance::Ask { to, .. } => to.clone(),
         _ => Vec::new(),
     }
+}
+
+/// The seat a conversation row names as its `askee`.
+///
+/// The company rows (`ConversationOpened` / `ConversationConcluded`) name one
+/// askee, as they did while an ask could name only one seat. A group ask
+/// names the first seat it asked there; the full set is in the row's
+/// `conversation_id` (see [`crate::hive::referral::conversation_channel`]).
+fn primary_askee(askees: &[String]) -> String {
+    askees.first().cloned().unwrap_or_default()
 }
 
 /// The failure an episode reports when this company's journal refuses a row.
@@ -680,7 +708,7 @@ impl Journal for DeskHost {
         desks
             .iter()
             .filter(|desk| desk.id != self.desk_id)
-            .filter(|desk| !crate::server::chat_history::is_general_chat(Some(&desk.id)))
+            .filter(|desk| !crate::ports::general_channel::is_general_spelling(&desk.id))
             .filter(|desk| {
                 desks
                     .members(&desk.id)
@@ -705,7 +733,7 @@ impl Journal for DeskHost {
             &commit.author,
             commit.utterance.message().to_owned(),
             commit.thread.or_else(|| concluded_conversation(commit)),
-            commit.only_for.as_deref(),
+            &commit.only_for,
         );
         // A committed row is an episode's row, and says so. Without this the
         // console cannot tell one from an ordinary chat reply, the
@@ -854,15 +882,15 @@ impl Journal for DeskHost {
         // stays the room's, and the console -- already subscribed to this
         // desk -- can raise the "two seats are talking" indicator without
         // watching every pair channel for one to start.
-        if let Event::Asked { seat, askee, root } = event {
-            let conversation_id = crate::hive::referral::pair_conversation(seat, askee);
+        if let Event::Asked { seat, askees, root } = event {
+            let conversation_id = crate::hive::referral::conversation_channel(seat, askees);
             let row = CompanyEvent::ConversationOpened {
                 chat_id: self.desk_id.clone(),
                 episode_id: self.episode_id.clone(),
                 conversation_id: conversation_id.clone(),
                 root: root.0,
                 asker: seat.clone(),
-                askee: askee.clone(),
+                askee: primary_askee(askees),
             };
             self.conversations
                 .lock()
@@ -874,7 +902,7 @@ impl Journal for DeskHost {
         if let Event::Concluded {
             root,
             asker,
-            askee,
+            askees,
             forced,
             ..
         } = event
@@ -882,10 +910,10 @@ impl Journal for DeskHost {
             let row = CompanyEvent::ConversationConcluded {
                 chat_id: self.desk_id.clone(),
                 episode_id: self.episode_id.clone(),
-                conversation_id: crate::hive::referral::pair_conversation(asker, askee),
+                conversation_id: crate::hive::referral::conversation_channel(asker, askees),
                 root: root.0,
                 asker: asker.clone(),
-                askee: askee.clone(),
+                askee: primary_askee(askees),
                 forced: *forced,
             };
             self.journal_or_warn(row);
@@ -922,6 +950,20 @@ impl Journal for DeskHost {
             // The conductor placed this one; a router's own probabilities
             // ride the opening plan, not a hand-off.
             probabilities: None,
+            // **Not a report — a constant, and read as one.**
+            //
+            // `Event::Broadcast` and `Event::Unplaced` carry the author, the
+            // recipients and the row, and not who chose them: the driver does
+            // not tell us whether Jev placed this or the lead-and-mention
+            // fallback did. Writing `Fallback` here is therefore a label, not
+            // an observation, and a live run read it as evidence that Jev was
+            // not routing broadcasts at all -- which the threading of
+            // `BroadcastRouting::primary` shows is untrue.
+            //
+            // The honest signal is the transport's own log (`hive::jev`),
+            // which now says when a call failed and what came back. Reporting
+            // the real source here needs the driver to put it on the event;
+            // until it does, do not read this field as an answer.
             router: crate::hive::routing::Router::Fallback,
         };
         self.journal_or_warn(row);
@@ -952,7 +994,7 @@ impl Journal for DeskHost {
             DESK_AUTHOR,
             note.body.clone(),
             note.thread,
-            note.only_for.as_deref(),
+            note.only_for.as_slice(),
         );
         self.append(event).map_err(|error| refused(&error))?;
         Ok(())
@@ -985,14 +1027,19 @@ fn dm_persona_note(desk_id: &str, seat: &str) -> Option<&'static str> {
         // wakes a teammate and lets it answer by taking the work, so the seat
         // that wants a transfer has to know that is what asking is for.
         "\n\n## This conversation\n\nThis is your own direct line with the operator, not a \
-         desk. What the brief calls desk messages are theirs. Answer them; the teammates \
-         listed as members are here to be asked, and none of them is waiting on you.\n\nIf \
-         the operator wants a teammate to *own* something rather than advise on it, `ask` \
-         that teammate whether they will take it. Asking is the only thing that reaches \
-         them: they may answer by claiming the work, and you will be told where the \
-         operator can reach them about it. Never tell the operator that someone has taken \
-         work on unless that teammate has said so themselves — saying it in a message \
-         hands over nothing."
+         desk. What the brief calls desk messages are theirs, and answering them is \
+         yours.\n\nThe teammates listed as members are here to be asked, and `ask` is the \
+         only thing that reaches them. It does two jobs.\n\n**Consulting.** A request that \
+         spans several specialisms is answered best by the specialists. Ask each one for \
+         its own lane and keep the work yourself. Several asks in one turn reach several \
+         teammates at once, and they answer in parallel. Writing a lane yourself that a \
+         teammate owns is the thing to avoid -- it is the part of the answer most likely \
+         to be wrong, and the teammate whose name ends up on it never saw it.\n\n**Handing \
+         over.** If the operator wants a teammate to *own* something rather than advise \
+         on it, ask whether they will take it. They may answer by claiming the work, and \
+         you will be told where the operator can reach them about it.\n\nNever tell the \
+         operator that someone has taken work on unless that teammate has said so \
+         themselves — saying it in a message hands over nothing."
     } else {
         "\n\n## This conversation\n\nYou are here because a teammate may need to ask you \
          something in their direct line with the operator. You are not the operator's \
@@ -1028,7 +1075,7 @@ fn broadcast_absent_note(prefix: &str) -> String {
         "\n\nOne correction to the brief below your messages: it will tell you to hand a \
          teammate's part on with `{prefix}broadcast`. You do not have that verb here -- there \
          is no room in a direct line to broadcast into. `{prefix}ask` is how you reach a \
-         teammate from here, one at a time, and it is how work is actually handed to them."
+         teammate, and several asks in one turn reach several teammates at once."
     )
 }
 
@@ -1091,6 +1138,7 @@ impl EpisodeHost for DeskHost {
                 dm: self
                     .desk_id
                     .starts_with(crate::runtime::assignee::DM_PREFIX),
+                concluding: self.concluding,
             },
         );
         // The standing prompt still travels separately: a seeded turn renders
@@ -1110,6 +1158,13 @@ impl EpisodeHost for DeskHost {
         // will not reach for, so the note travels with the tool.
         if guest {
             persona.push_str(&crate::hive::takeover::guest_persona_note(TOOL_PREFIX));
+        }
+        // The closing seat needs both halves for the same reason a DM owner
+        // does: it is told what this turn is for, and told that the one
+        // hand-off verb the driver's brief names is not on its belt.
+        if self.concluding {
+            persona.push_str(crate::hive::conclude::PERSONA_NOTE);
+            persona.push_str(&broadcast_absent_note(TOOL_PREFIX));
         }
         self.personas
             .lock()
