@@ -51,8 +51,9 @@ use super::*;
 /// consumes the recovery reply.
 #[tokio::test]
 async fn a_single_blank_script_reaches_the_empty_retry_arm() {
-    let (agent, _deps) = scripted_agent(vec![Ok(String::new()), Ok("recovery".into())]);
-    let (outcome, usages) = agent.run("hello").await;
+    let (agent, _deps, capture) =
+        scripted_agent_with_capture(vec![Ok(String::new()), Ok("recovery".into())]);
+    let (outcome, _usages) = agent.run("hello").await;
     let outcome = outcome.expect("wrapper recovers");
     assert!(
         outcome.reply.contains("recovery"),
@@ -60,7 +61,7 @@ async fn a_single_blank_script_reaches_the_empty_retry_arm() {
         outcome.reply,
     );
     assert_eq!(
-        usages.len(),
+        capture.captured.lock().unwrap().len(),
         2,
         "exactly two provider calls must have been made — one for the blank, one for the \
          recovery: {usages:?}",
@@ -144,6 +145,7 @@ fn transcripts_under(dir: &std::path::Path) -> Vec<(std::path::PathBuf, String)>
             if path.is_dir() {
                 stack.push(path);
             } else if path.extension().is_some_and(|ext| ext == "jsonl")
+                && path.components().any(|part| part.as_os_str() == "session_raw")
                 && let Ok(body) = std::fs::read_to_string(&path)
             {
                 out.push((path, body));
