@@ -569,6 +569,8 @@ pub struct DelegationQueue {
     /// turn's [`drain_refusals`](Self::drain_refusals) would take it, record it
     /// on its own card, and clear it.
     refused: Arc<Mutex<BTreeMap<DelegationScope, Vec<String>>>>,
+    /// Targets refused because this dispatched task already queued its one hand-off.
+    task_handoff_refusals: Arc<Mutex<BTreeMap<DelegationScope, Vec<String>>>>,
     /// The **scope chain**: the resolved desk ids of the hand-offs currently
     /// being executed, outermost first (issue #176).
     ///
@@ -898,6 +900,14 @@ impl DelegationQueue {
             && delegation.answers()
             && bucket.iter().any(Delegation::answers)
         {
+            if let Some(target) = hand_off_target_of(&delegation) {
+                self.task_handoff_refusals
+                    .lock()
+                    .expect("delegation queue")
+                    .entry(Self::current_scope())
+                    .or_default()
+                    .push(target);
+            }
             return Staged::NoDrain(NoDrainReason::TaskHandoffAlreadyQueued);
         }
         if bucket.len() >= cap {
@@ -990,6 +1000,15 @@ impl DelegationQueue {
         // pending refusals.
         bucket.clear();
         drained
+    }
+
+    /// Drains hand-off targets rejected by a dispatched task's one-transfer rule.
+    pub fn drain_task_handoff_refusals(&self) -> Vec<String> {
+        self.task_handoff_refusals
+            .lock()
+            .expect("delegation queue")
+            .remove(&Self::current_scope())
+            .unwrap_or_default()
     }
 
     /// Empties the queue (called before an orchestrator turn so stale
