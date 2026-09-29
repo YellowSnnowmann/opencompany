@@ -31,7 +31,7 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
   const expectedConfig =
     process.env.PW_ANALYTICS === "1"
       ? "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{}," +
-        '{analytics:true,analyticsEndpoint:"https://collector.example/"});\n'
+        '{analytics:true,analyticsEndpoint:"https://collector.example/api"});\n'
       : "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n";
   expect(await configResponse.text()).toBe(expectedConfig);
 
@@ -48,7 +48,7 @@ test("serves the runtime console configuration before OpenPanel loads", async ({
       .toContainEqual([
         "init",
         expect.objectContaining({
-          apiUrl: "https://collector.example/",
+          apiUrl: "https://collector.example/api",
           clientId: "afe8ec4e-0a6a-427a-aa22-49cbbf137d0a",
         }),
       ]);
