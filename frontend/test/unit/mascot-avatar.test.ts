@@ -17,6 +17,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rive = vi.hoisted(() => ({
+  // One instance for every render, like the real hook: a fresh object each time
+  // would rerun the animation effect through its `vmi` dependency on its own.
+  viewModelInstance: {},
   setNumber: vi.fn(),
   setHandRgb: vi.fn(),
   setSkinRgb: vi.fn(),
@@ -25,7 +28,7 @@ const rive = vi.hoisted(() => ({
 vi.mock("@rive-app/react-canvas", () => ({
   useRive: () => ({ rive: {}, RiveComponent: () => createElement("canvas") }),
   useViewModel: () => ({}),
-  useViewModelInstance: () => ({}),
+  useViewModelInstance: () => rive.viewModelInstance,
   useViewModelInstanceNumber: () => ({ value: 1, setValue: rive.setNumber }),
   useViewModelInstanceColor: (name: string) => ({
     setRgb: name === "handColor" ? rive.setHandRgb : rive.setSkinRgb,

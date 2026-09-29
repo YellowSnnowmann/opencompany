@@ -247,6 +247,10 @@ function holdPoseOnceSettled(
   const timer = setInterval(() => {
     if (performance.now() - started > GIVE_UP_AFTER_MS) {
       clearInterval(timer);
+      // No settled frame arrived. A frozen (static / reduced-motion) mascot
+      // must not fall back to animating without end, so hold whatever frame
+      // is on screen: an imperfect still beats motion the viewer opted out of.
+      rive.pause();
       return;
     }
     const current = readProbe(canvas, probe, ctx);
@@ -320,7 +324,14 @@ interface LiveProps extends Props {
  * rather than a shared one, so this follows the established convention.
  */
 export function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
+  // Read on the first render, not only in the effect: a reduced-motion viewer's
+  // first commit must already honour the preference, or the bob would start and
+  // only be cancelled on the second commit.
+  const [reduced, setReduced] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false),
+  );
   useEffect(() => {
     const mql = window.matchMedia?.("(prefers-reduced-motion: reduce)");
     if (!mql) return;
@@ -462,7 +473,9 @@ export function LiveMascot({
       } catch {
         // A canvas Rive draws into procedurally is never cross-origin-tainted,
         // but `toDataURL` is specified to throw if it is. Staying live is
-        // the safe failure: the mascot keeps moving rather than vanishing.
+        // the safe failure: the mascot stays on screen rather than vanishing,
+        // paused so a frozen mascot does not animate without end.
+        rive.pause();
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

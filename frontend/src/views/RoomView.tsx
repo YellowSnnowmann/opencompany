@@ -2618,7 +2618,15 @@ export function RoomView({
       // refusing on a now-stale local-only guard.
       setFromHost(true);
       // Only what a host that predates the look did not echo is written now.
-      outcome = (await writeUnechoedLook(client, company, created, fields))
+      const looked = await writeUnechoedLook(client, company, created, fields);
+      // The write changed the host record, not the row added above (built from
+      // a create response that did not echo the look) — mirror it locally so
+      // the rail shows the chosen face now, not after the next roster read.
+      if (looked) {
+        const withLook = fromDto({ ...created, ...birthLook(fields) });
+        setMembers((m) => m.map((x) => (x.id === withLook.id ? withLook : x)));
+      }
+      outcome = looked
         ? { kind: "added", name: fields.name }
         : addOutcome(fields.name, [
             { what: "their icon couldn't be set", fix: "Pick one again from their profile." },
