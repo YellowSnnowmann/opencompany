@@ -60,11 +60,12 @@ async fn a_single_blank_script_reaches_the_empty_retry_arm() {
         "second attempt reply must reach the caller: {:?}",
         outcome.reply,
     );
+    let calls = capture.captured.lock().unwrap().clone();
     assert_eq!(
-        capture.captured.lock().unwrap().len(),
+        calls.len(),
         2,
         "exactly two provider calls must have been made — one for the blank, one for the \
-         recovery: {usages:?}",
+         recovery: {calls:?}",
     );
 }
 
