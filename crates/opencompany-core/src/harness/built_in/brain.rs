@@ -1128,7 +1128,7 @@ impl HarnessBrain {
         // The per-iteration `clear()` inside the loop stays — it abandons a
         // redirected turn's work, which is a different decision from who is
         // entitled to queue.
-        let _delegation_claim = self.deps.delegations.claim_task();
+        let delegation_claim = self.deps.delegations.claim_task(card.id.clone());
         // Issue #339, same argument for staged workflow references: an operator
         // chat turn earlier in this cycle may have run a workflow through the
         // orchestrator's tool, and that run belongs to the conversation, not to
@@ -1204,7 +1204,7 @@ impl HarnessBrain {
             // cycle's operator message, or an earlier redirect rerun) left
             // behind can hijack this card — the same guard
             // `handle_operator_message` opens with.
-            self.deps.delegations.clear();
+            delegation_claim.clear();
             // Issue #244, same argument for staged publishes: a redirect
             // re-runs from the original brief and *abandons* the previous
             // turn's work, so a file that turn offered must be abandoned with
@@ -1216,30 +1216,32 @@ impl HarnessBrain {
             // it, for the same reason — the card's link must name what the turn
             // that actually settled produced, not what a discarded one did.
             self.deps.workflow_refs.clear();
-            let outcome = publish_claim
+            let outcome = delegation_claim
                 .scoped(Box::pin(
-                    dispatch_origin.scoped(Box::pin(
-                        run_turn
-                            // A dispatched task card carries no chat bubble (its steps
-                            // are discarded into the note), so its live turn frames
-                            // must not leak onto the console timeline — run it
-                            // un-streamed (#125 review).
-                            .run_steered_background(
-                                &self.record().id,
-                                &responder,
-                                &instruction,
-                                &control,
-                                // No conversation to bind to: a dispatched card's turn
-                                // answers the board, not a thread (#1890 I). Unchanged
-                                // behaviour — including that it does not clear
-                                // history, since one task can span several turns.
-                                ChatTarget::default(),
-                                // Issue #242: un-streamed does not mean unrecorded. The
-                                // trace this turn produces is written to the attempt
-                                // row as it happens, which is what a redirect re-run
-                                // appends to rather than restarting.
-                                sink.clone(),
-                            ),
+                    publish_claim.scoped(Box::pin(
+                        dispatch_origin.scoped(Box::pin(
+                            run_turn
+                                // A dispatched task card carries no chat bubble (its steps
+                                // are discarded into the note), so its live turn frames
+                                // must not leak onto the console timeline — run it
+                                // un-streamed (#125 review).
+                                .run_steered_background(
+                                    &self.record().id,
+                                    &responder,
+                                    &instruction,
+                                    &control,
+                                    // No conversation to bind to: a dispatched card's turn
+                                    // answers the board, not a thread (#1890 I). Unchanged
+                                    // behaviour — including that it does not clear
+                                    // history, since one task can span several turns.
+                                    ChatTarget::default(),
+                                    // Issue #242: un-streamed does not mean unrecorded. The
+                                    // trace this turn produces is written to the attempt
+                                    // row as it happens, which is what a redirect re-run
+                                    // appends to rather than restarting.
+                                    sink.clone(),
+                                ),
+                        )),
                     )),
                 ))
                 .await;
@@ -1307,23 +1309,25 @@ impl HarnessBrain {
                             // The card keeps the delegate as its assignee on the
                             // way to `todo` — the hand-off did happen, and a
                             // re-dispatch should start from who it was given to.
-                            let handoff = match publish_claim
+                            let handoff = match delegation_claim
                                 .scoped(Box::pin(
-                                    self.delegation_runner(run_turn.as_ref(), &record)
-                                        .for_task(&card.id)
-                                        // The delegate's turn is part of THIS attempt —
-                                        // its steps and its spend belong to the card's
-                                        // run, not to nothing (#242).
-                                        .for_run(sink.clone())
-                                        // Issue #1846 review (Codex #3864988176): the
-                                        // card's own (possibly redirect-augmented)
-                                        // instruction — the closest thing a dispatched
-                                        // task has to "the operator's own words" — so a
-                                        // delegate's budget-pause marker re-parks with
-                                        // the brief this attempt is actually running,
-                                        // not the hand-off instruction the model wrote.
-                                        .reissue_message(instruction.clone())
-                                        .handle_task_delegations(&mut card, &responder),
+                                    publish_claim.scoped(Box::pin(
+                                        self.delegation_runner(run_turn.as_ref(), &record)
+                                            .for_task(&card.id)
+                                            // The delegate's turn is part of THIS attempt —
+                                            // its steps and its spend belong to the card's
+                                            // run, not to nothing (#242).
+                                            .for_run(sink.clone())
+                                            // Issue #1846 review (Codex #3864988176): the
+                                            // card's own (possibly redirect-augmented)
+                                            // instruction — the closest thing a dispatched
+                                            // task has to "the operator's own words" — so a
+                                            // delegate's budget-pause marker re-parks with
+                                            // the brief this attempt is actually running,
+                                            // not the hand-off instruction the model wrote.
+                                            .reissue_message(instruction.clone())
+                                            .handle_task_delegations(&mut card, &responder),
+                                    )),
                                 ))
                                 .await
                             {

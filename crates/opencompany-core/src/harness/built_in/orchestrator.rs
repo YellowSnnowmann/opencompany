@@ -481,6 +481,12 @@ pub enum DelegationScope {
     /// several genuinely overlap, bounded only by the #401 in-flight cap. That
     /// is the concurrency this scoping exists for.
     Run(String),
+    /// One dispatched task card, keyed by its card id.
+    ///
+    /// Task turns can overlap hive seat turns. Keeping a task's one-handoff
+    /// rule in its own bucket prevents it from changing what those turns may
+    /// stage on the shared company queue.
+    Task(String),
 }
 
 tokio::task_local! {
@@ -673,8 +679,8 @@ impl DelegationQueue {
 
     /// A dispatched card transfers ownership once; unlike chat it cannot collect replies.
     #[must_use = "the claim releases on drop"]
-    pub fn claim_task(&self) -> DelegationClaim {
-        self.claim_as(Self::current_scope(), DrainClaim::Task)
+    pub fn claim_task(&self, task_id: impl Into<String>) -> DelegationClaim {
+        self.claim_as(DelegationScope::Task(task_id.into()), DrainClaim::Task)
     }
 
     /// Claims this queue for a turn whose operator message triaged as a
@@ -1246,6 +1252,12 @@ impl DelegationClaim {
     /// The scope this claim owns.
     pub fn scope(&self) -> &DelegationScope {
         &self.scope
+    }
+
+    /// Clears only this claimant's bucket, wherever the caller is currently
+    /// executing.
+    pub fn clear(&self) {
+        self.queue.clear_scope(&self.scope);
     }
 
     /// Runs `fut` with this claim's scope installed, so every delegation call
