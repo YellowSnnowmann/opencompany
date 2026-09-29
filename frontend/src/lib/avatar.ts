@@ -226,7 +226,8 @@ export function mascotSrc(kind: string): string {
 
 /** Whether an avatar reference names an animated mascot. */
 export function isMascotRef(ref: string): boolean {
-  return ref.trim().startsWith("mascot:");
+  const trimmed = ref.trim();
+  return MASCOT_KINDS.some((kind) => trimmed === `mascot:${kind}`);
 }
 
 /** The workspace node id a `blob:` reference names, or `null` for any other form. */

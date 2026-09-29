@@ -221,17 +221,9 @@ describe("isMascotRef", () => {
     }
   });
 
-  // `isMascotRef` only decides whether to mount the live canvas at all — it
-  // does not validate `kind` against `MASCOT_KINDS`, the same way
-  // `staticAvatarSrc`'s `tiny:` branch does not validate its flavour against
-  // `TINY_FLAVOURS` either. Both defer that to the host's `AvatarRef::parse`
-  // (`crates/opencompany-core/src/company/avatar.rs`), the actual
-  // persistence boundary — an unrecognised kind can never be written in the
-  // first place. `MascotAvatar` also never reads `kind` out of the stored
-  // reference (v1 hardcodes the one shipped `.riv`), so an unvalidated kind
-  // here has no path to a broken render even before the host's own check.
-  it("matches any kind suffix — validation is the host's job, same as tiny:", () => {
-    expect(isMascotRef("mascot:not-a-real-kind")).toBe(true);
+  it("only matches shipped mascot kinds", () => {
+    expect(isMascotRef("mascot:animated-extra")).toBe(false);
+    expect(isMascotRef("mascot:not-a-real-kind")).toBe(false);
   });
 });
 

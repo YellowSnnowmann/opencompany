@@ -43,8 +43,10 @@ behalf of whoever wrote it. `javascript:` is script injection.
 reports who looked at the roster and when. Either outlives the account that set
 it.
 
-Every accepted form names something **this host already holds**, so rendering
-one reaches nothing the viewer's session did not already reach.
+Every accepted form names either bytes held by this host or an asset shipped
+with the console. Only `blob:` points to host-held bytes; `tiny:` and `mascot:`
+name entries from closed sets of console-shipped assets. Rendering any form
+reaches no remote URL supplied by the person who chose the avatar.
 
 ### Why `mascot:` is curated, not uploaded
 
