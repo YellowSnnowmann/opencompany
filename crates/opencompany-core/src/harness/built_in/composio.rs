@@ -969,7 +969,7 @@ mod live {
                     .http1_only()
                     .timeout(std::time::Duration::from_secs(60))
                     .connect_timeout(std::time::Duration::from_secs(15))
-                    .default_headers(openhuman_core::api::product::product_identity_headers())
+                    .default_headers(openhuman_tinyhumans::backend::product_identity_headers())
                     .build()
                     .map_err(|error| format!("{error}"))
             })
@@ -986,7 +986,7 @@ mod live {
         use openhuman_core::core::observability::report_error_or_expected;
 
         const PATH: &str = "/agent-integrations/composio/execute";
-        let url = openhuman_core::api::config::api_url(&client.backend_url, PATH);
+        let url = openhuman_core::util::url::join_url(&client.backend_url, PATH);
         let response = http
             .post(&url)
             .bearer_auth(&client.auth_token)

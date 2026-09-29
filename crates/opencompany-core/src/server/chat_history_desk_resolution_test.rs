@@ -51,6 +51,7 @@ name = "{name}"
     ))
     .expect("valid manifest");
     CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
@@ -138,17 +139,19 @@ fn an_exact_id_wins_over_an_earlier_desks_display_name() {
 async fn resolve_none_is_the_general_desk() {
     assert_eq!(
         resolve(RecordStore(None), None).await,
-        (GENERAL_DESK.to_string(), GENERAL_DESK.to_string())
+        (
+            GENERAL_CHANNEL_ID.to_string(),
+            GENERAL_CHANNEL_ID.to_string()
+        )
     );
 }
 
 #[tokio::test]
 async fn resolve_general_spelling_short_circuits_without_a_store_read() {
-    // The store would panic on `save`/`list`, but a General spelling must not
-    // even reach `load` — it returns `(chat, chat)`, which owns folds.
+    // A legacy General spelling decodes to #general without reaching `load`.
     assert_eq!(
         resolve(RecordStore(None), Some("main")).await,
-        ("main".to_string(), "main".to_string())
+        ("general".to_string(), "general".to_string())
     );
 }
 

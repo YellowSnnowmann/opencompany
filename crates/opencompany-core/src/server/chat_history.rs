@@ -16,88 +16,36 @@ use serde::{Deserialize, Serialize};
 use crate::company::runtime::CompanyRuntime;
 use crate::error::OpenCompanyError;
 use crate::ports::CompanyStore;
+use crate::ports::general_channel::{
+    GENERAL_CHANNEL_ID, GENERAL_CHANNEL_NAME, decode_general_chat_id,
+};
 use crate::ports::types::{
     Actor, ActorKind, Attachment, ChatOutput, ChatOutputKind, CompanyEvent, CompanyId,
     CompanyRecord, EventSeq, Mention, MentionTarget, StoredEvent, TurnStep, UtteranceKind,
 };
-use crate::server::ops::language::DEFAULT_DESK;
 use crate::server::readable::{DisplayNames, project_history};
-
-// Conversation identity now lives in `tinyhivemind_core::chat`, and these are
-// re-exported so every existing caller keeps its path (issue #65, #435).
-//
-// The move is what lets `ports::types` stop reaching *upward* into
-// `crate::server::` to fold a General spelling: `resolve_desk_id` and
-// `desk_alias_is_ambiguous` call this rule, and a port calling a server module
-// was a layering violation that only a shared crate could remove.
-pub use tinyhivemind_core::chat::{
-    GENERAL_DESK, MAIN_THREAD_ID, is_general_chat, same_conversation,
-};
-
-// `DEFAULT_DESK` is the prosumer glossary string mirroring
-// `frontend/src/lib/language.ts`; `GENERAL_DESK` is the desk's identity. They
-// are different concerns that happen to be the same literal, so neither imports
-// the other — but they must never drift, because a message journaled under the
-// glossary word has to fold into the identity. Pinned here rather than
-// duplicated, and it costs nothing at runtime.
-const _: () = assert!(
-    matches!(DEFAULT_DESK.as_bytes(), b"General") && matches!(GENERAL_DESK.as_bytes(), b"General"),
-    "the operator-facing default desk name and the General desk id must agree",
-);
 
 /// The largest message page either history surface may materialize. Keeping
 /// the limit beside the shared reader prevents a new caller from turning its
 /// `Vec` reservation back into an allocation controlled by the request.
 pub const CHAT_HISTORY_PAGE_LIMIT: usize = 200;
 
-/// Where this lives, and why it is not beside its first caller.
-///
-/// It began in the chat seed, under `src/harness/`, which compiles only
-/// with the `openhuman` feature. Two later callers — the thread index in
-/// [`crate::runtime::cycle`] and `read_thread` — need the same resolution,
-/// and the first of those is in the ungated runtime, so the default build
-/// stopped compiling. Beside [`owns`] is where it belonged anyway: this
-/// module is the one place that answers what a desk id means, and a
-/// second copy is exactly what it exists to prevent.
-/// Resolves an incoming `chat_id` to the `(desk_id, desk_name)` pair
-/// [`owns`] filters on, exactly as the REST history route's
-/// `resolve_desk` does (issue #65).
-///
-/// `owns` matches a stored event's chat id against *both* the desk id and the
-/// desk name, because a named desk's messages can be journaled under either
-/// spelling. Passing `(chat_id, chat_id)` for a desk the operator addressed by
-/// id would therefore silently miss any line stored under its name — a seed that
-/// "looks fixed" but is empty. So a non-General selector is resolved against the
-/// manifest's group chats the same way the console resolves it.
-///
-/// * `None` → the synthetic General/operator desk.
-/// * A General spelling (`"main"` / `"general"` / `""`) short-circuits: every
-///   spelling folds together in [`same_conversation`], so no
-///   manifest read is needed and `(chat, chat)` already owns all of them.
-/// * Anything else is matched (case-insensitive, by id or name) against the
-///   manifest's group chats; an unmatched selector passes through as `(id, name)
-///   = (chat, chat)`, so an ad-hoc thread id still finds what was journaled under
-///   that exact string.
+/// Resolves an incoming `chat_id` to the `(desk_id, desk_name)` pair [`owns`]
+/// filters on. `None` and every legacy General spelling resolve to #general;
+/// anything else is resolved against the company's desks by [`desk_aliases`].
 pub async fn resolve_seed_desk(
     store: &Arc<dyn CompanyStore>,
     company: &CompanyId,
     chat_id: Option<&str>,
 ) -> (String, String) {
-    let Some(desk) = trivially_resolved(chat_id) else {
-        // Only a named desk needs the manifest, and only then is it read.
-        return match store.load(company).await {
-            Ok(Some(record)) => desk_aliases(&record, chat_id),
-            // A store miss or read error must not fail the turn — fall back to
-            // the verbatim selector, which still owns everything journaled
-            // under that exact string (the common case, where the console
-            // addresses id == name).
-            Ok(None) | Err(_) => {
-                let desk = chat_id.unwrap_or(GENERAL_DESK);
-                (desk.to_string(), desk.to_string())
-            }
-        };
-    };
-    desk
+    let desk = decode_general_chat_id(chat_id.unwrap_or_default().to_string());
+    if desk == GENERAL_CHANNEL_ID {
+        return (desk.clone(), desk);
+    }
+    match store.load(company).await {
+        Ok(Some(record)) => desk_aliases(&record, Some(&desk)),
+        Ok(None) | Err(_) => (desk.clone(), desk),
+    }
 }
 
 /// The other spelling the same operator DM is journaled under, if `key` names
@@ -159,10 +107,11 @@ pub fn dm_sibling(record: &CompanyRecord, key: &str) -> Option<String> {
 /// already answers. Same resolution, no store round-trip — and one body, so the
 /// two cannot drift into disagreeing about what a desk id means.
 pub fn desk_aliases(record: &CompanyRecord, chat_id: Option<&str>) -> (String, String) {
-    if let Some(resolved) = trivially_resolved(chat_id) {
-        return resolved;
+    let desk = decode_general_chat_id(chat_id.unwrap_or_default().to_string());
+    if desk == GENERAL_CHANNEL_ID {
+        return (desk.clone(), desk);
     }
-    let desk = chat_id.unwrap_or(GENERAL_DESK);
+    let desk = desk.as_str();
     // **Through `resolve_desk_id`, not a second lookup of its own** (codex +
     // coderabbit on #1972). That function already answers "which desk is this
     // key", and it answers two things a one-pass `id == key || name == key`
@@ -201,118 +150,18 @@ pub fn desk_aliases(record: &CompanyRecord, chat_id: Option<&str>) -> (String, S
     (id, name)
 }
 
-/// The two selectors that resolve without consulting a manifest at all.
-///
-/// `None` is the General desk — an unaddressed message is *routed* there
-/// (`chat_and_emit`), so treating it as "addressed to nothing" is what left
-/// those turns out of every desk-scoped read. Any other General spelling
-/// short-circuits too: they all fold in [`same_conversation`], so `(chat, chat)`
-/// already owns each other's lines.
-fn trivially_resolved(chat_id: Option<&str>) -> Option<(String, String)> {
-    match chat_id {
-        None => Some((GENERAL_DESK.to_string(), GENERAL_DESK.to_string())),
-        Some(desk) if is_general_chat(Some(desk)) => Some((desk.to_string(), desk.to_string())),
-        Some(_) => None,
-    }
-}
-
-/// Does a conversation id **stamped onto a record** name `desk`?
-///
-/// The fold is [`same_conversation`]'s — every spelling of General is one
-/// conversation, every other id compares verbatim — with the one difference
-/// this function exists to state:
-///
-/// **`None` is not the General desk.** [`same_conversation`] reads a missing id
-/// as *the id was never addressed*, which for a chat message is right: an
-/// unaddressed post went to the company-wide line, so it folds into General. A
-/// `None` **stamped on a record** means the opposite — *no conversation
-/// produced this*. A blocker parked by the planning pass, a card created on the
-/// board, a scheduler tick: each carries no thread because none of them
-/// happened in a conversation, and folding that into General hands every one of
-/// them to whoever next types in `#general`.
-///
-/// That is not hypothetical. `pending_blocker_groups` matched thread-less
-/// parked blockers against `#general` through [`same_conversation`], so a
-/// founder's first line in the channel was consumed as the *answer* to one of
-/// them: the send settled in milliseconds with no cycle, no run and no reply,
-/// and the console showed a message that read exactly like one being worked on.
-/// `owns` had already carved the same rule out by hand for a
-/// `DeskTaskCompleted` with no origin ("**`None` is not the General desk**",
-/// see its doc) — one carve-out written twice and missed a third time is the
-/// drift; one named predicate is the fix, the same argument
-/// [`same_conversation`] itself was extracted under.
-///
-/// The `desk` side stays a plain `&str` on purpose: a caller asking "is this
-/// record's origin the desk I am reading?" always has a desk, and taking an
-/// `Option` there would re-open the question this answers.
-/// Does a chat id stamped on a room's own **bookkeeping** name the conversation
-/// being read?
-///
-/// [`owns`] answers this for the rows a reader renders, and answers it against
-/// both slots the resolver produced. The events that are not rows --
-/// `ConversationOpened`/`Concluded`, a referral's crossing marker -- were
-/// compared to `desk_id` alone, which is the same question asked half as
-/// widely. For a DM that is the difference between attaching an exchange and
-/// dropping it: the episode journals its bookkeeping under `dm:<id>` while the
-/// console reads by the bare id, so an operator whose teammates had just held
-/// two full consultations was shown neither.
-///
-/// One rule for both, so a conversation cannot own a row and disown the
-/// bookkeeping that explains it.
+/// Does a chat id stamped on a room's own bookkeeping name the conversation
+/// being read? Matches either slot the resolver produced, as [`owns`] does.
 fn bookkeeping_names(stored: &str, desk_id: &str, desk_name: &str) -> bool {
-    same_conversation(Some(stored), Some(desk_id))
-        || same_conversation(Some(stored), Some(desk_name))
+    stored == desk_id || stored == desk_name
 }
 
+/// Does a conversation id stamped onto a record name `desk`? A record with no
+/// stamped conversation names none.
 pub fn stamped_conversation_is(origin: Option<&str>, desk: &str) -> bool {
-    origin.is_some_and(|origin| same_conversation(Some(origin), Some(desk)))
+    origin == Some(desk)
 }
 
-/// Whether a stored event belongs to the desk identified by `desk_id` /
-/// `desk_name`.
-///
-/// Both `AgentReply`s and `OperatorMessage`s route by their stored chat id,
-/// matched against the desk's id and its name through [`same_conversation`] — so
-/// a named desk still compares verbatim and the General desk answers to every
-/// spelling of itself, and no historical message is orphaned by the id it
-/// happened to be journaled under (issue #65).
-///
-/// **Folded on both sides, not just the event's** (issue #435). The General
-/// check used to key on the *desk being asked for* being spelled `"General"`,
-/// which the console never does: its default thread is `"main"`, so
-/// `?desk=main` resolves to `("main", "main")` — no group chat is named `main` —
-/// and every event journaled under `"General"` was excluded from the one
-/// transcript that should hold them. An unaddressed chat post is exactly that
-/// pair: the operator message stores `chat: None` and its answer is journaled
-/// with `chat_id: "General"`, so the console's main line dropped both halves of
-/// its own conversation. The asymmetry also put this function at odds with
-/// `resolvable_parent`, which now folds through the same rule: a continuation
-/// could be parented to a root the main line refuses to render, and the console
-/// drops a reply whose parent it cannot find rather than showing it flat.
-///
-/// **A third kind of event routes here since issue #377**: the dispatch
-/// terminal. A card raised from a channel settles somewhere — `in_review`,
-/// `paused`, `todo` — and until #377 nothing structural said so in the channel
-/// it came from, so a reader saw the agent's relay prose and reasonably
-/// concluded the work had finished when it had in fact parked. The terminal
-/// routes by the origin the card recorded at raise time, matched on exactly the
-/// terms the other two are.
-///
-/// **`None` is not the General desk.** Everywhere else in this module a missing
-/// chat id means *the id was never addressed* and folds into General; on a
-/// terminal it means *no conversation raised this card* — it was created on the
-/// board, by a scheduler, or before the origin was recorded. Folding that into
-/// General would post a marker about board-only work into the operator's main
-/// line, which is a different bug from the one #377 fixes, so this arm answers
-/// `false` for every desk including General. It is the single most bug-prone
-/// line in this function and has its own test.
-///
-/// That rule is [`stamped_conversation_is`] now. This arm keeps its own
-/// `return false` because it must also skip the shared tail below, but anywhere
-/// *else* asking "does this record's stamped origin name my desk?" calls the
-/// predicate rather than writing the carve-out again — writing it twice and
-/// forgetting it a third time is what let a thread-less parked blocker read as
-/// pending in `#general`.
 /// One channel this agent can read.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Channel {
@@ -388,15 +237,11 @@ pub fn agent_channels(record: &CompanyRecord, agent_id: &str) -> Vec<Channel> {
         }
     }
 
-    // The company's own line. Not a desk (issue #1743) unless a blueprint
-    // declared one under a General spelling, in which case the loop above
-    // already claimed it and this is a no-op.
-    let general = tinyhivemind_core::chat::GENERAL_DESK.to_string();
-    if seen.insert(general.clone()) {
+    if seen.insert(GENERAL_CHANNEL_ID.to_string()) {
         channels.push(Channel {
             label: "#general".to_string(),
-            name: general.clone(),
-            id: general,
+            name: GENERAL_CHANNEL_NAME.to_string(),
+            id: GENERAL_CHANNEL_ID.to_string(),
         });
     }
 
@@ -462,22 +307,19 @@ pub(crate) fn desk_display_name(record: &CompanyRecord, desk_id: &str) -> String
         .unwrap_or_else(|| desk_id.to_string())
 }
 
+/// Whether a stored event belongs to the desk identified by `desk_id` /
+/// `desk_name`. A dispatch terminal with no origin belongs to no conversation.
 pub fn owns(desk_id: &str, desk_name: &str, event: &CompanyEvent) -> bool {
     let stored = match event {
-        CompanyEvent::AgentReply { chat_id, .. } => Some(chat_id.as_str()),
-        CompanyEvent::OperatorMessage { chat, .. } => chat.as_deref(),
-        // Issue #377. `None` short-circuits to `false` here rather than
-        // falling through to the shared tail: `same_conversation` reads a
-        // `None` as "unaddressed, therefore General", and this event's `None`
-        // means the opposite — no conversation raised this card, so it belongs
-        // to no conversation's history.
+        CompanyEvent::AgentReply { chat_id, .. } => chat_id.as_str(),
+        CompanyEvent::OperatorMessage { chat, .. } => chat.as_deref().unwrap_or(GENERAL_CHANNEL_ID),
         CompanyEvent::DeskTaskCompleted { origin_chat_id, .. } => match origin_chat_id.as_deref() {
-            Some(origin) => Some(origin),
+            Some(origin) => origin,
             None => return false,
         },
         _ => return false,
     };
-    same_conversation(stored, Some(desk_id)) || same_conversation(stored, Some(desk_name))
+    stored == desk_id || stored == desk_name
 }
 
 /// The channel line a settled dispatch leaves behind (issue #377) —
@@ -1861,10 +1703,13 @@ async fn attach_agent_conversations(
                     author_id: agent_id.clone(),
                     // Empty for the seat that asked, exactly as a crossing
                     // leaves it: the row this folds onto already names them.
+                    // The replying seat itself rather than the row's single
+                    // `askee`: identical for a pair, and right for a group
+                    // ask, where any of several seats may answer.
                     author_label: if *agent_id == asker {
                         String::new()
                     } else {
-                        askee.clone()
+                        agent_id.clone()
                     },
                     text: text.clone(),
                     outbound: *agent_id == asker,

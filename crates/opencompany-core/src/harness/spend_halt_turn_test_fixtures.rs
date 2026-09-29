@@ -239,6 +239,7 @@ tier = "orchestrator"
 
 pub(super) fn record(budget: Option<f64>) -> CompanyRecord {
     CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),

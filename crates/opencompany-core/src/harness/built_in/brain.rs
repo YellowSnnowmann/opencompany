@@ -2567,13 +2567,7 @@ impl HarnessBrain {
         {
             return responder;
         }
-        // The built-in `#general` channel (issue #1743) — the one key that
-        // resolves to nobody *on purpose*. `chat_responder` declines it so both
-        // callers answer as their own orchestrator, which is what this host has
-        // always done for the company's main line. It is not the #884 case the
-        // warning below exists for: nothing was misaddressed, so logging it
-        // would bury the real misroutes under the console's most-used channel.
-        if crate::server::chat_history::is_general_chat(Some(chat)) {
+        if chat == crate::ports::general_channel::GENERAL_CHANNEL_ID {
             return self.responder.clone();
         }
         tracing::warn!(
@@ -2699,42 +2693,10 @@ impl HarnessBrain {
     }
 
     /// The desk key `@everyone` expands against for a message addressed to
-    /// `chat`. Folds the General-desk spellings [`is_general_chat`] admits
-    /// (`None`, `""`, `"main"`, `"General"`) to [`DEFAULT_DESK`], so a
-    /// broadcast from the console's default thread — which sends
-    /// `chat: "main"`, an alias `resolve_desk_id` does not know — expands
-    /// against the General desk rather than no desk at all.
-    ///
-    /// **A real desk answering to that key wins, whatever it is spelled like.**
-    /// A blueprint may declare `[[group_chat]] id = "main"` (or `"general"`),
-    /// which this host grandfathers — `is_general_channel` is guarded on
-    /// `!desk_exists`, so the desk keeps its members and `responder_for` routes
-    /// to its lead. Folding that key to `General` asks `resolve_desk_id` for a
-    /// name no such desk has, which misses, and `@everyone` then expands to the
-    /// **whole roster** instead of the desk that was actually addressed — a
-    /// broadcast escaping the scope of the one case the fold exists to keep
-    /// working. Asking the record first costs one lookup and cannot be wrong.
-    fn everyone_desk(record: &CompanyRecord, chat: Option<&str>) -> String {
-        match chat {
-            Some(chat)
-                if record.resolve_desk_id(chat).is_some()
-                    || !crate::server::chat_history::is_general_chat(Some(chat)) =>
-            {
-                chat.to_string()
-            }
-            // A General alias resolves to whichever desk claims the line, not
-            // to the literal `DEFAULT_DESK`. A blueprint desk declared
-            // `id = "main", name = "Front office"` claims it by id, so
-            // `resolve_desk_id("General")` misses and the guard above falls
-            // through — and expanding `@everyone` against a desk called
-            // `General` that does not exist scoped the broadcast to the entire
-            // roster, while the channel it was posted in is that desk and its
-            // lead answers there. The alias and the raw key have to name the
-            // same membership or `@everyone` means two different things in one
-            // channel (issue #1743).
-            _ => crate::runtime::delegation_tools::general_claimant(record)
-                .unwrap_or_else(|| crate::server::ops::language::DEFAULT_DESK.to_string()),
-        }
+    /// `chat`; an unaddressed message expands against #general.
+    fn everyone_desk(chat: Option<&str>) -> String {
+        chat.unwrap_or(crate::ports::general_channel::GENERAL_CHANNEL_ID)
+            .to_string()
     }
 
     /// Drains the MCP failure queue **onto the operator bubble's step timeline**
@@ -3117,7 +3079,8 @@ impl HarnessBrain {
             .into_iter()
             .filter(|card| card.origin_parent() == Some(root))
             .filter(|card| {
-                crate::server::chat_history::same_conversation(card.origin_chat_id(), chat)
+                card.origin_chat_id()
+                    == Some(chat.unwrap_or(crate::ports::general_channel::GENERAL_CHANNEL_ID))
             })
             .map(|card| card.id)
             .next_back()
@@ -3501,14 +3464,7 @@ impl HarnessBrain {
                     // delegation seam rather than through a new uncontrolled
                     // one. `@everyone` expands here, against the addressed
                     // desk's membership.
-                    //
-                    // The addressed desk is the raw chat key unless it is one of
-                    // the General-desk spellings `is_general_chat` folds — the
-                    // console's default thread sends `chat: "main"`, and
-                    // `resolve_desk_id` does not recognise that console-only
-                    // alias, so a broadcast from the main thread would otherwise
-                    // expand against no desk at all.
-                    let addressed_desk = Self::everyone_desk(&self.record(), chat.as_deref());
+                    let addressed_desk = Self::everyone_desk(chat.as_deref());
                     let also_mentioned =
                         self.mentioned_members(&addressed_desk, mentions, Some(&responder));
                     // The chat/desk thread this turn answers — the same id the
@@ -4002,7 +3958,7 @@ impl HarnessBrain {
                         // `channel` made reload history route the same reply to
                         // General while journaling the wrong author; they are
                         // separate facts (issue #885).
-                        channel: crate::server::ops::language::DEFAULT_DESK.to_string(),
+                        channel: crate::server::ops::language::GENERAL_CHANNEL_ID.to_string(),
                         agent: Some(responder.clone()),
                         text: if turn.budget_paused.is_some() {
                             BUDGET_PAUSED_PLACEHOLDER_REPLY.to_string()
@@ -4032,7 +3988,7 @@ impl HarnessBrain {
                             message_id: None,
                             task_id: None,
                             outputs: Vec::new(),
-                            channel: crate::server::ops::language::DEFAULT_DESK.to_string(),
+                            channel: crate::server::ops::language::GENERAL_CHANNEL_ID.to_string(),
                             agent: Some(crate::ports::SYSTEM_AUTHOR.to_string()),
                             text: iteration_cap_pause_notice(&responder),
                             steps: Vec::new(),
@@ -4045,7 +4001,7 @@ impl HarnessBrain {
                             message_id: None,
                             task_id: None,
                             outputs: Vec::new(),
-                            channel: crate::server::ops::language::DEFAULT_DESK.to_string(),
+                            channel: crate::server::ops::language::GENERAL_CHANNEL_ID.to_string(),
                             agent: Some(crate::ports::SYSTEM_AUTHOR.to_string()),
                             text: spend_halt_notice(halt),
                             steps: Vec::new(),
@@ -4058,7 +4014,7 @@ impl HarnessBrain {
                             message_id: None,
                             task_id: None,
                             outputs: Vec::new(),
-                            channel: crate::server::ops::language::DEFAULT_DESK.to_string(),
+                            channel: crate::server::ops::language::GENERAL_CHANNEL_ID.to_string(),
                             agent: Some(crate::ports::SYSTEM_AUTHOR.to_string()),
                             text: budget_pause_notice(pause),
                             steps: Vec::new(),
@@ -4085,7 +4041,9 @@ impl HarnessBrain {
                             // Nothing threaded a scheduled turn: it posts into
                             // the General desk's channel-level conversation,
                             // which is what the bare id meant before #1890 B.
-                            ChatTarget::channel(Some(crate::server::ops::language::DEFAULT_DESK)),
+                            ChatTarget::channel(Some(
+                                crate::server::ops::language::GENERAL_CHANNEL_ID,
+                            )),
                             publish_claim.is_claimed(),
                             published,
                             &mut responses[0].text,
@@ -4124,7 +4082,7 @@ impl HarnessBrain {
                                     &responder,
                                     spawned_task.as_deref(),
                                     ChatTarget::channel(Some(
-                                        crate::server::ops::language::DEFAULT_DESK,
+                                        crate::server::ops::language::GENERAL_CHANNEL_ID,
                                     )),
                                     publish_claim.is_claimed(),
                                     nudge_published,
@@ -4167,7 +4125,7 @@ impl HarnessBrain {
                             message_id: None,
                             task_id: None,
                             outputs: Vec::new(),
-                            channel: crate::server::ops::language::DEFAULT_DESK.to_string(),
+                            channel: crate::server::ops::language::GENERAL_CHANNEL_ID.to_string(),
                             agent: Some(crate::ports::SYSTEM_AUTHOR.to_string()),
                             text: notice,
                             steps: Vec::new(),
@@ -4191,7 +4149,7 @@ impl HarnessBrain {
                                         parent: None,
                                         task_id: response.task_id.clone(),
                                         outputs: response.outputs.clone(),
-                                        chat_id: crate::server::ops::language::DEFAULT_DESK
+                                        chat_id: crate::server::ops::language::GENERAL_CHANNEL_ID
                                             .to_string(),
                                         agent_id,
                                         text: response.text.clone(),

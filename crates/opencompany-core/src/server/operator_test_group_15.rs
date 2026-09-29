@@ -208,7 +208,7 @@ async fn mention_context_maps_unresolvable_general_spellings_to_main() {
                 .mention_seam()
                 .mention_context(&id, &[], general)
                 .await,
-            crate::server::chat_history::MAIN_THREAD_ID,
+            crate::ports::general_channel::GENERAL_CHANNEL_ID,
             "a mention in the General desk ({general:?}) has to store the console's \
              main-thread id, which the rail aliases onto its first rendered desk \
              channel"

@@ -128,10 +128,10 @@ describe("the channel intro's mark", () => {
     expect(mark().className).toContain("bg-surface-icon");
   });
 
-  it("keeps the company's own brand mark on the main line", () => {
-    // `main` is the one channel that legitimately has a voice behind it, and it
-    // wears the company mark rather than a mascot or a hash.
-    render({ id: "main", name: "general", voice: "Acme", kind: "channel", purpose: "" });
+  it("keeps the company's own brand mark on #general", () => {
+    // `#general` is the one channel that legitimately has a voice behind it, and
+    // it wears the company mark rather than a mascot or a hash.
+    render({ id: "general", name: "general", voice: "Acme", kind: "channel", purpose: "" });
 
     expect(mark().querySelector("img")).toBeNull();
     expect(mark().className).toContain("bg-primary");

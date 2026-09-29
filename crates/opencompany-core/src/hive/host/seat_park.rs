@@ -561,7 +561,7 @@ impl DeskHost {
             Some(chat) => (chat, lane),
             None => (self.desk_id.clone(), None),
         };
-        let event = self.reply(&chat, DESK_AUTHOR, body, thread, Some(seat));
+        let event = self.reply(&chat, DESK_AUTHOR, body, thread, &[seat.to_owned()]);
         self.events.append(&self.company, event).await
     }
 }

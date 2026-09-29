@@ -158,6 +158,7 @@ fn record() -> CompanyRecord {
     let manifest: crate::company::CompanyManifest =
         toml::from_str("[company]\nname = \"Acme\"\n").expect("manifest parses");
     CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),

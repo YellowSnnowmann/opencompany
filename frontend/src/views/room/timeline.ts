@@ -202,7 +202,7 @@ export function senderOf(
     };
   }
 
-  // A desk speaks as itself and wears its own tone; only the main line — the
+  // A desk speaks as itself and wears its own tone; only `#general` — the
   // one channel with no tone of its own — speaks as the company. A DM's
   // "channel" is the teammate on the other end, so its avatar is theirs.
   return {

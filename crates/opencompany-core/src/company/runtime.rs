@@ -121,10 +121,7 @@ const RELAY_SCAN_MAX_PAGES: usize = 8;
 /// thread and has no origin conversation to review it in.
 #[cfg(feature = "openhuman")]
 fn is_review_target(card: &TaskRecord, desk: &str) -> bool {
-    card.column == crate::ports::tasks::COLUMN_IN_REVIEW
-        && card.origin_chat_id().is_some_and(|origin| {
-            crate::server::chat_history::same_conversation(Some(origin), Some(desk))
-        })
+    card.column == crate::ports::tasks::COLUMN_IN_REVIEW && card.origin_chat_id() == Some(desk)
 }
 
 /// Whether a company should come up with the emergency stop engaged, given what
@@ -2271,9 +2268,8 @@ impl CompanyRuntime {
     /// `is_roster_agent` is checked alongside it, the same carve-out applied
     /// to the other namespace `RESERVED_AGENT_IDS` reserves — and a desk
     /// grandfathered by **name** rather than id (issue #1781 review, Codex
-    /// P1 follow-up): `{ id = "legacy_ops", name = "Operator" }` is exactly
-    /// the collision `operator_feed_channel` diverts the system feed off of,
-    /// but `desk_exists("operator")` only ever matches on id, so a chat or
+    /// P1 follow-up): `{ id = "legacy_ops", name = "Operator" }` — and
+    /// `desk_exists("operator")` only ever matches on id, so a chat or
     /// ACP send addressed through the desk's own supported case-insensitive
     /// `Operator` alias — which every *read* already resolves via
     /// `resolve_desk_id` — was refused here as if it named the fake system
@@ -2281,53 +2277,11 @@ impl CompanyRuntime {
     /// through `resolve_desk_id` first is what makes this guard agree with
     /// the read path on which desk a caller meant.
     ///
-    /// `OPERATOR_CHANNEL_COLLISION_FALLBACK` is the id `list_desks` hands the
-    /// synthetic system desk when a roster teammate is the one grandfathered
-    /// onto `operator` (see `CompanyRecord::operator_feed_channel`), and its
-    /// **id** is unmintable by any real desk or agent (see the constant's
-    /// doc). Its display **name** is not id-validated at all, though (issue
-    /// #1781 review, Codex P2 follow-up): a pre-#1757 manifest desk such as
-    /// `{ id = "ops", name = "operator-feed" }` predates every id-charset
-    /// rule this reasoning leans on, `from_path_for_reload` never
-    /// re-validates a stored manifest, and this can be true even without a
-    /// *primary* `operator` collision at all. So this branch resolves the
-    /// alias first too, the same as the literal `operator` case below — only
-    /// refusing once nothing real actually claims it.
-    ///
     /// The store load's `?` propagates a real store failure as itself, rather
     /// than collapsing it into "no real desk" — that would misreport a
     /// transient store error as the ordinary read-only refusal, for every
     /// company, and journal the failure nowhere.
     pub(crate) async fn ensure_desk_writable(&self, desk: &str) -> Result<()> {
-        if desk.eq_ignore_ascii_case(crate::runtime::OPERATOR_CHANNEL_COLLISION_FALLBACK) {
-            // `resolve_desk_id(desk)` — not an unconditional refusal — for the
-            // identical reason the `OPERATOR_CHANNEL` branch below resolves
-            // its alias first (issue #1781 review, Codex P2 follow-up):
-            // `OPERATOR_CHANNEL_COLLISION_FALLBACK`'s id is unmintable by any
-            // *new* desk (`is_valid_desk_id` rejects the hyphen), but its
-            // display **name** is not id-validated at all, and
-            // `from_path_for_reload` deliberately never re-validates a stored
-            // manifest — so a pre-#1757 desk such as
-            // `{ id = "ops", name = "operator-feed" }` can already exist,
-            // stay listed and readable, and (unlike the id case) be true even
-            // when there is no *primary* `operator` collision at all. Without
-            // this, a send addressed through that desk's own supported
-            // case-insensitive alias — the one every read already resolves
-            // via `resolve_desk_id` — was refused here as if it named the
-            // synthetic read-only system desk instead.
-            let has_real_recipient = self
-                .store()
-                .load(&self.id)
-                .await?
-                .is_some_and(|record| record.resolve_desk_id(desk).is_some());
-            if !has_real_recipient {
-                return Err(OpenCompanyError::InvalidRequest(
-                    "the Operator channel is a read-only feed of workflow reports and \
-                     notifications — it cannot be posted to"
-                        .to_string(),
-                ));
-            }
-        }
         if desk.eq_ignore_ascii_case(crate::runtime::OPERATOR_CHANNEL) {
             let has_real_operator_recipient =
                 self.store().load(&self.id).await?.is_some_and(|record| {
@@ -2341,8 +2295,7 @@ impl CompanyRuntime {
                 });
             if !has_real_operator_recipient {
                 return Err(OpenCompanyError::InvalidRequest(
-                    "the Operator channel is a read-only feed of workflow reports and \
-                     notifications — it cannot be posted to"
+                    "the Operator channel is a read-only system channel — it cannot be posted to"
                         .to_string(),
                 ));
             }
@@ -4362,18 +4315,9 @@ impl CompanyRuntime {
             // sequence means the recorded parent was never a valid root.
             _ => return None,
         };
-        // Compared through the same rule the console renders by
-        // ([`same_conversation`](crate::server::chat_history::same_conversation)),
-        // never as raw strings. The General desk has four spellings — `None`
-        // from an unaddressed chat post, `""` from older events, the console's
-        // `"main"`, and `"General"` itself — and a raw compare rejects the pair
-        // it is *most* likely to be handed: an unaddressed message is journaled
-        // with `chat: None` and rendered under General, so a reply to it arrives
-        // here as `None` vs `"General"`. That mismatch dropped the parent and
-        // resumed in the channel — issue #435's own symptom, surviving inside
-        // its fix.
-        crate::server::chat_history::same_conversation(channel.as_deref(), Some(chat_id))
-            .then_some(parent)
+        let channel = channel
+            .unwrap_or_else(|| crate::ports::general_channel::GENERAL_CHANNEL_ID.to_string());
+        (channel == chat_id).then_some(parent)
     }
 
     /// Files a durable mention notification for the people `mentions` names in
@@ -4420,8 +4364,8 @@ impl CompanyRuntime {
     /// `refuse_dispatch` return no relay at all) contributes nothing here
     /// either. An **empty** `chat_id` is still a real destination, not an
     /// absent one: `origin_chat_id` preserves `Some("")` for a card spawned
-    /// from General, and `chat_history::same_conversation` treats `""` as an
-    /// alias for General — so it must be journaled, not discarded.
+    /// from a legacy General row, which decodes to #general — so it must be
+    /// journaled, not discarded.
     ///
     /// Best-effort, like `HarnessBrain::journal_task_outcome`'s own writes: a
     /// failure here is logged, never propagated. By the time this runs the
@@ -4634,7 +4578,7 @@ impl CompanyRuntime {
                 task_id: None,
                 chat_id,
                 ..
-            } if crate::server::chat_history::same_conversation(Some(&chat_id), Some(desk)) => {
+            } if chat_id == desk => {
                 let Some((pill_seq, task_id)) = self.settle_pill_before(desk, parent).await? else {
                     return Ok(None);
                 };
@@ -4689,12 +4633,7 @@ impl CompanyRuntime {
                         task_id,
                         origin_chat_id,
                         ..
-                    } if origin_chat_id.as_deref().is_some_and(|origin| {
-                        crate::server::chat_history::same_conversation(Some(origin), Some(desk))
-                    }) =>
-                    {
-                        Some((seq, task_id))
-                    }
+                    } if origin_chat_id.as_deref() == Some(desk) => Some((seq, task_id)),
                     _ => None,
                 }
             });
@@ -4783,10 +4722,7 @@ impl CompanyRuntime {
                         agent_id,
                         ..
                     } if (system_is_a_teammate || agent_id != crate::ports::SYSTEM_AUTHOR)
-                        && crate::server::chat_history::same_conversation(
-                            Some(chat_id.as_str()),
-                            Some(desk),
-                        ) =>
+                        && chat_id == desk =>
                     {
                         return Ok(seq == parent);
                     }
@@ -4881,11 +4817,7 @@ impl CompanyRuntime {
                     task_id: found_id,
                     origin_chat_id,
                     ..
-                } if found_id == task_id
-                    && origin_chat_id.as_deref().is_some_and(|origin| {
-                        crate::server::chat_history::same_conversation(Some(origin), Some(desk))
-                    }) =>
-                {
+                } if found_id == task_id && origin_chat_id.as_deref() == Some(desk) => {
                     Some(stored.seq)
                 }
                 _ => None,
@@ -4994,15 +4926,17 @@ impl CompanyRuntime {
             .journal
             .approval_conversation(approval_id)
             .unwrap_or_default();
-        let thread = conversation.thread;
-        // Where the reply goes when the approval was raised in no conversation
-        // at all — a workflow node's parked tool call, a scheduler tick. Read
-        // once for the whole report: every response of one continuation answers
-        // the same approval, so they cannot land in two places.
-        let nowhere =
-            continuation_fallback_chat_id(self.journal.approval_origin(approval_id).as_ref());
+        let chat_id = continuation_chat_id(
+            conversation.thread,
+            self.journal.approval_origin(approval_id).as_ref(),
+        );
+        tracing::debug!(
+            company = %self.id,
+            approval_id = %approval_id,
+            chat = %chat_id,
+            "[approval] continuation answers here"
+        );
         for response in &mut report.responses {
-            let chat_id = thread.clone().unwrap_or_else(|| nowhere.clone());
             // Checked against the channel actually being answered into, not
             // against the recorded thread: when `thread` is absent the reply
             // goes to the run or card the work belongs to, and a root belonging
@@ -5092,14 +5026,10 @@ impl CompanyRuntime {
             .journal
             .approval_conversation(approval_id)
             .unwrap_or_default();
-        let thread = conversation
-            .thread
-            .unwrap_or_else(|| crate::runtime::channel::OPERATOR_CHANNEL.to_string());
-        // Issue #435: the bad news belongs in the same place the good news
-        // would have gone. A failure notice left flat in the channel while the
-        // question sits in a thread is the same lost-conclusion bug wearing a
-        // different hat — and this is the message the operator is most likely
-        // to be waiting on.
+        let thread = continuation_chat_id(
+            conversation.thread,
+            self.journal.approval_origin(approval_id).as_ref(),
+        );
         let parent = self.resolvable_parent(conversation.parent, &thread).await;
         if let Err(err) = self
             .events
@@ -5162,8 +5092,8 @@ impl CompanyRuntime {
     ///
     /// **Driven by [`MaintenanceTicker`](crate::runtime::maintenance::MaintenanceTicker)**
     /// — a process-wide ticker over the registry, not the per-company cron
-    /// scheduler. Until issue #971 the only production caller was
-    /// `CompanyScheduler::tick_maintenance`, and that scheduler is only spawned
+    /// scheduler. Until issue #971 the only production caller was the
+    /// `CompanyScheduler` minute loop, and that scheduler is only spawned
     /// for a company whose manifest declares a `[[schedule]]`. So a company with
     /// no manifest cron — including one whose work is driven entirely by
     /// *workflow* schedules, which run on a different loop — parked approvals
@@ -6400,15 +6330,7 @@ impl CompanyRuntime {
     /// a verdict does not mean the same thing to each, so a group must never
     /// mix them. Oldest-first, the order `pending` already returns.
     ///
-    /// Matched through
-    /// [`stamped_conversation_is`](crate::server::chat_history::stamped_conversation_is)
-    /// rather than `same_conversation`, so a blocker that names **no** thread is
-    /// pending in no conversation rather than in General. `park_blocker` always
-    /// stamps the sender's DM, but `cycle_conversation` hands back a thread-less
-    /// `ApprovalConversation` for every park that came from no conversation at
-    /// all — a planning pass, a scheduler tick, an unaddressed trigger — and
-    /// through `same_conversation` each of those read as pending in `#general`,
-    /// where the next top-level message was consumed as its answer.
+    /// A blocker that names no thread is pending in no conversation.
     #[cfg(feature = "openhuman")]
     fn pending_blocker_groups(&self, desk: &str) -> Vec<PendingBlockerGroup> {
         let prefix = format!("{}.", crate::ports::blockers::BLOCKER_EFFECT_PREFIX);
@@ -7750,6 +7672,30 @@ fn ask_which_prompt(groups: &[PendingBlockerGroup]) -> String {
     )
 }
 
+/// Where a continuation's reply is journaled: a workflow run's park answers on
+/// its run whatever conversation started the run, and any other park answers in
+/// the conversation it was raised in, falling back to its origin.
+fn continuation_chat_id(
+    thread: Option<String>,
+    origin: Option<&crate::runtime::journal::ApprovalOrigin>,
+) -> String {
+    if let Some(run) = origin.and_then(workflow_run_of_origin) {
+        return run;
+    }
+    thread.unwrap_or_else(|| continuation_fallback_chat_id(origin))
+}
+
+/// The workflow run a park's origin belongs to: an explicitly unlinked park
+/// that carries a run id.
+fn workflow_run_of_origin(origin: &crate::runtime::journal::ApprovalOrigin) -> Option<String> {
+    matches!(
+        origin.task,
+        Some(crate::runtime::journal::TaskLink::Unlinked)
+    )
+    .then(|| origin.run_id.clone())
+    .flatten()
+}
+
 /// Where a continuation's reply is journaled when the approval it resumes was
 /// raised in **no conversation** (issue #1092), read off the park's own origin.
 ///
@@ -7784,7 +7730,7 @@ fn continuation_fallback_chat_id(
     // unknown case too (a pre-#333 line with no recorded link): a reply in the
     // operator's own line is recoverable, while one in a teammate's DM reads as
     // a message that teammate never sent.
-    let general = || crate::server::ops::language::DEFAULT_DESK.to_string();
+    let general = || crate::server::ops::language::GENERAL_CHANNEL_ID.to_string();
     let Some(origin) = origin else {
         return general();
     };

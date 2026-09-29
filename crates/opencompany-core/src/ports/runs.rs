@@ -284,7 +284,11 @@ pub struct RunRecord {
     pub agent_id: String,
     /// The conversation this attempt belongs to, when one raised it
     /// (issue #983) — the only handle a card-less chat turn has.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::ports::general_channel::deserialize_general_chat_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub chat_id: Option<String>,
     /// Which attempt at `task_id` this is, **1-based** — the first run of a card
     /// is `Attempt 1`. Assigned by the backend at create time; see

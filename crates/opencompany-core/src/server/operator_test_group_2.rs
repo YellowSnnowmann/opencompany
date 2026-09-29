@@ -162,7 +162,7 @@ async fn only_a_person_gets_a_self_promoting_card() {
             &message,
             by.as_ref(),
             None,
-            crate::server::ops::language::DEFAULT_DESK,
+            crate::server::ops::language::GENERAL_CHANNEL_ID,
         )
         .await
         .expect("the turn is accepted");
@@ -202,6 +202,7 @@ async fn chat_routes_through_the_harness_brain() {
     .unwrap();
 
     let record = CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),

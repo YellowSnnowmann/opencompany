@@ -153,6 +153,7 @@ async fn a_desk_reorder_reaches_a_resident_runtime_without_a_rebuild() {
     let store = FsCompanyStore::new(home.clone());
     store
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
             overlay_desk_hive: Vec::new(),
@@ -312,6 +313,7 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
     let store = FsCompanyStore::new(home.clone());
     store
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
             overlay_desk_hive: Vec::new(),
@@ -466,6 +468,7 @@ async fn build_seeds_desk_order_into_brain_routing() {
     let store = FsCompanyStore::new(home.clone());
     store
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
             overlay_desk_hive: Vec::new(),
@@ -578,6 +581,7 @@ async fn build_applies_the_effective_policy_to_the_gate_but_not_an_injected_one(
     };
     FsCompanyStore::new(dir.path())
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
             overlay_desk_hive: Vec::new(),
