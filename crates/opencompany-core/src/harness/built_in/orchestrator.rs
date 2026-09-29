@@ -1003,12 +1003,17 @@ impl DelegationQueue {
     }
 
     /// Drains hand-off targets rejected by a dispatched task's one-transfer rule.
-    pub fn drain_task_handoff_refusals(&self) -> Vec<String> {
-        self.task_handoff_refusals
+    pub fn drain_task_handoff_refusals(&self, cap: usize) -> Vec<String> {
+        let mut guard = self.task_handoff_refusals
             .lock()
-            .expect("delegation queue")
-            .remove(&Self::current_scope())
-            .unwrap_or_default()
+            .expect("delegation queue");
+        let Some(bucket) = guard.get_mut(&Self::current_scope()) else {
+            return Vec::new();
+        };
+        let take = bucket.len().min(cap);
+        let drained = bucket.drain(..take).collect();
+        bucket.clear();
+        drained
     }
 
     /// Empties the queue (called before an orchestrator turn so stale
@@ -1030,6 +1035,10 @@ impl DelegationQueue {
     fn clear_scope(&self, scope: &DelegationScope) {
         self.inner.lock().expect("delegation queue").remove(scope);
         self.refused.lock().expect("delegation queue").remove(scope);
+        self.task_handoff_refusals
+            .lock()
+            .expect("delegation queue")
+            .remove(scope);
     }
 
     /// Releases a claim: discards everything the claim's scope staged and
