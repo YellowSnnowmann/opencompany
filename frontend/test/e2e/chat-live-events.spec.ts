@@ -63,24 +63,18 @@ function railRow(page: Page, channelName: string): Locator {
   return page.getByRole("complementary").first().getByRole("button", { name: channelName });
 }
 
-test("does not offer the built-in general channel by default", async ({ page }) => {
+test("offers #general in the rail, from the host's desk list", async ({ page }) => {
   await openChannel(page, ENGINEERING.id);
 
-  // `#general` remains resolvable for legacy history, but the console no
-  // longer offers it as a channel to open or compose into.
   await expect(railRow(page, ENGINEERING.channel)).toBeVisible();
-  await expect(railRow(page, "general")).toHaveCount(0);
+  await expect(railRow(page, "general")).toBeVisible();
 });
 
-test("resolves the hidden general channel from its legacy deep link", async ({ page }) => {
-  await openChannel(page, ENGINEERING.id);
-  await expect(railRow(page, "general")).toHaveCount(0);
+test("a legacy #/chat/main link opens #general under its own address", async ({ page }) => {
+  await page.goto("/#/chat/main");
 
-  await openChannel(page, "general");
-  await expect(page).toHaveURL(/#\/chat\/general(?:[/?]|$)/);
-  await expect(page.getByRole("main")).toBeVisible();
-  await expect(page.getByPlaceholder(/^Message /)).toBeVisible();
-  await expect(railRow(page, "general")).toHaveCount(0);
+  await expect(page.getByPlaceholder("Message #general")).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => new URL(page.url()).hash).toMatch(/^#\/chat\/general(?:\?|$)/);
 });
 
 /**
@@ -207,6 +201,25 @@ test("a turn sent from the composer renders exactly one company bubble", async (
   await page.waitForTimeout(3_000);
   await expect(bubbles(page)).toHaveCount(before + 2);
   await expect(reply(page, marker)).toHaveCount(1);
+});
+
+test("a turn sent in #general gets its reply there", async ({ page }) => {
+  test.skip(LIVE_BRAIN, ECHO_BRAIN_ONLY);
+
+  await openChannel(page, "general");
+  await expect(page).toHaveURL(/#\/chat\/general(?:[/?]|$)/);
+  const before = await settledBubbleCount(page);
+
+  const marker = `general-${Date.now()}`;
+  const sent = page.waitForRequest(
+    (r) => r.method() === "POST" && /\/chat$/.test(new URL(r.url()).pathname),
+  );
+  await page.getByPlaceholder("Message #general").fill(marker);
+  await page.keyboard.press("Enter");
+  expect((await sent).postDataJSON()).toMatchObject({ text: marker, chat: "general" });
+
+  await expect(reply(page, marker)).toHaveCount(1, { timeout: 60_000 });
+  await expect(bubbles(page)).toHaveCount(before + 2);
 });
 
 test("a running turn shows its current tool in the channel", async ({ page }) => {

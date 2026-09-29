@@ -99,6 +99,14 @@ RUN --mount=type=cache,target=/build/target \
 FROM docker.io/library/node:22-slim AS console
 WORKDIR /console
 
+# `node:22-slim` ships no CA bundle. Node itself carries its own roots, but the
+# native `sentry-cli` that `@sentry/vite-plugin` runs during `npm run build`
+# uses the system store, and without it every call (`releases new`, sourcemap
+# upload) dies with "unable to get local issuer certificate" and fails the build.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Console crash reporting (`docs/spec/runtime/crash-reporting.md`).
 #
 # These are read by Vite at BUILD time and inlined into the bundle, so unlike
@@ -107,9 +115,11 @@ WORKDIR /console
 # them there is no path for a console DSN to reach a hosted tenant at all, and
 # setting one on the StatefulSet is a silent no-op.
 #
-# Both default to empty, which is the shipped behaviour: `resolveCrashReporting`
-# builds no client without a DSN, and `sentryRelease()` falls back to the bare
-# version without a commit. A local `docker build` therefore needs neither.
+# Both default to empty. An empty `VITE_SENTRY_DSN` makes the production bundle
+# report to the compiled-in TinyHumans console project
+# (`DEFAULT_CONSOLE_SENTRY_DSN`); pass `VITE_SENTRY_DSN=off` for a silent one
+# (`deploy/docker-compose.yml` does). `sentryRelease()` falls back to the bare
+# version without a commit.
 #
 # `VITE_SENTRY_ENVIRONMENT` has to be passed for the same reason, and is easy to
 # miss because both surfaces default to something plausible and different: the
