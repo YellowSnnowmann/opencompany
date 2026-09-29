@@ -1004,9 +1004,7 @@ impl DelegationQueue {
 
     /// Drains hand-off targets rejected by a dispatched task's one-transfer rule.
     pub fn drain_task_handoff_refusals(&self, cap: usize) -> Vec<String> {
-        let mut guard = self.task_handoff_refusals
-            .lock()
-            .expect("delegation queue");
+        let mut guard = self.task_handoff_refusals.lock().expect("delegation queue");
         let Some(bucket) = guard.get_mut(&Self::current_scope()) else {
             return Vec::new();
         };

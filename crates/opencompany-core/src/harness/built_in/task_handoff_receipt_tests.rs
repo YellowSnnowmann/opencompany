@@ -20,6 +20,7 @@ async fn dispatched_card_refuses_second_handoff_but_chat_collects_both() {
                 queue.push_within_cap(handoff("reviewer"), 3, 3),
                 Staged::NoDrain(NoDrainReason::TaskHandoffAlreadyQueued)
             );
+            assert_eq!(queue.drain_task_handoff_refusals(3), vec!["reviewer"]);
             let drained = queue.drain(3);
             assert_eq!(drained.len(), 1);
             assert_eq!(drained[0], handoff("maker"));

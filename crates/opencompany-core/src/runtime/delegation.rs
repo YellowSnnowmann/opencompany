@@ -2161,10 +2161,7 @@ impl<'a> DelegationRunner<'a> {
                 ),
             ));
         }
-        for target in self
-            .queue
-            .drain_task_handoff_refusals(self.max_delegations)
-        {
+        for target in self.queue.drain_task_handoff_refusals(self.max_delegations) {
             tracing::warn!(
                 task_id = %card.id,
                 delegator = %delegator,
