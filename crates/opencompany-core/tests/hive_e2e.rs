@@ -941,12 +941,23 @@ async fn report(runtime: &Arc<CompanyRuntime>) -> Report {
 /// A generous bound: every seat turn here is a couple of loopback calls.
 const EPISODE: Duration = Duration::from_secs(60);
 
+// These cases boot separate companies, but OpenHuman's embedded runtime is
+// process-wide and retains the first model configuration it is given. Keep
+// each end-to-end scenario from routing turns into another scenario's scripted
+// model server.
+static E2E_RUNTIME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn lock_e2e_runtime() -> tokio::sync::MutexGuard<'static, ()> {
+    E2E_RUNTIME_LOCK.lock().await
+}
+
 // ---------------------------------------------------------------------------
 // 1: a desk answers through the seat its routing named
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_desk_answers_through_the_seat_its_routing_named() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", record_part),
@@ -1134,6 +1145,7 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_broadcast_without_jev_falls_back_deterministically() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         // This is the hand-off test, so this is the script that hands off:
@@ -1244,6 +1256,7 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
 /// message actually takes on a desk now.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_ask_opens_a_conversation_the_desk_only_references() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", |seat| {
@@ -1475,6 +1488,7 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_single_member_desk_answers_with_one_ordinary_turn() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted — the front desk has it.", |seat| {
@@ -1537,6 +1551,7 @@ const TAGLINE: &str = "Checkout, now with fewer steps.";
 #[ignore = "cross-desk referral is not reconnected to the conductor"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_cross_desk_referral_crosses_only_the_answer_back() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", |seat| {
@@ -1750,6 +1765,7 @@ fn cross_desk_overlap(rows: &[StoredEvent]) -> bool {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", record_part),
@@ -1849,6 +1865,7 @@ const ASK_TWO: &str = "When is the rollout window?";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", |seat| {
@@ -1965,6 +1982,7 @@ async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
 /// each other yet.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_seat_at_two_desks_is_shown_the_other_as_context() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     // The hand-off script, because the fallback plan names one seat and it is
     // never the CEO: the seat it opens with broadcasts, the fallback places
@@ -2197,6 +2215,7 @@ fn told(script: &support::script_model::Script, words: &str) -> usize {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_approved_request_resumes_the_seat_and_completes_the_episode() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         ask_then_record(
@@ -2242,6 +2261,7 @@ async fn an_approved_request_resumes_the_seat_and_completes_the_episode() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_denied_request_resumes_the_seat_with_the_denial() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         ask_then_record(
@@ -2272,6 +2292,7 @@ async fn a_denied_request_resumes_the_seat_with_the_denial() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_answered_escalation_reaches_the_seat_that_asked() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         ask_then_record(
@@ -2309,6 +2330,7 @@ async fn an_answered_escalation_reaches_the_seat_that_asked() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_parked_episode_resumes_from_its_checkpoint_after_a_restart() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         ask_then_record(
@@ -2428,6 +2450,7 @@ fn delivered_rows(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_seat_publishes_a_deliverable_the_operator_can_edit() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", write_publish_then_record),
@@ -2539,6 +2562,7 @@ async fn a_seat_publishes_a_deliverable_the_operator_can_edit() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_turn_that_only_publishes_hands_over_on_a_row_of_its_own() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let published = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let marked = Arc::clone(&published);
