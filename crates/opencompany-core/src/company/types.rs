@@ -612,20 +612,9 @@ pub struct Company {
     /// Company logo as a self-contained data:image/... URL (issue: operator-set brand logo).
     #[serde(default)]
     pub logo_url: Option<String>,
-    /// The desk that owns the company's own line — the General channel.
-    ///
-    /// Unset (the default) keeps the historical behaviour: General resolves to
-    /// no desk, so a message there is answered by a single responder off the
-    /// fallback ladder.
-    ///
-    /// **The named desk must not itself be called General.** tinyhivemind
-    /// refuses a hive episode on a desk whose id *or name* is a General
-    /// spelling (`reserved desk identity`), and that refusal lands in the turn
-    /// rather than at load — a company that names one boots clean and then
-    /// fails every message on its main thread. This key exists precisely so the
-    /// company line can reach a room without any desk having to be called
-    /// General: the channel is General, the desk it resolves to is not.
-    #[serde(default)]
+    /// Retired: #general is built in. Kept only so manifest validation can
+    /// name the key when a manifest still sets it.
+    #[serde(default, skip_serializing)]
     pub general_desk: Option<String>,
 }
 

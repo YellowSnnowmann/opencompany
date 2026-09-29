@@ -276,8 +276,11 @@ Nothing, unless it is a tenant on the TinyHumans hosted platform.
 
 [`docs/spec/runtime/analytics.md`](docs/spec/runtime/analytics.md) has every
 event and property, the conditions that must all hold before anything is sent,
-and how the opaque id is derived. Crash reporting is separate, off until you
-configure it, and goes to your own Sentry project rather than ours —
+and how the opaque id is derived. Crash reporting is separate: a self-hosted
+host is off until you configure your own Sentry DSN, while the official desktop
+app, hosted tenants and a console bundle built without `VITE_SENTRY_DSN` report
+to TinyHumans' projects unless you set your own DSN or `OPENCOMPANY_SENTRY=off`
+/ `VITE_SENTRY_DSN=off` —
 [`docs/spec/runtime/crash-reporting.md`](docs/spec/runtime/crash-reporting.md).
 
 ## Documentation

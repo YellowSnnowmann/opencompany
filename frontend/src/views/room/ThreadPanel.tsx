@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { TriangleAlert, X } from "lucide-react";
+import { X } from "lucide-react";
 
 import { Markdown } from "@/components/markdown";
 import { TeammateAvatar } from "@/components/teammate-avatar";
@@ -88,19 +88,6 @@ interface Props {
    * composer's outside-channel warning. Absent when membership is unknown.
    */
   channelMemberIds?: string[];
-  /**
-   * Whether the channel this thread belongs to is read-only (issue #1757's
-   * Operator channel, `Boolean(channel?.system)` in `RoomView`). The main
-   * composer is not rendered on such a channel, but a thread has its own
-   * composer — so without this a durable Operator report could still be
-   * opened as a thread and replied to there, only for the server's read-only
-   * guard to reject it after the text was written. Absent means "no such
-   * channel is open", the same as the main composer's default.
-   *
-   * The panel answers it the way the channel does: **no composer at all**,
-   * and a notice in its place saying why. See the render site.
-   */
-  readOnly?: boolean;
   /**
    * Whether this thread hangs off a settled `in_review` dispatch card's review
    * surface — its settle pill or the relay bubble that followed it. When set, a
@@ -253,7 +240,6 @@ export function ThreadPanel({
   sending,
   mentionables,
   channelMemberIds,
-  readOnly,
   youAvatar,
   resolveAttachmentUrl,
   onSend,
@@ -381,103 +367,75 @@ export function ThreadPanel({
         {!atBottom && <JumpToLatest onClick={jumpToLatest} />}
       </div>
 
-      {/* A read-only thread gets the notice and no composer, the way its
-          channel does. The panel used to render a *disabled* composer with the
-          placeholder "This channel is read-only" — but a disabled reply box is
-          still a claim that replying is a thing you do here, and it was the
-          only thing this panel said on the subject. The explanation is what
-          should occupy the space; the affordance should not be there at all.
-
-          `noopSend` went with it: with no composer there is nothing left to
-          wire a no-op to. The belt that mattered is the server's read-only
-          guard (issue #1757), which is untouched, plus `RoomView`'s own
-          `if (readOnly) return;` before it calls `client.chat`. */}
-      {readOnly ? (
-        <p
-          role="status"
-          data-testid="thread-read-only-notice"
-          className="flex shrink-0 items-center gap-1.5 border-t bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"
-        >
-          <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
-          <span className="min-w-0">
-            The <span className="font-medium text-foreground">Operator</span> channel is a
-            read-only feed of automation reports and notifications. There is nothing to reply to
-            here.
-          </span>
-        </p>
-      ) : (
-        <>
-          {(openTurn || !!openTurnSteps?.length) && (
-            <div className="px-4 py-2">
-              {/* Named, not blind. The rows used to render against each line
-                  in the body while this row said only "Replying…" — so the
-                  panel showed the work in the past tense of its position and
-                  the presence in the present tense of its wording. One row,
-                  at the foot, carrying both. */}
-              <WorkingIndicator
-                srLabel={openTurn?.queued ? "Queued…" : "Replying…"}
-                steps={openTurnSteps}
-                name={liveName ?? turnAgentName}
-                queued={openTurn?.queued}
-              />
-              {/* …and what it has done, the same pair the channel shows. The
-                  line names the teammate and stops; this names the call in
-                  flight in its own summary. */}
-              {!!openTurnSteps?.length && <StepTimeline steps={[...openTurnSteps]} />}
-            </div>
-          )}
-          <TypingLine names={typingNames} />
-          {reviewing && (
-            <div className="flex items-center justify-between gap-2 border-t bg-muted/40 px-4 py-1.5">
-              <p className="text-xs text-muted-foreground">
-                This card is ready for review. A reply sends it back for another pass
-                with your notes.
-              </p>
-              {reviewTaskId !== undefined && onReviewCard !== undefined && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-6 shrink-0 px-2 text-xs"
-                  disabled={reviewInFlight}
-                  onClick={() => onReviewCard(reviewTaskId, "approve")}
-                >
-                  {reviewInFlight ? "Approving…" : "Approve"}
-                </Button>
-              )}
-            </div>
-          )}
-          {additionalReviewAnchors?.map((anchor) => (
-            <div
-              key={anchor.taskId}
-              className="flex items-center justify-between gap-2 border-t bg-muted/40 px-4 py-1.5"
-            >
-              <p className="text-xs text-muted-foreground">
-                Another card in this thread is also ready for review.
-              </p>
-              {onReviewCard !== undefined && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-6 shrink-0 px-2 text-xs"
-                  disabled={reviewingTaskId?.has(anchor.taskId) ?? false}
-                  onClick={() => onReviewCard(anchor.taskId, "approve")}
-                >
-                  {reviewingTaskId?.has(anchor.taskId) ? "Approving…" : "Approve"}
-                </Button>
-              )}
-            </div>
-          ))}
-          <MessageComposer
-            compact
-            placeholder={reviewing ? "Send for another pass…" : "Reply…"}
-            disabled={sending}
-            mentionables={mentionables}
-            channelMemberIds={channelMemberIds}
-            onSend={onSend}
-            onTyping={onTyping}
+      {(openTurn || !!openTurnSteps?.length) && (
+        <div className="px-4 py-2">
+          {/* Named, not blind. The rows used to render against each line
+              in the body while this row said only "Replying…" — so the
+              panel showed the work in the past tense of its position and
+              the presence in the present tense of its wording. One row,
+              at the foot, carrying both. */}
+          <WorkingIndicator
+            srLabel={openTurn?.queued ? "Queued…" : "Replying…"}
+            steps={openTurnSteps}
+            name={liveName ?? turnAgentName}
+            queued={openTurn?.queued}
           />
-        </>
+          {/* …and what it has done, the same pair the channel shows. The
+              line names the teammate and stops; this names the call in
+              flight in its own summary. */}
+          {!!openTurnSteps?.length && <StepTimeline steps={[...openTurnSteps]} />}
+        </div>
       )}
+      <TypingLine names={typingNames} />
+      {reviewing && (
+        <div className="flex items-center justify-between gap-2 border-t bg-muted/40 px-4 py-1.5">
+          <p className="text-xs text-muted-foreground">
+            This card is ready for review. A reply sends it back for another pass
+            with your notes.
+          </p>
+          {reviewTaskId !== undefined && onReviewCard !== undefined && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 shrink-0 px-2 text-xs"
+              disabled={reviewInFlight}
+              onClick={() => onReviewCard(reviewTaskId, "approve")}
+            >
+              {reviewInFlight ? "Approving…" : "Approve"}
+            </Button>
+          )}
+        </div>
+      )}
+      {additionalReviewAnchors?.map((anchor) => (
+        <div
+          key={anchor.taskId}
+          className="flex items-center justify-between gap-2 border-t bg-muted/40 px-4 py-1.5"
+        >
+          <p className="text-xs text-muted-foreground">
+            Another card in this thread is also ready for review.
+          </p>
+          {onReviewCard !== undefined && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 shrink-0 px-2 text-xs"
+              disabled={reviewingTaskId?.has(anchor.taskId) ?? false}
+              onClick={() => onReviewCard(anchor.taskId, "approve")}
+            >
+              {reviewingTaskId?.has(anchor.taskId) ? "Approving…" : "Approve"}
+            </Button>
+          )}
+        </div>
+      ))}
+      <MessageComposer
+        compact
+        placeholder={reviewing ? "Send for another pass…" : "Reply…"}
+        disabled={sending}
+        mentionables={mentionables}
+        channelMemberIds={channelMemberIds}
+        onSend={onSend}
+        onTyping={onTyping}
+      />
     </aside>
   );
 }

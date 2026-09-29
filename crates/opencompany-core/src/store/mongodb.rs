@@ -892,6 +892,7 @@ impl CompanyStore for MongoStore {
             name_confirmed: overlay.name_confirmed,
             activation_completed_at: overlay.activation_completed_at,
             created_at_millis: overlay.created_at_millis,
+            general_channel: overlay.general_channel.unwrap_or_default(),
         }))
     }
 

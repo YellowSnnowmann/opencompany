@@ -82,7 +82,7 @@ impl DeskHost {
             // Not necessarily the desk: in a DM, a seat that is only here to
             // be askable does not write into the owner's operator line. See
             // `DeskHost::row_chat`.
-            let mut event = self.reply(&self.row_chat(&seat), &seat, String::new(), None, None);
+            let mut event = self.reply(&self.row_chat(&seat), &seat, String::new(), None, &[]);
             if let CompanyEvent::AgentReply {
                 outputs,
                 task_id,

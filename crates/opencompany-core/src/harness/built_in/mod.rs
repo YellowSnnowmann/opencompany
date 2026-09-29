@@ -749,10 +749,10 @@ pub struct CompanyAgent {
     /// telemetry cells. Held here so `meter_turn_costs` reads the SAME
     /// instance the turn ran through.
     chat_model: Arc<dyn HarnessModel>,
-    /// The catalogue the `opencompany` MCP brief in this agent's system prompt
-    /// names (`build::agent_spec_for`'s `allow_tools`): the speech tools plus
-    /// every served tool. Kept so a roster rebuild can tell whether the
-    /// catalogue moved — see [`Self::catalogue_brief_stale`].
+    /// Always empty for an embedded agent: there is no `opencompany` MCP
+    /// catalogue left to brief it about, so [`Self::catalogue_brief_stale`]'s
+    /// comparison can never find this field to have moved. Kept as the type
+    /// the rebuild-comparison plumbing expects.
     served_catalogue: Vec<String>,
     /// Whether the session this agent resumes may still carry an OLDER brief
     /// than [`Self::served_catalogue`].
@@ -1127,7 +1127,7 @@ pub struct TurnOutcome {
     /// `Some` exactly when [`classify_turn`](CompanyAgent) recognised the
     /// model provider's `Err` as the same budget-exhausted wire shape the
     /// delegated sub-agent path already halts gracefully on
-    /// (`oh::api::classify::is_budget_exhausted_message`). `None` on
+    /// (`oh::backend::classify::is_budget_exhausted_message`). `None` on
     /// every other path, including a turn that failed for an unrelated
     /// reason — those still propagate as `Err`, never as this field.
     ///
@@ -1220,10 +1220,11 @@ impl CompanyAgent {
     ///
     /// The agent is also registered on the process-wide `opencompany` MCP
     /// host (plan hive-desks Phase 3) under the same runtime id, with a fresh
-    /// bearer, its non-native belt as the catalogue and its
-    /// [`ApprovalPolicy`] as the gate; when the host's listener is up, the
-    /// spec carries the matching `McpServer`. `events` is the journal `read`
-    /// is served from — `None` leaves that one tool refusing.
+    /// bearer and its [`ApprovalPolicy`] as the gate, so its turns are
+    /// attributed there; the spec itself carries no `opencompany` server, and
+    /// every tool of this crate's reaches the model on the belt by its own
+    /// name. `events` is the journal the belt's `read` is served from — `None`
+    /// keeps `read` on the belt, refusing every call.
     pub(crate) fn register(
         runtime: &openhuman_embed::Runtime,
         company: &CompanyId,
@@ -1239,13 +1240,8 @@ impl CompanyAgent {
         )?;
         let mcp = crate::hive::mcp_server::global();
         let mcp_bearer = crate::hive::mcp_server::McpAgent::mint_bearer();
-        // The speech tools stay on the MCP server; this crate's own tools do
-        // not, so they leave the served catalogue with them.
-        let allow_tools: Vec<String> = crate::hive::tools::served_speech_tool_names()
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect();
-        let served_catalogue = allow_tools.clone();
+        let served_catalogue: Vec<String> = Vec::new();
+        let read_binding = Arc::new(std::sync::OnceLock::new());
         // Shared once, here, and handed to the spec as a factory that mints
         // owned handles per turn. OpenHuman's own tools are filtered out: it
         // runs those itself, and handing them back would register each twice.
@@ -1257,13 +1253,18 @@ impl CompanyAgent {
             .map(|tool| tool.name().to_string())
             .collect();
         let gate = Arc::clone(&blueprint.policy);
-        let native_belt: Arc<Vec<Arc<dyn tinytools::Tool>>> =
-            Arc::new(crate::hive::tools::share_belt(
-                std::mem::take(&mut blueprint.tools)
-                    .into_iter()
-                    .filter(|tool| !build::OPENHUMAN_NATIVE_TOOLS.contains(&tool.name()))
-                    .collect(),
-            ));
+        let mut shared_belt = crate::hive::tools::share_belt(
+            std::mem::take(&mut blueprint.tools)
+                .into_iter()
+                .filter(|tool| !build::OPENHUMAN_NATIVE_TOOLS.contains(&tool.name()))
+                .collect(),
+        );
+        shared_belt.push(Arc::new(crate::hive::tools::ConversationReadTool::new(
+            Arc::clone(mcp.in_flight()),
+            Arc::clone(&read_binding),
+            events.clone(),
+        )));
+        let native_belt: Arc<Vec<Arc<dyn tinytools::Tool>>> = Arc::new(shared_belt);
         // Created before the agent, because the belt factory closes over it at
         // registration and an episode writes to it long afterwards.
         let seating = crate::hive::seating::EpisodeBelts::default();
@@ -1271,18 +1272,11 @@ impl CompanyAgent {
         let mut runtime_id = base_id.clone();
         let mut attempt = 0u32;
         let agent = loop {
-            let attach = mcp.endpoint_for(company, &runtime_id).map(|endpoint| {
-                crate::hive::mcp_server::McpAttach {
-                    endpoint,
-                    bearer: mcp_bearer.clone(),
-                    allow_tools: allow_tools.clone(),
-                }
-            });
             let spec = build::agent_spec_for(
                 &blueprint,
                 &runtime_id,
                 bridge.provider(),
-                attach.as_ref(),
+                None,
                 Some(&native_belt),
                 Some(&gate),
                 Some(&seating),
@@ -1313,14 +1307,14 @@ impl CompanyAgent {
                 "[harness] runtime id was taken; registered under a numbered suffix"
             );
         }
+        let _ = read_binding.set(runtime_id.clone());
         let build::AgentBlueprint {
             workspace,
             chat_model,
             ..
         } = blueprint;
-        // No `.tools(..)`: the belt is the agent's own now. The server still
-        // serves the speech tools, and still holds the policy and workspace
-        // those calls are admitted and sandboxed against.
+        // No `.tools(..)`: the belt is the agent's own now. The entry keeps
+        // the bearer, policy and workspace a turn is attributed under.
         let mut entry = crate::hive::mcp_server::McpAgent::new(
             company.clone(),
             agent_id,
@@ -1394,7 +1388,7 @@ impl CompanyAgent {
     ) -> tinyhivemind_embed::ConversationRef {
         use tinyhivemind_embed::ConversationKind;
         let (id, kind) = match chat_id {
-            Some(chat) if tinyhivemind_core::chat::is_general_chat(Some(chat)) => {
+            Some(chat) if chat == crate::ports::general_channel::GENERAL_CHANNEL_ID => {
                 (chat.to_string(), ConversationKind::General)
             }
             Some(chat) if chat.starts_with("dm:") => (chat.to_string(), ConversationKind::Direct),
@@ -1846,13 +1840,7 @@ impl CompanyAgent {
                 }
             }
         }
-        let hit_iteration_cap = progress_pump::hit_iteration_cap(&events);
-        if hit_iteration_cap {
-            tracing::info!(
-                agent = %self.agent_id,
-                "[turn] paused at the tool-iteration cap; the reply is a resumable checkpoint, not a finished answer"
-            );
-        }
+        let raw_iteration_cap = progress_pump::hit_iteration_cap(&events);
         let halted_for_spend = spend_brake.and_then(|(cap_usd, halted)| {
             halted
                 .load(std::sync::atomic::Ordering::SeqCst)
@@ -1862,6 +1850,37 @@ impl CompanyAgent {
                     cap_usd,
                 })
         });
+        // #988: a spend halt reads `hit_iteration_cap == false`.
+        //
+        // `brain.rs` emits the step-pause notice and the spend notice from
+        // separate `if`s, on the stated grounds that one operator message can
+        // run several turns and both facts may be owed — but that the two
+        // "cannot both come from ONE turn" *because* this invariant holds.
+        // The predicate itself cannot see the halt: it reads only the progress
+        // stream, and a hook-driven halt is not in it. While the stream never
+        // reported a cap at all the invariant held for free; now that it does,
+        // it has to be stated here, where both facts are in hand, rather than
+        // re-checked at each notice site.
+        //
+        // The halt wins because it is the more specific account of why the
+        // turn stopped, and the two notices are not interchangeable: a step
+        // pause invites "continue", which on a spent budget would invite the
+        // operator to burn a cap that has already run out.
+        let hit_iteration_cap =
+            progress_pump::reportable_iteration_cap(raw_iteration_cap, halted_for_spend.is_some());
+        if hit_iteration_cap {
+            tracing::info!(
+                agent = %self.agent_id,
+                "[turn] paused at the tool-iteration cap; the reply is a resumable checkpoint, not a finished answer"
+            );
+        }
+        if raw_iteration_cap && !hit_iteration_cap {
+            tracing::info!(
+                agent = %self.agent_id,
+                "[turn] the iteration cap was reached on a turn already halted for spend; \
+                 reporting the halt, which is why it stopped"
+            );
+        }
         if let Some(halt) = &halted_for_spend {
             tracing::info!(
                 agent = %self.agent_id,
@@ -2034,13 +2053,13 @@ impl CompanyAgent {
 /// account for), matches the single existing budget-exhausted wire-shape
 /// classifier.
 ///
-/// Deliberately reuses `oh::api::classify::is_budget_exhausted_message`
+/// Deliberately reuses `oh::backend::classify::is_budget_exhausted_message`
 /// rather than forking a second copy of the phrase list — the whole point of
 /// this fix is to close the asymmetry, not add a second place for the two to
 /// drift apart. See `budget_wire_shapes_all_classify_as_budget_paused` for the
 /// drift-coupling test that fails CI if the two ever disagree.
 fn is_top_level_budget_exhausted(err: &anyhow::Error) -> bool {
-    oh::api::classify::is_budget_exhausted_message(&format!("{err:#}"))
+    oh::backend::classify::is_budget_exhausted_message(&format!("{err:#}"))
 }
 
 /// UTF-8-safe truncation to at most `max` chars, appending a truncation marker
@@ -3189,17 +3208,13 @@ impl HarnessPool {
         // boot-time snapshot (e.g. `HarnessBrain::record`), so the roster is
         // built from the live-resolved overlay set, not `company.overlay_agents`.
         let mut fresh_company = company.clone();
-        fresh_company.overlay_agents = overlay.agents;
+        fresh_company.install_roster_overlay(overlay.agents, overlay.retired);
         // And the operator's edits of the manifest teammates, for exactly the
         // reason the budget overrides below are installed: `build_roster`
         // resolves every manifest row through `fresh_company.effective_agent`,
         // so the live edit set has to be the one it reads — otherwise a console
         // rename would reach the roster only after a restart.
         fresh_company.overlay_agent_edits = overlay.agent_edits;
-        // And the tombstones, for the same reason: `build_roster` filters the
-        // manifest roster through `fresh_company.effective_agents`, so the live
-        // removal set has to be the one it reads.
-        fresh_company.overlay_retired_agents = overlay.retired;
         // Same treatment for the budget overrides (issue #343): `build_roster`
         // resolves every agent's cap through `fresh_company.effective_budget`,
         // so installing the live set here is what carries a console budget edit
@@ -4522,9 +4537,9 @@ impl HarnessPool {
             company: company.clone(),
             agent_id: confine::CONFINED_AGENT_ID.to_string(),
             route: crate::turn_stream::LiveRoute::Chat {
-                chat_id: chat_id
-                    .map(str::to_string)
-                    .unwrap_or_else(|| crate::server::ops::language::DEFAULT_DESK.to_string()),
+                chat_id: chat_id.map(str::to_string).unwrap_or_else(|| {
+                    crate::server::ops::language::GENERAL_CHANNEL_ID.to_string()
+                }),
             },
             // A copilot turn is addressed by `chat_id` alone — this entry point
             // takes no `ChatTarget` — so its frames key by thread, as every
@@ -4822,9 +4837,9 @@ impl HarnessPool {
                 // durable reply when the caller addressed no desk (e.g. an API
                 // client that omits `chat`).
                 route: crate::turn_stream::LiveRoute::Chat {
-                    chat_id: chat_id
-                        .map(str::to_string)
-                        .unwrap_or_else(|| crate::server::ops::language::DEFAULT_DESK.to_string()),
+                    chat_id: chat_id.map(str::to_string).unwrap_or_else(|| {
+                        crate::server::ops::language::GENERAL_CHANNEL_ID.to_string()
+                    }),
                 },
                 // The operator message this turn answers, read off the
                 // `ChatTarget` the caller already passes. Nothing new is
@@ -6325,6 +6340,9 @@ pub(crate) fn workflow_wiring_deps(
 #[cfg(test)]
 #[path = "built_in_catalogue_brief_tests.rs"]
 mod built_in_catalogue_brief_tests;
+#[cfg(test)]
+#[path = "built_in_read_retention_tests.rs"]
+mod built_in_read_retention_tests;
 /// Issue #1840: chat-turn history seeding, first half.
 /// `routed_context` fingerprint/resolution coverage.
 #[cfg(test)]

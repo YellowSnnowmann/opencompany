@@ -214,6 +214,16 @@ the host transport `hive::jev::TinyHumansSystemOne`:
   `TINYHUMANS_API_KEY`). The proxy speaks the System One wire body unchanged
   and resolves `jev-latest` to a concrete `typesafe/jev-*` id in the
   response; the router records that id and never compares it.
+- `OPENCOMPANY_JEV_KEY` is a **development** override: the bearer to present
+  instead of the managed TinyHumans credential, for pointing routing at a
+  different vendor than inference while testing. Paired with
+  `OPENCOMPANY_JEV_URL` — TypeSafe's own endpoint with a TypeSafe key — because
+  either alone is the misconfiguration that looks configured: a TinyHumans key
+  addressed to `api.typesafe.ai` `401`s every round and falls back to
+  lead-and-mention with no "no key" line to say why, since a key *was* resolved.
+  Resolved by `hive::dispatch::host_router` and `host_oracle` and handed to
+  `jev_router` / `jev_transport`; unset — the hosted default — leaves the managed
+  ladder untouched.
 - `OPENCOMPANY_JEV_URL` moves the proxy. It must be `https`, or `http` to a
   loopback host — the credential is a request header, and the rule is the one
   [analytics.md](analytics.md) applies to its collector. A plain-`http` URL on
@@ -289,10 +299,9 @@ things, so the only pooling that helps is across the boundary. With
 `[group_chat.routing.referral]` enabled, a `post` or `dm` that names a desk
 (`@#content`) or a member of another desk is decided by
 `tinyhivemind_core::referral::referral(policy, input, roster, desks)`; a
-`MessageRoute::DeskReferral{desk_id}` is enqueued once through
-`hive::referral::JournalReferralQueue` — the journal's `ReferralEnqueued` row
-keyed by `(episode, hop)` is the idempotency record — and `dispatch_referral`
-opens an episode on the target desk seeded with the question, authored
+`MessageRoute::DeskReferral{desk_id}` is enqueued once — the journal's
+`ReferralEnqueued` row keyed by `(episode, hop)` is the idempotency record —
+and an episode opens on the target desk seeded with the question, authored
 `hive-referral`.
 
 When that episode completes, its answer is appended to the origin desk under
@@ -355,8 +364,7 @@ Gone with the quorum hive: the `hive-report` and `hive-failure` authors, the
 | `src/hive/episode_store.rs` | `EpisodeStateSaved`, resume and replay |
 | `src/hive/routing.rs` | `[group_chat.routing]` → `EffectiveRouting` → `RoutingPolicy`, the overlay, `RoutingPlanDto` |
 | `src/hive/jev.rs` | `TinyHumansSystemOne`, `jev_router` |
-| `src/hive/referral.rs` | `JournalReferralQueue`, `dispatch_referral`, the answer's return |
-| `src/hive/prompt.rs` | the sentinel, the delta, the fence |
+| `src/hive/referral.rs` | the reserved `hive-referral` author, the pair key, the question and answer heads, `ReturnAddress` |
 | `src/hive/session_log.rs` | `EventLogSessionLog` — the journal as a `SessionLog` |
 | `src/hive/mcp_server.rs`, `tools.rs` | the `opencompany` MCP server, `InFlightRegistry`, the speech fold, `McpToolAdapter` |
 | `src/harness/openhuman_runtime.rs` | the one `Runtime` |

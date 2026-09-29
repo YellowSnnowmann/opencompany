@@ -5,6 +5,7 @@ import type { ApprovalSummary, CognitionState, DecideApproval, TurnStep, Verdict
 import type { TaskStatus } from "@/api/tasks";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { GENERAL_CHANNEL_ID } from "@/lib/chat";
 import { cn } from "@/lib/utils";
 import { ApprovalRow } from "./ApprovalRow";
 import { ChatLiveReceipt, type ChatReceipt } from "./ChatLiveReceipt";
@@ -342,15 +343,6 @@ export function MessageTimeline({
             onRedeemBudgetPause={onRedeemBudgetPause}
             redeemingBudgetPauseAgent={redeemingBudgetPauseAgent}
             latestBudgetPauseMessageIdByAgent={latestBudgetPauseMessageIdByAgent}
-            // Issue #1986: read off `channel.system` here rather than threaded
-            // down from `RoomView`, because this component already holds the
-            // channel and that flag *is* the predicate `RoomView` derives its
-            // own `readOnly` from — a second prop carrying the same fact through
-            // the same tree is one more thing that can disagree with it. See
-            // `MessageRow`'s `readOnly` doc for what it takes away (adding a
-            // reaction) and what it deliberately leaves (reactions already
-            // there, and the way into a thread).
-            readOnly={Boolean(channel.system)}
             agentNames={agentNames}
           />
         </div>
@@ -546,16 +538,8 @@ function ChannelIntro({
       {/* The two openings a new channel actually has. Held back until the
           history has answered, for the same reason the sentence above is:
           offering "add an agent here" over a channel that turns out to be full
-          of conversation reads as data loss.
-
-          Not on the read-only Operator feed (`channel.system`, the same
-          predicate `RoomView` derives `readOnly` from). Neither opening exists
-          there: "Give the team a brief" prefills a composer that channel does
-          not render, and "Add people" opens a members pane `RoomView` gates
-          off on the same flag — so both were controls offering an action that
-          could not happen, under a notice saying there is nothing to reply to
-          here. */}
-      {empty && !loading && channel.kind === "channel" && !channel.system && (
+          of conversation reads as data loss. */}
+      {empty && !loading && channel.kind === "channel" && (
         <ActionCards onStartBrief={onStartBrief} onAddPeople={onAddPeople} />
       )}
     </div>
@@ -594,8 +578,8 @@ function IntroMark({ channel }: { channel: Channel }) {
     );
   }
 
-  // The company's own line keeps the brand mark it has always had.
-  if (channel.id === "main") {
+  // `#general` wears the company brand mark.
+  if (channel.id === GENERAL_CHANNEL_ID) {
     return (
       <TeammateAvatar
         name={channel.voice ?? channel.name}
@@ -768,7 +752,7 @@ function LiveTurnRow({
         name={channel.voice ?? channel.name}
         tone={channel.tone}
         avatar={channel.member?.avatar}
-        company={channel.kind === "channel" && channel.id === "main"}
+        company={channel.kind === "channel" && channel.id === GENERAL_CHANNEL_ID}
         className="size-9 shrink-0"
       />
       <div className="min-w-0 flex-1 space-y-1.5">
@@ -809,7 +793,7 @@ function TypingRow({
         name={channel.voice ?? channel.name}
         tone={channel.tone}
         avatar={channel.member?.avatar}
-        company={channel.kind === "channel" && channel.id === "main"}
+        company={channel.kind === "channel" && channel.id === GENERAL_CHANNEL_ID}
         className="size-9"
       />
       <WorkingIndicator srLabel="Replying…" queued={queued} name={name} label={label} />

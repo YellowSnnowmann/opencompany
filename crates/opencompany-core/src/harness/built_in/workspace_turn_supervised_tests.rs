@@ -16,6 +16,7 @@ use crate::ports::types::CompanyRecord;
 /// gets, so it is the mode these last tests care about.
 async fn supervised(deps: &HarnessDeps, grants: &str) -> (HarnessPool, CompanyRecord) {
     let mut record = CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
@@ -157,7 +158,6 @@ async fn a_write_to_the_agents_own_workspace_runs_without_policy_hitl() {
 #[tokio::test]
 async fn a_supervised_turn_reads_its_own_workspace_without_asking() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("seed.md"), "hello").ok();
     let (base, script) = spawn_script(vec![
         Turn::Call {
             tool: "grep",
@@ -172,6 +172,9 @@ async fn a_supervised_turn_reads_its_own_workspace_without_asking() {
     .await;
     let (_pool, deps, _record, _store) = harness(base, "\"files\"", dir.path()).await;
     let (pool, record) = supervised(&deps, "\"files\"").await;
+    let workspace = crate::harness::build::agent_workspace(dir.path(), &record.id, "ceo");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::write(workspace.join("seed.md"), "hello").unwrap();
 
     let cycle = deps
         .approval_requests
