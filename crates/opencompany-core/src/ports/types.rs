@@ -3589,13 +3589,17 @@ pub enum EvictionPolicy {
 ///
 /// Real ingress is route-specific:
 /// - operator chat → `CompanyEvent::OperatorMessage`
-/// - email / webhooks → filed into [`crate::ports::InboxStore`], then emit
-///   `CompanyEvent::WebhookReceived` (the two steps are one path, not alternatives)
+/// - email → filed into [`crate::ports::InboxStore`]; the email ingest/poll
+///   path may then trigger a cycle using `CompanyEvent::WebhookReceived` with
+///   `channel: "email"`
+/// - webhooks → delivered through their route-specific webhook handler, which
+///   emits `CompanyEvent::WebhookReceived` for that integration
 #[deprecated(
     since = "0.2.4",
     note = "ChannelAdapter::inbound is a deprecated empty default (issue #1958). \
             Operator chat: CompanyEvent::OperatorMessage; \
-            email/webhooks: InboxStore + CompanyEvent::WebhookReceived."
+            email: InboxStore, then an email cycle tagged channel=email; \
+            webhooks: their route-specific handler emits CompanyEvent::WebhookReceived."
 )]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InboundMessage {
