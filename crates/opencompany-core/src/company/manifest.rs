@@ -588,6 +588,12 @@ impl CompanyManifest {
             }
         }
 
+        if enforce_reserved_agent_ids && self.company.general_desk.is_some() {
+            problems.push(
+                "`[company].general_desk` is no longer supported — #general is built in and every teammate is in it. Remove the key; the desk it named stays an ordinary desk.".into(),
+            );
+        }
+
         // Group chats: ids snake_case + unique; every member is a real agent.
         let mut chat_ids = std::collections::HashSet::new();
         for (index, chat) in self.group_chats.iter().enumerate() {
@@ -645,22 +651,11 @@ impl CompanyManifest {
                     "{label} is named \"Operator\", which is reserved for the built-in Operator channel — choose a different name."
                 ));
             } else if enforce_reserved_agent_ids
-                && chat.name.eq_ignore_ascii_case(
-                    crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK,
-                )
+                && (crate::ports::general_channel::is_general_spelling(&chat.id)
+                    || crate::ports::general_channel::is_general_spelling(&chat.name))
             {
-                // Issue #1781 review (Codex/CodeRabbit P2 follow-up): the
-                // name reservation above only blocks "Operator", but a
-                // grandfathered collision diverts the durable feed to
-                // `OPERATOR_CHANNEL_COLLISION_FALLBACK` ("operator-feed")
-                // instead, and `server::operator::resolve_desk` folds a
-                // `?desk=` selector against a desk's name exactly the same
-                // way it folds it against "operator" — so a desk named
-                // "operator-feed" would shadow the fallback feed precisely
-                // as a desk named "Operator" would shadow the primary one.
-                // Reserved for the same reason, gated the same way.
                 problems.push(format!(
-                    "{label} is named \"operator-feed\", which is reserved for the built-in Operator channel's fallback feed — choose a different name."
+                    "{label} uses the id or name of #general, the built-in company-wide channel — choose a different id and name."
                 ));
             } else if !chat_ids.insert(chat.id.as_str()) {
                 problems.push(format!(
@@ -1481,6 +1476,9 @@ fn join_backticked(values: &[&str]) -> String {
         .join(", ")
 }
 
+#[cfg(test)]
+#[path = "manifest_tests_general.rs"]
+mod tests_general;
 #[cfg(test)]
 #[path = "manifest_tests_grants.rs"]
 mod tests_grants;

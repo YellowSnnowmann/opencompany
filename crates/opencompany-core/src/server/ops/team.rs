@@ -716,7 +716,7 @@ async fn add_member(
         model: None,
         harness: None,
     };
-    record.overlay_agents.push(agent.clone());
+    let general_delta = record.hire_overlay_agent(agent.clone());
     let attribution = author.map(|admin| BudgetOverride {
         agent_id: agent.id.clone(),
         budget_usd_daily: body.budget_usd_daily,
@@ -785,6 +785,7 @@ async fn add_member(
     {
         tracing::warn!(error = %err, "teammate-added audit row could not be journaled");
     }
+    journal_general_membership(&company, general_delta).await;
     // A brand-new overlay teammate has no `[[agent]]` row at all, so it declares
     // no tier, holds the company's standard grant, and sits on no desk until
     // somebody adds it to one. Resolved through the shared helpers rather than
@@ -859,35 +860,14 @@ async fn remove_member(
         )));
     }
 
-    // Tombstone the operator-feed divert before it can be lost (issue #1781
-    // review, Codex P2 follow-up to the desk-deletion fix): a manifest
-    // teammate at the literal id `operator` is already covered below —
-    // `retire_agent` tombstones it under the same key
-    // `operator_feed_channel`'s own `is_retired` check reads — but an
-    // *overlay* teammate is deleted outright with no tombstone at all. If
-    // this removal is what's currently holding the divert (id or, via
-    // `is_roster_agent`, nothing else does for a teammate — desks are the
-    // only case matched by display name), the fallback address must stay
-    // fixed after the removal exactly as `delete_desk` already keeps it
-    // fixed after a colliding desk's removal — see
-    // `CompanyRecord::divert_operator_feed_permanently`'s doc.
-    if record.operator_feed_channel()
-        == crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK
-    {
-        record.divert_operator_feed_permanently();
-    }
     let is_manifest = record.manifest.agents.iter().any(|a| a.id == agent_id);
-    if is_manifest {
-        // A tombstone, not a manifest rewrite: `company.toml` and the global
-        // baseline merged into it are re-read on every rebuild, so a teammate
-        // "removed" by editing the roster would simply come back. Recorded here
-        // and filtered out by `CompanyRecord::effective_agents`, which is what
-        // takes the teammate off the roster, off its desks and out of the
-        // harness build rather than merely off the Team page.
-        record.retire_agent(&agent_id);
+    // A manifest teammate is tombstoned rather than edited out of
+    // `company.toml`, which is re-read on every rebuild.
+    let general_delta = if is_manifest {
+        record.retire_agent(&agent_id)
     } else {
-        record.overlay_agents.retain(|a| a.id != agent_id);
-    }
+        record.remove_overlay_agent(&agent_id).1
+    };
     // Desk seats an operator added are dropped with the teammate either way. A
     // blueprint seat is left alone — `effective_desk_members` already filters a
     // retired teammate out of it, and the manifest is not rewritten.
@@ -913,7 +893,22 @@ async fn remove_member(
     // for a typo'd name rather than a hazard to design around.
     record.overlay_budgets.retain(|b| b.agent_id != agent_id);
     company.runtime.store().save(&record).await?;
+    journal_general_membership(&company, general_delta).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Journals a `#general` membership change, best-effort: the roster write is
+/// already durable, so a refused row must not fail the request.
+async fn journal_general_membership(
+    company: &ScopedCompany,
+    delta: crate::ports::types::GeneralMembershipDelta,
+) {
+    let Some(event) = delta.into_event(company.actor.clone()) else {
+        return;
+    };
+    if let Err(err) = company.runtime.events().append(company.id(), event).await {
+        tracing::warn!(error = %err, "#general membership change could not be journaled");
+    }
 }
 
 /// `PUT {scope}/team/{agent_id}/budget` — set, change, or remove a teammate's
@@ -1196,3 +1191,6 @@ mod tests_an_admin_can_set;
 #[cfg(test)]
 #[path = "team_an_uncapped_company_is_tests.rs"]
 mod tests_an_uncapped_company_is;
+#[cfg(test)]
+#[path = "team_general_channel_tests.rs"]
+mod tests_general_channel;

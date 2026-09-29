@@ -151,9 +151,8 @@ pub use advance::{SYSTEM_ATTRIBUTION, advance_settled_card, append_result};
 pub use board_events::{BoardAnnouncer, CHANGE_OPENED, CHANGE_REMOVED, CHANGE_UPDATED};
 pub use builder::{RuntimeBuilder, company_id_from_name};
 pub use channel::{
-    DeskChannel, DurableOperatorChannel, OPERATOR_CHANNEL, OPERATOR_CHANNEL_COLLISION_FALLBACK,
-    OWNER_FALLBACK_REPORT_AUTHOR, OperatorChannel, WORKFLOW_REPLY_AUTHOR,
-    undeliverable_channel_message,
+    DeskChannel, OPERATOR_CHANNEL, OWNER_FALLBACK_REPORT_AUTHOR, OperatorChannel,
+    WORKFLOW_REPLY_AUTHOR, undeliverable_channel_message,
 };
 pub use cron::{CivilTime, CronExpr};
 pub use cycle::CycleRunner;

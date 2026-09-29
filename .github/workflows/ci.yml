@@ -111,6 +111,9 @@ permissions:
 # read `CARGO_*` only where they invoke cargo, so the value is inert elsewhere.
 env:
   CARGO_INCREMENTAL: "0"
+  # The console bundle defaults to the TinyHumans Sentry project when this is
+  # empty (`frontend/src/lib/crash-reporting.ts`); CI builds must not report.
+  VITE_SENTRY_DSN: "off"
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 # Issue #251. Every cargo invocation below that resolves a dependency graph
@@ -267,11 +270,6 @@ jobs:
               # Same reasoning for the release-notes generator and its test,
               # which also run in `Console`.
               - 'scripts/release/**'
-              # And for the staging deploy. No filter listed this file at all,
-              # so a PR editing it selected no lane and ran nothing — while the
-              # gate inside it is the one thing a failed deploy on main is
-              # reported by. `test-tenant-landed-gate.sh` runs in `Console`.
-              - '.github/workflows/deploy-staging.yml'
             desktop:
               - '.github/workflows/ci.yml'
               - 'crates/opencompany-app/**'
@@ -533,7 +531,7 @@ jobs:
       # toolchain: `deploy-staging.yml` sets `submodules: false` and names its
       # vendored checkouts by hand, and it does not run on pull requests — so a
       # vendored path dependency missing from that list is green here and fails
-      # only on deploy. Cargo reads every path dependency's manifest during
+      # only on the post-merge image build. Cargo reads every path dependency's manifest during
       # resolution whatever the feature selection, so the break is the default
       # build, not the feature that added the crate.
       - name: Assert vendored path dependencies are checked out
@@ -1810,18 +1808,6 @@ jobs:
       # a second app added under `frontend/` would not have triggered that lane
       # at all.
       - run: ./scripts/ci/assert-single-tauri-app.sh
-
-      # The tenant landed-state gate in `deploy-staging.yml`, which decides
-      # whether a staging deploy passes or fails. It runs over ssh on the
-      # staging node, only on a push to main, so `main` is the first place a
-      # mistake in it can show — and because it lives inside a quoted heredoc,
-      # `actionlint` and `shellcheck` both read it as literal data. The script
-      # extracts its functions and drives them over kubectl fixtures.
-      #
-      # Rides `Console` for the reason the checks above do: bash and jq, no
-      # toolchain. The `frontend` path filter gains
-      # `.github/workflows/deploy-staging.yml` alongside this step.
-      - run: ./scripts/ci/test-tenant-landed-gate.sh
 
       # Issue #858. `pnpm-lock.yaml`, read by nothing until now.
       #

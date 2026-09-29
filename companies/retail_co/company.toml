@@ -32,11 +32,6 @@
 name = "retail-co"
 output = "A customer's order problem resolved by the desk that owns the remedy, with every read and write recorded as a tool call"
 human_role = "Read the transcript and say whether the desks did what the retail policy required"
-# The desk that owns the company's own line. Without this, General resolves to
-# no desk and a message there falls to a root agent picked by filename order.
-# The target is deliberately NOT called General: tinyhivemind refuses an
-# episode on a desk whose id or name is a General spelling.
-general_desk = "company_line"
 
 [brain]
 mode = "hosted"
@@ -121,27 +116,13 @@ vision-v1 = "deepseek/deepseek-v4-flash"
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# The company's own line, as a real desk.
-#
-# The id is NOT a General spelling: tinyhivemind refuses a desk whose identity
-# collides with one (`reserved desk identity`), and a company that declares
-# `id = "general"` boots clean and then fails every message on its main thread.
-# The NAME is `General`, and `resolve_desk_id` matches a manifest desk by name
-# as well as by id — with no General guard on that pass — so the company's own
-# line resolves here instead of resolving to nothing.
-#
-# That is the actual defect this fixes. With general resolving to no desk, the
-# desk selector bails out and the message falls to a *root* agent chosen by
-# filename order: a delivered-order case was answered by `amendments`, the
-# pending-order seat, holding three write tools and no exchange tool.
+# A room with every seat, for cases that need the whole company at once.
 # ---------------------------------------------------------------------------
 
 [[group_chat]]
 id = "company_line"
 name = "Company Line"
-description = "The company's own line. Everybody who works here."
-# Documentation only — the runtime seats the live roster here, so a
-# teammate created tomorrow is in this room without anybody editing
+description = "Every seat in one room."
 members = ["triage", "exchanges", "refunds", "cancellations", "amendments"]
 
 [group_chat.routing]

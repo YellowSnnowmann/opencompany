@@ -96,7 +96,8 @@ use crate::ports::tasks::{
     TaskStore, column_label, is_board_column,
 };
 use crate::ports::types::{
-    CompanyEvent, CompanyId, EventSeq, OnboardingStep, OverlayAgent, WorkflowNodeStatus,
+    CompanyEvent, CompanyId, EventSeq, OnboardingStep, OverlayAgent, SkillChange,
+    WorkflowNodeStatus,
 };
 use crate::ports::{CompanyStore, WorkflowRun, WorkflowRunner};
 
@@ -2561,6 +2562,14 @@ fn summarize_event(event: &CompanyEvent) -> String {
                 "desk routing configured".into()
             }
         }
+        CompanyEvent::SkillChanged { slug, change, .. } => {
+            let what = match change {
+                SkillChange::Installed => "installed",
+                SkillChange::Updated => "updated",
+                SkillChange::Removed => "removed",
+            };
+            format!("skill {what}: {slug}")
+        }
         // Plan hive-desks: the episode ledger. Structural only — ids and
         // counts, never an utterance — for the same reason every arm here is.
         CompanyEvent::EpisodeOpened { .. } => "episode opened".into(),
@@ -4109,7 +4118,7 @@ impl Tool for AddAgentTool {
             model: None,
             harness: None,
         };
-        record.overlay_agents.push(agent);
+        let general_delta = record.hire_overlay_agent(agent);
         self.store.save(&record).await?;
 
         // The audit row for one agent creating another.
@@ -4137,6 +4146,12 @@ impl Tool for AddAgentTool {
                 .await
         {
             tracing::warn!(error = %err, "teammate-added audit row could not be journaled");
+        }
+        if let Some(events) = &self.events
+            && let Some(event) = general_delta.into_event(None)
+            && let Err(err) = events.append(&self.company, event).await
+        {
+            tracing::warn!(error = %err, "#general membership change could not be journaled");
         }
 
         // Issue #619: the mint is observable — the minter, the teammate, and

@@ -328,6 +328,6 @@ fn legacy_operator_message_without_chat_stays_on_general() {
         deliverable: None,
         attachments: Vec::new(),
     };
-    assert!(owns(GENERAL_DESK, GENERAL_DESK, &event));
+    assert!(owns(GENERAL_CHANNEL_ID, GENERAL_CHANNEL_ID, &event));
     assert!(!owns("strategy", "Strategy desk", &event));
 }

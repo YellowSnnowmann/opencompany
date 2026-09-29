@@ -1941,8 +1941,9 @@ async fn async_main() -> Result<()> {
     // Bound to a NAMED local so the client lives as long as the process. A bare
     // `_` would drop it here and close the client while the process carried on
     // running, which reports nothing for the rest of its life and reads as a
-    // DSN that does not work. Silent by default: without
-    // `OPENCOMPANY_SENTRY_DSN` this resolves to `Silent` and installs nothing.
+    // DSN that does not work. Without `OPENCOMPANY_SENTRY_DSN` a hosted tenant
+    // reports to the compiled-in default project and every other deployment
+    // resolves to `Silent` and installs nothing.
     //
     // The decision is NOT printed here. `spec` and `doctor --json` write
     // machine-readable output to stdout, so a boot line at this point would be
@@ -2714,11 +2715,11 @@ async fn async_main() -> Result<()> {
             // The id still goes to stdout first — it is the one thing that
             // makes the failure investigable, since the event may well have
             // arrived and only the acknowledgement was late.
-            let drained = crash_guard.flush(std::time::Duration::from_secs(5));
+            let drained = crash_guard.flush(std::time::Duration::from_secs(15));
             println!("{event_id}");
             if !drained {
                 return Err(opencompany::error::OpenCompanyError::Config(
-                    "the crash-reporting queue did not drain within 5s, so delivery of this \
+                    "the crash-reporting queue did not drain within 15s, so delivery of this \
                      event is unconfirmed. Check network egress to the ingest endpoint. See \
                      docs/spec/runtime/crash-reporting.md."
                         .to_string(),

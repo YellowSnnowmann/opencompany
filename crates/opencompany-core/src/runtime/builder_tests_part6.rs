@@ -291,6 +291,7 @@ async fn wires_manifest_and_overlay_desks_as_delivery_channels() {
     let id = CompanyId::new("acme");
     FsCompanyStore::new(dir.path())
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
             overlay_desk_hive: Vec::new(),
@@ -405,6 +406,7 @@ async fn deliverable_channel_ids_dedupes_a_grandfathered_operator_desk() {
     let id = company_id_from_name("Acme");
     FsCompanyStore::new(dir.path())
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             id: id.clone(),
             manifest: manifest.clone(),
             ledger: Vec::new(),

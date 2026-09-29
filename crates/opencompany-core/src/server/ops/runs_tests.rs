@@ -39,6 +39,7 @@ async fn state_with_company(home: &std::path::Path) -> (AppState, CompanyId) {
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_desk_hive: Vec::new(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
@@ -416,6 +417,7 @@ async fn add_second_company(state: &AppState, home: &std::path::Path) -> Company
     let id = CompanyId::new("beta");
     store
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_desk_hive: Vec::new(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),

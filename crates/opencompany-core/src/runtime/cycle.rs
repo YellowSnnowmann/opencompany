@@ -945,14 +945,7 @@ impl<'a> CycleRunner<'a> {
             if let Some(record) = &record
                 // Cheap exit before touching either store: no operator message,
                 // so no briefing has anywhere to land.
-                //
-                // Every operator message counts, addressed or not. `chat: None`
-                // is not "unaddressed" — `chat_and_emit` routes it to the
-                // General desk and every reader of the journal folds it there
-                // (`is_general_chat`), so requiring `Some` silently withheld
-                // both briefings from exactly the turns a bare REST or ACP
-                // caller sends: "did that ship?" answered blind, in the one
-                // conversation the console itself defaults to (codex on #1972).
+
                 && events
                     .iter()
                     .any(|e| matches!(e, CompanyEvent::OperatorMessage { .. }))
@@ -1459,39 +1452,14 @@ working on):\n{}\n]",
             // same whoever ran it. That is a different axis from the briefing
             // above, which is why this is a second pass rather than a wider
             // filter on the first.
-            //
-            // Both halves of the origin, since #1890 B: the channel through
-            // `same_conversation` (which folds General's four spellings), and
-            // the thread verbatim.
-            //
-            // **Both desk spellings**, like `chat_history::owns`. This filter
-            // originally compared the addressed selector verbatim, on the
-            // argument that both sides are the raw chat id stamped from this
-            // same field — which holds only while every caller spells the desk
-            // the same way. They do not: a card raised by a client addressing
-            // the desk by id, and a later "did that ship?" addressing it by
-            // name, are the same conversation and compared unequal, so the
-            // briefing went missing exactly when the operator was asking for it
-            // (codex on #1972).
+
             let mut done: Vec<&&TaskRecord> = settled
                 .iter()
                 .filter(|c| {
-                    // A recorded desk is required before any of this compares.
-                    // `same_conversation(None, "General")` is `true` — `None`
-                    // is one of General's four spellings *for a message* — but
-                    // a card with no origin was raised by no conversation at
-                    // all, and reading its absence as "General" briefs
-                    // board-only work into an unaddressed turn as work "raised
-                    // in this conversation". `chat_history::owns` already draws
-                    // that line for the terminal (`a_terminal_with_no_origin_
-                    // belongs_to_nobody_not_to_general`); this now draws the
-                    // same one (coderabbit on #1982).
                     let Some(origin) = c.origin_chat_id() else {
                         return false;
                     };
-                    (chat_history::same_conversation(Some(origin), Some(desk_id.as_str()))
-                        || chat_history::same_conversation(Some(origin), Some(desk_name.as_str())))
-                        && c.origin_parent() == thread
+                    (origin == desk_id || origin == desk_name) && c.origin_parent() == thread
                 })
                 .collect();
             if done.is_empty() {
@@ -3000,6 +2968,7 @@ fn cycle_task_id(
             | CompanyEvent::DeskDeleted { .. }
             | CompanyEvent::DeskMembersChanged { .. }
             | CompanyEvent::DeskRoutingConfigured { .. }
+            | CompanyEvent::SkillChanged { .. }
             // Plan hive-desks, Phase 4: the episode record — brackets around
             // the `AgentReply` rows a room wrote, and the driver's checkpoint.
             // Records of a round that already ran, not stimuli for a cycle.
@@ -3255,6 +3224,7 @@ fn cycle_conversation(
             | CompanyEvent::DeskDeleted { .. }
             | CompanyEvent::DeskMembersChanged { .. }
             | CompanyEvent::DeskRoutingConfigured { .. }
+            | CompanyEvent::SkillChanged { .. }
             // Plan hive-desks, Phase 4: the episode record — brackets around
             // the `AgentReply` rows a room wrote, and the driver's checkpoint.
             // Records of a round that already ran, not stimuli for a cycle.
