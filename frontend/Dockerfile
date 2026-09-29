@@ -13,8 +13,9 @@ RUN npm ci
 COPY . .
 # Crash reporting is a BUILD-time decision for the console: Vite substitutes
 # these into the bundle, so a variable set when the container runs arrives far
-# too late. Blank — the default — builds a bundle that never initializes the
-# SDK, which is what every build that does not pass them gets.
+# too late. A blank `VITE_SENTRY_DSN` builds a bundle that reports to the
+# compiled-in TinyHumans console project; `off` builds one that never
+# initializes the SDK (Compose passes `off` unless you set a DSN).
 # See `docs/spec/runtime/crash-reporting.md`.
 ARG VITE_SENTRY_DSN=
 ARG VITE_SENTRY_ENVIRONMENT=
