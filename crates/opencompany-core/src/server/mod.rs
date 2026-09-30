@@ -38,6 +38,8 @@ mod routes;
 /// The first-run setup flow: one surface that configures an instance.
 pub mod setup;
 pub mod shutdown;
+/// SSO auto-login: redeeming a platform-minted token for a session. See [`sso`].
+pub mod sso;
 pub mod users;
 
 #[cfg(test)]

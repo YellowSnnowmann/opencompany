@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ArrowRight,
   Building2,
+  CheckCircle2,
   KeyRound,
   Loader2,
   MailCheck,
@@ -14,6 +15,7 @@ import {
   claimFirstAdmin,
   fetchAuthConfig,
   loginWithPassword,
+  redeemSso,
   requestCode,
   requestWalletChallenge,
   verifyWalletSignature,
@@ -23,6 +25,7 @@ import {
 import { connectWallet, hasWallet, NoWalletError, signMessage } from "@/lib/wallet";
 import { generatePassword, passwordProblem } from "@/lib/generate-password";
 import { resendLabel, secondsUntilResend } from "@/views/login/resend";
+import { ssoTokenFromHash } from "@/views/login/sso";
 import { arrivedViaSetupHandoff, SETUP_HANDOFF_FRAGMENT } from "@/setup/state";
 import type { OpenCompanyClient } from "@/api/client";
 import { ApiError } from "@/api/types";
@@ -82,6 +85,16 @@ const ASSUMED_CONFIG: AuthConfig = {
   magicLink: true,
   claimable: false,
 };
+
+/**
+ * How long the "Signed in as …" SSO confirmation holds before the app takes
+ * over.
+ *
+ * Long enough to read who you were signed in as, short enough not to be a wait.
+ * A moment, not a modal: the redemption already succeeded, so this is
+ * acknowledgement, not a step.
+ */
+const SSO_CONFIRM_MILLIS = 900;
 
 /**
  * The sign-in view.
@@ -154,6 +167,64 @@ export function Login({ client, company, notice, onSignedIn }: Props) {
   const [now, setNow] = useState(() => Date.now());
   /** Set when a *re*send lands, so the second press is acknowledged as one. */
   const [resent, setResent] = useState(false);
+  /**
+   * The SSO auto-login state, when the person arrived via `#/sso?token=…`.
+   *
+   * `null` is the ordinary sign-in screen — no fragment, or a fragment already
+   * spent. `redeeming` hides the form entirely while the token is exchanged;
+   * `done` shows the brief "Signed in as …" confirmation before the app takes
+   * over. A failed redemption clears back to `null` and sets `notice`-style
+   * `error` on the normal form, so a dead link never dead-ends on a spinner.
+   */
+  const [sso, setSso] = useState<
+    { phase: "redeeming" } | { phase: "done"; email: string } | null
+  >(null);
+
+  useEffect(() => {
+    // Auto-login from the dashboard: `#/sso?token=<jwt>`. Read once on mount —
+    // the token rides the URL fragment, which survived the cold-wake refresh to
+    // get here, and is redeemed exactly once. On success the confirmation shows
+    // briefly, then `onSignedIn` hands the session to the console (the wizard,
+    // for a fresh company). On failure the fragment is cleared and the ordinary
+    // form returns carrying the reason, rather than looping on a spent link.
+    const token = ssoTokenFromHash(window.location.hash);
+    if (!token) return;
+
+    let cancelled = false;
+    setSso({ phase: "redeeming" });
+    setError(null);
+    // Clear the token from the address bar immediately, so a reload or a shared
+    // URL cannot replay a link that is single-use anyway — and so the fragment
+    // never lingers in history. `replaceState` leaves the route without adding a
+    // history entry.
+    const cleared = window.location.pathname + window.location.search;
+    window.history.replaceState(null, "", cleared || "/");
+
+    void (async () => {
+      try {
+        const result = await redeemSso(client, company, token);
+        if (cancelled) return;
+        setSso({ phase: "done", email: result.email });
+        // A beat on the confirmation, then into the app. Short enough not to be
+        // a wait, long enough to read who you were signed in as.
+        window.setTimeout(() => {
+          if (!cancelled) onSignedIn(result);
+        }, SSO_CONFIRM_MILLIS);
+      } catch (err) {
+        if (cancelled) return;
+        setSso(null);
+        setError(ssoFailure(err));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Mount-only: the fragment is read once and cleared. `client`/`company` are
+    // fixed for a given mounted Login (it is keyed by connection upstream), and
+    // re-running on their identity would re-redeem a token already cleared.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -368,6 +439,38 @@ export function Login({ client, company, notice, onSignedIn }: Props) {
       </header>
 
       <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-6 py-16">
+        {/*
+          SSO auto-login. When the person arrived from the dashboard via
+          `#/sso?token=…`, this replaces the whole sign-in screen: there is no
+          email or password to type, and showing a form beside a spinner would
+          invite them to start a second, competing sign-in. `redeeming` is a
+          quiet spinner; `done` is the "Signed in as …" confirmation that holds
+          for a beat before the app takes over. A *failed* redemption sets `sso`
+          back to null and surfaces the reason on the ordinary form below.
+        */}
+        {sso ? (
+          <Card className="p-6" data-testid="login-sso">
+            {sso.phase === "redeeming" ? (
+              <div className="flex items-center gap-3">
+                <Loader2 className="size-5 shrink-0 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Signing you in…</p>
+              </div>
+            ) : (
+              <div className="flex items-start gap-3" data-testid="login-sso-done">
+                <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-primary" />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">
+                    Signed in as <span className="break-all">{sso.email}</span>
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Taking you to your company…
+                  </p>
+                </div>
+              </div>
+            )}
+          </Card>
+        ) : (
+        <>
         {/*
           The refusal, above the heading, where the eye lands first.
 
@@ -708,6 +811,8 @@ export function Login({ client, company, notice, onSignedIn }: Props) {
               : "Forgot it? An admin can set you a temporary password."}
           </p>
         ) : null}
+        </>
+        )}
       </main>
     </div>
   );
@@ -777,4 +882,27 @@ function friendly(err: unknown): string {
     return err.message;
   }
   return "Something went wrong. Try again.";
+}
+
+/**
+ * The message shown when an SSO auto-login link fails, so a dead link falls back
+ * to the ordinary form with a reason rather than a spinner that never resolves.
+ *
+ * `invalid_sso_token` is the host's single, deliberate answer for every reason a
+ * token can be refused — expired, already used, wrong company, not the standing
+ * admin — so, like `invalid_login`, it stays vague here. A `404` means the host
+ * has no SSO configured at all, which for someone who followed a dashboard link
+ * reads best as "this link is not valid here". Anything else falls through to
+ * the shared renderer.
+ */
+function ssoFailure(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.code === "invalid_sso_token" || err.status === 404) {
+      return "This sign-in link didn't work — it may have expired or already been used. Sign in below instead.";
+    }
+    if (err.status === 0) {
+      return "Can't reach the company host. Try the link again in a moment.";
+    }
+  }
+  return friendly(err);
 }
