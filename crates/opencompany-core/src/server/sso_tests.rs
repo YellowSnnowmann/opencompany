@@ -10,6 +10,7 @@
 use crate::company::CompanyManifest;
 use crate::ports::CompanyStore;
 use crate::ports::types::{CompanyId, CompanyRecord, SecretValue};
+use crate::ports::users::UserStatus;
 use crate::runtime::RuntimeBuilder;
 use crate::server::ops::ConnectionsRuntime;
 use crate::server::router;
@@ -46,8 +47,19 @@ async fn state_from(
     manifest: CompanyManifest,
     config: AppConfig,
 ) -> AppState {
+    state_from_id(home, manifest, config, CompanyId::new("acme")).await
+}
+
+/// Like [`state_from`] but registers the company under an explicit `id` — used to
+/// exercise shared-single-DB tenant namespacing, where `runtime.id()` is
+/// `<tenant>--acme` while a platform token still carries the bare slug.
+async fn state_from_id(
+    home: &std::path::Path,
+    manifest: CompanyManifest,
+    config: AppConfig,
+    id: CompanyId,
+) -> AppState {
     let store = crate::store::FsCompanyStore::new(home.to_path_buf());
-    let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
             general_channel: Default::default(),
@@ -403,5 +415,72 @@ async fn a_blank_secret_disables_the_endpoint() {
     assert_eq!(
         redeem(&state, &valid_token()).await.status(),
         StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn a_suspended_admin_is_refused_even_with_a_valid_token() {
+    // A first redemption claims ada as an active admin; suspending her must then
+    // refuse a later valid, unexpired token rather than resurrecting the account —
+    // the same status gate every other login honors before minting a session.
+    let home = home();
+    let state = enabled_state(home.path()).await;
+    assert_eq!(
+        redeem(&state, &valid_token()).await.status(),
+        StatusCode::OK
+    );
+
+    let runtime = state.registry().get(&CompanyId::new("acme")).unwrap();
+    let mut user = runtime
+        .users()
+        .list_users(runtime.id())
+        .await
+        .unwrap()
+        .remove(0);
+    user.status = UserStatus::Suspended;
+    runtime
+        .users()
+        .upsert_user(runtime.id(), &user)
+        .await
+        .unwrap();
+
+    // A fresh jti (single use is per-token) so only the status gate can refuse it.
+    let again = token_with(SSO_SECRET, "acme", ADMIN, "jti-2", far_future());
+    assert_rejected(&state, &again, "a suspended admin").await;
+}
+
+#[tokio::test]
+async fn a_bare_slug_token_signs_in_under_tenant_namespacing() {
+    // Shared-single-DB mode: `runtime.id()` is `<tenant>--acme`, but the platform
+    // mints the token with the bare slug `acme`. The slug is namespaced the same
+    // way before the scope check, so a bare-slug token is still accepted here.
+    let home = home();
+    let config = AppConfig {
+        sso_secret: Some(SecretValue(SSO_SECRET.to_string())),
+        tenant_namespace: Some("acmecorp".to_string()),
+        ..AppConfig::default()
+    };
+    let id = config.namespaced_company_id(CompanyId::new("acme"));
+    assert_ne!(
+        id.as_ref(),
+        "acme",
+        "namespacing must actually prefix the id for this test to mean anything"
+    );
+    let state = state_from_id(home.path(), manifest(), config, id.clone()).await;
+
+    // `valid_token()` carries the bare slug `acme`; the URL addresses the
+    // namespaced id, as a hosted console would.
+    let response = router(state.clone())
+        .oneshot(post(
+            &format!("/api/v1/companies/{}/sso/redeem", id.as_ref()),
+            serde_json::json!({ "token": valid_token() }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "a bare-slug token must sign in where runtime.id() is tenant-namespaced"
     );
 }

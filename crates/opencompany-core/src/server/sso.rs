@@ -62,6 +62,8 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
+use crate::ports::types::CompanyId;
+use crate::ports::users::UserStatus;
 use crate::server::users::bootstrap::standing_admins;
 use crate::server::users::scope::{PublicCompany, public_scoped};
 
@@ -174,8 +176,16 @@ async fn redeem(
     };
 
     // Scope: a token minted for another company must not sign anyone in here.
-    // `slug` is compared against the addressed company's own id.
-    if claims.slug != runtime.id().as_ref() {
+    // The platform mints tokens carrying the bare slug, so it is namespaced the
+    // same way `runtime.id()` is — a no-op unless shared-single-DB tenant mode is
+    // on, and idempotent for an already-prefixed id — before the comparison.
+    // Without this a valid token is refused wherever tenant namespacing is
+    // enabled, because `runtime.id()` is `<tenant>--<slug>` while the token's
+    // `slug` is bare.
+    let claimed = state
+        .config()
+        .namespaced_company_id(CompanyId::new(claims.slug.as_str()));
+    if claimed.as_ref() != runtime.id().as_ref() {
         return Ok(invalid_token());
     }
 
@@ -214,6 +224,14 @@ async fn redeem(
         now,
     )
     .await?;
+
+    // First use *claims* the admin (created active); a later use returns the
+    // existing account as-is — which may since have been suspended. A signed,
+    // unexpired token must not resurrect a deactivated admin, so this mirrors the
+    // status gate every other login honors before a session is minted.
+    if user.status != UserStatus::Active {
+        return Ok(invalid_token());
+    }
 
     tracing::info!(company = %runtime.id(), "sso auto-login redeemed");
     crate::server::users::routes::mint_session(&state, &runtime, &user, &headers).await
