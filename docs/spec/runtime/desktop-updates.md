@@ -17,8 +17,8 @@ The short version:
   operator is never asked to start a download and never watches a progress bar.
 - Nothing is installed that was not signed by the key compiled into the running
   application. A bundle whose signature does not verify is discarded.
-- **macOS only.** It is the only platform this repository releases, so it is the
-  only platform the manifest advertises. A Windows or Linux build compiled from
+- **macOS and Windows.** Those are the platforms this repository releases, so
+  they are the platforms the manifest advertises. A Linux build compiled from
   this tree finds no entry for its target and reports no update, quietly.
 - Until somebody generates the minisign keypair and wires it up (see
   [Operator setup](#operator-setup)), the shipped configuration carries a
@@ -139,20 +139,28 @@ test for precisely that in `crates/opencompany-app/src/local.rs`.
 
 The DMG is **not** what an update installs. On macOS the updater replaces the
 `.app` bundle in place, out of a gzipped tarball with a detached minisign
-signature beside it. `.github/workflows/build-desktop.yml` — the reusable build
-`release-production.yml` calls — produces three things beyond the DMGs, all
+signature beside it. On Windows it downloads the NSIS `-setup.exe` and runs it,
+so there the installer *is* the update, with a `.sig` beside it.
+`.github/workflows/build-desktop.yml` — the reusable build
+`release-production.yml` calls — produces these beyond the installers, all
 gated on its `with_updater` input, which production sets and staging does not:
 
 1. **A guard, before anything is built.** `scripts/release/assert-updater-configured.sh`
    fails the dispatch in seconds if `tauri.conf.json` still carries the
    placeholder public key, if it declares no endpoint, or if the
    `TAURI_SIGNING_PRIVATE_KEY` secret is missing.
-2. **`OpenCompany_<version>_<arch>.app.tar.gz` and its `.sig`**, per
+2. **`OpenCompany_<version>_<arch>.app.tar.gz` and its `.sig`**, per macOS
    architecture, built by `scripts/release/package-updater-artifact.sh` and
    attached to the draft release.
-3. **`latest.json`**, assembled from both architectures' assets by
-   `scripts/release/publish-updater-manifest.sh` in its own job, and uploaded
-   to the draft before it is published.
+3. **`OpenCompany_<version>_x64-setup.exe.sig` and `..._x64_en-US.msi.sig`**,
+   emitted by the Tauri bundler itself on the Windows leg:
+   `scripts/release/prepare-tauri-config.mjs` turns on
+   `bundle.createUpdaterArtifacts` for that leg only, and `TAURI_SIGNING_*` is
+   in its environment and no other's.
+4. **`latest.json`**, assembled by `scripts/release/publish-updater-manifest.sh`
+   in its own job — `darwin-aarch64` and `darwin-x86_64` always, and
+   `windows-x86_64` (the setup `.exe`) when `PLATFORMS` includes `windows` —
+   and uploaded to the draft before it is published.
 
 ### Two orderings that are load-bearing
 
@@ -163,14 +171,17 @@ in later steps. Every client that took such an update would end up with a bundle
 Gatekeeper refuses to launch, and no obvious way back. Building it after
 `xcrun stapler validate` means the updater installs byte-for-byte the bundle
 Apple approved, and the signing key is needed for one `signer sign` invocation
-rather than for the whole compile.
+rather than for the whole compile. Windows has no later signing step to wait
+for — Authenticode, when configured, runs inside the Tauri build through
+`bundle.windows.signCommand` — so there the bundler's own artifact is the right
+one.
 
 **`latest.json` is written into the draft, before publish.** This repository has
 immutable releases: publishing freezes the asset list, and nothing can be added
 afterwards. A release published without a manifest pins every existing install
 to the build it already has — silently, with no error anywhere, permanently.
 That is why `publish` needs `updater-manifest`, and why the manifest script
-refuses to upload a partial manifest that names only one architecture.
+refuses to upload a partial manifest missing any platform it was asked for.
 
 ### A staging cut ships no update anybody can reach
 
@@ -187,24 +198,39 @@ first that parses, so every build would take the first entry and none of them
 would be opted in to anything — a channel is a property of the install, and
 `endpoints` is compiled into all of them alike.
 
-## macOS only, and why that is the honest answer
+## macOS and Windows; Linux not yet
 
-`build-desktop.yml` is the only desktop release path that exists. There
-is no Windows or Linux build published anywhere, so there is nothing for a
-Windows or Linux client to update *to*.
+`build-desktop.yml` builds macOS (both architectures) and Windows x64, and a
+production cut advertises all three in `latest.json`:
+
+| Platform key | Asset the client installs |
+|---|---|
+| `darwin-aarch64` | `OpenCompany_<version>_aarch64.app.tar.gz` |
+| `darwin-x86_64` | `OpenCompany_<version>_x64.app.tar.gz` |
+| `windows-x86_64` | `OpenCompany_<version>_x64-setup.exe` |
+
+The MSI ships beside the setup for managed installs; it is not an update
+target. `release-production.yml`'s `windows` input (default on) switches the
+Windows leg, its required assets and its manifest entry together, so a cut
+without Windows publishes a macOS-only manifest rather than a broken one.
 
 The plugin is compiled on every platform — it is not `cfg`-gated, and gating it
-would mean a code path no lane compiles. What is macOS-specific is the
-**manifest**: it advertises `darwin-aarch64` and `darwin-x86_64` and nothing
-else. A client on another platform finds no entry for its target, the check
-fails, and `oc_app_update_check` reports "no update" — the same silence as a
-laptop with no network. No banner, no error, no promise.
+would mean a code path no lane compiles. There is no Linux build, so a Linux
+client finds no entry for its target, the check fails, and
+`oc_app_update_check` reports "no update" — the same silence as a laptop with no
+network. No banner, no error, no promise.
 
-Adding a platform is: publish a build for it, teach
-`package-updater-artifact.sh` the target's arch word, and add the platform key
-to `publish-updater-manifest.sh`'s required set. The required-set assertion is
-what stops a half-finished addition from shipping a manifest that silently omits
-the new platform.
+**Releases cut before Windows builds existed** have no Windows entry, and
+immutable releases mean they never will. `backfill-windows-desktop.yml`
+publishes their installers as a companion release (`<tag>-windows`) that never
+becomes `latest`; an install from it reports "no update" until the next release
+that ships Windows builds, and takes that one normally. See
+[releases.md](releases.md#backfilling-windows-for-an-older-release).
+
+Adding a platform is: publish a build for it, produce its signed update
+artifact, and add the platform key to `publish-updater-manifest.sh`'s required
+set. The required-set assertion is what stops a half-finished addition from
+shipping a manifest that silently omits the new platform.
 
 ## Operator setup
 
@@ -295,12 +321,14 @@ keypair, so the only honest verification is a release-to-release one. Do it
 deliberately the first time, on two versions:
 
 1. **The release carries the right assets.** After the workflow finishes, the
-   release should have, per architecture, a `.dmg`, a `.app.tar.gz` and a
-   `.app.tar.gz.sig` — plus one `latest.json`.
+   release should have, per macOS architecture, a `.dmg`, a `.app.tar.gz` and a
+   `.app.tar.gz.sig`; the Windows `_x64-setup.exe` and `_x64_en-US.msi`, each
+   with its `.sig`; and one `latest.json`.
 2. **The manifest resolves.** `curl -sL https://github.com/tinyhumansai/opencompany/releases/latest/download/latest.json | jq`
-   should print the version you just cut and both `darwin-*` platform entries.
-3. **An older install finds it.** Install the *previous* release's DMG on a Mac,
-   launch it, and wait. Within about five seconds the check runs; within a
+   should print the version you just cut, both `darwin-*` entries and
+   `windows-x86_64`.
+3. **An older install finds it.** Install the *previous* release's DMG on a Mac
+   (and its setup on Windows, once two releases carry one), launch it, and wait. Within about five seconds the check runs; within a
    minute or two — download time — the banner should appear naming the new
    version. The log line to look for is `a newer desktop build is available`.
 4. **The restart works and the companies come back.** Press "Restart now". The
