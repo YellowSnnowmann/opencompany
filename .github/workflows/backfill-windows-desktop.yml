@@ -1,0 +1,274 @@
+# Build Windows x64 installers for a production release that shipped without
+# them, and publish them as a COMPANION release `<tag>-windows`.
+#
+# This repository has immutable releases: a published release's asset list
+# is frozen, so `<tag>` itself can never gain the installers. The companion
+# carries them instead, built from `<tag>`'s own commit, and is published with
+# `--latest=false` so `/releases/latest` — and with it every client's
+# `latest.json` — stays on `<tag>`. A Windows install from the companion has
+# no update entry in `<tag>`'s manifest and starts updating with the next
+# release that ships Windows builds.
+#
+# DISPATCH IT FROM `main`:
+#
+#   gh workflow run backfill-windows-desktop.yml --ref main -f tag=v0.3.0
+#
+#   prepare   validate the tag, create `refs/tags/<tag>-windows` at the tag's
+#             commit, and draft the companion release.
+#   build     the Windows leg of build-desktop.yml, uploaded into the draft.
+#   publish   assert both installers, publish the companion without taking
+#             `latest`, and prove `/releases/latest` is still `<tag>`.
+#   cleanup   on failure, delete the companion draft and its tag — never
+#             anything else.
+#
+# Shares `release-production`'s concurrency group, so it never races a cut.
+name: Backfill Windows Desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published production tag to build Windows installers for, e.g. v0.3.0.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-production
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate tag and draft the companion release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      companion: ${{ steps.validate.outputs.companion }}
+      version: ${{ steps.validate.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - name: Enforce the main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Backfill runs from main only (got $GITHUB_REF), so the workflow and build tooling are the reviewed ones." >&2
+          exit 1
+
+      - name: Validate the tag
+        id: validate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$TAG' is not a production tag (expected vMAJOR.MINOR.PATCH)." >&2
+            exit 1
+          fi
+          companion="${TAG}-windows"
+          if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::No GitHub Release exists for $TAG." >&2
+            exit 1
+          fi
+          if [ "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "true" ]; then
+            echo "::error::$TAG is still a draft. Backfill is for published releases; a draft can take the installers directly." >&2
+            exit 1
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${companion}" >/dev/null 2>&1; then
+            echo "::error::Tag $companion already exists. Delete it (and its release, if unpublished) before re-running." >&2
+            exit 1
+          fi
+          if gh release view "$companion" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::A GitHub Release named $companion already exists." >&2
+            exit 1
+          fi
+          {
+            echo "tag=$TAG"
+            echo "companion=$companion"
+            echo "version=${TAG#v}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.validate.outputs.tag }}
+          persist-credentials: false
+
+      - name: The tag's application version matches the tag
+        id: version
+        env:
+          VERSION: ${{ steps.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          built="$(jq -r .version crates/opencompany-app/tauri.conf.json)"
+          if [ "$built" != "$VERSION" ]; then
+            echo "::error::The tag's crates/opencompany-app/tauri.conf.json says $built, not $VERSION." >&2
+            exit 1
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Create the companion tag
+        id: companion-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPANION: ${{ steps.validate.outputs.companion }}
+          SHA: ${{ steps.version.outputs.sha }}
+        run: |
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${COMPANION}" -f sha="$SHA" --jq .ref
+
+      - name: Draft the companion release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.validate.outputs.tag }}
+          COMPANION: ${{ steps.validate.outputs.companion }}
+          VERSION: ${{ steps.validate.outputs.version }}
+          SHA: ${{ steps.version.outputs.sha }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<EOF
+          Windows x64 installers for [OpenCompany ${TAG}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}), built from \`${SHA}\` — the commit ${TAG} was released from.
+
+          ${TAG} was published before Windows builds existed, and a published release cannot gain assets, so the installers are in this companion release.
+
+          - \`OpenCompany_${VERSION}_x64-setup.exe\` — the installer most people want.
+          - \`OpenCompany_${VERSION}_x64_en-US.msi\` — for managed and Group Policy installs.
+
+          Auto-update: ${TAG}'s update manifest has no Windows entry, so nothing is offered until the next release that ships Windows builds; from then on this install updates itself.
+          EOF
+          gh release create "$COMPANION" -R "$GITHUB_REPOSITORY" \
+            --draft \
+            --verify-tag \
+            --title "OpenCompany ${TAG} — Windows" \
+            --notes-file notes.md
+
+      - name: Remove the companion tag if the draft was not created
+        if: failure() && steps.companion-tag.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPANION: ${{ steps.validate.outputs.companion }}
+        run: gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${COMPANION}"
+
+  build:
+    name: Build Windows installers
+    needs: [prepare]
+    permissions:
+      contents: write # uploads into the companion draft
+    uses: ./.github/workflows/build-desktop.yml
+    # Names passed one by one; the called job's `Production` environment
+    # supplies the values. See build-desktop.yml's `secrets:` note.
+    secrets:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SM_HOST: ${{ secrets.SM_HOST }}
+      SM_API_KEY: ${{ secrets.SM_API_KEY }}
+      SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+      SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+      KEYPAIR_ALIAS: ${{ secrets.KEYPAIR_ALIAS }}
+    with:
+      build_ref: ${{ needs.prepare.outputs.tag }}
+      tag: ${{ needs.prepare.outputs.companion }}
+      macos: false
+      windows: true
+      sign: false
+      with_updater: false
+      with_release_upload: true
+
+  publish:
+    name: Publish the companion release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      COMPANION: ${{ needs.prepare.outputs.companion }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}
+    steps:
+      - name: Validate required assets
+        run: |
+          set -euo pipefail
+          gh release view "$COMPANION" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > assets.txt
+          echo "Assets on $COMPANION:"; sed 's/^/  /' assets.txt
+          missing=0
+          for name in "OpenCompany_${VERSION}_x64-setup.exe" "OpenCompany_${VERSION}_x64_en-US.msi"; do
+            if ! grep -Fxq "$name" assets.txt; then
+              echo "::error::required asset missing from $COMPANION: $name" >&2
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+
+      - name: State the signing status in the notes
+        run: |
+          set -euo pipefail
+          gh release view "$COMPANION" -R "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          echo "" >> notes.md
+          if [ "$WINDOWS_SIGNED" = "true" ]; then
+            echo "The installers are Authenticode-signed." >> notes.md
+          else
+            echo "The installers are not code-signed yet, so Windows SmartScreen warns on first run: choose **More info → Run anyway**." >> notes.md
+          fi
+          gh release edit "$COMPANION" -R "$GITHUB_REPOSITORY" --notes-file notes.md
+
+      - name: Publish without taking latest
+        run: gh release edit "$COMPANION" -R "$GITHUB_REPOSITORY" --draft=false --latest=false
+
+      # `/releases/latest` is where every installed client finds latest.json.
+      # If it moved to the companion, which carries no manifest, updates would
+      # stop for everyone.
+      - name: The latest release is still the tag
+        run: |
+          set -euo pipefail
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          if [ "$latest" != "$TAG" ]; then
+            gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --latest
+            echo "::error::/releases/latest resolved to '$latest' after publishing $COMPANION; re-marked $TAG as latest. Check that updates resolve." >&2
+            exit 1
+          fi
+          url="$(gh release view "$COMPANION" -R "$GITHUB_REPOSITORY" --json url --jq .url)"
+          {
+            echo "### Published"
+            echo ""
+            echo "$url — \`/releases/latest\` is still \`$TAG\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  cleanup:
+    name: Remove the companion draft and tag if a step failed
+    needs: [prepare, build, publish]
+    if: >-
+      always()
+      && needs.prepare.result == 'success'
+      && (needs.build.result == 'failure' || needs.build.result == 'cancelled'
+          || needs.publish.result == 'failure' || needs.publish.result == 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Delete the companion draft and tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPANION: ${{ needs.prepare.outputs.companion }}
+        run: |
+          if gh release view "$COMPANION" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if [ "$(gh release view "$COMPANION" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "true" ]; then
+              gh release delete "$COMPANION" -R "$GITHUB_REPOSITORY" --yes && echo "Deleted draft release $COMPANION"
+            else
+              echo "::warning::$COMPANION is already published; leaving it and its tag alone."
+              exit 0
+            fi
+          fi
+          if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${COMPANION}"; then
+            echo "Deleted tag $COMPANION"
+          else
+            echo "::warning::Could not delete tag $COMPANION (already gone?)"
+          fi
+          echo "::error::A step failed; the $COMPANION draft and tag were removed. Fix the failure and re-dispatch." >&2
+          exit 1
