@@ -90,7 +90,11 @@ detection.
 
 `Tracker::track` is synchronous, infallible and returns nothing, so a call site
 cannot await a network or branch on a telemetry error. A dead collector drops
-events after one `debug!` line.
+events; the first outcome of the first drain is said once (an `info!` when
+accepted, a `warn!` otherwise) and later failures of a kind stay at `debug!`. Every
+arm of the drain also records into the counters `/spec` serves under `analytics`
+(see [analytics-status.md](analytics-status.md)), and one extra drain runs 5s
+after construction so those populate soon after boot.
 
 The queue is what makes that possible without batching. Losing the batch
 endpoint invites the obvious simplification — drop the queue and fire a request

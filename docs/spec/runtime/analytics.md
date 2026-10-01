@@ -452,12 +452,12 @@ an overrun costs a half-finished turn.
 
 `Tracker::track` is synchronous, infallible and returns nothing, so a call site
 cannot await a network or branch on a telemetry error. A dead collector drops
-events after one `debug!` line, the queue is bounded at 500 events, and a drain
-that cannot reach the collector abandons the rest of itself rather than paying a
-5s timeout per queued event. Three status classes — `401`, `3xx`, `429`/`5xx` —
-abandon it too, none being an answer about the event posted. The full reasoning,
-and the one loss said out loud (the tail a cancelled shutdown flush drops), is in
-[analytics-wire.md](analytics-wire.md#failure-is-silent-and-the-drain-gives-up-early).
+events (the first failure is a `warn!`, the rest `debug!`), the queue is bounded
+at 500, and a drain that cannot reach the collector abandons the rest of itself
+rather than paying a 5s timeout per event; `401`, `3xx` and `429`/`5xx` abandon
+it too. Reasoning: [analytics-wire.md](analytics-wire.md#failure-is-silent-and-the-drain-gives-up-early).
+Visibility: `/spec` `analytics` and the first-send self-check, in
+[analytics-status.md](analytics-status.md).
 
 ## What is deliberately not instrumented yet
 
