@@ -19,11 +19,21 @@
 // is a decision about the panel's LIFETIME, not about where there happens to be
 // room:
 //
-//   leftRail  — in-flow, shrinks the canvas. A browsing context the operator
-//               opened on purpose and keeps open while they work: it is meant
-//               to be read alongside the graph, not over it. Run history is the
-//               only occupant today. Single occupancy — a second panel wanting
-//               this rail must replace it rather than stack under it.
+//   leftRail  — a floating overlay at `xl`, a strip below the canvas beneath
+//               it. It was in-flow and shrank the canvas; with the app's 240px
+//               sidebar and Company's 240px section rail (Automations is a
+//               Company page now) beside it, that left a 626px canvas at 1440px
+//               — under the 640px floor `workflow-run-history-rail.spec.ts`
+//               defends, and too narrow for a short graph to fit at
+//               `LEGIBLE_FIT_ZOOM` (`graph.ts`). So at `xl` it is `absolute
+//               left-3 top-3 bottom-3 z-10` against the SHELL, mirroring the
+//               right overlay below: the canvas keeps its full width and the
+//               rail covers it, dismissed with its own close control. Run
+//               history is the only occupant. Single occupancy.
+//
+//               The canvas's zoom controls sit bottom-left, which is exactly
+//               where this lands, so `WorkflowsView` nudges them clear of it
+//               while it is open.
 //
 //   rightRail — in-flow, shrinks the canvas from the other side. Issue #1205's
 //               answer for `RunResultPanel` and `RunFailurePanel`: a receipt
@@ -103,10 +113,12 @@ export function CanvasShell({
   children: ReactNode;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
+    <div className="relative flex min-h-0 flex-1 flex-col xl:flex-row">
       <div className="relative min-h-0 flex-1">{children}</div>
       {leftRail && (
-        <div className="shrink-0 xl:order-first xl:w-80">{leftRail}</div>
+        <div className="shrink-0 xl:absolute xl:top-3 xl:bottom-3 xl:left-3 xl:z-10 xl:w-80 xl:overflow-hidden xl:rounded-xl xl:border xl:bg-card/95 xl:shadow-lg xl:backdrop-blur">
+          {leftRail}
+        </div>
       )}
       {rightRail && <div className="shrink-0 xl:w-80">{rightRail}</div>}
     </div>
