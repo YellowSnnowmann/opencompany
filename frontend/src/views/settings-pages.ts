@@ -10,6 +10,7 @@
 
 import {
   Activity,
+  Lock,
   MessageSquareWarning,
   Palette,
   ShieldCheck,
@@ -18,6 +19,8 @@ import {
   Settings2,
   UserCog,
 } from "lucide-react";
+
+import { isDesktopRuntime } from "@/api/transport";
 
 /** The sub-pages that live under Settings. The id is the hash's second segment. */
 export const SETTINGS_PAGES = [
@@ -130,8 +133,29 @@ export const SETTINGS_PAGES = [
   // what this rail is a list of. Filed under "This console" because that is
   // exactly what it is about — the product, not the company running in it.
   { id: "feedback", label: "Feedback", icon: MessageSquareWarning, hint: "Tell us what is wrong or missing", group: "console" },
+  // The analytics switch and the account of what it sends. DESKTOP ONLY
+  // (`desktopOnly`): the setting lives in the Tauri shell, whose Rust host is
+  // what reports, so a browser console has nothing to switch and must neither
+  // list this row nor call the shell commands behind it. Filed under "This
+  // console" beside Appearance because, like the theme, it is a fact about this
+  // installation rather than about the company.
+  {
+    id: "privacy",
+    label: "Privacy",
+    icon: Lock,
+    hint: "What this app shares, and the switch to turn it off",
+    group: "console",
+    desktopOnly: true,
+  },
   { id: "usage", label: "Usage", icon: ChartColumnBig, hint: "What this company is spending", group: "spend" },
-] as const satisfies readonly { id: string; label: string; icon: LucideIcon; hint: string; group: string }[];
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  hint: string;
+  group: string;
+  desktopOnly?: boolean;
+}[];
 
 export type SettingsPage = (typeof SETTINGS_PAGES)[number]["id"];
 
@@ -175,9 +199,25 @@ export const DEFAULT_SETTINGS_PAGE: SettingsPage = "general";
  */
 export const SETTINGS_FIELD_COLUMN = "max-w-4xl";
 
-/** Whether a hash segment names a real sub-page. */
+/**
+ * Whether this runtime may show a page at all.
+ *
+ * A `desktopOnly` page exists only inside the Tauri shell; everywhere else it is
+ * as absent as a page that was never written, so its address falls back to
+ * General rather than rendering a screen whose commands do not exist.
+ */
+export function isPageAvailable(page: (typeof SETTINGS_PAGES)[number]): boolean {
+  return !("desktopOnly" in page && page.desktopOnly) || isDesktopRuntime();
+}
+
+/** The pages the rail should list in this runtime, in table order. */
+export function availableSettingsPages(): (typeof SETTINGS_PAGES)[number][] {
+  return SETTINGS_PAGES.filter(isPageAvailable);
+}
+
+/** Whether a hash segment names a real sub-page, in this runtime. */
 export function isSettingsPage(sub: string | null): sub is SettingsPage {
-  return SETTINGS_PAGES.some((page) => page.id === sub);
+  return SETTINGS_PAGES.some((page) => page.id === sub && isPageAvailable(page));
 }
 
 /** Whether a hash segment names a real sub-page. */

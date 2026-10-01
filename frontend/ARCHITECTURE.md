@@ -299,6 +299,9 @@ it. Responses mirror the TypeScript models in `src/lib/*` and `src/api/types.ts`
 - The table lives in its own module rather than in `SettingsSection.tsx`, so
   prose that sends someone to a sub-page can name one without importing the
   section back through itself — and cannot name one that does not exist.
+- **Privacy is desktop-only.** The row carries `desktopOnly`; `isSettingsPage`
+  and `availableSettingsPages()` hide it (and send its address to General)
+  outside the Tauri shell. See `docs/spec/runtime/analytics-desktop.md`.
 - **Devices is gone.** The pairing page and its `…/devices` routes left with
   device pairing itself: the frontend client holds its own session.
 
