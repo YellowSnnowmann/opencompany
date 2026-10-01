@@ -260,3 +260,34 @@ fn the_seat_note_names_the_card_verb_and_no_withheld_one() {
         assert!(!SEAT_CARDS_NOTE.contains(withheld), "{withheld}");
     }
 }
+
+/// The note and the receipt have to describe ONE contract.
+///
+/// They disagreed once, and the disagreement was the defect: the receipt
+/// promises a reply only when the write fails, while the note told the seat to
+/// wait until it "was told" the card was open. A seat whose card landed was
+/// therefore waiting on a message that is never sent, and a live run showed it
+/// crediting a teammate that never took a turn rather than claiming the card.
+///
+/// Pinned on the receipt's own wording rather than on a paraphrase, so a reword
+/// of either side that breaks the agreement fails here instead of on staging.
+#[test]
+fn the_seat_note_does_not_promise_a_success_confirmation() {
+    // The receipt's promise, verbatim from `SpawnTaskTool::execute`'s seated arm.
+    let receipt = "you will be told here if it cannot be";
+    assert!(
+        receipt.contains("if it cannot be"),
+        "the receipt no longer promises a failure-only reply; re-read \
+         `SpawnTaskTool::execute` and decide what the note should say"
+    );
+    // The note must say the same thing: silence means it landed.
+    assert!(
+        SEAT_CARDS_NOTE.contains("only if it could not be"),
+        "the seat note must tell the seat it hears back only on failure"
+    );
+    // And must not send it waiting for a confirmation nothing sends.
+    assert!(
+        !SEAT_CARDS_NOTE.contains("until you are told it is"),
+        "the seat note is waiting on a success confirmation the tool never sends"
+    );
+}
