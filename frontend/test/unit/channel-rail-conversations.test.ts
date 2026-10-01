@@ -90,7 +90,12 @@ describe("the merged conversation list", () => {
   it("is one flat list with no Channels or Direct messages heading", () => {
     render();
     expect(container.querySelectorAll("section")).toHaveLength(0);
-    expect(container.querySelectorAll("ul")).toHaveLength(1);
+    // Two lists in the DOM (the DMs slide on a re-sort and need their own), one
+    // run on screen: nothing between them.
+    expect(container.querySelectorAll("ul")).toHaveLength(2);
+    expect(container.querySelectorAll("ul")[0].parentElement).toBe(
+      container.querySelectorAll("ul")[1].parentElement,
+    );
     expect(container.textContent).not.toContain("Channels");
     expect(container.textContent).not.toContain("Direct messages");
     // No fold toggle among the list's own rows (the two menu triggers carry

@@ -202,6 +202,19 @@ export function ChannelRail({
   // already had — the row's own icon (`#`, a lock, the teammate's avatar) is
   // what tells them apart now, not a heading over them.
   const rows = shownSections.flatMap((section) => section.channels);
+  const channelRows = rows.filter((channel) => channel.kind !== "dm");
+  const dmRows = rows.filter((channel) => channel.kind === "dm");
+  const row = (channel: Channel) => (
+    <ChannelRow
+      channel={channel}
+      active={channel.id === activeId}
+      activeAria={activeAria}
+      onPage={onPage}
+      unread={unread[channel.id] ?? 0}
+      mentions={mentions?.[channel.id] ?? 0}
+      onSelect={onSelect}
+    />
+  );
   const channelsOnly = sections
     .filter((section) => section.id !== "dms")
     .flatMap((section) => section.channels);
@@ -267,32 +280,33 @@ export function ChannelRail({
 
       {/* No horizontal padding of its own: the sidebar group already gutters the
           rail, and a second one pushed every row right of the nav rows. */}
-      <ul
-        // A re-sort moves DM rows in the DOM. Left as scroll-anchor candidates,
-        // a visible row that jumped to the top dragged the scrolled sidebar
-        // with it, so the sliding list opts out and the offset stays put.
-        className="mt-0.5 flex select-none flex-col gap-px [overflow-anchor:none]"
-      >
-        {rows.map((channel) => (
-          <li
-            key={channel.id}
-            ref={channel.kind === "dm" ? dmRowRef(channel.id) : undefined}
-          >
-            <ChannelRow
-              channel={channel}
-              active={channel.id === activeId}
-              activeAria={activeAria}
-              onPage={onPage}
-              unread={unread[channel.id] ?? 0}
-              mentions={mentions?.[channel.id] ?? 0}
-              onSelect={onSelect}
-            />
-          </li>
-        ))}
+      {/* One visual list, two lists in the DOM. The DM rows slide when a message
+          re-sorts them, and `useFlipList` measures a row against its own list —
+          so the DMs need a list of their own, or a channel appearing above them
+          would shift every DM slot and play a slide that is not a re-sort. No
+          caption, border or extra gap sits between the two: read as one run. */}
+      <div className="mt-0.5 flex select-none flex-col gap-px">
+        <ul className="flex flex-col gap-px">
+          {channelRows.map((channel) => (
+            <li key={channel.id}>{row(channel)}</li>
+          ))}
+        </ul>
+        <ul
+          // A re-sort moves DM rows in the DOM. Left as scroll-anchor candidates,
+          // a visible row that jumped to the top dragged the scrolled sidebar
+          // with it, so the sliding list opts out and the offset stays put.
+          className="flex flex-col gap-px [overflow-anchor:none]"
+        >
+          {dmRows.map((channel) => (
+            <li key={channel.id} ref={dmRowRef(channel.id)}>
+              {row(channel)}
+            </li>
+          ))}
+        </ul>
         {rows.length === 0 && (
-          <li className="px-2 py-1 text-xs text-muted-foreground">Nothing here yet.</li>
+          <p className="px-2 py-1 text-xs text-muted-foreground">Nothing here yet.</p>
         )}
-      </ul>
+      </div>
 
       {/* Controlled: the menu items open these, there is no trigger of their own. */}
       <NewMessageDialog
