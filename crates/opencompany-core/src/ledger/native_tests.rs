@@ -7,6 +7,7 @@ use crate::ports::tasks::{
 
 fn card(id: &str, column: &str, updated: u64) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored(&format!("card {id}")),
         note: None,

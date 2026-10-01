@@ -194,6 +194,10 @@ pub(crate) struct TaskCard {
     /// which is every card the board rendered before this.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) bounced: Option<String>,
+    /// The teammate, and the HiveMind episode, that opened this card from
+    /// chat. Omitted for every card nobody opened that way.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) opened_by: Option<crate::ports::TaskOpener>,
 }
 
 impl From<TaskRecord> for TaskCard {
@@ -225,6 +229,7 @@ impl From<TaskRecord> for TaskCard {
             origin_run_id: t.origin_run_id,
             origin_workflow_id: t.origin_workflow_id,
             bounced: t.bounced,
+            opened_by: t.opened_by,
         }
     }
 }
@@ -520,6 +525,7 @@ async fn create_task(
     };
     let assignee = resolve_assignee(&company, body.assignee.unwrap_or_default()).await?;
     let record = TaskRecord {
+        opened_by: None,
         id: generate_id(),
         title,
         note: body.note,

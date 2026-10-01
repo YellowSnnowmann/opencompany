@@ -247,6 +247,14 @@ export interface TaskWorkflowProposal {
   runId: string;
 }
 
+/** The teammate, and the HiveMind episode, that opened a card from chat. */
+export interface TaskOpener {
+  /** Roster id of the teammate whose seat opened it. */
+  agentId: string;
+  /** The episode the seat was speaking in, when there was one. */
+  episodeId?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -295,6 +303,11 @@ export interface Task {
    * created before this field existed.
    */
   originParent?: number;
+  /**
+   * The teammate who opened this card from inside a HiveMind room, and the
+   * episode they were in. Absent for a card a person or the board opened.
+   */
+  openedBy?: TaskOpener;
   /**
    * The workflow run whose agent node opened this card (issue #661), and the
    * graph it is a run of.

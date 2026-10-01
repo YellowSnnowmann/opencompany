@@ -3576,6 +3576,7 @@ impl<'a> CycleHostImpl<'a> {
             });
         };
         let card = TaskRecord {
+            opened_by: None,
             id: generate_id(),
             title: crate::ports::tasks::TaskTitle::system(&parsed.title),
             note: parsed.note,
@@ -3700,6 +3701,7 @@ impl<'a> CycleHostImpl<'a> {
             ),
         };
         let card = TaskRecord {
+            opened_by: None,
             id: generate_id(),
             title: crate::ports::tasks::mint_task_title(
                 &parsed.instruction,

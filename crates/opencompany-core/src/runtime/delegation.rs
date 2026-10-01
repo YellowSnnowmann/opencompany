@@ -32,9 +32,7 @@ use crate::harness::orchestrator::{self, Delegation, DelegationQueue};
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::run_trace::RunTraceSink;
 use crate::harness::workflow_refs::WorkflowRefQueue;
-use crate::ports::tasks::{
-    COLUMN_TODO, TaskOutput, TaskOutputAction, TaskOutputSource, TaskOutputWorkflow,
-};
+use crate::ports::tasks::{TaskOutput, TaskOutputAction, TaskOutputSource, TaskOutputWorkflow};
 use crate::ports::types::{CompanyId, CompanyRecord, EventSeq, OutboundMessage, TurnStep};
 use crate::ports::{TaskOrigin, TaskRecord, TaskStore, generate_id, now_millis};
 use crate::runtime::assignee;
@@ -427,9 +425,11 @@ pub(crate) struct DelegationOutcome {
 /// A board-write refusal and its operator-facing reason.
 #[derive(Clone, Debug)]
 pub(crate) struct RefusedCardWrite {
-    /// `"assign_task"` or `"review_task"`, for the operator-facing note.
+    /// `"spawn_task"`, `"assign_task"` or `"review_task"`, for the
+    /// operator-facing note.
     pub(crate) tool: &'static str,
-    pub(crate) task_id: String,
+    /// The card the write named: its id, or the title of one never opened.
+    pub(crate) card: String,
     pub(crate) reason: String,
 }
 
@@ -1881,7 +1881,7 @@ impl<'a> DelegationRunner<'a> {
         for unknown in refused_cards {
             operator_reply.push_str(&format!(
                 "\n\n(tried to {} card {:?}, but {})",
-                unknown.tool, unknown.task_id, unknown.reason
+                unknown.tool, unknown.card, unknown.reason
             ));
         }
         // Drained after the relay, not before it: a relay turn carries the same
@@ -2228,7 +2228,7 @@ impl<'a> DelegationRunner<'a> {
                         delegator,
                         &format!(
                             "{} refused for card {:?}: {}",
-                            refused.tool, refused.task_id, refused.reason
+                            refused.tool, refused.card, refused.reason
                         ),
                     ));
                 }
@@ -2652,7 +2652,7 @@ impl<'a> DelegationRunner<'a> {
         for unknown in nested.refused_cards {
             reply.push_str(&format!(
                 "\n\n({member} tried to {} card {:?}, but {})",
-                unknown.tool, unknown.task_id, unknown.reason
+                unknown.tool, unknown.card, unknown.reason
             ));
         }
         // Issue #1846 review (Codex #3865395868): this hand-off's own card
@@ -2823,6 +2823,7 @@ impl<'a> DelegationRunner<'a> {
             return Ok(None);
         }
         let card = TaskRecord {
+            opened_by: None,
             id: generate_id(),
             title: crate::ports::tasks::mint_task_title(request, None, self.titler).await,
             note: Some(append_note(None, "operator", request)),
@@ -3066,8 +3067,9 @@ impl<'a> DelegationRunner<'a> {
     /// [`TaskStore::upsert`](crate::ports::TaskStore) path the console uses and
     /// **reports the card's id** so the caller can say one was opened (issue
     /// #246) — it surfaces no bubble of its own, which is a different thing
-    /// from the nothing it used to surface. A missing task store is a silent
-    /// no-op.
+    /// from the nothing it used to surface. A missing task store or a failed
+    /// write comes back as a [`RefusedCardWrite`], so the rest of the drain
+    /// still runs.
     /// `delegate_to_desk` runs a single turn on the desk's lead member and
     /// **returns its reply for the orchestrator to relay** (a [`DeskReply`]). An
     /// unknown desk (no roster-backed lead) or a cancelled run yields nothing to
@@ -3102,7 +3104,18 @@ impl<'a> DelegationRunner<'a> {
                 assignee,
             } => {
                 let Some(tasks) = self.tasks else {
-                    return Ok(DelegationOutcome::default());
+                    tracing::warn!(
+                        company = %self.company,
+                        "[delegation] spawn_task could not open its card: no task store is wired"
+                    );
+                    return Ok(DelegationOutcome {
+                        refused_card: Some(RefusedCardWrite {
+                            tool: "spawn_task",
+                            card: title,
+                            reason: "no task board is wired here".to_string(),
+                        }),
+                        ..DelegationOutcome::default()
+                    });
                 };
                 // Grounded against the roster on the same terms `AssignTask`
                 // grounds its own: a name that resolves to nobody opens the card
@@ -3113,65 +3126,36 @@ impl<'a> DelegationRunner<'a> {
                     .map(|name| assignee::resolve(self.record, name))
                     .and_then(|resolved| resolved.canonical().map(str::to_string))
                     .unwrap_or_default();
-                let card = TaskRecord {
-                    id: generate_id(),
-                    title: crate::ports::tasks::TaskTitle::system(&title),
+                let card = crate::runtime::spawn_card::SpawnCard {
+                    title,
                     note,
-                    origin_message_seq: None,
-                    column: COLUMN_TODO.to_string(),
-                    priority: "medium".to_string(),
                     assignee: owner,
-                    updated_at_millis: now_millis(),
-                    // Issue #151 §3.2: remember which conversation asked for this,
-                    // so the completion can answer there instead of only landing in
-                    // the note.
-                    // Issue #661 (M5): `None` on the workflow path, and that is
-                    // the lineage-root decision rather than a gap. A run has no
-                    // conversation behind it, so there is nowhere for a
-                    // completion to post back to — and stamping the chat that
-                    // *scheduled* the workflow hours earlier would make the card
-                    // answer into a conversation the operator has left. The run
-                    // reference below is the provenance instead.
-                    // Issue #1890 B: which thread inside it, too — the root the
-                    // runner was bound to by `in_thread`, so a card a threaded
-                    // turn spawns settles back into that thread rather than flat
-                    // in the channel. On the workflow path the whole origin is
-                    // `None` for the reason above: no conversation is behind a
-                    // run, so there is no thread inside one either.
                     origin: TaskOrigin::new(chat_id.map(str::to_string), self.thread_root),
-                    // Lineage (#185): the dispatched card whose turn queued this
-                    // one, when the drain is running inside a task
-                    // (`for_task`) — since #204 a dispatched turn drains the
-                    // queue too, so a task IS in scope here and this is the site
-                    // that stamps it. An orchestrator *chat* turn has no task in
-                    // scope and still writes `None`; lineage for those is written
-                    // through the task API's `parentTaskId` instead.
                     parent_task_id: self.task.clone(),
-                    // Nothing has run yet, so there is no deliverable to point
-                    // at (issue #339). The first successful settle stamps it.
-                    output: None,
-                    plan: None,
-                    planning_attempts: Vec::new(),
-                    deliverable: crate::ports::tasks::TaskDeliverable::Once,
-                    workflow_proposal: None,
-                    // Issue #661 (M5): machine provenance for a card a workflow
-                    // node opened — a reference to the run, never a parent. Both
-                    // ids or neither; `None` on every chat and task path, which is
-                    // every caller that did not go through `for_workflow_run`.
-                    //
-                    // A `sub_workflow` child's node stamps the PARENT run's ids:
-                    // the resolver runs the child inside the engine under the
-                    // parent's bundle, so there is exactly one run id in
-                    // existence and it is the only one a console can navigate to.
                     origin_run_id: self.workflow_run.as_ref().map(|run| run.run_id.clone()),
                     origin_workflow_id: self
                         .workflow_run
                         .as_ref()
                         .map(|run| run.workflow_id.clone()),
-                    // Issue #1865: a card just being minted has never bounced.
-                    bounced: None,
-                };
-                tasks.upsert(self.company, &card).await?;
+                    opened_by: None,
+                }
+                .into_record();
+                if let Err(error) = tasks.upsert(self.company, &card).await {
+                    tracing::error!(
+                        company = %self.company,
+                        %error,
+                        "[delegation] spawn_task could not write its card; the rest of the drain \
+                         carries on"
+                    );
+                    return Ok(DelegationOutcome {
+                        refused_card: Some(RefusedCardWrite {
+                            tool: "spawn_task",
+                            card: card.title.to_string(),
+                            reason: "the board would not save it".to_string(),
+                        }),
+                        ..DelegationOutcome::default()
+                    });
+                }
                 // Issue #246: report the card so the caller can surface it. The
                 // id is reported only after the write succeeded, so a bubble can
                 // never claim a card that is not on the board.
@@ -3292,7 +3276,7 @@ impl<'a> DelegationRunner<'a> {
                     return Ok(DelegationOutcome {
                         refused_card: Some(RefusedCardWrite {
                             tool: "assign_task",
-                            task_id,
+                            card: task_id,
                             reason: "no such card is on the board".to_string(),
                         }),
                         ..DelegationOutcome::default()
@@ -3374,7 +3358,7 @@ impl<'a> DelegationRunner<'a> {
                     return Ok(DelegationOutcome {
                         refused_card: Some(RefusedCardWrite {
                             tool: "assign_task",
-                            task_id,
+                            card: task_id,
                             reason: "the card changed before the assignment could be recorded"
                                 .to_string(),
                         }),
@@ -3412,7 +3396,7 @@ impl<'a> DelegationRunner<'a> {
                     return Ok(DelegationOutcome {
                         refused_card: Some(RefusedCardWrite {
                             tool: "review_task",
-                            task_id,
+                            card: task_id,
                             reason: "no such card is on the board".to_string(),
                         }),
                         ..DelegationOutcome::default()
@@ -3423,7 +3407,7 @@ impl<'a> DelegationRunner<'a> {
                     return Ok(DelegationOutcome {
                         refused_card: Some(RefusedCardWrite {
                             tool: "review_task",
-                            task_id,
+                            card: task_id,
                             reason: format!("the card is {:?}, not in_review", card.column),
                         }),
                         ..DelegationOutcome::default()
@@ -3443,7 +3427,7 @@ impl<'a> DelegationRunner<'a> {
                     return Ok(DelegationOutcome {
                         refused_card: Some(RefusedCardWrite {
                             tool: "review_task",
-                            task_id,
+                            card: task_id,
                             reason: "the card changed before the review could be recorded"
                                 .to_string(),
                         }),
@@ -4012,3 +3996,6 @@ mod tests_part8;
 #[cfg(test)]
 #[path = "delegation_tests_part9.rs"]
 mod tests_part9;
+#[cfg(test)]
+#[path = "delegation_tests_spawn_honesty.rs"]
+mod tests_spawn_honesty;

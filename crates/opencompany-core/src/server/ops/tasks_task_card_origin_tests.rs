@@ -4,6 +4,7 @@ use crate::ports::tasks::TaskTitle;
 
 fn plain_record() -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: "t-1".to_string(),
         title: TaskTitle::authored("Draft the spec"),
         note: None,
@@ -49,4 +50,20 @@ fn a_channel_level_origin_carries_no_thread_root() {
 
     let json = serde_json::to_string(&card).expect("serializes");
     assert!(!json.contains("originParent"), "{json}");
+}
+
+#[test]
+fn a_card_opened_in_chat_names_who_opened_it_and_others_say_nothing() {
+    let card = TaskCard::from(plain_record());
+    let json = serde_json::to_string(&card).expect("serializes");
+    assert!(!json.contains("openedBy"), "{json}");
+
+    let mut record = plain_record();
+    record.opened_by = Some(crate::ports::TaskOpener {
+        agent_id: "writer".to_string(),
+        episode_id: Some("ep-1".to_string()),
+    });
+    let json = serde_json::to_value(TaskCard::from(record)).expect("serializes");
+    assert_eq!(json["openedBy"]["agentId"], "writer");
+    assert_eq!(json["openedBy"]["episodeId"], "ep-1");
 }

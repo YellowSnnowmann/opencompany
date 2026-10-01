@@ -51,6 +51,8 @@ pub mod blockers;
 pub mod brain;
 pub mod build;
 pub mod capability_budget;
+/// The task-local card budget a HiveMind seat's `spawn_task` reserves against.
+pub mod card_budget;
 #[cfg(feature = "chargebee")]
 pub mod chargebee;
 /// Guarding a chat-only (`suppress_tools`) turn's reply against the tool-call
@@ -5294,6 +5296,11 @@ async fn refresh_oauth_decls(
 /// the roster, and drop every live agent session for a cosmetic change — issue
 /// #1676's review note.
 ///
+/// A skill scope is one of the things the harness reads — it decides which
+/// skills are materialized into the teammate's tree — so a row carrying only a
+/// scope is not avatar-only, and filtering it here would leave the fingerprint
+/// unmoved for the commonest scope edit: one teammate, nothing else changed.
+///
 /// An explicit `Some(vec![])` tool list, `Some("")` instructions and `Some("")`
 /// model/harness (the stored form of "cleared") stay real overrides ("the
 /// company's standard grant" / "cleared" / "the blueprint's model and harness"),
@@ -5303,6 +5310,7 @@ fn is_avatar_only(edit: &crate::ports::types::AgentOverride) -> bool {
         && edit.role.is_none()
         && edit.description.is_none()
         && edit.tools.is_none()
+        && edit.skills.is_none()
         && edit.instructions.is_none()
         && edit.model.is_none()
         && edit.harness.is_none()
@@ -5357,6 +5365,12 @@ fn overlay_fingerprint(
         edit.role.hash(&mut hasher);
         edit.description.hash(&mut hasher);
         edit.tools.hash(&mut hasher);
+        // A skill scope decides which skills are materialized into this
+        // teammate's tree, so it moves the roster the same way a grant edit
+        // does. Without it every other axis is stable on a scope-only change,
+        // the cached roster is reused, and the scope is silently ignored until
+        // the process restarts.
+        edit.skills.hash(&mut hasher);
         // A routing override changes the harness binding the roster must build,
         // so it has to move this fingerprint too — otherwise re-binding one
         // teammate to another model/harness would persist and be silently
@@ -5384,6 +5398,7 @@ fn overlay_fingerprint(
         // order (an operator's own list), length folded in first via the slice
         // length above so `["a","b"]` cannot collide with `["ab"]`.
         agent.tools.hash(&mut hasher);
+        agent.skills.hash(&mut hasher);
         // The overlay's own routing binding (`overlay_agent_to_manifest` carries
         // both straight through), so a model/harness change on an overlay
         // teammate invalidates the cached roster exactly as an edit of a
@@ -5947,22 +5962,13 @@ pub(crate) fn seat_persona(
         orchestrator::orchestrator_id(&live_roster).as_deref() == Some(manifest_agent.id.as_str()),
         &crate::company::team_brief::seat_team_section(company, &manifest_agent.id),
     )?;
-    // **The hand-off tools come off an episode seat's belt.**
+    // **The hand-off and lifecycle tools come off an episode seat's belt.**
     //
-    // `spawn_task`, `delegate_to_desk` and `delegate_to_teammate` are wired
-    // onto every roster agent (`build.rs`), and each queues work the
-    // [`HarnessBrain`] drains. Inside an episode nothing drains that queue,
-    // so the orchestrator refuses the call in the model's own turn rather
-    // than parking it forever (`drain_unwired`).
-    //
-    // The refusal is handled; what it invites is not. A seat that reaches for
-    // one concludes delegation is impossible here and reports that to the
-    // operator -- "board actions are unavailable, so delegation is blocked",
-    // asking them to go and fix a board that was never the problem -- while
-    // the hive's own `ask` sat on the same belt the whole time. Offering a
-    // tool that cannot work in this context is worse than withholding it: it
-    // does not just fail, it argues the seat out of the tool that would have
-    // worked.
+    // A seat reaches a teammate with the episode's own `ask`, and its turn
+    // claims a delegation bucket that permits opening a card and nothing else
+    // (`DrainClaim::Seat`). A tool on the belt that can only refuse argues the
+    // seat out of the verb that works, so these are withheld rather than left
+    // to refuse. `spawn_task` stays: the seat's settle writes its cards.
     //
     // Removed from the belt AND from the provider-visible names, because
     // `episode_seat` builds the allowlist from these and a name the model can
@@ -5978,18 +5984,9 @@ pub(crate) fn seat_persona(
     // **And the briefs that describe them.**
     //
     // A seat is built by the same builder as an ordinary roster agent, so it
-    // inherits the orchestrator runtime's prose wholesale: how to hand work
-    // on, and how the board tracks it. Inside an episode there is no drain
-    // and no board, and `tinyhivemind` is the thing running the room -- a
-    // seat reaches a teammate with `ask`, which the episode's own belt
-    // serves.
-    //
-    // Taking the tools without the prose is the worst of both: the persona
-    // spends a paragraph on `delegate_to_teammate`, the belt does not have
-    // it, and a seat that goes looking concludes the capability was
-    // withdrawn. On a live run one did exactly that and told the operator to
-    // go and make "the board" available -- reporting, accurately, an
-    // affordance its prompt had promised and its belt could not honour.
+    // inherits the orchestrator runtime's prose about handing work on and
+    // tracking it, which names the withheld tools. What a seat may do with
+    // cards is told to it by the host instead (`SEAT_CARDS_NOTE`).
     //
     // Removed by exact match on what was appended, so a brief that is
     // reworded upstream is either removed whole or left whole, never
@@ -6007,18 +6004,9 @@ pub(crate) fn seat_persona(
 
     // **And the ledger catalogue, which names them too.**
     //
-    // The two briefs above are not the only prose that hands a seat a verb
-    // name. `ledger_brief` prints every native ledger's `written_by`, and the
-    // board's says "`spawn_task` to open a card, `assign_task` to hand it
-    // over" -- true of the company, and false of a seat whose belt was just
-    // stripped of the first. The strip above is by exact match on two known
-    // blocks and could not see a third.
-    //
-    // A live run paid for it. The claimer read the catalogue, went looking,
-    // found nothing, and told the operator "opening the task card on the
-    // board isn't something I can do directly from here", then routed the
-    // work through a teammate it had invented a reason to involve. The same
-    // failure the comment above describes, arriving by a different sentence.
+    // `ledger_brief` prints every native ledger's `written_by`, and the
+    // board's names `assign_task` beside `spawn_task` -- true of the company,
+    // and false of a seat. Swapped for a line that is true of a seat.
     //
     // Driven off `EPISODE_WITHHELD_TOOLS` rather than off the `tasks` slug,
     // so a ledger declared later whose writer prose names a withheld verb is
@@ -6052,11 +6040,15 @@ pub(crate) fn seat_persona(
 
 /// The roster tools an episode seat is **not** built with.
 ///
-/// Every one of these queues work for the [`HarnessBrain`] to drain, and no
-/// brain drains inside an episode. See `build_episode_seat` for why they are
+/// A seat's delegation claim permits opening a card and nothing else, so each
+/// of these could only refuse there. See `seat_persona` for why they are
 /// withheld rather than left to refuse.
-pub(crate) const EPISODE_WITHHELD_TOOLS: [&str; 3] =
-    ["spawn_task", "delegate_to_desk", "delegate_to_teammate"];
+pub(crate) const EPISODE_WITHHELD_TOOLS: [&str; 4] = [
+    "delegate_to_desk",
+    "delegate_to_teammate",
+    "assign_task",
+    "review_task",
+];
 
 pub(crate) fn build_roster(
     runtime: &openhuman_embed::Runtime,
@@ -6292,6 +6284,10 @@ fn overlay_agent_to_manifest(overlay: &OverlayAgent) -> ManifestAgent {
         // A non-empty list is intersected with `[tools].allow` by that same
         // function below (narrow-only, never a widen).
         tools: overlay.tools.clone(),
+        // The overlay's own skill scope, carried the same way, so a
+        // console-created teammate is scoped exactly as a manifest one is.
+        // `None` is every enabled skill, unchanged from before the field.
+        skills: overlay.skills.clone(),
         // An overlay teammate declares no delegation allowlist, and an empty
         // list is unrestricted (`delegation_tools::reach_is_unrestricted`): it
         // carries the hand-off tools like every roster agent and may reach
@@ -6462,3 +6458,7 @@ mod mcp_policy_freshness_tests;
 #[cfg(all(test, feature = "openhuman"))]
 #[path = "mcp_reads_tests.rs"]
 mod mcp_reads_tests;
+
+#[cfg(test)]
+#[path = "built_in_tests_skill_scope_freshness.rs"]
+mod tests_skill_scope_freshness;

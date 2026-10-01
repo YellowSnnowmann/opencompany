@@ -262,3 +262,43 @@ export function mcpRemovalNote(source: McpSource): string {
       return "Removing it drops it from every agent's tool belt on the next turn and deletes the credential stored here for it.";
   }
 }
+
+/**
+ * Who publishes a directory entry: the host of its website, else the owner its
+ * qualified name encodes (`com.notion/mcp` → `notion.com`,
+ * `io.github.acme/server` → `acme`, `@acme/server` → `acme`).
+ */
+export function catalogPublisher(entry: {
+  qualifiedName: string;
+  websiteUrl?: string;
+}): string | null {
+  if (entry.websiteUrl) {
+    try {
+      const host = new URL(entry.websiteUrl).hostname.replace(/^www\./, "");
+      if (host) return host;
+    } catch {
+      // Not a URL; fall through to the qualified name.
+    }
+  }
+  const namespace = entry.qualifiedName.split("/")[0]?.trim() ?? "";
+  if (namespace.startsWith("@")) return namespace.slice(1) || null;
+  const parts = namespace.split(".").filter(Boolean);
+  if (parts.length < 2) return null;
+  if (parts[0] === "io" && parts[1] === "github" && parts.length > 2) {
+    return parts.slice(2).join(".");
+  }
+  return parts.reverse().join(".");
+}
+
+/** The name the host saves a directory install under: its shown name as a slug. */
+export function directoryServerName(displayName: string): string {
+  return displayName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** The name a server is shown under: its own title when it has one. */
+export function mcpDisplayName(server: Pick<McpServer, "name" | "probedTitle">): string {
+  return server.probedTitle?.trim() || server.name;
+}
