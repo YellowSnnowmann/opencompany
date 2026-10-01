@@ -326,7 +326,8 @@ projected onto `/events` under the frame name below, all on the usual
 | `episode_completed` | `episodeId, revision, completedBy?, rounds, reason, summarySeq?` |
 | `referral` (+) | `episodeId?, toEpisodeId?` — the asking and the answering episode |
 | `desk_routing_configured` | `deskId, reset` (replaces `desk_hive_configured`) |
-| `tool_call` / `tool_result` / `thinking` (+) | `episodeId?, roundRevision?` (ephemeral) |
+| `tool_call` / `tool_result` / `thinking` | ephemeral live frames on `{type, seq, agentId?, chatId?, ...}`; they carry no `episodeId`/`roundRevision` (the hive desk's seat turns emit none of them today) |
+| `replying` (+) | ephemeral, `agentId?, chatId?, messageSeq?` and no label or status: this agent started writing its reply text. Emitted once per run of text (a tool call or thinking burst re-arms it), never folded into a step, never journaled. The console shows "typing" from it until a `tool_call` / `thinking` frame resets it, the sending console's POST ends, an `agent_reply` lands with no other turn open on that chat, or a `turn_settled` names the chat (a chat-route settle carries no `chatId` and clears nothing by itself); no timer |
 
 `plan` is `{kind:"one", primaryId}`, `{kind:"hive", primaryId, invitedIds[]}`,
 `{kind:"clarify", question?}` or `{kind:"fallback", reason}`. A seat's

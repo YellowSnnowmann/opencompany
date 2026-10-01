@@ -134,17 +134,101 @@ pub fn hives_for(
     hives
 }
 
-/// The Jev router this host routes with, if a TinyHumans key resolves.
+/// Tiers 1 and 2 of the routing credential, shared by everything that reaches
+/// System One on a company's behalf.
+///
+/// A configured `Credential` is that identity. An unconfigured one means
+/// "nothing here -- walk the inherited environment ladder", which is tier 3 and
+/// lives in `jev.rs`. `None` is different and stronger: the secret store could
+/// not be read, so this company's identity is *unknown*.
+/// [`company_key::load`](crate::company::company_key::load) propagates that
+/// error deliberately and its own doc says why -- mapping it to "no credential"
+/// would route a company that has a key under the host's own
+/// `OPENCOMPANY_INFERENCE_KEY` for as long as the store stayed unreadable,
+/// borrowing an identity rather than using the one this company pays under.
+///
+/// # Why this is one function
+///
+/// Because it was two. Routing read the company key and the closing oracle did
+/// not, so a company that signed in through the console routed as itself and
+/// concluded as the host -- silently, because a host with no oracle concludes
+/// every settled episode and picks the desk lead, which reads as a policy
+/// rather than as a credential nobody looked for. Anything that asks System One
+/// a question on a company's behalf resolves its identity here.
+///
+/// Called **once** per dispatcher, and its answer handed to both consumers.
+/// Calling it per consumer made them share the logic but not the read: two
+/// store reads a moment apart can disagree -- one failing, or a rotation
+/// landing between them -- and the pair would split again for a reason no
+/// amount of shared code prevents. One read cannot disagree with itself, and a
+/// [`Credential`](crate::company::Credential) is already the seam that carries
+/// a rotating token rather than a value frozen at build time, so sharing one is
+/// what keeps both callers on the same identity as it rotates.
+async fn routing_credential(
+    company: &crate::ports::types::CompanyId,
+    secrets: Option<&Arc<dyn crate::ports::SecretStore>>,
+) -> Option<crate::company::Credential> {
+    let env = &crate::app::config::ProcessEnv;
+    let credential = crate::app::config::EnvSource::get(env, crate::hive::jev::JEV_KEY_ENV)
+        .map(crate::company::Credential::from_value)
+        .unwrap_or_default();
+    if credential.configured() {
+        return Some(credential);
+    }
+    let Some(secrets) = secrets else {
+        return Some(credential);
+    };
+    match crate::company::company_key::load(company, secrets.as_ref()).await {
+        Ok(company_key) => Some(company_key),
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "[hive] the company's account key could not be read; routing by lead and mention"
+            );
+            None
+        }
+    }
+}
+
+/// The Jev router this host routes with, built from an already-resolved
+/// credential -- `None` when [`routing_credential`] could not read one.
+///
+/// # Which key, in what order
+///
+/// 1. `OPENCOMPANY_JEV_KEY`, because routing and inference are not always the
+///    same vendor (see [`jev::JEV_KEY_ENV`]) and an operator who names a
+///    routing vendor explicitly means it.
+/// 2. The company's own account key -- `tinyhumans/key`, what a console sign-in
+///    stores and [`company_key::load`](crate::company::company_key::load)
+///    reads. This tier is why the function takes a company at all. Without it a
+///    host whose only credential arrived through the console routed by lead and
+///    mention while inference, reading that same key by that same seam, worked:
+///    the key material was present and routing was the one resolver not looking
+///    at it.
+/// 3. The inherited environment ladder inside [`jev::jev_router`]
+///    (`OPENCOMPANY_INFERENCE_KEY`, the TinyHumans token file,
+///    `TINYHUMANS_API_KEY`), which is the right answer when routing and
+///    inference *are* the same vendor.
+///
+/// Read live on every dispatch rather than cached at boot, for the reason
+/// `resolve_effective` re-reads the secret store on every call: a company that
+/// signs in while the host is up should route through Jev on its next message,
+/// not its next restart.
+///
+/// `secrets` is `None` wherever no store is wired -- tests, stub runtimes --
+/// which skips tier 2 and leaves the resolution exactly as it was.
 #[must_use]
-pub fn host_router() -> Option<Arc<dyn Router>> {
-    // `OPENCOMPANY_JEV_KEY` first, because routing and inference are not
-    // always the same vendor -- see `jev::JEV_KEY_ENV`. `None` keeps the
-    // inherited ladder, which is the right answer when they are.
-    let key = crate::app::config::EnvSource::get(
-        &crate::app::config::ProcessEnv,
-        crate::hive::jev::JEV_KEY_ENV,
-    );
-    match crate::hive::jev::jev_router(&crate::app::config::ProcessEnv, key.as_deref()) {
+pub fn host_router(credential: Option<crate::company::Credential>) -> Option<Arc<dyn Router>> {
+    let env = &crate::app::config::ProcessEnv;
+    let credential = credential?;
+    // Unconfigured here is not "no key anywhere": tier 3 lives inside
+    // `jev_router`, which is what `None` asks it to walk.
+    let resolved = if credential.configured() {
+        crate::hive::jev::jev_router_from(env, credential)
+    } else {
+        crate::hive::jev::jev_router(env, None)
+    };
+    match resolved {
         Ok(Some(router)) => Some(Arc::new(router)),
         Ok(None) => {
             tracing::info!("[hive] no TinyHumans key: desks route by lead and mention");
@@ -159,17 +243,23 @@ pub fn host_router() -> Option<Arc<dyn Router>> {
 
 /// The System One transport the closing decision asks, or `None`.
 ///
-/// Resolved exactly as [`host_router`] resolves the router, and silent in the
-/// same way: an instance with no credential concludes every settled episode and
-/// picks the desk lead, which is the behaviour before
+/// Built from the *same* [`routing_credential`] result [`host_router`] is given,
+/// and silent in the same way: an instance with no credential concludes every
+/// settled episode and picks the desk lead, which is the behaviour before
 /// [`crate::hive::conclude::decide`] existed.
 #[must_use]
-pub fn host_oracle() -> Option<Arc<crate::hive::jev::TinyHumansSystemOne>> {
-    let key = crate::app::config::EnvSource::get(
-        &crate::app::config::ProcessEnv,
-        crate::hive::jev::JEV_KEY_ENV,
-    );
-    match crate::hive::jev::jev_transport(&crate::app::config::ProcessEnv, key.as_deref()) {
+pub fn host_oracle(
+    credential: Option<crate::company::Credential>,
+) -> Option<Arc<crate::hive::jev::TinyHumansSystemOne>> {
+    let env = &crate::app::config::ProcessEnv;
+    let credential = credential?;
+    // Tier 3 lives inside `jev_transport`, which is what `None` asks it to walk.
+    let resolved = if credential.configured() {
+        crate::hive::jev::jev_transport_from(env, credential)
+    } else {
+        crate::hive::jev::jev_transport(env, None)
+    };
+    match resolved {
         Ok(Some(transport)) => Some(Arc::new(transport)),
         Ok(None) => None,
         Err(error) => {
@@ -222,8 +312,13 @@ pub fn tinyhivemind_mention(
 }
 
 /// Assembles a dispatcher for one company.
-#[must_use]
-pub fn dispatcher(
+///
+/// `async` because the routing credential is resolved here and the
+/// [`SecretStore`](crate::ports::SecretStore) is async. Every caller is already
+/// in an async context. The alternative -- a credential pre-resolved onto
+/// [`HarnessDeps`](crate::harness::built_in::HarnessDeps) -- would go stale the
+/// way the inference copy of the account key did before issue #2266 removed it.
+pub async fn dispatcher(
     record: Arc<CompanyRecord>,
     events: Arc<dyn EventLog>,
     hives: HashMap<String, Arc<crate::hive::graph::DeskHive>>,
@@ -231,12 +326,17 @@ pub fn dispatcher(
     pool: Arc<crate::harness::built_in::HarnessPool>,
     mentions: Option<crate::runtime::mention_seam::MentionSeam>,
 ) -> Arc<HiveDispatcher> {
+    // Before the record is moved into the dispatcher, and before the struct, so
+    // the await is not held across a partially-built value.
+    let credential = routing_credential(&record.id, deps.secrets.as_ref()).await;
+    let router = host_router(credential.clone());
+    let oracle = host_oracle(credential);
     Arc::new(HiveDispatcher {
         record,
         events,
         hives,
-        router: host_router(),
-        oracle: host_oracle(),
+        router,
+        oracle,
         deps,
         pool,
         mentions,

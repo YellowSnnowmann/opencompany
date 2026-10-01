@@ -1898,6 +1898,36 @@ pub enum CompanyEvent {
         /// The seat asked.
         askee: String,
     },
+    /// A committed row the driver then refused.
+    ///
+    /// `hive::host::commit` stamps a row's `episode.kind` from the utterance
+    /// it is given, and the driver folds that row *after* it is appended: a
+    /// seat still owed an answer has its `complete_episode` refused
+    /// (`AwaitingReply`) with the row already journaled, saying the seat
+    /// finished when it did not. The log is append-only, so the row cannot be
+    /// taken back -- this is the correction written beside it.
+    ///
+    /// Observed live (episode `277a4988`): a seat asked two teammates, called
+    /// `complete_episode` while both conversations were open, and was refused.
+    /// Its row carried `kind: "complete_episode"` at revision 3; the real
+    /// completion landed 32 seconds later at revision 9. A reader with only
+    /// the rows cannot tell them apart, and the console's history fallback
+    /// read the first as the end of the episode.
+    ///
+    /// The row keeps the seat's words -- it did say them, and an operator
+    /// should read them. What it loses is the claim that it finished.
+    UtteranceRefused {
+        /// The desk the row is on.
+        chat_id: String,
+        /// The episode it belongs to.
+        episode_id: String,
+        /// The seat whose call was refused.
+        seat: String,
+        /// The refused row's sequence.
+        at: u64,
+        /// Why, in the sentence the seat was given.
+        reason: String,
+    },
     /// A private conversation ended, answered or not.
     ///
     /// The other half of the reference: what turns the indicator off. A
@@ -2775,6 +2805,7 @@ impl CompanyEvent {
             Self::BroadcastRouted { .. } => "BroadcastRouted",
             Self::DmDelivered { .. } => "DmDelivered",
             Self::EpisodeCompleted { .. } => "EpisodeCompleted",
+            Self::UtteranceRefused { .. } => "UtteranceRefused",
             Self::ConversationOpened { .. } => "ConversationOpened",
             Self::ConversationConcluded { .. } => "ConversationConcluded",
             Self::EpisodeSeatParked { .. } => "EpisodeSeatParked",
@@ -2955,6 +2986,10 @@ impl CompanyEvent {
             // conversation happened at all.
             | Self::ConversationOpened { .. }
             | Self::ConversationConcluded { .. }
+            // The correction beside a row the driver refused. Prune it and the
+            // row it corrects outlives it, saying the seat finished when it
+            // did not -- so it keeps the retention its row has.
+            | Self::UtteranceRefused { .. }
             // What a seat waited on and when it came back: the only record
             // that an episode stood still on the operator.
             | Self::EpisodeSeatParked { .. }

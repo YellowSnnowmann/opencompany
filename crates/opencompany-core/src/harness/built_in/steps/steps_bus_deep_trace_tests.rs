@@ -120,11 +120,11 @@ fn ordinals_continue_across_turns_of_one_run() {
 
 #[test]
 fn stream_event_from_maps_start_and_completion() {
-    let mut thinking_open = false;
+    let mut live = LiveRunState::default();
     let start = stream_event_from(
         &started("c1", "mcp_call_tool", Some("Searching")),
         0,
-        &mut thinking_open,
+        &mut live,
     )
     .expect("start maps to a frame");
     assert_eq!(start.kind, "tool_call");
@@ -142,7 +142,7 @@ fn stream_event_from_maps_start_and_completion() {
             None,
         ),
         1,
-        &mut thinking_open,
+        &mut live,
     )
     .expect("completion maps to a frame");
     assert_eq!(done.kind, "tool_result");
@@ -168,7 +168,7 @@ fn stream_event_from_reports_a_park_as_a_park() {
             None,
         ),
         0,
-        &mut false,
+        &mut LiveRunState::default(),
     )
     .expect("frame");
     assert_eq!(frame.status, Some("awaiting_approval"));
@@ -181,7 +181,7 @@ fn stream_event_from_carries_the_typed_failure() {
     let frame = stream_event_from(
         &completed("c1", "mcp_call_tool", false, "401 unauthorized", None, None),
         0,
-        &mut false,
+        &mut LiveRunState::default(),
     )
     .expect("frame");
     assert_eq!(frame.status, Some("error"));
@@ -189,16 +189,64 @@ fn stream_event_from_carries_the_typed_failure() {
 }
 
 #[test]
-fn stream_event_from_coalesces_thinking_and_ignores_text() {
-    let mut open = false;
-    let first = stream_event_from(&thinking("hmm"), 0, &mut open).expect("first delta → frame");
+fn stream_event_from_coalesces_thinking_and_text_closes_it_and_opens_replying() {
+    let mut live = LiveRunState::default();
+    let first = stream_event_from(&thinking("hmm"), 0, &mut live).expect("first delta → frame");
     assert_eq!(first.kind, "thinking");
     assert_eq!(first.label.as_deref(), Some("Thinking"));
-    assert!(open, "run is now open");
-    assert!(stream_event_from(&thinking("more"), 1, &mut open).is_none());
-    assert!(stream_event_from(&text("hello"), 2, &mut open).is_none());
-    assert!(!open, "text closed the run");
-    assert!(stream_event_from(&thinking("again"), 3, &mut open).is_some());
+    assert!(live.thinking_open, "run is now open");
+    assert!(stream_event_from(&thinking("more"), 1, &mut live).is_none());
+    let replying = stream_event_from(&text("hello"), 2, &mut live).expect("text → replying");
+    assert_eq!(replying.kind, "replying");
+    assert_eq!(replying.seq, 2);
+    assert!(replying.label.is_none() && replying.status.is_none());
+    assert!(!live.thinking_open, "text closed the thinking run");
+    assert!(live.replying_open);
+    assert!(stream_event_from(&thinking("again"), 3, &mut live).is_some());
+    assert!(
+        !live.replying_open,
+        "a new thinking burst closes the reply run"
+    );
+}
+
+#[test]
+fn stream_event_from_emits_one_replying_per_text_run() {
+    let mut live = LiveRunState::default();
+    let kinds: Vec<_> = ["a", "b", "c"]
+        .iter()
+        .filter_map(|d| stream_event_from(&text(d), 0, &mut live))
+        .map(|f| f.kind)
+        .collect();
+    assert_eq!(kinds, vec!["replying"], "a burst of deltas is one frame");
+}
+
+#[test]
+fn stream_event_from_replying_re_fires_after_a_tool_call() {
+    let mut live = LiveRunState::default();
+    assert!(stream_event_from(&text("one"), 0, &mut live).is_some());
+    assert!(stream_event_from(&text("two"), 1, &mut live).is_none());
+    // A tool round closes the reply run, on start and on completion alike.
+    stream_event_from(&started("c1", "mcp_call_tool", None), 2, &mut live).expect("tool frame");
+    assert!(!live.replying_open);
+    let again = stream_event_from(&text("three"), 3, &mut live).expect("text after a tool round");
+    assert_eq!(again.kind, "replying");
+    stream_event_from(
+        &completed("c1", "mcp_call_tool", true, "[]", None, None),
+        4,
+        &mut live,
+    )
+    .expect("tool result frame");
+    assert!(!live.replying_open);
+}
+
+/// `replying` is a live-only signal: the folded timeline must gain no step for
+/// it, or the live and folded counts would drift apart.
+#[test]
+fn fold_steps_adds_no_step_for_text() {
+    let events = vec![thinking("hmm"), text("hello"), text("world")];
+    let steps = fold_steps(events);
+    assert_eq!(steps.len(), 1, "only the thinking row: {steps:?}");
+    assert_eq!(steps[0].kind, TurnStepKind::Thinking);
 }
 
 /// The live frame is scrubbed exactly like the folded step.
@@ -217,7 +265,7 @@ fn stream_event_from_never_leaks_remote_output() {
             None,
         ),
         0,
-        &mut false,
+        &mut LiveRunState::default(),
     )
     .expect("frame");
     let json = serde_json::to_string(&frame).expect("frame serialize");

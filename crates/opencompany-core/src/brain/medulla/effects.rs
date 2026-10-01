@@ -635,6 +635,16 @@ pub(crate) fn wire_event(seq: u64, event: &CompanyEvent) -> WireEvent {
             format!("Episode {episode_id}: {from} messaged {}", to.join(", ")),
             "episode.dm_delivered",
         ),
+        // A row the driver turned away. The seat's words are already on the
+        // desk under their own row; this says only that its call did not take.
+        CompanyEvent::UtteranceRefused {
+            episode_id, seat, ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            format!("Episode {episode_id}: @{seat}'s call was refused"),
+            "episode.utterance_refused",
+        ),
         CompanyEvent::ConversationOpened {
             episode_id,
             asker,

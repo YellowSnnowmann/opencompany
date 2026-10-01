@@ -397,7 +397,9 @@ ones, because an id stays reserved while any clone of it lives.
 
 A turn is `agent.turn(message).session(openhuman_session_key).cwd(..)
 .on_progress(tx).send()` under the agent's `turn_lock`; `progress_pump.rs`
-maps `AgentProgress` onto `turn_stream::LiveFrame`s and reads cost from
+maps `AgentProgress` onto `turn_stream::LiveFrame`s (`tool_call`, `tool_result`,
+`thinking`, and a text-free `replying` on the first text delta of a run, the same
+for an ACP teammate's first `agent_message_chunk`) and reads cost from
 `ModelCallCompleted` / `TurnCostUpdated`. There is no resident session, no
 `Mutex<Agent>`, and no history seeding: OpenHuman owns the thread, and the
 company's delta is prepended to the message ([speech.md](speech.md)).

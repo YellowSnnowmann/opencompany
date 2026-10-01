@@ -2980,6 +2980,7 @@ fn cycle_task_id(
             | CompanyEvent::EpisodeCompleted { .. }
             | CompanyEvent::ConversationOpened { .. }
             | CompanyEvent::ConversationConcluded { .. }
+            | CompanyEvent::UtteranceRefused { .. }
             | CompanyEvent::EpisodeSeatParked { .. }
             | CompanyEvent::EpisodeSeatResumed { .. }
             | CompanyEvent::EpisodeStateSaved { .. }
@@ -3236,6 +3237,7 @@ fn cycle_conversation(
             | CompanyEvent::EpisodeCompleted { .. }
             | CompanyEvent::ConversationOpened { .. }
             | CompanyEvent::ConversationConcluded { .. }
+            | CompanyEvent::UtteranceRefused { .. }
             | CompanyEvent::EpisodeSeatParked { .. }
             | CompanyEvent::EpisodeSeatResumed { .. }
             | CompanyEvent::EpisodeStateSaved { .. }

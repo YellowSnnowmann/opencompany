@@ -26,6 +26,8 @@ import type { CommsObservation } from "@/views/comms/model";
 export interface OpenTurn {
   key: string;
   agentId?: string;
+  /** The thread the bracket named, so presence can say which chat a turn is in. */
+  chatId?: string;
   episodeId?: string;
   roundRevision?: number;
   startedAtMillis: number;
@@ -73,6 +75,7 @@ export function reduceTurnBracket(ledger: TurnLedger, frame: TurnBracketFrame): 
       {
         key,
         agentId: frame.agentId,
+        chatId: frame.chatId,
         episodeId: frame.episodeId,
         roundRevision: frame.roundRevision,
         startedAtMillis: frame.atMillis,

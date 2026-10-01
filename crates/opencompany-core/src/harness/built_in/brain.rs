@@ -2639,7 +2639,8 @@ impl HarnessBrain {
             Arc::new(HarnessDeps::clone(&self.deps)),
             Arc::clone(&self.pool),
             self.mentions.clone(),
-        );
+        )
+        .await;
         crate::hive::dispatch::spawn_resume(dispatcher, episode_id.to_owned());
         true
     }
@@ -3431,7 +3432,8 @@ impl HarnessBrain {
                                 Arc::new(HarnessDeps::clone(&self.deps)),
                                 Arc::clone(&self.pool),
                                 self.mentions.clone(),
-                            );
+                            )
+                            .await;
                             let trigger = crate::hive::dispatch::trigger_for(
                                 event_seq, &composed, *parent, mentions,
                             );

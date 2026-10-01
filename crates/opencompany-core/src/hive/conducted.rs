@@ -466,10 +466,29 @@ impl HiveDispatcher {
         // its part, which is exactly when a desk has everything to assemble
         // and nobody assigned to assemble it -- see `conclude` for the six
         // live runs that measured the gap.
+        //
+        // `spoke` is the seats that recorded a part on the desk, not
+        // `report.settled`: see `conclude::contributors` for why the driver's
+        // count makes every one-seat answer on a multi-seat desk look like
+        // several. A read that fails keeps the old count, which errs toward
+        // concluding -- the cheap mistake, per `conclude::ALREADY_ASSEMBLED`.
+        let spoke = match episode_store::episode_rows(
+            self.events.as_ref(),
+            &self.record.id,
+            &episode_id,
+        )
+        .await
+        {
+            Ok(rows) => crate::hive::conclude::contributors(&rows, &desk.desk_id),
+            Err(error) => {
+                tracing::warn!(%error, "[hive] could not count who spoke; using the settled count");
+                report.settled
+            }
+        };
         let conclusion = if crate::hive::conclude::eligible(
             &desk.desk_id,
             crate::ports::types::EpisodeReason::CompleteEpisode,
-            report.settled,
+            spoke,
         ) {
             self.conclusion(
                 &desk,

@@ -20,6 +20,7 @@ import {
   type AcpHarnessModel,
 } from "@/api/transport/desktop";
 import { ApiError, type AgentDetailDto, type EditAgentInput, type HarnessDto } from "@/api/types";
+import { AgentFace } from "@/components/agent-face";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/page-header";
@@ -1386,16 +1387,26 @@ function Identity({
             field named after it — and the hover ring is what says so, since an
             avatar that looks identical to an inert one is a button nobody
             finds. Falls back to a plain tile where there is no handler. */}
-        {onPickAvatar ? (
-          <button
-            type="button"
-            onClick={onPickAvatar}
-            disabled={avatarBusy}
-            aria-label="Change this agent's icon"
-            title="Change icon"
-            className="rounded-xl ring-2 ring-transparent transition-colors hover:ring-primary focus-visible:ring-primary focus-visible:outline-none disabled:cursor-wait"
-            data-testid="agent-avatar-pick"
-          >
+        <AgentFace agentId={agent.id} size="md" surface="background" name={display}>
+          {onPickAvatar ? (
+            <button
+              type="button"
+              onClick={onPickAvatar}
+              disabled={avatarBusy}
+              aria-label="Change this agent's icon"
+              title="Change icon"
+              className="rounded-xl ring-2 ring-transparent transition-colors hover:ring-primary focus-visible:ring-primary focus-visible:outline-none disabled:cursor-wait"
+              data-testid="agent-avatar-pick"
+            >
+              <TeammateAvatar
+                name={display}
+                tone={tone}
+                avatar={avatar}
+                className="size-14 rounded-xl text-base"
+                data-testid="agent-avatar"
+              />
+            </button>
+          ) : (
             <TeammateAvatar
               name={display}
               tone={tone}
@@ -1403,16 +1414,8 @@ function Identity({
               className="size-14 rounded-xl text-base"
               data-testid="agent-avatar"
             />
-          </button>
-        ) : (
-          <TeammateAvatar
-            name={display}
-            tone={tone}
-            avatar={avatar}
-            className="size-14 rounded-xl text-base"
-            data-testid="agent-avatar"
-          />
-        )}
+          )}
+        </AgentFace>
         <div className="min-w-0 flex-1 space-y-2">
           <div>
             <h1 className="truncate text-2xl font-semibold tracking-tight" data-testid="agent-name">

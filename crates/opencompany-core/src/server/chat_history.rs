@@ -1593,6 +1593,7 @@ pub async fn history_for_desk(
     drop_dead_outputs(runtime, &mut messages).await?;
     attach_referral_origins(runtime, desk_id, desk_name, &mut messages).await?;
     attach_agent_conversations(runtime, desk_id, desk_name, &mut messages).await?;
+    strip_refused_completions(runtime, &mut messages).await?;
     project_history(&mut messages, &names);
     Ok(messages)
 }
@@ -1606,6 +1607,62 @@ pub async fn history_for_desk(
 /// what they said. This reads the pair channel out of the same page and hands
 /// the rows to the row that sent them aside.
 ///
+/// Drops the completion claim from a row the driver refused.
+///
+/// `hive::host::commit` stamps `episode.kind` off the utterance and appends the
+/// row; the driver folds it *afterwards* and may refuse. A seat still owed an
+/// answer has its `complete_episode` turned away with the row already on the
+/// desk, saying it finished. The log is append-only, so the host writes
+/// [`CompanyEvent::UtteranceRefused`] beside it naming the row by sequence —
+/// this is the read side of that pair.
+///
+/// Only the **kind** is cleared, never the row: the seat did say those words
+/// and an operator should read them. What goes is the assertion that they
+/// ended the episode, which is what a console folding history reads to decide
+/// an episode is over.
+async fn strip_refused_completions(
+    runtime: &CompanyRuntime,
+    messages: &mut [MessageView],
+) -> Result<(), OpenCompanyError> {
+    let Some(oldest) = messages
+        .iter()
+        .filter_map(|m| m.id.parse::<u64>().ok())
+        .min()
+    else {
+        return Ok(());
+    };
+    // The refusal is journaled within the same wave as the row it names, so a
+    // short lookback covers it. Matches `attach_agent_conversations`.
+    const LOOKBACK: u64 = 64;
+    let page = runtime
+        .events()
+        .read_from(
+            runtime.id(),
+            EventSeq::new(oldest.saturating_sub(LOOKBACK)),
+            4096,
+        )
+        .await?;
+    let refused: std::collections::HashSet<u64> = page
+        .iter()
+        .filter_map(|stored| match &stored.event {
+            CompanyEvent::UtteranceRefused { at, .. } => Some(*at),
+            _ => None,
+        })
+        .collect();
+    if refused.is_empty() {
+        return Ok(());
+    }
+    for message in messages.iter_mut() {
+        let Ok(seq) = message.id.parse::<u64>() else {
+            continue;
+        };
+        if refused.contains(&seq) {
+            message.episode = None;
+        }
+    }
+    Ok(())
+}
+
 /// Mirrors [`attach_referral_origins`] deliberately, down to the lookback: a
 /// conversation whose `ask` fell outside the window renders with whatever part
 /// of it the page holds, which is the same bounded-widening bargain a crossing
@@ -2721,6 +2778,12 @@ mod tests_terminal;
 #[cfg(test)]
 #[path = "chat_history_dead_card_test.rs"]
 mod dead_card_test;
+
+/// A completion the driver refused, reconciled against the row already on the
+/// desk.
+#[cfg(test)]
+#[path = "chat_history_refused_completion_test.rs"]
+mod refused_completion_test;
 
 /// Where a referred line says it came from, and who it says is speaking.
 #[cfg(test)]

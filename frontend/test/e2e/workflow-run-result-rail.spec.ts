@@ -152,8 +152,8 @@ test("both rails open at once: history left, run result right, canvas squeezed b
     graph.x + graph.width - 1,
   );
 
-  // The arithmetic `CanvasShell.tsx` documents: 1440 viewport, 216px app
-  // sidebar, two 320px rails ⇒ ~584px of canvas left. A band, not an exact
+  // The arithmetic `CanvasShell.tsx` documents: 1440 viewport, 240px app
+  // sidebar, two 320px rails ⇒ ~560px of canvas left. A band, not an exact
   // pixel, to tolerate scrollbar/border rounding — but it pins the number so a
   // future change to either rail's width has to look at this test.
   expect(

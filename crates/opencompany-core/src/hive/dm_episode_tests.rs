@@ -69,7 +69,8 @@ async fn an_operator_dm_runs_an_episode_answered_by_its_own_teammate() {
         Arc::new(deps),
         Arc::new(pool),
         None,
-    );
+    )
+    .await;
 
     // Journalled first, as `run_cycle` does. A trigger naming a row that was
     // never said threads the episode under a root nothing exists at, and the
@@ -217,7 +218,8 @@ async fn announce_then_reply_does_not_stall() {
         Arc::new(deps),
         Arc::new(pool),
         None,
-    );
+    )
+    .await;
     let reply_seq = events
         .append(
             &record.id,
@@ -286,7 +288,8 @@ async fn a_desk_episode_with_prior_history_settles() {
         Arc::new(deps),
         Arc::new(pool),
         None,
-    );
+    )
+    .await;
     // Journal the triggering message, as `run_cycle` does in production, and
     // dispatch on *its* sequence. A fabricated trigger names a row that does
     // not exist, and the episode threads under a root nothing was said at.
@@ -313,4 +316,266 @@ async fn a_desk_episode_with_prior_history_settles() {
         )
         .await
         .expect("a desk episode with prior history should settle");
+}
+
+/// Every tool name a request advertised to the model.
+fn advertised(body: &serde_json::Value) -> Vec<String> {
+    body.get("tools")
+        .and_then(|tools| tools.as_array())
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(|tool| {
+                    tool.get("function")
+                        .and_then(|function| function.get("name"))
+                        .and_then(|name| name.as_str())
+                        .map(str::to_owned)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// **A turn the room narrowed is offered only the verbs it asked for.**
+///
+/// A seat whose turn recorded nothing is asked again, and that second ask
+/// exists for one purpose: to put what it already said on the record. The room
+/// names the verbs that would do it, and the belt is cut down to them.
+///
+/// Read off the wire rather than off the seating map, because every part of
+/// this can hold while the belt the model is actually handed is untouched --
+/// which is what happened. `narrow_turn` keys the narrowing by the seat's
+/// session and the belt factory looks it up by the turn's; a unit test on
+/// either half passes with those two keys disagreeing, and a live run is easy
+/// to misread, because a retry's belt is smaller than a first turn's for an
+/// unrelated reason. The only claim that cannot be satisfied by accident is
+/// what the request carried.
+///
+/// The `desk_` sweep is the regression guard. The filter has to be the last
+/// thing done to the belt: it ran before `desk_take_over` was appended, so a
+/// turn narrowed to `desk_complete_episode` was still offered the verb that
+/// claims the work instead -- the one thing a retry is not asking for. Naming
+/// the absent verbs individually would not have caught that, since the leak was
+/// a verb no assertion mentioned.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_narrowed_retry_is_offered_only_the_verbs_the_room_asked_for() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let completing = || Turn::Call {
+        tool: "desk_complete_episode",
+        args: serde_json::json!({
+            "message": "two sprints is fine",
+            "chat": "engineering",
+            "parent": null
+        }),
+    };
+    // Plain text records nothing, which is what makes the room ask again.
+    let (base_url, script) = spawn_script_recording(vec![
+        Turn::Say("I think two sprints is fine."),
+        completing(),
+        completing(),
+        completing(),
+    ])
+    .await;
+    let (deps, _journal) = deps(base_url, dir.path());
+    let record = record(TWO_DESKS);
+    let pool = HarnessPool::new();
+    pool.ensure(&record, &deps).await.expect("roster");
+    let log = Arc::new(MemoryLog::default());
+    let events: Arc<dyn EventLog> = log.clone();
+    let (hives, errors) = crate::hive::graph::desk_hives(&record, 3, &|id| {
+        futures::executor::block_on(pool.agent(&record.id, id))
+            .map(|agent| agent.runtime_agent().clone())
+    });
+    assert!(errors.is_empty(), "{errors:?}");
+    let dispatcher = crate::hive::dispatch::dispatcher(
+        Arc::new(record.clone()),
+        Arc::clone(&events),
+        hives,
+        Arc::new(deps),
+        Arc::new(pool),
+        None,
+    )
+    .await;
+    let trigger_seq = events
+        .append(
+            &record.id,
+            crate::hive::test_support::operator_message("engineering", "two sprints?", None),
+        )
+        .await
+        .expect("the trigger is a real row");
+    dispatcher
+        .run_desk_message(
+            "engineering",
+            crate::hive::conducted::Trigger {
+                seq: trigger_seq,
+                text: "two sprints?".to_owned(),
+                parent: None,
+                mentions: Vec::new(),
+            },
+        )
+        .await
+        .expect("the episode runs");
+
+    let seen = script.seen.lock().unwrap().clone();
+    // The retry names itself: `insist` tells the seat the room heard none of it.
+    const INSISTED: &str = "ended without calling any of the verbs this room records by";
+    let retry = seen
+        .iter()
+        .position(|body| {
+            serde_json::to_string(body)
+                .unwrap_or_default()
+                .contains(INSISTED)
+        })
+        .expect("the silent turn was asked again");
+    assert!(
+        retry > 0,
+        "the retry cannot be the episode's first request: {retry}"
+    );
+
+    // The turn before it is the un-narrowed one. Asserting it *has* the verbs
+    // the retry lacks is what makes the comparison mean anything: without it
+    // this test passes just as well on a build that never offered them.
+    let before = advertised(&seen[retry - 1]);
+    for verb in ["desk_read", "desk_ask_teammates"] {
+        assert!(
+            before.contains(&verb.to_owned()),
+            "an ordinary turn is offered `{verb}`, or the comparison below is vacuous: {before:?}"
+        );
+    }
+
+    let narrowed = advertised(&seen[retry]);
+    assert!(
+        narrowed.contains(&"desk_complete_episode".to_owned()),
+        "a narrowed turn keeps the verb it is being asked to call: {narrowed:?}"
+    );
+    // The room's own verbs for a desk turn, as `recording_verbs` names them.
+    let asked_for = ["desk_broadcast", "desk_ask", "desk_complete_episode"];
+    let leaked: Vec<&String> = narrowed
+        .iter()
+        .filter(|name| name.starts_with(crate::hive::host::TOOL_PREFIX))
+        .filter(|name| !asked_for.contains(&name.as_str()))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "a narrowed turn is offered no room verb outside {asked_for:?}: {leaked:?}"
+    );
+}
+
+/// **A seat that finishes while it is still owed an answer is refused, and the
+/// refusal names the row.**
+///
+/// The driver's half of
+/// `a_refused_completion_keeps_its_words_and_loses_its_claim`. The row is
+/// appended before the driver rules on it, so the refusal cannot prevent it --
+/// it can only name it, by the sequence the host gave it. If that sequence is
+/// wrong the correction lands on some other row, or on none, and the read plane
+/// has nothing to reconcile: the desk keeps a line claiming an episode ended
+/// that did not.
+///
+/// One turn asks and finishes, which is the shape a live run produced and the
+/// shape tinyhivemind's own `links` test pins: `ask` opens a conversation, so
+/// the `complete_episode` behind it is committed and then refused for
+/// `AwaitingReply`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_completion_refused_while_owed_an_answer_is_journaled_as_refused() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let (base_url, _script) = spawn_script_recording(vec![
+        Turn::Call {
+            tool: "desk_ask",
+            args: serde_json::json!({
+                "to": "ceo",
+                "message": "is two sprints acceptable?",
+                "chat": "engineering",
+                "parent": null
+            }),
+        },
+        // Finishing behind its own open question: committed, then refused.
+        Turn::Call {
+            tool: "desk_complete_episode",
+            args: serde_json::json!({
+                "message": "wrapping up once I hear back",
+                "chat": "engineering",
+                "parent": null
+            }),
+        },
+        Turn::Say("waiting."),
+    ])
+    .await;
+    let (deps, _journal) = deps(base_url, dir.path());
+    let record = record(TWO_DESKS);
+    let pool = HarnessPool::new();
+    pool.ensure(&record, &deps).await.expect("roster");
+    let log = Arc::new(MemoryLog::default());
+    let events: Arc<dyn EventLog> = log.clone();
+    let (hives, errors) = crate::hive::graph::desk_hives(&record, 3, &|id| {
+        futures::executor::block_on(pool.agent(&record.id, id))
+            .map(|agent| agent.runtime_agent().clone())
+    });
+    assert!(errors.is_empty(), "{errors:?}");
+    let dispatcher = crate::hive::dispatch::dispatcher(
+        Arc::new(record.clone()),
+        Arc::clone(&events),
+        hives,
+        Arc::new(deps),
+        Arc::new(pool),
+        None,
+    )
+    .await;
+    let trigger_seq = events
+        .append(
+            &record.id,
+            crate::hive::test_support::operator_message("engineering", "two sprints?", None),
+        )
+        .await
+        .expect("the trigger is a real row");
+    let _ = dispatcher
+        .run_desk_message(
+            "engineering",
+            crate::hive::conducted::Trigger {
+                seq: trigger_seq,
+                text: "two sprints?".to_owned(),
+                parent: None,
+                mentions: Vec::new(),
+            },
+        )
+        .await;
+
+    let rows = log.rows();
+    let refused: Vec<(u64, String)> = rows
+        .iter()
+        .filter_map(|stored| match &stored.event {
+            crate::ports::types::CompanyEvent::UtteranceRefused { at, seat, .. } => {
+                Some((*at, seat.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    let (at, seat) = refused.first().cloned().unwrap_or_else(|| {
+        panic!(
+            "a completion behind an open ask is refused: {:?}",
+            log.kinds()
+        )
+    });
+    assert_eq!(seat, "engineer", "the seat that was refused is named");
+
+    // The sequence has to be a row this desk really holds, and that row has to
+    // be the one claiming the episode ended. A refusal naming anything else is
+    // a correction the history plane cannot apply.
+    let named = rows
+        .iter()
+        .find(|stored| stored.seq.value() == at)
+        .unwrap_or_else(|| panic!("the refusal names a journalled row, not {at}"));
+    let crate::ports::types::CompanyEvent::AgentReply {
+        episode, agent_id, ..
+    } = &named.event
+    else {
+        panic!("the row named is the seat's own line: {:?}", named.event);
+    };
+    assert_eq!(agent_id, "engineer");
+    assert!(
+        episode.as_ref().is_some_and(
+            |episode| episode.kind == crate::ports::types::UtteranceKind::CompleteEpisode
+        ),
+        "and it is the row stamped as ending the episode: {episode:?}",
+    );
 }

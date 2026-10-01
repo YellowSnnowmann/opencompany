@@ -1011,7 +1011,12 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
     assert_eq!(done.len(), 1, "{done:?}");
     assert_eq!(done[0].1, ENGINEERING);
     assert_eq!(done[0].2, EpisodeReason::CompleteEpisode);
-    assert_eq!(done[0].3, 1, "one wave ran");
+    // One wave of seat turns, plus the closing round. `rounds` is
+    // `report.waves + closing_waves`, and the closing round runs on its own
+    // conductor -- which is why `rounds()` above, folded from `TurnStarted`
+    // rows, still sees exactly one. The two count different things and both
+    // are right.
+    assert_eq!(done[0].3, 2, "the seat's wave, and the closing round");
 
     // **The episode wrote down what a restart would otherwise lose.**
     //
@@ -1045,6 +1050,15 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
 
     // Recording *is* a seat's contribution: there is no separate "say
     // something" act in a completion episode, so one seat leaves one row.
+    //
+    // Two rows here, from the one seat. The first is its own part. The second
+    // is the closing round's: once the desk settles, OpenCompany asks Jev
+    // whether an assembly is still owed, seats whoever it names for a single
+    // turn, and that turn's `complete_episode` message becomes the episode's
+    // summary -- `summary_seq` and `completed_by` are filled from it. On a
+    // one-seat desk the seat it names is the seat that just finished, so the
+    // same agent records twice. The scripted model says the same words both
+    // times; a real one would assemble.
     let desk = replies(&rows, ENGINEERING);
     let kinds: Vec<(String, Option<UtteranceKind>)> = desk
         .iter()
@@ -1052,8 +1066,11 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
         .collect();
     assert_eq!(
         kinds,
-        vec![(ENGINEER.to_string(), Some(UtteranceKind::CompleteEpisode))],
-        "the seat's recorded part is its reply: {desk:?}"
+        vec![
+            (ENGINEER.to_string(), Some(UtteranceKind::CompleteEpisode)),
+            (ENGINEER.to_string(), Some(UtteranceKind::CompleteEpisode)),
+        ],
+        "the seat's own part, then the closing round's summary: {desk:?}"
     );
     assert!(
         desk.iter()
@@ -1084,11 +1101,18 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
     let measured = report(&runtime).await;
     assert_eq!(measured.episodes_completed, 1);
     assert_eq!(measured.same_agent_overlaps, 0);
+    // The measure reads the journalled `rounds`, so it carries the closing
+    // round too -- it is a round of work, and analytics should see it. It no
+    // longer equals what `rounds()` folds out of the desk's turn rows: the
+    // closing round does leave a turn row, but stamped wave `0` like the
+    // first, because it runs on a conductor that numbers from zero. Folding
+    // by revision therefore cannot see it.
     assert_eq!(
-        measured.episodes[&done[0].0].rounds, 1,
-        "the measure counts the wave the turn rows carry: {measured:?}"
+        measured.episodes[&done[0].0].rounds, 2,
+        "the measure counts the closing round as well: {measured:?}"
     );
-    assert_eq!(measured.utterance_kinds["complete_episode"], 1);
+    // Two completions: the seat's own part, and the closing round's summary.
+    assert_eq!(measured.utterance_kinds["complete_episode"], 2);
     assert!(
         !measured.utterance_kinds.contains_key("post"),
         "`post` is not served to a seat: {measured:?}"
@@ -1121,10 +1145,15 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
             _ => None,
         })
         .collect();
+    // Two turns, both stamped wave `0`. The second is the closing round's,
+    // and it numbers its own waves from zero because it runs on a conductor
+    // of its own -- so wave numbers are unique per conductor, not per
+    // episode. `rounds()` above folds these two into one entry only because
+    // it collapses a repeated seat within a revision.
     assert_eq!(
         attributed,
-        vec![(ENGINEER.to_string(), 0)],
-        "the seat turn names its episode and its wave"
+        vec![(ENGINEER.to_string(), 0), (ENGINEER.to_string(), 0)],
+        "the seat's turn and the closing round's, each naming its own wave"
     );
 }
 
@@ -1245,8 +1274,16 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_ask_opens_a_conversation_the_desk_only_references() {
     let home = tempfile::tempdir().unwrap();
+    // Asked once per *episode*, not once per turn. `seat.called` sees one
+    // turn, and the closing round this desk settles into runs on its own
+    // conductor with a fresh session -- so a turn-scoped guard lets the
+    // closing seat ask the same question again and open a second
+    // conversation. The script means "have I asked this yet", which is an
+    // episode-wide question.
+    let asked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let asked_once = std::sync::Arc::clone(&asked);
     let (base_url, script) = spawn_script_with_latency(
-        seat_script("Noted.", |seat| {
+        seat_script("Noted.", move |seat| {
             // `!called` is load-bearing: a turn ends when the seat has
             // *recorded* its part, and an `ask` is not that. Without the
             // guard the same question is asked again on every continuation
@@ -1254,6 +1291,7 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
             if seat.speaker == ENGINEER
                 && !seat.operator_asked().is_empty()
                 && !seat.called("desk_ask")
+                && !asked_once.swap(true, std::sync::atomic::Ordering::SeqCst)
             {
                 return speech(
                     "ask",
@@ -2222,9 +2260,11 @@ async fn an_approved_request_resumes_the_seat_and_completes_the_episode() {
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
     dump(&rows, &script);
     assert_eq!(seat_resumed(&rows), vec![ENGINEER.to_string()]);
+    // Twice: the resumed turn, and the closing round's turn, which carries
+    // the same brief. Both are real turns the seat was shown the decision on.
     assert_eq!(
         told(&script, "approved your request: Email the client"),
-        1,
+        2,
         "the resumed seat is shown the decision once"
     );
     assert!(
@@ -2266,7 +2306,8 @@ async fn a_denied_request_resumes_the_seat_with_the_denial() {
 
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
     dump(&rows, &script);
-    assert_eq!(told(&script, "denied your request: Email the client"), 1);
+    // The resumed turn and the closing round's turn, as above.
+    assert_eq!(told(&script, "denied your request: Email the client"), 2);
     assert_eq!(told(&script, "approved your request"), 0);
 }
 
@@ -2304,7 +2345,8 @@ async fn an_answered_escalation_reaches_the_seat_that_asked() {
 
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
     dump(&rows, &script);
-    assert_eq!(told(&script, "\"eu-west first\""), 1);
+    // The resumed turn and the closing round's turn, as above.
+    assert_eq!(told(&script, "\"eu-west first\""), 2);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -2430,7 +2472,23 @@ fn delivered_rows(
 async fn a_seat_publishes_a_deliverable_the_operator_can_edit() {
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
-        seat_script("Noted.", write_publish_then_record),
+        seat_script("Noted.", {
+            // Published once per *episode*. `write_publish_then_record` asks
+            // `seat.called("publish_artifact")`, which sees one turn, and the
+            // closing round is a fresh conductor -- so without this the
+            // closing seat writes and publishes the outline a second time,
+            // filing a second card for one deliverable.
+            let published = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            move |seat: &Seat| {
+                if published.load(std::sync::atomic::Ordering::SeqCst) {
+                    return complete(seat, "The pilot slide outline is published.");
+                }
+                if seat.called("publish_artifact") {
+                    published.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                write_publish_then_record(seat)
+            }
+        }),
         Duration::from_millis(30),
     )
     .await;
@@ -2590,27 +2648,50 @@ async fn a_turn_that_only_publishes_hands_over_on_a_row_of_its_own() {
         .collect();
     assert_eq!(handed.len(), 1, "handed over once: {delivered:?}");
     let (kind, text, outputs, task_id) = handed[0];
-    assert!(
-        text.is_empty(),
-        "a row of its own, with nothing said: {text}"
-    );
+    // **The handover rides on the completion, where it used to ride alone.**
+    //
+    // This row was a bare `Post` with no text: the turn that published said
+    // nothing the room records, so its wave ended and the artifact handed over
+    // on a row of its own. Since tinyhivemind#84 a turn that recorded nothing
+    // is asked again, and what this seat does on the second attempt is the
+    // `complete_episode` it would otherwise have made a wave later -- so the
+    // outputs attach to *that* row. The desk shows one row carrying the
+    // artifact and the words about it rather than two rows carrying one each.
+    //
+    // Worth knowing while reading the rows here: the completion is journalled
+    // twice, with the same text, before this change and after. That duplication
+    // is neither new nor this test's subject.
+    //
+    // What is still asserted is what the test is for -- the artifact hands over
+    // exactly once, on a row belonging to the episode, naming the card it was
+    // published against -- and one thing more than before: that it rides on the
+    // *first* completion. A retry that recorded nothing and left the outputs to
+    // a later wave would still satisfy every claim above it.
     assert_eq!(
         *kind,
-        Some(UtteranceKind::Post),
+        Some(UtteranceKind::CompleteEpisode),
         "it belongs to the episode"
+    );
+    assert!(
+        text.contains("on its card"),
+        "and carries what the seat was asked again to say: {text}"
     );
     assert_eq!(outputs[0]["kind"], json!("artifact"));
     assert_eq!(outputs[0]["taskId"], json!(task_id.clone().unwrap()));
-    let recorded = delivered
+    let first_completion = delivered
         .iter()
         .position(|(kind, ..)| *kind == Some(UtteranceKind::CompleteEpisode))
-        .expect("the engineer recorded its part on a later turn");
+        .expect("the engineer recorded its part");
     let handed_at = delivered
         .iter()
-        .position(|(_, text, ..)| text.is_empty())
+        .position(|(.., outputs, _)| {
+            outputs
+                .as_array()
+                .is_some_and(|outputs| !outputs.is_empty())
+        })
         .unwrap();
-    assert!(
-        handed_at < recorded,
-        "handed over when its turn's wave ended"
+    assert_eq!(
+        handed_at, first_completion,
+        "the artifact hands over on the retry that recorded, not on a later wave: {delivered:?}"
     );
 }
