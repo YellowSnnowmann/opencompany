@@ -217,26 +217,31 @@ jobs:
           fi
           gh release edit "$COMPANION" -R "$GITHUB_REPOSITORY" --notes-file notes.md
 
+      - name: Capture the release that is latest before publishing the companion
+        id: latest-before
+        run: |
+          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          echo "tag=$latest" >> "$GITHUB_OUTPUT"
+
       - name: Publish without taking latest
         run: gh release edit "$COMPANION" -R "$GITHUB_REPOSITORY" --draft=false --latest=false
 
-      # `/releases/latest` is where every installed client finds latest.json.
-      # If it moved to the companion, which carries no manifest, updates would
-      # stop for everyone.
-      - name: The latest release is still the tag
+      - name: Verify that latest release did not change
+        env:
+          LATEST_BEFORE: ${{ steps.latest-before.outputs.tag }}
         run: |
           set -euo pipefail
           latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
-          if [ "$latest" != "$TAG" ]; then
-            gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --latest
-            echo "::error::/releases/latest resolved to '$latest' after publishing $COMPANION; re-marked $TAG as latest. Check that updates resolve." >&2
+          if [ "$latest" != "$LATEST_BEFORE" ]; then
+            gh release edit "$LATEST_BEFORE" -R "$GITHUB_REPOSITORY" --latest
+            echo "::error::/releases/latest moved to '$latest' after publishing $COMPANION; restored to $LATEST_BEFORE. Check that updates resolve." >&2
             exit 1
           fi
           url="$(gh release view "$COMPANION" -R "$GITHUB_REPOSITORY" --json url --jq .url)"
           {
             echo "### Published"
             echo ""
-            echo "$url — \`/releases/latest\` is still \`$TAG\`."
+            echo "$url — \`/releases/latest\` is still \`$LATEST_BEFORE\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
   cleanup:
