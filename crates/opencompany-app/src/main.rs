@@ -17,6 +17,15 @@ fn main() -> std::process::ExitCode {
         return opencompany_desktop_lib::crash::run_sentry_test(message);
     }
 
+    // Hidden release check, the analytics twin of the above:
+    // `opencompany-desktop analytics-test` sends one `analytics_self_test`
+    // through the desktop's own environment and exits `0` only if the collector
+    // accepted it (`2` when analytics is off). Headless, so CI can run it.
+    let args = std::env::args_os().map(|arg| arg.to_string_lossy().into_owned());
+    if opencompany_desktop_lib::analytics::analytics_test_args(args) {
+        return opencompany_desktop_lib::analytics::run_analytics_test();
+    }
+
     // `OPENHUMAN_WORKSPACE` must be exported HERE, before anything else starts.
     //
     // The library path deliberately does not do it: `journal::prepare`'s
