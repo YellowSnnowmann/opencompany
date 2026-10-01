@@ -1847,9 +1847,18 @@ const MAX_BLOCKING_THREADS: usize = 512;
 /// filter would run the whole staging measurement and record nothing — the same
 /// shape as the durable-append gap above, one level quieter.
 ///
+/// `opencompany::analytics` is the product-analytics transport. Its warnings are
+/// the only account of a collector that is refusing this instance's credential
+/// (`401`), redirecting, or rejecting events, and of the first send failing:
+/// every one is said once and bounded, and under a bare `error` filter every one
+/// was swallowed — "analytics: reporting to …" at boot and then silence, which
+/// is the failure the transport exists to refuse. The same answer is on `/spec`
+/// (`analytics`), but a log is where an operator looks first.
+///
 /// Setting `RUST_LOG` replaces this string wholesale — the operator keeps full
 /// control, and behaviour with `RUST_LOG` set is unchanged.
-const DEFAULT_LOG_FILTER: &str = "error,tinyagents::observability=warn,policy::shadow_floor=info";
+const DEFAULT_LOG_FILTER: &str =
+    "error,tinyagents::observability=warn,policy::shadow_floor=info,opencompany::analytics=warn";
 
 fn main() -> Result<()> {
     tokio::runtime::Builder::new_multi_thread()
