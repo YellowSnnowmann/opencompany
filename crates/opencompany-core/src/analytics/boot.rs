@@ -70,7 +70,9 @@ pub fn install(state: &AppState, handle: &DeferredTracker, env: &dyn EnvSource) 
 
     let envelope = Envelope::new(id, deployment, cognition);
     let tracker: Arc<dyn Tracker> = openpanel::build(&decision, envelope);
-    handle.install(tracker);
+    // Through the decision-carrying install, so `/spec` can say *why* a
+    // process is silent: a `NullTracker` has no opinion of its own.
+    handle.install_with_decision(tracker, &decision, deployment);
 
     handle.track(Event::InstanceStarted {
         companies: state.registry().list().len() as u64,
@@ -124,6 +126,17 @@ pub(crate) fn identify(state: &AppState, env: &dyn EnvSource) -> OpaqueId {
 /// other boot line here is a `println!`. So the build is named on this line
 /// instead.
 pub fn describe(decision: &Decision) -> String {
+    describe_for(Deployment::default(), decision)
+}
+
+/// [`describe`] for a known deployment kind.
+///
+/// Every deployment gets the same wording today, so the wrapper above can pass
+/// any kind; the parameter exists so the desktop shell, which will need to say
+/// "consent" where a hosted tenant says "reporting", has a seam to add that
+/// wording to without changing every caller again. Existing wording is
+/// unchanged and pinned by the tests in `boot_tests.rs`.
+pub fn describe_for(_deployment: Deployment, decision: &Decision) -> String {
     match decision {
         Decision::Silent(reason) => {
             format!("analytics: off ({})", reason.as_str())

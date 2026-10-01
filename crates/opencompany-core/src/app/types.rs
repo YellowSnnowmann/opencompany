@@ -1377,6 +1377,10 @@ impl AppState {
             // There, "has companies" is what supplies an admin to check
             // against, so the two questions come apart.
             setup_complete: self.setup_complete() || !self.registry().is_empty(),
+            analytics: self
+                .analytics
+                .status()
+                .unwrap_or_else(crate::analytics::AnalyticsStatus::not_wired),
         }
     }
 
@@ -1480,6 +1484,11 @@ pub struct AppSpec {
     /// unreachable exactly when it is needed. A bare boolean is the whole
     /// disclosure: the configuration itself lives behind `/api/v1/setup`.
     pub setup_complete: bool,
+    /// Whether this process is tracking and whether that is working. Served
+    /// here, unauthenticated, so "is it tracking?" is answerable without the
+    /// collector: the endpoint is redacted and the client id is never present.
+    /// See [`crate::analytics::AnalyticsStatus`].
+    pub analytics: crate::analytics::AnalyticsStatus,
 }
 
 #[cfg(test)]
