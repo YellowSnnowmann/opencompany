@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Building2,
@@ -180,6 +180,13 @@ export function Login({ client, company, notice, onSignedIn }: Props) {
     { phase: "redeeming" } | { phase: "done"; email: string } | null
   >(null);
 
+  // Refs, not state, so they survive React StrictMode's mount→unmount→mount
+  // replay in dev: `startedRef` makes the single-use token redeem exactly once,
+  // and `mountedRef` lets the in-flight redemption apply its result across the
+  // transient remount instead of being discarded by the first pass's cleanup.
+  const startedRef = useRef(false);
+  const mountedRef = useRef(true);
+
   useEffect(() => {
     // Auto-login from the dashboard: `#/sso?token=<jwt>`. Read once on mount —
     // the token rides the URL fragment, which survived the cold-wake refresh to
@@ -187,10 +194,17 @@ export function Login({ client, company, notice, onSignedIn }: Props) {
     // briefly, then `onSignedIn` hands the session to the console (the wizard,
     // for a fresh company). On failure the fragment is cleared and the ordinary
     // form returns carrying the reason, rather than looping on a spent link.
+    mountedRef.current = true;
     const token = ssoTokenFromHash(window.location.hash);
-    if (!token) return;
-
-    let cancelled = false;
+    // `startedRef` guards StrictMode's double-invoke: the token is single-use, so
+    // a second pass must neither redeem it again (and find it spent) nor discard
+    // the first pass's result. Either way, keep the mounted ref honest on unmount.
+    if (!token || startedRef.current) {
+      return () => {
+        mountedRef.current = false;
+      };
+    }
+    startedRef.current = true;
     setSso({ phase: "redeeming" });
     setError(null);
     // Clear the token from the address bar immediately, so a reload or a shared
@@ -203,26 +217,26 @@ export function Login({ client, company, notice, onSignedIn }: Props) {
     void (async () => {
       try {
         const result = await redeemSso(client, company, token);
-        if (cancelled) return;
+        if (!mountedRef.current) return;
         setSso({ phase: "done", email: result.email });
         // A beat on the confirmation, then into the app. Short enough not to be
         // a wait, long enough to read who you were signed in as.
         window.setTimeout(() => {
-          if (!cancelled) onSignedIn(result);
+          if (mountedRef.current) onSignedIn(result);
         }, SSO_CONFIRM_MILLIS);
       } catch (err) {
-        if (cancelled) return;
+        if (!mountedRef.current) return;
         setSso(null);
         setError(ssoFailure(err));
       }
     })();
 
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
     };
-    // Mount-only: the fragment is read once and cleared. `client`/`company` are
-    // fixed for a given mounted Login (it is keyed by connection upstream), and
-    // re-running on their identity would re-redeem a token already cleared.
+    // Mount-only: the fragment is read once and cleared, and `startedRef` makes
+    // the redemption idempotent across StrictMode. `client`/`company` are fixed
+    // for a given mounted Login (it is keyed by connection upstream).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
