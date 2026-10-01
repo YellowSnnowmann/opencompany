@@ -115,6 +115,15 @@ fn far_future() -> u64 {
 /// explicit key — so a test can sign with the derived set-password key or the
 /// raw SSO key and prove the two do not cross-verify.
 fn sign(key: &[u8], slug: &str, sub: &str, jti: &str, exp: u64) -> String {
+    // iat = exp - 300: a realistic 5-minute token, within the verify-side lifetime
+    // cap, so a token built to fail for another reason still passes the cap and
+    // fails only for the reason under test.
+    sign_with_iat(key, slug, sub, jti, exp.saturating_sub(300), exp)
+}
+
+/// Like [`sign`] but with an explicit `iat`, so a test can mint a token whose
+/// declared lifetime (`exp - iat`) exceeds the 5-minute contract.
+fn sign_with_iat(key: &[u8], slug: &str, sub: &str, jti: &str, iat: u64, exp: u64) -> String {
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
     encode(
         &Header::new(Algorithm::HS256),
@@ -122,7 +131,7 @@ fn sign(key: &[u8], slug: &str, sub: &str, jti: &str, exp: u64) -> String {
             "sub": sub,
             "slug": slug,
             "jti": jti,
-            "iat": 1_700_000_000u64,
+            "iat": iat,
             "exp": exp,
         }),
         &EncodingKey::from_secret(key),
@@ -284,6 +293,55 @@ async fn an_expired_token_is_refused() {
     let response = call(&state, &expired, PASSWORD).await;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_token_claiming_a_longer_life_than_the_contract_is_refused() {
+    let home = home();
+    let state = enabled_state(home.path()).await;
+
+    // Unexpired (exp far in the future) but minted an hour before exp — a declared
+    // lifetime far beyond the 5-minute contract, so it is refused by the lifetime
+    // cap rather than by expiry.
+    let over_long = sign_with_iat(
+        &derive_key(SSO_SECRET),
+        "acme",
+        ADMIN,
+        "jti-cap",
+        far_future() - 3600,
+        far_future(),
+    );
+    let response = call(&state, &over_long, PASSWORD).await;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn an_unconfigured_host_returns_404_not_401() {
+    let home = home();
+    // SSO secret configured, but no company registered yet — still in its setup
+    // wizard, so the registry is empty.
+    let state = AppState::new(AppConfig {
+        sso_secret: Some(SecretValue(SSO_SECRET.to_string())),
+        ..AppConfig::default()
+    })
+    .with_home(home.path().to_path_buf())
+    .with_connections(ConnectionsRuntime::new());
+
+    // A validly-signed, in-contract token: the only thing wrong is that this host
+    // has no company yet, so it must read as "not ready" (404), distinct from a
+    // signing failure (401) — otherwise a backend/app key mismatch would look the
+    // same as "finish your setup wizard".
+    let token = sign(
+        &derive_key(SSO_SECRET),
+        "acme",
+        ADMIN,
+        "jti-1",
+        far_future(),
+    );
+    let response = call(&state, &token, PASSWORD).await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

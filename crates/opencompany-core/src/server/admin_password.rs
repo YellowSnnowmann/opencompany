@@ -77,6 +77,21 @@ fn invalid_token() -> Response {
         .into_response()
 }
 
+/// `404` with a distinct code for a host that has no company registered yet — it
+/// is still in its setup wizard. Unlike [`invalid_token`]'s `401`, this tells the
+/// caller the signing was fine and the company simply is not up yet, so the
+/// backend can retry after setup instead of reporting a key mismatch.
+fn not_ready() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({
+            "error": "no company is configured on this host yet",
+            "code": "company_not_ready",
+        })),
+    )
+        .into_response()
+}
+
 /// Why a set-password token was refused, before it collapses to the flat wire
 /// response. Mirrors [`sso`](crate::server::sso)'s split so a build without
 /// `platform-jwt` (which cannot verify signatures) answers `404` like a disabled
@@ -110,6 +125,16 @@ fn verify(secret: &str, token: &str) -> Result<SsoClaims, Reject> {
 #[cfg(feature = "platform-jwt")]
 const SET_PASSWORD_KEY_LABEL: &[u8] = b"opencompany:admin-set-password:v1";
 
+/// The platform contract is a 5-minute token; a token claiming a longer life is
+/// refused regardless of whether it has expired yet, bounding the blast radius of
+/// any mint-side bug or key leak. This route sets a credential, so a long-lived
+/// token is worse here than on redeem.
+#[cfg(feature = "platform-jwt")]
+const MAX_TOKEN_LIFETIME_SECS: u64 = 300;
+/// Clock-skew leeway added to the lifetime cap.
+#[cfg(feature = "platform-jwt")]
+const CLOCK_LEEWAY_SECS: u64 = 60;
+
 /// Derives the set-password signing key from the shared SSO secret:
 /// `HMAC-SHA256(secret, label)`. A pseudorandom key distinct from the raw secret
 /// the SSO tokens are signed with, so the two token families are not
@@ -136,9 +161,17 @@ fn verify_hs256(secret: &str, token: &str) -> Result<SsoClaims, Reject> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_required_spec_claims(&["sub", "exp"]);
     validation.validate_exp = true;
-    decode::<SsoClaims>(token, &DecodingKey::from_secret(&key), &validation)
+    let claims = decode::<SsoClaims>(token, &DecodingKey::from_secret(&key), &validation)
         .map(|data| data.claims)
-        .map_err(|_| Reject::Invalid)
+        .map_err(|_| Reject::Invalid)?;
+
+    // Cap the declared lifetime: `exp` alone bounds only the far edge, so refuse a
+    // token claiming more than the 5-minute contract (plus leeway).
+    if claims.exp.saturating_sub(claims.iat) > MAX_TOKEN_LIFETIME_SECS + CLOCK_LEEWAY_SECS {
+        return Err(Reject::Invalid);
+    }
+
+    Ok(claims)
 }
 
 /// `POST /api/v1/admin/set-password` — set this host's standing-admin password.
@@ -167,6 +200,13 @@ async fn set_password(
         .config()
         .namespaced_company_id(CompanyId::new(claims.slug.as_str()));
     let Some(runtime) = state.registry().get(&id) else {
+        // Distinguish "no company registered on this host yet" (still in its setup
+        // wizard) from a token that does not verify: with an empty registry the
+        // backend should retry after setup, not read it as a signing mismatch. A
+        // configured host that simply does not serve this slug stays a flat 401.
+        if state.registry().is_empty() {
+            return Ok(not_ready());
+        }
         return Ok(invalid_token());
     };
 
