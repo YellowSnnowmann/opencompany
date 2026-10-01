@@ -143,19 +143,21 @@ test("both rails open at once: history left, run result right, canvas squeezed b
   const graph = (await flow.boundingBox())!;
   const right = (await result.boundingBox())!;
 
-  // History stays left of the canvas, result stays right of it — neither rail
-  // overlaps the canvas or the other rail.
-  expect(left.x + left.width, "history sits left of the canvas").toBeLessThanOrEqual(
-    graph.x + 1,
+  // History floats over the canvas's left edge (it takes no width from it);
+  // the result rail stays in-flow to the right of it.
+  expect(left.x, "history floats over the canvas's left edge").toBeGreaterThanOrEqual(graph.x);
+  expect(left.x + left.width, "history stays inside the canvas").toBeLessThanOrEqual(
+    graph.x + graph.width,
   );
   expect(right.x, "run result sits right of the canvas").toBeGreaterThanOrEqual(
     graph.x + graph.width - 1,
   );
 
-  // The arithmetic `CanvasShell.tsx` documents: 1440 viewport, 240px app
-  // sidebar, two 320px rails ⇒ ~560px of canvas left. A band, not an exact
-  // pixel, to tolerate scrollbar/border rounding — but it pins the number so a
-  // future change to either rail's width has to look at this test.
+  // The arithmetic: 1440 viewport, 240px app sidebar, Company's 240px section
+  // rail and the 320px result rail ⇒ ~626px of canvas left. (History overlays
+  // the canvas and costs it nothing.) A band, not an exact pixel, to tolerate
+  // scrollbar/border rounding — but it pins the number so a future change to a
+  // rail's width has to look at this test.
   expect(
     graph.width,
     "the canvas keeps a real, if tight, width with both rails open",
