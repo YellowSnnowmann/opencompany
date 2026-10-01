@@ -417,3 +417,59 @@ fn debug_redacts_the_key() {
     assert!(!rendered.contains("super-secret"), "{rendered}");
     assert!(rendered.contains("<redacted>"), "{rendered}");
 }
+
+/// The belt is now assembled from the vendored TinySearch catalogue rather than
+/// from constructors the compiler checks, so an upstream rename is no longer a
+/// build error — it is a provider that silently wires one tool fewer, and a
+/// company that quietly loses `web_search` while its key is still configured.
+/// This is the pin that turns that back into a test failure.
+#[test]
+fn the_vendored_catalogue_still_publishes_every_tool_a_provider_wires() {
+    let catalogue = tinysearch_bus::provider_tool_specs();
+    let expected: [(&str, &[&str]); 4] = [
+        (
+            "brave",
+            &[
+                "brave_web_search",
+                "brave_news_search",
+                "brave_image_search",
+                "brave_video_search",
+            ],
+        ),
+        (
+            "exa",
+            &["exa_search", "exa_find_similar", "exa_get_contents"],
+        ),
+        ("querit", &["querit_search"]),
+        ("searxng", &["searxng_search"]),
+    ];
+    for (provider, tools) in expected {
+        let specs = catalogue
+            .get(provider)
+            .unwrap_or_else(|| panic!("the catalogue no longer publishes `{provider}`"));
+        for tool in tools {
+            assert!(
+                specs.iter().any(|spec| spec.name == *tool),
+                "`{provider}` no longer publishes `{tool}`; the belt would wire one tool fewer",
+            );
+        }
+    }
+}
+
+/// `exa_answer` is a fourth Exa tool the upstream catalogue gained and this host
+/// does not wire. Adding it means adding it to [`BYO_SEARCH_TOOLS`] in the same
+/// change, or the capability gate has a name it cannot classify — so the
+/// deferral is recorded here rather than left to be noticed.
+#[test]
+fn the_one_catalogue_tool_this_host_defers_is_named() {
+    let catalogue = tinysearch_bus::provider_tool_specs();
+    let exa = catalogue.get("exa").expect("exa");
+    assert!(
+        exa.iter().any(|spec| spec.name == "exa_answer"),
+        "`exa_answer` is gone upstream; drop this test with it",
+    );
+    assert!(
+        !BYO_SEARCH_TOOLS.contains(&"exa_answer"),
+        "`exa_answer` is now declared, so wire it in `extras` and delete this test",
+    );
+}
