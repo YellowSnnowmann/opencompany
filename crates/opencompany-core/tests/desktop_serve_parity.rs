@@ -169,16 +169,6 @@ const DELIBERATE_DIFFERENCES: &[(&str, &str)] = &[
          product change rather than restored wiring",
     ),
     (
-        "state.with_analytics",
-        "deferred, tracked in #2322 — resolves to a no-op off a hosted tenant, \
-         so this differs only for an operator who opted in explicitly; whether \
-         a desktop app reports telemetry at all is a product decision",
-    ),
-    (
-        "builder.with_analytics",
-        "deferred, tracked in #2322 — pairs with state.with_analytics",
-    ),
-    (
         "state.with_webhook",
         "OPENCOMPANY_WEBHOOK_URL reaches no desktop host, which offers no \
          outbound-webhook surface to configure one from",
