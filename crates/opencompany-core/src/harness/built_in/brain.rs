@@ -2213,7 +2213,7 @@ impl HarnessBrain {
         // timeline is unbroken; what it no longer does is announce an ending
         // that has not happened. The anchor arrives when the attempt really
         // ends.
-        if !settled.is_terminal() {
+        if !lifecycle::anchors_timeline(settled) {
             tracing::debug!(
                 task_id = %card.id,
                 status = ?settled,
