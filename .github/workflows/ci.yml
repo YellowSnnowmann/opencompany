@@ -400,6 +400,14 @@ jobs:
       - name: Assert desktop feature sets agree
         run: scripts/ci/assert-desktop-features.sh
 
+      # The analytics read-back tooling's own logic (JSON and SSE framing, the
+      # eventNames fallback, 401/403 versus never-stored, the missing-secret
+      # split), run against canned fixtures with no network. Ungated for the
+      # reason the checks above are: it is `bash` and `python3` over the tree.
+      # docs/spec/runtime/analytics-smoke.md.
+      - name: Test the analytics read-back script
+        run: scripts/ci/test-verify-analytics-capture.sh
+
       # Every file that carries the application version says the same thing.
       # v0.1.5 shipped with `crates/opencompany-app/Cargo.toml` still at 0.1.4
       # because a hand bump touched five files and missed the sixth; the

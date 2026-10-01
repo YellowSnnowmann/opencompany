@@ -533,6 +533,37 @@ jobs:
           echo "::error::Sentry accepted event ${event_id} but never stored it (last lookup: HTTP ${code} after 120s). Reporting is NOT working: the ingest is answering while events are discarded. Check the Sentry instance's accepted-outcome stats, not this repository." >&2
           exit 1
 
+      # Product analytics, sent AND read back (the sibling of the crash-reporting
+      # gate above, same shape). `opencompany analytics-test` sends one
+      # `analytics_self_test` event as a hosted tenant under a throwaway `s_`
+      # profile and exits 0 only when the collector ACCEPTED it; that proves the
+      # `analytics` feature is compiled in and egress works, not that the event
+      # was kept. `verify-analytics-capture.sh` then reads the profile back from
+      # OpenPanel's MCP endpoint and passes only when it is stored.
+      #
+      # `VERIFY_ANALYTICS_REQUIRED` is deliberately unset: until the operator
+      # adds the `OPENPANEL_MCP_BEARER` secret the read-back warns and passes
+      # instead of blocking a release; the send half still fails hard.
+      # Set it to `1` once the secret exists. docs/spec/runtime/analytics-smoke.md.
+      - name: Verify product analytics (analytics-test)
+        env:
+          OPENPANEL_MCP_BEARER: ${{ secrets.OPENPANEL_MCP_BEARER }}
+        run: |
+          set -euo pipefail
+          rc=0
+          profile="$(docker run --rm \
+            --entrypoint opencompany \
+            -e OPENCOMPANY_DEPLOYMENT=hosted-tenant \
+            "${IMAGE}:${TAG}" \
+            analytics-test)" || rc=$?
+          case "$rc" in
+            0) ;;
+            2) echo "::error::analytics-test says this image would be SILENT as a hosted tenant, so it reports nothing. Check the TENANT_FEATURES list and the OPENCOMPANY_ANALYTICS switch. See docs/spec/runtime/analytics-status.md." >&2; exit 1 ;;
+            *) echo "::error::analytics-test exited ${rc}: the collector did not accept the event (or the image has no analytics transport). See docs/spec/runtime/analytics-status.md." >&2; exit 1 ;;
+          esac
+          echo "analytics profile id: ${profile}"
+          scripts/ci/verify-analytics-capture.sh "$profile"
+
       - name: Log in to GHCR
         if: inputs.create_release
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
