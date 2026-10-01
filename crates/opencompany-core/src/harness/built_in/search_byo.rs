@@ -217,6 +217,7 @@ impl TenantSearch {
     }
 }
 
+mod declaration;
 mod module;
 
 pub use live::{BYO_SEARCH_TOOLS, byo_search_tools};
@@ -233,7 +234,7 @@ mod live {
         PermissionLevel, Tool, ToolCallOptions, ToolCategory, ToolResult, ToolScope, ToolTimeout,
     };
 
-    use super::module;
+    use super::{declaration, module};
     use crate::harness::search::WEB_SEARCH_TOOL;
 
     /// Every tool name a BYO provider can put on a belt, across all providers.
@@ -323,7 +324,7 @@ mod live {
         match spec_for(canonical_name) {
             Some(spec) => tools.push(Box::new(ModuleSearchTool::aliased(
                 config.clone(),
-                spec,
+                declaration::documented(spec, true),
                 WEB_SEARCH_TOOL,
                 label,
             ))),
@@ -338,7 +339,7 @@ mod live {
                 Some(spec) => {
                     tools.push(Box::new(ModuleSearchTool::upstream(
                         config.clone(),
-                        spec,
+                        declaration::documented(spec, false),
                         label,
                     )));
                 }
@@ -395,11 +396,18 @@ mod live {
         /// How many results to render. The module is configured with the
         /// company's default; an explicit argument narrows the rendering the
         /// same way upstream's own tool does.
+        ///
+        /// Both spellings are read because the catalogue uses two: `count` is
+        /// Brave's and `max_results` is everyone else's. Reading only one meant
+        /// an agent asking Brave for twenty results got twenty from the
+        /// provider, on the company's bill, and was shown five. No catalogue
+        /// tool declares both, so the order between them never decides
+        /// anything — the test walks every wired tool to keep that true.
         fn max_results(&self, args: &Value) -> usize {
-            args.get("max_results")
-                .and_then(Value::as_u64)
-                .map_or(DEFAULT_MAX_RESULTS, |count| count as usize)
-                .clamp(1, 20)
+            ["max_results", "count"]
+                .iter()
+                .find_map(|key| args.get(*key).and_then(Value::as_u64))
+                .map_or(DEFAULT_MAX_RESULTS, |count| (count as usize).clamp(1, 20))
         }
     }
 

@@ -46,6 +46,7 @@ use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::search::SearchBackend;
 use crate::harness::{HarnessDeps, HarnessPool};
 use crate::ports::types::{CompanyId, CompanyRecord};
+use crate::ports::types::{TurnStep, TurnStepFailure, TurnStepStatus};
 use crate::ports::usage::{SampleKind, UsageMeter, UsageSample};
 use crate::store::{FsCompanyStore, FsContextStore};
 
@@ -457,11 +458,51 @@ async fn a_text_shaped_call_to_a_tool_the_agent_does_not_have_is_not_dispatched(
         "an unknown tool name must never reach a backend"
     );
     assert_eq!(search_samples(&meter), 0, "and must never be metered");
-    // Nothing was recovered, so the text stands as the model's answer rather
-    // than being silently swallowed.
+    // Nothing was recovered, and the attempt is not silently swallowed — but
+    // where it stays visible moved in OpenHuman v0.64.10. The text used to
+    // stand as the model's answer, so the assertion read `outcome.reply`.
+    // The loop now continues past an unrecovered call to another model
+    // request, and the attempt is recorded as a step instead: by tool name,
+    // with the arguments it carried, classified `NotFound`.
+    //
+    // That is a better place for it than the reply — an operator reading the
+    // timeline sees what the model tried, and the raw `function_call:{...}`
+    // prose never surfaces as an answer (the assertion below). So this asserts
+    // the property where it now lives rather than where it used to.
+    let attempted: Vec<&TurnStep> = outcome
+        .steps
+        .iter()
+        .filter(|step| step.label.starts_with("Delete Production Db"))
+        .collect();
     assert!(
-        outcome.reply.contains("delete_production_db"),
-        "an unrecovered call must stay visible, not vanish: {}",
+        !attempted.is_empty(),
+        "an unrecovered call must stay visible, not vanish: reply {:?}, steps {:?}",
+        outcome.reply,
+        outcome.steps,
+    );
+    assert!(
+        attempted
+            .iter()
+            .all(|step| step.status == TurnStepStatus::Error),
+        "an undispatched call must not read as having run: {attempted:?}",
+    );
+    assert!(
+        attempted
+            .iter()
+            .any(|step| step.failure == Some(TurnStepFailure::NotFound)),
+        "the operator is not told the tool does not exist: {attempted:?}",
+    );
+    assert!(
+        attempted
+            .iter()
+            .any(|step| step.detail.as_deref() == Some("confirm=true")),
+        "the arguments the model sent are not recorded: {attempted:?}",
+    );
+    // And the raw call never surfaced as something the operator reads, which is
+    // what the old reply-shaped assertion could not check.
+    assert!(
+        !outcome.reply.contains("function_call"),
+        "the raw call leaked into the reply: {}",
         outcome.reply
     );
 }

@@ -74,12 +74,21 @@ fn a_complete_result_is_not_flagged() {
 /// go quiet again — which is precisely how #410 stayed hidden.
 #[test]
 fn truncation_markers_still_appear_in_the_vendored_tool_pipeline() {
+    // OpenHuman v0.64.10 moved the per-result persistence out of
+    // `openhuman-core` into `tinyagents_harness::artifacts::tool_results`,
+    // taking both markers with it. The *wording* did not change, which is why
+    // `output_was_truncated` kept classifying correctly across the bump — only
+    // the address did. The old `tool_result_artifacts/mod.rs` is still there
+    // and still readable, now a 62-line wrapper holding the host's redactor
+    // and tool vocabulary, so `read_vendored` succeeded and this assertion is
+    // what caught the move. `openhuman-core` keeps the middleware that calls
+    // into the moved code, so both files are still read.
     let sources = [
         vendored(
             "vendor/openhuman/crates/openhuman-core/src/agent/tinyagents/middleware/tool_output.rs",
         ),
         vendored(
-            "vendor/openhuman/crates/openhuman-core/src/agent/harness/tool_result_artifacts/mod.rs",
+            "vendor/openhuman/vendor/tinyagents/crates/tinyagents-harness/src/artifacts/tool_results.rs",
         ),
     ]
     .concat();
