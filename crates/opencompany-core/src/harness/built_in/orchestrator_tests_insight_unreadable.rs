@@ -173,3 +173,53 @@ async fn query_company_unwired_board_says_no_board_is_wired() {
     assert!(out.contains("No task board is wired on this host"), "{out}");
     assert!(unreadable(&result).is_empty());
 }
+
+fn cache_with(nodes: Value) -> RunOutputCache {
+    let cache = RunOutputCache::default();
+    cache.store("run-1", "demo", nodes, Vec::new());
+    cache
+}
+
+#[tokio::test]
+async fn read_run_output_refuses_a_node_without_an_items_list() {
+    let cache = cache_with(json!({ "worker": { "text": "x" } }));
+    let reader = ReadRunOutputTool::new(CompanyId::new("acme"), cache);
+    let result = reader
+        .execute(json!({ "run_id": "run-1", "node": "worker" }))
+        .await
+        .unwrap();
+    assert!(result.is_error, "{result:?}");
+    let out = result.output();
+    assert!(out.contains("no `items`"), "{out}");
+    assert!(out.contains("not the same as no output"), "{out}");
+    assert!(!out.contains("produced no items"), "{out}");
+}
+
+#[tokio::test]
+async fn read_run_output_still_reports_an_empty_items_list_as_no_items() {
+    let cache = cache_with(json!({ "worker": { "items": [] } }));
+    let reader = ReadRunOutputTool::new(CompanyId::new("acme"), cache);
+    let result = reader
+        .execute(json!({ "run_id": "run-1", "node": "worker" }))
+        .await
+        .unwrap();
+    assert!(!result.is_error);
+    assert!(result.output().contains("produced no items"));
+}
+
+#[tokio::test]
+async fn read_run_output_unknown_node_listing_marks_unreadable_output() {
+    let cache = cache_with(json!({
+        "good": { "items": ["a", "b"] },
+        "odd": { "text": "x" },
+    }));
+    let reader = ReadRunOutputTool::new(CompanyId::new("acme"), cache);
+    let out = reader
+        .execute(json!({ "run_id": "run-1", "node": "missing" }))
+        .await
+        .unwrap()
+        .output();
+    assert!(out.contains("`good` (2 item(s))"), "{out}");
+    assert!(out.contains("`odd` (output unreadable)"), "{out}");
+    assert!(!out.contains("`odd` (0 item(s))"), "{out}");
+}

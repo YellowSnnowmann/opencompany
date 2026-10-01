@@ -102,6 +102,7 @@ use crate::ports::types::{
 use crate::ports::{CompanyStore, WorkflowRun, WorkflowRunner};
 
 mod insight_reads;
+mod run_output_items;
 
 /// The manifest cognition-tier that marks the orchestrator agent.
 ///
@@ -5544,14 +5545,7 @@ impl Tool for ReadRunOutputTool {
             // with a real node rather than guess.
             let mut valid: Vec<String> = nodes
                 .iter()
-                .map(|(id, st)| {
-                    let count = st
-                        .get("items")
-                        .and_then(Value::as_array)
-                        .map(Vec::len)
-                        .unwrap_or(0);
-                    format!("`{id}` ({count} item(s))")
-                })
+                .map(|(id, st)| format!("`{id}` ({})", run_output_items::listing_count(st)))
                 .collect();
             valid.sort();
             let list = if valid.is_empty() {
@@ -5565,18 +5559,19 @@ impl Tool for ReadRunOutputTool {
             )));
         };
 
-        let items = state
-            .get("items")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+        let Some(items) = run_output_items::node_items(state) else {
+            tracing::warn!(company = %self.company, run_id = %run_id, node = %node, "read_run_output: node output has no items list");
+            return Ok(ToolResult::error(run_output_items::unreadable_shape(
+                node, run_id,
+            )));
+        };
         if items.is_empty() {
             return Ok(ToolResult::success(format!(
                 "Node `{node}` of run `{run_id}` produced no items."
             )));
         }
 
-        let (full, n) = render_run_items(&items);
+        let (full, n) = render_run_items(items);
         let total = full.chars().count();
         let start = offset.min(total);
         let budget = crate::harness::build::TOOL_RESULT_BUDGET_BYTES
