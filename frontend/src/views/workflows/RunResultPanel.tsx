@@ -179,7 +179,7 @@ export function RunResultPanel({
     // edge; `CanvasShell` owns the placement and the width.
     <aside
       aria-label="Run result"
-      className="flex h-full flex-col border-t bg-card/60 xl:border-t-0 xl:border-l"
+      className="flex h-full flex-col border-t bg-card/60 xl:border-0 xl:bg-transparent"
       data-testid="workflow-run-result"
     >
       <div className="flex items-center justify-between px-4 py-2">

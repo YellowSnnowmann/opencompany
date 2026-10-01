@@ -35,20 +35,19 @@
 //               where this lands, so `WorkflowsView` nudges them clear of it
 //               while it is open.
 //
-//   rightRail — in-flow, shrinks the canvas from the other side. Issue #1205's
-//               answer for `RunResultPanel` and `RunFailurePanel`: a receipt
-//               for something that just happened, dismissed when read, but
-//               tall and vertically stacking (a delivery block, a Steps list,
-//               one card per node) — exactly the shape `leftRail` already
-//               proved a horizontal strip cannot show well. It is built the
-//               same way as `leftRail`, mirrored: in-flow only at `xl`
-//               (≥1280px viewport), collapsing to a full-width strip below the
-//               canvas beneath that — see `RunResultPanel`/`RunFailurePanel`
-//               for the class pattern, copied from `RunHistoryPanel`. Single
-//               occupancy; the two panels are mutually exclusive by
-//               construction in `WorkflowsView` (a run either produces a
-//               result or a failure, never both), so no arbitration beyond
-//               that is needed.
+//   rightRail — a floating overlay at `xl`, mirrored from `leftRail`: `absolute
+//               right-3 top-3 bottom-3 z-10` against the shell, a strip below
+//               the canvas beneath it. Issue #1205's answer for
+//               `RunResultPanel` and `RunFailurePanel`: a receipt for something
+//               that just happened, dismissed when read, but tall and
+//               vertically stacking. It was in-flow too, and with Company's
+//               section rail beside the canvas it left 626px — under the 640px
+//               floor — so it floats and the canvas keeps its width. It is
+//               rendered after the canvas, so where it meets the right overlay
+//               below (copilot, inspector) it sits on top of it until
+//               dismissed. Single occupancy; the two panels are mutually
+//               exclusive by construction in `WorkflowsView` (a run either
+//               produces a result or a failure, never both).
 //
 //   right overlay — a floating overlay, mounted `absolute right-3 top-3
 //               bottom-3 z-10` INSIDE the canvas (see `CopilotPanel` and
@@ -70,22 +69,21 @@
 //               A panel that mounts here and describes ONE thing on the canvas
 //               owes the operator the same.
 //
-// **Why the overlay and `rightRail` can never collide.** They are not siblings
-// in the same box: the overlay is `absolute` against the canvas's own
-// `relative` container (`children` below), not against this shell. When
-// `rightRail` is present it takes real flex width, so the canvas container
-// itself gets narrower — and the overlay's containing block shrinks with it.
-// The overlay's right edge is always the (now-narrower) canvas's right edge,
-// which is `rightRail`'s left edge, never underneath or past it. No z-index
-// race, no arbitration code: the overlay simply has less canvas to sit over.
+// **Where the overlays meet.** All three floating panels sit over the canvas's
+// edges now (`leftRail` left; `rightRail` and the right overlay both right), so
+// none of them costs the canvas width. `rightRail` and the right overlay share
+// an edge: `rightRail` is rendered after the canvas and so paints over the
+// copilot or inspector until it is dismissed, which then reappears underneath.
+// It is as wide as the copilot (`w-96`), the widest of them, so nothing peeks
+// out beside it.
+// It is as wide as the copilot (`w-96`), the widest of them, so nothing peeks
+// out beside it.
+// The left rail and the right panels only meet on a canvas narrower than their
+// two widths, which `xl` (≥1280px) is wide enough to avoid.
 //
-// The arithmetic that fixes the breakpoint: a rail is in-flow, so it costs the
-// canvas real width, while the overlay only covers it. Two 320px rails (640px)
-// plus the app's own 240px nav sidebar is 856px before the canvas or the
-// overlay even enter into it — most of a laptop window. So both rails are
-// in-flow only at `xl` (≥1280px viewport) — below that each falls back to the
-// bottom strip it has always been, stacking canvas → leftRail's strip →
-// rightRail's strip, which never competes with the overlay slot.
+// Below `xl` each rail falls back to the bottom strip it has always been,
+// stacking canvas → leftRail's strip → rightRail's strip, which never competes
+// with the overlay slot.
 
 import type { ReactNode } from "react";
 
@@ -120,7 +118,11 @@ export function CanvasShell({
           {leftRail}
         </div>
       )}
-      {rightRail && <div className="shrink-0 xl:w-80">{rightRail}</div>}
+      {rightRail && (
+        <div className="shrink-0 xl:absolute xl:top-3 xl:right-3 xl:bottom-3 xl:z-10 xl:w-96 xl:overflow-hidden xl:rounded-xl xl:border xl:bg-card/95 xl:shadow-lg xl:backdrop-blur">
+          {rightRail}
+        </div>
+      )}
     </div>
   );
 }
