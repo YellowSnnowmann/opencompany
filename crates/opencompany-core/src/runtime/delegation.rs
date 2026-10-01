@@ -1088,6 +1088,7 @@ impl<'a> DelegationRunner<'a> {
         use crate::ports::{WorkflowBoardAction, WorkflowRunBoardRow};
 
         let mut rows = Vec::with_capacity(delegations.len());
+        let unwired = self.tasks.is_none();
         for delegation in delegations {
             // Read the row's structural fields off the delegation BEFORE it is
             // consumed by the drain. Nothing here is the model's prose beyond the
@@ -1132,10 +1133,12 @@ impl<'a> DelegationRunner<'a> {
                         title,
                         assignee,
                     },
-                    // `Ok` with no id: this runtime wired no task board. Not an
-                    // error the node should fail on, and not a card either.
                     None => WorkflowRunBoardRow {
-                        action: WorkflowBoardAction::SpawnFailed,
+                        action: if unwired {
+                            WorkflowBoardAction::BoardUnwired
+                        } else {
+                            WorkflowBoardAction::SpawnFailed
+                        },
                         task_id: None,
                         title,
                         assignee,
@@ -1144,6 +1147,8 @@ impl<'a> DelegationRunner<'a> {
                 (false, Ok(outcome)) => WorkflowRunBoardRow {
                     action: if outcome.assigned {
                         WorkflowBoardAction::Assigned
+                    } else if unwired {
+                        WorkflowBoardAction::BoardUnwired
                     } else {
                         WorkflowBoardAction::AssignFailed
                     },
