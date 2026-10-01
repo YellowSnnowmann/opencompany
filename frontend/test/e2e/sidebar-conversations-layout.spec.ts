@@ -93,4 +93,108 @@ test.describe("sidebar conversations layout", () => {
       page.locator('[data-tour="nav-company"] [data-sidebar=menu-button]'),
     ).toHaveAttribute("data-active", "");
   });
+
+  test.describe("the two doors on the Conversations row", () => {
+    // Each door is a menu, and each item opens a different dialog. They are told
+    // apart by what is IN them, not by "a dialog opened": `Create a new agent`
+    // once opened the agent picker ("New message") instead of the Add agent
+    // form, and a bare dialog-is-visible check passes for both.
+    async function openAt(page: Page) {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto("/#/company");
+      await dismissTour(page);
+    }
+
+    const door = (page: Page, name: string) =>
+      page.getByRole("button", { name, exact: true });
+    const items = (page: Page) => page.getByRole("menuitem");
+    const dialog = (page: Page) => page.getByRole("dialog");
+
+    async function closeDialog(page: Page) {
+      await page.keyboard.press("Escape");
+      await expect(dialog(page)).toHaveCount(0);
+    }
+
+    test("the + menu offers exactly Create a new channel and Create a new agent", async ({
+      page,
+    }) => {
+      await openAt(page);
+      await door(page, "New").click();
+      await expect(items(page)).toHaveText(["Create a new channel", "Create a new agent"]);
+    });
+
+    test("Create a new channel opens the New channel form", async ({ page }) => {
+      await openAt(page);
+      await door(page, "New").click();
+      await page.getByRole("menuitem", { name: "Create a new channel" }).click();
+
+      const form = dialog(page);
+      await expect(form.getByText("New channel", { exact: true })).toBeVisible();
+      await expect(form.getByText("Name", { exact: true })).toBeVisible();
+      await expect(form.getByText("What it's for", { exact: true })).toBeVisible();
+      await expect(form.getByText("Members", { exact: true })).toBeVisible();
+      // Not the agent picker.
+      await expect(form.getByText("New message", { exact: true })).toHaveCount(0);
+      await closeDialog(page);
+    });
+
+    test("Create a new agent opens the Add agent form, not the New message picker", async ({
+      page,
+    }) => {
+      await openAt(page);
+      await door(page, "New").click();
+      await page.getByRole("menuitem", { name: "Create a new agent" }).click();
+
+      const form = dialog(page);
+      // The real create form: a name, an icon and a post.
+      await expect(form.getByText("Add agent", { exact: true }).first()).toBeVisible();
+      await expect(form.getByPlaceholder("e.g. Ada")).toBeVisible();
+      await expect(form.getByText("Icon", { exact: true })).toBeVisible();
+      await expect(form.getByText("Post", { exact: true })).toBeVisible();
+      // And what the regression looked like: the DM picker.
+      await expect(form.getByText("New message", { exact: true })).toHaveCount(0);
+      await expect(
+        form.getByText("Choose an agent to start a direct message."),
+      ).toHaveCount(0);
+      await closeDialog(page);
+    });
+
+    test("the pencil menu offers the two Start a conversation items and no Search", async ({
+      page,
+    }) => {
+      await openAt(page);
+      await door(page, "Start a conversation").click();
+      await expect(items(page)).toHaveText([
+        "Start a conversation in a channel",
+        "Start a conversation with the agent",
+      ]);
+      await expect(page.getByRole("menuitem", { name: /search/i })).toHaveCount(0);
+    });
+
+    test("the channel picker lists channels and the agent picker lists agents", async ({
+      page,
+    }) => {
+      await openAt(page);
+
+      await door(page, "Start a conversation").click();
+      await page.getByRole("menuitem", { name: "Start a conversation in a channel" }).click();
+      const channels = dialog(page);
+      await expect(
+        channels.getByText("Start a conversation in a channel", { exact: true }),
+      ).toBeVisible();
+      await expect(channels.getByText("Choose a channel to talk in.")).toBeVisible();
+      await expect(channels.getByRole("button", { name: /^general/ })).toBeVisible();
+      await expect(channels.getByRole("button", { name: /^Chief Executive/ })).toHaveCount(0);
+      await closeDialog(page);
+
+      await door(page, "Start a conversation").click();
+      await page.getByRole("menuitem", { name: "Start a conversation with the agent" }).click();
+      const agents = dialog(page);
+      await expect(agents.getByText("New message", { exact: true })).toBeVisible();
+      await expect(agents.getByText("Choose an agent to start a direct message.")).toBeVisible();
+      await expect(agents.getByRole("button", { name: /^Chief Executive/ })).toBeVisible();
+      await expect(agents.getByRole("button", { name: /^general/ })).toHaveCount(0);
+      await closeDialog(page);
+    });
+  });
 });
