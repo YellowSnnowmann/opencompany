@@ -75,14 +75,17 @@ test("at xl the run result is a right rail, and the canvas keeps a usable width"
   const rail = (await panel.boundingBox())!;
   const graph = (await flow.boundingBox())!;
 
-  // Right of the canvas, not under it.
-  expect(rail.x, "the rail must sit right of the canvas").toBeGreaterThanOrEqual(
-    graph.x + graph.width - 1,
-  );
-  // Full height of the canvas region, mirroring the left rail's own check.
+  // Over the canvas's right edge, not beside it: the rail floats, so it sits
+  // inside the canvas box and costs it no width.
+  expect(rail.x, "the rail floats inside the canvas").toBeGreaterThanOrEqual(graph.x);
   expect(
-    Math.abs(rail.height - graph.height),
-    "the rail runs the full height of the canvas region",
+    rail.x + rail.width,
+    "the rail's right edge is the canvas's, less its 12px inset",
+  ).toBeLessThanOrEqual(graph.x + graph.width);
+  // Full height of the canvas region, less its 12px inset top and bottom.
+  expect(
+    Math.abs(graph.height - rail.height - 24),
+    "the rail runs the canvas's full height, less its inset",
   ).toBeLessThan(4);
   // Only one rail open here, so the floor matches the left rail's own case.
   expect(graph.width, "the canvas keeps a usable width beside the rail").toBeGreaterThan(
@@ -137,33 +140,29 @@ test("both rails open at once: history left, run result right, canvas squeezed b
   const history = page.getByTestId("workflow-run-history");
   await expect(history).toBeVisible();
 
+  const widthWithHistoryOnly = (await flow.boundingBox())!.width;
   const result = await runAndAwaitResult(page);
 
   const left = (await history.boundingBox())!;
   const graph = (await flow.boundingBox())!;
   const right = (await result.boundingBox())!;
 
-  // History floats over the canvas's left edge (it takes no width from it);
-  // the result rail stays in-flow to the right of it.
+  // Both rails float over the canvas, one on each edge, and neither costs it
+  // any width: the canvas is as wide with both open as with history alone, and
+  // above the same 640px floor the single-rail cases defend. (This asserted a
+  // 500-650px band when the rails were in-flow and squeezed it.)
   expect(left.x, "history floats over the canvas's left edge").toBeGreaterThanOrEqual(graph.x);
-  expect(left.x + left.width, "history stays inside the canvas").toBeLessThanOrEqual(
-    graph.x + graph.width,
-  );
-  expect(right.x, "run result sits right of the canvas").toBeGreaterThanOrEqual(
-    graph.x + graph.width - 1,
-  );
-
-  // The arithmetic: 1440 viewport, 240px app sidebar, Company's 240px section
-  // rail and the 320px result rail ⇒ ~626px of canvas left. (History overlays
-  // the canvas and costs it nothing.) A band, not an exact pixel, to tolerate
-  // scrollbar/border rounding — but it pins the number so a future change to a
-  // rail's width has to look at this test.
   expect(
-    graph.width,
-    "the canvas keeps a real, if tight, width with both rails open",
-  ).toBeGreaterThan(500);
+    right.x + right.width,
+    "run result floats inside the canvas's right edge",
+  ).toBeLessThanOrEqual(graph.x + graph.width);
   expect(
-    graph.width,
-    "the canvas is not wider than the two-rail arithmetic predicts",
-  ).toBeLessThan(650);
+    left.x + left.width,
+    "the two rails do not overlap each other",
+  ).toBeLessThanOrEqual(right.x);
+  expect(graph.width, "the canvas keeps a usable width with both rails open").toBeGreaterThan(640);
+  expect(graph.width, "opening the result rail takes no width from the canvas").toBeCloseTo(
+    widthWithHistoryOnly,
+    0,
+  );
 });
