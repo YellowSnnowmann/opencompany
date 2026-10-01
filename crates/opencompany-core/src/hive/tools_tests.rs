@@ -4,6 +4,8 @@ use super::*;
 use async_trait::async_trait;
 use tinyhivemind_embed::ConversationKind;
 
+use crate::ports::events::EventLog;
+
 fn desk_surface(id: &str) -> ConversationRef {
     ConversationRef {
         id: id.to_string(),
