@@ -52,6 +52,14 @@ payload, and `no_credential_reaches_the_request_body` asserts it on the wire.
 `z.record(z.string(), z.unknown())`; `profileId` is a string or a number.
 `groups` exists and is unused here.
 
+**Three id spaces** share `profileId`, told apart by prefix: `i_` (the random
+instance id; also every desktop), `t_` (a keyed tenant digest) and `s_` (a
+throwaway 128-bit nonce, used only by `analytics-test`). The self-test sends one
+event, `analytics_self_test`, with no properties of its own; it is constructed
+only by `analytics::selftest` and sits in the name-blocklist and no-PII tests
+like every other event name. The envelope may also carry `shell_version`, only
+when a shell names itself. See [analytics-desktop.md](analytics-desktop.md).
+
 **There is no batch endpoint and no array body.** `/track` takes one object. The
 only bulk path, `POST /import/events`, refuses a `write` client outright and
 inserts raw ClickHouse rows, bypassing sessions, geo and the queue — it is a

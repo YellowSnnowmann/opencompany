@@ -67,6 +67,10 @@ smtp           | partial      | imap,smtp                       | send_then_rece
 chargebee      | partial      | openhuman,chargebee,paypal,composio | chargebee server::ops::finance
 paypal         | partial      | openhuman,chargebee,paypal,composio | paypal server::ops::finance
 sidecar        | partial      | sidecar                         | brain::sidecar
+# `analytics` is also compiled by the desktop shell (crates/opencompany-app), whose own
+# analytics tests (consent gate, preferences, embedded host against a loopback
+# collector) run in the `Desktop` job, not here. This row covers the core: the
+# transport, `analytics::selftest` and the exact-headers test.
 analytics      | partial      | analytics                       | analytics
 crash-reporting | partial     | crash-reporting                 | observability
 webhooks       | partial      | webhooks                        | server::webhook

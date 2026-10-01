@@ -51,11 +51,11 @@ either a second `tauri.conf.json` or a script that invokes a bare `tauri`.
 
 The desktop links the host with an explicit feature set, and it is declared in
 **two** places — reading only the first is issue #1738. The manifest's list, on
-the `opencompany-core` dependency in `crates/opencompany-app/Cargo.toml`:
+the `opencompany-core` dependency in `crates/opencompany-app/Cargo.toml` (`analytics` is there: the desktop reports product analytics by default with an opt-out, see [analytics-desktop.md](analytics-desktop.md)):
 
 ```toml
 opencompany-core = { path = "../opencompany-core", default-features = false, features = [
-  "sqlite", "platform-jwt", "oauth", "mcp", "tinymemory",
+  "sqlite", "platform-jwt", "oauth", "mcp", "tinymemory", "tinyhumans", "crash-reporting", "analytics",
 ] }
 ```
 

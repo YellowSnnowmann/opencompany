@@ -254,11 +254,16 @@ adding a new business is a new folder, not a new program.
 
 Nothing, unless it is a tenant on the TinyHumans hosted platform.
 
-- **A self-hosted or desktop install sends nothing** — and not "nothing by
-  default" in the sense of a switch someone could flip. The network client is
-  behind a cargo feature the shipped default build does not compile in, so
-  there is no code in that binary that could make the request. Getting one out
-  of that state takes a recompile, not a config change.
+- **A self-hosted install sends nothing** — and not "nothing by default" in
+  the sense of a switch someone could flip. The network client is behind a
+  cargo feature the shipped default build does not compile in, so there is no
+  code in that binary that could make the request. Getting one out of that
+  state takes a recompile, not a config change.
+- **The desktop app reports by default, and you can turn it off** in
+  Settings → Privacy (or `OPENCOMPANY_ANALYTICS=off`). It sends the same
+  shape-and-outcome events as a hosted tenant, from the app's Rust host, under
+  a random per-install id that names no person
+  ([`docs/spec/runtime/analytics-desktop.md`](docs/spec/runtime/analytics-desktop.md)).
 - **Hosted tenants report product usage**, because the platform builds their
   image with that feature on and injects a project token. What it reports is
   shape and outcome under an opaque id: how many companies are configured,
@@ -271,8 +276,9 @@ Nothing, unless it is a tenant on the TinyHumans hosted platform.
   review: a reported property is a word compiled into the binary, a count, a
   number or a boolean, and the type has no `String` variant for runtime text to
   arrive in.
-- **To turn it off**, set `OPENCOMPANY_ANALYTICS=off`. It outranks everything
-  else, and boot prints one line saying which way it resolved.
+- **To turn it off**, set `OPENCOMPANY_ANALYTICS=off` (on the desktop, also the
+  Privacy setting). It outranks everything else, and boot prints one line saying
+  which way it resolved.
 
 [`docs/spec/runtime/analytics.md`](docs/spec/runtime/analytics.md) has every
 event and property, the conditions that must all hold before anything is sent,

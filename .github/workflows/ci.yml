@@ -273,6 +273,13 @@ jobs:
             desktop:
               - '.github/workflows/ci.yml'
               - 'crates/opencompany-app/**'
+              # The shell compiles the core's `analytics` feature and drives its
+              # tracker, decision and self-test, and `desktop.rs` builds every
+              # desktop company. A change there can break the desktop without
+              # touching this crate, and without these lines the first thing to
+              # notice would be the merge queue rather than the pull request.
+              - 'crates/opencompany-core/src/analytics/**'
+              - 'crates/opencompany-core/src/desktop.rs'
 
   # The header above states an invariant. This job is what makes it one.
   #

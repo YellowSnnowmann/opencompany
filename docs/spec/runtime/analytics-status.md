@@ -20,7 +20,7 @@ things that close that gap. Neither changes **what is sent**.
 | `deployment` | `desktop`, `self-hosted` or `hosted-tenant`. |
 | `endpoint` | The collector, **always** through `boot::loggable_endpoint` (userinfo, query and deep path segments removed). `null` when there is none. |
 | `in_build` | Whether the network transport was compiled in. |
-| `consent` | `true`/`false` where a deployment asks the user, `null` where no question applies. Always `null` today. |
+| `consent` | `true`/`false` where a deployment asks the user, `null` where no question applies. The desktop's gate ([analytics-desktop.md](analytics-desktop.md)); `null` elsewhere. |
 | `last_send` | `never`, `accepted`, `refused-credential`, `redirect`, `collector-busy`, `unreachable` or `rejected-event`. |
 | `last_status` | The HTTP status of that send; `null` for `never` and `unreachable`. |
 | `last_at` | RFC-3339 UTC when it ended, `null` until one has. |
