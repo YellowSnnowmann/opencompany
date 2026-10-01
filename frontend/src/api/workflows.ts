@@ -527,13 +527,15 @@ export interface WorkflowRunApprovalRow {
  * (or tried to set) an owner. The `*Failed` arms are NOT run failures — they
  * record that the store refused a write the node's turn was already told would
  * happen, the same honesty {@link DeliveryStatus} `failed` gives a report that
- * did not send. Mirrors the Rust `WorkflowBoardAction` camelCase serde.
+ * did not send. `boardUnwired` means the runtime had no task board to write to.
+ * Mirrors the Rust `WorkflowBoardAction` camelCase serde.
  */
 export type WorkflowBoardAction =
   | "spawned"
   | "assigned"
   | "spawnFailed"
-  | "assignFailed";
+  | "assignFailed"
+  | "boardUnwired";
 
 /**
  * One board write a run's agent node performed (issue #661 / M5) — "this run

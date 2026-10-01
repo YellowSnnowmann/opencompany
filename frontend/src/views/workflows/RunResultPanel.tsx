@@ -33,6 +33,7 @@ import {
 } from "./run-output";
 // Issue #1002: which of the company's parked cards this run is held on.
 import { blockingApprovals, runApprovals, type RunApproval } from "./run-approvals";
+import { boardActionMeta } from "./run-board";
 // Issue #981: the one rung for "this report did not go out", shared with the
 // history rows, the run dot, the SSE toast and the host itself.
 import { undeliveredCount, undeliveredNodes } from "./run-health";
@@ -369,27 +370,6 @@ export function RunResultPanel({
   );
 }
 
-/** The label and badge tone for one board action. The two `*Failed` arms get a
- * failed hue — a write the node was told would happen and did not — while the
- * two success arms stay neutral, since the card itself is the loud thing. */
-const BOARD_ACTION: Record<
-  WorkflowRunBoardRow["action"],
-  { label: string; tone: string; failed: boolean }
-> = {
-  spawned: { label: "Opened", tone: "border-border bg-muted/60", failed: false },
-  assigned: { label: "Assigned", tone: "border-border bg-muted/60", failed: false },
-  spawnFailed: {
-    label: "Open failed",
-    tone: "border-status-failed/40 bg-status-failed-soft",
-    failed: true,
-  },
-  assignFailed: {
-    label: "Assign failed",
-    tone: "border-status-failed/40 bg-status-failed-soft",
-    failed: true,
-  },
-};
-
 /**
  * The board writes a run performed (issue #1014) — one row per card it opened
  * or re-owned, shipped on the wire since #661 but never rendered until now.
@@ -401,7 +381,7 @@ const BOARD_ACTION: Record<
  * failure.
  */
 function BoardRows({ board }: { board: WorkflowRunBoardRow[] }) {
-  const failed = board.filter((r) => BOARD_ACTION[r.action].failed).length;
+  const failed = board.filter((r) => boardActionMeta(r.action).failed).length;
   return (
     <div
       className="mb-3 space-y-1.5 rounded-lg border bg-background/40 p-2"
@@ -419,7 +399,7 @@ function BoardRows({ board }: { board: WorkflowRunBoardRow[] }) {
         )}
       </div>
       {board.map((row, i) => {
-        const meta = BOARD_ACTION[row.action];
+        const meta = boardActionMeta(row.action);
         // The card link — every arm but `spawnFailed` names a card by id.
         const label = row.title ?? "the card";
         return (
