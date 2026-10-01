@@ -473,3 +473,93 @@ fn the_one_catalogue_tool_this_host_defers_is_named() {
         "`exa_answer` is now declared, so wire it in `extras` and delete this test",
     );
 }
+
+/// The guidance layer is *wired*, not merely present.
+///
+/// `declaration::documented` is applied at two call sites in
+/// `byo_search_tools` — the aliased canonical tool and each provider extra —
+/// and its own tests exercise the transform directly. Neither would notice a
+/// call site that stopped applying it, which is the mistake available here: the
+/// extras arm was edited separately from the canonical one, and a belt whose
+/// `web_search` is documented while `brave_news_search` is not would look right
+/// in every other test.
+///
+/// So this asserts it through the real entry point, on the `Tool` objects the
+/// agent is actually handed.
+#[test]
+fn every_tool_on_a_byo_belt_reaches_the_model_documented() {
+    for provider in ["brave", "exa", "querit", "searxng"] {
+        let config = TenantSearch {
+            provider: provider.to_string(),
+            api_key: Some("k".to_string()),
+            endpoint: Some("https://searx.example".to_string()),
+        };
+        let tools = byo_search_tools(&config);
+        assert!(!tools.is_empty(), "{provider} wired no tools");
+        for tool in &tools {
+            let name = tool.name();
+            assert!(
+                tool.description().split_whitespace().count() >= 20,
+                "{provider}/{name} is described in {} words, so the call site is \
+                 not applying `declaration::documented`",
+                tool.description().split_whitespace().count(),
+            );
+            let schema = tool.parameters_schema();
+            let properties = schema["properties"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{provider}/{name} declares no properties"));
+            for (property, declared) in properties {
+                assert!(
+                    declared
+                        .get("description")
+                        .and_then(|text| text.as_str())
+                        .is_some_and(|text| !text.trim().is_empty()),
+                    "{provider}/{name}.{property} reaches the model undocumented",
+                );
+            }
+        }
+    }
+}
+
+/// Brave's result count is `count`, everyone else's is `max_results`. The tool
+/// reads both, and this is the pin that keeps the belt honest about which one
+/// each provider actually advertises — reading the wrong one meant an agent
+/// paid for twenty results and was shown five.
+#[test]
+fn braves_belt_advertises_count_and_the_others_advertise_max_results() {
+    let brave = TenantSearch {
+        provider: "brave".to_string(),
+        api_key: Some("k".to_string()),
+        endpoint: None,
+    };
+    let web_search = byo_search_tools(&brave)
+        .into_iter()
+        .find(|tool| tool.name() == "web_search")
+        .expect("brave wires web_search");
+    let schema = web_search.parameters_schema();
+    let properties = schema["properties"].as_object().expect("properties");
+    assert!(properties.contains_key("count"), "{properties:?}");
+    assert!(!properties.contains_key("max_results"), "{properties:?}");
+
+    for provider in ["exa", "querit", "searxng"] {
+        let config = TenantSearch {
+            provider: provider.to_string(),
+            api_key: Some("k".to_string()),
+            endpoint: Some("https://searx.example".to_string()),
+        };
+        let web_search = byo_search_tools(&config)
+            .into_iter()
+            .find(|tool| tool.name() == "web_search")
+            .unwrap_or_else(|| panic!("{provider} wires web_search"));
+        let schema = web_search.parameters_schema();
+        let properties = schema["properties"].as_object().expect("properties");
+        assert!(
+            properties.contains_key("max_results"),
+            "{provider}: {properties:?}",
+        );
+        assert!(
+            !properties.contains_key("count"),
+            "{provider}: {properties:?}"
+        );
+    }
+}

@@ -506,3 +506,77 @@ async fn a_text_shaped_call_to_a_tool_the_agent_does_not_have_is_not_dispatched(
         outcome.reply
     );
 }
+
+/// The protocol pin, observed on the wire rather than read off a config field.
+///
+/// `agent_spec_for` sets `config.agent.tool_dispatcher = "native"` in a
+/// `spec.config(..)` hook, and that one line is the whole of this host's choice
+/// of tool protocol. OpenHuman's schema default for the field is `"python"`
+/// (`default_agent_tool_dispatcher`), which `resolve_dispatcher_kind` maps to
+/// `DispatcherKind::Code(CodeStyle::Python)` *before* the native-support arm is
+/// consulted — so losing the line does not fall back to native, it falls
+/// forward to Python, where `should_send_tool_specs()` is `false` and the
+/// catalogue reaches the model as prose in the system prompt.
+///
+/// Nothing could catch that. The hook is a boxed `FnOnce` behind a private
+/// field, so no test can invoke it and read the config back; and every
+/// behavioural test in this crate keeps passing on the Python dispatcher,
+/// because `native_salvage` exists precisely to parse calls back out of prose.
+/// A green suite is not evidence either way.
+///
+/// What *is* evidence is the request: a native dispatcher advertises the belt in
+/// a `tools` array, and a code dispatcher sends none. So this reads the shape
+/// off the wire, which is the same thing tinyhivemind's offline harness does in
+/// `the_dialect_is_read_from_the_tools_the_request_advertises`.
+#[tokio::test]
+async fn the_belt_reaches_the_model_as_native_tool_specs_and_not_as_prose() {
+    let (model_url, script) = spawn_script(vec![Turn::Text("done")]).await;
+    let (search_url, _backend) = spawn_search_backend().await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, deps, record, _meter) = harness(model_url, search_url, dir.path()).await;
+    pool.run(
+        &record.id,
+        "ceo",
+        "What is on my plate?",
+        &deps,
+        crate::runtime::delegation::ChatTarget::default(),
+    )
+    .await
+    .expect("turn runs");
+
+    let seen = script.seen.lock().unwrap();
+    let first = seen.first().expect("the model was asked at least once");
+    let tools = first
+        .get("tools")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| {
+            panic!(
+                "the request advertised no `tools` array, which is the Python/code \
+                 dispatcher's shape — `agent.tool_dispatcher` is no longer pinned to \
+                 \"native\", or an agent path was added that skips `agent_spec_for`. \
+                 Request keys: {:?}",
+                first.as_object().map(|o| o.keys().collect::<Vec<_>>())
+            )
+        });
+    assert!(
+        !tools.is_empty(),
+        "a native request with an empty belt tells the model it has no tools",
+    );
+    // And each entry is a structured declaration with a schema a provider can
+    // validate, not a name in a sentence.
+    for tool in tools {
+        let function = tool
+            .get("function")
+            .unwrap_or_else(|| panic!("a tool entry is not provider-native: {tool}"));
+        assert!(
+            function.get("name").and_then(Value::as_str).is_some(),
+            "a tool entry carries no name: {tool}",
+        );
+        assert!(
+            function.get("parameters").is_some(),
+            "a tool entry carries no parameter schema, so the provider cannot \
+             validate a call against it: {tool}",
+        );
+    }
+}
