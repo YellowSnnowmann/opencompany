@@ -297,7 +297,13 @@ test("the automation canvas fills the card and keeps its minimap inside it", asy
       const r = el.getBoundingClientRect();
       return { left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
     };
-    return { inner, flow: rect(flow), mini: rect(mini) };
+    // Automations is a row on Company's rail now, so `#/workflows` holds the
+    // 240px navigation column before the page — as `#/company/graph` does. Read
+    // from the DOM, because below `lg` the rail is a chip row and the canvas
+    // runs to the card's own edge.
+    const rail = card.querySelector("nav[aria-label]");
+    const railBox = rail && getComputedStyle(rail).display !== "none" ? rail.getBoundingClientRect() : null;
+    return { inner, rail: railBox ? { right: railBox.right } : null, flow: rect(flow), mini: rect(mini) };
   });
 
   // React Flow computes its viewport transform and its minimap viewbox from the
@@ -305,7 +311,7 @@ test("the automation canvas fills the card and keeps its minimap inside it", asy
   // measures is the card — not a box wider than the one it is clipped to. That
   // is the crop class of bug #1259 and #1261 were filed for.
   expect(canvas.flow).not.toBeNull();
-  expect(canvas.flow!.left).toBeCloseTo(canvas.inner.left, 0);
+  expect(canvas.flow!.left).toBeCloseTo(canvas.rail?.right ?? canvas.inner.left, 0);
   expect(canvas.flow!.right).toBeCloseTo(canvas.inner.right, 0);
 
   // And the minimap, pinned to the canvas's bottom-right, is inside the card

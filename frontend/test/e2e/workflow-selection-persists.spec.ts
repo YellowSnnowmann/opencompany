@@ -146,12 +146,12 @@ test("automations tab selection is preserved across tab switches (#864)", async 
     await openWorkflow(page, secondName);
     await expect(page).toHaveURL(new RegExp(`#/workflows/${secondId}$`));
 
-    // Room and Automations: two section rows, both reachable in one click from
-    // anywhere. Workspace is a child under Company now, so stepping away
-    // through it would take two clicks and test the sidebar rather than the
-    // remembered workflow this spec is about.
-    await page.getByRole("button", { name: "Room", exact: true }).click();
-    await page.getByRole("button", { name: "Automations", exact: true }).click();
+    // Step away to Connections, then back the way an operator does now:
+    // Company, whose rail carries Automations. Two clicks, and both are the
+    // sidebar the way it is today rather than a deep link.
+    await page.getByRole("button", { name: "Connections", exact: true }).click();
+    await page.getByRole("button", { name: "Company", exact: true }).click();
+    await page.locator('[data-tour="nav-workflows"]').getByRole("button").first().click();
     await expect(openWorkflowName(page)).toHaveText(secondName);
 
     await page.goto(`/#/workflows/${firstId}`);
@@ -160,12 +160,12 @@ test("automations tab selection is preserved across tab switches (#864)", async 
     // is the flake, not the console.
     await expect(openWorkflowName(page)).toHaveText(firstName, { timeout: 30_000 });
 
-    // Room and Automations: two section rows, both reachable in one click from
-    // anywhere. Workspace is a child under Company now, so stepping away
-    // through it would take two clicks and test the sidebar rather than the
-    // remembered workflow this spec is about.
-    await page.getByRole("button", { name: "Room", exact: true }).click();
-    await page.getByRole("button", { name: "Automations", exact: true }).click();
+    // Step away to Connections, then back the way an operator does now:
+    // Company, whose rail carries Automations. Two clicks, and both are the
+    // sidebar the way it is today rather than a deep link.
+    await page.getByRole("button", { name: "Connections", exact: true }).click();
+    await page.getByRole("button", { name: "Company", exact: true }).click();
+    await page.locator('[data-tour="nav-workflows"]').getByRole("button").first().click();
     await expect(openWorkflowName(page)).toHaveText(firstName);
   } finally {
     await deleteWorkflow(request, firstId);
