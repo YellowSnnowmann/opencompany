@@ -101,6 +101,8 @@ use crate::ports::types::{
 };
 use crate::ports::{CompanyStore, WorkflowRun, WorkflowRunner};
 
+mod insight_reads;
+
 /// The manifest cognition-tier that marks the orchestrator agent.
 ///
 /// Re-exported from [`crate::company`] rather than declared here (issue #264):
@@ -1392,11 +1394,14 @@ impl Tool for QueryCompanyTool {
         let query = args.get("query").and_then(Value::as_str).map(str::trim);
         let query = query.filter(|q| !q.is_empty());
 
+        let mut unreadable: Vec<&'static str> = Vec::new();
         let facts = match &self.facts {
-            Some(store) => store
-                .list(&self.company, query, None)
-                .await
-                .unwrap_or_default(),
+            Some(store) => insight_reads::section(
+                store.list(&self.company, query, None).await,
+                "facts",
+                &self.company,
+                &mut unreadable,
+            ),
             None => Vec::new(),
         };
 
@@ -1413,10 +1418,13 @@ impl Tool for QueryCompanyTool {
         // line instead: the orchestrator learns that people are talking on the
         // cards without losing what the company *did*.
         let stored = match &self.events {
-            Some(log) => log
-                .read_from(&self.company, EventSeq::new(0), usize::MAX)
-                .await
-                .unwrap_or_default(),
+            Some(log) => insight_reads::section(
+                log.read_from(&self.company, EventSeq::new(0), usize::MAX)
+                    .await,
+                "recent_activity",
+                &self.company,
+                &mut unreadable,
+            ),
             None => Vec::new(),
         };
         let mut recent: Vec<String> = Vec::new();
@@ -1465,7 +1473,9 @@ impl Tool for QueryCompanyTool {
 
         let mut md = String::from("# Company insight\n");
         md.push_str("\n## Facts\n");
-        if facts.is_empty() {
+        if unreadable.contains(&"facts") {
+            md.push_str(insight_reads::FACTS_UNREADABLE);
+        } else if facts.is_empty() {
             md.push_str("_No durable facts recorded._\n");
         } else {
             // Two bounds, so the facts section can never be the thing that
@@ -1510,7 +1520,9 @@ impl Tool for QueryCompanyTool {
             }
         }
         md.push_str("\n## Recent activity\n");
-        if recent.is_empty() {
+        if unreadable.contains(&"recent_activity") {
+            md.push_str(insight_reads::ACTIVITY_UNREADABLE);
+        } else if recent.is_empty() {
             md.push_str("_No recent activity._\n");
         } else {
             md.push_str(&recent.join("\n"));
@@ -1519,12 +1531,12 @@ impl Tool for QueryCompanyTool {
 
         // Load the persisted record once: it carries both the roster and the
         // manifest's enabled workflow ids (the seed workflows that have no file
-        // under `workflows/`). `None`/error → those sections read empty rather
-        // than failing the whole surface.
-        let record = match &self.store {
-            Some(store) => store.load(&self.company).await.ok().flatten(),
-            None => None,
-        };
+        // under `workflows/`).
+        let record_read = insight_reads::RecordRead::load(self.store.as_ref(), &self.company).await;
+        if record_read.failed() {
+            unreadable.extend(["saved_workflows", "team", "desks"]);
+        }
+        let record = record_read.record();
 
         // Saved workflows: the seed `workflows/*.toml` graphs unioned with the
         // record's runtime-authored bodies (what `create_workflow` persists and
@@ -1551,7 +1563,7 @@ impl Tool for QueryCompanyTool {
         .collect();
         let mut seen: std::collections::HashSet<String> =
             workflows.iter().map(|(id, _)| id.clone()).collect();
-        if let Some(record) = &record {
+        if let Some(record) = record {
             for id in &record.manifest.workflows.enabled {
                 if seen.insert(id.clone()) {
                     workflows.push((id.clone(), id.clone()));
@@ -1560,7 +1572,7 @@ impl Tool for QueryCompanyTool {
         }
         workflows.sort_by(|a, b| a.0.cmp(&b.0));
         md.push_str("\n## Saved workflows\n");
-        if workflows.is_empty() {
+        if workflows.is_empty() && !record_read.failed() {
             md.push_str("_No saved workflows. Author one with `create_workflow`._\n");
         } else {
             for (id, name) in &workflows {
@@ -1569,6 +1581,9 @@ impl Tool for QueryCompanyTool {
                     name.trim(),
                     id
                 ));
+            }
+            if record_read.failed() {
+                md.push_str(insight_reads::WORKFLOWS_PARTIAL);
             }
         }
 
@@ -1579,7 +1594,7 @@ impl Tool for QueryCompanyTool {
         // delegation tools ground, the shape `workflow_build::roster_line`
         // also shows this model.
         let mut roster: Vec<(String, Option<String>, String)> = Vec::new();
-        if let Some(record) = &record {
+        if let Some(record) = record {
             // Resolved through the record: a teammate the operator removed is not
             // a delegation target, and one they renamed is named as it is now.
             for agent in record.effective_agents() {
@@ -1600,7 +1615,11 @@ impl Tool for QueryCompanyTool {
             }
         }
         md.push_str("\n## Team\n");
-        if roster.is_empty() {
+        if record_read.failed() {
+            md.push_str(insight_reads::ROSTER_UNREADABLE);
+        } else if roster.is_empty() && record.is_some() {
+            md.push_str(insight_reads::ROSTER_EMPTY);
+        } else if roster.is_empty() {
             md.push_str("_Roster unavailable._\n");
         } else {
             for (id, _, role) in &roster {
@@ -1619,7 +1638,6 @@ impl Tool for QueryCompanyTool {
         // are exactly the ids `delegate_to_desk` accepts, with each desk's lead
         // named so the two are never confused for one another again.
         let desks: Vec<(String, Option<String>)> = record
-            .as_ref()
             .map(|record| {
                 delegation_tools::desk_ids(record)
                     .into_iter()
@@ -1631,11 +1649,13 @@ impl Tool for QueryCompanyTool {
             })
             .unwrap_or_default();
         md.push_str("\n## Desks\n");
-        if desks.is_empty() {
+        if record_read.failed() {
+            md.push_str(insight_reads::DESKS_UNREADABLE);
+        } else if desks.is_empty() {
             md.push_str("_No desks._\n");
         } else {
             for (id, lead) in &desks {
-                let label = record.as_ref().map_or_else(
+                let label = record.map_or_else(
                     || id.clone(),
                     |r| crate::company::team_brief::desk_label(r, id),
                 );
@@ -1647,10 +1667,7 @@ impl Tool for QueryCompanyTool {
                     // "cannot be handed work" would be a lie about a staffed
                     // channel — while a desk with nobody on the roster really
                     // cannot take anything.
-                    None if record
-                        .as_ref()
-                        .is_some_and(|r| !r.desk_responder_mode(id).is_lead()) =>
-                    {
+                    None if record.is_some_and(|r| !r.desk_responder_mode(id).is_lead()) => {
                         md.push_str("channel without a lead; who answers is picked per message\n")
                     }
                     None => md.push_str("no member on the roster, so it cannot be handed work\n"),
@@ -1721,11 +1738,12 @@ impl Tool for QueryCompanyTool {
                     board_open_count = total_open;
                 }
                 Err(err) => {
-                    tracing::debug!(company = %self.company, error = %err, "query_company: board read failed");
-                    md.push_str("_Board unavailable._\n");
+                    tracing::warn!(company = %self.company, error = %err, "query_company: board read failed");
+                    unreadable.push("board");
+                    md.push_str(insight_reads::BOARD_UNREADABLE);
                 }
             },
-            None => md.push_str("_Board unavailable._\n"),
+            None => md.push_str(insight_reads::BOARD_UNWIRED),
         }
 
         Ok(ToolResult::success_with_markdown(
@@ -1737,6 +1755,7 @@ impl Tool for QueryCompanyTool {
                 "team": roster.len(),
                 "desks": desks.len(),
                 "board_open": board_open_count,
+                "unreadable": unreadable,
             }),
             md,
         ))
