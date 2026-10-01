@@ -1779,6 +1779,8 @@ jobs:
 
       - run: node --test scripts/release/prepare-tauri-config.test.mjs
 
+      - run: node --test scripts/release/publish-updater-manifest.test.mjs
+
       # Exactly one Tauri app, and no script that picks it by working directory
       # rather than by name.
       #
