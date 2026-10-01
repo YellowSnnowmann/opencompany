@@ -1,16 +1,20 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import {
-  ChevronRight,
   CircleDot,
   Hash,
   Lock,
-  type LucideIcon,
   PanelRight,
   Plus,
   SquarePen,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { AgentFace } from "@/components/agent-face";
 import { agentPresenceLabel } from "@/components/agent-status-dot";
 import { TeammateAvatar } from "@/components/teammate-avatar";
@@ -32,6 +36,10 @@ import { channelSubtitle, dmFace, dmThreadId, type Channel, type ChannelSection 
  */
 const UNREAD_IS_LOCAL = "Estimated in this browser — unread is not tracked on the company.";
 
+/** The two icon buttons above the list — same size, hit area and hover. */
+const DOOR =
+  "rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground";
+
 interface Props {
   sections: ChannelSection[];
   /**
@@ -40,6 +48,11 @@ interface Props {
    * refused) when the roster cannot staff a channel yet.
    */
   onAddChannel?: () => void;
+  /**
+   * Opens the create-agent dialog (`AddMemberDialog`), which `RoomView` mounts
+   * and owns — the rail only asks. The "+" menu's "Create a new agent".
+   */
+  onAddAgent?: () => void;
   activeId: string | null;
   /** Channel id → unread count. Absent or 0 reads as caught up. */
   unread: Record<string, number>;
@@ -92,20 +105,21 @@ interface Props {
 export function ChannelRail({
   sections,
   onAddChannel,
+  onAddAgent,
   activeId,
   unread,
   mentions,
   onSelect,
   collapsed = false,
   onExpand,
-  openSections,
-  onToggleSection,
   directMessages = [],
   onStartDirectMessage,
   className,
   currentPage = true,
   animateReorder = false,
 }: Props) {
+  // Which picker the compose menu has open: `dm` is the agent picker, `channel` the channel picker. One at a time; `null` is none. (Create a new agent is not here — it asks `RoomView` for the real `AddMemberDialog`.)
+  const [dialog, setDialog] = useState<"dm" | "channel" | null>(null);
   // Resolved once and threaded down, so the three row shapes cannot come to
   // disagree about what marking the open channel means.
   const activeAria: "page" | "true" = currentPage ? "page" : "true";
@@ -122,23 +136,6 @@ export function ChannelRail({
   // `active` itself is untouched, so the unread badge stays suppressed on the
   // channel you have actually read.
   const onPage = currentPage;
-  // Section disclosure lives here rather than inside `Section`, because the
-  // collapsed branch below unmounts every `Section`. Held inside them, folding
-  // a section and then collapsing the rail would reopen it on expand — the
-  // density toggle must not discard the operator's organization. Absent means
-  // "open": the default is a fully expanded list. `RoomView` passes the state
-  // in so both rail instances share one fold set across the `lg` breakpoint;
-  // a standalone rail (tests, other hosts) keeps it local to the instance.
-  const [internalOpenSections, setInternalOpenSections] = useState<Record<string, boolean>>({});
-  const resolvedOpenSections = openSections ?? internalOpenSections;
-  const toggleSection = (id: string) => {
-    if (onToggleSection) {
-      onToggleSection(id);
-    } else {
-      setInternalOpenSections((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
-    }
-  };
-
   // The Direct messages order is `latestMessageAt` descending, so a message
   // moves its row to the top. A row sliding under the pointer can land a click
   // on the wrong DM (the same hazard as #1414), so the order is held while the
@@ -201,6 +198,15 @@ export function ChannelRail({
     );
   }
 
+  // One list, no captions. Channels first, then DMs, each kind in the order it
+  // already had — the row's own icon (`#`, a lock, the teammate's avatar) is
+  // what tells them apart now, not a heading over them.
+  const rows = shownSections.flatMap((section) => section.channels);
+  const channelsOnly = sections
+    .filter((section) => section.id !== "dms")
+    .flatMap((section) => section.channels);
+  const canMessage = directMessages.length > 0 && !!onStartDirectMessage;
+
   return (
     <aside
       {...stable.containerProps}
@@ -209,43 +215,100 @@ export function ChannelRail({
         className,
       )}
     >
-      {shownSections.map((section) => (
-        <Section
-          key={section.id}
-          section={section}
-          rowRef={section.id === "dms" ? dmRowRef : undefined}
-          // Each section header carries its own door, and only its own.
-          // Channels gets "+" (create a channel); Direct messages gets the
-          // compose pencil, because a DM is what it starts. It used to float
-          // alone above the whole list, attached to nothing and reading as
-          // chrome for the rail rather than an action on a section.
-          action={
-            section.id === "channels" ? (
-              onAddChannel && <SectionAction onClick={onAddChannel} label="New channel" icon={Plus} />
-            ) : section.id === "dms" && onStartDirectMessage ? (
-              <NewMessageDialog
-                directMessages={directMessages}
-                onSelect={onStartDirectMessage}
-                trigger={
-                  <SectionAction
-                    label="New message"
-                    icon={SquarePen}
-                    disabled={directMessages.length === 0}
-                  />
-                }
-              />
-            ) : undefined
-          }
-          activeId={activeId}
-          activeAria={activeAria}
-          onPage={onPage}
-          unread={unread}
-          mentions={mentions}
-          onSelect={onSelect}
-          open={resolvedOpenSections[section.id] ?? true}
-          onToggle={() => toggleSection(section.id)}
-        />
-      ))}
+      {/* The list's two doors, on one row with no caption: "+" makes things,
+          the pencil starts a conversation. They were each on a section header;
+          the headers are gone, the doors are not. */}
+      <div className="flex items-center gap-0.5 pt-2">
+        {/* A caption, not a control and not a heading element: the list is one
+            ungrouped run, this only names it. A `div` for the reason
+            `section-rail.tsx`'s own caption is one (issue #1392,
+            `nav-rail-headings.test.ts`); `px-2` puts it on the rows' text line. */}
+        <div className="min-w-0 flex-1 truncate px-2 text-xs font-medium text-muted-foreground">
+          Conversations
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            title="New"
+            aria-label="New"
+            className={DOOR}
+          >
+            <Plus className="size-3.5" aria-hidden />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-48">
+            <DropdownMenuItem disabled={!onAddChannel} onClick={() => onAddChannel?.()}>
+              Create a new channel
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!onAddAgent} onClick={() => onAddAgent?.()}>
+              Create a new agent
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            title="Start a conversation"
+            aria-label="Start a conversation"
+            className={DOOR}
+          >
+            <SquarePen className="size-3.5" aria-hidden />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-56">
+            <DropdownMenuItem
+              disabled={channelsOnly.length === 0}
+              onClick={() => setDialog("channel")}
+            >
+              Start a conversation in a channel
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!canMessage} onClick={() => setDialog("dm")}>
+              Start a conversation with the agent
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {/* No horizontal padding of its own: the sidebar group already gutters the
+          rail, and a second one pushed every row right of the nav rows. */}
+      <ul
+        // A re-sort moves DM rows in the DOM. Left as scroll-anchor candidates,
+        // a visible row that jumped to the top dragged the scrolled sidebar
+        // with it, so the sliding list opts out and the offset stays put.
+        className="mt-0.5 flex select-none flex-col gap-px [overflow-anchor:none]"
+      >
+        {rows.map((channel) => (
+          <li
+            key={channel.id}
+            ref={channel.kind === "dm" ? dmRowRef(channel.id) : undefined}
+          >
+            <ChannelRow
+              channel={channel}
+              active={channel.id === activeId}
+              activeAria={activeAria}
+              onPage={onPage}
+              unread={unread[channel.id] ?? 0}
+              mentions={mentions?.[channel.id] ?? 0}
+              onSelect={onSelect}
+            />
+          </li>
+        ))}
+        {rows.length === 0 && (
+          <li className="px-2 py-1 text-xs text-muted-foreground">Nothing here yet.</li>
+        )}
+      </ul>
+
+      {/* Controlled: the menu items open these, there is no trigger of their own. */}
+      <NewMessageDialog
+        open={dialog === "dm"}
+        onOpenChange={(next) => setDialog(next ? "dm" : null)}
+        directMessages={directMessages}
+        onSelect={(id) => onStartDirectMessage?.(id)}
+      />
+      <NewMessageDialog
+        open={dialog === "channel"}
+        onOpenChange={(next) => setDialog(next ? "channel" : null)}
+        directMessages={channelsOnly}
+        onSelect={onSelect}
+        title="Start a conversation in a channel"
+        description="Choose a channel to talk in."
+      />
     </aside>
   );
 }
@@ -317,155 +380,6 @@ function CompactChannelRow({
         />
       )}
     </button>
-  );
-}
-
-/**
- * One section header's door, on the right of its caption.
- *
- * One component for both, so "+" on Channels and the compose pencil on Direct
- * messages read as the same kind of affordance — same size, same hit area, same
- * hover — rather than two controls that happen to sit in the same place.
- */
-function SectionAction({
-  label,
-  icon: Icon,
-  onClick,
-  disabled,
-  ...rest
-}: {
-  label: string;
-  icon: LucideIcon;
-  onClick?: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      // The whole of what a screen reader gets for an icon-only control.
-      aria-label={label}
-      className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-      {...rest}
-    >
-      <Icon className="size-3.5" aria-hidden />
-    </button>
-  );
-}
-
-function Section({
-  section,
-  activeId,
-  activeAria,
-  onPage,
-  unread,
-  mentions,
-  onSelect,
-  open,
-  onToggle,
-  action,
-  rowRef,
-}: {
-  section: ChannelSection;
-  activeId: string | null;
-  activeAria: "page" | "true";
-  /** Whether this rail's channel is the page on screen — see `onPage`. */
-  onPage: boolean;
-  unread: Record<string, number>;
-  mentions?: Record<string, number>;
-  onSelect: (id: string) => void;
-  open: boolean;
-  onToggle: () => void;
-  /** This section's own door, rendered at the right of its caption. */
-  action?: ReactNode;
-  /** Per-row ref from `useFlipList`, for a section whose rows slide when it re-sorts. */
-  rowRef?: (channelId: string) => (node: HTMLElement | null) => void;
-}) {
-  const hiddenUnread = !open
-    ? section.channels.reduce((n, c) => n + (unread[c.id] ?? 0), 0)
-    : 0;
-  const hiddenMentions = !open
-    ? section.channels.reduce((n, c) => n + (mentions?.[c.id] ?? 0), 0)
-    : 0;
-
-  return (
-    // No horizontal padding of its own. This rail was written as a standalone
-    // column with its own gutter; inside the sidebar that gutter doubles up
-    // against `SidebarGroup`'s `px-3` and pushes every channel row 8px right of
-    // the four nav rows above — which is what made the list read as a panel
-    // pasted into the column rather than part of it. Measured, not guessed: the
-    // nav row's box starts at x=12 and its icon at x=20, and with this removed
-    // a channel row lands on exactly the same two numbers.
-    <section className="group/section select-none pt-2">
-      <div className="flex items-center gap-0.5">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        // `px-2`, matching the nav rows above: the caption's chevron then
-        // stands on the same vertical line as their icons.
-        className="flex w-full min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1 text-left text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ChevronRight
-          className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")}
-          aria-hidden
-        />
-        <span className="truncate">{section.label}</span>
-        {(hiddenMentions > 0 || hiddenUnread > 0) && (
-          <span className="ml-auto flex items-center gap-1">
-            {hiddenMentions > 0 && (
-              <span
-                data-testid="section-mentions"
-                title={`${hiddenMentions} ${hiddenMentions === 1 ? "mention" : "mentions"} of you in this section`}
-                className="rounded-full bg-destructive px-1.5 text-3xs font-semibold leading-4 text-destructive-foreground"
-              >
-                @{hiddenMentions > 99 ? "99+" : hiddenMentions}
-              </span>
-            )}
-            {hiddenUnread > 0 && (
-              <span
-                title={UNREAD_IS_LOCAL}
-                className="rounded-full bg-primary px-1.5 text-3xs font-semibold leading-4 text-primary-foreground"
-              >
-                {hiddenUnread > 99 ? "99+" : hiddenUnread}
-              </span>
-            )}
-          </span>
-        )}
-      </button>
-      {action}
-      </div>
-
-      {open && (
-        <ul
-          // A re-sort moves rows in the DOM. Left as scroll-anchor candidates,
-          // a visible row that jumped to the top dragged the scrolled sidebar
-          // with it (to 0, or to wherever the row landed), because anchoring
-          // keeps the anchor node still on screen. Opting the sliding list out
-          // leaves the offset where the operator put it.
-          className={cn("mt-0.5 flex flex-col gap-px", rowRef && "[overflow-anchor:none]")}
-        >
-          {section.channels.map((channel) => (
-            <li key={channel.id} ref={rowRef?.(channel.id)}>
-              <ChannelRow
-                channel={channel}
-                active={channel.id === activeId}
-                activeAria={activeAria}
-                onPage={onPage}
-                unread={unread[channel.id] ?? 0}
-                mentions={mentions?.[channel.id] ?? 0}
-                onSelect={onSelect}
-              />
-            </li>
-          ))}
-          {section.channels.length === 0 && (
-            <li className="px-2 py-1 text-xs text-muted-foreground">Nothing here yet.</li>
-          )}
-        </ul>
-      )}
-    </section>
   );
 }
 
