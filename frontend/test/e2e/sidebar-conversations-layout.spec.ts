@@ -183,7 +183,16 @@ test.describe("sidebar conversations layout", () => {
         channels.getByText("Start a conversation in a channel", { exact: true }),
       ).toBeVisible();
       await expect(channels.getByText("Choose a channel to talk in.")).toBeVisible();
-      await expect(channels.getByRole("button", { name: /^general/ })).toBeVisible();
+      // The first row of the rail is a channel (channels come first), so the
+      // picker must list it by name — and no agent.
+      const firstChannel = (
+        await page
+          .getByTestId("room-rail-slot")
+          .locator("li button span.truncate")
+          .first()
+          .innerText()
+      ).trim();
+      await expect(channels.getByRole("button", { name: new RegExp(`^${firstChannel}`) })).toBeVisible();
       await expect(channels.getByRole("button", { name: /^Chief Executive/ })).toHaveCount(0);
       await closeDialog(page);
 
@@ -193,7 +202,7 @@ test.describe("sidebar conversations layout", () => {
       await expect(agents.getByText("New message", { exact: true })).toBeVisible();
       await expect(agents.getByText("Choose an agent to start a direct message.")).toBeVisible();
       await expect(agents.getByRole("button", { name: /^Chief Executive/ })).toBeVisible();
-      await expect(agents.getByRole("button", { name: /^general/ })).toHaveCount(0);
+      await expect(agents.getByRole("button", { name: new RegExp(`^${firstChannel}`) })).toHaveCount(0);
       await closeDialog(page);
     });
   });
