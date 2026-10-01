@@ -73,15 +73,6 @@ mod verify;
 
 pub use jti::ConsumedJtis;
 
-/// How long a consumed-`jti` marker is kept before it may be pruned.
-///
-/// A token cannot outlive its own `exp`, so a marker only has to survive as long
-/// as the longest token could be replayed — the platform mints 5-minute tokens.
-/// A generous ceiling covers clock skew and any future TTL bump without letting
-/// the marker directory grow without bound: once a marker is older than this,
-/// the token it guarded has certainly expired and the marker is dead weight.
-pub const CONSUMED_JTI_TTL_MILLIS: u64 = 60 * 60 * 1000;
-
 /// The claims an SSO auto-login token carries.
 ///
 /// HS256-signed by the platform, verified offline here. Registered claims only,

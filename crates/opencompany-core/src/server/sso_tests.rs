@@ -131,13 +131,23 @@ fn valid_token() -> String {
 }
 
 fn token_with(secret: &str, slug: &str, sub: &str, jti: &str, exp: u64) -> String {
+    // A realistic 5-minute token ending at `exp` (iat = exp - 300). Keeping the
+    // lifetime within the contract means a token built to be refused for some
+    // *other* reason (wrong slug, wrong subject, expired, replayed) still passes
+    // the lifetime cap and is refused only for the reason under test.
+    token_with_iat(secret, slug, sub, jti, exp.saturating_sub(300), exp)
+}
+
+/// Like [`token_with`] but with an explicit `iat`, so a test can mint a token
+/// whose declared lifetime (`exp - iat`) exceeds the 5-minute contract.
+fn token_with_iat(secret: &str, slug: &str, sub: &str, jti: &str, iat: u64, exp: u64) -> String {
     sign(
         secret,
         &serde_json::json!({
             "sub": sub,
             "slug": slug,
             "jti": jti,
-            "iat": 1_700_000_000u64,
+            "iat": iat,
             "exp": exp,
         }),
     )
@@ -316,6 +326,29 @@ async fn an_expired_token_is_refused() {
     // 2001-09-09 — in the past whenever this runs.
     let expired = token_with(SSO_SECRET, "acme", ADMIN, "jti-1", 1_000_000_000);
     assert_rejected(&state, &expired, "an expired token").await;
+}
+
+#[tokio::test]
+async fn a_token_claiming_a_longer_life_than_the_contract_is_refused() {
+    let home = home();
+    let state = enabled_state(home.path()).await;
+    // Unexpired (exp far in the future) but minted an hour before exp — a declared
+    // lifetime far beyond the 5-minute contract. The expiry check passes, so this
+    // is refused by the lifetime cap rather than by expiry.
+    let over_long = token_with_iat(
+        SSO_SECRET,
+        "acme",
+        ADMIN,
+        "jti-cap",
+        far_future() - 3600,
+        far_future(),
+    );
+    assert_rejected(
+        &state,
+        &over_long,
+        "a token with an over-long declared lifetime",
+    )
+    .await;
 }
 
 #[tokio::test]
