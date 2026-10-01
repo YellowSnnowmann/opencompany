@@ -349,3 +349,46 @@ fn only_a_speech_tool_is_reached_through_mcp_call_tool() {
     assert_eq!(name, "file_read");
     assert_eq!(args, json!({ "path": "memo.md" }));
 }
+
+#[tokio::test]
+async fn a_read_with_only_private_rows_does_not_call_the_conversation_empty() {
+    use crate::hive::test_support::{MemoryLog, agent_reply_in};
+    let log = Arc::new(MemoryLog::default());
+    let company = MemoryLog::company();
+    log.append(
+        &company,
+        agent_reply_in("eng", "planner", "quietly", vec!["reviewer".into()], None),
+    )
+    .await
+    .unwrap();
+    let events: Arc<dyn EventLog> = log;
+    let out = read_conversation(events, &company, "writer", &desk_surface("eng"), 10)
+        .await
+        .expect("reads");
+    assert!(
+        out.contains("None of the most recent 1 messages here are visible to you"),
+        "{out}"
+    );
+    assert!(
+        out.contains("This does not mean the conversation is empty."),
+        "{out}"
+    );
+    assert!(!out.contains("Nothing has been said"), "{out}");
+    assert!(!out.contains("Older messages exist"), "{out}");
+}
+
+#[tokio::test]
+async fn a_read_of_an_empty_conversation_says_nothing_has_been_said() {
+    use crate::hive::test_support::MemoryLog;
+    let events: Arc<dyn EventLog> = Arc::new(MemoryLog::default());
+    let out = read_conversation(
+        events,
+        &MemoryLog::company(),
+        "writer",
+        &desk_surface("eng"),
+        10,
+    )
+    .await
+    .expect("reads");
+    assert_eq!(out, "Nothing has been said in this conversation yet.");
+}

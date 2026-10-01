@@ -600,8 +600,19 @@ pub async fn read_conversation(
         })
         .collect();
     lines.reverse();
-    if lines.is_empty() {
+    if page.messages.is_empty() {
         return Ok("Nothing has been said in this conversation yet.".to_string());
+    }
+    if lines.is_empty() {
+        let mut body = format!(
+            "None of the most recent {} messages here are visible to you (they are private \
+             exchanges between other teammates). This does not mean the conversation is empty.",
+            page.messages.len()
+        );
+        if page.next_before.is_some() {
+            body.push_str(" Older messages exist and are not in this reply.");
+        }
+        return Ok(body);
     }
     let mut body = lines.join("\n");
     if page.next_before.is_some() {
