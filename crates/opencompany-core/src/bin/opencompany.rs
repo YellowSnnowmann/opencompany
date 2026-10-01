@@ -128,6 +128,16 @@ enum Command {
         #[arg(long)]
         panic: bool,
     },
+    /// Send one deliberate `analytics_self_test` event, to prove product
+    /// analytics reaches the collector from this binary and environment.
+    ///
+    /// Resolves exactly as boot does. Prints the throwaway `s_…` profile id on
+    /// stdout and nothing else. Exits `0` only when the collector accepted the
+    /// event, `2` when analytics is off here (nothing to test), and `1` for
+    /// anything else — so a CI step that runs it proves something.
+    ///
+    /// See `docs/spec/runtime/analytics-desktop.md`.
+    AnalyticsTest,
     /// Issue a sign-in password for a company, from the host (#1718).
     ///
     /// The way in when a deployment cannot mail a sign-in link: the magic-link
@@ -2687,6 +2697,12 @@ async fn async_main() -> Result<()> {
                 print!("{}", report.to_text());
             }
             Ok(())
+        }
+        Some(Command::AnalyticsTest) => {
+            let code =
+                opencompany::analytics::selftest::run_cli(&opencompany::app::config::ProcessEnv)
+                    .await;
+            std::process::exit(code);
         }
         Some(Command::SentryTest { message, panic }) => {
             // The client, if any, was installed at the top of `async_main`.

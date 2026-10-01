@@ -74,6 +74,10 @@ pub enum Event {
         /// data and buys no segmentation here.
         attributed_to_run: bool,
     },
+    /// One deliberate event from `opencompany analytics-test`, proving the
+    /// collector round trip. Constructed only by `analytics::selftest`, and
+    /// always under an `s_` [`OpaqueId`](super::OpaqueId), never a real id.
+    AnalyticsSelfTest {},
 }
 
 impl Event {
@@ -103,6 +107,7 @@ impl Event {
             Self::InstanceStarted { .. } => "instance_started",
             Self::TurnFinished { .. } => "turn_finished",
             Self::TurnMetered { .. } => "turn_metered",
+            Self::AnalyticsSelfTest {} => "analytics_self_test",
         }
     }
 
@@ -165,6 +170,7 @@ impl Event {
                 }
                 props
             }
+            Self::AnalyticsSelfTest {} => Vec::new(),
         }
     }
 }

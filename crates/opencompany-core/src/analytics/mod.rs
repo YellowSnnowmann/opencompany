@@ -33,13 +33,18 @@
 //! that fired at boot would turn the lane red and could not legitimately be
 //! fixed by giving the namespace a route.
 //!
-//! # The desktop sends nothing, and needs no transport
+//! # The desktop reports through this tracker, not the webview
 //!
-//! `src-tauri/tauri.conf.json` sets `connect-src 'self' ipc: http://ipc.localhost`,
-//! so the desktop webview makes no outbound request at all — deliberately, and
-//! documented in two places in the frontend. The desktop is
-//! [`Deployment::Desktop`], which is silent, so nothing here asks for that CSP
-//! to be widened and nothing here should ever be a reason to widen it.
+//! `crates/opencompany-app/tauri.conf.json` limits `connect-src` to `'self'`,
+//! `ipc:` and the crash-reporting host, so the desktop webview makes no
+//! analytics request, and nothing here asks for that CSP to be widened.
+//! The desktop *does* report product analytics, by default and with a user
+//! opt-out — but from the Rust host, through the same [`Tracker`] as a hosted
+//! tenant. The shell opts in by declaring [`Deployment::Desktop`] and an
+//! explicit `on` through its own environment (`opencompany-app`'s
+//! `analytics.rs`); the core resolver still treats a *bare* desktop as silent,
+//! so `serve` and the TUI send nothing. See
+//! `docs/spec/runtime/analytics-desktop.md`.
 //!
 //! # Failure is silent
 //!
@@ -67,10 +72,11 @@ pub mod boot;
 pub mod config;
 pub mod meter;
 pub mod openpanel;
+pub mod selftest;
 pub mod status;
 pub mod types;
 
-pub use boot::install as install_analytics;
+pub use boot::{install as install_analytics, install_for_shell as install_analytics_for_shell};
 pub use config::{Decision, resolve};
 pub use meter::TrackingUsageMeter;
 pub use status::{AnalyticsStatus, LastSend};

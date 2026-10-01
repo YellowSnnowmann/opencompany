@@ -2,13 +2,14 @@
 
 Product analytics (issue #1739): the `Tracker` port, its silent default, and the
 opt-in OpenPanel transport. Specs: `docs/spec/runtime/analytics.md`,
-`analytics-wire.md`, `analytics-status.md`.
+`analytics-wire.md`, `analytics-status.md`, `analytics-desktop.md`.
 
 | File | What it is |
 |---|---|
 | `mod.rs` | `Tracker` (incl. the default `status()` / `discard_pending()`), `NullTracker`, `RecordingTracker`, `DeferredTracker` (+ `install_with_decision`) and the payload builder. |
 | `config.rs` | The enable/disable `Decision` and every `Silence` reason; client-id and endpoint validation. |
-| `boot.rs` | `install` (chooses and installs the tracker), `describe` / `describe_for`, `loggable_endpoint`. |
+| `boot.rs` | `install` / `install_for_shell` (choose and install the tracker; a shell stamps its version), `describe` / `describe_for`, `loggable_endpoint`. |
+| `selftest.rs` | `analytics-test`: resolves like boot, sends one `analytics_self_test` under a throwaway `s_` id, maps the outcome to an exit code. |
 | `status.rs` | `AnalyticsStatus` / `LastSend`: the serializable "is it tracking?" answer `/spec` serves. Un-gated. |
 | `types.rs` | The payload vocabulary: `PropValue`, enums, `OpaqueId`, `Envelope`. |
 | `types/` | `event.rs`: the `Event` enum, split out of `types.rs`; re-exported. |

@@ -494,6 +494,11 @@ fn desktop_builder(
     .with_default_mcp_servers(state.config().default_mcp_servers.clone())
     .with_workspace_quota(state.config().workspace_quota)
     .with_workspace_git_enabled(state.config().workspace_git_enabled)
+    // The same tracker the host reports through (`bin/opencompany.rs`,
+    // `server/provision.rs`). Without it every company built here — and every
+    // one `DesktopRebuilder` rebuilds — meters into a `NullTracker`, so a
+    // desktop that reports `instance_started` would never report a turn.
+    .with_analytics(state.analytics())
     // Empty unless a `skills_root` is set, which a packaged install has no
     // checkout to supply — so this resolves to the honest "this host serves no
     // shared registry" rather than inventing a directory to point at.

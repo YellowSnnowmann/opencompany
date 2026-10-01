@@ -309,3 +309,47 @@ fn an_opted_out_host_says_why() {
     assert_eq!(decision, Decision::Silent(Silence::OptedOut));
     assert!(describe(&decision).contains("operator opted out"));
 }
+
+/// **U3: the core still resolves a bare desktop to silence.** The desktop shell
+/// turns reporting on by *saying so* through its own environment; `serve` and
+/// the TUI, which say nothing, must stay silent even when they claim to be a
+/// desktop.
+#[test]
+fn a_desktop_that_says_nothing_is_still_silent() {
+    let env = MapEnv::new(Vec::<(&str, &str)>::new());
+    assert_eq!(
+        resolve(Deployment::Desktop, &env),
+        Decision::Silent(Silence::NotHosted)
+    );
+}
+
+/// The desktop boot line names the user's way out; other deployments keep their
+/// wording. An opt-out reads as the user's doing, not an operator's.
+#[test]
+fn the_desktop_boot_line_says_how_to_turn_it_off() {
+    let off = describe_for(Deployment::Desktop, &Decision::Silent(Silence::OptedOut));
+    assert_eq!(off, "analytics: off (turned off by the user)");
+
+    let on = describe_for(Deployment::Desktop, &reporting(TEST_ENDPOINT));
+    if crate::analytics::BuildFlags::of_this_build().analytics {
+        assert!(on.starts_with("analytics: on (desktop default;"), "{on}");
+        assert!(on.contains("Settings → Privacy"), "{on}");
+        assert!(on.contains("OPENCOMPANY_ANALYTICS=off"), "{on}");
+        assert!(
+            on.ends_with(&format!("reporting to {TEST_ENDPOINT}")),
+            "{on}"
+        );
+    } else {
+        assert!(on.contains("compiled without"), "{on}");
+    }
+    assert!(!on.contains("not-a-real-client-id"), "{on}");
+
+    // Every other deployment is untouched.
+    assert_eq!(
+        describe_for(
+            Deployment::HostedTenant,
+            &Decision::Silent(Silence::OptedOut)
+        ),
+        "analytics: off (operator opted out)"
+    );
+}

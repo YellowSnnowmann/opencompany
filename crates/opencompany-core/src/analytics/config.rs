@@ -30,10 +30,13 @@ pub const DEFAULT_CLIENT_ID: &str = "afe8ec4e-0a6a-427a-aa22-49cbbf137d0a";
 /// The TinyHumans OpenPanel ingestion URL a [`Deployment::HostedTenant`]
 /// reports to when `OPENCOMPANY_ANALYTICS_ENDPOINT` is unset or blank.
 ///
-/// **Hosted tenants only, never any other deployment.** The `analytics`
+/// **A default for hosted tenants only, in this resolver.** The `analytics`
 /// feature is compiled into the TinyHumans tenant image
-/// (`deploy-staging.yml` `TENANT_FEATURES`) and into no other official build —
-/// not the desktop app, not a default `cargo build` — but it is not
+/// (`deploy-staging.yml` `TENANT_FEATURES`) and into the desktop app, but into
+/// no default `cargo build`. The desktop does not lean on this fallback: its
+/// shell supplies the same endpoint through its own environment
+/// (`opencompany-app`'s `analytics.rs`), so this resolver still gives a bare
+/// desktop, or any non-hosted process, no destination. It is not
 /// *impossible* to compile elsewhere: a self-hoster can add it through
 /// `OPENCOMPANY_FEATURES` in `deploy/docker-compose.yml`. A self-hoster who
 /// then sets `OPENCOMPANY_ANALYTICS=on` has opted in to reporting to *their*

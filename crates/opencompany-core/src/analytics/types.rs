@@ -361,9 +361,12 @@ pub fn metering_slug(metering: UsageMetering) -> &'static str {
 #[derive(Clone, PartialEq, Eq)]
 pub struct OpaqueId(String);
 
-/// Prefixes so the two id spaces can never collide on one `distinct_id`.
+/// Prefixes so the id spaces can never collide on one `profileId`.
 const INSTANCE_PREFIX: &str = "i_";
 const TENANT_PREFIX: &str = "t_";
+/// The self-test space: `opencompany analytics-test` reports as a throwaway
+/// `s_<nonce>` so a smoke run never lands on a real instance's profile.
+const SMOKE_PREFIX: &str = "s_";
 
 /// How many hex characters of the tenant digest to keep. 32 characters is 128
 /// bits — the same width as the instance id, and far past any collision concern
@@ -398,6 +401,21 @@ impl OpaqueId {
             let _ = write!(hex, "{byte:02x}");
         }
         Self(format!("{TENANT_PREFIX}{hex}"))
+    }
+
+    /// A throwaway id for one `analytics-test` run: `s_` plus the nonce.
+    ///
+    /// A third id space beside `i_` and `t_`, so a verification event is
+    /// separable from — and can never be attributed to — a real install. The
+    /// nonce is reduced to at most 32 ASCII hex digits, which keeps the "opaque
+    /// by construction" promise: no caller-supplied text can ride through here.
+    pub fn smoke(nonce_hex: &str) -> Self {
+        let nonce: String = nonce_hex
+            .chars()
+            .filter(char::is_ascii_hexdigit)
+            .take(TENANT_DIGEST_HEX)
+            .collect();
+        Self(format!("{SMOKE_PREFIX}{nonce}"))
     }
 
     /// The id as it goes on the wire.
@@ -511,6 +529,9 @@ pub struct Envelope {
     pub cognition_metering: &'static str,
     /// Which optional surfaces are compiled in.
     pub build: BuildFlags,
+    /// The version of the shell hosting this process, when there is one (the
+    /// desktop app). `None` for a plain server; emitted only when `Some`.
+    pub shell_version: Option<&'static str>,
 }
 
 impl Envelope {
@@ -526,7 +547,15 @@ impl Envelope {
             cognition_provider: provider_slug(cognition.provider),
             cognition_metering: metering_slug(cognition.metering),
             build: BuildFlags::of_this_build(),
+            shell_version: None,
         }
+    }
+
+    /// Names the shell (desktop app) version this host runs inside, so its
+    /// events can be told from a bare server's. A compiled-in constant only.
+    pub fn with_shell_version(mut self, version: &'static str) -> Self {
+        self.shell_version = Some(version);
+        self
     }
 
     /// Re-labels the cognition path this host is on.
@@ -556,7 +585,7 @@ impl Envelope {
 
     /// The envelope as super-properties.
     pub fn props(&self) -> Vec<Prop> {
-        vec![
+        let mut props = vec![
             ("deployment", PropValue::Word(self.deployment.as_str())),
             ("app_version", PropValue::Word(self.app_version)),
             ("os", PropValue::Word(self.os)),
@@ -575,7 +604,11 @@ impl Envelope {
             ("acp_in_build", PropValue::Flag(self.build.acp)),
             ("oauth_in_build", PropValue::Flag(self.build.oauth)),
             ("analytics_in_build", PropValue::Flag(self.build.analytics)),
-        ]
+        ];
+        if let Some(version) = self.shell_version {
+            props.push(("shell_version", PropValue::Word(version)));
+        }
+        props
     }
 }
 

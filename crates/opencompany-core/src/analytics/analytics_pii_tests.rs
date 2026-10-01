@@ -105,7 +105,10 @@ fn exhaustive_kind(k: SampleKind) {
 }
 fn exhaustive_event(e: &Event) {
     match e {
-        Event::InstanceStarted { .. } | Event::TurnFinished { .. } | Event::TurnMetered { .. } => {}
+        Event::InstanceStarted { .. }
+        | Event::TurnFinished { .. }
+        | Event::TurnMetered { .. }
+        | Event::AnalyticsSelfTest {} => {}
     }
 }
 
@@ -166,6 +169,7 @@ fn every_event() -> Vec<Event> {
             }
         }
     }
+    events.push(Event::AnalyticsSelfTest {});
     events.iter().for_each(exhaustive_event);
     events
 }
@@ -175,7 +179,7 @@ fn envelopes() -> Vec<Envelope> {
     for deployment in DEPLOYMENTS {
         for metering in METERINGS {
             for path in ["harness", "hosted", "echo", "sidecar", "custom"] {
-                out.push(Envelope::new(
+                let envelope = Envelope::new(
                     OpaqueId::instance("0123456789abcdef0123456789abcdef"),
                     deployment,
                     Cognition {
@@ -184,7 +188,10 @@ fn envelopes() -> Vec<Envelope> {
                         model: None,
                         metering,
                     },
-                ));
+                );
+                // Half of them name a shell, so `shell_version` is exercised too.
+                out.push(envelope.clone().with_shell_version("1.2.3"));
+                out.push(envelope);
             }
         }
     }
@@ -217,7 +224,12 @@ fn vocabulary() -> Vec<&'static str> {
         words.push(provider_slug(provider));
     }
     words.push(ModelSlug::classify("a private fine-tune").as_str());
-    words.extend(["instance_started", "turn_finished", "turn_metered"]);
+    words.extend([
+        "instance_started",
+        "turn_finished",
+        "turn_metered",
+        "analytics_self_test",
+    ]);
     words
 }
 
@@ -279,6 +291,7 @@ fn analytics_no_pii_in_any_payload_over_every_event_and_enum_value() {
             envelope.app_version.to_string(),
             envelope.os.to_string(),
             envelope.arch.to_string(),
+            "1.2.3".to_string(),
         ];
         for event in &events {
             let body = payload(envelope, event);
