@@ -23,6 +23,7 @@ import {
   type LocalInstance,
 } from "@/api/transport/desktop";
 import { ApiError } from "@/api/types";
+import { AnalyticsDisclosure } from "@/components/analytics-disclosure";
 import { AppUpdatePrompt } from "@/components/app-update-prompt";
 import { ConsoleChrome } from "@/components/host-switcher";
 import { ManageHostsPage } from "@/components/manage-hosts";
@@ -729,6 +730,11 @@ function Console() {
           reach. Renders nothing in a browser, and nothing on the desktop until
           an update has been downloaded and is waiting on a restart. */}
       <AppUpdatePrompt />
+
+      {/* Same placement and same reason: the desktop's first-launch notice that
+          it reports anonymous usage data, with the off switch in the card.
+          Renders nothing in a browser, and nothing once the person has chosen. */}
+      <AnalyticsDisclosure />
     </HostsProvider>
   );
 }

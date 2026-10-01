@@ -82,6 +82,36 @@ The Tauri commands (`commands_analytics.rs`):
 - `oc_set_analytics_preference(enabled)` persists, flips the gate, discards on
   off, and returns the same object.
 
+## The Privacy page and the first-launch notice
+
+Both are console UI over the two commands above, and **desktop only**: the
+setting lives in the shell, so a browser console neither lists the page nor calls
+the commands (`desktopOnly` in `frontend/src/views/settings-pages.ts`;
+`#/settings/privacy` falls back to General outside the shell). The webview CSP is
+untouched: the console never sends analytics, it only asks the shell.
+
+- **Settings → Privacy** (`views/settings/PrivacyView.tsx`): the on/off switch
+  (`oc_set_analytics_preference`), the last-send status read from
+  `oc_analytics_preference().status` (result, HTTP status, time, accepted and
+  dropped counts, redacted endpoint; re-read every 10 seconds), the "takes effect
+  at next launch" note when `restart_required`, a locked switch with an
+  explanation when `source` is `env`, a plain-language list of what is sent and
+  what never is, the note that the collector sees the IP address of any request,
+  and a link to this page.
+- **First-launch notice** (`components/analytics-disclosure.tsx`): a floating,
+  non-blocking card with "Got it" and "Turn off". Shown while `source` is
+  `default` and analytics is on. **No new storage:** either button saves a choice
+  (`true` or `false`), which flips `source` to `setting`, so "shown once" is the
+  preference that already exists. "Got it" therefore writes an explicit
+  `{"analytics": true}`. An `env` decision is never asked about.
+- **Copy** is one file, `frontend/src/lib/analytics-copy.ts`, each line checked
+  against `types.rs`, `types/event.rs` and [analytics.md](analytics.md). Legal and
+  operator approval of that wording is pending before release.
+- **Tests:** `privacy-view.test.ts`, `analytics-disclosure.test.ts`, and the CSP
+  pins in `openpanel-loader.test.ts` (no `connect-src` entry, release or dev,
+  names `panel.tinyhumans.ai` or `openpanel.dev`; the browser loader exits under
+  `__TAURI_INTERNALS__`).
+
 ## `/spec` and the boot line
 
 `/spec.analytics.consent` is no longer always `null`: on the desktop it is the
