@@ -178,6 +178,11 @@ pub mod search_byo;
 /// responses are scripted. Test-only.
 #[cfg(test)]
 mod search_turn_tests;
+/// The managed search backend's response as it comes off the wire — the two
+/// types [`search`] deserializes, re-declared here since OpenHuman v0.64.10
+/// moved the search domain out to the `tinysearch` module and stopped owning a
+/// Rust type for the raw envelope.
+pub mod search_wire;
 pub mod skills;
 pub mod steer;
 pub mod steps;

@@ -104,9 +104,13 @@ use openhuman_core as oh;
 use oh::security::SecurityPolicy;
 #[cfg(feature = "mcp")]
 use oh::tools::McpListToolsTool;
-use oh::tools::{EditFileTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ListFilesTool};
+// OpenHuman v0.64.10 moved the filesystem tools into `tinytools-std`; the same
+// vendored copy `openhuman-core` depends on, so these are the one type.
 use openhuman_embed::{Access, AgentDefinitionSpec, AgentSpec, ToolScopeSpec};
 use tinytools::Tool;
+use tinytools_std::filesystem::{
+    EditFileTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ListFilesTool,
+};
 
 use crate::company::Agent as ManifestAgent;
 use crate::company::inference::store as inference_store;
