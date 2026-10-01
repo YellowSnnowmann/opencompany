@@ -191,6 +191,12 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}
     steps:
+      - name: Checkout the dispatching ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/release
+          persist-credentials: false
+
       - name: Validate required assets
         run: |
           set -euo pipefail
@@ -228,15 +234,11 @@ jobs:
 
       - name: Verify that latest release did not change
         env:
+          REPO: ${{ github.repository }}
           LATEST_BEFORE: ${{ steps.latest-before.outputs.tag }}
         run: |
           set -euo pipefail
-          latest="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
-          if [ "$latest" != "$LATEST_BEFORE" ]; then
-            gh release edit "$LATEST_BEFORE" -R "$GITHUB_REPOSITORY" --latest
-            echo "::error::/releases/latest moved to '$latest' after publishing $COMPANION; restored to $LATEST_BEFORE. Check that updates resolve." >&2
-            exit 1
-          fi
+          ./scripts/release/assert-latest-unchanged.sh
           url="$(gh release view "$COMPANION" -R "$GITHUB_REPOSITORY" --json url --jq .url)"
           {
             echo "### Published"
