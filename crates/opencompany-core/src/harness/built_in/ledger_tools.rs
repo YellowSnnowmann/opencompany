@@ -339,9 +339,8 @@ impl Tool for ListLedgers {
             .iter()
             .filter(|spec| ledger_access(&self.ledger_grants, &spec.slug).is_some())
         {
-            let entries = ledgers::entries(&self.ctx, spec).await.unwrap_or_default();
             out.push_str(&format!(
-                "- `{}` — {}\n  statuses: {}\n  {} open, {} closed\n",
+                "- `{}` — {}\n  statuses: {}\n  {}\n",
                 spec.slug,
                 crate::ledger::budget::truncate(&spec.purpose, 300),
                 spec.statuses
@@ -349,8 +348,7 @@ impl Tool for ListLedgers {
                     .map(|status| status.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", "),
-                entries.open_count(spec),
-                entries.closed_count(spec),
+                counts_line(&self.ctx, spec).await,
             ));
             if spec.source == LedgerSource::Native {
                 out.push_str(&format!("  read-only here: {}\n", spec.written_by));
@@ -362,6 +360,24 @@ impl Tool for ListLedgers {
             out.push_str(&format!("- (not loaded) {fault}\n"));
         }
         Ok(ToolResult::success(out))
+    }
+}
+
+/// The open/closed count line for one ledger in `list_ledgers`.
+async fn counts_line(ctx: &Ledgers, spec: &LedgerSpec) -> String {
+    match ledgers::entries(ctx, spec).await {
+        Ok(entries) => format!(
+            "{} open, {} closed",
+            entries.open_count(spec),
+            entries.closed_count(spec)
+        ),
+        Err(error) => {
+            tracing::warn!(ledger = %spec.slug, %error, "list_ledgers: rows could not be read");
+            format!(
+                "counts unavailable — rows could not be read ({error}); do not treat this ledger \
+                 as empty"
+            )
+        }
     }
 }
 
@@ -454,10 +470,7 @@ impl Tool for ReadLedger {
             return Ok(ToolResult::success(format!(
                 "`{}` has no rows matching that. It holds {} in total.",
                 spec.slug,
-                ledgers::entries(&self.ctx, &spec)
-                    .await
-                    .map(|entries| entries.entries.len())
-                    .unwrap_or_default()
+                read.open + read.closed
             )));
         }
         let mut out = String::new();
@@ -792,3 +805,7 @@ const _: Option<Arc<()>> = None;
 #[cfg(test)]
 #[path = "ledger_tools_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "ledger_tools_unreadable_tests.rs"]
+mod unreadable_tests;
