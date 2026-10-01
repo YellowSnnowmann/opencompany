@@ -1858,7 +1858,7 @@ impl HarnessBrain {
         // It still carries the card's landing column, so the operator reads one
         // line and knows both what came back and where the card went. Steps are
         // deliberately empty: a dispatched card discards them into the note.
-        self.journal_task_outcome(&card, &responder, result_text, artifact_ids)
+        self.journal_task_outcome(&card, &responder, result_text, artifact_ids, settled)
             .await;
         let Some(origin) = card.origin_chat_id().map(str::to_string) else {
             return Ok(None);
@@ -1922,7 +1922,7 @@ impl HarnessBrain {
         let Some(origin) = card.origin_chat_id().map(str::to_string) else {
             // A refusal has no relay, but its terminal outcome still belongs
             // on the task timeline.
-            self.journal_task_outcome(&card, &orchestrator, text, Vec::new())
+            self.journal_task_outcome(&card, &orchestrator, text, Vec::new(), RunStatus::Failed)
                 .await;
             return Ok(None);
         };
@@ -1936,7 +1936,7 @@ impl HarnessBrain {
         // A refusal never ran a turn, so there is no reassignment history to
         // carry into the strip.
         let relay = lifecycle::relay_reply(&card, &speaker, &speaker, origin, &[]);
-        self.journal_task_outcome(&card, &orchestrator, text, Vec::new())
+        self.journal_task_outcome(&card, &orchestrator, text, Vec::new(), RunStatus::Failed)
             .await;
         Ok(Some(relay))
     }
@@ -2150,6 +2150,7 @@ impl HarnessBrain {
         responder: &str,
         result_text: String,
         artifact_ids: Vec<String>,
+        settled: RunStatus,
     ) {
         let Some(events) = self.deps.events.as_ref() else {
             return;
@@ -2195,6 +2196,31 @@ impl HarnessBrain {
         // persisted so it always records a completed run. Attempted even if the
         // reply above failed — the anchor is what closes a timeline, so dropping
         // it is strictly worse than dropping the reply.
+        //
+        // **Only for an attempt that is actually over.** `chat_history` renders
+        // this row into the card's origin as `finished → <column>`, so emitting
+        // it for a parked attempt told that conversation a card had finished
+        // while it was in fact waiting on a person: an approval parked mid-turn
+        // settles `WaitingApproval`, which `column_for_settled_run` lands in
+        // `Paused`, and the origin then read "finished → Paused".
+        //
+        // `is_terminal` is the right question and the card's column is not: a
+        // run that settled `WaitingApproval` and one an operator paused both
+        // land in `Paused`, and only the latter is an ending. The status keeps
+        // the distinction the column throws away.
+        //
+        // A parked attempt still journals its reply above, so the card's
+        // timeline is unbroken; what it no longer does is announce an ending
+        // that has not happened. The anchor arrives when the attempt really
+        // ends.
+        if !settled.is_terminal() {
+            tracing::debug!(
+                task_id = %card.id,
+                status = ?settled,
+                "[task] no terminal anchor: this attempt is parked, not finished"
+            );
+            return;
+        }
         if let Err(err) = events
             .append(
                 &self.record().id,
