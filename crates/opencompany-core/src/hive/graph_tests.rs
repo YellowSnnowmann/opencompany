@@ -199,3 +199,58 @@ fn a_dm_is_answered_by_its_owner_and_a_desk_is_still_routed() {
         "a desk is routed -- that is what a desk is for"
     );
 }
+
+/// A card's room is its desk's membership keyed on the card, and every other
+/// assignee falls back to a pooled dispatch.
+///
+/// The key is the whole point. It is what every row the episode journals carries
+/// as its `chat_id`, and a card id matches no desk — the same property
+/// `journal_task_outcome` already relies on to keep a run's reply off a channel
+/// and on the card's timeline. Two cards on one desk therefore get two
+/// conversations rather than sharing the desk's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cards_room_is_its_desk_keyed_on_the_card() {
+    let runtime = global(RuntimeBoot::ephemeral()).await.expect("runtime");
+    let salt = uuid::Uuid::new_v4().simple().to_string();
+    let agents: HashMap<String, openhuman_embed::Agent> = ["ceo", "engineer", "writer"]
+        .into_iter()
+        .map(|id| {
+            (
+                id.to_string(),
+                runtime
+                    .agent(AgentSpec::new(format!("card-hive-{id}-{}", &salt[..8])))
+                    .expect("agent"),
+            )
+        })
+        .collect();
+    let mut record = record(TWO_DESKS);
+    record.manifest.group_chats.push(crate::company::GroupChat {
+        id: "solo".into(),
+        name: "Solo".into(),
+        description: None,
+        members: vec!["writer".into()],
+        tools: Vec::new(),
+        hive: Default::default(),
+    });
+    let bind = |id: &str| agents.get(id).cloned();
+
+    let room = card_hive(&record, "card-7", "engineering", 7, &bind).expect("a room for the card");
+    // Keyed on the card, not the desk — in the graph the driver reads, not just
+    // on the wrapper.
+    assert_eq!(room.desk_id, "card-7");
+    assert_eq!(room.hive.graph().desk.id, "card-7");
+    // Everything else is the desk's own.
+    assert_eq!(room.desk_name, "Engineering desk");
+    assert_eq!(room.members(), vec!["engineer", "ceo"]);
+    assert_eq!(room.lead().as_deref(), Some("engineer"));
+    assert_eq!(room.roster_version, 7);
+
+    // Two cards on one desk are two separate conversations.
+    let other = card_hive(&record, "card-8", "engineering", 7, &bind).expect("a second room");
+    assert_ne!(room.hive.graph().desk.id, other.hive.graph().desk.id);
+
+    // A desk of one cannot deliberate, so the card takes the pooled path.
+    assert!(card_hive(&record, "card-9", "solo", 7, &bind).is_none());
+    // And a desk that does not exist is not a room either.
+    assert!(card_hive(&record, "card-10", "nope", 7, &bind).is_none());
+}
