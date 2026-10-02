@@ -63,6 +63,15 @@ impl BoardStarter for Started {
     }
 }
 
+struct ChangedBeforeStart;
+
+#[async_trait]
+impl BoardStarter for ChangedBeforeStart {
+    async fn start(&self, _observed: &TaskRecord, _card: &TaskRecord) -> crate::Result<bool> {
+        Ok(false)
+    }
+}
+
 fn card(id: &str, column: &str) -> TaskRecord {
     TaskRecord {
         id: id.to_string(),
@@ -122,6 +131,24 @@ async fn starting_a_todo_card_hands_it_to_the_capability_in_working() {
         handed[0].column, COLUMN_IN_PROGRESS,
         "the card must already carry Working, or the edge does not fire"
     );
+}
+
+#[tokio::test]
+async fn start_task_reports_a_card_changed_during_the_dispatch_race() {
+    let board = Arc::new(Board::default());
+    board
+        .upsert(&CompanyId::new("acme"), &card("c1", COLUMN_TODO))
+        .await
+        .unwrap();
+    let handle = BoardStarterHandle::default();
+    handle.set(&(Arc::new(ChangedBeforeStart) as Arc<dyn BoardStarter>));
+
+    let result = tool(&board, handle)
+        .execute(serde_json::json!({ "task_id": "c1" }))
+        .await
+        .unwrap();
+    assert!(result.is_error);
+    assert!(result.text().contains("changed while it was being started"));
 }
 
 /// With nothing wired the tool refuses in its own turn rather than reporting a

@@ -1287,7 +1287,9 @@ impl HarnessBrain {
         // lifecycle bug would come from.
         let convened = self.convene_for_card(&card, &resolution).await;
         let (run_end, result_text) = if let Some(room) = convened {
-            let (end, result) = self.run_card_room(room, &card).await;
+            let (end, result) = delegation_claim
+                .scoped(Box::pin(self.run_card_room(room, &card)))
+                .await;
             let (end, result) = room_outcome_after_steer(&mut card, control.take(), end, result);
             settle(&mut card, end, &responder, &result);
             (end, result)
