@@ -144,3 +144,81 @@ async fn an_agent_discovers_and_calls_an_action_unaided_on_two_large_toolkits() 
         );
     }
 }
+
+/// A BYOK action makes it from a supervised model turn through the connector
+/// module, carrying the company's own route and returning the module result to
+/// the model. The module boundary is scripted so CI does not need its native
+/// artifact or a live Composio key.
+#[cfg(feature = "composio")]
+#[tokio::test]
+async fn a_supervised_byok_turn_executes_through_the_connector_module() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
+    let (model_url, script) = spawn_script(vec![
+        Turn::Call {
+            tool: "composio_execute",
+            args: json!({
+                "tool": "GITHUB_LIST_REPOSITORY_ISSUES",
+                "arguments": { "owner": "acme", "state": "open" }
+            }),
+        },
+        Turn::Say("The module found issue 42."),
+    ])
+    .await;
+    let _test_responses = crate::harness::built_in::composio_module::set_test_responses([
+        (
+            openhuman_core::modules::connectors::methods::CONFIGURE.to_string(),
+            json!({}),
+        ),
+        (
+            openhuman_core::modules::connectors::methods::EXECUTE.to_string(),
+            json!({
+                "data": { "number": 42, "title": "A real issue" },
+                "successful": true,
+                "costUsd": 0.0
+            }),
+        ),
+    ])
+    .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let composio = TenantComposio::from_access(
+        "https://api.tinyhumans.ai",
+        crate::company::composio::ComposioAccess {
+            mode: crate::company::composio::ComposioMode::Byok,
+            credential: Credential::from_value("ak_company_key"),
+        },
+        vec!["github".to_string()],
+    );
+    let (pool, deps, record) = harness_with_composio(model_url, composio, dir.path()).await;
+    let outcome = pool
+        .run(
+            &record.id,
+            "ceo",
+            "Find the open issues in our GitHub account.",
+            &deps,
+            crate::runtime::delegation::ChatTarget::default(),
+        )
+        .await
+        .expect("supervised turn runs");
+
+    assert!(outcome.reply.contains("issue 42"), "{}", outcome.reply);
+    let calls = crate::harness::built_in::composio_module::take_test_calls().await;
+    assert_eq!(calls.len(), 2, "configure and execute must use the module");
+    assert_eq!(
+        calls[0].0,
+        openhuman_core::modules::connectors::methods::CONFIGURE
+    );
+    assert_eq!(calls[0].1[0]["route"], "direct");
+    assert_eq!(calls[0].1[0]["api_key"], "ak_company_key");
+    assert_eq!(
+        calls[1].0,
+        openhuman_core::modules::connectors::methods::EXECUTE
+    );
+    assert_eq!(calls[1].1[0]["tool"], "GITHUB_LIST_REPOSITORY_ISSUES");
+    assert_eq!(calls[1].1[0]["arguments"]["owner"], "acme");
+    let results = tool_results(&script).join("\n");
+    assert!(
+        results.contains("42"),
+        "module result did not reach the model: {results}"
+    );
+}

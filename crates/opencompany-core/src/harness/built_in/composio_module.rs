@@ -341,6 +341,12 @@ where
     Args: serde::Serialize + Send,
     Reply: serde::de::DeserializeOwned,
 {
+    #[cfg(test)]
+    if let Some(response) = test_call(member, &args).await? {
+        return serde_json::from_value(response)
+            .map_err(|error| format!("invalid test response for {member}: {error}"));
+    }
+
     oh::modules::ops::ensure_loaded_within(loader_config(), MODULE_ID, Some(LOAD_TIMEOUT))
         .await
         .map_err(oh::modules::ops::LoadError::into_message)?;
@@ -354,6 +360,76 @@ where
         .call(member, args)
         .await
         .map_err(|error| format!("composio {member} failed: {error}"))
+}
+
+#[cfg(test)]
+type TestCall = (String, serde_json::Value);
+
+#[cfg(test)]
+static TEST_CALLS: OnceLock<tokio::sync::Mutex<Vec<TestCall>>> = OnceLock::new();
+
+#[cfg(test)]
+static TEST_RESPONSES: OnceLock<
+    tokio::sync::Mutex<std::collections::VecDeque<(String, serde_json::Value)>>,
+> = OnceLock::new();
+
+#[cfg(test)]
+async fn test_call<Args: serde::Serialize>(
+    member: &str,
+    args: &Args,
+) -> Result<Option<serde_json::Value>, String> {
+    let args = serde_json::to_value(args).map_err(|error| error.to_string())?;
+    let responses = TEST_RESPONSES.get_or_init(Default::default);
+    let mut responses = responses.lock().await;
+    let Some(index) = responses
+        .iter()
+        .position(|(expected, _)| expected == member)
+    else {
+        return Ok(None);
+    };
+    TEST_CALLS
+        .get_or_init(Default::default)
+        .lock()
+        .await
+        .push((member.to_string(), args));
+    Ok(responses.remove(index).map(|(_, response)| response))
+}
+
+#[cfg(test)]
+pub(crate) struct TestResponseGuard;
+
+#[cfg(test)]
+impl Drop for TestResponseGuard {
+    fn drop(&mut self) {
+        if let Some(responses) = TEST_RESPONSES.get()
+            && let Ok(mut responses) = responses.try_lock()
+        {
+            responses.clear();
+        }
+        if let Some(calls) = TEST_CALLS.get()
+            && let Ok(mut calls) = calls.try_lock()
+        {
+            calls.clear();
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) async fn set_test_responses(
+    responses: impl IntoIterator<Item = (String, serde_json::Value)>,
+) -> TestResponseGuard {
+    *TEST_RESPONSES.get_or_init(Default::default).lock().await = responses.into_iter().collect();
+    TEST_CALLS
+        .get_or_init(Default::default)
+        .lock()
+        .await
+        .clear();
+    TestResponseGuard
+}
+
+#[cfg(test)]
+pub(crate) async fn take_test_calls() -> Vec<TestCall> {
+    std::mem::take(&mut *TEST_CALLS.get_or_init(Default::default).lock().await)
 }
 
 /// The platform's managed Composio account for one company.
