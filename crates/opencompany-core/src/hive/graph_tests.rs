@@ -254,3 +254,25 @@ async fn a_cards_room_is_its_desk_keyed_on_the_card() {
     // And a desk that does not exist is not a room either.
     assert!(card_hive(&record, "card-10", "nope", 7, &bind).is_none());
 }
+
+/// Card episodes are off unless asked for — the inverse of the DM flag.
+///
+/// A convened card's episode is awaited inside its dispatch cycle, which holds the
+/// company-wide lock, so turning this on makes that company single-threaded for
+/// the episode's duration. DM episodes default ON because they replace one pooled
+/// turn with another of similar length; this one does not, so it must be opted
+/// into rather than out of.
+#[test]
+fn card_episodes_are_off_unless_asked_for() {
+    use crate::app::config::MapEnv;
+
+    assert!(!card_episodes_enabled(&MapEnv::default()));
+    for off in ["0", "false", "no", "off", "", "maybe"] {
+        let env = MapEnv::new([("OPENCOMPANY_CARD_EPISODES", off)]);
+        assert!(!card_episodes_enabled(&env), "{off:?} must not enable it");
+    }
+    for on in ["1", "true", "yes", "on"] {
+        let env = MapEnv::new([("OPENCOMPANY_CARD_EPISODES", on)]);
+        assert!(card_episodes_enabled(&env), "{on:?} must enable it");
+    }
+}

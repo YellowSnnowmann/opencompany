@@ -156,6 +156,32 @@ pub fn dm_episodes_enabled(env: &dyn crate::app::config::EnvSource) -> bool {
         .is_none_or(|value| !matches!(value.trim(), "0" | "false" | "no" | "off"))
 }
 
+/// Whether a desk-assigned card's work runs as an episode rather than as one
+/// pooled turn on the desk's lead.
+///
+/// **Default off**, which is the opposite of
+/// [`dm_episodes_enabled`](self::dm_episodes_enabled) and deliberate: a convened
+/// card's episode is awaited *inside* its dispatch cycle, and that cycle holds the
+/// company-wide `serial` lock. So while a room works a card, nothing else in that
+/// company runs — no chat turn, no other dispatch, no scheduler tick. For a
+/// twelve-round episode that is minutes of a single-threaded company.
+///
+/// That is a real regression for anyone who turns this on, and it is why the flag
+/// exists rather than the behaviour simply shipping. Taking a narrower lock is the
+/// fix, and it is deliberately not attempted here: the lock has to be chosen
+/// before the cycle starts while whether a card convenes is decided inside it, so
+/// the two can disagree — and a narrow lock on a turn that then runs pooled would
+/// let a hand-off reassign the card under it. Sizing that properly wants the
+/// measurement this flag exists to collect: how long a room actually holds, and
+/// what it costs.
+///
+/// `OPENCOMPANY_CARD_EPISODES=1` turns it on.
+#[must_use]
+pub fn card_episodes_enabled(env: &dyn crate::app::config::EnvSource) -> bool {
+    env.get("OPENCOMPANY_CARD_EPISODES")
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
+}
+
 /// The room a **card** convenes, keyed on the card and made of its desk.
 ///
 /// # Why the card id and not the desk id
