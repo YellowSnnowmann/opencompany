@@ -256,7 +256,7 @@ pub(super) async fn set_test_response(response: ExecuteToolResponse) {
 }
 
 #[cfg(test)]
-pub(super) async fn take_test_call() -> Option<(String, Option<String>, String)> {
+pub(super) async fn take_test_call() -> Option<TestCall> {
     TEST_CALL
         .get_or_init(|| Mutex::new(None))
         .lock()
@@ -265,9 +265,12 @@ pub(super) async fn take_test_call() -> Option<(String, Option<String>, String)>
 }
 
 #[cfg(test)]
+type TestCall = (String, Option<String>, String);
+
+#[cfg(test)]
 static TEST_RESPONSE: OnceLock<Mutex<Option<ExecuteToolResponse>>> = OnceLock::new();
 #[cfg(test)]
-static TEST_CALL: OnceLock<Mutex<Option<(String, Option<String>, String)>>> = OnceLock::new();
+static TEST_CALL: OnceLock<Mutex<Option<TestCall>>> = OnceLock::new();
 
 #[cfg(test)]
 #[path = "module_tests.rs"]
