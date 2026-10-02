@@ -957,7 +957,7 @@ impl DelegationQueue {
                     .expect("delegation queue")
                     .entry(Self::current_scope())
                     .or_default()
-                    .push(target);
+                    .push(target.to_string());
             }
             return Staged::NoDrain(NoDrainReason::TaskHandoffAlreadyQueued);
         }
