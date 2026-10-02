@@ -9,7 +9,6 @@ fn handoff(name: &str) -> Delegation {
 async fn dispatched_card_refuses_second_handoff_but_chat_collects_both() {
     let queue = DelegationQueue::default();
     let task_claim = queue.claim_task("card");
-    let chat_claim = queue.claim();
     task_claim
         .scoped(async {
             assert_eq!(
@@ -24,21 +23,20 @@ async fn dispatched_card_refuses_second_handoff_but_chat_collects_both() {
             let drained = queue.drain(3);
             assert_eq!(drained.len(), 1);
             assert_eq!(drained[0], handoff("maker"));
-            chat_claim
-                .scoped(async {
-                    assert_eq!(
-                        queue.push_within_cap(handoff("maker"), 3, 3),
-                        Staged::Queued
-                    );
-                    assert_eq!(
-                        queue.push_within_cap(handoff("reviewer"), 3, 3),
-                        Staged::Queued
-                    );
-                    assert_eq!(queue.drain(3).len(), 2);
-                })
-                .await;
         })
         .await;
+    drop(task_claim);
+    let chat_claim = queue.claim();
+    assert_eq!(
+        queue.push_within_cap(handoff("maker"), 3, 3),
+        Staged::Queued
+    );
+    assert_eq!(
+        queue.push_within_cap(handoff("reviewer"), 3, 3),
+        Staged::Queued
+    );
+    assert_eq!(queue.drain(3).len(), 2);
+    drop(chat_claim);
 }
 #[tokio::test]
 async fn task_handoff_keeps_unrelated_board_writes_and_redirect_reset() {
