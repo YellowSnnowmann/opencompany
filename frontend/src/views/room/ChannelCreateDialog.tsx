@@ -226,6 +226,10 @@ export function ChannelCreateDialog({
                       <TeammateAvatar
                         name={member.name}
                         avatar={member.avatar}
+                        mascotCostume={member.mascotCostume}
+                        mascotSkinColor={member.mascotSkinColor}
+                        mascotHandColor={member.mascotHandColor}
+                        mascotMode={member.mascotMode}
                         tone={member.tone}
                         className="size-5 shrink-0"
                       />

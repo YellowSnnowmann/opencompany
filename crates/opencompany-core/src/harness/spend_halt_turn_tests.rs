@@ -270,7 +270,7 @@ async fn a_spend_halted_chat_turn_says_so_in_a_second_bubble() {
 /// useless as one that never fires.
 #[tokio::test]
 async fn a_turn_inside_its_budget_says_nothing_extra() {
-    let (base_url, _script) = spawn_script(write_then_answer(2), CHEAP_TOKENS).await;
+    let (base_url, script) = spawn_script(vec![Turn::Say(ANSWER.to_string())], CHEAP_TOKENS).await;
     let dir = tempfile::tempdir().unwrap();
     let (deps, ops) = deps_for(base_url, dir.path());
     let brain =
@@ -282,6 +282,11 @@ async fn a_turn_inside_its_budget_says_nothing_extra() {
         .expect("cycle runs");
 
     let bubbles = operator_bubbles(&result.channel_responses);
+    assert_eq!(
+        script.calls(),
+        1,
+        "the scripted answer must finish this turn"
+    );
     assert_eq!(
         bubbles.len(),
         1,

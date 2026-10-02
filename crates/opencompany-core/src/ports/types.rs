@@ -4297,6 +4297,42 @@ pub struct AgentOverride {
     /// choice of face is the same act whichever kind was clicked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
+    /// Whether a `mascot:animated` wearer's canvas plays at all — one of
+    /// [`crate::company::mascot::MASCOT_MODES`], validated the same way
+    /// [`Self::avatar`] is before it is stored.
+    ///
+    /// Only meaningful alongside a `mascot:` [`Self::avatar`], but carried as
+    /// its own field for the same reason [`Self::mascot_costume`] is: the
+    /// reference itself stays the closed, simple grammar
+    /// [`crate::company::avatar::AvatarRef`] documents (`docs/spec/runtime/
+    /// avatars.md`'s avatar-grammar notes), never a vector for encoding
+    /// arbitrary per-agent appearance state. `None` means **the file's own
+    /// default mode** (`"animated"`, matching what every `mascot:animated`
+    /// wearer already rendered before this override existed), not "no
+    /// mascot".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mascot_mode: Option<String>,
+    /// The mascot costume this teammate wears, when somebody has chosen one —
+    /// one of [`crate::company::mascot::MASCOT_COSTUMES`], validated the same
+    /// way. Applies to both [`Self::mascot_mode`]s: a static wearer freezes on
+    /// this costume's resting frame, an animated one lands here as its
+    /// baseline. `None` means the file's own default costume (the mascot's
+    /// cap, [`crate::company::mascot::DEFAULT_MASCOT_COSTUME`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mascot_costume: Option<String>,
+    /// The mascot's skin (body) color, when somebody has chosen one — one of
+    /// [`crate::company::mascot::MASCOT_SKIN_COLORS`], validated the same
+    /// way, and independent of [`Self::mascot_hand_color`]. Applies to both
+    /// display modes, same as [`Self::mascot_costume`]. `None` means the
+    /// file's own default skin color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mascot_skin_color: Option<String>,
+    /// The mascot's hand/accent color, when somebody has chosen one — one of
+    /// [`crate::company::mascot::MASCOT_HAND_COLORS`], validated the same
+    /// way, and independent of [`Self::mascot_skin_color`]. `None` means the
+    /// file's own default hand color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mascot_hand_color: Option<String>,
     /// The model this teammate runs, as an overlay on the blueprint.
     ///
     /// `Some("")` is the stored form of "cleared", matching `description`:
@@ -4646,6 +4682,10 @@ impl AgentOverride {
             skills,
             instructions,
             avatar,
+            mascot_mode,
+            mascot_costume,
+            mascot_skin_color,
+            mascot_hand_color,
             model,
             harness,
             provider,
@@ -4657,6 +4697,10 @@ impl AgentOverride {
             && skills.is_none()
             && instructions.is_none()
             && avatar.is_none()
+            && mascot_mode.is_none()
+            && mascot_costume.is_none()
+            && mascot_skin_color.is_none()
+            && mascot_hand_color.is_none()
             && model.is_none()
             && harness.is_none()
             && provider.is_none()
@@ -6205,6 +6249,10 @@ impl CompanyRecord {
                 skills,
                 instructions,
                 avatar,
+                mascot_mode,
+                mascot_costume,
+                mascot_skin_color,
+                mascot_hand_color,
                 model,
                 harness,
                 provider,
@@ -6229,6 +6277,18 @@ impl CompanyRecord {
             }
             if avatar.is_some() {
                 held.avatar = avatar;
+            }
+            if mascot_mode.is_some() {
+                held.mascot_mode = mascot_mode;
+            }
+            if mascot_costume.is_some() {
+                held.mascot_costume = mascot_costume;
+            }
+            if mascot_skin_color.is_some() {
+                held.mascot_skin_color = mascot_skin_color;
+            }
+            if mascot_hand_color.is_some() {
+                held.mascot_hand_color = mascot_hand_color;
             }
             if model.is_some() {
                 held.model = model;
@@ -6482,6 +6542,91 @@ impl CompanyRecord {
             .find(|entry| entry.agent_id == agent_id)
         {
             entry.avatar = None;
+        }
+        self.retain_nonempty_agent_edits();
+    }
+
+    /// Whether a `mascot:animated` wearer's canvas plays for `agent_id`, or
+    /// `None` for "the file's own default mode" (`"animated"`) — not "no
+    /// mascot"; see [`AgentOverride::mascot_mode`].
+    pub fn effective_mascot_mode(&self, agent_id: &str) -> Option<String> {
+        self.agent_override(agent_id)
+            .and_then(|o| o.mascot_mode.clone())
+    }
+
+    /// Drops `agent_id`'s chosen mascot mode so the file's own default
+    /// (`"animated"`) applies again. Same field-wise-clear contract as
+    /// [`Self::clear_agent_avatar`].
+    pub fn clear_agent_mascot_mode(&mut self, agent_id: &str) {
+        if let Some(entry) = self
+            .overlay_agent_edits
+            .iter_mut()
+            .find(|entry| entry.agent_id == agent_id)
+        {
+            entry.mascot_mode = None;
+        }
+        self.retain_nonempty_agent_edits();
+    }
+
+    /// The mascot costume in force for `agent_id`, or `None` for "the file's
+    /// own default costume"; see [`AgentOverride::mascot_costume`].
+    pub fn effective_mascot_costume(&self, agent_id: &str) -> Option<String> {
+        self.agent_override(agent_id)
+            .and_then(|o| o.mascot_costume.clone())
+    }
+
+    /// Drops `agent_id`'s chosen mascot costume so the file's own default
+    /// applies again. Same field-wise-clear contract as
+    /// [`Self::clear_agent_avatar`].
+    pub fn clear_agent_mascot_costume(&mut self, agent_id: &str) {
+        if let Some(entry) = self
+            .overlay_agent_edits
+            .iter_mut()
+            .find(|entry| entry.agent_id == agent_id)
+        {
+            entry.mascot_costume = None;
+        }
+        self.retain_nonempty_agent_edits();
+    }
+
+    /// The mascot skin color in force for `agent_id`, or `None` for "the
+    /// file's own default"; see [`AgentOverride::mascot_skin_color`].
+    pub fn effective_mascot_skin_color(&self, agent_id: &str) -> Option<String> {
+        self.agent_override(agent_id)
+            .and_then(|o| o.mascot_skin_color.clone())
+    }
+
+    /// Drops `agent_id`'s chosen mascot skin color so the file's own default
+    /// applies again. Same field-wise-clear contract as
+    /// [`Self::clear_agent_avatar`].
+    pub fn clear_agent_mascot_skin_color(&mut self, agent_id: &str) {
+        if let Some(entry) = self
+            .overlay_agent_edits
+            .iter_mut()
+            .find(|entry| entry.agent_id == agent_id)
+        {
+            entry.mascot_skin_color = None;
+        }
+        self.retain_nonempty_agent_edits();
+    }
+
+    /// The mascot hand color in force for `agent_id`, or `None` for "the
+    /// file's own default"; see [`AgentOverride::mascot_hand_color`].
+    pub fn effective_mascot_hand_color(&self, agent_id: &str) -> Option<String> {
+        self.agent_override(agent_id)
+            .and_then(|o| o.mascot_hand_color.clone())
+    }
+
+    /// Drops `agent_id`'s chosen mascot hand color so the file's own default
+    /// applies again. Same field-wise-clear contract as
+    /// [`Self::clear_agent_avatar`].
+    pub fn clear_agent_mascot_hand_color(&mut self, agent_id: &str) {
+        if let Some(entry) = self
+            .overlay_agent_edits
+            .iter_mut()
+            .find(|entry| entry.agent_id == agent_id)
+        {
+            entry.mascot_hand_color = None;
         }
         self.retain_nonempty_agent_edits();
     }

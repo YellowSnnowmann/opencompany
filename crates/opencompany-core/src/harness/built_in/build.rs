@@ -1390,13 +1390,11 @@ pub fn build_agent_with_model(
     };
 
     #[cfg(feature = "composio")]
-    let definition_name = if composio_toolkits.is_some() {
-        "integrations_agent".to_string()
-    } else {
-        manifest_agent.id.clone()
-    };
+    let has_composio = composio_toolkits.is_some();
     #[cfg(not(feature = "composio"))]
-    let definition_name = manifest_agent.id.clone();
+    let has_composio = false;
+    let definition_name =
+        host_toolpack_identity(&manifest_agent.id, is_orchestrator, has_composio).to_string();
 
     super::tool_posture::declare();
     let native_tool_names = native_tool_names(&tools);
@@ -2359,6 +2357,22 @@ pub(crate) fn file_tools(
     }
 }
 
+/// Select the definition label whose pack disclosure preserves host-granted tools.
+/// This also changes OpenHuman transcript labels; it does not change grants.
+fn host_toolpack_identity(agent_id: &str, orchestrator: bool, composio: bool) -> &str {
+    if orchestrator {
+        "workflow_builder"
+    } else if composio {
+        "integrations_agent"
+    } else {
+        agent_id
+    }
+}
+
 #[cfg(test)]
 #[path = "build_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "host_toolpack_tests.rs"]
+mod host_toolpack_tests;
