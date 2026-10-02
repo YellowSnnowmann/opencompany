@@ -67,14 +67,6 @@ fn carry_steps(
     }
 }
 
-/// How many progress events a seat's turn may run ahead of the reader.
-///
-/// Backpressure, not a buffer: the core awaits each send, so this is the number
-/// of frames that may be in flight before the turn itself waits. Deep enough
-/// that a burst of tool calls never blocks, small enough that a reader which
-/// stops shows up as a stalled turn rather than as unbounded memory.
-const PROGRESS_DEPTH: usize = 256;
-
 /// The most steps one row may carry, across every attempt behind it.
 ///
 /// `fold_steps` already caps a single turn; this bounds their join, because a
