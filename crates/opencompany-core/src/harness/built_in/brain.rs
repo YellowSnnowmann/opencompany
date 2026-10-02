@@ -1276,7 +1276,10 @@ impl HarnessBrain {
         // lifecycle bug would come from.
         let convened = self.convene_for_card(&card, &resolution).await;
         let (run_end, result_text) = if let Some(room) = convened {
-            self.run_card_room(room, &card).await
+            let (end, result) = self.run_card_room(room, &card).await;
+            let (end, result) = room_outcome_after_steer(&mut card, control.take(), end, result);
+            settle(&mut card, end, &responder, &result);
+            (end, result)
         } else {
             loop {
                 // Start each turn from an empty queue so nothing a prior turn (this
@@ -3381,6 +3384,39 @@ fn settle(card: &mut TaskRecord, end: TaskRunEnd, responder: &str, body: &str) {
         body,
     ));
     card.column = lifecycle::landing_column(end).to_string();
+}
+
+/// Apply any operator action that arrived while a card's room was convened.
+/// The room does not consume the pooled turn's steer control, so the card path
+/// must take it after the episode and preserve it before common settlement.
+fn room_outcome_after_steer(
+    card: &mut TaskRecord,
+    action: Option<SteerAction>,
+    end: TaskRunEnd,
+    result: String,
+) -> (TaskRunEnd, String) {
+    match action {
+        Some(SteerAction::Cancel) => (
+            TaskRunEnd::Cancelled,
+            "cancelled while in flight".to_string(),
+        ),
+        Some(SteerAction::Pause) => (TaskRunEnd::Paused, format!("[paused] {result}")),
+        Some(SteerAction::Redirect { instruction }) => {
+            let instruction = cap_redirect(&instruction);
+            card.note = Some(append_result(
+                card.note.as_deref(),
+                lifecycle::OPERATOR_REDIRECT_ATTRIBUTION,
+                &instruction,
+            ));
+            (
+                TaskRunEnd::Paused,
+                format!(
+                    "[paused] operator redirected this room run; resume the card to continue with the new instruction: {instruction}"
+                ),
+            )
+        }
+        None => (end, result),
+    }
 }
 
 #[async_trait]
