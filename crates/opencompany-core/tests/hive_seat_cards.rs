@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use support::room::{Room, Seat, ask, call, complete, operator_message, room_script};
-use support::script_model::{Reply, spawn_script_with_latency};
+use support::script_model::{Ask, Reply, Responder, spawn_script_with_latency};
 
 use opencompany::ports::types::{CompanyEvent, StoredEvent};
 
@@ -426,4 +426,149 @@ async fn a_spawn_before_an_approval_park_is_written_once() {
     room.episodes_completed(1, EPISODE).await;
 
     assert_eq!(room.cards().await.len(), 1, "and not again on resume");
+}
+
+struct CardEpisodesEnv(Option<std::ffi::OsString>);
+
+impl CardEpisodesEnv {
+    fn enable() -> Self {
+        let previous = std::env::var_os("OPENCOMPANY_CARD_EPISODES");
+        // SAFETY: this integration target has no other test that dispatches a
+        // board card; the guard restores the process value when the test ends.
+        unsafe { std::env::set_var("OPENCOMPANY_CARD_EPISODES", "1") };
+        Self(previous)
+    }
+}
+
+impl Drop for CardEpisodesEnv {
+    fn drop(&mut self) {
+        // SAFETY: paired with the guarded mutation above.
+        unsafe {
+            match &self.0 {
+                Some(value) => std::env::set_var("OPENCOMPANY_CARD_EPISODES", value),
+                None => std::env::remove_var("OPENCOMPANY_CARD_EPISODES"),
+            }
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn start_task_dispatches_a_desk_card_through_the_live_room_path() {
+    let _card_episodes = CardEpisodesEnv::enable();
+    let home = tempfile::tempdir().unwrap();
+    let task_id = Arc::new(std::sync::Mutex::new(None::<String>));
+    let start_requested = Arc::new(AtomicBool::new(false));
+    let room_started = Arc::new(AtomicBool::new(false));
+    let card_id = Arc::clone(&task_id);
+    let requested = Arc::clone(&start_requested);
+    let entered_room = Arc::clone(&room_started);
+    let room_responder = room_script(ROLES, |seat| complete(seat, "The card work is recorded."));
+    let responder: Responder = Arc::new(move |ask: &Ask| {
+        let asks_to_start = ask.messages.iter().any(|message| {
+            message.get("role").and_then(Value::as_str) == Some("user")
+                && message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .is_some_and(|content| content.contains("start the prepared board card"))
+        });
+        if asks_to_start
+            && ask.tools.iter().any(|name| name == "start_task")
+            && !requested.swap(true, Ordering::SeqCst)
+        {
+            let id = card_id
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("the board card was created before the start request");
+            return call("start_task", json!({ "task_id": id }));
+        }
+        let card_room_turn = ask.messages.iter().any(|message| {
+            message.get("role").and_then(Value::as_str) == Some("user")
+                && message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .is_some_and(|content| content.contains("Task: Run the card room integration"))
+        });
+        if card_room_turn && !entered_room.swap(true, Ordering::SeqCst) {
+            // Hold the first seat response long enough for the operator to steer
+            // the live card run through the production route.
+            std::thread::sleep(Duration::from_millis(750));
+        }
+        room_responder(ask)
+    });
+    let (base_url, script) = spawn_script_with_latency(responder, Duration::from_millis(30)).await;
+    let company_id = format!("seat-cards-start-{}", uuid::Uuid::new_v4().simple());
+    let room = Room::boot(home.path(), &company_id, &manifest(&company_id, &base_url)).await;
+
+    let (status, created) = room
+        .post(
+            "/tasks",
+            json!({
+                "title": "Run the card room integration",
+                "note": "Record that the desk completed this assignment.",
+                "assignee": STUDIO
+            }),
+        )
+        .await;
+    assert_eq!(status, 200, "{created}");
+    let id = created["id"].as_str().expect("created card id").to_string();
+    *task_id.lock().unwrap() = Some(id.clone());
+
+    room.say("ceo", "Please start the prepared board card now.")
+        .await;
+    assert!(
+        start_requested.load(Ordering::SeqCst),
+        "start_task was not called"
+    );
+    assert!(
+        script
+            .asks()
+            .iter()
+            .any(|ask| ask.tools.iter().any(|name| name == "start_task")),
+        "the real orchestrator turn did not receive the start_task tool"
+    );
+
+    let started = Instant::now();
+    while !room_started.load(Ordering::SeqCst) {
+        assert!(
+            started.elapsed() < EPISODE,
+            "the desk card did not enter its room"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let (status, body) = room
+        .post(
+            &format!("/tasks/{id}/steer"),
+            json!({
+                "action": "redirect",
+                "instruction": "Use the new research scope"
+            }),
+        )
+        .await;
+    assert_eq!(status, 202, "{body}");
+
+    let started = Instant::now();
+    let detail = loop {
+        let (status, body) = room.get(&format!("/tasks/{id}")).await;
+        assert_eq!(status, 200, "{body}");
+        let finished = body["runs"].as_array().is_some_and(|runs| !runs.is_empty())
+            && body["task"]["column"] != "in_progress";
+        if finished {
+            break body;
+        }
+        assert!(
+            started.elapsed() < EPISODE,
+            "card dispatch did not settle: {body:#}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    assert_eq!(detail["task"]["assignee"], STUDIO);
+    assert!(
+        detail["task"]["note"].as_str().is_some_and(|note| {
+            note.contains("[operator redirect] Use the new research scope")
+                && note.contains("operator redirected this room run")
+        }),
+        "the redirected room result was not preserved on the board: {detail:#}"
+    );
+    assert!(!detail["runs"].as_array().unwrap().is_empty());
 }
