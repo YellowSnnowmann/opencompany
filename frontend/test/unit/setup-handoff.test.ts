@@ -86,4 +86,3 @@ describe("the setup hand-off marker", () => {
     expect(accept({ connection: "conn-a", company: "other" })).toBe(false);
   });
 });
-

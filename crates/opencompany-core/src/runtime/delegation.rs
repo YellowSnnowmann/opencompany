@@ -2195,6 +2195,21 @@ impl<'a> DelegationRunner<'a> {
                 ),
             ));
         }
+        for target in self.queue.drain_task_handoff_refusals(self.max_delegations) {
+            tracing::warn!(
+                task_id = %card.id,
+                delegator = %delegator,
+                target = %target,
+                "[task] a second hand-off was refused because this task already transferred ownership"
+            );
+            card.note = Some(append_note(
+                card.note.as_deref(),
+                delegator,
+                &format!(
+                    "Hand-off to {target} was refused because this board task already has its one +                     ownership transfer queued. Only the first colleague will run; this second +                     target was not assigned."
+                ),
+            ));
+        }
         let queued = self.queue.drain(self.max_delegations);
         if queued.is_empty() {
             return Ok(None);
@@ -3582,7 +3597,10 @@ fn kind_label(delegation: &Delegation) -> &'static str {
 /// distinction still matters — the card note that says *why* delivery failed —
 /// picks its wording from the delegation's own variant at the call site rather
 /// than from a second accessor.
-fn hand_off_target_of(delegation: &Delegation) -> Option<&str> {
+///
+/// Crate-visible because the delegation queue records a dispatched card's
+/// refused second hand-off by this same target at the staging boundary.
+pub(crate) fn hand_off_target_of(delegation: &Delegation) -> Option<&str> {
     match delegation {
         Delegation::DelegateToDesk { desk, .. } => Some(desk),
         Delegation::DelegateToTeammate { teammate, .. } => Some(teammate),

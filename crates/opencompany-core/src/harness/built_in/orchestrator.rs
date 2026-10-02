@@ -161,6 +161,7 @@ pub const QUERY_COMPANY_TOOL: &str = "query_company";
 // path share one definition and cannot drift.
 use crate::runtime::assignee;
 use crate::runtime::builder::agent_effective_grants;
+use crate::runtime::delegation::hand_off_target_of;
 use crate::runtime::delegation_tools;
 pub use crate::runtime::delegation_tools::{
     DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL, SPAWN_TASK_TOOL,
@@ -483,6 +484,12 @@ pub enum DelegationScope {
     /// several genuinely overlap, bounded only by the #401 in-flight cap. That
     /// is the concurrency this scoping exists for.
     Run(String),
+    /// One dispatched task card, keyed by its card id.
+    ///
+    /// Task turns can overlap hive seat turns. Keeping a task's one-handoff
+    /// rule in its own bucket prevents it from changing what those turns may
+    /// stage on the shared company queue.
+    Task(String),
     /// One HiveMind seat turn, keyed by its episode-seat turn key
     /// ([`turn_key`](crate::runtime::episode_resume::turn_key)).
     Seat(String),
@@ -568,6 +575,8 @@ pub struct DelegationQueue {
     /// turn's [`drain_refusals`](Self::drain_refusals) would take it, record it
     /// on its own card, and clear it.
     refused: Arc<Mutex<BTreeMap<DelegationScope, Vec<String>>>>,
+    /// Targets refused because this dispatched task already queued its one hand-off.
+    task_handoff_refusals: Arc<Mutex<BTreeMap<DelegationScope, Vec<String>>>>,
     /// The **scope chain**: the resolved desk ids of the hand-offs currently
     /// being executed, outermost first (issue #176).
     ///
@@ -676,6 +685,15 @@ impl DelegationQueue {
         self.claim_as(Self::current_scope(), DrainClaim::Full)
     }
 
+    /// A dispatched card transfers ownership once; unlike chat it cannot collect replies.
+    #[must_use = "the claim releases on drop"]
+    pub fn claim_task(&self, task_id: impl Into<String>) -> DelegationClaim {
+        {
+            let _ = task_id.into();
+            self.claim_as(Self::current_scope(), DrainClaim::Task)
+        }
+    }
+
     /// Claims this queue for a turn whose operator message triaged as a
     /// question (issue #267).
     ///
@@ -702,6 +720,17 @@ impl DelegationQueue {
         self.claim_as(DelegationScope::Run(run_id.into()), DrainClaim::Board)
     }
 
+    /// Claims this queue for a turn whose operator message triaged as a
+    /// question (issue #267).
+    ///
+    /// Identical to [`claim`](Self::claim) in every way that matters to the
+    /// drain — it runs, and it runs the same code — but only delegations that
+    /// [`answer`](Delegation::answers) may be staged under it. The three pure
+    /// board writes are refused at the tool boundary in the model's own turn.
+    ///
+    /// This exists because withholding the claim outright was too blunt: it
+    /// took `delegate_to_desk` away too, and that tool is how a question the
+    /// orchestrator cannot answer alone gets routed to a desk that can.
     #[must_use = "the claim releases on drop; dropping it immediately un-claims the queue"]
     pub fn claim_answering(&self) -> DelegationClaim {
         self.claim_as(Self::current_scope(), DrainClaim::Answering)
@@ -872,7 +901,8 @@ impl DelegationQueue {
     /// opposite of what the bound is for.
     #[must_use = "a refused delegation must be reported to the model, not dropped"]
     pub fn push_within_cap(&self, delegation: Delegation, cap: usize, max_depth: usize) -> Staged {
-        match self.claim_state() {
+        let claim = self.claim_state();
+        match claim {
             DrainClaim::Unclaimed => return Staged::NoDrain(NoDrainReason::Unwired),
             // Issue #267: the operator asked a question. A hand-off is how one
             // gets answered, so it stages; the pure board writes do not.
@@ -895,7 +925,11 @@ impl DelegationQueue {
             DrainClaim::Seat if !matches!(delegation, Delegation::SpawnTask { .. }) => {
                 return Staged::NoDrain(NoDrainReason::Seat);
             }
-            DrainClaim::Answering | DrainClaim::Full | DrainClaim::Board | DrainClaim::Seat => {}
+            DrainClaim::Answering
+            | DrainClaim::Full
+            | DrainClaim::Board
+            | DrainClaim::Task
+            | DrainClaim::Seat => {}
         }
         // Issue #176: checked after the claim (a context that drains nothing is
         // still the only fact worth reporting) and before the queue lock, so the
@@ -916,6 +950,22 @@ impl DelegationQueue {
         }
         let mut guard = self.inner.lock().expect("delegation queue");
         let bucket = guard.entry(Self::current_scope()).or_default();
+        // Match the dispatched-card drain: a second hand-off would otherwise
+        // receive a success receipt and then be discarded without running.
+        if claim == DrainClaim::Task
+            && delegation.answers()
+            && bucket.iter().any(Delegation::answers)
+        {
+            if let Some(target) = hand_off_target_of(&delegation) {
+                self.task_handoff_refusals
+                    .lock()
+                    .expect("delegation queue")
+                    .entry(Self::current_scope())
+                    .or_default()
+                    .push(target.to_string());
+            }
+            return Staged::NoDrain(NoDrainReason::TaskHandoffAlreadyQueued);
+        }
         if bucket.len() >= cap {
             return Staged::OverCap;
         }
@@ -1008,6 +1058,18 @@ impl DelegationQueue {
         drained
     }
 
+    /// Drains hand-off targets rejected by a dispatched task's one-transfer rule.
+    pub fn drain_task_handoff_refusals(&self, cap: usize) -> Vec<String> {
+        let mut guard = self.task_handoff_refusals.lock().expect("delegation queue");
+        let Some(bucket) = guard.get_mut(&Self::current_scope()) else {
+            return Vec::new();
+        };
+        let take = bucket.len().min(cap);
+        let drained = bucket.drain(..take).collect();
+        bucket.clear();
+        drained
+    }
+
     /// Empties the queue (called before an orchestrator turn so stale
     /// delegations from a prior turn never leak into this one).
     ///
@@ -1027,6 +1089,10 @@ impl DelegationQueue {
     fn clear_scope(&self, scope: &DelegationScope) {
         self.inner.lock().expect("delegation queue").remove(scope);
         self.refused.lock().expect("delegation queue").remove(scope);
+        self.task_handoff_refusals
+            .lock()
+            .expect("delegation queue")
+            .remove(scope);
     }
 
     /// Releases a claim: discards everything the claim's scope staged and
@@ -1174,6 +1240,8 @@ pub enum NoDrainReason {
     /// naming: open a card for the desk instead, which persists and is exactly
     /// what a run *can* do.
     WorkflowHandOff,
+    /// A dispatched card already has its one ownership transfer queued.
+    TaskHandoffAlreadyQueued,
     /// The queue is claimed by a HiveMind seat turn ([`DrainClaim::Seat`]),
     /// which may open cards and nothing else on the board.
     Seat,
@@ -1194,6 +1262,7 @@ impl NoDrainReason {
             Self::Depth => "depth_capped",
             Self::WorkflowLifecycle => "workflow_lifecycle_operator_only",
             Self::WorkflowHandOff => "workflow_handoff_no_reply_target",
+            Self::TaskHandoffAlreadyQueued => "task_handoff_already_queued",
             Self::Seat => "seat_opens_cards_only",
         }
     }
@@ -1220,6 +1289,8 @@ pub enum DrainClaim {
     Unclaimed,
     /// A drain site has claimed the queue and will execute anything staged.
     Full,
+    /// A dispatched board card permits one ownership transfer, not fan-out.
+    Task,
     /// A drain site has claimed the queue for a turn whose operator message
     /// triaged as [`MessageTriage::Answer`](crate::company::task_intent::MessageTriage)
     /// (issue #267). The drain runs exactly as under [`Full`](Self::Full); only
@@ -1276,6 +1347,12 @@ impl DelegationClaim {
     /// The scope this claim owns.
     pub fn scope(&self) -> &DelegationScope {
         &self.scope
+    }
+
+    /// Clears only this claimant's bucket, wherever the caller is currently
+    /// executing.
+    pub fn clear(&self) {
+        self.queue.clear_scope(&self.scope);
     }
 
     /// Drains up to `cap` of this claim's own staged delegations, wherever
@@ -3229,7 +3306,7 @@ impl Tool for DelegateToDeskTool {
             }
         }
         Ok(ToolResult::success(format!(
-            "Delegated to the {desk} desk. Its lead will answer this turn."
+            "Queued for the {desk} desk. The lead runs AFTER you finish your current turn. Finish this turn after queuing the required work; do not poll for its result before returning. On a board task this transfers ownership of the card; on a chat turn the host collects the reply for your relay."
         )))
     }
 }
@@ -3448,9 +3525,13 @@ impl Tool for DelegateToTeammateTool {
         // name it read, and the id is the token it should write next time.
         Ok(ToolResult::success(
             if target.eq_ignore_ascii_case(&teammate) {
-                format!("Handed to {target}. They will answer this turn.")
+                format!(
+                    "Queued for {target}. They run AFTER you finish your current turn. Finish this turn after queuing the required work; do not poll for their result before returning. On a board task this transfers ownership of the card; on a chat turn the host collects the reply for your relay."
+                )
             } else {
-                format!("Handed to {teammate} (`{target}`). They will answer this turn.")
+                format!(
+                    "Queued for {teammate} (`{target}`). They run AFTER you finish your current turn. Finish this turn after queuing the required work; do not poll for their result before returning. On a board task this transfers ownership of the card; on a chat turn the host collects the reply for your relay."
+                )
             },
         ))
     }
@@ -3697,6 +3778,13 @@ fn no_drain(tool: &str, effect: &str, reason: NoDrainReason) -> String {
          model's own turn rather than queuing into a queue nothing will drain"
     );
     match reason {
+        NoDrainReason::TaskHandoffAlreadyQueued => format!(
+            "Refused: this board task already has an ownership transfer queued, so {effect}. \
+             Only the first colleague will run; a task hand-off does not return their answer \
+             to you. Do not claim this second colleague was assigned or reviewed the result. \
+             For a multi-colleague calculation and review, use a manual workflow with separate \
+             agent steps and explicit dependencies instead of multiple hand-offs on one card."
+        ),
         NoDrainReason::Unwired => format!(
             "Refused: nothing here can carry out board work, so {effect}. Board actions are \
              unavailable in this context. Do not retry — it will fail the same way — and do NOT \
@@ -6243,3 +6331,7 @@ pub(crate) fn create_workflow_parameters_schema() -> Value {
 #[cfg(test)]
 #[path = "orchestrator_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "task_handoff_receipt_tests.rs"]
+mod task_handoff_receipt_tests;

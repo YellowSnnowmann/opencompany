@@ -268,6 +268,20 @@ async fn delegate_to_desk_tool_queues_ungrounded_when_no_record_is_readable() {
         .await
         .expect("execute");
     assert!(!result.is_error);
+    let text = result.text();
+    assert!(text.contains("Queued for the whatever desk."), "{text}");
+    assert!(
+        text.contains("AFTER you finish your current turn"),
+        "{text}"
+    );
+    assert!(
+        text.contains("do not poll for its result before returning"),
+        "{text}"
+    );
+    assert!(
+        text.contains("this transfers ownership of the card"),
+        "{text}"
+    );
     assert_eq!(queue.queued(), 1);
 }
 
