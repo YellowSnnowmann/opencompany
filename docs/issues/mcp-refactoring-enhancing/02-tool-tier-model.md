@@ -71,7 +71,7 @@ New, in `company/mcp.rs`:
 /// has confirmed it. Never derived from a server's own self-reported hints
 /// without that confirmation; see this file's "Where a tool's tier comes
 /// from" for why.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolTier {
     Interactive,

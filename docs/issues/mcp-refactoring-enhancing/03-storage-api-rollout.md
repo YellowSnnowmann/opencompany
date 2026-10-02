@@ -69,9 +69,14 @@ pub(super) struct ToolPolicyDto {
 ```
 
 `PUT` bodies reuse the existing "every field optional, only set fields
-applied" convention already used by the add/update-server handlers, for
-bulk tier-default updates, plus a simple `{ tool: String, mode: ApprovalMode }`
-list for per-tool overrides.
+applied" convention already used by the add/update-server handlers. They
+accept bulk tier-default updates, per-tool overrides with `{ tool: String,
+tier: Option<ToolTier>, mode: ApprovalMode }` entries, and a `reset_tools:
+Vec<String>` list. `tier` is optional so an override can change approval mode
+while continuing to inherit its suggested tier. A reset removes that tool's
+entire override and restores tier and mode inheritance. Apply resets before
+upserts; reject a tool named in both lists as an invalid request. An omitted
+`reset_tools` field performs no resets.
 
 **Bundle with this PR:** the build-feature-gap fix from
 `01-prerequisites.md` §c, since it touches the same handlers in
