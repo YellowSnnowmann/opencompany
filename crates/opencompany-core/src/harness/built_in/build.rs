@@ -1705,13 +1705,17 @@ pub fn agent_spec_for(
             // **What a seat still may not reach.**
             //
             // These queue work for the `HarnessBrain` to drain, and no brain
-            // drains inside an episode. The persona has their prose cut to
-            // match (`seat_persona`), so the seat is neither told about them
-            // nor handed them -- which is the only honest pairing until the
-            // queues drain on a seated turn. Then both go.
+            // drains inside an episode. A seat combines its own belt with the
+            // borrowed episode belt, so filter both sources; otherwise a
+            // workflow verb can leak back in through the loan. The persona has
+            // their prose cut to match (`seat_persona`), so the seat is neither
+            // told about them nor handed them.
+            let episode_withheld = |name: &str| {
+                crate::harness::built_in::EPISODE_WITHHELD_TOOLS.contains(&name)
+                    || name == crate::hive::tools::READ_TOOL
+            };
             tools.retain(|tool| {
-                !crate::harness::built_in::EPISODE_WITHHELD_TOOLS.contains(&tool.name())
-                    && tool.name() != crate::hive::tools::READ_TOOL
+                !episode_withheld(tool.name())
             });
             let episode = loan.source.belt();
             // **`broadcast` is withheld in two places.**
@@ -1729,9 +1733,15 @@ pub fn agent_spec_for(
             let kept = |name: &str| withheld.as_deref() != Some(name);
             let mut visible: std::collections::HashSet<String> =
                 tools.iter().map(|tool| tool.name().to_owned()).collect();
-            visible.extend(episode.names().iter().filter(|name| kept(name)).cloned());
+            visible.extend(
+                episode
+                    .names()
+                    .iter()
+                    .filter(|name| kept(name) && !episode_withheld(name.as_str()))
+                    .cloned(),
+            );
             let mut episode_tools = episode.tools;
-            episode_tools.retain(|tool| kept(tool.name()));
+            episode_tools.retain(|tool| kept(tool.name()) && !episode_withheld(tool.name()));
             tools.append(&mut episode_tools);
             // **A guest seat can claim the work instead of answering it.**
             //
