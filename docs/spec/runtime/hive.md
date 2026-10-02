@@ -175,6 +175,41 @@ too — an OpenCompany tool call the agent's `ApprovalPolicy` parks journals
 `ApprovalParked`, answers "awaiting approval", and its result is delivered as
 a fresh turn once `ApprovalResolved` lands.
 
+## Seats open cards
+
+A seat keeps `spawn_task`. What an episode withholds is the board's hand-over
+verbs — `delegate_to_desk`, `delegate_to_teammate`, `assign_task` and
+`review_task` (`EPISODE_WITHHELD_TOOLS`) — because handing work to a teammate
+inside a room is a `dm` or an `ask`, not a card someone else then picks up.
+Opening a card for work that should outlive the conversation is still the
+seat's call.
+
+A seat's `spawn_task` does not write the card in the turn. It is queued under
+the seat's own delegation scope (`DelegationScope::Seat`, keyed by the seat's
+turn key), so nothing it queues can drain into the pooled turn or another
+seat, and it is written when the seat's turn settles
+(`host/seat_park.rs` → `open_seat_cards`). The tool answers "Queued a task
+card", never "opened": until the board has taken it, it is not open, and a
+card the board refuses is reported back to the seat rather than dropped.
+
+One episode opens at most **three** cards (`EPISODE_CARD_CAP`), shared by
+every seat, through a task-local `CardBudget` the episode installs around each
+seat turn. A title the episode already queued or opened — compared after
+case, spacing and punctuation are folded — is refused at call time with a
+message that says so, and so is a fourth card. A seat whose message is a
+question (`triage` says answer) is claimed as answering and cannot open a
+card at all.
+
+The card the person's message already opened — the REST handler's card for a
+`deliverable: workflow` request, found by `origin_message_seq` — is the
+episode's **message card**. A seat's first spawn adopts it instead of opening
+a second card when it is still unowned and in To-do, and the seats' publishes
+are filed on it. With no message card the first publish mints one and stamps
+it with the message's sequence, so a resumed episode finds the same card
+(`EpisodeCards::recall`). Every card a seat opens carries
+`openedBy {agentId, episodeId}`, which the console's card detail renders as
+"Opened in chat by <name>".
+
 ## The prompt
 
 Every seat's turn message has a fixed first line — the sentinel the mock
@@ -366,6 +401,7 @@ Gone with the quorum hive: the `hive-report` and `hive-failure` authors, the
 | `src/hive/jev.rs` | `TinyHumansSystemOne`, `jev_router` |
 | `src/hive/referral.rs` | the reserved `hive-referral` author, the pair key, the question and answer heads, `ReturnAddress` |
 | `src/hive/session_log.rs` | `EventLogSessionLog` — the journal as a `SessionLog` |
+| `src/hive/host/seat_cards.rs` | `EpisodeCards` — the episode's card budget, the message card, adoption and recall |
 | `src/hive/mcp_server.rs`, `tools.rs` | the `opencompany` MCP server, `InFlightRegistry`, the speech fold, `McpToolAdapter` |
 | `src/harness/openhuman_runtime.rs` | the one `Runtime` |
 | `src/harness/built_in/build.rs` | `agent_spec_for` |

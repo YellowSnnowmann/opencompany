@@ -604,6 +604,7 @@ impl crate::ports::brain::Brain for MentioningReplyBrain {
 #[cfg(feature = "openhuman")]
 pub(super) fn card_in_review(id: &str, chat_id: &str) -> crate::ports::tasks::TaskRecord {
     crate::ports::tasks::TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Ship it"),
         note: None,

@@ -413,6 +413,7 @@ impl PublishFiling<'_> {
         };
 
         let card = TaskRecord {
+            opened_by: None,
             id: generate_id(),
             title: crate::ports::tasks::TaskTitle::system(&publish::conversation_card_title(
                 &published,
@@ -464,6 +465,98 @@ impl PublishFiling<'_> {
             agent = %responder,
             artifacts = recorded.len(),
             "[publish] a conversation published files; minted a card to carry them"
+        );
+        Ok(card.id)
+    }
+
+    /// Files what a conversation turn published onto the card that turn already
+    /// opened (issue #463). Returns that card's id.
+    ///
+    /// # Why this exists at all
+    ///
+    /// #445 made a chat publish mint a card, which was right for a publish with
+    /// nothing else in scope and wrong the moment #442 started opening a card
+    /// for the work itself: one substantial ask that ended in a published file
+    /// produced two cards, and the reply linked to the one with no artifacts on
+    /// it. Both fixes were correct alone. Together they doubled, and the
+    /// deliverable ended up on the card nothing pointed at.
+    ///
+    /// So a publish files onto the card in scope instead of opening a rival to
+    /// it. The card already carries the request and the answer; this adds the
+    /// artifact and says who delivered it.
+    ///
+    /// # What it changes on the card, and what it leaves alone
+    ///
+    /// The note gains a line naming the published files. The column moves to
+    /// [`COLUMN_IN_REVIEW`] — a deliverable was produced and a person has not
+    /// accepted it yet, the same landing `record_conversation_publishes` gives
+    /// its minted card and the same one a settled run gets. A card with **no
+    /// assignee** — the To-do card the REST chat handler opens, which has never
+    /// belonged to anybody — is assigned to the publisher; a card that already
+    /// has an owner keeps them, because filing a file must not quietly take
+    /// somebody's work away from them.
+    ///
+    /// A card that has since been deleted falls back to minting, so the
+    /// artifact stays reachable rather than being dropped for the sake of the
+    /// rule. **The returned id is the card the deliverable actually landed
+    /// on** — the replacement, on that path, not `card_id` — because the caller
+    /// links the operator's reply to it and sending them to an id that no
+    /// longer resolves is the bug this whole change is about.
+    ///
+    /// `chat` is carried into that fallback so a minted replacement points
+    /// back at the same conversation the no-card-in-scope path's card does;
+    /// two minting paths must not differ in where their card posts back. One
+    /// [`ChatTarget`] rather than a channel and a root side by side (#1890 B):
+    /// the pair travels four frames down this chain, and two bare `Option`s
+    /// beside each other is the mis-pairing hazard that type exists to remove.
+    pub(crate) async fn file_on_card(
+        &self,
+        card_id: &str,
+        agent: &str,
+        chat: ChatTarget<'_>,
+        published: Vec<publish::PendingPublish>,
+    ) -> crate::Result<String> {
+        let Some(tasks) = self.deps.tasks.as_ref() else {
+            return Err(crate::OpenCompanyError::Harness(
+                "a conversation published a file but no task board is wired".to_string(),
+            ));
+        };
+        let Some(mut card) = tasks
+            .list(self.company)
+            .await?
+            .into_iter()
+            .find(|card| card.id == card_id)
+        else {
+            tracing::warn!(
+                task_id = %card_id,
+                agent = %agent,
+                "[publish] the card this turn opened is gone; minting one for the deliverable \
+                 instead of dropping it"
+            );
+            return self
+                .record_conversation_publishes(agent, chat, published)
+                .await;
+        };
+
+        let recorded = self
+            .record_published_artifacts(&card, agent, published.clone(), None)
+            .await?;
+        card.note = Some(crate::runtime::advance::append_result(
+            card.note.as_deref(),
+            agent,
+            &publish::filed_on_card_note(&published),
+        ));
+        card.column = COLUMN_IN_REVIEW.to_string();
+        if card.assignee.is_empty() {
+            card.assignee = agent.to_string();
+        }
+        card.updated_at_millis = now_millis();
+        tasks.upsert(self.company, &card).await?;
+        tracing::info!(
+            task_id = %card.id,
+            agent = %agent,
+            artifacts = recorded.len(),
+            "[publish] a conversation published files onto the card this message already opened"
         );
         Ok(card.id)
     }

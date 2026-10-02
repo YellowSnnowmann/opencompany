@@ -1099,6 +1099,17 @@ impl ApprovalPolicy {
         self.mode
     }
 
+    /// Whether this policy turns a classification into an approval request, as
+    /// opposed to allowing everything the hard denials do not already refuse.
+    ///
+    /// The read side of the bypass in [`check`](Self::check): a `needs_approval`
+    /// MCP tool mode parks only where this is `true`. Read by
+    /// [`roster_approvals_park`](crate::harness::built_in::roster_approvals_park)
+    /// so the console states the fact rather than restating the assumption.
+    pub fn policy_hitl_enabled(&self) -> bool {
+        self.policy_hitl_enabled
+    }
+
     /// The mode handed to OpenHuman's built-in tool security. With policy HITL
     /// disabled, non-readonly tiers use `Full` there too; otherwise an advisory
     /// medium-risk check could recreate an approval prompt below this policy.

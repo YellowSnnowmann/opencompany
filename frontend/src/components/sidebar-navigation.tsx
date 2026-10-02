@@ -542,7 +542,7 @@ export function SidebarNavigation({
       {/* Space, not a rule.
 
           A horizontal line here was the reflex and it is the wrong mark: this
-          column is already quiet, and one more seam across 13.5rem reads as
+          column is already quiet, and one more seam across 15rem reads as
           hardware bolted on. The gap does the same work — above it, the four
           places you can go; below it, the room you talk in — and it does it
           without adding anything to look at. The console draws no rule above its

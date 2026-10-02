@@ -331,6 +331,7 @@ fn build_brain(
 
 fn card(id: &str, assignee: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Write the first note"),
         note: None,
@@ -455,6 +456,7 @@ async fn an_overlay_teammate_added_at_runtime_writes_on_its_first_turn() {
         role: "Analyst".to_string(),
         description: Some("Reads the numbers.".to_string()),
         tools: None,
+        skills: None,
         model: None,
         harness: None,
     };

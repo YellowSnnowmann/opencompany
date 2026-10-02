@@ -27,6 +27,7 @@ async fn a_budget_paused_turn_settles_failed_and_feeds_run_capped_nodes() {
             agent: "researcher".to_string(),
             summary: "acme is out of inference credits".to_string(),
         }),
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1883"));
     let publish_refusal_claim = Arc::new(deps.pending_publishes.claim_refusals_for_run("run-1883"));
@@ -112,6 +113,7 @@ async fn a_spend_halted_turn_skips_the_judge_and_settles_failed() {
             cap_usd: 5.0,
         }),
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1990-spend"));
     let publish_refusal_claim = Arc::new(
@@ -257,6 +259,7 @@ async fn an_abnormal_acp_stop_fails_the_workflow_node() {
         abnormal_stop: Some("[stopped: the agent declined to continue]".to_string()),
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1880"));
     let publish_refusal_claim = Arc::new(deps.pending_publishes.claim_refusals_for_run("run-1880"));
@@ -506,6 +509,7 @@ async fn a_reply_that_is_a_json_list_satisfies_non_empty_list_with_no_field() {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1937"));
     let publish_refusal_claim = Arc::new(deps.pending_publishes.claim_refusals_for_run("run-1937"));
@@ -568,6 +572,7 @@ async fn a_prose_reply_still_fails_non_empty_list_with_no_field() {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1937b"));
     let publish_refusal_claim =
@@ -613,5 +618,118 @@ async fn a_prose_reply_still_fails_non_empty_list_with_no_field() {
     assert!(
         message.contains("not a list"),
         "the halting message should say the shape did not match: {message}"
+    );
+}
+
+/// Issue #1680 at the surface it was filed against: a **workflow agent node**
+/// whose turn hits the wall-clock ceiling.
+///
+/// The sibling of `a_budget_paused_turn_settles_failed_and_feeds_run_capped_nodes`
+/// above, and the proof that the run no longer dies at the node. Before this,
+/// a ceiling hit left `CompanyAgent` as an `Err`, so `run_turn` returned `Err`,
+/// the run failed, and the node after it never ran — which on #1680's own
+/// workflow meant the **Send update** step was never reached. It now settles
+/// `Failed` with an explanation and the graph carries on.
+///
+/// Also pins the thing that made the old behaviour expensive: `steps` survives.
+/// The timeline is folded unconditionally and was being dropped at
+/// `reply.map(..)` purely because the reply was an `Err`; on a ceiling hit that
+/// timeline is the material the node was going to write its answer from.
+#[tokio::test]
+async fn a_ceiling_paused_node_settles_failed_and_keeps_its_steps() {
+    let dir = tempfile::Builder::new()
+        .prefix("oc-1680-ceiling-paused-")
+        .tempdir()
+        .expect("tempdir");
+    let (deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(String::new(), dir.path());
+    let record = crate::workflows::gated_tool_turn_tests::record();
+    let turn = Arc::new(ScriptedTurn(crate::harness::TurnOutcome {
+        reply: "ran out of time before writing the summary".to_string(),
+        // The nine minutes of work that caused the ceiling to fire. A `Hard`
+        // arm threw this away.
+        steps: vec![crate::ports::types::TurnStep {
+            label: "list_issues".to_string(),
+            ..crate::ports::types::TurnStep::default()
+        }],
+        hit_iteration_cap: false,
+        abnormal_stop: None,
+        halted_for_spend: None,
+        budget_paused: None,
+        ceiling_paused: Some(crate::harness::CeilingPause {
+            agent: "product_manager".to_string(),
+            elapsed: std::time::Duration::from_millis(601_000),
+            summary: "product_manager hit the per-turn wall-clock ceiling after 10m 01s. \
+                      Underlying error: exceeded its remaining wall-clock budget (56636 ms)"
+                .to_string(),
+        }),
+    }));
+    let board_claim = Arc::new(deps.delegations.claim_board("run-1680"));
+    let publish_refusal_claim = Arc::new(deps.pending_publishes.claim_refusals_for_run("run-1680"));
+    let capped = RunCappedNodes::default();
+    let runs: Arc<dyn crate::ports::RunStore> =
+        Arc::new(crate::store::FsOps::new(dir.path().to_path_buf()));
+    let runner = HarnessAgentRunner::new(
+        turn,
+        deps,
+        record,
+        CompanyId::new("acme"),
+        "wf-1680".to_string(),
+        "run-1680".to_string(),
+        None,
+        Value::Null,
+        crate::ports::types::StartedBy::Operator,
+        RunNotices::default(),
+        RunBoard::default(),
+        RunBlocks::default(),
+        capped.clone(),
+        RunApprovals::default(),
+        RunArtifacts::default(),
+        board_claim,
+        publish_refusal_claim,
+    )
+    .with_runs(Some(runs.clone()), None, RunAttempts::default());
+
+    let (_, outcome) = runner
+        .run_turn(
+            "product_manager",
+            json!({ "node_id": "draft_status", "prompt": "summarise yesterday's closed issues" }),
+        )
+        .await
+        .expect("a ceiling-paused turn is Ok now — the run continues to the next node");
+
+    let pause = outcome.ceiling_paused.as_ref().expect("the pause survives");
+    assert_eq!(pause.agent, "product_manager");
+    assert_eq!(
+        outcome.steps.len(),
+        1,
+        "the folded timeline rides out with the pause rather than being dropped"
+    );
+
+    // Same reconciliation channel as the three siblings: the engine reports the
+    // step `Success` through `LimitStop`, this settle marks the attempt
+    // `Failed`, and `reclassify_capped_nodes` is what makes the two agree.
+    assert_eq!(
+        capped.take(),
+        vec!["draft_status".to_string()],
+        "the ceiling-paused node's id must reach the channel the runner reconciles against"
+    );
+
+    let attempts = runs
+        .list_runs(
+            &CompanyId::new("acme"),
+            &crate::ports::RunFilter::for_workflow_run("run-1680".to_string()),
+        )
+        .await
+        .expect("list attempts");
+    assert_eq!(attempts.len(), 1, "one attempt for one node turn");
+    assert_eq!(attempts[0].status, crate::ports::RunStatus::Failed);
+    let error = attempts[0].error.as_deref().expect("an explanation");
+    assert!(
+        error.contains("product_manager") && error.contains("10m 01s"),
+        "the row explains itself in the notice's own words: {error}"
+    );
+    assert!(
+        !error.to_ascii_lowercase().contains("continue"),
+        "and must not invite a resume there is no checkpoint for: {error}"
     );
 }

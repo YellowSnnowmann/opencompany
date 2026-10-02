@@ -18,6 +18,7 @@ const raw = readFileSync("src/views/room/RawTurns.tsx", "utf8");
 const session = readFileSync("src/views/team/AgentSession.tsx", "utf8");
 const header = readFileSync("src/views/room/ChatHeader.tsx", "utf8");
 const room = readFileSync("src/views/RoomView.tsx", "utf8");
+const scope = readFileSync("src/views/room/rawTurnScope.ts", "utf8");
 const types = readFileSync("src/api/types.ts", "utf8");
 const messageRow = readFileSync("src/views/room/MessageRow.tsx", "utf8");
 const threadPanel = readFileSync("src/views/room/ThreadPanel.tsx", "utf8");
@@ -265,7 +266,11 @@ describe("the raw-turns toggle in a DM", () => {
    * cross-channel view keeps its own address, and the pane links to it.
    */
   it("shows this conversation's turns, and links to the whole session", () => {
-    expect(room).toContain("rows.filter((row) => inDmWith(row, agentId))");
+    // The scope moved to `rawTurnScope.ts` so it could be tested against real
+    // rows rather than asserted as source text; `raw-turn-scope.test.ts` is
+    // that test. What stays asserted here is that the view uses it.
+    expect(room).toContain("dmRawTurns(seen, agentId)");
+    expect(scope).toContain("inDmWith(row, agentId)");
     expect(room).toContain("?tab=session&raw");
   });
 
@@ -281,7 +286,8 @@ describe("the raw-turns toggle in a DM", () => {
   it("pages backward with `before` to fill the DM's own window, not just its first page", () => {
     expect(room).toContain("async function fetchDmRawTurns(");
     expect(room).toContain("before,");
-    expect(room).toContain("rows.length < RAW_TURN_PAGE || collected.length >= RAW_TURN_PAGE");
+    expect(room).toContain("rows.length < RAW_TURN_PAGE ||");
+    expect(room).toContain("dmRawTurns(seen, agentId).length >= RAW_TURN_PAGE");
   });
 
   /**
@@ -290,7 +296,9 @@ describe("the raw-turns toggle in a DM", () => {
    * `dm:<id>`. Matching one would silently drop every line keyed the other way.
    */
   it("matches both spellings of a DM channel key", () => {
-    expect(room).toContain("row.sessionChannelId === agentId || row.sessionChannelId === `dm:${agentId}`");
+    expect(scope).toContain(
+      "row.sessionChannelId === agentId || row.sessionChannelId === `dm:${agentId}`",
+    );
   });
 
   /**

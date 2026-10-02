@@ -54,6 +54,7 @@ impl RunTurn for RefusalWorkflowTurn {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 }
@@ -195,6 +196,7 @@ async fn a_recovered_reply_ships_the_exact_text_the_judge_certified() {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1990h"));
     let publish_refusal_claim =
@@ -274,6 +276,7 @@ async fn a_recovered_reply_does_not_emit_its_pre_recovery_json_parse() {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1990i"));
     let publish_refusal_claim =
@@ -357,6 +360,7 @@ async fn a_recovered_reply_that_fails_its_postcondition_does_not_settle_succeede
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1990j"));
     let publish_refusal_claim =
@@ -467,6 +471,7 @@ async fn a_recovery_park_leaves_the_attempt_row_blocked() {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-recover"));
     let publish_refusal_claim =
@@ -574,6 +579,7 @@ async fn a_budget_paused_turn_skips_the_sufficiency_judge() {
             agent: "researcher".to_string(),
             summary: "acme is out of inference credits".to_string(),
         }),
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1990"));
     let publish_refusal_claim = Arc::new(deps.pending_publishes.claim_refusals_for_run("run-1990"));

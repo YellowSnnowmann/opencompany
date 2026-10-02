@@ -3,6 +3,7 @@ use crate::ports::tasks::TaskTitle;
 
 fn card(column: &str, note: Option<&str>) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: "t-1".to_string(),
         title: TaskTitle::authored("Ship the thing"),
         note: note.map(str::to_string),

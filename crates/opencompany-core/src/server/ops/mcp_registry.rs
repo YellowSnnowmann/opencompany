@@ -318,6 +318,12 @@ fn row_from_install(
         server_id: Some(install.server_id),
         qualified_name: Some(install.qualified_name),
         icon_url: install.icon_url,
+        // A directory install is not probed through the declared-server path, so
+        // it reports no `serverInfo` of its own; the directory's own description
+        // is already this row's `description`.
+        probed_title: None,
+        probed_description: None,
+        website_url: None,
         transport: Some(install.transport),
         // Every teammate, or nobody when the install is off — see
         // `McpServerDto::reachable_by`.
