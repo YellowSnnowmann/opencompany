@@ -35,6 +35,8 @@ mod blocked_node_pure_tests;
 /// board card, and that everything it may not do stays refused.
 #[cfg(test)]
 mod board_turn_tests;
+#[cfg(test)]
+mod board_turn_unwired_tests;
 pub mod caps;
 pub mod checkpoint_store;
 pub mod delivery;

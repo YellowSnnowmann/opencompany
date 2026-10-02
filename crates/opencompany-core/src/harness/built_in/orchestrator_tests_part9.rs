@@ -574,7 +574,7 @@ async fn query_company_board_section_is_unavailable_when_the_board_is_unwired() 
     let tool = QueryCompanyTool::new(CompanyId::new("acme"), None, None, None, None, None);
     let out = tool.execute(json!({})).await.unwrap().output_for_llm(true);
     assert!(out.contains("## Board"), "{out}");
-    assert!(out.contains("Board unavailable"), "{out}");
+    assert!(out.contains("No task board is wired on this host"), "{out}");
 }
 
 /// The ordering guarantee the byte-budget reasoning depends on: Board is

@@ -66,6 +66,9 @@ use crate::ports::workspace::{
     FolderClaim, NodeKind, WorkspaceNode, WorkspaceOrigin, WorkspaceStore,
 };
 
+mod manifest_read;
+use manifest_read::ManifestRead;
+
 /// Tool name: list page manifests.
 pub const PAGES_LIST_TOOL: &str = "pages_list";
 /// Tool name: read one page's manifest and source.
@@ -486,24 +489,6 @@ impl CompanyPages {
             .await?;
         Ok(claim.id().to_string())
     }
-
-    /// Reads a manifest node's TOML body, falling back to the default when the
-    /// node is absent or fails to parse — a slug with a source but no manifest
-    /// (or a manifest a hand-edit corrupted) should still list and read rather
-    /// than error, since a title default of the slug itself is always a valid
-    /// answer.
-    async fn read_manifest(&self, node: &WorkspaceNode, fallback_title: &str) -> PageManifest {
-        match self.store.read(&self.company, &node.id).await {
-            Ok(Some((_, body))) => toml::from_str(&body).unwrap_or_else(|_| PageManifest {
-                title: fallback_title.to_string(),
-                ..Default::default()
-            }),
-            _ => PageManifest {
-                title: fallback_title.to_string(),
-                ..Default::default()
-            },
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -603,12 +588,15 @@ impl Tool for PagesListTool {
                 shown += 1;
                 continue;
             }
-            let manifest = match &bundle.manifest {
-                Some(node) => self.pages.read_manifest(node, slug).await,
-                None => PageManifest {
-                    title: slug.clone(),
-                    ..Default::default()
-                },
+            let read = self.pages.read_manifest(bundle.manifest.as_ref()).await;
+            let Some(manifest) = read.known(slug) else {
+                let line = read.list_line(slug).unwrap_or_default();
+                if rendered.len() + line.len() > MAX_LIST_BYTES {
+                    break;
+                }
+                rendered.push_str(&line);
+                shown += 1;
+                continue;
             };
             let mut line = format!(
                 "- {slug}: \"{title}\"{desc}{icon}{hidden}\n",
@@ -752,29 +740,25 @@ impl Tool for PagesReadTool {
             )));
         };
 
-        let manifest = match &bundle.manifest {
-            Some(node) => self.pages.read_manifest(node, slug).await,
-            None => PageManifest {
-                title: slug.to_string(),
-                ..Default::default()
-            },
+        let read = self.pages.read_manifest(bundle.manifest.as_ref()).await;
+        let mut out = match read.known(slug) {
+            Some(manifest) => format!(
+                "Page `{slug}`: title=\"{title}\"{desc}{icon}, nav_visible={visible}\n",
+                title = manifest.title,
+                desc = manifest
+                    .description
+                    .as_deref()
+                    .map(|d| format!(", description=\"{d}\""))
+                    .unwrap_or_default(),
+                icon = manifest
+                    .icon
+                    .as_deref()
+                    .map(|i| format!(", icon=\"{i}\""))
+                    .unwrap_or_default(),
+                visible = manifest.nav_visible,
+            ),
+            None => read.read_header(slug).unwrap_or_default(),
         };
-
-        let mut out = format!(
-            "Page `{slug}`: title=\"{title}\"{desc}{icon}, nav_visible={visible}\n",
-            title = manifest.title,
-            desc = manifest
-                .description
-                .as_deref()
-                .map(|d| format!(", description=\"{d}\""))
-                .unwrap_or_default(),
-            icon = manifest
-                .icon
-                .as_deref()
-                .map(|i| format!(", icon=\"{i}\""))
-                .unwrap_or_default(),
-            visible = manifest.nav_visible,
-        );
 
         match &bundle.source {
             Some(node) => match self.pages.store.read(&self.pages.company, &node.id).await {
@@ -926,6 +910,21 @@ impl Tool for PagesWriteTool {
             }
         };
 
+        let title_arg = args
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let manifest_read = self
+            .pages
+            .read_manifest(existing.as_ref().and_then(|b| b.manifest.as_ref()))
+            .await;
+        if let Some(refusal) = manifest_read.write_refusal(slug, title_arg.is_some()) {
+            return Ok(ToolResult::error(refusal));
+        }
+        let replaced_unparseable = matches!(manifest_read, ManifestRead::Unparseable(_));
+
         // CAS guard, mirroring `workspace_write`: required whenever a source
         // that already exists is being replaced, so a page edited since the
         // agent last read it is refused rather than clobbered. A brand-new
@@ -988,17 +987,11 @@ impl Tool for PagesWriteTool {
         // Resolve the manifest to write: an explicit field overrides, an
         // omitted field keeps the existing manifest's value, and a
         // brand-new page needs `title`.
-        let existing_manifest = match existing.as_ref().and_then(|b| b.manifest.as_ref()) {
-            Some(node) => Some(self.pages.read_manifest(node, slug).await),
-            None => None,
+        let existing_manifest = match manifest_read {
+            ManifestRead::Found(manifest) => Some(manifest),
+            _ => None,
         };
-        let title = args
-            .get("title")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .or_else(|| existing_manifest.as_ref().map(|m| m.title.clone()));
+        let title = title_arg.or_else(|| existing_manifest.as_ref().map(|m| m.title.clone()));
         let Some(title) = title else {
             return Ok(ToolResult::error(
                 "Invalid arguments: `title` is required the first time a page is created."
@@ -1111,12 +1104,20 @@ impl Tool for PagesWriteTool {
 
         Ok(ToolResult::success(format!(
             "Saved page `{slug}` (\"{title}\"). {compiled_note}View it at {{scope}}/pages/{slug} \
-             in the console once the operator opens it.",
+             in the console once the operator opens it.{replaced_note}",
             title = manifest.title,
             compiled_note = if source.is_some() {
                 "Compiled successfully. "
             } else {
                 ""
+            },
+            replaced_note = if replaced_unparseable {
+                format!(
+                    " The old {MANIFEST_NAME} could not be parsed and was replaced with the \
+                     fields you passed."
+                )
+            } else {
+                String::new()
             },
         )))
     }
@@ -1362,3 +1363,7 @@ pub fn pages_tools(
 #[cfg(test)]
 #[path = "pages_tools_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "pages_tools_manifest_tests.rs"]
+mod manifest_tests;
