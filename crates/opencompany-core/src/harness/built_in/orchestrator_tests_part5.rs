@@ -652,7 +652,7 @@ async fn run_workflow_tool_separates_blocked_nodes_from_paused_gates() {
 
 #[tokio::test(start_paused = true)]
 async fn workflow_tool_survives_single_call_deadline_and_stages_result() {
-    struct SlowRunner;
+    struct SlowRunner(tokio::sync::Notify);
     #[async_trait::async_trait]
     impl WorkflowRunner for SlowRunner {
         async fn run(
@@ -662,13 +662,15 @@ async fn workflow_tool_survives_single_call_deadline_and_stages_result() {
             _input: Value,
             _ctx: &crate::ports::WorkflowRunContext,
         ) -> crate::Result<WorkflowRun> {
+            self.0.notify_one();
             tokio::time::sleep(std::time::Duration::from_secs(121)).await;
             Ok(StubRunner::empty().run)
         }
     }
     let dir = tempfile::tempdir().unwrap();
     seed_demo_workflow(dir.path());
-    let runner: Arc<dyn WorkflowRunner> = Arc::new(SlowRunner);
+    let started = Arc::new(tokio::sync::Notify::new());
+    let runner: Arc<dyn WorkflowRunner> = Arc::new(SlowRunner(Arc::clone(&started)));
     let handle = WorkflowRunnerHandle::default();
     handle.set(&runner);
     let refs = WorkflowRefQueue::default();
@@ -689,7 +691,11 @@ async fn workflow_tool_survives_single_call_deadline_and_stages_result() {
         deadline.is_none(),
         "the harness must not truncate a supervised workflow"
     );
-    let result = tool.execute(args).await.unwrap();
+    let started_turn = started.notified();
+    let execute = tokio::spawn(async move { tool.execute(args).await.unwrap() });
+    started_turn.await;
+    tokio::time::advance(std::time::Duration::from_secs(121)).await;
+    let result = execute.await.unwrap();
     assert!(!result.is_error, "{result:?}");
     assert_eq!(
         refs.drain().len(),
