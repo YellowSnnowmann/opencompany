@@ -343,8 +343,8 @@ pub(super) fn git_operation_matching_is_case_sensitive() {
 #[cfg(feature = "openhuman")]
 pub(super) fn the_read_only_set_matches_the_vendored_classifier() {
     use openhuman_core::security::SecurityPolicy;
-    use openhuman_core::tools::GitOperationsTool;
     use tinytools::Tool;
+    use tinytools_std::filesystem::GitOperationsTool;
 
     let policy = std::sync::Arc::new(SecurityPolicy::default());
     let tool = GitOperationsTool::new(policy, std::path::PathBuf::from("."));
