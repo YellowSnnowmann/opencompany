@@ -39,6 +39,7 @@ impl RunTurn for SpyEngine {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 
@@ -114,6 +115,7 @@ impl RunTurn for FlakyEngine {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 

@@ -193,6 +193,16 @@ struct CapabilityStatusDto {
     /// lets the MCP surfaces state that plainly instead of the operator finding
     /// out by asking an agent and watching nothing happen.
     mcp_in_build: bool,
+    /// Whether a tool set to `needs_approval` actually parks the call, or is
+    /// allowed through as if it were set to allow.
+    ///
+    /// The one fact a permissions screen cannot derive from anything else on it:
+    /// every other reading says which mode is stored, and an operator who sets
+    /// `needs_approval` and is told nothing walks away believing the tool is
+    /// gated. Read from
+    /// [`crate::policy::approvals_park`], which asks the policy the roster is
+    /// actually built from rather than restating its wiring here.
+    approvals_park: bool,
     /// Whether this company's teammates can actually think, and why not when
     /// they cannot (issue #1735).
     ///
@@ -281,17 +291,23 @@ struct OptInFlags {
     /// the echo brain's output as a teammate's reply on exactly the companies
     /// that have a budget configured.
     cognition: CognitionState,
+    /// Whether a `needs_approval` MCP tool mode parks a call on this host, or is
+    /// allowed through. Carried here for the reason the notes above give, and
+    /// knowable without a company record: it is the roster's own wiring.
+    approvals_park: bool,
 }
 
 impl OptInFlags {
     /// All-false — used when no company record is present.
     ///
-    /// Takes the cognition state because that one is knowable without a record:
-    /// the runtime is in hand either way, and which brain it holds does not
-    /// depend on whether its company row loaded.
-    fn none(cognition: CognitionState) -> Self {
+    /// Takes the cognition state and the approval-parking answer because both are
+    /// knowable without a record: the runtime is in hand either way, and neither
+    /// which brain it holds nor how its roster is gated depends on whether its
+    /// company row loaded.
+    fn none(cognition: CognitionState, approvals_park: bool) -> Self {
         Self {
             cognition,
+            approvals_park,
             media_granted: false,
             chargebee_granted: false,
             composio_granted: false,
@@ -339,6 +355,7 @@ fn unconfigured(flags: OptInFlags) -> CapabilityStatusDto {
         publish_granted: flags.publish_granted,
         publish_in_build: cfg!(feature = "openhuman"),
         mcp_in_build: cfg!(feature = "mcp"),
+        approvals_park: flags.approvals_park,
         cognition: flags.cognition,
     }
 }
@@ -495,15 +512,19 @@ async fn effective_status(runtime: &CompanyRuntime) -> Result<CapabilityStatusDt
     // avoid (issues #266, #514). Borrowing that function rather than re-deriving
     // it is what keeps the two surfaces from disagreeing about one company.
     let cognition = cognition_for(runtime).await;
+    // The policy the gate is evaluating, not the manifest block: an operator who
+    // moved the tier from the console moved this one too.
+    let approvals_park = crate::policy::approvals_park(&runtime.approval_gate.policy());
     let record = runtime.store().load(runtime.id()).await.map_err(ApiError)?;
     let Some(record) = record else {
-        return Ok(unconfigured(OptInFlags::none(cognition)));
+        return Ok(unconfigured(OptInFlags::none(cognition, approvals_park)));
     };
     // Media + composio are opt-in per tool grant (explicit namespace, never `*`)
     // and live on the manifest regardless of whether a `[plan]` is configured.
     let search_credential_source = search_credential_source(runtime).await;
     let flags = OptInFlags {
         cognition,
+        approvals_park,
         media_granted: crate::company::grants_media_explicit(&record.manifest.tools.allow),
         chargebee_granted: crate::company::grants_chargebee_explicit(&record.manifest.tools.allow),
         composio_granted: crate::company::grants_composio_explicit(&record.manifest.tools.allow),
@@ -628,6 +649,7 @@ async fn effective_status(runtime: &CompanyRuntime) -> Result<CapabilityStatusDt
         publish_granted: flags.publish_granted,
         publish_in_build: cfg!(feature = "openhuman"),
         mcp_in_build: cfg!(feature = "mcp"),
+        approvals_park: flags.approvals_park,
         cognition: flags.cognition,
     })
 }

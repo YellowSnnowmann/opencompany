@@ -228,6 +228,7 @@ async fn a_workflow_node_opens_a_card_stamped_with_its_run() {
 async fn a_workflow_node_assigns_an_existing_card_without_moving_it() {
     let dir = tempfile::tempdir().unwrap();
     let seed = TaskRecord {
+        opened_by: None,
         id: "card-1".to_string(),
         title: TaskTitle::authored("Quarterly close"),
         note: None,

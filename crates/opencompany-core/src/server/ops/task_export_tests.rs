@@ -48,6 +48,7 @@ fn card(title: &str) -> TaskCard {
         origin_run_id: None,
         origin_workflow_id: None,
         bounced: None,
+        opened_by: None,
         // The export document is deliberately link-free (issue #339): it is
         // read offline, by people who never saw the board, so a console hash
         // route would be a dead address in it. The deliverable itself is what

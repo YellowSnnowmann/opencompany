@@ -160,24 +160,13 @@ mod tests;
 /// episode it has `ask`, the asking turn ends, and the answers arrive in a
 /// later brief.
 ///
-/// # What had to land first, and what has not
+/// # What had to land first
 ///
 /// It waited behind a flag for three things, all now on `main`: a seat's
 /// approvals reached nobody (#2467, #2471 — a seat now parks and the episode
 /// resumes on the decision); a seat could not hand over a deliverable
 /// (#2472, #2480); and two episodes on one desk read each other's in-flight
 /// rows while a seat was amnesiac about its own operator line (#2483).
-///
-/// One thing has **not**: `spawn_task` is still in
-/// `EPISODE_WITHHELD_TOOLS`, because the delegation queue it writes to is
-/// drained by a brain that does not run inside an episode. So an operator
-/// who says "track this" in a DM gets an agent that cannot open a card,
-/// where before it could. That is the one thing this default makes worse,
-/// and it is worth knowing rather than discovering: the fix is the shape
-/// #2471 used for approvals — claim the queue per seat turn under
-/// `DrainClaim::Board` (which permits board writes and refuses the hand-off,
-/// exactly a seat's shape), drain it in `settle`, and open the cards from
-/// `park_seat`.
 ///
 /// `OPENCOMPANY_DM_EPISODES=0` restores the pooled turn.
 #[must_use]

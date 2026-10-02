@@ -445,6 +445,7 @@ pub(crate) fn company() -> CompanyId {
 /// A dispatched card, already in the column dispatch happens from.
 pub(crate) fn card(id: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Draft the launch spec"),
         note: None,

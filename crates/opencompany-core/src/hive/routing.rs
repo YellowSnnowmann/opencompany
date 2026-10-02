@@ -635,6 +635,17 @@ pub fn desk_routing_dto(record: &CompanyRecord, desk_id: &str, router: Router) -
 /// The default build carries no Jev transport (it lives behind `openhuman`),
 /// so it always answers `Fallback` — which is also the honest answer for a
 /// host that cannot run a round at all.
+///
+/// # This reads the host's ladder only
+///
+/// It answers for `OPENCOMPANY_JEV_KEY` and the inherited environment ladder,
+/// and it takes no company, so it cannot see a company's *own* stored key.
+/// [`crate::hive::dispatch::host_router`] does read that key, which means the
+/// two can disagree: a company that signed in through the console has its
+/// desks routed by Jev while this reports `Fallback`. Reporting the host's
+/// ladder is right for the host-level question; it is the per-company answer
+/// that is missing, and closing the gap needs a secret store threaded to every
+/// caller of this — the operator read plane has none today.
 #[must_use]
 pub fn host_router() -> Router {
     #[cfg(feature = "openhuman")]

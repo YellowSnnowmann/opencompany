@@ -74,6 +74,7 @@ impl crate::runtime::delegation::RunTurn for SpyLane {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
     async fn run_steered(

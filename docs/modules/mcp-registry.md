@@ -67,6 +67,43 @@ got there before the directory existed at all.
 Upstream still reads a host-process `SMITHERY_API_KEY` if one is set; nothing in
 this deployment writes, reads or reports it.
 
+### Ranking and top connectors
+
+The registry search route
+([`mcp_registry::wired`](../../crates/opencompany-core/src/server/ops/mcp_registry/wired.rs))
+orders what it returns with the pure helpers in
+[`mcp_registry::catalogue`](../../crates/opencompany-core/src/server/ops/mcp_registry/catalogue.rs):
+
+- `rank_catalogue` marks an entry `official` only when its qualified name is in
+  `tinymcp::registry::curation::OFFICIAL_SERVERS`, matched exactly, then sorts
+  official first and by install count after that. Ties keep upstream's order.
+  The upstream registry reports every entry as unofficial, so this list is the
+  only source of the verified badge. Install counts come only from Smithery, so
+  on the official registry the second key orders nothing.
+- A browse — no search term — opens on **top connectors**: the official
+  connectors alone, each fetched by name and kept when it names an endpoint this
+  host can dial (`featured_entry`). "Show more" continues into the directory,
+  numbered after that first page (`browse_upstream_page`, `shift_browse_page`)
+  and without repeating an official entry. The official registry records no
+  install or download counts, so its own order — by publisher domain — is not a
+  ranking worth leading with.
+
+### Icons are inlined host-side
+
+An icon reaches the console only as a `data:image/` URI. Search, detail and the
+install rows pass every icon through `inline_icon`: an inline image is kept, a
+remote `http(s)` address is fetched by the host through the SSRF-guarded
+`fetch_icon` (64 KB cap, 5 s timeout) and inlined, and anything else is dropped.
+Results are cached per URL (512 entries). The console renders nothing that is
+not already inline, so opening Discover makes no request to a publisher's host
+from the operator's browser.
+
+The registry gives most first-party servers no title and no icon, so the
+official thirteen are named, and given their GitHub organisation avatar as a
+logo, from the brand table in `catalogue`. Any other entry whose name is only
+`mcp` or `server` is shown under its publisher namespace (`com.acme/mcp` →
+"Acme").
+
 ### Delete dispatches
 
 `DELETE …/mcp/servers/{name}` removes what the row actually has: the
