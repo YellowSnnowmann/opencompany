@@ -399,6 +399,7 @@ async fn a_second_task_in_the_same_window_does_not_absorb_the_first_s_approvals(
         .upsert(
             &company,
             &TaskRecord {
+                opened_by: None,
                 id: "t-2".into(),
                 title: TaskTitle::authored("Also ship it"),
                 note: None,

@@ -53,6 +53,23 @@ function completedStatus(word: string | undefined): TurnStepStatus {
 }
 
 /**
+ * Every frame `onTurnEvent` receives, folded: the three row frames through
+ * {@link foldLiveFrame}, and the host's `replying` marker to `null` (no row).
+ *
+ * `replying` says the agent started writing its reply. It is a live signal for
+ * the presence dot, never a step: `fold_steps` on the host adds none for it, so
+ * a row here would make the live and folded counts disagree the moment the
+ * reply lands. {@link LiveFrame} stays the narrow row shape on purpose.
+ */
+export function foldTurnFrame(
+  rows: readonly LiveRow[],
+  frame: LiveFrame | { type: "replying" },
+): LiveRow[] | null {
+  if (frame.type === "replying") return null;
+  return foldLiveFrame(rows, frame);
+}
+
+/**
  * Folds one live frame into a turn's rows, or returns `null` to drop it.
  *
  * Extracted from `AppShell.onTurnEvent` so the two maps that hold live rows —

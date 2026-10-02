@@ -91,6 +91,7 @@ async fn a_dispatched_cards_relay_is_journaled_into_its_origin_thread() {
     );
 
     let card = TaskRecord {
+        opened_by: None,
         id: "t-1".to_string(),
         title: TaskTitle::authored("Ship it"),
         note: None,
@@ -249,6 +250,7 @@ async fn a_private_dm_relay_is_authored_by_the_dm_agent_not_the_orchestrator() {
 
     let orchestrator = "ceo";
     let card = |id: &str, origin: &str| TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Ship it"),
         note: None,
@@ -486,6 +488,7 @@ async fn a_relayed_card_answers_in_the_thread_that_raised_it() {
         .expect("the root is journaled");
 
     let mut card = crate::ports::tasks::TaskRecord {
+        opened_by: None,
         id: "t-relay".to_string(),
         title: TaskTitle::authored("Draft the launch email"),
         note: None,

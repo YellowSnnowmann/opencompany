@@ -64,6 +64,99 @@ async fn a_desk_note_is_the_episodes_own_voice_and_may_be_private() {
     assert!(format!("{host:?}").contains("engineering"));
 }
 
+/// **A note about a conversation is written into that conversation.**
+///
+/// `nudge_silent_askees_in` addresses a seat inside the conversation it went
+/// silent in, so the note carries that conversation's root -- and `reply`
+/// turns a `Some` thread into the row's parent. Writing such a note to the
+/// desk therefore produced a row the desk cannot place: its parent is the
+/// `ask`, which lives in the pair channel. `reply`'s own note already states
+/// the rule from the other side -- "a desk position means nothing in a pair
+/// channel" -- and this is that defect inverted.
+///
+/// A live run showed both halves of the cost: the nudge rendered in the room
+/// as a loose instruction with no question above it, and, standing between
+/// the operator's message and the first answer, it read to the console as a
+/// second conversation racing in the channel and folded the answered episode
+/// behind a chip.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_note_about_a_conversation_lands_in_that_conversation() {
+    let log = Arc::new(MemoryLog::default());
+    let events: Arc<dyn EventLog> = log.clone();
+    let host = host(Arc::clone(&events));
+    host.event(&tinyhivemind_driver::Event::Asked {
+        seat: "one".to_owned(),
+        askees: vec!["two".to_owned()],
+        root: tinyhivemind::Sequence(11),
+    });
+    host.note(&Note {
+        body: "the teammate who asked you is waiting for your answer".to_owned(),
+        thread: Some(tinyhivemind::Sequence(11)),
+        only_for: Some("two".to_owned()),
+    })
+    .expect("the journal takes the note");
+    let note = log
+        .rows()
+        .into_iter()
+        .filter_map(|row| match row.event {
+            CompanyEvent::AgentReply {
+                chat_id,
+                agent_id,
+                parent,
+                ..
+            } if agent_id == crate::ports::SYSTEM_AUTHOR => Some((chat_id, parent)),
+            _ => None,
+        })
+        .next()
+        .expect("the note is journaled as a row");
+    assert_eq!(
+        note.0, "dm:one+two",
+        "the note belongs beside the ask it is about, not on the desk"
+    );
+    assert_eq!(
+        note.1,
+        Some(EventSeq::new(11)),
+        "and still hangs off that ask, which is now in its own channel"
+    );
+}
+
+/// The other half of the rule, and the reason the fix is a no-op for every
+/// note that was already right: only a conversation's root is ever recorded,
+/// so a note carrying the desk's own thread -- or none at all -- misses the
+/// map and stays where it was.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_note_about_the_desk_still_lands_on_the_desk() {
+    let log = Arc::new(MemoryLog::default());
+    let events: Arc<dyn EventLog> = log.clone();
+    let host = host(Arc::clone(&events));
+    host.event(&tinyhivemind_driver::Event::Asked {
+        seat: "one".to_owned(),
+        askees: vec!["two".to_owned()],
+        root: tinyhivemind::Sequence(11),
+    });
+    host.note(&Note {
+        body: "you still have open work and nothing new has come in".to_owned(),
+        thread: Some(tinyhivemind::Sequence(2)),
+        only_for: Some("one".to_owned()),
+    })
+    .expect("the journal takes the note");
+    let chats: Vec<String> = log
+        .rows()
+        .into_iter()
+        .filter_map(|row| match row.event {
+            CompanyEvent::AgentReply {
+                chat_id, agent_id, ..
+            } if agent_id == crate::ports::SYSTEM_AUTHOR => Some(chat_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        chats,
+        vec!["engineering".to_owned()],
+        "an unrecognised thread is the desk's own, and the desk is where it goes"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_turn_without_a_pool_runs_unbracketed_rather_than_refusing() {
     let log = Arc::new(MemoryLog::default());
@@ -564,5 +657,60 @@ fn a_publish_is_filed_where_its_rows_are_and_only_a_desk_keeps_the_thread() {
         owner_thread,
         Some(crate::ports::types::EventSeq::new(11)),
         "where the episode's thread root does apply"
+    );
+}
+
+/// One turn's steps, for the carry tests.
+fn step(label: &str) -> crate::ports::types::TurnStep {
+    crate::ports::types::TurnStep {
+        kind: crate::ports::types::TurnStepKind::ToolCall,
+        status: crate::ports::types::TurnStepStatus::Ok,
+        label: label.to_string(),
+        ..Default::default()
+    }
+}
+
+/// **A retry does not erase what the first attempt did.**
+///
+/// This is the shape the whole feature exists for. A seat that writes a file
+/// and then answers in prose records nothing the room can hear, so `insist`
+/// asks it again -- and the second attempt typically calls `complete_episode`
+/// and nothing else. Replacing the held steps there dropped the write and kept
+/// only the speech call, which is the one the episode annotation already
+/// shows: the row would report the least interesting half of the turn and
+/// silently lose the rest.
+#[test]
+fn a_retrys_steps_are_added_to_the_first_attempts() {
+    let mut held = Vec::new();
+    super::carry_steps(&mut held, vec![step("File Write"), step("File Read")]);
+    super::carry_steps(&mut held, vec![step("Desk Complete Episode")]);
+    assert_eq!(
+        held.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(),
+        vec!["File Write", "File Read", "Desk Complete Episode"],
+        "the row carries both attempts, in the order they happened",
+    );
+}
+
+/// The join of several attempts is bounded, and sheds the oldest.
+///
+/// `fold_steps` caps one turn; nothing capped their sum until this. Oldest
+/// first, because a row is a timeline rather than a ledger -- and the newest
+/// step is the one a reader is most likely looking for.
+#[test]
+fn a_rows_steps_are_bounded_across_attempts() {
+    let mut held = Vec::new();
+    for round in 0..4 {
+        let batch: Vec<_> = (0..40).map(|n| step(&format!("{round}-{n}"))).collect();
+        super::carry_steps(&mut held, batch);
+    }
+    assert_eq!(held.len(), super::MAX_ROW_STEPS, "bounded");
+    assert_eq!(
+        held.last().map(|s| s.label.as_str()),
+        Some("3-39"),
+        "the most recent step survives",
+    );
+    assert!(
+        !held.iter().any(|s| s.label.starts_with("0-")),
+        "and the oldest attempt is what was shed",
     );
 }

@@ -88,12 +88,14 @@ Supporting docs:
   how a company supersedes or disables one, and why provenance is persisted
 - [agents.md](agents.md) — how a teammate is declared: the inline `[[agent]]`
   form and the one-file-per-teammate `agents/<id>.toml` bundle form, custom
-  prompts, checked-in briefing documents versus routed workspace documents, and
-  the `classes` routing exclusions
-  - [agents-turn-limits.md](agents-turn-limits.md) — the two ceilings on one
-    turn: the 25-round tool-iteration cap, the in-turn spend brake armed only
-    for a teammate with a declared daily budget, and why a cap pause and a
-    budget halt are reported separately
+  prompts, checked-in briefing documents versus routed workspace documents, the
+  `classes` routing exclusions, and the `skills` scope that narrows which of the
+  company's skills it reads
+  - [agents-turn-limits.md](agents-turn-limits.md) — the four limits that stop
+    one teammate's turn short: the 25-round tool-iteration cap, the in-turn
+    spend brake armed only for a teammate with a declared daily budget, an
+    exhausted account, and the vendored wall-clock ceiling — what each one
+    preserves, and why one must never be reported as another
 - [tools.md](tools.md) — the three-level tool grant
   (`[tools].allow ∩ desk.tools ∩ agent.tools`), why an absent grant means
   "inherit" rather than "nothing" (and why an explicit empty agent grant is a

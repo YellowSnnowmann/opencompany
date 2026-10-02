@@ -6,6 +6,7 @@ use crate::ports::types::{CompanyId, TokenUsage};
 
 fn task(id: &str, parent: Option<&str>, planning_cost: f64) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored(id),
         note: None,

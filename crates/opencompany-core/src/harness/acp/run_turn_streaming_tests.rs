@@ -37,8 +37,8 @@ async fn a_chat_turn_streams_its_execution_state_onto_the_watching_thread() {
     let kinds: Vec<&str> = frames.iter().map(|f| f.kind).collect();
     assert_eq!(
         kinds,
-        vec!["thinking", "tool_call", "tool_result"],
-        "one coalesced thinking row, the call, and its completion"
+        vec!["thinking", "tool_call", "tool_result", "replying"],
+        "one coalesced thinking row, the call, its completion, then the reply starts"
     );
 
     // Routed to the thread that asked, and labelled with the desk that
@@ -49,7 +49,7 @@ async fn a_chat_turn_streams_its_execution_state_onto_the_watching_thread() {
     // Ordered and dedupable by the console.
     assert_eq!(
         frames.iter().map(|f| f.seq).collect::<Vec<_>>(),
-        vec![0, 1, 2]
+        vec![0, 1, 2, 3]
     );
 
     let call = &frames[1];
@@ -164,7 +164,12 @@ fn rendered_rows(frames: &[TurnStreamEvent]) -> usize {
         .iter()
         .filter_map(|f| f.tool_call_id.as_deref())
         .collect();
-    paired.len() + frames.iter().filter(|f| f.tool_call_id.is_none()).count()
+    // `replying` is a live-only marker, never a row (and never a folded step).
+    paired.len()
+        + frames
+            .iter()
+            .filter(|f| f.tool_call_id.is_none() && f.kind != "replying")
+            .count()
 }
 
 #[test]
@@ -244,6 +249,7 @@ fn thinking_around_assistant_text_folds_and_streams_the_same_way() {
     let live = updates
         .iter()
         .filter_map(|u| live_frame_from(u, &mut state))
+        .filter(|f| f.kind == "thinking")
         .count();
 
     let outcome = fold(turn(updates));
@@ -272,7 +278,34 @@ fn a_burst_of_thoughts_is_one_row_until_something_else_happens() {
     assert_eq!(frames.len(), 1);
 
     // Text closes the run, so the next thought opens a new row — exactly
-    // what `fold` does with its own `thinking` flag.
-    assert!(live_frame_from(&AcpUpdate::MessageChunk("hi".into()), &mut state).is_none());
+    // what `fold` does with its own `thinking` flag. The text itself is not a
+    // thinking row: its only frame is the text-free `replying` marker.
+    let text = live_frame_from(&AcpUpdate::MessageChunk("hi".into()), &mut state);
+    assert_eq!(text.map(|f| f.kind), Some("replying"));
+    let next = live_frame_from(&AcpUpdate::ThoughtChunk, &mut state);
+    assert_eq!(next.map(|f| f.kind), Some("thinking"));
+}
+
+#[test]
+fn acp_message_chunk_emits_one_replying() {
+    let mut state = LiveState::default();
+    let chunks = vec![AcpUpdate::MessageChunk("a".into()); 4];
+    let frames: Vec<_> = chunks
+        .iter()
+        .filter_map(|u| live_frame_from(u, &mut state))
+        .collect();
+    assert_eq!(frames.len(), 1, "a burst of chunks is one frame");
+    assert_eq!(frames[0].kind, "replying");
+    assert!(frames[0].label.is_none() && frames[0].status.is_none());
+
+    // A tool call closes the reply run; the next chunk announces itself again.
+    let call = AcpUpdate::ToolCall {
+        id: "c1".into(),
+        title: "Read".into(),
+    };
+    assert!(live_frame_from(&call, &mut state).is_some());
+    assert!(live_frame_from(&AcpUpdate::MessageChunk("b".into()), &mut state).is_some());
+    // So does a thought.
     assert!(live_frame_from(&AcpUpdate::ThoughtChunk, &mut state).is_some());
+    assert!(live_frame_from(&AcpUpdate::MessageChunk("c".into()), &mut state).is_some());
 }

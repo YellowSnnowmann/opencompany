@@ -1095,6 +1095,8 @@ pub fn build_agent_with_model(
             deps.skills_source_dir.as_deref(),
             &deps.skills_registry,
             skill_deltas,
+            &manifest_agent.id,
+            manifest_agent.skills.as_deref(),
         ) {
             Ok(effective) => {
                 if !effective.is_empty() {
@@ -1765,6 +1767,28 @@ pub fn agent_spec_for(
                     "[hive] a guest seat was lent a takeover but got no verb: `complete_episode` was \
                      not on its belt to wrap"
                 );
+            }
+            // **A turn the room narrowed.**
+            //
+            // The room asks for this when a turn must end in a particular call
+            // rather than in prose -- the seat said something the room cannot
+            // hear, and is being asked again. Most of a seated belt is this
+            // host's own, so only here can the rest be withheld.
+            //
+            // This is deliberately the *last* thing done to the belt. The names
+            // the room gives are its served ones, so they have to be present to
+            // be kept -- but anything added after this filter escapes it, and
+            // `desk_take_over` did: a turn narrowed to `desk_complete_episode`
+            // was still offered the verb that claims the work instead, which is
+            // the one thing the retry is not asking for. The takeover lifts its
+            // `complete_episode` off a spare belt rather than this one, so the
+            // seat keeps the verb it is being narrowed to.
+            //
+            // An empty narrowing never reaches here (`narrowed_to` filters it):
+            // a belt of nothing refuses the call outright.
+            if let Some(only) = seating.narrowed_to(turn.session_id()) {
+                tools.retain(|tool| only.iter().any(|name| name == tool.name()));
+                visible.retain(|name| only.contains(name));
             }
             // **The gate is the episode's, over this company's.**
             //
