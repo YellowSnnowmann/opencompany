@@ -4934,7 +4934,7 @@ impl HarnessPool {
         // Skipped entirely for a chat-only turn (issue #1725): a greeting /
         // "Just chatting" reply must not be grounded in prior task outcomes, and
         // pulling them is the exact context leak the fast path exists to stop.
-        let augmented = if crate::runtime::delegation::is_chat_only_turn() {
+        let augmented = if crate::runtime::delegation::is_chat_only_turn() || !chat.history_seed {
             message.to_string()
         } else {
             // **Retrieved on the operator's own words, injected into the

@@ -213,6 +213,7 @@ pub(super) struct ScriptedTurns {
     /// the call in `with_chat_only_hint(true, ..)` itself, which cannot
     /// catch the classifier failing to derive it).
     chat_only_at_turn: Mutex<Vec<bool>>,
+    pub(super) history_seed_at_turn: Mutex<Vec<bool>>,
     /// What the tool boundary answered for each
     /// [`Turn::tool_pushes`] entry, in order across all turns (issue #267).
     staged: Mutex<Vec<orchestrator::Staged>>,
@@ -233,6 +234,7 @@ impl ScriptedTurns {
             board_at_turn: Mutex::new(Vec::new()),
             committed_at_turn: Mutex::new(Vec::new()),
             chat_only_at_turn: Mutex::new(Vec::new()),
+            history_seed_at_turn: Mutex::new(Vec::new()),
             staged: Mutex::new(Vec::new()),
             tasks: fx.tasks.clone(),
             company: fx.record.id.clone(),
@@ -401,6 +403,10 @@ impl RunTurn for ScriptedTurns {
         message: &str,
         _chat_id: ChatTarget<'_>,
     ) -> Result<TurnOutcome> {
+        self.history_seed_at_turn
+            .lock()
+            .unwrap()
+            .push(_chat_id.history_seed);
         Ok(self.next(agent_id, message, None).await)
     }
 
@@ -413,6 +419,10 @@ impl RunTurn for ScriptedTurns {
         _chat_id: ChatTarget<'_>,
         _run_sink: Option<Arc<RunTraceSink>>,
     ) -> Result<TurnOutcome> {
+        self.history_seed_at_turn
+            .lock()
+            .unwrap()
+            .push(_chat_id.history_seed);
         Ok(self.next(agent_id, message, Some(control)).await)
     }
 
@@ -425,6 +435,10 @@ impl RunTurn for ScriptedTurns {
         _chat: ChatTarget<'_>,
         _run_sink: Option<Arc<RunTraceSink>>,
     ) -> Result<TurnOutcome> {
+        self.history_seed_at_turn
+            .lock()
+            .unwrap()
+            .push(_chat.history_seed);
         Ok(self.next(agent_id, message, Some(control)).await)
     }
 }
