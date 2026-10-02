@@ -2165,27 +2165,6 @@ async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) 
             let admin_email = std::env::var("OPENCOMPANY_ADMIN_EMAIL")
                 .ok()
                 .filter(|value| !value.trim().is_empty());
-            // The SSO auto-login signing secret (`OPENCOMPANY_SSO_SECRET`). The
-            // platform signs a short-lived, single-use token per "Open company"
-            // deep-link with it; this workload verifies it offline at
-            // `POST /api/v1/sso/redeem`. Blank or unset disables the endpoint
-            // entirely (`server::sso`), so a self-hosted `serve` exposes no SSO
-            // surface until a secret is configured — the same off-by-default
-            // shape the platform credentials take.
-            let sso_secret = std::env::var("OPENCOMPANY_SSO_SECRET")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .map(opencompany::ports::types::SecretValue);
-            // Scrub the secret from the environment now that it is captured into
-            // AppConfig. A tenant runs agents with shell/MCP tools that inherit
-            // this process's environment; the injected per-tenant SSO key must not
-            // be readable by them (CodeGhost21, #2537). AppConfig holds the only
-            // copy from here on.
-            //
-            // SAFETY: run during single-threaded startup, before the HTTP server
-            // accepts a request or any agent/child process is spawned, so no other
-            // thread is reading the environment concurrently.
-            unsafe { std::env::remove_var("OPENCOMPANY_SSO_SECRET") };
             // Hosted-brain credential, resolved with the same precedence the
             // harness uses (`harness_inference_from_env`) so `/spec`'s
             // `cycles_available` reflects whether cognition can actually run.
