@@ -88,6 +88,7 @@ impl TaskSeed {
     /// provenance field is `None` rather than invented.
     pub fn to_record(&self, at_millis: u64) -> TaskRecord {
         TaskRecord {
+            opened_by: None,
             id: self.id.clone(),
             title: crate::ports::tasks::TaskTitle::authored(&self.title),
             note: self.note.clone(),

@@ -677,6 +677,7 @@ async fn clearing_a_tier_default_returns_its_tools_to_the_gate() {
             tier_defaults: Some(defaults),
             tools: None,
         },
+        None,
     )
     .unwrap();
     save_tool_policies(&company, &secrets, &tool_policies_key("notion"), &cleared)
@@ -726,6 +727,7 @@ async fn clearing_a_tier_default_leaves_a_per_tool_decision_alone() {
             tier_defaults: Some(defaults),
             tools: None,
         },
+        None,
     )
     .unwrap();
     save_tool_policies(&company, &secrets, &tool_policies_key("notion"), &cleared)

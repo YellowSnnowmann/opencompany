@@ -10,11 +10,12 @@ import {
   Users,
 } from "lucide-react";
 
+import { AgentFace } from "@/components/agent-face";
 import { AgentAvatarButton } from "@/components/agent-profile-sheet";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { channelSubtitle, channelTitle, dmFace, type Channel } from "./model";
+import { channelSubtitle, channelTitle, dmFace, dmThreadId, type Channel } from "./model";
 
 interface Props {
   channel: Channel;
@@ -191,9 +192,17 @@ function KindIcon({ channel }: { channel: Channel }) {
     return face ? (
       // The teammate this line is *with* — clicking their face here opens who
       // they are (issue #1653), same as clicking it in the transcript below.
-      <AgentAvatarButton agentId={channel.member?.id} name={channel.name}>
-        <TeammateAvatar {...face} className="size-6" />
-      </AgentAvatarButton>
+      <AgentFace
+        agentId={channel.member?.id}
+        chatId={channel.member ? dmThreadId(channel.member) : undefined}
+        size="md"
+        surface="background"
+        name={channel.name}
+      >
+        <AgentAvatarButton agentId={channel.member?.id} name={channel.name}>
+          <TeammateAvatar {...face} className="size-6" />
+        </AgentAvatarButton>
+      </AgentFace>
     ) : (
       <CircleDot className={cls} aria-hidden />
     );

@@ -41,6 +41,35 @@ pub mod judgement;
 #[cfg(test)]
 pub(crate) mod test_support;
 
+#[cfg(test)]
+#[path = "policy_approvals_park_tests.rs"]
+mod approvals_park_tests;
+
 pub use consequence::{Consequence, McpReadSet, Reach, Standing, consequence_of};
 pub use gate::{DEFAULT_TTL_MILLIS, ManifestApprovalGate};
 pub use judgement::{CallPath, Judgement, StopReason, judge};
+
+/// Whether a tool set to `needs_approval` parks the call on this build, or is
+/// allowed through as if it were set to allow.
+///
+/// The read surfaces that say so — the per-teammate permissions route and the
+/// capability status the server page consumes — ask this rather than restating
+/// the wiring, which is what kept the answer a hardcoded `false` while the
+/// condition behind it lived somewhere else entirely.
+///
+/// With the harness compiled in, the answer is the roster's own: asked of the
+/// policy [`roster_policy_base`](crate::harness::built_in::roster_policy_base)
+/// builds, so a roster that parks again reports so with no second edit. Without
+/// it there is no roster and no MCP bridge to reach one, so nothing parks —
+/// `false` there is a fact about the build, not a stand-in for an unknown.
+pub fn approvals_park(policy: &crate::company::Policy) -> bool {
+    #[cfg(feature = "openhuman")]
+    {
+        crate::harness::built_in::roster_approvals_park(policy)
+    }
+    #[cfg(not(feature = "openhuman"))]
+    {
+        let _ = policy;
+        false
+    }
+}

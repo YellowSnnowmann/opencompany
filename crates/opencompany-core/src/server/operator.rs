@@ -2483,6 +2483,26 @@ fn project_event_for_viewer(
             }
             o
         }
+        // A skill was installed, replaced or removed. Without an arm here this
+        // fell to the wildcard below, so a console holding the Skills tab open
+        // showed a stale list — and, once drift is rendered, a stale badge —
+        // until someone reloaded.
+        //
+        // Three fields, all structural and all already reachable by this same
+        // operator through `GET …/skills`. `by` is dropped, the deny-by-default
+        // actor omission every attributed arm above uses. `digest` is dropped
+        // too: it is an audit anchor for matching a journal row to a pin, and a
+        // live console reacts by re-reading the row rather than by comparing
+        // hashes.
+        CompanyEvent::SkillChanged {
+            slug, change, tier, ..
+        } => {
+            let mut o = envelope("skill_changed");
+            o["slug"] = json!(slug);
+            o["change"] = json!(change);
+            o["tier"] = json!(tier);
+            o
+        }
         // Not an attention signal, or carries a raw payload we never put on the
         // wire — dropped.
         _ => return None,
@@ -2955,6 +2975,7 @@ async fn run_chat(
         // lose its card over who it was addressed to.
         let assignee = addressed_assignee(&runtime, message.chat.as_deref()).await;
         let record = crate::ports::tasks::TaskRecord {
+            opened_by: None,
             id: crate::ports::generate_id(),
             title,
             note,

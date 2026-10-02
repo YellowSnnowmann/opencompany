@@ -48,7 +48,9 @@ export function TitleBarSearch({
   return (
     <div
       data-tauri-drag-region
-      className="flex min-w-0 flex-1 items-center justify-center self-stretch px-3"
+      // Tighter gutters below `sm`: on a 390px phone this is what is left once
+      // the fixed controls are placed, and 24px of padding was most of it.
+      className="flex min-w-0 flex-1 items-center justify-center self-stretch px-3 max-sm:px-1"
     >
       <button
         type="button"
@@ -59,13 +61,15 @@ export function TitleBarSearch({
         className={
           // Capped, not elastic: a search control that grows to fill a 1440px
           // window reads as a text field somebody stretched by accident.
-          "flex h-9 w-full max-w-sm items-center gap-2 rounded-lg border border-chrome-border " +
-          "bg-background pr-2 pl-3 text-sm text-muted-foreground " +
+          // `min-w-0` + `overflow-hidden` so a squeezed row clips the label
+          // inside the control instead of painting it over the glyphs beside it.
+          "flex h-9 w-full min-w-0 max-w-sm items-center gap-2 overflow-hidden rounded-lg border border-chrome-border " +
+          "bg-background pr-2 pl-3 text-sm text-muted-foreground max-sm:justify-center max-sm:px-0 " +
           "hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         }
       >
         <Search aria-hidden="true" className="size-4 shrink-0" />
-        <span className="flex-1 text-left">{SEARCH_PLACEHOLDER}</span>
+        <span className="min-w-0 flex-1 truncate text-left max-sm:hidden">{SEARCH_PLACEHOLDER}</span>
         <kbd className="hidden shrink-0 rounded border border-chrome-border px-1.5 py-0.5 font-sans text-2xs sm:inline">
           {isAppleKeyboard() ? "⌘K" : "Ctrl K"}
         </kbd>

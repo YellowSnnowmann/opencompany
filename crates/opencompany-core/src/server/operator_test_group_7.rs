@@ -560,6 +560,7 @@ async fn a_dm_answer_to_a_task_backed_blocker_completes() {
     let app = router(state);
 
     let mut card = crate::ports::tasks::TaskRecord {
+        opened_by: None,
         id: "t-9".to_string(),
         title: crate::ports::tasks::TaskTitle::authored("Draft the launch note"),
         note: None,

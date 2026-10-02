@@ -241,6 +241,7 @@ async fn task_export_serves_a_readable_document_and_alters_nothing() {
         .upsert(
             &company,
             &TaskRecord {
+                opened_by: None,
                 id: "t-1".into(),
                 title: TaskTitle::authored("Launch post"),
                 note: Some("Write the launch post.".into()),
@@ -368,6 +369,7 @@ async fn task_timeline_scopes_approvals_to_the_run_window() {
         .upsert(
             &company,
             &TaskRecord {
+                opened_by: None,
                 id: "t-1".into(),
                 title: TaskTitle::authored("Ship it"),
                 note: None,

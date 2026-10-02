@@ -168,6 +168,7 @@ async fn runtime_with_a_system_teammate() -> (Arc<Runtime>, TempDir) {
 
 fn card(id: &str, origin: &str, column: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Ship it"),
         note: None,

@@ -365,6 +365,7 @@ async fn chat_history_route_rehydrates_the_card_a_reply_opened() {
         .upsert(
             runtime.id(),
             &crate::ports::tasks::TaskRecord {
+                opened_by: None,
                 id: "t-77".to_string(),
                 title: TaskTitle::authored("Draft the launch note"),
                 note: None,

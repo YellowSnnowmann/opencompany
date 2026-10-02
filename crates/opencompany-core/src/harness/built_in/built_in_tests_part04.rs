@@ -340,18 +340,36 @@ fn the_figure_less_spelling_is_not_promised_a_figure() {
     );
 }
 
+/// Issue #1680, the second half: a ceiling hit classifies as a **pause**,
+/// not a hard error, and #1761's honest text travels on it verbatim.
+///
+/// The original of this test asserted `Hard`, which was correct for the
+/// diagnosis-only half — see `wall_clock_ceiling_message`'s own doc for why
+/// that was deliberate. What made it wrong was the cost: a `Hard` arm reaches
+/// `reply.map(..)` as an `Err`, and the folded `TurnStep` timeline computed one
+/// line above it is dropped. On a ceiling hit that timeline is the whole of the
+/// turn's work, because the ceiling fires precisely *because* the agent worked
+/// for the full budget.
 #[tokio::test]
-async fn classify_turn_reframes_a_ceiling_hit_and_keeps_it_hard() {
+async fn classify_turn_pauses_on_a_ceiling_hit_and_keeps_the_honest_text() {
     let (agent, _deps) = scripted_agent(vec![]);
 
     let outcome = agent.classify_turn(Err(ceiling_error()), Duration::from_millis(601_000));
-    let AttemptOutcome::Hard(err) = outcome else {
-        panic!("a ceiling hit is not retryable and must classify Hard");
+    let AttemptOutcome::CeilingPaused { summary, elapsed } = outcome else {
+        panic!("a ceiling hit is a graceful pause, not a hard error");
     };
-    let text = err.to_string();
     assert!(
-        text.contains("per-turn wall-clock ceiling after 10m 01s"),
-        "got {text}"
+        summary.contains("per-turn wall-clock ceiling after 10m 01s"),
+        "got {summary}"
+    );
+    assert!(
+        summary.contains("OPENHUMAN_AGENT_TURN_TIMEOUT_SECS"),
+        "#1761's knob survives the move: {summary}"
+    );
+    assert_eq!(
+        elapsed,
+        Duration::from_millis(601_000),
+        "the attempt's own clock rides along, so the notice can quote it"
     );
 
     // Every other hard error keeps the plain wrapper, unchanged.
@@ -661,4 +679,208 @@ async fn a_top_level_budget_exhaustion_pauses_gracefully_and_parks_a_reissue_mar
     assert_eq!(marker.agent, "ceo");
     assert_eq!(marker.message, "Please summarize today's standup notes.");
     assert_eq!(marker.summary, pause.summary);
+}
+
+/// Issue #1680: the four limits that stop a turn short must stay
+/// distinguishable at the classifier, because each one's operator action is
+/// different. A ceiling hit in particular must never be read as the transient
+/// empty class — that one is RETRYABLE, and retrying a ten-minute failure is
+/// the twenty-minute failure #1761 refused to ship.
+#[tokio::test]
+async fn a_ceiling_hit_is_not_the_retryable_empty_class() {
+    let (agent, _deps) = scripted_agent(vec![]);
+
+    assert!(
+        matches!(
+            agent.classify_turn(Err(ceiling_error()), Duration::from_millis(601_000)),
+            AttemptOutcome::CeilingPaused { .. }
+        ),
+        "the ceiling leaf is a pause"
+    );
+    assert!(
+        matches!(
+            agent.classify_turn(
+                Err(anyhow::anyhow!("The model returned an empty response")),
+                Duration::from_secs(2),
+            ),
+            AttemptOutcome::Empty
+        ),
+        "and the transient class is untouched, so it keeps its one retry"
+    );
+    // The budget arm is checked AFTER the ceiling arm on purpose: a ceiling
+    // hit can carry provider response text, and must not be re-read as a
+    // budget pause (which would tell the operator to add credits).
+    let both = anyhow::anyhow!(
+        "model call for run 'agent_turn' exceeded its remaining wall-clock budget (56636 ms); \
+         hosted inference returned 402: You have no remaining credits to use the LLM apis."
+    );
+    assert!(
+        matches!(
+            agent.classify_turn(Err(both), Duration::from_millis(601_000)),
+            AttemptOutcome::CeilingPaused { .. }
+        ),
+        "arm order holds: the ceiling wins over a budget phrase riding in the same chain"
+    );
+}
+
+/// Issue #1680: the notice is the fourth sibling, and the one whose next move
+/// differs from all three. It must not invite `"continue"` — there is no
+/// checkpoint, so continuing spends another full ceiling reaching the same
+/// wall. `spend_halt_notice` refuses that word for the same reason.
+#[test]
+fn the_ceiling_notice_never_invites_continue() {
+    let notice = crate::harness::built_in::brain::ceiling_pause_notice(&CeilingPause {
+        agent: "product_manager".to_string(),
+        elapsed: Duration::from_millis(601_000),
+        // Ignored by the notice on purpose: it is the run surface's long copy,
+        // and the chat notice is built from `agent` and `elapsed` alone.
+        summary: "product_manager hit the per-turn wall-clock ceiling after 10m 01s. \
+                  Underlying error: exceeded its remaining wall-clock budget (56636 ms)"
+            .to_string(),
+    });
+
+    assert!(
+        notice.contains("product_manager"),
+        "names the teammate, so the duration is attributable: {notice}"
+    );
+    assert!(
+        notice.contains("10m 01s"),
+        "quotes what the turn actually spent: {notice}"
+    );
+    assert!(
+        !notice.to_ascii_lowercase().contains("continue"),
+        "there is no checkpoint to continue from: {notice}"
+    );
+    assert!(
+        !notice.to_ascii_lowercase().contains("credit"),
+        "credits are the budget-pause lever, not this one: {notice}"
+    );
+    // Same reason `wall_clock_ceiling_message` declines to: the ceiling's value
+    // is private to the vendored crate and a copy here would go stale silently.
+    assert!(
+        !notice.contains("600"),
+        "must not hardcode a ceiling it cannot read: {notice}"
+    );
+}
+
+/// Issue #1680, end to end through the retry wrapper — the behaviour change,
+/// not the classification.
+///
+/// Before this, a ceiling hit came back `Err` and took its caller down with
+/// it: a workflow run died at the node, and the folded step timeline computed
+/// just above `reply.map(..)` was dropped on the floor. It now comes back
+/// `Ok`, carrying the pause, so the caller can report what happened and carry
+/// on. Still **one attempt** — the whole reason #1761 reached for `Hard`.
+#[tokio::test]
+async fn a_ceiling_hit_returns_a_pause_instead_of_taking_the_caller_down() {
+    let (agent, _deps) = scripted_agent(vec![
+        Err(
+            "run timed out; model call for run 'agent_turn' exceeded its remaining \
+             wall-clock budget (56636 ms)"
+                .to_string()
+        );
+        4
+    ]);
+
+    let (outcome, usages) = agent.run("summarise yesterday's closed issues").await;
+    let outcome = outcome.expect("a ceiling hit is a graceful pause, not an Err");
+
+    let pause = outcome
+        .ceiling_paused
+        .as_ref()
+        .expect("the scripted body matches the wall-clock classifier");
+    assert_eq!(
+        pause.agent, agent.agent_id,
+        "the pause names whose turn it was"
+    );
+    assert!(
+        outcome.reply.contains("wall-clock ceiling"),
+        "#1761's honest copy is the reply the caller renders: {}",
+        outcome.reply
+    );
+
+    assert_eq!(
+        usages.len(),
+        1,
+        "not retryable: one ten-minute failure must never become two"
+    );
+
+    // The three siblings stay clear of it — each one's operator action differs,
+    // and a caller reads these to decide which notice to emit.
+    assert!(
+        !outcome.hit_iteration_cap,
+        "a ceiling hit is not a step-cap pause (which WOULD be resumable)"
+    );
+    assert!(
+        outcome.budget_paused.is_none(),
+        "nor a credits pause — adding money does not buy time"
+    );
+    assert!(
+        outcome.halted_for_spend.is_none(),
+        "nor a declared-cap spend halt"
+    );
+}
+
+/// Issue #1680 — CodeRabbit on PR #2554, and the most consequential of its
+/// findings: a ceiling pause must not reach the **memory writeback.**
+///
+/// `run_inner` returns `Ok` for a ceiling hit now, and that outcome's `reply`
+/// is the scrubbed `wall_clock_ceiling_message` — host-authored copy, not an
+/// answer the teammate produced. The writeback guard excluded only
+/// `budget_paused`, whose own comment gives the reason that applies here
+/// verbatim: writing it back recalls "you hit the wall-clock ceiling" as prior
+/// context in the next turn, and puts it on record as something this teammate
+/// said. Unlike the chat-bubble attribution bugs beside it, this one is durable
+/// and contaminates later turns.
+///
+/// Driven through `HarnessPool::run`, because `run_inner` is where the guard
+/// lives — `CompanyAgent::run` never reaches it.
+#[tokio::test]
+async fn a_ceiling_paused_turn_is_never_written_back_to_memory() {
+    let company = crate::test_support::per_test_company_id("acme-1680-memory");
+    let mut rec = record();
+    rec.id = company.clone();
+
+    let (_agent, mut deps) = scripted_agent(vec![
+        Err(
+            "run timed out; model call for run \'agent_turn\' exceeded its remaining \
+             wall-clock budget (56636 ms)"
+                .to_string()
+        );
+        6
+    ]);
+    let context = Arc::new(MockContext::default());
+    deps.context = context.clone();
+
+    let pool = HarnessPool::new();
+    pool.ensure(&rec, &deps).await.expect("pool ensures");
+
+    let outcome = pool
+        .run(
+            &company,
+            "ceo",
+            "summarise yesterday\'s closed issues",
+            &deps,
+            crate::runtime::delegation::ChatTarget::default(),
+        )
+        .await
+        .expect("a ceiling hit is a graceful pause, not an Err");
+    assert!(
+        outcome.ceiling_paused.is_some(),
+        "fixture precondition: the scripted body must classify as a ceiling pause"
+    );
+
+    let written: Vec<String> = context
+        .chunks
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, chunk)| chunk.body.clone())
+        .collect();
+    assert!(
+        !written
+            .iter()
+            .any(|text| text.contains("wall-clock ceiling")),
+        "the ceiling diagnosis must never be stored as this teammate\'s answer: {written:?}"
+    );
 }

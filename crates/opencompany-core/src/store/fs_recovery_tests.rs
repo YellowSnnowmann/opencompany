@@ -212,11 +212,11 @@ async fn cancelling_a_save_during_the_first_commit_does_not_orphan_the_second() 
 
     // The update path commits company.toml first — park that rename in
     // flight, then abort the save while it is held there.
-    let release = stall_probe::arm_commit(&bundle.company_toml());
+    let gate = stall_probe::arm_commit(&bundle.company_toml());
     let after = record("After", "paused");
     let reader = FsCompanyStore::new(&root);
     let handle = tokio::spawn(async move { store.save(&after).await });
-    release.wait_blocked().await;
+    gate.wait().await;
     handle.abort();
     let joined = handle.await;
     assert!(
@@ -224,7 +224,7 @@ async fn cancelling_a_save_during_the_first_commit_does_not_orphan_the_second() 
         "the save task must actually have been cancelled for this test \
              to mean anything, got {joined:?}"
     );
-    release.send(()).expect("stall gate still open");
+    gate.release().expect("stall gate still open");
 
     // The detached commit unit keeps running after cancellation — give
     // it a moment to finish landing (or fully bailing on) both files.
@@ -328,11 +328,11 @@ async fn abort_then_concurrent_update_does_not_race_the_orphaned_commit() {
     // flight, then abort its caller while it is held there — the same
     // setup as the sibling test above, but this time a second, live
     // caller shows up while the first is still orphaned mid-commit.
-    let release = stall_probe::arm_commit(&bundle.company_toml());
+    let gate = stall_probe::arm_commit(&bundle.company_toml());
     let stale = record("Stale", "paused");
     let stale_store = FsCompanyStore::new(&root);
     let stale_handle = tokio::spawn(async move { stale_store.save(&stale).await });
-    release.wait_blocked().await;
+    gate.wait().await;
     stale_handle.abort();
     let joined = stale_handle.await;
     assert!(
@@ -359,7 +359,7 @@ async fn abort_then_concurrent_update_does_not_race_the_orphaned_commit() {
 
     // Release the stale commit and let it settle, then the fresh save
     // must be free to finish.
-    release.send(()).expect("stall gate still open");
+    gate.release().expect("stall gate still open");
     let bundle_dir = bundle.company_toml().parent().unwrap().to_path_buf();
     let settled = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
@@ -474,11 +474,11 @@ async fn a_racing_load_does_not_lose_an_orphaned_commits_update() {
     // Park the stale call's first commit (company.toml, update path) in
     // flight, exactly as the sibling test above, then abort its caller
     // while it is held there.
-    let release = stall_probe::arm_commit(&bundle.company_toml());
+    let gate = stall_probe::arm_commit(&bundle.company_toml());
     let stale = record("Before", "paused");
     let stale_store = FsCompanyStore::new(&root);
     let stale_handle = tokio::spawn(async move { stale_store.save(&stale).await });
-    release.wait_blocked().await;
+    gate.wait().await;
     stale_handle.abort();
     let joined = stale_handle.await;
     assert!(
@@ -517,7 +517,7 @@ async fn a_racing_load_does_not_lose_an_orphaned_commits_update() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
     // Release the stale commit and let it land.
-    release.send(()).expect("stall gate still open");
+    gate.release().expect("stall gate still open");
     let bundle_dir = bundle.company_toml().parent().unwrap().to_path_buf();
     let settled = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {

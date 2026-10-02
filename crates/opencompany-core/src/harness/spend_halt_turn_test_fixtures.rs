@@ -200,8 +200,27 @@ impl CycleHost for NoopHost {
     }
 }
 
+thread_local! {
+    // One id per test function, not the literal `"acme"` every other test
+    // file in this crate also uses. A chat turn with no addressed desk
+    // shares its openhuman session by company+agent
+    // (`session_key::openhuman_session_key`), so two tests both naming
+    // `"acme"`/`"ceo"` dispatch onto the *same* session on the one
+    // process-wide OpenHuman runtime. Run concurrently — the ordinary case
+    // under `cargo test`'s default parallelism — one test's tool-call
+    // history lands in the session the other reads, and a turn that made
+    // three calls can see the iteration count of whichever turn shared its
+    // session, including one that ran to the real cap. That is what made
+    // `a_turn_inside_its_budget_says_nothing_extra` CI-flaky: passing alone,
+    // failing beside the rest of the suite. `#[test]`/`#[tokio::test]`
+    // each get their own OS thread, so a thread-local generated on first use
+    // is stable for every call within one test and distinct from every
+    // other test's, in this file and every other.
+    static TEST_COMPANY_ID: CompanyId = CompanyId::generate();
+}
+
 pub(super) fn company() -> CompanyId {
-    CompanyId::new("acme")
+    TEST_COMPANY_ID.with(|id| id.clone())
 }
 
 /// A one-agent company on `full` policy, so an ordinary turn is not parked for

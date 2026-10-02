@@ -18,6 +18,7 @@ pub(super) use crate::store::{FsCompanyStore, FsContextStore, FsOps};
 /// about dispatch/lifecycle plumbing rather than the card's own content.
 pub(super) fn card(id: &str, assignee: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Ship the thing"),
         note: None,
