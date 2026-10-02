@@ -46,6 +46,7 @@ pub(super) fn handler_seq() -> EventSeq {
 
 pub(super) fn handler_card_in(title: String, column: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: "t-handler".to_string(),
         title: TaskTitle::authored(&title),
         note: None,
@@ -107,6 +108,7 @@ pub(super) fn authored(workflow_id: &str) -> TaskOutputWorkflow {
 
 pub(super) fn card_in(id: &str, column: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Draft the launch plan"),
         note: None,

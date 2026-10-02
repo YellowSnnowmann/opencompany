@@ -114,14 +114,15 @@ pub fn granted_secrets(decls: &[McpServerDecl], grants: &[String]) -> Vec<String
         .collect()
 }
 
-/// The per-tool policies for the servers an agent's grants reach, narrowed the
-/// same way [`granted_secrets`] narrows credential substrings so the refusal and
-/// the toolbelt cannot disagree about which servers an agent can name.
+/// The per-tool policies for the servers an agent's grants reach, resolved for
+/// that agent.
 pub fn granted_policies(
     decls: &[McpServerDecl],
+    agent: &str,
     grants: &[String],
 ) -> crate::company::mcp_policy::McpToolPolicySet {
     crate::company::mcp_policy::McpToolPolicySet::from_declarations(
+        agent,
         decls
             .iter()
             .filter(|decl| grants_cover_server(grants, &decl.name)),
@@ -204,6 +205,7 @@ pub fn capability_brief(declared: bool, registry: bool) -> String {
 /// band-aid here; it is called out rather than silently reintroduced.
 pub fn embed_servers_for_agent(
     decls: &[McpServerDecl],
+    agent: &str,
     grants: &[String],
 ) -> Vec<openhuman_embed::McpServer> {
     decls
@@ -214,10 +216,14 @@ pub fn embed_servers_for_agent(
             // attachment is the path a company agent actually takes, and the
             // deny list is what the transport filters on. Deny outranks allow
             // there, so a server with an allow list cannot re-admit one.
+            //
+            // Resolved for `agent`, so one teammate's refusal reaches only that
+            // teammate's attachment.
             let mut denied = decl.disallowed_tools.clone();
-            for tool in crate::company::mcp_policy::blocked_tool_names(
+            for tool in crate::company::mcp_policy::blocked_tool_names_for_agent(
                 &decl.tool_policies,
                 &decl.tool_inventory,
+                agent,
             ) {
                 if !denied.contains(&tool) {
                     denied.push(tool);

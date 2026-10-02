@@ -57,16 +57,14 @@ fn a_seat_and_a_chat_agent_carry_the_same_mcp_read_set() {
     fx.deps.mcp_servers = divergent_servers();
     let company = record();
     let agent = engineer(&company);
-    let grants = grants_for_policy(&company, &company.manifest.tools.allow, &agent);
 
-    let seat = seat_policy(&company, &fx.deps, &agent, &grants);
+    let seat = seat_policy(&company, &fx.deps, &agent);
     let chat = agent_policy_for(
         &company,
         &fx.deps,
         &agent,
         &company.effective_policy(),
         company.effective_budget(&agent.id),
-        &grants,
     );
 
     assert_eq!(seat.mcp_reads(), chat.mcp_reads());
@@ -79,11 +77,8 @@ fn the_read_set_follows_the_stored_policy_over_the_declaration() {
     fx.deps.mcp_servers = divergent_servers();
     let company = record();
     let agent = engineer(&company);
-    let grants = grants_for_policy(&company, &company.manifest.tools.allow, &agent);
 
-    let reads = seat_policy(&company, &fx.deps, &agent, &grants)
-        .mcp_reads()
-        .clone();
+    let reads = seat_policy(&company, &fx.deps, &agent).mcp_reads().clone();
 
     assert!(
         !reads.contains("notion", "search_pages"),

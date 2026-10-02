@@ -37,6 +37,7 @@ pub(super) fn ok_outcome() -> crate::harness::TurnOutcome {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }
 }
 
@@ -235,6 +236,7 @@ impl RunTurn for CappedWorkflowTurn {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 }
@@ -379,6 +381,7 @@ impl RunTurn for CappedVerifiedWorkflowTurn {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 }

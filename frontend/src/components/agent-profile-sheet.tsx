@@ -10,6 +10,7 @@ import { Pencil, Sparkles, Users, Wrench } from "lucide-react";
 
 import type { OpenCompanyClient } from "@/api/client";
 import { ApiError, type AgentDetailDto } from "@/api/types";
+import { AgentFace } from "@/components/agent-face";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -227,13 +228,15 @@ function ProfileBody({ agent }: { agent: AgentDetailDto }) {
     <>
       <SheetHeader className="gap-3 pr-10">
         <div className="flex items-start gap-3">
-          <TeammateAvatar
-            name={profile.display}
-            tone={profile.tone}
-            avatar={profile.avatar}
-            className="size-12 rounded-xl text-sm"
-            data-testid="agent-profile-avatar"
-          />
+          <AgentFace agentId={agent.id} size="md" surface="background" name={profile.display}>
+            <TeammateAvatar
+              name={profile.display}
+              tone={profile.tone}
+              avatar={profile.avatar}
+              className="size-12 rounded-xl text-sm"
+              data-testid="agent-profile-avatar"
+            />
+          </AgentFace>
           <div className="min-w-0 flex-1">
             <SheetTitle className="truncate text-lg" data-testid="agent-profile-name">
               {profile.display}

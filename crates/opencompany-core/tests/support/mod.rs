@@ -6,4 +6,5 @@
 
 #![allow(dead_code)]
 
+pub mod room;
 pub mod script_model;

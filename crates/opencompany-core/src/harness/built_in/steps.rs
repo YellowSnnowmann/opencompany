@@ -567,10 +567,27 @@ impl StepTrace {
     }
 }
 
+/// What [`stream_event_from`] remembers between the events of one turn, so a
+/// burst of deltas coalesces into one frame instead of hundreds.
+#[derive(Debug, Default)]
+pub(crate) struct LiveRunState {
+    /// A run of thinking deltas is already open: the next one emits nothing.
+    pub(crate) thinking_open: bool,
+    /// A run of reply text is already open: the next delta emits nothing. A
+    /// tool call or a thinking burst closes it, so text after a tool round
+    /// announces itself again (once per run, like `thinking`).
+    pub(crate) replying_open: bool,
+}
+
 /// Map one live [`AgentProgress`] event to a scrubbed [`TurnStreamEvent`] for
 /// the transient [`turn_stream`](crate::turn_stream) bus, or `None` for events
-/// with no operator-facing live frame (text/thinking/args deltas, iteration and
-/// cost updates, sub-agent lifecycle, turn markers).
+/// with no operator-facing live frame (thinking/args deltas after the first,
+/// iteration and cost updates, sub-agent lifecycle, turn markers).
+///
+/// The first text delta of a run emits a `replying` frame: it carries no text
+/// (nothing on this bus does) and adds no step, only tells the console this
+/// agent has started writing its reply so it can show "typing" instead of
+/// "thinking" (see [`fold_steps`], which is unchanged and folds no step for it).
 ///
 /// This is the live counterpart of [`fold_steps`] and shares its exact
 /// scrubbing helpers ([`label_for`], [`enrich_detail`], [`error_detail`]), so
@@ -581,7 +598,7 @@ impl StepTrace {
 pub(crate) fn stream_event_from(
     event: &AgentProgress,
     seq: u64,
-    thinking_open: &mut bool,
+    state: &mut LiveRunState,
 ) -> Option<TurnStreamEvent> {
     match event {
         AgentProgress::ToolCallStarted {
@@ -590,7 +607,8 @@ pub(crate) fn stream_event_from(
             display_label,
             ..
         } => {
-            *thinking_open = false;
+            state.thinking_open = false;
+            state.replying_open = false;
             Some(TurnStreamEvent {
                 kind: "tool_call",
                 seq,
@@ -610,7 +628,8 @@ pub(crate) fn stream_event_from(
             failure,
             ..
         } => {
-            *thinking_open = false;
+            state.thinking_open = false;
+            state.replying_open = false;
             let done = complete(
                 tool_name,
                 *success,
@@ -640,8 +659,9 @@ pub(crate) fn stream_event_from(
         // fall through to the catch-all and emit nothing, so the live timeline
         // shows the same thinking rows the final folded one does (they were
         // otherwise missing live — the count jumped up when the reply landed).
-        AgentProgress::ThinkingDelta { .. } if !*thinking_open => {
-            *thinking_open = true;
+        AgentProgress::ThinkingDelta { .. } if !state.thinking_open => {
+            state.thinking_open = true;
+            state.replying_open = false;
             Some(TurnStreamEvent {
                 kind: "thinking",
                 seq,
@@ -651,10 +671,21 @@ pub(crate) fn stream_event_from(
             })
         }
         // Visible assistant text closes a thinking run (the reply is the bubble
-        // body), matching `fold_steps`; it adds no step of its own.
+        // body), matching `fold_steps`; it adds no step of its own. The first
+        // delta of a run does emit a `replying` frame, so the console can tell
+        // "writing the answer" from "still thinking".
         AgentProgress::TextDelta { .. } => {
-            *thinking_open = false;
-            None
+            state.thinking_open = false;
+            if state.replying_open {
+                None
+            } else {
+                state.replying_open = true;
+                Some(TurnStreamEvent {
+                    kind: "replying",
+                    seq,
+                    ..TurnStreamEvent::default()
+                })
+            }
         }
         _ => None,
     }

@@ -554,6 +554,7 @@ impl crate::ports::journal::JournalStore for FailGrantedMintStore {
 #[test]
 fn a_card_has_settled_only_once_its_run_stopped() {
     let card = |column: &str, bounced: Option<&str>| TaskRecord {
+        opened_by: None,
         id: "t-1".to_string(),
         title: TaskTitle::authored("Ship the thing"),
         note: None,
@@ -608,6 +609,7 @@ fn a_card_has_settled_only_once_its_run_stopped() {
 /// A card that has settled, ready for a test to point at a conversation.
 pub(super) fn settled_card(id: &str, title: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored(title),
         note: None,

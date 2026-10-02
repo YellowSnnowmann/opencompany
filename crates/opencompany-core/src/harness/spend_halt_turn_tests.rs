@@ -419,3 +419,42 @@ fn the_notice_quotes_the_spend_the_cap_and_the_teammate() {
         "a spend halt is not resumable by asking again: {notice}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Test isolation
+// ---------------------------------------------------------------------------
+
+/// Two tests never share a company, or they never share an openhuman
+/// session either.
+///
+/// `a_turn_inside_its_budget_says_nothing_extra` is a live-turn test: its
+/// `chat()` message names no desk, so its session id
+/// (`session_key::openhuman_session_key`) is `{company}:ceo`, unaddressed and
+/// therefore *not* isolated (`CompanyAgent::isolated_session`) — the same
+/// session a second call for the same company/agent would resume, by design,
+/// so a follow-up question keeps its context. With every fixture in this
+/// crate naming the same literal `"acme"`, two unrelated tests both hit that
+/// same session on the one process-wide OpenHuman runtime
+/// (`harness::openhuman_runtime::global`); run concurrently — the ordinary
+/// case under `cargo test`'s default parallelism — one turn's tool-call
+/// history lands in the session another reads back, and a turn that made
+/// three calls can read the iteration count of whichever turn shared its
+/// session, including one that ran to the real cap. That is what made the
+/// turn test above CI-flaky: passing alone, failing beside the rest of the
+/// suite (observed on #2502's CI run and its rerun, and on #2516).
+///
+/// `company()` fixes it with a company id generated once per test thread
+/// rather than the shared literal, so no two tests' sessions can collide.
+/// Proven here by calling it from two different threads — `#[test]` and
+/// `#[tokio::test]` (default flavor) each run on their own OS thread, so this
+/// is the same shape two concurrently-running tests are in.
+#[test]
+fn two_test_threads_never_share_a_company() {
+    let here = company();
+    let elsewhere = std::thread::spawn(company).join().expect("thread joins");
+    assert_ne!(
+        here, elsewhere,
+        "two test threads shared a company id, so their openhuman sessions \
+         (`{{company}}:ceo`) collide too"
+    );
+}

@@ -267,17 +267,37 @@ pub fn jev_router(
     env: &dyn EnvSource,
     key: Option<&str>,
 ) -> Result<Option<JevRouter<TinyHumansSystemOne>>> {
-    let url = env
-        .get(JEV_URL_ENV)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_JEV_URL.to_string());
     let credential = match key.map(str::trim).filter(|key| !key.is_empty()) {
         Some(key) => Credential::from_value(key),
         None => crate::harness::built_in::provider::hosted_endpoint_from_env_at(env, None)
             .map(|(credential, _url)| credential)
             .unwrap_or_default(),
     };
+    jev_router_from(env, credential)
+}
+
+/// [`jev_router`] over a credential the caller has already resolved.
+///
+/// Exists for the company's own account key, which resolves asynchronously and
+/// arrives as a [`Credential::Company`]. Handing it through `jev_router`'s
+/// `key: Option<&str>` would flatten it to [`Credential::Value`], and the
+/// console reads a credential's own variant to say *whose* identity a brokered
+/// call presents -- a company key reported as `static` would be wrong about the
+/// one thing that distinction exists to answer.
+///
+/// # Errors
+///
+/// As [`jev_router`]: a URL the credential may not cross, or an HTTP client
+/// that will not build.
+pub fn jev_router_from(
+    env: &dyn EnvSource,
+    credential: Credential,
+) -> Result<Option<JevRouter<TinyHumansSystemOne>>> {
+    let url = env
+        .get(JEV_URL_ENV)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_JEV_URL.to_string());
     if !credential.configured() {
         return Ok(None);
     }
@@ -319,6 +339,33 @@ pub fn jev_transport(
             .map(|(credential, _url)| credential)
             .unwrap_or_default(),
     };
+    if !credential.configured() {
+        return Ok(None);
+    }
+    Ok(Some(TinyHumansSystemOne::new(url, credential)?))
+}
+
+/// [`jev_transport`] for a credential already resolved, keeping whatever it is.
+///
+/// The counterpart to [`jev_router_from`], and it exists for the same reason: a
+/// `Credential::Company` flattened to a raw value loses the one distinction the
+/// type is there to carry. The closing decision must reach System One under the
+/// same identity the routing call does, or a company routes as itself and
+/// concludes as the host.
+///
+/// # Errors
+///
+/// As [`jev_transport`]: a URL the credential may not cross, or an HTTP client
+/// that will not build.
+pub fn jev_transport_from(
+    env: &dyn EnvSource,
+    credential: Credential,
+) -> Result<Option<TinyHumansSystemOne>> {
+    let url = env
+        .get(JEV_URL_ENV)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_JEV_URL.to_string());
     if !credential.configured() {
         return Ok(None);
     }

@@ -70,6 +70,7 @@ async fn seed_bounced_card(state: &AppState, id: &str) {
         .upsert(
             &company,
             &crate::ports::tasks::TaskRecord {
+                opened_by: None,
                 id: id.to_string(),
                 title: crate::ports::tasks::TaskTitle::authored("Draft the launch note"),
                 note: None,
