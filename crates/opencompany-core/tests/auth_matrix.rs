@@ -806,7 +806,10 @@ const OPS_SCOPED_ROUTES: &[Route] = &[
     r!(Post, "/setup/roster", Scoped, Ordinary, ""),
     r!(Post, "/skills/{slug}/install", Admin, Authority, ""),
     r!(Post, "/skills/{slug}/uninstall", Admin, Destructive, ""),
+    r!(Post, "/skills/{slug}/update", Admin, Authority, ""),
     r!(Get, "/skills/registry", Scoped, Ordinary, ""),
+    r!(Get, "/skills/{slug}/doc", Scoped, Ordinary, ""),
+    r!(Put, "/skills/{slug}/doc", Admin, Authority, ""),
     r!(Put, "/skills/{slug}", Admin, Authority, ""),
     r!(Post, "/skills", Admin, Authority, ""),
     r!(Post, "/skills/upload", Admin, Authority, ""),
@@ -880,6 +883,13 @@ const OPS_SCOPED_ROUTES: &[Route] = &[
     r!(Post, "/team/draft", Scoped, Ordinary, ""),
     r!(Post, "/team/design", Scoped, Ordinary, ""),
     r!(Post, "/team/{agent_id}/draft", Scoped, Ordinary, ""),
+    r!(
+        Get,
+        "/team/{agent_id}/mcp/permissions",
+        Scoped,
+        Ordinary,
+        "Members may read which MCP servers and tools a teammate reaches."
+    ),
     r!(
         Put,
         "/team/{agent_id}/inbox",
@@ -1798,24 +1808,24 @@ async fn company_status_temp_password_boundary_waits_for_an_assigned_branch() {
 
 #[test]
 fn table_counts_and_intentional_widenings_are_explicit() {
-    assert_eq!(OPS_SCOPED_ROUTES.len(), 218);
+    assert_eq!(OPS_SCOPED_ROUTES.len(), 222);
     assert_eq!(
         OPS_SCOPED_ROUTES
             .iter()
             .map(|route| route.path)
             .collect::<BTreeSet<_>>()
             .len(),
-        169,
+        172,
     );
     assert_eq!(OPS_EXACT_ROUTES.len(), 3);
     assert_eq!(
         OPS_SCOPED_ROUTES.len() * 2,
-        436,
+        444,
         "dual-address ops route-method rows",
     );
     assert_eq!(
         OPS_SCOPED_ROUTES.len() * 2 + OPS_EXACT_ROUTES.len(),
-        439,
+        447,
         "complete ops route-method rows",
     );
     assert_eq!(EXTERNAL_AUTHORITY_ROUTES.len(), 4);
@@ -1826,7 +1836,7 @@ fn table_counts_and_intentional_widenings_are_explicit() {
         all_routes()
             .map(|route| route_patterns(route).len())
             .sum::<usize>(),
-        489,
+        497,
         "concrete route-method rows",
     );
     assert_eq!(
@@ -1834,10 +1844,10 @@ fn table_counts_and_intentional_widenings_are_explicit() {
             .flat_map(route_patterns)
             .collect::<BTreeSet<_>>()
             .len(),
-        384,
+        390,
         "concrete paths",
     );
-    assert_eq!(render_snapshot().lines().count(), 3_423);
+    assert_eq!(render_snapshot().lines().count(), 3_479);
     assert_eq!(
         all_routes()
             .map(|route| {
@@ -1856,8 +1866,8 @@ fn table_counts_and_intentional_widenings_are_explicit() {
             .iter()
             .filter(|route| route.access == Access::Admin)
             .count(),
-        85,
-        "70 signature-admin, seven body-admin, and eight aspirational authority rows",
+        87,
+        "72 signature-admin, seven body-admin, and eight aspirational authority rows",
     );
     assert_eq!(
         OPS_SCOPED_ROUTES

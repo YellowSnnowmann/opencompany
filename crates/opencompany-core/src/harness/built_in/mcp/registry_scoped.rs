@@ -35,6 +35,7 @@ use crate::runtime::tools::grants_cover_registry_server;
 /// forwarded so the decorated tool is indistinguishable from the one it wraps.
 pub struct OcMcpRegistryScopedTool {
     inner: Box<dyn Tool>,
+    agent: String,
     grants: Vec<String>,
     company: CompanyId,
     secrets: Option<Arc<dyn SecretStore>>,
@@ -42,18 +43,20 @@ pub struct OcMcpRegistryScopedTool {
 
 impl OcMcpRegistryScopedTool {
     /// Wraps `inner`, gating it on the agent's *effective* grants and on the
-    /// named install's stored tool policy.
+    /// named install's stored tool policy as it stands for that agent.
     ///
     /// Without a secret store the policy cannot be read and the grant is the
     /// whole gate.
     pub fn new(
         inner: Box<dyn Tool>,
+        agent: String,
         grants: Vec<String>,
         company: CompanyId,
         secrets: Option<Arc<dyn SecretStore>>,
     ) -> Self {
         Self {
             inner,
+            agent,
             grants,
             company,
             secrets,
@@ -120,6 +123,9 @@ impl OcMcpRegistryScopedTool {
     /// it, so a store that will not answer cannot manufacture a refusal. An
     /// install has no `read_only_tools` — that is a manifest affordance of a
     /// declared server — so the stored document is the whole policy.
+    ///
+    /// Resolved for the agent this decorator was wired for. The refusal text
+    /// names no teammate.
     async fn blocked(&self, server_id: &str, tool: &str) -> bool {
         let Some(secrets) = self.secrets.as_deref() else {
             return false;
@@ -137,7 +143,7 @@ impl OcMcpRegistryScopedTool {
             &policy::registry_tool_inventory_key(server_id),
         )
         .await;
-        policy::blocks_tool(&policies, &inventory, tool)
+        policy::blocks_tool_for_agent(&policies, &inventory, &self.agent, tool)
     }
 }
 

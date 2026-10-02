@@ -56,13 +56,34 @@ export interface StableList<T> {
   containerProps: {
     onPointerEnter: () => void;
     onPointerLeave: () => void;
+    onPointerDownCapture: () => void;
+    onKeyDownCapture: () => void;
     onFocusCapture: () => void;
     onBlurCapture: (event: FocusEvent) => void;
     ref: (node: HTMLElement | null) => void;
   };
 }
 
-export function useStableList<T>(live: T[]): StableList<T> {
+/** Options for {@link useStableList}. */
+export interface StableListOptions {
+  /**
+   * Whether focus a pointer press put inside the container holds the list,
+   * as keyboard focus does. Default `true`, which is what the Approvals queue
+   * needs: a clicked decide button keeps focus while its request is in flight.
+   *
+   * The chat rail passes `false`. Clicking a DM row focuses its button and the
+   * button keeps focus after the pointer leaves, so with this on the rail stayed
+   * frozen, its order stale, until focus happened to move elsewhere. There the
+   * hover hold already covers the pointer, and only keyboard focus (the
+   * `:focus-visible` kind) should hold on its own.
+   */
+  holdPointerFocus?: boolean;
+}
+
+export function useStableList<T>(
+  live: T[],
+  { holdPointerFocus = true }: StableListOptions = {},
+): StableList<T> {
   // The held snapshot, or `null` when the list is flowing live. Kept as the
   // actual rows rather than a set of ids so a card removed by the host stays on
   // screen — in place — until the operator moves away, instead of vanishing and
@@ -85,6 +106,10 @@ export function useStableList<T>(live: T[]): StableList<T> {
   // Two independent reasons to be frozen; the list thaws only when BOTH clear.
   const pointerInside = useRef(false);
   const focusInside = useRef(false);
+  // Focus inside came from a pointer press, not the keyboard. Only read when
+  // `holdPointerFocus` is off. Set on a press, cleared by a key press inside or
+  // by focus leaving, so tabbing back in later holds again.
+  const pointerFocus = useRef(false);
 
   // The container node, so the thaw check can ask the DOM directly rather
   // than trust `focusInside` alone — see `focusInsideNow`.
@@ -126,12 +151,16 @@ export function useStableList<T>(live: T[]): StableList<T> {
     const active = document.activeElement;
     if (active instanceof HTMLElement && active.matches(":disabled"))
       return false;
+    // Pointer-put focus does not hold when the caller says so. Tracked with
+    // the press itself rather than `:focus-visible`, whose heuristics differ
+    // between engines (jsdom's disagrees with Chromium's after a key press).
+    if (!holdPointerFocus && pointerFocus.current) return false;
     return (
       active !== null &&
       containerRef.current !== null &&
       containerRef.current.contains(active)
     );
-  }, []);
+  }, [holdPointerFocus]);
 
   const thawIfIdle = useCallback(() => {
     if (pointerInside.current) return;
@@ -152,11 +181,27 @@ export function useStableList<T>(live: T[]): StableList<T> {
     thawIfIdle();
   }, [thawIfIdle]);
 
-  const onFocusCapture = useCallback(() => {
+  const onPointerDownCapture = useCallback(() => {
+    pointerFocus.current = true;
+  }, []);
+
+  // A key pressed inside turns focus a click left behind into keyboard focus,
+  // so the hold starts here rather than on the next focus event: a key that
+  // does not move focus (Shift, Enter on the row) fires none, and a message
+  // arriving before one would otherwise re-sort the list under the keyboard.
+  const onKeyDownCapture = useCallback(() => {
+    pointerFocus.current = false;
     focusInside.current = true;
     setHeld(true);
     freeze();
   }, [freeze]);
+
+  const onFocusCapture = useCallback(() => {
+    if (!holdPointerFocus && pointerFocus.current) return;
+    focusInside.current = true;
+    setHeld(true);
+    freeze();
+  }, [freeze, holdPointerFocus]);
 
   const onBlurCapture = useCallback(
     (event: FocusEvent) => {
@@ -165,6 +210,7 @@ export function useStableList<T>(live: T[]): StableList<T> {
       if (event.currentTarget.contains(event.relatedTarget as Node | null))
         return;
       focusInside.current = false;
+      pointerFocus.current = false;
       thawIfIdle();
     },
     [thawIfIdle],
@@ -194,6 +240,8 @@ export function useStableList<T>(live: T[]): StableList<T> {
     containerProps: {
       onPointerEnter,
       onPointerLeave,
+      onPointerDownCapture,
+      onKeyDownCapture,
       onFocusCapture,
       onBlurCapture,
       ref: setContainerRef,

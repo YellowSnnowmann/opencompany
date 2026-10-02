@@ -123,6 +123,11 @@ pub struct AcpRunTurn {
 struct LiveState {
     seq: u64,
     thinking_open: bool,
+    /// Reply text is already streaming, so the next `agent_message_chunk`
+    /// publishes nothing. A tool call or a thought closes it, so text after a
+    /// tool round emits a fresh `replying` frame (the built-in harness does the
+    /// same; see `steps::LiveRunState`).
+    replying_open: bool,
     /// The tool calls this turn has published a `running` row for.
     ///
     /// [`fold`] drops an update for a call it never saw start ("a step with no
@@ -171,12 +176,13 @@ fn count_of(count: usize, noun: &str) -> String {
 ///
 /// Assistant text adds no row here for the same reason it adds no step in
 /// [`fold`]: the reply *is* the bubble body. Nothing on this bus carries the
-/// text itself.
+/// text itself; the first chunk of a run only publishes a `replying` frame.
 fn live_frame_from(update: &AcpUpdate, state: &mut LiveState) -> Option<TurnStreamEvent> {
     let seq = state.seq;
     match update {
         AcpUpdate::ToolCall { id, title } => {
             state.thinking_open = false;
+            state.replying_open = false;
             state.started.insert(id.clone());
             Some(TurnStreamEvent {
                 kind: "tool_call",
@@ -194,6 +200,7 @@ fn live_frame_from(update: &AcpUpdate, state: &mut LiveState) -> Option<TurnStre
             // row would leave the live view opening a second `Thinking` row
             // where the folded timeline opens none.
             state.thinking_open = false;
+            state.replying_open = false;
             let status = match status.as_str() {
                 "completed" => TurnStepStatus::Ok,
                 "failed" => TurnStepStatus::Error,
@@ -216,6 +223,7 @@ fn live_frame_from(update: &AcpUpdate, state: &mut LiveState) -> Option<TurnStre
         }
         AcpUpdate::ThoughtChunk if !state.thinking_open => {
             state.thinking_open = true;
+            state.replying_open = false;
             Some(TurnStreamEvent {
                 kind: "thinking",
                 seq,
@@ -225,9 +233,21 @@ fn live_frame_from(update: &AcpUpdate, state: &mut LiveState) -> Option<TurnStre
             })
         }
         AcpUpdate::ThoughtChunk => None,
+        // The first chunk of a run publishes a text-free `replying` frame, so
+        // the console can tell "writing the answer" from "still thinking". It
+        // adds no step: `fold` is unchanged.
         AcpUpdate::MessageChunk(_) => {
             state.thinking_open = false;
-            None
+            if state.replying_open {
+                None
+            } else {
+                state.replying_open = true;
+                Some(TurnStreamEvent {
+                    kind: "replying",
+                    seq,
+                    ..TurnStreamEvent::default()
+                })
+            }
         }
     }
 }
@@ -326,7 +346,7 @@ impl AcpRunTurn {
     /// reason it is not closed here.
     fn session_key(&self, company: &CompanyId, agent_id: &str, chat_id: Option<&str>) -> String {
         match chat_id {
-            Some(chat) if chat != crate::ports::general_channel::GENERAL_CHANNEL_ID => {
+            Some(chat) if !crate::ports::general_channel::is_general_spelling(chat) => {
                 // …and a named desk's two spellings likewise. The key was
                 // `(company, agent)` before #1890 H, where no selector could
                 // disagree with itself; adding the chat introduced the
@@ -674,6 +694,7 @@ pub fn fold(turn: AcpTurn) -> TurnOutcome {
         // The external process's own budget handling (if any) is opaque to
         // this side.
         budget_paused: None,
+        ceiling_paused: None,
     }
 }
 

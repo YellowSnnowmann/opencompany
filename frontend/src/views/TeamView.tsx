@@ -15,6 +15,7 @@ import type { OpenCompanyClient } from "@/api/client";
 import { listTasks } from "@/api/tasks";
 import { ApiError, type TeamMemberDto } from "@/api/types";
 import { PageHeader } from "@/components/page-header";
+import { AgentFace } from "@/components/agent-face";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -799,7 +800,9 @@ function MemberCard({
             44px, comfortably above the ~24px floor under which a mascot is a
             smudge and the bare tone tile is the honest fallback.
           */}
-          <TeammateAvatar name={member.name} tone={member.tone} avatar={member.avatar} className="size-11 rounded-xl text-sm" />
+          <AgentFace agentId={member.id} size="md" surface="card" name={member.name}>
+            <TeammateAvatar name={member.name} tone={member.tone} avatar={member.avatar} className="size-11 rounded-xl text-sm" />
+          </AgentFace>
           {onOpen ? (
             <button
               type="button"

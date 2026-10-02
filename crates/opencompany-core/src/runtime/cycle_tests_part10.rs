@@ -180,6 +180,7 @@ async fn handed_task_awareness_surfaces_open_cards_on_a_direct_query() {
         .upsert(
             rt.id(),
             &TaskRecord {
+                opened_by: None,
                 id: "t1".into(),
                 title: TaskTitle::authored("Ship invoicing"),
                 note: Some("build the importer".into()),
@@ -260,6 +261,7 @@ async fn awareness_skips_done_cards() {
         .upsert(
             rt.id(),
             &TaskRecord {
+                opened_by: None,
                 id: "t1".into(),
                 title: TaskTitle::authored("Already finished"),
                 note: None,

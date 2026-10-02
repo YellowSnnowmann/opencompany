@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ChevronRight,
   CircleDot,
@@ -11,10 +11,15 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { AgentFace } from "@/components/agent-face";
+import { agentPresenceLabel } from "@/components/agent-status-dot";
 import { TeammateAvatar } from "@/components/teammate-avatar";
+import { useFlipList } from "@/hooks/use-flip-list";
+import { useStableList } from "@/hooks/use-stable-list";
 import { cn } from "@/lib/utils";
+import { useAgentPresence } from "@/room/store";
 import { NewMessageDialog } from "./NewMessageDialog";
-import { channelSubtitle, dmFace, type Channel, type ChannelSection } from "./model";
+import { channelSubtitle, dmFace, dmThreadId, type Channel, type ChannelSection } from "./model";
 
 /**
  * What an unread badge actually claims (issue #364).
@@ -67,6 +72,12 @@ interface Props {
    * `routeOpen` straight through.
    */
   currentPage?: boolean;
+  /**
+   * Whether the Direct messages list may slide rows to their new slot when a
+   * message re-sorts it. `RoomView` passes `false` until every channel's
+   * history has landed, so a cold load does not play a storm of moves.
+   */
+  animateReorder?: boolean;
 }
 
 /**
@@ -93,6 +104,7 @@ export function ChannelRail({
   onStartDirectMessage,
   className,
   currentPage = true,
+  animateReorder = false,
 }: Props) {
   // Resolved once and threaded down, so the three row shapes cannot come to
   // disagree about what marking the open channel means.
@@ -127,9 +139,35 @@ export function ChannelRail({
     }
   };
 
+  // The Direct messages order is `latestMessageAt` descending, so a message
+  // moves its row to the top. A row sliding under the pointer can land a click
+  // on the wrong DM (the same hazard as #1414), so the order is held while the
+  // pointer or keyboard focus is anywhere in the rail and reconciles on
+  // release. Focus a click left behind does not hold (`holdPointerFocus`): the
+  // clicked row keeps focus after the pointer leaves, and holding on it froze
+  // the order until focus happened to move. Only the ORDER is held, as ids:
+  // row content (name, unread) still reads live.
+  const dmSection = sections.find((s) => s.id === "dms");
+  const liveDmIds = useMemo(() => dmSection?.channels.map((c) => c.id) ?? [], [dmSection]);
+  const stable = useStableList(liveDmIds, { holdPointerFocus: false });
+  const shownSections = useMemo(() => {
+    if (!dmSection) return sections;
+    const byId = new Map(dmSection.channels.map((c) => [c.id, c]));
+    const held = stable.items.flatMap((id) => byId.get(id) ?? []);
+    // A DM that appeared mid-hold goes last rather than shifting the rows the
+    // pointer is aiming at; the release puts it in its real slot.
+    const late = dmSection.channels.filter((c) => !stable.items.includes(c.id));
+    return sections.map((s) => (s === dmSection ? { ...s, channels: [...held, ...late] } : s));
+  }, [sections, dmSection, stable.items]);
+  const dmRowRef = useFlipList(
+    shownSections.find((s) => s.id === "dms")?.channels.map((c) => c.id) ?? [],
+    { disabled: !animateReorder || collapsed },
+  );
+
   if (collapsed) {
     return (
       <aside
+        {...stable.containerProps}
         className={cn(
           "w-14 shrink-0 flex-col items-center border-r bg-sidebar/40 py-3",
           className,
@@ -165,15 +203,17 @@ export function ChannelRail({
 
   return (
     <aside
+      {...stable.containerProps}
       className={cn(
         "w-64 shrink-0 flex-col border-r bg-sidebar/40 pb-3",
         className,
       )}
     >
-      {sections.map((section) => (
+      {shownSections.map((section) => (
         <Section
           key={section.id}
           section={section}
+          rowRef={section.id === "dms" ? dmRowRef : undefined}
           // Each section header carries its own door, and only its own.
           // Channels gets "+" (create a channel); Direct messages gets the
           // compose pencil, because a DM is what it starts. It used to float
@@ -326,6 +366,7 @@ function Section({
   open,
   onToggle,
   action,
+  rowRef,
 }: {
   section: ChannelSection;
   activeId: string | null;
@@ -339,6 +380,8 @@ function Section({
   onToggle: () => void;
   /** This section's own door, rendered at the right of its caption. */
   action?: ReactNode;
+  /** Per-row ref from `useFlipList`, for a section whose rows slide when it re-sorts. */
+  rowRef?: (channelId: string) => (node: HTMLElement | null) => void;
 }) {
   const hiddenUnread = !open
     ? section.channels.reduce((n, c) => n + (unread[c.id] ?? 0), 0)
@@ -396,9 +439,16 @@ function Section({
       </div>
 
       {open && (
-        <ul className="mt-0.5 flex flex-col gap-px">
+        <ul
+          // A re-sort moves rows in the DOM. Left as scroll-anchor candidates,
+          // a visible row that jumped to the top dragged the scrolled sidebar
+          // with it (to 0, or to wherever the row landed), because anchoring
+          // keeps the anchor node still on screen. Opting the sliding list out
+          // leaves the offset where the operator put it.
+          className={cn("mt-0.5 flex flex-col gap-px", rowRef && "[overflow-anchor:none]")}
+        >
           {section.channels.map((channel) => (
-            <li key={channel.id}>
+            <li key={channel.id} ref={rowRef?.(channel.id)}>
               <ChannelRow
                 channel={channel}
                 active={channel.id === activeId}
@@ -439,6 +489,14 @@ function ChannelRow({
 }) {
   const hasUnread = unread > 0 && !active;
   const hasMentions = mentions > 0;
+  // The dot on the avatar is decorative here (`AgentFace decorative`): its
+  // words go AFTER the name, so the row is announced "Ada Lovelace, Thinking"
+  // and a screen-reader user hears who before what. Same lookup the dot makes.
+  const statusAgent = channel.kind === "dm" && dmFace(channel) ? channel.member?.id : undefined;
+  const status = useAgentPresence(
+    statusAgent,
+    channel.member ? dmThreadId(channel.member) : undefined,
+  );
 
   return (
     <button
@@ -452,7 +510,7 @@ function ChannelRow({
       // `""` — is what suppresses the native bubble.
       title={channelSubtitle(channel) ?? undefined}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-md transition-colors",
         active
           ? onPage
             ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
@@ -461,8 +519,11 @@ function ChannelRow({
         hasUnread && "font-semibold text-foreground",
       )}
     >
-      <ChannelIcon channel={channel} />
+      <ChannelIcon channel={channel} withStatus />
       <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+      {status !== "inactive" && (
+        <span className="sr-only">, {agentPresenceLabel(status)}</span>
+      )}
       {hasMentions && (
         <span
           data-testid="channel-mentions"
@@ -489,11 +550,22 @@ function ChannelRow({
   );
 }
 
-function ChannelIcon({ channel }: { channel: Channel }) {
+function ChannelIcon({ channel, withStatus = false }: { channel: Channel; withStatus?: boolean }) {
   if (channel.kind === "dm") {
     const face = dmFace(channel);
     return face ? (
-      <TeammateAvatar {...face} className="size-5 text-3xs" />
+      // The live state badge rides the expanded row only: the compact rail's
+      // 36px tiles are measured to fit its 48px width and stay as they were.
+      // Scoped to this DM's own thread, so a teammate busy in a channel does
+      // not light every row that names them.
+      <AgentFace
+        agentId={withStatus ? channel.member?.id : undefined}
+        chatId={channel.member ? dmThreadId(channel.member) : undefined}
+        surface="chrome"
+        decorative
+      >
+        <TeammateAvatar {...face} className="size-6 text-2xs" />
+      </AgentFace>
     ) : (
       <CircleDot className="size-4 shrink-0" aria-hidden />
     );
