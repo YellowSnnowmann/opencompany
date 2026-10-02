@@ -1530,6 +1530,27 @@ impl FsCompanyStore {
         let toml_src = toml::to_string(&record.manifest)
             .map_err(|e| OpenCompanyError::Store(format!("cannot serialize manifest: {e}")))?;
 
+        // **The manifest names prompt files; this writes them.**
+        //
+        // `Agent::prompt_files` survives the round trip because it is ordinary
+        // manifest data, but `prompt_files_resolved` is `#[serde(skip)]` -- it
+        // is derived from the bundle and deliberately not persisted in the
+        // record. So a store that saved only the manifest kept the *paths* and
+        // dropped the *bodies*, and `load` had nothing to resolve them against:
+        // the saved directory has no `agents/` in it at all.
+        //
+        // The effect was silent and total. `prompt::bundle_section` renders
+        // from `prompt_files_resolved`, so every agent's checked-in briefing
+        // rendered empty on every rebuild -- a six-seat lab ran a full session
+        // on one-line role descriptions while its authored prompts sat unread
+        // in the bundle, and `dump-prompt.sh` showed them correctly the whole
+        // time because it reads the bundle rather than the store.
+        //
+        // Writing the bodies here makes the saved directory a faithful bundle,
+        // which is what `load` below resolves against. The record still carries
+        // no persisted copy: these are files, re-read like any other bundle.
+        write_prompt_files(&bundle, &record.manifest).await?;
+
         let meta = Meta {
             lifecycle: record.lifecycle.clone(),
             overlay_agents: record.overlay_agents.clone(),
@@ -1826,6 +1847,14 @@ impl CompanyStore for FsCompanyStore {
                 "[store] ledger lines could not be parsed; they were skipped so the company can still boot, and left on disk for repair — reported spend is incomplete until they are fixed"
             );
         }
+
+        // Paired with `write_prompt_files` in `save_gated`: the manifest came
+        // back with its `prompt_files` paths and, because the resolved bodies
+        // are `#[serde(skip)]`, without their contents. Resolve them from the
+        // files that save wrote, so an agent rebuilt from the store carries the
+        // same briefing as one built straight from the bundle.
+        let mut manifest = manifest;
+        resolve_saved_prompt_files(&bundle, &mut manifest).await;
 
         Ok(Some(CompanyRecord {
             overlay_agent_edits: meta.overlay_agent_edits,
@@ -2841,3 +2870,91 @@ mod tests_recovery;
 #[cfg(test)]
 #[path = "fs_recovery2_tests.rs"]
 mod tests_recovery2;
+
+/// Write every agent's resolved prompt bodies under the saved bundle.
+///
+/// Paths come from the manifest and are written relative to `agents/`, which is
+/// where [`resolve_saved_prompt_files`] and the bundle loader both look. A path
+/// that escapes that directory is skipped rather than written: the manifest
+/// loader already rejects those, and this is a second gate on the write side so
+/// a record reaching the store by any other route cannot place a file outside
+/// the company's own directory.
+async fn write_prompt_files(
+    bundle: &Bundle,
+    manifest: &crate::company::CompanyManifest,
+) -> Result<()> {
+    for agent in &manifest.agents {
+        for (rel, body) in &agent.prompt_files_resolved {
+            let path = std::path::Path::new(rel);
+            if path.is_absolute()
+                || path.components().any(|c| {
+                    matches!(
+                        c,
+                        std::path::Component::ParentDir
+                            | std::path::Component::RootDir
+                            | std::path::Component::Prefix(_)
+                    )
+                })
+            {
+                continue;
+            }
+            let target = bundle.dir().join("agents").join(path);
+            if let Some(parent) = target.parent() {
+                tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                    OpenCompanyError::Store(format!(
+                        "cannot create prompt directory for `{}`: {e}",
+                        agent.id
+                    ))
+                })?;
+            }
+            tokio::fs::write(&target, body).await.map_err(|e| {
+                OpenCompanyError::Store(format!(
+                    "cannot write prompt file `{rel}` for `{}`: {e}",
+                    agent.id
+                ))
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Re-read the prompt bodies a previous save wrote, filling
+/// `prompt_files_resolved` on each agent.
+///
+/// Best-effort on purpose. A missing file here is not the manifest error it is
+/// at bundle-load time: this runs on every `load`, including for records saved
+/// before the files were written alongside them, and failing the load of an
+/// otherwise-valid company over a briefing document would take the whole
+/// company down to fix a degraded prompt. The agent renders without that
+/// section instead, exactly as it did before this pair existed.
+async fn resolve_saved_prompt_files(
+    bundle: &Bundle,
+    manifest: &mut crate::company::CompanyManifest,
+) {
+    let root = bundle.dir().join("agents");
+    for agent in &mut manifest.agents {
+        if !agent.prompt_files_resolved.is_empty() {
+            continue;
+        }
+        let mut resolved = Vec::new();
+        for rel in &agent.prompt_files {
+            let path = std::path::Path::new(rel);
+            if path.is_absolute()
+                || path.components().any(|c| {
+                    matches!(
+                        c,
+                        std::path::Component::ParentDir
+                            | std::path::Component::RootDir
+                            | std::path::Component::Prefix(_)
+                    )
+                })
+            {
+                continue;
+            }
+            if let Ok(body) = tokio::fs::read_to_string(root.join(path)).await {
+                resolved.push((rel.clone(), body));
+            }
+        }
+        agent.prompt_files_resolved = resolved;
+    }
+}

@@ -17,6 +17,8 @@
 //! [`ScopedCompany`], matching `GET …/mcp/servers`.
 
 use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::extract::{Path, Query};
@@ -26,19 +28,29 @@ use serde::{Deserialize, Serialize};
 
 use oh::mcp::registry::types::{ConnStatus, InstalledServer};
 use openhuman_core as oh;
+use tinymcp::registry::curation::OFFICIAL_SERVERS;
 
+use crate::company::mcp::load_runtime_index;
 use crate::company::mcp::{McpHealth, stdio_install_refusal};
+use crate::company::mcp_endpoint::normalize_endpoint;
+use crate::company::mcp_server_info::{self, fetch_icon};
 use crate::company::runtime::CompanyRuntime;
 use crate::error::OpenCompanyError;
+use crate::harness::mcp::McpRuntime;
 use crate::ports::now_millis;
 use crate::server::error::ApiError;
 use crate::server::ops::mcp::{
-    AuthKind, McpServerDto, NEXT_TURN_NOTE, auth_material_from, declare_runtime_server, merged_rows,
+    AuthKind, McpServerDto, NEXT_TURN_NOTE, auth_material_from, declare_runtime_server,
+    manifest_servers, merged_rows,
 };
 use crate::server::ops::{AdminScopedCompany, ScopedCompany, not_wired};
 
 use super::RegistryInstall;
-use super::catalogue::{catalogue_detail, catalogue_search, health_from_status};
+use super::catalogue::{
+    CatalogueEntryDto, InstallName, brand_logo, brand_name, browse_upstream_page, catalogue_detail,
+    catalogue_search, featured_entry, featured_page, health_from_status, inline_icon, inline_icons,
+    install_name_for, rank_catalogue, shift_browse_page,
+};
 
 // ---------------------------------------------------------------------------
 // Request and response bodies
@@ -152,13 +164,101 @@ pub(in crate::server::ops) async fn installs(runtime: &CompanyRuntime) -> Vec<Re
         .map(|state| (state.server_id.clone(), state))
         .collect();
     let now = now_millis();
-    servers
+    let mut installs: Vec<RegistryInstall> = servers
         .into_iter()
         .map(|server| {
             let state = status.get(&server.server_id);
             project(server, state, now)
         })
+        .collect();
+    let icons = futures::future::join_all(
+        installs
+            .iter()
+            .map(|install| inline_icon(install.icon_url.clone(), &cached_icon)),
+    )
+    .await;
+    for (install, icon) in installs.iter_mut().zip(icons) {
+        install.icon_url = icon;
+    }
+    installs
+}
+
+/// How long an official entry is served from memory before it is looked up
+/// again. A failed refresh keeps serving the entry it already has.
+const FEATURED_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+
+static FEATURED: LazyLock<Mutex<HashMap<&'static str, (Instant, CatalogueEntryDto)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// The official connectors, in their listed order. Each is looked up once and
+/// kept: the registry answers some of these lookups slower than the request
+/// timeout, so fetching all of them on every visit drops a different few each
+/// time.
+async fn featured_servers(mcp: &McpRuntime) -> Vec<CatalogueEntryDto> {
+    let now = Instant::now();
+    let due: Vec<&'static str> = {
+        let cache = FEATURED
+            .lock()
+            .map(|cache| cache.clone())
+            .unwrap_or_default();
+        OFFICIAL_SERVERS
+            .iter()
+            .copied()
+            .filter(|name| {
+                cache
+                    .get(name)
+                    .is_none_or(|(at, _)| now.duration_since(*at) > FEATURED_TTL)
+            })
+            .collect()
+    };
+    let fetched = futures::future::join_all(due.into_iter().map(|name| async move {
+        let entry = mcp
+            .registry_get(name.to_string())
+            .await
+            .ok()
+            .and_then(|raw| featured_entry(&raw));
+        (name, entry)
+    }))
+    .await;
+    let Ok(mut cache) = FEATURED.lock() else {
+        return fetched.into_iter().filter_map(|(_, entry)| entry).collect();
+    };
+    for (name, entry) in fetched {
+        if let Some(entry) = entry {
+            cache.insert(name, (now, entry));
+        }
+    }
+    OFFICIAL_SERVERS
+        .iter()
+        .filter_map(|name| cache.get(name).map(|(_, entry)| entry.clone()))
         .collect()
+}
+
+/// Entries kept before the icon cache starts over.
+const ICON_CACHE_LIMIT: usize = 512;
+
+static ICON_CACHE: LazyLock<Mutex<HashMap<String, Option<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// [`fetch_icon`], remembered per address for the life of the process.
+async fn cached_icon(url: String) -> Option<String> {
+    if let Some(hit) = ICON_CACHE
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(&url).cloned())
+    {
+        return hit;
+    }
+    let icon = fetch_icon(&url).await;
+    if let Ok(mut cache) = ICON_CACHE.lock() {
+        if cache.len() >= ICON_CACHE_LIMIT {
+            cache.clear();
+        }
+        if icon.is_some() {
+            cache.insert(url, icon.clone());
+        }
+    }
+    icon
 }
 
 /// One store record plus its live connection state.
@@ -175,12 +275,16 @@ fn project(server: InstalledServer, state: Option<&ConnStatus>, now: u64) -> Reg
             now,
         )
     });
+    let display_name = brand_name(&server.qualified_name, Some(server.display_name));
+    let icon_url = server
+        .icon_url
+        .or_else(|| brand_logo(&server.qualified_name));
     RegistryInstall {
         server_id: server.server_id,
         qualified_name: server.qualified_name,
-        display_name: server.display_name,
+        display_name,
+        icon_url,
         description: server.description,
-        icon_url: server.icon_url,
         endpoint,
         transport,
         enabled: server.enabled,
@@ -193,21 +297,50 @@ fn project(server: InstalledServer, state: Option<&ConnStatus>, now: u64) -> Reg
 
 /// `GET …/mcp/registry/search` — browse the upstream MCP directory.
 ///
-/// The open `modelcontextprotocol/registry` and nothing else. The Smithery
-/// half, with the per-company API key that decided whether it was queried at
-/// all, was removed: one vendor's credential slot on a console tab is a
-/// credential to rotate, revoke and explain, and what it bought — one
-/// directory's hosted listings — is not worth the surface. Entries that declare
-/// no remote endpoint are filtered out here as they always were, since this
-/// deployment launches no local subprocess.
+/// The open `modelcontextprotocol/registry`, plus Smithery only where the host
+/// process sets `SMITHERY_API_KEY`. Entries that declare no remote endpoint are
+/// filtered out, since this deployment launches no local subprocess. The first
+/// page of an empty query leads with the known vendor servers, every page is
+/// ordered official first and most-installed next, and icons are inlined so the
+/// browser never requests a remote address.
 pub(super) async fn search(company: ScopedCompany, Query(query): Query<SearchQuery>) -> Response {
     let Some(mcp) = company.runtime.mcp() else {
         return not_wired("mcp registry");
     };
-    match mcp.search(query.q, query.page, query.page_size).await {
-        Ok(raw) => Json(catalogue_search(&raw)).into_response(),
-        Err(error) => ApiError(error).into_response(),
+    let browsing = query.q.as_deref().is_none_or(|q| q.trim().is_empty());
+    let shown_page = query.page.unwrap_or(1).max(1);
+    if browsing && shown_page == 1 {
+        let featured = featured_servers(mcp).await;
+        if !featured.is_empty() {
+            let mut page = featured_page(featured);
+            rank_catalogue(&mut page.servers, OFFICIAL_SERVERS);
+            inline_icons(&mut page.servers, cached_icon).await;
+            return Json(page).into_response();
+        }
     }
+    let upstream_page = if browsing {
+        browse_upstream_page(shown_page)
+    } else {
+        shown_page
+    };
+    let mut results = match mcp
+        .search(query.q, Some(upstream_page), query.page_size)
+        .await
+    {
+        Ok(raw) => catalogue_search(&raw),
+        Err(error) => return ApiError(error).into_response(),
+    };
+    if browsing {
+        let already_listed: &[&str] = if shown_page == 1 {
+            &[]
+        } else {
+            OFFICIAL_SERVERS
+        };
+        shift_browse_page(&mut results, upstream_page, already_listed);
+    }
+    rank_catalogue(&mut results.servers, OFFICIAL_SERVERS);
+    inline_icons(&mut results.servers, cached_icon).await;
+    Json(results).into_response()
 }
 
 /// `GET …/mcp/registry/entry?qualifiedName=…` — one directory entry in full,
@@ -229,7 +362,10 @@ pub(super) async fn entry(company: ScopedCompany, Query(query): Query<EntryQuery
         Err(error) => return ApiError(error).into_response(),
     };
     match catalogue_detail(&raw) {
-        Some(detail) => Json(detail).into_response(),
+        Some(mut detail) => {
+            detail.icon_url = inline_icon(detail.icon_url.take(), &cached_icon).await;
+            Json(detail).into_response()
+        }
         None => ApiError(OpenCompanyError::McpServerNotFound(qualified_name)).into_response(),
     }
 }
@@ -295,7 +431,11 @@ pub(super) async fn install(
         )))
         .into_response();
     };
-    let server = super::declaration_from_directory(&qualified_name, &endpoint, detail.description);
+    let name = match install_name(runtime, &detail.display_name, &qualified_name, &endpoint).await {
+        Ok(name) => name,
+        Err(error) => return error.into_response(),
+    };
+    let server = super::declaration_from_directory(&name, &endpoint, detail.description);
     let auth = match auth_material_from(
         body.token.as_deref(),
         body.auth_kind,
@@ -305,9 +445,60 @@ pub(super) async fn install(
         Ok(auth) => auth,
         Err(error) => return error.into_response(),
     };
-    match declare_runtime_server(runtime, server, auth).await {
-        Ok(response) => response.into_response(),
-        Err(error) => error.into_response(),
+    let declared = match declare_runtime_server(runtime, server, auth).await {
+        Ok(response) => response,
+        Err(error) => return error.into_response(),
+    };
+    let icon = inline_icon(detail.icon_url, &cached_icon).await;
+    remember_directory_identity(runtime, &name, detail.display_name, icon).await;
+    declared.into_response()
+}
+
+/// The name a directory install is saved under, or the refusal when this
+/// company already declares a server at the same endpoint.
+async fn install_name(
+    runtime: &CompanyRuntime,
+    display_name: &str,
+    qualified_name: &str,
+    endpoint: &str,
+) -> Result<String, ApiError> {
+    let manifest = manifest_servers(runtime).await?;
+    let index = load_runtime_index(runtime.id(), runtime.secrets().as_ref())
+        .await
+        .map_err(ApiError)?;
+    let existing: Vec<(String, Option<String>)> = manifest
+        .iter()
+        .chain(index.iter())
+        .map(|server| {
+            (
+                server.name.trim().to_string(),
+                normalize_endpoint(&server.endpoint),
+            )
+        })
+        .collect();
+    let endpoint = normalize_endpoint(endpoint);
+    match install_name_for(display_name, qualified_name, endpoint.as_deref(), &existing) {
+        InstallName::Free(name) => Ok(name),
+        InstallName::AlreadyInstalled(name) => Err(ApiError(OpenCompanyError::Conflict(format!(
+            "this server is already installed as `{name}`."
+        )))),
+    }
+}
+
+/// Keeps the directory's name and logo on the installed server wherever the
+/// server's own handshake did not supply one.
+async fn remember_directory_identity(
+    runtime: &CompanyRuntime,
+    name: &str,
+    title: String,
+    icon: Option<String>,
+) {
+    let secrets = runtime.secrets();
+    let mut info = mcp_server_info::load(runtime.id(), name, secrets.as_ref()).await;
+    info.title = info.title.or(Some(title));
+    info.icon_data_url = info.icon_data_url.or(icon);
+    if let Err(error) = mcp_server_info::save(runtime.id(), name, &info, secrets.as_ref()).await {
+        tracing::warn!("[mcp-registry] `{name}`: directory name and logo not stored: {error}");
     }
 }
 

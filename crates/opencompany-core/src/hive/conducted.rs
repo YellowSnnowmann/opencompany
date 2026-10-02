@@ -26,6 +26,7 @@ use tinyhivemind_tools::EpisodeTools;
 use crate::error::{OpenCompanyError, Result};
 use crate::harness::built_in::{HarnessDeps, HarnessPool};
 mod closing;
+mod opening;
 
 use crate::hive::episode_store;
 use crate::hive::graph::DeskHive;
@@ -72,6 +73,9 @@ pub struct Episode<'a> {
     pub parking: Option<Arc<dyn SeatParking>>,
     /// How a desk reply's mentions are resolved and notified (#2441).
     pub mentions: Option<crate::runtime::mention_seam::MentionSeam>,
+    /// Whether the operator's message read as a question. Its seats then
+    /// open no cards, as a pooled turn on a question opens none.
+    pub answering: bool,
 }
 
 /// Run one completion episode to quiescence.
@@ -127,6 +131,8 @@ async fn conduct(
             members.clone(),
         )
         .in_thread(episode.thread_root)
+        .opened_at(episode.opened_at)
+        .answering(episode.answering)
         .episode(episode.episode_id.clone())
         .seating(Arc::clone(&episode.record), Arc::clone(&episode.deps))
         .locking(Arc::clone(&episode.pool));
@@ -150,6 +156,7 @@ async fn conduct(
         }
         host
     });
+    host.recall_cards().await;
 
     let releases = host.seat_releases();
     let _running = releases.as_ref().map(|releases| {
@@ -287,6 +294,9 @@ pub struct Trigger {
     pub parent: Option<EventSeq>,
     /// Who it named.
     pub mentions: Vec<Mention>,
+    /// Whether this opens a claimed handover's carry-on rather than answering
+    /// an operator message. A carry-on is never read as a question.
+    pub carried_on: bool,
 }
 
 /// What one episode came to, in this host's words.
@@ -421,6 +431,8 @@ impl HiveDispatcher {
         // call needs the operator's own words, and a summary of a summary is
         // not what it should be scoring.
         let request = trigger.text.clone();
+        let answering = trigger.is_question();
+        tracing::debug!(desk = %desk_id, answering, "[hive] read the opening message");
         let (starters, plan_dto) = self.opening(&desk, &routing, &trigger, thread_root).await?;
         self.events
             .append(
@@ -460,6 +472,7 @@ impl HiveDispatcher {
             concluding: false,
             parking: self.seat_parking(&desk.desk_id, Some(thread_root), &episode_id),
             mentions: self.mentions.clone(),
+            answering,
         })
         .await?;
         // The settle point. `run` returns only once every seat has recorded
@@ -497,6 +510,7 @@ impl HiveDispatcher {
                 Some(thread_root),
                 trigger.seq,
                 &request,
+                answering,
             )
             .await
         } else {
@@ -537,10 +551,12 @@ impl HiveDispatcher {
         let rows =
             episode_store::episode_rows(self.events.as_ref(), &self.record.id, episode_id).await?;
         let routing = desk_routing(&self.record, &desk.desk_id);
+        let (opened_at, answering) = self.opening_of(&rows, saved.thread_root).await;
         tracing::info!(
             desk = %desk.desk_id,
             episode = %episode_id,
             revision = saved.revision,
+            answering,
             "[hive] resuming a parked episode from its checkpoint"
         );
         let report = resume(
@@ -554,11 +570,12 @@ impl HiveDispatcher {
                 router: self.router.as_deref(),
                 episode_id: episode_id.to_owned(),
                 thread_root: saved.thread_root,
-                opened_at: saved.thread_root.unwrap_or(EventSeq::new(0)),
+                opened_at,
                 starters: Vec::new(),
                 concluding: false,
                 parking: self.seat_parking(&desk.desk_id, saved.thread_root, episode_id),
                 mentions: self.mentions.clone(),
+                answering,
             },
             snapshot,
             &rows,

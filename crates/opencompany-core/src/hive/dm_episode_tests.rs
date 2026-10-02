@@ -94,6 +94,7 @@ async fn an_operator_dm_runs_an_episode_answered_by_its_own_teammate() {
                 text: "ship passkeys next sprint?".to_owned(),
                 parent: None,
                 mentions: Vec::new(),
+                carried_on: false,
             },
         )
         .await;
@@ -235,6 +236,7 @@ async fn announce_then_reply_does_not_stall() {
                 text: "two sprints is fine, go".to_owned(),
                 parent: None,
                 mentions: Vec::new(),
+                carried_on: false,
             },
         )
         .await;
@@ -312,6 +314,7 @@ async fn a_desk_episode_with_prior_history_settles() {
                 text: "two sprints is fine, go".to_owned(),
                 parent: None,
                 mentions: Vec::new(),
+                carried_on: false,
             },
         )
         .await
@@ -411,6 +414,7 @@ async fn a_narrowed_retry_is_offered_only_the_verbs_the_room_asked_for() {
                 text: "two sprints?".to_owned(),
                 parent: None,
                 mentions: Vec::new(),
+                carried_on: false,
             },
         )
         .await
@@ -536,6 +540,7 @@ async fn a_completion_refused_while_owed_an_answer_is_journaled_as_refused() {
                 text: "two sprints?".to_owned(),
                 parent: None,
                 mentions: Vec::new(),
+                carried_on: false,
             },
         )
         .await;

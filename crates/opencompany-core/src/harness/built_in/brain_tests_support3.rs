@@ -1,5 +1,6 @@
 use super::*;
 use crate::company::steer::InflightRegistry;
+use crate::ports::tasks::COLUMN_IN_REVIEW;
 use crate::ports::tasks::TaskTitle;
 use std::collections::VecDeque;
 use std::sync::Mutex as StdMutex;
@@ -418,6 +419,7 @@ pub(super) fn brain_over_script(
 /// A card sitting in review, waiting on the verdict the operator approved.
 pub(super) fn card_in_review(id: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored(&format!("Work item {id}")),
         note: None,

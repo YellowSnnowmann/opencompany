@@ -300,6 +300,7 @@ impl RunTurn for PeerStub {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 
@@ -321,6 +322,7 @@ impl RunTurn for PeerStub {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 }

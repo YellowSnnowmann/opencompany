@@ -283,6 +283,7 @@ pub fn trigger_for(
         text: text.to_string(),
         parent,
         mentions: mentions.to_vec(),
+        carried_on: false,
     }
 }
 
@@ -421,12 +422,15 @@ pub fn carry_on_job(saying: &str) -> String {
 /// the claim is the second.
 #[must_use]
 fn carry_on_trigger(claim: &crate::hive::takeover::TakeoverClaim, opened_at: EventSeq) -> Trigger {
-    trigger_for(
-        Some(opened_at),
-        &carry_on_job(&claim.saying),
-        Some(EventSeq::new(claim.at)),
-        &[],
-    )
+    Trigger {
+        carried_on: true,
+        ..trigger_for(
+            Some(opened_at),
+            &carry_on_job(&claim.saying),
+            Some(EventSeq::new(claim.at)),
+            &[],
+        )
+    }
 }
 
 /// Opens the claimer's own line for every takeover staged inside `episode`.

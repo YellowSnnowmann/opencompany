@@ -169,6 +169,22 @@ pub(crate) const BUDGET_PAUSED_PLACEHOLDER_REPLY: &str = "(no reply — see the 
 /// string; keep the two in sync by hand until a structured field exists.
 pub(crate) const BUDGET_PAUSE_NOTICE_PREFIX: &str = "⏸ Paused — out of credits:";
 
+/// [`BUDGET_PAUSED_PLACEHOLDER_REPLY`]'s sibling for a wall-clock ceiling hit
+/// (issue #1680), and it exists for the identical reason: the authored bubble
+/// must not claim words the teammate did not produce.
+///
+/// A ceiling pause's `reply` is `wall_clock_ceiling_message` — host-authored
+/// runtime copy, not the model's. Rendering it under the teammate's name is the
+/// author-vs-channel conflation #885/#966 exist to prevent, and PR #2554's
+/// review is what turned it up: the first cut left the reply in place on the
+/// grounds that it carried #1761's text, which is true and is exactly why it
+/// cannot also be the teammate's bubble. The text now lives in one place only:
+/// `CeilingPause::summary`, on the run surface, with
+/// [`ceiling_pause_notice`] as the unauthored chat bubble beside this
+/// placeholder.
+pub(crate) const CEILING_PAUSED_PLACEHOLDER_REPLY: &str =
+    "(no reply — the turn ran out of time; see the notice below)";
+
 /// The system bubble emitted when a turn paused for lack of inference
 /// budget/credits (issue #1846) — the sibling of
 /// [`iteration_cap_pause_notice`] and [`spend_halt_notice`], and, like both,
@@ -182,6 +198,49 @@ pub(crate) const BUDGET_PAUSE_NOTICE_PREFIX: &str = "⏸ Paused — out of credi
 /// [`BUDGET_PAUSE_NOTICE_PREFIX`].
 pub(crate) fn budget_pause_notice(pause: &crate::harness::BudgetPause) -> String {
     format!("{BUDGET_PAUSE_NOTICE_PREFIX} {}", pause.summary)
+}
+
+/// The system bubble emitted when a turn hit the harness's per-turn wall-clock
+/// ceiling (issue #1680) — the fourth and last sibling of
+/// [`iteration_cap_pause_notice`], [`spend_halt_notice`] and
+/// [`budget_pause_notice`], and, like all three, deliberately unauthored.
+///
+/// The operator's next move is distinct from all three, which is why this could
+/// not be folded into any of them:
+///
+/// * a step pause is resumable — `"continue"` finishes the work;
+/// * a spend halt means the company's declared cap was reached, so raising that
+///   cap or narrowing the ask is the lever;
+/// * a budget pause means the *account* is out of money, so the lever is credits;
+/// * a ceiling hit means the step was given more work than fits in one turn.
+///   Credits change nothing and there is no cap to raise. **It must never say
+///   `"continue"`**: unlike a step pause there is no checkpoint, so continuing
+///   would spend another full ten minutes reaching the identical wall — the same
+///   reasoning [`spend_halt_notice`] gives for refusing that word.
+///
+/// Names the teammate and quotes the elapsed time for
+/// [`spend_halt_notice`]'s reason: one operator message can run a responder, a
+/// desk and a relay turn, and a bare duration would be a number the operator
+/// cannot attribute. The ceiling's own *value* is still not restated — see
+/// [`wall_clock_ceiling_message`](super::wall_clock_ceiling_message), whose
+/// doc explains why a literal `600` here would be a copy that goes stale on the
+/// next vendored bump with nothing failing.
+///
+/// Unlike its three siblings this notice can promise the work survived, because
+/// on this path it does: the folded [`TurnStep`](crate::ports::types::TurnStep)
+/// timeline rides out on the same outcome, and on a ceiling hit it is by
+/// definition substantial.
+pub(crate) fn ceiling_pause_notice(pause: &crate::harness::CeilingPause) -> String {
+    format!(
+        "The reply above is where this turn stopped, not a finished answer: {agent} reached \
+         the longest a single turn may run ({elapsed}) and stopped before it could write up \
+         what it had gathered. Nothing errored, and the steps it took are recorded on this \
+         reply — but there is no checkpoint to resume, so asking again runs a fresh turn \
+         against the same limit. Narrowing what {agent} was asked to do in one step is what \
+         lets the work finish.",
+        agent = pause.agent,
+        elapsed = super::humanise_elapsed(pause.elapsed),
+    )
 }
 
 /// The non-redeemable sibling of [`BUDGET_PAUSE_NOTICE_PREFIX`] (issue #1846
@@ -230,7 +289,7 @@ use crate::harness::run_trace::RunTraceSink;
 use crate::ports::blockers::{BlockerPayload, BlockerStep};
 use crate::ports::brain::{Brain, CycleHost};
 use crate::ports::runs::{RunOutcome, RunStatus};
-use crate::ports::tasks::{COLUMN_IN_REVIEW, TaskOutput, TaskOutputArtifact, TaskOutputSource};
+use crate::ports::tasks::{TaskOutput, TaskOutputArtifact, TaskOutputSource};
 use crate::ports::types::{
     CompanyEvent, CompanyRecord, CompressedTrace, CycleRequest, CycleResult, Effect, EffectGroup,
     OutboundMessage, TokenUsage, TurnStep, TurnStepKind, TurnStepStatus, Verdict,
@@ -450,6 +509,16 @@ fn confined_bubble(outcome: crate::harness::TurnOutcome) -> OutboundMessage {
 /// returned `null` followed by a POST that 404'd. The no-resend prefix makes
 /// the claim true.
 fn confined_turn_bubble(outcome: crate::harness::TurnOutcome) -> OutboundMessage {
+    // Issue #1680: a ceiling pause routes here for the same reason a budget
+    // pause does. Falling through to `confined_bubble` would attribute
+    // `wall_clock_ceiling_message` -- host-authored runtime copy -- to
+    // `CONFINED_AGENT_ID` as the copilot's own answer, which is the defect
+    // this function was extracted to prevent. No `_no_resend` distinction
+    // applies: a ceiling pause parks no marker and offers no CTA on any path,
+    // so there is only one notice to reach for.
+    if let Some(pause) = &outcome.ceiling_paused {
+        return system_notice(ceiling_pause_notice(pause));
+    }
     match &outcome.budget_paused {
         Some(pause) => system_notice(budget_pause_notice_no_resend(pause)),
         None => confined_bubble(outcome),
@@ -936,6 +1005,14 @@ impl HarnessBrain {
             // identity, which the generic chat-message redeem path does not
             // carry; until it does, the honest surface is a notice with no
             // button rather than a button that cannot work.
+            // Issue #1680: and a continuation whose turn ran out of time says
+            // so, rather than falling into the `None` arm below and reading as
+            // the teammate's answer to the operator's decision.
+            Ok(outcome) if outcome.ceiling_paused.is_some() => outcome
+                .ceiling_paused
+                .as_ref()
+                .map(ceiling_pause_notice)
+                .unwrap_or_default(),
             Ok(outcome) => match &outcome.budget_paused {
                 Some(pause) => budget_pause_notice_no_resend(pause),
                 None => {
@@ -1422,6 +1499,38 @@ impl HarnessBrain {
                                 }
                                 // Nothing was handed off — the responder did the
                                 // work itself, as before.
+                                // Issue #1680. Settled AFTER the drain, not
+                                // before it -- CodeRabbit on PR #2554, and it
+                                // is right. The first cut of this arm sat
+                                // beside the budget one above and borrowed its
+                                // rationale ("the model call itself errored, so
+                                // nothing can have queued a hand-off"). That
+                                // reasoning does not transfer: a budget pause
+                                // fires when the model call fails, with no tool
+                                // loop behind it, while a CEILING pause fires
+                                // on a turn that ran for the entire budget --
+                                // by construction a turn that executed tool
+                                // calls, since `TurnOutcome::steps` retaining
+                                // that timeline is the point of this issue. So
+                                // it can absolutely have staged a `spawn_task`
+                                // or a hand-off before the clock ran out, and
+                                // breaking before the drain dropped that work
+                                // with the claim.
+                                //
+                                // Reached only when the drain found nothing to
+                                // run: a hand-off that DID happen is the
+                                // delegate's work and settles from their output
+                                // in the arms above, which is a real completion
+                                // rather than this pause.
+                                None if outcome.ceiling_paused.is_some() => {
+                                    let pause = outcome
+                                        .ceiling_paused
+                                        .as_ref()
+                                        .expect("guarded by this arm");
+                                    let result = ceiling_pause_notice(pause);
+                                    settle(&mut card, TaskRunEnd::Paused, &responder, &result);
+                                    (TaskRunEnd::Paused, result)
+                                }
                                 None => {
                                     let result = outcome.reply;
                                     settle(&mut card, TaskRunEnd::Completed, &responder, &result);
@@ -2390,46 +2499,11 @@ impl HarnessBrain {
         }
     }
 
-    /// Files what a conversation turn published onto the card that turn already
-    /// opened (issue #463). Returns that card's id.
+    /// Files what a conversation turn published onto the card that turn
+    /// already opened. Returns the id of the card it landed on.
     ///
-    /// # Why this exists at all
-    ///
-    /// #445 made a chat publish mint a card, which was right for a publish with
-    /// nothing else in scope and wrong the moment #442 started opening a card
-    /// for the work itself: one substantial ask that ended in a published file
-    /// produced two cards, and the reply linked to the one with no artifacts on
-    /// it. Both fixes were correct alone. Together they doubled, and the
-    /// deliverable ended up on the card nothing pointed at.
-    ///
-    /// So a publish files onto the card in scope instead of opening a rival to
-    /// it. The card already carries the request and the answer; this adds the
-    /// artifact and says who delivered it.
-    ///
-    /// # What it changes on the card, and what it leaves alone
-    ///
-    /// The note gains a line naming the published files. The column moves to
-    /// [`COLUMN_IN_REVIEW`] — a deliverable was produced and a person has not
-    /// accepted it yet, the same landing `record_conversation_publishes` gives
-    /// its minted card and the same one a settled run gets. A card with **no
-    /// assignee** — the To-do card the REST chat handler opens, which has never
-    /// belonged to anybody — is assigned to the publisher; a card that already
-    /// has an owner keeps them, because filing a file must not quietly take
-    /// somebody's work away from them.
-    ///
-    /// A card that has since been deleted falls back to minting, so the
-    /// artifact stays reachable rather than being dropped for the sake of the
-    /// rule. **The returned id is the card the deliverable actually landed
-    /// on** — the replacement, on that path, not `card_id` — because the caller
-    /// links the operator's reply to it and sending them to an id that no
-    /// longer resolves is the bug this whole change is about.
-    ///
-    /// `chat` is carried into that fallback so a minted replacement points
-    /// back at the same conversation the no-card-in-scope path's card does;
-    /// two minting paths must not differ in where their card posts back. One
-    /// [`ChatTarget`] rather than a channel and a root side by side (#1890 B):
-    /// the pair travels four frames down this chain, and two bare `Option`s
-    /// beside each other is the mis-pairing hazard that type exists to remove.
+    /// Delegates to [`PublishFiling`](publish::filing::PublishFiling), which a
+    /// hive episode's seat also uses.
     async fn file_publishes_on_card(
         &self,
         card_id: &str,
@@ -2437,49 +2511,12 @@ impl HarnessBrain {
         chat: ChatTarget<'_>,
         published: Vec<publish::PendingPublish>,
     ) -> Result<String> {
-        let Some(tasks) = self.deps.tasks.as_ref() else {
-            return Err(crate::OpenCompanyError::Harness(
-                "a conversation published a file but no task board is wired".to_string(),
-            ));
-        };
-        let Some(mut card) = tasks
-            .list(&self.record().id)
-            .await?
-            .into_iter()
-            .find(|card| card.id == card_id)
-        else {
-            tracing::warn!(
-                task_id = %card_id,
-                agent = %agent,
-                "[publish] the card this turn opened is gone; minting one for the deliverable \
-                 instead of dropping it"
-            );
-            return self
-                .record_conversation_publishes(agent, chat, published)
-                .await;
-        };
-
-        let recorded = self
-            .record_published_artifacts(&card, agent, published.clone(), None)
-            .await?;
-        card.note = Some(append_result(
-            card.note.as_deref(),
-            agent,
-            &publish::filed_on_card_note(&published),
-        ));
-        card.column = COLUMN_IN_REVIEW.to_string();
-        if card.assignee.is_empty() {
-            card.assignee = agent.to_string();
+        publish::filing::PublishFiling {
+            company: &self.record().id,
+            deps: &self.deps,
         }
-        card.updated_at_millis = now_millis();
-        tasks.upsert(&self.record().id, &card).await?;
-        tracing::info!(
-            task_id = %card.id,
-            agent = %agent,
-            artifacts = recorded.len(),
-            "[publish] a conversation published files onto the card this message already opened"
-        );
-        Ok(card.id)
+        .file_on_card(card_id, agent, chat, published)
+        .await
     }
 
     /// Files a conversation's publishes, on a card minted to carry them.
@@ -3598,6 +3635,15 @@ impl HarnessBrain {
                     if turn.budget_paused.is_some() {
                         operator_reply = BUDGET_PAUSED_PLACEHOLDER_REPLY.to_string();
                     }
+                    // Issue #1680: the same wholesale override, and the same
+                    // contract for the delegation layer above. Separate `if`
+                    // rather than an `||` because the two placeholders differ:
+                    // one says the account ran dry, the other says the clock
+                    // did, and an operator who reads the wrong one looks for
+                    // the wrong lever.
+                    if turn.ceiling_paused.is_some() {
+                        operator_reply = CEILING_PAUSED_PLACEHOLDER_REPLY.to_string();
+                    }
 
                     // Drain what the conversation published (#445). Unconditional
                     // so nothing survives into the next turn, and only *recorded*
@@ -3874,6 +3920,34 @@ impl HarnessBrain {
                             mentions: Vec::new(),
                         });
                     }
+                    // Issue #1680: and a turn that ran out of *time* says so,
+                    // in its own bubble, on the same terms as the three above.
+                    // Mutually exclusive with all three in practice:
+                    // `classify_turn` reaches this arm only on the vendored
+                    // wall-clock leaf, which is an `Err`, so the same attempt
+                    // cannot also have capped or been halted by a hook.
+                    if let Some(pause) = &turn.ceiling_paused {
+                        channel_responses.push(OutboundMessage {
+                            message_id: None,
+                            task_id: None,
+                            outputs: Vec::new(),
+                            channel: "operator".to_string(),
+                            // `SYSTEM_AUTHOR`, not `None` -- CodeRabbit on PR
+                            // #2554. The iteration-cap notice above documents
+                            // why at length: `agent: None` journals as
+                            // `agent_id: "operator"`, no roster member matches,
+                            // and the console falls back to the channel's
+                            // voice, so the platform's words render under the
+                            // orchestrator's name. This arm was written against
+                            // the budget and spend notices below, which still
+                            // carry that unfixed shape.
+                            agent: Some(crate::ports::SYSTEM_AUTHOR.to_string()),
+                            text: ceiling_pause_notice(pause),
+                            steps: Vec::new(),
+                            reply_to: None,
+                            mentions: Vec::new(),
+                        });
+                    }
                     channel_responses.extend(turn.bubbles);
                 }
                 CompanyEvent::TaskDispatched { task_id, run_id } => {
@@ -3964,6 +4038,12 @@ impl HarnessBrain {
                         agent: Some(responder.clone()),
                         text: if turn.budget_paused.is_some() {
                             BUDGET_PAUSED_PLACEHOLDER_REPLY.to_string()
+                        } else if turn.ceiling_paused.is_some() {
+                            // Issue #1680: the journaled sibling. A scheduled
+                            // turn's journal is its only durable record, so an
+                            // unauthored placeholder here is what keeps the
+                            // teammate's name off runtime copy permanently.
+                            CEILING_PAUSED_PLACEHOLDER_REPLY.to_string()
                         } else {
                             turn.reply
                         },
@@ -4019,6 +4099,24 @@ impl HarnessBrain {
                             channel: crate::server::ops::language::GENERAL_CHANNEL_ID.to_string(),
                             agent: Some(crate::ports::SYSTEM_AUTHOR.to_string()),
                             text: budget_pause_notice(pause),
+                            steps: Vec::new(),
+                            reply_to: None,
+                            mentions: Vec::new(),
+                        });
+                    }
+                    // Issue #1680, journaled for the same reason as the three
+                    // above: a scheduled turn's journal is its only durable
+                    // record. This is the path the 24hr-status workflow's
+                    // predecessor ran on, where a ceiling hit previously left
+                    // nothing but a run-level error.
+                    if let Some(pause) = &turn.ceiling_paused {
+                        responses.push(OutboundMessage {
+                            message_id: None,
+                            task_id: None,
+                            outputs: Vec::new(),
+                            channel: crate::server::ops::language::GENERAL_CHANNEL_ID.to_string(),
+                            agent: Some(crate::ports::SYSTEM_AUTHOR.to_string()),
+                            text: ceiling_pause_notice(pause),
                             steps: Vec::new(),
                             reply_to: None,
                             mentions: Vec::new(),

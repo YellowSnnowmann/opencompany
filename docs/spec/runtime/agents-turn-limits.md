@@ -1,14 +1,30 @@
 # What a turn is allowed to spend
 
-The two ceilings that bound one teammate's turn — the tool-iteration cap and
-the in-turn spend brake — what each one stops, and why a run that hits one must
-never be reported as having hit the other.
+The limits that bound one teammate's turn — what each one stops, and why a run
+that hits one must never be reported as having hit another. Two of them are set
+here (the tool-iteration cap and the in-turn spend brake); the other two are the
+account running out of credits and the harness's per-turn wall-clock ceiling,
+which is declared in the vendored runtime and described under
+[Wall-clock](#wall-clock--the-vendored-harnesss-own-ceiling) below.
 
 Split out of [`agents.md`](agents.md) on this repo's 500-line cap for a Markdown
 file. That page owns how a teammate is declared and what reaches its prompt;
 this one owns what a turn built from it may spend.
 
-Two ceilings bound one turn, and they bound different things.
+Four limits can stop one turn short, and they stop different things. Every one
+of them settles as a **pause** that keeps the partial work — never as an error —
+and each has its own operator lever:
+
+| Limit | `TurnOutcome` field | Operator's lever |
+|---|---|---|
+| Tool-iteration cap | `hit_iteration_cap` | reply `"continue"` — there is a checkpoint |
+| In-turn spend brake | `halted_for_spend` | raise the company's cap, or narrow the ask |
+| Account out of credits | `budget_paused` | add credits |
+| Wall-clock ceiling | `ceiling_paused` | narrow the ask, or raise the ceiling |
+
+The first two are this crate's own policy and are described below. The third is
+issue #1846's. The fourth was the last one to stop hard rather than pause; see
+the section at the end.
 
 ## Tool iterations — 25
 
@@ -92,3 +108,68 @@ with work still to do and can be resumed via the "continue" bubble above; a
 budget halt means it ran out of money, returns whatever reply the model produced
 before the hook fired, and gets no such bubble today. Anything that renders one
 to an operator must not label it with the other.
+
+## Wall-clock — the vendored harness's own ceiling
+
+The fourth limit, and the only one not set by this crate: the vendored harness
+policy's `max_wall_clock_ms` — `DEFAULT_AGENT_TURN_TIMEOUT_SECS`, **3600** at
+the current pin and 600 when #1680 was filed, with no override set anywhere in
+this repo — overridden with
+`OPENHUMAN_AGENT_TURN_TIMEOUT_SECS`. It bounds the whole turn from the moment
+the harness run starts — model time, tool time, sub-agent time and retry backoff
+all count against it. See
+[`harnesses.md`](harnesses.md#how-long-a-turn-may-take) for the nesting diagram
+and for why the harness's own error message misleads.
+
+It was also the last of the four to **fail** rather than pause, until issue
+#1680's second half. That was the expensive half of the defect, rather than the
+misleading message #1761 fixed.
+
+The ceiling's lever is distinct from the three above, which is why it is a fourth
+field rather than a reading of an existing one: credits buy nothing, there is no
+company-declared cap to raise, and — unlike a step pause — **there is no
+checkpoint to continue from.** `ceiling_pause_notice`
+(`src/harness/built_in/brain.rs`) therefore never uses the word "continue";
+doing so would invite the operator to spend another full ceiling arriving at the
+same wall.
+
+**What survives, and what does not.** Three different answers:
+
+- **The reply text does not.** The vendored harness returns an `Err` with no
+  partial `String` in it, so the draft the turn was composing is unrecoverable
+  from here. A salvage would have to happen upstream, inside the harness.
+- **The spend already did**, via issue B-120 — `turn_costs` is returned outside
+  the `Result` precisely because a ceiling hit "fires precisely *because* the
+  agent worked for the full ceiling" and was reporting the most expensive runs a
+  founder owns as free.
+- **The folded step timeline does now.** `pump.finish()` runs unconditionally
+  and `fold_steps` builds the full `Vec<TurnStep>` whether the reply is `Ok` or
+  `Err` — but `reply.map(..)` then dropped it on every `Err`, so a `Hard` ceiling
+  arm discarded a complete timeline one line after computing it. On a ceiling hit
+  that timeline is by definition substantial, and for the workflow node #1680 was
+  filed against it is the fetched material the summary was going to be written
+  from.
+
+**At a workflow node**, a ceiling pause settles the attempt row `Failed` with
+the notice as its error, pushes the node id onto `RunCappedNodes` so the row and
+the attempt agree (the #1865 reconciliation, as for the other three), and
+reports `StopReason::LimitStop { limit: "wall_clock_ceiling" }` rather than
+`Finished` — so the pause copy is never bound downstream as if it were the
+node's deliverable. The run then continues to the next node, which is what #1680
+asked for: on its own workflow, the **Send update** step is reached.
+
+**On a delegation chain**, the pause folds first-wins exactly as
+`budget_paused` does, so a ceiling hit two desks down names the teammate that
+actually ran out of time. The CEO-relay is deliberately **not** skipped for it,
+unlike a budget pause: the provider has not run dry, so the relay call will
+work, and the synthesis it produces over the branches that *did* finish is what
+the delegates' own text would otherwise never reach the operator as.
+
+What the relay buys is the **fold onto the operator's timeline**, not its reply
+text. Both chat callers replace the primary reply with
+`CEILING_PAUSED_PLACEHOLDER_REPLY` whenever `ceiling_paused` is set, exactly as
+#1906 established for a budget pause — so the relay's own words are discarded
+the same way, and anything appended to `OperatorTurn::reply` upstream is
+unreachable from there. A delegate's words reaching the operator through a pause
+would need a channel of their own, which is the constraint #1906 already
+records.

@@ -60,6 +60,10 @@ name = "hive_e2e"
 path = "tests/hive_e2e.rs"
 
 [[test]]
+name = "hive_seat_cards"
+path = "tests/hive_seat_cards.rs"
+
+[[test]]
 name = "offline_e2e"
 path = "tests/offline_e2e.rs"
 

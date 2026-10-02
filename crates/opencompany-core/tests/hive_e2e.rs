@@ -1011,13 +1011,7 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
     assert_eq!(done.len(), 1, "{done:?}");
     assert_eq!(done[0].1, ENGINEERING);
     assert_eq!(done[0].2, EpisodeReason::CompleteEpisode);
-    // One wave, and no closing round. `rounds` is `report.waves +
-    // closing_waves`, and `closing_waves` is zero here because
-    // `conclude::eligible` requires `spoke > 1` -- more than one seat having
-    // recorded a part. This episode is the one-seat case the gate exists to
-    // refuse: the fallback plan named a single seat (asserted above), so a
-    // closing round would be that seat asked to summarise itself.
-    assert_eq!(done[0].3, 1, "the seat's wave, and no closing round");
+    assert_eq!(done[0].3, 1, "one wave ran");
 
     // **The episode wrote down what a restart would otherwise lose.**
     //
@@ -1051,16 +1045,6 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
 
     // Recording *is* a seat's contribution: there is no separate "say
     // something" act in a completion episode, so one seat leaves one row.
-    //
-    // One row, from the one seat: its own part. There is no second row,
-    // because the closing round that would have written one does not run here.
-    // Once a desk settles, OpenCompany asks Jev whether an assembly is still
-    // owed and seats whoever it names for a single turn, whose
-    // `complete_episode` message becomes the episode's summary. But
-    // `conclude::eligible` gates that on `spoke > 1`, and on a one-seat desk
-    // the seat Jev would name is the seat that just finished -- so the closing
-    // round would be that seat asked to summarise itself, and the same agent
-    // would record the same words twice. Refusing it is the point of the gate.
     let desk = replies(&rows, ENGINEERING);
     let kinds: Vec<(String, Option<UtteranceKind>)> = desk
         .iter()
@@ -1069,7 +1053,7 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
     assert_eq!(
         kinds,
         vec![(ENGINEER.to_string(), Some(UtteranceKind::CompleteEpisode))],
-        "the seat's own part, and no closing round's summary: {desk:?}"
+        "the seat's recorded part is its reply: {desk:?}"
     );
     assert!(
         desk.iter()
@@ -1100,19 +1084,10 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
     let measured = report(&runtime).await;
     assert_eq!(measured.episodes_completed, 1);
     assert_eq!(measured.same_agent_overlaps, 0);
-    // The measure reads the journalled `rounds`, which would carry a closing
-    // round if one had run -- it is a round of work and analytics should see
-    // it. None ran here: `conclude::eligible` gates it on `spoke > 1` and this
-    // is a one-seat episode, so the journalled count agrees with what
-    // `rounds()` folds out of the desk's turn rows. On a desk where a closing
-    // round does run the two diverge, because that round's turn row is stamped
-    // wave `0` like the first (its conductor numbers from zero) and folding by
-    // revision cannot see it.
     assert_eq!(
         measured.episodes[&done[0].0].rounds, 1,
-        "one round, and no closing round to add: {measured:?}"
+        "the measure counts the wave the turn rows carry: {measured:?}"
     );
-    // One completion: the seat's own part. No closing round, so no summary.
     assert_eq!(measured.utterance_kinds["complete_episode"], 1);
     assert!(
         !measured.utterance_kinds.contains_key("post"),
@@ -1146,15 +1121,10 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
             _ => None,
         })
         .collect();
-    // One turn, stamped wave `0`. A closing round would add a second, also
-    // stamped `0` -- it numbers its own waves from zero because it runs on a
-    // conductor of its own, so wave numbers are unique per conductor rather
-    // than per episode. None is added here: `conclude::eligible` gates the
-    // closing round on `spoke > 1` and this episode has one seat.
     assert_eq!(
         attributed,
         vec![(ENGINEER.to_string(), 0)],
-        "the seat's turn, naming its wave"
+        "the seat turn names its episode and its wave"
     );
 }
 
@@ -1438,14 +1408,10 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
 
     // **A seat is never offered a hand-off tool it cannot use here.**
     //
-    // `spawn_task`, `delegate_to_desk` and `delegate_to_teammate` are wired
-    // onto every roster agent and queue work the brain drains; no brain
-    // drains inside an episode, so the orchestrator refuses them outright
-    // (`drain_unwired`). On a live run a seat reached for one, took the
-    // refusal as proof that delegating was impossible, and told the operator
-    // to go and make "the board" available -- while `ask`, the tool that
-    // does work here, was on the same belt. The refusal was handled; the
-    // misdiagnosis it invited was not, so the names come off the belt.
+    // The hand-off and lifecycle verbs are wired onto roster agents but
+    // could only refuse on a seat, whose claim permits opening a card and
+    // nothing else; a refused tool argues the seat out of `ask`, so the names
+    // come off the belt. `spawn_task` stays, and `hive_seat_cards` covers it.
     let offered: Vec<String> = script
         .asks()
         .iter()
@@ -1455,7 +1421,12 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
         !offered.is_empty(),
         "the fixture saw no tool schemas at all, so this asserts nothing",
     );
-    for withheld in ["spawn_task", "delegate_to_desk", "delegate_to_teammate"] {
+    for withheld in [
+        "delegate_to_desk",
+        "delegate_to_teammate",
+        "assign_task",
+        "review_task",
+    ] {
         assert!(
             !offered.iter().any(|name| name == withheld),
             "`{withheld}` was offered to an episode seat: {offered:?}",
@@ -2261,10 +2232,6 @@ async fn an_approved_request_resumes_the_seat_and_completes_the_episode() {
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
     dump(&rows, &script);
     assert_eq!(seat_resumed(&rows), vec![ENGINEER.to_string()]);
-    // Once: the resumed turn. There is no closing round's turn to carry the
-    // brief a second time, because `conclude::eligible` refuses a one-seat
-    // episode and this episode is one seat -- the seat that asked, resumed
-    // with the operator's decision.
     assert_eq!(
         told(&script, "approved your request: Email the client"),
         1,
@@ -2309,7 +2276,6 @@ async fn a_denied_request_resumes_the_seat_with_the_denial() {
 
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
     dump(&rows, &script);
-    // The resumed turn, and no closing round's turn -- one seat, as above.
     assert_eq!(told(&script, "denied your request: Email the client"), 1);
     assert_eq!(told(&script, "approved your request"), 0);
 }
@@ -2348,7 +2314,6 @@ async fn an_answered_escalation_reaches_the_seat_that_asked() {
 
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
     dump(&rows, &script);
-    // The resumed turn, and no closing round's turn -- one seat, as above.
     assert_eq!(told(&script, "\"eu-west first\""), 1);
 }
 
