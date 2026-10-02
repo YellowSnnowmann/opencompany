@@ -31,6 +31,10 @@ test("an SSO fragment redeems once and confirms the signed-in owner", async ({ b
   await page.route("**/api/v1/spec", (route) =>
     route.fulfill({ json: { setup_complete: false } }),
   );
+  // `onSignedIn` probes the connection before the app reboots into the setup
+  // wizard. A fresh registry has no company status to query, so make the
+  // platform company list answer successfully as an empty list.
+  await page.route("**/api/v1/companies", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/setup", async (route) => {
     const headers = route.request().headers();
     setupCarrier = headers["x-opencompany-session"] ?? headers.cookie;
