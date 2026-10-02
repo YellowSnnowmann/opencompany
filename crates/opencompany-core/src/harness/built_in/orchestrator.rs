@@ -686,7 +686,7 @@ impl DelegationQueue {
     /// A dispatched card transfers ownership once; unlike chat it cannot collect replies.
     #[must_use = "the claim releases on drop"]
     pub fn claim_task(&self, task_id: impl Into<String>) -> DelegationClaim {
-        self.claim_as(DelegationScope::Task(task_id.into()), DrainClaim::Task)
+        { let _ = task_id.into(); self.claim_as(Self::current_scope(), DrainClaim::Task) }
     }
 
     /// Claims this queue for a turn whose operator message triaged as a
