@@ -363,7 +363,7 @@ where
 }
 
 #[cfg(test)]
-type TestCall = (String, serde_json::Value);
+pub(crate) type TestCall = (String, serde_json::Value);
 
 #[cfg(test)]
 static TEST_CALLS: OnceLock<tokio::sync::Mutex<Vec<TestCall>>> = OnceLock::new();
