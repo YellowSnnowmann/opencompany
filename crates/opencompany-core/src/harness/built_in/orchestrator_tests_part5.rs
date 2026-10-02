@@ -652,7 +652,7 @@ async fn run_workflow_tool_separates_blocked_nodes_from_paused_gates() {
 
 #[tokio::test(start_paused = true)]
 async fn workflow_tool_survives_single_call_deadline_and_stages_result() {
-    struct SlowRunner(tokio::sync::Notify);
+    struct SlowRunner(Arc<tokio::sync::Notify>);
     #[async_trait::async_trait]
     impl WorkflowRunner for SlowRunner {
         async fn run(
