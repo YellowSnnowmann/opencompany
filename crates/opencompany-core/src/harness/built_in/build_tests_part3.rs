@@ -332,7 +332,15 @@ fn a_company_agent_runtime_registers_no_upstream_composio_tools() {
     use openhuman_core::config::schema::{COMPOSIO_MODE_BACKEND, COMPOSIO_MODE_DIRECT};
 
     let mut config = openhuman_core::config::Config::default();
+    config.composio.pin_host_credential(
+        openhuman_core::config::schema::ComposioHostCredential::direct("test-host-credential"),
+    );
     withhold_openhuman_composio(&mut config);
+
+    assert!(
+        config.composio.host_credential.is_none(),
+        "a pinned credential takes precedence over the mode and must also be removed"
+    );
 
     assert_ne!(config.composio.mode, COMPOSIO_MODE_BACKEND);
     assert_ne!(config.composio.mode, COMPOSIO_MODE_DIRECT);

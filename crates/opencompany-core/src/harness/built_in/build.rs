@@ -1898,14 +1898,15 @@ fn withhold_openhuman_docs(config: &mut oh::config::Config) {
 /// inference runs on. So upstream's tools went from never registering here to
 /// always registering.
 ///
-/// The lever is the mode string, and it is the only deterministic one. There is
-/// no `is_active()` gate for Composio the way there is for `google_places`,
+/// The mode string is necessary but not sufficient: an embedder may also pin a
+/// host credential, which takes precedence over mode selection. There is no
+/// `is_active()` gate for Composio the way there is for `google_places`,
 /// `stock_prices` and `twilio` — those three sit inside the `build_client` block
 /// and each tests its own config; Composio is called outside it. `enabled` on
 /// `ComposioConfig` looks like the switch and is not: nothing in
-/// `openhuman-core` reads it. Naming `direct` with no key would depend on
-/// whatever the host's keychain happens to hold, which is not a property this
-/// crate controls. An unroutable mode fails closed on every host.
+/// `openhuman-core` reads it. Clear the host-pinned credential and set an
+/// unroutable mode so the upstream registration probe fails closed regardless
+/// of the host's credentials.
 ///
 /// Nothing here loses a capability. OpenCompany's Composio surface resolves its
 /// own credentials from the [`SecretStore`](crate::ports::SecretStore) per
@@ -1914,6 +1915,7 @@ fn withhold_openhuman_docs(config: &mut oh::config::Config) {
 /// itself and never consults this field — grep for `composio.mode` outside this
 /// function and the only hit is a doc comment.
 fn withhold_openhuman_composio(config: &mut oh::config::Config) {
+    config.composio.host_credential = None;
     config.composio.mode = "opencompany-serves-composio-itself".into();
 }
 
