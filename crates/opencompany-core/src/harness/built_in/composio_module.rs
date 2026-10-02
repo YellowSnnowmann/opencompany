@@ -56,6 +56,25 @@
 //! reconfigured whenever consecutive calls come from different companies. It is
 //! the same price [`super::search_byo::module`] pays for the same reason: a
 //! module shaped for a single-user host, serving a multi-tenant one.
+//!
+//! # That contention is bounded, and by what
+//!
+//! A read guard is held across the member call, and tokio's `RwLock` is fair —
+//! a waiting writer blocks new readers — so one company's in-flight call does
+//! delay another company's, and a queue can form behind it. The question that
+//! follows is how long, and the answer is not "indefinitely": every tinybus call
+//! carries a deadline. `ModuleRuntime::proxy` builds the proxy through
+//! `Connection::proxy`, which constructs it with `tinybus::DEFAULT_TIMEOUT` —
+//! thirty seconds — and the bus states the rule outright: "Every call has a
+//! deadline". So a hung module cannot hold the route; the call fails and the
+//! guard drops.
+//!
+//! Thirty seconds is also upstream's own choice for these members. Its
+//! `connectors::call` path takes the default, and it raises the deadline only
+//! for `Sync` (`SLOW_MEMBER_TIMEOUT`, fifteen minutes). Any member here that
+//! outgrows thirty seconds wants `Proxy::with_timeout`, not a second timeout
+//! wrapped around the call: two bounds would report whichever fired first and
+//! hide the bus's own message.
 
 use std::sync::OnceLock;
 
