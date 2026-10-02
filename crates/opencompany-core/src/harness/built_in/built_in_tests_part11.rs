@@ -40,10 +40,10 @@
 //!    and assistant roles intact;
 //! 6. typed tool-call / tool-result rows survive the replay across the retry.
 
+use super::built_in_test_fixtures::test_runtime;
 use super::built_in_test_fixtures::*;
 use super::built_in_test_fixtures_2::*;
 use super::*;
-use super::built_in_test_fixtures::test_runtime;
 
 /// **Reachability** — a single `Ok(String::new())` in the scripted-provider
 /// sequence causes the wrapper to make exactly two provider calls: the first
