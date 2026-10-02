@@ -12,6 +12,8 @@
 //! the rest. That is what keeps an upstream payload change from silently
 //! becoming an OpenCompany API change.
 
+use std::future::Future;
+
 use serde::Serialize;
 use serde_json::Value;
 
@@ -96,7 +98,7 @@ pub(in crate::server::ops) fn health_from_status(
 /// Upstream's `SmitheryServerSummary` ends in `#[serde(flatten)] extra`, so it
 /// round-trips every key the two registries emit. Naming what we forward is what
 /// keeps an upstream payload change from becoming an OpenCompany API change.
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::server::ops) struct CatalogueEntryDto {
     pub(in crate::server::ops) qualified_name: String,
@@ -199,10 +201,10 @@ pub(in crate::server::ops) fn catalogue_search(raw: &Value) -> CatalogueSearchDt
 fn catalogue_entry(raw: &Value) -> Option<CatalogueEntryDto> {
     let qualified_name = text(raw, "qualified_name")?;
     Some(CatalogueEntryDto {
-        display_name: text(raw, "display_name").unwrap_or_else(|| qualified_name.clone()),
+        display_name: brand_name(&qualified_name, text(raw, "display_name")),
+        icon_url: text(raw, "icon_url").or_else(|| brand_logo(&qualified_name)),
         qualified_name,
         description: text(raw, "description"),
-        icon_url: text(raw, "icon_url"),
         source: text(raw, "source").unwrap_or_default(),
         official: raw
             .get("official")
@@ -211,6 +213,218 @@ fn catalogue_entry(raw: &Value) -> Option<CatalogueEntryDto> {
         use_count: raw.get("use_count").and_then(Value::as_u64).unwrap_or(0),
         website_url: text(raw, "website_url"),
     })
+}
+
+/// First-party servers by qualified name, with the name and GitHub account id
+/// their logo is read from. The registry carries neither for most of them.
+const OFFICIAL_BRANDS: &[(&str, &str, u64)] = &[
+    ("io.github.github/github-mcp-server", "GitHub", 9919),
+    ("com.notion/mcp", "Notion", 4792552),
+    ("com.stripe/mcp", "Stripe", 856813),
+    ("com.atlassian/atlassian-mcp-server", "Atlassian", 168166),
+    ("app.linear/linear", "Linear", 46686594),
+    ("com.gitlab/mcp", "GitLab", 1086321),
+    ("com.paypal.mcp/mcp", "PayPal", 476675),
+    ("com.cloudflare.mcp/mcp", "Cloudflare", 314135),
+    ("com.airtable/mcp", "Airtable", 9687261),
+    ("com.supabase/mcp", "Supabase", 54469796),
+    ("com.vercel/vercel-mcp", "Vercel", 14985020),
+    ("com.webflow/mcp", "Webflow", 1229663),
+    ("com.wix/mcp", "Wix", 686511),
+];
+
+fn official_brand(qualified_name: &str) -> Option<&'static (&'static str, &'static str, u64)> {
+    OFFICIAL_BRANDS
+        .iter()
+        .find(|(name, _, _)| *name == qualified_name)
+}
+
+/// The name a directory row is shown under: the first-party brand, upstream's
+/// name when it says something, or the publisher's namespace when upstream's
+/// is only a word like `mcp`.
+pub(in crate::server::ops) fn brand_name(qualified_name: &str, upstream: Option<String>) -> String {
+    if let Some((_, brand, _)) = official_brand(qualified_name) {
+        return (*brand).to_string();
+    }
+    match upstream {
+        Some(name) if !is_generic_name(&name) => name,
+        upstream => publisher_name(qualified_name)
+            .or(upstream)
+            .unwrap_or_else(|| qualified_name.to_string()),
+    }
+}
+
+/// Where a first-party server's logo is fetched from, for the host to inline.
+pub(in crate::server::ops) fn brand_logo(qualified_name: &str) -> Option<String> {
+    official_brand(qualified_name)
+        .map(|(_, _, account)| format!("https://avatars.githubusercontent.com/u/{account}?s=128"))
+}
+
+/// The name a directory install is saved under: its shown name as a slug, so
+/// the row reads `notion` rather than `com.notion/mcp`.
+pub(in crate::server::ops) fn directory_server_name(display_name: &str) -> Option<String> {
+    let mut slug = String::new();
+    for c in display_name.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let slug = slug.trim_end_matches('-');
+    (!slug.is_empty()).then(|| slug.to_string())
+}
+
+/// What a directory install is saved as, given the company's existing servers
+/// as `(name, normalized endpoint)` pairs.
+#[derive(Debug, PartialEq, Eq)]
+pub(in crate::server::ops) enum InstallName {
+    /// A name nothing else uses.
+    Free(String),
+    /// A server already dials this endpoint, under this name.
+    AlreadyInstalled(String),
+}
+
+/// Picks the name for a directory install: refused when the same endpoint is
+/// already declared, otherwise the slug of its shown name, numbered on a clash.
+pub(in crate::server::ops) fn install_name_for(
+    display_name: &str,
+    qualified_name: &str,
+    endpoint: Option<&str>,
+    existing: &[(String, Option<String>)],
+) -> InstallName {
+    if let Some((name, _)) = existing
+        .iter()
+        .find(|(_, other)| endpoint.is_some() && other.as_deref() == endpoint)
+    {
+        return InstallName::AlreadyInstalled(name.clone());
+    }
+    let base = directory_server_name(display_name).unwrap_or_else(|| qualified_name.to_string());
+    let taken = |candidate: &str| existing.iter().any(|(name, _)| name == candidate);
+    if !taken(&base) {
+        return InstallName::Free(base);
+    }
+    let numbered = (2..)
+        .map(|n| format!("{base}-{n}"))
+        .find(|candidate| !taken(candidate))
+        .unwrap_or(base);
+    InstallName::Free(numbered)
+}
+
+fn is_generic_name(name: &str) -> bool {
+    name.split(|c: char| c.is_whitespace() || c == '-' || c == '_')
+        .filter(|word| !word.is_empty())
+        .all(|word| {
+            matches!(
+                word.to_ascii_lowercase().as_str(),
+                "mcp" | "server" | "remote" | "official"
+            )
+        })
+}
+
+fn publisher_name(qualified_name: &str) -> Option<String> {
+    let namespace = qualified_name
+        .split_once('/')
+        .map_or(qualified_name, |(ns, _)| ns);
+    let parts: Vec<&str> = namespace.trim_start_matches('@').split('.').collect();
+    let candidates: &[&str] = match parts.as_slice() {
+        ["io", "github", rest @ ..] => rest,
+        [_tld, rest @ ..] if !rest.is_empty() => rest,
+        all => all,
+    };
+    let word = candidates
+        .iter()
+        .find(|part| !part.is_empty() && !part.eq_ignore_ascii_case("mcp"))?;
+    let mut chars = word.chars();
+    let first = chars.next()?;
+    Some(first.to_uppercase().chain(chars).collect())
+}
+
+/// Badges the servers named in `official` by exact qualified name, then orders
+/// official first and most-installed next. Ties keep upstream's order.
+pub(in crate::server::ops) fn rank_catalogue(servers: &mut [CatalogueEntryDto], official: &[&str]) {
+    for server in servers.iter_mut() {
+        server.official = official.contains(&server.qualified_name.as_str());
+    }
+    servers.sort_by(|a, b| {
+        b.official
+            .cmp(&a.official)
+            .then_with(|| b.use_count.cmp(&a.use_count))
+    });
+}
+
+/// A `registry_get` answer as a catalogue row, when it names an endpoint this
+/// host can dial.
+pub(in crate::server::ops) fn featured_entry(raw: &Value) -> Option<CatalogueEntryDto> {
+    let server = raw.get("server")?;
+    http_deployment_url(server)?;
+    catalogue_entry(server)
+}
+
+/// The upstream page a browse — no search term — reads for a shown page. The
+/// first shown page is the official connectors alone, so every later one is
+/// the directory page before it.
+pub(in crate::server::ops) fn browse_upstream_page(shown: u32) -> u32 {
+    shown.saturating_sub(1).max(1)
+}
+
+/// The first browse page: the official connectors, with the directory after.
+pub(in crate::server::ops) fn featured_page(servers: Vec<CatalogueEntryDto>) -> CatalogueSearchDto {
+    CatalogueSearchDto {
+        servers,
+        page: 1,
+        total_pages: 2,
+    }
+}
+
+/// A directory page as a browse shows it: numbered after the featured page,
+/// and without the official connectors that page already listed.
+pub(in crate::server::ops) fn shift_browse_page(
+    results: &mut CatalogueSearchDto,
+    upstream_page: u32,
+    official: &[&str],
+) {
+    results
+        .servers
+        .retain(|server| !official.contains(&server.qualified_name.as_str()));
+    results.page = upstream_page + 1;
+    results.total_pages = results.total_pages.max(upstream_page) + 1;
+}
+
+/// An icon as the browser may load it: an inline image kept as is, a remote
+/// address replaced by what `fetch` inlines from it, or nothing.
+pub(in crate::server::ops) async fn inline_icon<F, Fut>(
+    icon: Option<String>,
+    fetch: &F,
+) -> Option<String>
+where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = Option<String>>,
+{
+    match icon {
+        Some(icon) if icon.starts_with("data:image/") => Some(icon),
+        Some(url) if url.starts_with("https://") || url.starts_with("http://") => fetch(url).await,
+        _ => None,
+    }
+}
+
+/// [`inline_icon`] over every row, concurrently.
+pub(in crate::server::ops) async fn inline_icons<F, Fut>(
+    servers: &mut [CatalogueEntryDto],
+    fetch: F,
+) where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = Option<String>>,
+{
+    let icons = futures::future::join_all(
+        servers
+            .iter()
+            .map(|server| inline_icon(server.icon_url.clone(), &fetch)),
+    )
+    .await;
+    for (server, icon) in servers.iter_mut().zip(icons) {
+        server.icon_url = icon;
+    }
 }
 
 /// Projects `{ server: … }` as upstream's `registry_get` returns it, deciding
@@ -223,10 +437,10 @@ pub(in crate::server::ops) fn catalogue_detail(raw: &Value) -> Option<CatalogueD
         .is_none()
         .then(|| stdio_install_refusal(&qualified_name));
     Some(CatalogueDetailDto {
-        display_name: text(server, "display_name").unwrap_or_else(|| qualified_name.clone()),
+        display_name: brand_name(&qualified_name, text(server, "display_name")),
+        icon_url: text(server, "icon_url").or_else(|| brand_logo(&qualified_name)),
         qualified_name,
         description: text(server, "description"),
-        icon_url: text(server, "icon_url"),
         source: text(server, "source").unwrap_or_default(),
         installable: endpoint.is_some(),
         endpoint,
@@ -252,3 +466,7 @@ fn text(raw: &Value, key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
         .map(str::to_string)
 }
+
+#[cfg(test)]
+#[path = "catalogue_tests.rs"]
+mod tests;

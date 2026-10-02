@@ -47,6 +47,7 @@ fn a_stored_backlog_card_reads_back_in_todo() {
 
 fn plain_card() -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: "t-1".to_string(),
         title: TaskTitle::authored("Draft the spec"),
         note: None,

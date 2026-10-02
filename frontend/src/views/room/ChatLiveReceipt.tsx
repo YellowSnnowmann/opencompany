@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { TurnStep } from "@/api/types";
+import { usePrefersReducedMotion } from "@/hooks/use-prefers-reduced-motion";
 import { GENERAL_CHANNEL_ID } from "@/lib/chat";
 import { cn } from "@/lib/utils";
 import { TeammateAvatar } from "@/components/teammate-avatar";
@@ -280,27 +281,4 @@ function useReceiptClock(): number {
     return () => clearInterval(id);
   }, []);
   return clock;
-}
-
-/**
- * Whether the viewer asked for reduced motion, kept live. Mirrors
- * `WorkingIndicator`'s hook — reads `false` where `matchMedia` is unavailable,
- * and prefers the modern `addEventListener` spelling with the deprecated
- * `addListener` as the fallback older WebKitGTK builds still need.
- */
-function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    const mql = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    if (!mql) return;
-    setReduced(mql.matches);
-    const onChange = () => setReduced(mql.matches);
-    if (typeof mql.addEventListener === "function") {
-      mql.addEventListener("change", onChange);
-      return () => mql.removeEventListener("change", onChange);
-    }
-    mql.addListener(onChange);
-    return () => mql.removeListener(onChange);
-  }, []);
-  return reduced;
 }

@@ -42,8 +42,10 @@
 // See `node-reveal.ts` for the arithmetic and for why this pans rather than
 // zooms or reflows.
 
-import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
+
+import { usePrefersReducedMotion } from "@/hooks/use-prefers-reduced-motion";
 
 import { NODE_H, NODE_W } from "./graph";
 import { revealViewport, shouldRestore, type Viewport } from "./node-reveal";
@@ -56,38 +58,6 @@ const REVEAL_MS = 200;
 /** Slack on top of the animation before the viewport counts as the operator's
  * again — one or two frames of transition teardown. */
 const SETTLE_SLACK_MS = 80;
-
-const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
-
-/**
- * Whether the operator has asked for less motion.
- *
- * `index.css` already honours the preference globally — "the quality floor …
- * rather than remembering to do it per animation" — but that block can only
- * reach CSS animations and transitions, and this one is neither: React Flow
- * drives the viewport by setting a `transform` from a d3 timer, which no
- * stylesheet can shorten. So this animation is one of the few that has to ask
- * for itself. Reduced motion makes the reveal a cut rather than removing it —
- * the node still has to come out from under the panel.
- */
-function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(
-    () => typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia(REDUCED_MOTION).matches,
-  );
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return;
-    }
-    const query = window.matchMedia(REDUCED_MOTION);
-    const onChange = () => setReduced(query.matches);
-    onChange();
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, []);
-  return reduced;
-}
 
 /** What `WorkflowsView` calls when the operator moves the canvas themselves. */
 export interface RevealSelectedNodeHandle {
@@ -111,6 +81,9 @@ export function RevealSelectedNode({
 }) {
   const { getInternalNode, getViewport, setViewport } = useReactFlow();
   const paneWidth = useStore((s) => s.width);
+  // React Flow moves the viewport from a d3 timer, which the global CSS
+  // reduced-motion rule cannot shorten, so ask for the preference here. Reduced
+  // motion makes the reveal a cut, not a removal.
   const duration = usePrefersReducedMotion() ? 0 : REVEAL_MS;
 
   /** The viewport to go back to — captured before the FIRST reveal of a run of

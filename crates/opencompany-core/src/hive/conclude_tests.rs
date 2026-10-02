@@ -133,6 +133,78 @@ fn the_router_is_given_each_seat_s_finding() {
     );
 }
 
+/// A desk reply stamped as the speech act `kind` in an episode.
+fn act(
+    seq: u64,
+    chat: &str,
+    agent: &str,
+    kind: crate::ports::types::UtteranceKind,
+) -> crate::ports::types::StoredEvent {
+    let mut row = reply(seq, chat, agent, "text");
+    if let crate::ports::types::CompanyEvent::AgentReply { episode, .. } = &mut row.event {
+        *episode = Some(crate::ports::types::ReplyEpisode {
+            id: "ep".to_owned(),
+            revision: 0,
+            kind,
+            to: Vec::new(),
+            routed_by: None,
+        });
+    }
+    row
+}
+
+/// Who spoke is counted per seat that recorded its part on the desk, and
+/// never from the driver's participant list -- which seats every desk member,
+/// so a two-seat desk answered by one seat used to read as two and got a
+/// closing turn asking that seat to summarise itself.
+#[test]
+fn only_seats_that_recorded_a_part_on_the_desk_count_as_spoken() {
+    use crate::ports::types::UtteranceKind::{Broadcast, CompleteEpisode};
+
+    let one_seat = vec![
+        act(1, "engineering", "engineer", CompleteEpisode),
+        // A finish the driver refused, then the real one: still one seat.
+        act(2, "engineering", "engineer", CompleteEpisode),
+        // The host's own notice on the desk is nobody's part.
+        reply(
+            3,
+            "engineering",
+            "system",
+            "the operator denied your request",
+        ),
+        // A seat that only handed work to the room recorded nothing.
+        act(4, "engineering", "ceo", Broadcast),
+        // An answer inside an `ask` lands on the pair's chat.
+        act(5, "dm:ceo+engineer", "ceo", CompleteEpisode),
+    ];
+    assert_eq!(
+        super::contributors(&one_seat, "engineering"),
+        1,
+        "one seat recorded a part, however many rows the desk holds"
+    );
+    assert!(
+        !eligible(
+            "engineering",
+            EpisodeReason::CompleteEpisode,
+            super::contributors(&one_seat, "engineering")
+        ),
+        "a one-seat answer gets no closing turn"
+    );
+
+    let two_seats = vec![
+        act(1, "engineering", "engineer", Broadcast),
+        act(2, "engineering", "ceo", CompleteEpisode),
+        act(3, "engineering", "engineer", CompleteEpisode),
+    ];
+    assert_eq!(super::contributors(&two_seats, "engineering"), 2);
+    assert!(eligible(
+        "engineering",
+        EpisodeReason::CompleteEpisode,
+        super::contributors(&two_seats, "engineering")
+    ));
+    assert_eq!(super::contributors(&[], "engineering"), 0);
+}
+
 /// One journaled desk reply, for the read-back rules below.
 fn reply(seq: u64, chat: &str, agent: &str, text: &str) -> crate::ports::types::StoredEvent {
     use crate::ports::types::{CompanyEvent, CompanyId, EventSeq, StoredEvent};

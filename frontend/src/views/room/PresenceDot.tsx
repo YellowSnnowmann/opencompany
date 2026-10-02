@@ -11,8 +11,9 @@ import type { PresenceStatus } from "@/lib/awareness";
  * support. A hollow ring says "not seen" honestly.
  *
  * Never rendered for a teammate. An agent is not "online": it has no session
- * and no machine to be at, and its live state is already the working
- * indicator. A dot on one would be decoration that reads as fact.
+ * and no machine to be at. Its live state (typing, thinking, working, waiting
+ * for approval, queued) is `AgentStatusDot`'s, under a different testid, so
+ * `chat-presence.spec.ts` can keep counting this one against the person rows.
  */
 export function PresenceDot({
   status,

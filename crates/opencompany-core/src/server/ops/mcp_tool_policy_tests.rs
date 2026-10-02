@@ -23,7 +23,7 @@ fn patch(tools: Vec<PutToolPolicyEntry>) -> PutToolPolicy {
 /// than silently storing the document unchanged.
 #[test]
 fn a_body_naming_neither_field_is_refused() {
-    let err = apply_tool_policy_patch(McpToolPolicies::default(), PutToolPolicy::default())
+    let err = apply_tool_policy_patch(McpToolPolicies::default(), PutToolPolicy::default(), None)
         .expect_err("refused");
     assert!(err.contains("tierDefaults"), "{err}");
     assert!(err.contains("tools"), "{err}");
@@ -42,7 +42,8 @@ fn an_entry_naming_no_field_resets_that_row() {
         },
     );
     let merged =
-        apply_tool_policy_patch(stored, patch(vec![entry("search_pages", None, None)])).unwrap();
+        apply_tool_policy_patch(stored, patch(vec![entry("search_pages", None, None)]), None)
+            .unwrap();
     assert!(merged.overrides.is_empty());
 }
 
@@ -67,6 +68,7 @@ fn setting_a_mode_leaves_the_tier_override_standing() {
             None,
             Some(ApprovalMode::AlwaysAllow),
         )]),
+        None,
     )
     .unwrap();
     let row = merged.overrides.get("move_page").unwrap();
@@ -88,6 +90,7 @@ fn setting_a_tier_leaves_the_mode_override_standing() {
     let merged = apply_tool_policy_patch(
         stored,
         patch(vec![entry("move_page", Some(ToolTier::WriteDelete), None)]),
+        None,
     )
     .unwrap();
     let row = merged.overrides.get("move_page").unwrap();
@@ -110,6 +113,7 @@ fn an_unmentioned_row_is_untouched() {
     let merged = apply_tool_policy_patch(
         stored,
         patch(vec![entry("move_page", None, Some(ApprovalMode::Blocked))]),
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -123,6 +127,7 @@ fn a_blank_tool_name_is_refused() {
     let err = apply_tool_policy_patch(
         McpToolPolicies::default(),
         patch(vec![entry("   ", None, Some(ApprovalMode::Blocked))]),
+        None,
     )
     .expect_err("refused");
     assert!(err.contains("`tool` name"), "{err}");
@@ -138,6 +143,7 @@ fn an_unknown_tier_name_is_refused() {
             tier_defaults: Some(defaults),
             tools: None,
         },
+        None,
     )
     .expect_err("refused");
     assert!(err.contains("read-only"), "{err}");
@@ -153,6 +159,7 @@ fn tier_defaults_are_stored_under_the_wire_spelling() {
             tier_defaults: Some(defaults),
             tools: None,
         },
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -171,6 +178,7 @@ fn tier_defaults_are_total_on_the_wire() {
         "notion",
         &McpToolPolicies::default(),
         &McpToolInventory::default(),
+        None,
     );
     assert_eq!(dto.tier_defaults.len(), ToolTier::ALL.len());
     let read_only = dto.tier_defaults.get("read_only").expect("present");
@@ -192,7 +200,7 @@ fn a_written_tier_default_reads_as_stored() {
     policies
         .tier_defaults
         .insert(ToolTier::ReadOnly, ApprovalMode::AlwaysAllow);
-    let dto = tool_policy_dto("notion", &policies, &McpToolInventory::default());
+    let dto = tool_policy_dto("notion", &policies, &McpToolInventory::default(), None);
     let read_only = dto.tier_defaults.get("read_only").expect("present");
     assert_eq!(read_only.mode, ApprovalMode::AlwaysAllow);
     assert!(read_only.stored);
@@ -215,12 +223,13 @@ fn a_tier_default_named_as_nothing_is_cleared() {
             tier_defaults: Some(defaults),
             tools: None,
         },
+        None,
     )
     .unwrap();
 
     assert!(!merged.tier_defaults.contains_key(&ToolTier::ReadOnly));
     assert!(
-        !tool_policy_dto("notion", &merged, &McpToolInventory::default())
+        !tool_policy_dto("notion", &merged, &McpToolInventory::default(), None)
             .tier_defaults
             .get("read_only")
             .expect("present")
@@ -242,7 +251,7 @@ fn a_reclassified_row_reports_both_tiers() {
         },
     );
     let inventory = inventory_from_discovery([("search_pages", None)], 9);
-    let dto = tool_policy_dto("notion", &policies, &inventory);
+    let dto = tool_policy_dto("notion", &policies, &inventory, None);
     let row = dto.tools.iter().find(|r| r.tool == "search_pages").unwrap();
     assert_eq!(row.effective_tier, ToolTier::WriteDelete);
     assert_eq!(row.suggested_tier, Some(ToolTier::ReadOnly));
@@ -262,7 +271,7 @@ fn the_row_set_unions_discovery_and_overrides() {
         },
     );
     let inventory = inventory_from_discovery([("search_pages", None)], 1);
-    let dto = tool_policy_dto("notion", &policies, &inventory);
+    let dto = tool_policy_dto("notion", &policies, &inventory, None);
     let names: Vec<&str> = dto.tools.iter().map(|r| r.tool.as_str()).collect();
     assert!(names.contains(&"search_pages"));
     assert!(names.contains(&"retired_tool"));
@@ -273,7 +282,7 @@ fn the_row_set_unions_discovery_and_overrides() {
 #[test]
 fn an_inherited_row_is_not_marked_an_override() {
     let inventory = inventory_from_discovery([("search_pages", None)], 1);
-    let dto = tool_policy_dto("notion", &McpToolPolicies::default(), &inventory);
+    let dto = tool_policy_dto("notion", &McpToolPolicies::default(), &inventory, None);
     let row = dto.tools.iter().find(|r| r.tool == "search_pages").unwrap();
     assert!(!row.is_override);
     // Suggested read-only still parks: the suggestion groups, never allows.

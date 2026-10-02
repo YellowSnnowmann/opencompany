@@ -32,6 +32,7 @@ async fn thread_reply_review_feedback_marks_the_response_not_empty_handed() {
         .upsert(
             runtime.id(),
             &crate::ports::tasks::TaskRecord {
+                opened_by: None,
                 id: "t-1".to_string(),
                 title: TaskTitle::authored("Ship it"),
                 note: None,
@@ -146,6 +147,7 @@ async fn review_card_rejects_an_unknown_decision() {
         .upsert(
             runtime.id(),
             &crate::ports::tasks::TaskRecord {
+                opened_by: None,
                 id: "t-1".to_string(),
                 title: TaskTitle::authored("Ship it"),
                 note: None,
@@ -210,6 +212,7 @@ async fn chat_review_route_is_mounted_and_settles_via_http() {
         .upsert(
             runtime.id(),
             &crate::ports::tasks::TaskRecord {
+                opened_by: None,
                 id: "t-1".to_string(),
                 title: TaskTitle::authored("Ship it"),
                 note: None,

@@ -16,6 +16,10 @@ use super::tests::{decl, grants};
 /// loudly, so "was it dialled" is observable without a live server.
 const DEAD_ENDPOINT: &str = "http://127.0.0.1:1/mcp";
 
+/// The teammate every case here is resolved for. These fixtures write no
+/// per-agent rule, so the company answer is what each one must produce.
+const AGENT: &str = "engineer";
+
 fn blocked_server(name: &str, tool: &str) -> McpServerDecl {
     let mut server = decl(name, DEAD_ENDPOINT);
     let mut policies = McpToolPolicies::default();
@@ -39,7 +43,7 @@ fn call_tool(servers: &[McpServerDecl], queue: McpFailureQueue) -> OcMcpCallTool
         Vec::new(),
         queue,
         McpMetering::off(),
-        granted_policies(servers, &grants),
+        granted_policies(servers, AGENT, &grants),
     )
 }
 
@@ -147,9 +151,11 @@ async fn markdown_wrapping_does_not_evade_the_block() {
 #[test]
 fn an_ungranted_server_contributes_no_policy() {
     let servers = vec![blocked_server("fixture", "delete_page")];
-    let narrowed = granted_policies(&servers, &grants(&["mcp:other"]));
+    let narrowed = granted_policies(&servers, AGENT, &grants(&["mcp:other"]));
     assert!(!narrowed.is_blocked("fixture", "delete_page"));
-    assert!(granted_policies(&servers, &grants(&["mcp:*"])).is_blocked("fixture", "delete_page"));
+    assert!(
+        granted_policies(&servers, AGENT, &grants(&["mcp:*"])).is_blocked("fixture", "delete_page")
+    );
 }
 
 /// A disabled server hands out no tool at all, so its policy is not consulted.
@@ -157,7 +163,7 @@ fn an_ungranted_server_contributes_no_policy() {
 fn a_disabled_server_contributes_no_policy() {
     let mut server = blocked_server("fixture", "delete_page");
     server.enabled = false;
-    let policies = granted_policies(std::slice::from_ref(&server), &grants(&["mcp:*"]));
+    let policies = granted_policies(std::slice::from_ref(&server), AGENT, &grants(&["mcp:*"]));
     assert!(!policies.is_blocked("fixture", "delete_page"));
 }
 
@@ -168,7 +174,8 @@ fn a_disabled_server_contributes_no_policy() {
 /// on the attachment itself rather than on a helper's return value is the
 /// point — the question is what the spec receives.
 fn attachment(server: McpServerDecl) -> String {
-    let attached = crate::harness::mcp::embed_servers_for_agent(&[server], &grants(&["mcp:*"]));
+    let attached =
+        crate::harness::mcp::embed_servers_for_agent(&[server], AGENT, &grants(&["mcp:*"]));
     assert_eq!(attached.len(), 1);
     format!("{attached:?}")
 }

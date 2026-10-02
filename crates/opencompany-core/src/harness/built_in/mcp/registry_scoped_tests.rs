@@ -131,11 +131,16 @@ impl Tool for Recording {
     }
 }
 
+/// The teammate these cases are resolved for. None of them writes a per-agent
+/// rule, so each must produce the company answer.
+const AGENT: &str = "engineer";
+
 /// Builds the decorator over a fresh recorder, handing back the shared log.
 fn wrap(grants_list: &[&str]) -> (CallLog, OcMcpRegistryScopedTool) {
     let calls: CallLog = CallLog::default();
     let tool = OcMcpRegistryScopedTool::new(
         Box::new(Recording::with_log(Arc::clone(&calls))),
+        AGENT.to_string(),
         grants(grants_list),
         company(),
         None,
@@ -152,6 +157,7 @@ fn wrap_with_secrets(
     let calls: CallLog = CallLog::default();
     let tool = OcMcpRegistryScopedTool::new(
         Box::new(Recording::with_log(Arc::clone(&calls))),
+        AGENT.to_string(),
         grants(grants_list),
         company(),
         Some(secrets),
@@ -281,8 +287,13 @@ fn wrapper_forwards_the_inner_tools_identity() {
     let expected_concurrency = inner.is_concurrency_safe(&json!({}));
     let expected_spec = inner.spec();
 
-    let tool =
-        OcMcpRegistryScopedTool::new(Box::new(inner), grants(&["mcp_registry"]), company(), None);
+    let tool = OcMcpRegistryScopedTool::new(
+        Box::new(inner),
+        AGENT.to_string(),
+        grants(&["mcp_registry"]),
+        company(),
+        None,
+    );
 
     assert_eq!(tool.name(), expected_name);
     assert_eq!(tool.description(), expected_description);

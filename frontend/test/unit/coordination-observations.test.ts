@@ -53,6 +53,14 @@ describe("reduceTurnBracket", () => {
     expect(reduceTurnBracket(ledger, bracket("turn_settled", "ceo", 3))).toBe(ledger);
   });
 
+  it("keeps the thread a bracket named on the open turn, for the presence dot", () => {
+    const ledger = reduceTurnBracket(
+      EMPTY_TURN_LEDGER,
+      bracket("turn_started", "engineer", 1, { turnId: "t1", chatId: "dm-thread" }),
+    );
+    expect(ledger.open[0].chatId).toBe("dm-thread");
+  });
+
   it("counts a second turn opening on an agent whose first is still open", () => {
     const ledger = [
       bracket("turn_started", "ceo", 1, { turnId: "a" }),
