@@ -165,6 +165,14 @@ fn verify_hs256(secret: &str, token: &str) -> Result<SsoClaims, Reject> {
         .map(|data| data.claims)
         .map_err(|_| Reject::Invalid)?;
 
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| Reject::Invalid)?
+        .as_secs();
+    if claims.iat > now.saturating_add(CLOCK_LEEWAY_SECS) {
+        return Err(Reject::Invalid);
+    }
+
     // Cap the declared lifetime: `exp` alone bounds only the far edge, so refuse a
     // token claiming more than the 5-minute contract (plus leeway).
     if claims.exp.saturating_sub(claims.iat) > MAX_TOKEN_LIFETIME_SECS + CLOCK_LEEWAY_SECS {

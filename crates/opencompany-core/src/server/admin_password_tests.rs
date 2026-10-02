@@ -201,6 +201,24 @@ async fn a_valid_token_sets_the_admin_password_without_forcing_a_change() {
         !users[0].must_change_password,
         "a dashboard-managed password never forces a change"
     );
+
+    // The password installed through the host-level route is accepted by the
+    // company's ordinary password-login route.
+    let login = router(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/companies/acme/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "email": "ada@example.com", "password": PASSWORD })
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +311,25 @@ async fn an_expired_token_is_refused() {
     let response = call(&state, &expired, PASSWORD).await;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_token_with_a_far_future_issued_at_is_refused() {
+    let home = home();
+    let state = enabled_state(home.path()).await;
+
+    let future_iat = sign_with_iat(
+        &derive_key(SSO_SECRET),
+        "acme",
+        ADMIN,
+        "jti-future-iat",
+        far_future(),
+        far_future() + 300,
+    );
+    let response = call(&state, &future_iat, PASSWORD).await;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(!admin_has_password(&state).await);
 }
 
 #[tokio::test]
