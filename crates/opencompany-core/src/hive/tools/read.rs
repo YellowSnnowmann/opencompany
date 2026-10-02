@@ -79,7 +79,7 @@ pub async fn read_conversation(
             page.messages.len()
         );
         if page.next_before.is_some() {
-            body.push_str(" Older messages exist and are not in this reply.");
+            body.push_str(" There may be older messages that are not in this reply.");
         }
         return Ok(body);
     }
