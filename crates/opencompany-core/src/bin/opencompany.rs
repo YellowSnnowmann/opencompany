@@ -1947,7 +1947,7 @@ fn resolve_serve_base_url(
     Ok(default_val)
 }
 
-async fn async_main() -> Result<()> {
+async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) -> Result<()> {
     // Crash reporting first, before the subscriber and before any other work.
     // The panic hook is installed inside `init`, so anything that panics ahead
     // of this panics unobserved — and the two things most likely to panic early
