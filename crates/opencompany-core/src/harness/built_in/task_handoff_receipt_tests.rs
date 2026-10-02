@@ -5,6 +5,31 @@ fn handoff(name: &str) -> Delegation {
         instruction: "Synthetic review".into(),
     }
 }
+
+#[test]
+fn second_task_handoff_refusal_text_is_specific_and_actionable() {
+    for (tool, effect) in [
+        (
+            DELEGATE_TO_DESK_TOOL,
+            "nothing was handed to the design desk",
+        ),
+        (
+            DELEGATE_TO_TEAMMATE_TOOL,
+            "nothing was handed to the writer",
+        ),
+    ] {
+        let text = no_drain(tool, effect, NoDrainReason::TaskHandoffAlreadyQueued);
+        assert!(text.contains("ownership transfer queued"), "{text}");
+        assert!(text.contains("Only the first colleague will run"), "{text}");
+        assert!(text.contains("does not return their answer"), "{text}");
+        assert!(text.contains(effect), "{text}");
+        assert!(
+            text.contains("Do not claim this second colleague was assigned"),
+            "{text}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn dispatched_card_refuses_second_handoff_but_chat_collects_both() {
     let queue = DelegationQueue::default();
