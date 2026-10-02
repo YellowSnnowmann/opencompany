@@ -30,11 +30,19 @@ impl TaskStore for Board {
     async fn update_if_column(
         &self,
         _company: &CompanyId,
-        _task: &TaskRecord,
-        _observed: &TaskRecord,
-        _expected_column: &str,
+        task: &TaskRecord,
+        observed: &TaskRecord,
+        expected_column: &str,
     ) -> crate::Result<bool> {
-        unreachable!("start_task does not take the compare-and-swap path")
+        let mut rows = self.rows.lock().expect("board");
+        let Some(current) = rows.iter_mut().find(|row| row.id == observed.id) else {
+            return Ok(false);
+        };
+        if current != observed || current.column != expected_column {
+            return Ok(false);
+        }
+        *current = task.clone();
+        Ok(true)
     }
     async fn delete(&self, _company: &CompanyId, _id: &str) -> crate::Result<bool> {
         unreachable!("start_task deletes nothing")
@@ -49,9 +57,9 @@ struct Started {
 
 #[async_trait]
 impl BoardStarter for Started {
-    async fn start(&self, card: &TaskRecord) -> crate::Result<()> {
+    async fn start(&self, _observed: &TaskRecord, card: &TaskRecord) -> crate::Result<bool> {
         self.cards.lock().expect("started").push(card.clone());
-        Ok(())
+        Ok(true)
     }
 }
 

@@ -10,9 +10,9 @@ struct Recorder {
 
 #[async_trait::async_trait]
 impl BoardStarter for Recorder {
-    async fn start(&self, card: &TaskRecord) -> crate::Result<()> {
+    async fn start(&self, _observed: &TaskRecord, card: &TaskRecord) -> crate::Result<bool> {
         self.started.lock().expect("recorder").push(card.id.clone());
-        Ok(())
+        Ok(true)
     }
 }
 

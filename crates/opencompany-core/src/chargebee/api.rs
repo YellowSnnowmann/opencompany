@@ -203,12 +203,19 @@ pub async fn get_customer(
     query.push("email[is]", email);
     query.push("limit", "1");
     let body = client.get("/customers", &query).await?;
-    Ok(body
-        .get("list")
-        .and_then(Value::as_array)
-        .and_then(|rows| rows.first())
-        .and_then(|row| row.get("customer"))
-        .map(summarize_customer))
+    let Some(row) = require_array(&body, "list")?.first() else {
+        return Ok(None);
+    };
+    let customer = summarize_customer(require(row, "customer")?);
+    if customer.id.is_empty() {
+        tracing::warn!("[chargebee] customer lookup returned a customer with no id");
+        return Err(OpenCompanyError::Chargebee {
+            status: 0,
+            code: "unexpected_response".to_string(),
+            message: "Chargebee's customer lookup returned a customer with no `id`.".to_string(),
+        });
+    }
+    Ok(Some(customer))
 }
 
 /// Creates a customer.
@@ -499,3 +506,7 @@ pub async fn list_invoices(
 #[cfg(test)]
 #[path = "api_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "api_customer_lookup_tests.rs"]
+mod customer_lookup_tests;

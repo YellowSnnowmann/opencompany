@@ -70,9 +70,9 @@ pub fn for_company(company: &CompanyId) -> BoardStarterHandle {
 pub trait BoardStarter: Send + Sync {
     /// Persists `card` through the write site that edge-fires dispatch.
     ///
-    /// The caller has already set the column; this is only about *which* write
-    /// path the record takes, because the plain port cannot dispatch.
-    async fn start(&self, card: &TaskRecord) -> crate::Result<()>;
+    /// Move `observed` into Working only if it is still the same To-do card,
+    /// then dispatch the successful transition. Returns `false` on a race.
+    async fn start(&self, observed: &TaskRecord, card: &TaskRecord) -> crate::Result<bool>;
 }
 
 /// A shared, fillable handle to the company's [`BoardStarter`].

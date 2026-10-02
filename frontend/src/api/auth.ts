@@ -198,6 +198,30 @@ export async function claimFirstAdmin(
   return client.postSignIn<SignIn>(`${client.scopeFor(company)}/auth/claim`, { email, password });
 }
 
+/**
+ * Redeems a platform-minted SSO token for a session.
+ *
+ * The token is a short-lived, single-use JWT the dashboard put in the
+ * `#/sso?token=…` fragment; the host verifies it offline and, on first use,
+ * claims the standing admin it names. No email or password is involved on this
+ * path — the token *is* the credential.
+ *
+ * Refusals: `invalid_sso_token` (expired, replayed, wrong company, or not the
+ * standing admin), and a `404` when the host has no SSO secret configured.
+ * Read them off {@link ApiError.code} / {@link ApiError.status}.
+ *
+ * {@link postSignIn}, so a cross-origin console asks for the header carrier and
+ * receives a {@link SignIn.session} it must store — exactly like every other
+ * sign-in route.
+ */
+export async function redeemSso(
+  client: OpenCompanyClient,
+  company: string | null,
+  token: string,
+): Promise<SignIn> {
+  return client.postSignIn<SignIn>(`${client.scopeFor(company)}/sso/redeem`, { token });
+}
+
 /** Exchanges an email and password for a session. */
 export async function loginWithPassword(
   client: OpenCompanyClient,

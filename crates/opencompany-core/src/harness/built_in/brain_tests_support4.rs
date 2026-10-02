@@ -287,6 +287,8 @@ pub(super) struct DelegatingProvider {
     /// snapshot the board **as that turn sees it** — the only way a test can
     /// observe a dispatched card mid-run (issue #204).
     pub(super) tasks: Arc<FsOps>,
+    /// The text sent to each model invocation, in order.
+    pub(super) requests: StdMutex<Vec<Vec<String>>>,
     /// `(column, assignee)` of the company's card at each invoke, in order.
     pub(super) board: StdMutex<Vec<(String, String)>>,
     /// How this provider misbehaves, by invoke number.
@@ -343,6 +345,13 @@ impl ChatModel<()> for DelegatingProvider {
         if is_triage_request(&request) {
             return Ok(ModelResponse::assistant("chatter".to_string()));
         }
+        self.requests.lock().unwrap().push(
+            request
+                .messages
+                .iter()
+                .map(|message| message.text().to_string())
+                .collect(),
+        );
         let invoke = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         if self.faults.fail_from.is_some_and(|from| invoke >= from) {
             return Err(tinyinference::Error::Model(
@@ -436,6 +445,7 @@ pub(super) fn brain_that_delegates_with(
         pushes: StdMutex::new(pushes.into_iter().collect()),
         calls: std::sync::atomic::AtomicUsize::new(0),
         tasks: tasks.clone(),
+        requests: StdMutex::new(Vec::new()),
         board: StdMutex::new(Vec::new()),
         faults,
         steer: steer.clone(),

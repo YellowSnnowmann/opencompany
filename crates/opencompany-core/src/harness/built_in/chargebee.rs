@@ -385,7 +385,12 @@ mod live {
                     "No Chargebee customer matches {}.",
                     args.email
                 ))),
-                other => Ok(render("chargebee_get_customer", other)),
+                Err(e) => Ok(ToolResult::error(format!(
+                    "Could not tell whether a Chargebee customer exists for {}: {e}. Do not \
+                     create one because of this — try the lookup again.",
+                    args.email
+                ))),
+                found => Ok(render("chargebee_get_customer", found)),
             }
         }
     }

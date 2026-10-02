@@ -7801,17 +7801,28 @@ struct RuntimeBoardStarter {
 #[cfg(feature = "openhuman")]
 #[async_trait::async_trait]
 impl crate::harness::built_in::board_start::BoardStarter for RuntimeBoardStarter {
-    async fn start(&self, card: &TaskRecord) -> Result<()> {
+    async fn start(&self, observed: &TaskRecord, card: &TaskRecord) -> Result<bool> {
         let rt = self.rt.upgrade().ok_or_else(|| {
             OpenCompanyError::InvalidRequest(
                 "this company was replaced while the card was being started".to_string(),
             )
         })?;
-        // The write site that edge-fires dispatch. `dispatch_task` spawns the
-        // attempt detached, so this returns as soon as the card is persisted —
+        // Compare-and-swap the observed To-do record so an operator edit between
+        // list and start cannot be overwritten by this stale copy.
+        if !rt
+            .ops
+            .tasks
+            .update_if_column(&rt.id, card, observed, crate::ports::tasks::COLUMN_TODO)
+            .await?
+        {
+            return Ok(false);
+        }
+        // Dispatch only after the conditional write succeeds. `dispatch_task`
+        // spawns the attempt detached, so this returns as soon as persisted —
         // the turn that asked does not wait for the work it started, and the
         // spawned cycle queues behind whatever lock the current one holds.
-        rt.upsert_task(card).await.map(|_| ())
+        rt.dispatch_task(card).await;
+        Ok(true)
     }
 }
 

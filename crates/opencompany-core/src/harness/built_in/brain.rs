@@ -1205,7 +1205,7 @@ impl HarnessBrain {
         // The per-iteration `clear()` inside the loop stays — it abandons a
         // redirected turn's work, which is a different decision from who is
         // entitled to queue.
-        let _delegation_claim = self.deps.delegations.claim();
+        let delegation_claim = self.deps.delegations.claim_task(card.id.clone());
         // Issue #339, same argument for staged workflow references: an operator
         // chat turn earlier in this cycle may have run a workflow through the
         // orchestrator's tool, and that run belongs to the conversation, not to
@@ -1232,7 +1232,18 @@ impl HarnessBrain {
         // The base turn instruction is frozen at dispatch (the card's note keeps
         // accumulating operator/agent blocks, but a redirect always re-runs from
         // the original brief plus the fresh instruction — last redirect wins).
-        let base_instruction = task_instruction(&card);
+        let base_instruction = format!(
+            "{}\n\nBoard-task coordination: delegate_to_teammate/delegate_to_desk TRANSFERS \
+             this card to one colleague and ends your ownership; it does not consult them and \
+             return a result. Only one hand-off can run. If this task requires several colleagues, \
+             independent review, or your final synthesis, use create_workflow/run_workflow when \
+             available, with separate agent steps, explicit dependencies, and a manual trigger \
+             only. If you lack those tools, hand the full remaining coordination brief to one \
+             authorized coordinator or report the actual limitation. Verify every required \
+             step and saved output before reporting completion. Do not replace \
+             a required colleague's work with your own or claim a queued hand-off is a review.",
+            task_instruction(&card)
+        );
         let mut instruction = base_instruction.clone();
         let mut redirects: u32 = 0;
         // Route the background turn through the brain-agnostic `RunTurn` seam
@@ -1286,7 +1297,7 @@ impl HarnessBrain {
                 // cycle's operator message, or an earlier redirect rerun) left
                 // behind can hijack this card — the same guard
                 // `handle_operator_message` opens with.
-                self.deps.delegations.clear();
+                delegation_claim.clear();
                 // Issue #244, same argument for staged publishes: a redirect
                 // re-runs from the original brief and *abandons* the previous
                 // turn's work, so a file that turn offered must be abandoned with
@@ -1298,30 +1309,32 @@ impl HarnessBrain {
                 // it, for the same reason — the card's link must name what the turn
                 // that actually settled produced, not what a discarded one did.
                 self.deps.workflow_refs.clear();
-                let outcome = publish_claim
+                let outcome = delegation_claim
                     .scoped(Box::pin(
-                        dispatch_origin.scoped(Box::pin(
-                            run_turn
-                                // A dispatched task card carries no chat bubble (its steps
-                                // are discarded into the note), so its live turn frames
-                                // must not leak onto the console timeline — run it
-                                // un-streamed (#125 review).
-                                .run_steered_background(
-                                    &self.record().id,
-                                    &responder,
-                                    &instruction,
-                                    &control,
-                                    // No conversation to bind to: a dispatched card's turn
-                                    // answers the board, not a thread (#1890 I). Unchanged
-                                    // behaviour — including that it does not clear
-                                    // history, since one task can span several turns.
-                                    ChatTarget::default(),
-                                    // Issue #242: un-streamed does not mean unrecorded. The
-                                    // trace this turn produces is written to the attempt
-                                    // row as it happens, which is what a redirect re-run
-                                    // appends to rather than restarting.
-                                    sink.clone(),
-                                ),
+                        publish_claim.scoped(Box::pin(
+                            dispatch_origin.scoped(Box::pin(
+                                run_turn
+                                    // A dispatched task card carries no chat bubble (its steps
+                                    // are discarded into the note), so its live turn frames
+                                    // must not leak onto the console timeline — run it
+                                    // un-streamed (#125 review).
+                                    .run_steered_background(
+                                        &self.record().id,
+                                        &responder,
+                                        &instruction,
+                                        &control,
+                                        // No conversation to bind to: a dispatched card's turn
+                                        // answers the board, not a thread (#1890 I). Unchanged
+                                        // behaviour — including that it does not clear
+                                        // history, since one task can span several turns.
+                                        ChatTarget::default(),
+                                        // Issue #242: un-streamed does not mean unrecorded. The
+                                        // trace this turn produces is written to the attempt
+                                        // row as it happens, which is what a redirect re-run
+                                        // appends to rather than restarting.
+                                        sink.clone(),
+                                    ),
+                            )),
                         )),
                     ))
                     .await;
