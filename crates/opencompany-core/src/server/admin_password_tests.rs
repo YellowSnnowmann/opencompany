@@ -107,8 +107,13 @@ async fn enabled_state(home: &std::path::Path) -> AppState {
 }
 
 fn far_future() -> u64 {
-    // ~2050, comfortably beyond any test run.
-    2_524_608_000
+    // Give each test a fresh five-minute expiry. Its paired `iat` is then now,
+    // which remains valid under the verifier's clock-skew check.
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock is after the Unix epoch")
+        .as_secs()
+        + 300
 }
 
 /// Signs an HS256 token over the claim shape both token families share, with an
