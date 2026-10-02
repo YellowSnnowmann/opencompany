@@ -3541,7 +3541,12 @@ export function WorkflowsView({
                 proOptions={{ hideAttribution: true }}
               >
                 <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-                <Controls showInteractive={false}>
+                {/* Clear of the run-history overlay, which lands bottom-left over
+                    them at `xl` (see `CanvasShell`). */}
+                <Controls
+                  showInteractive={false}
+                  className={historyOpen && historySupported ? "xl:!ml-[21.25rem]" : undefined}
+                >
                   <WorkflowZoomReadout />
                 </Controls>
                 {/* Issue #1259: a custom minimap, not React Flow's built-in

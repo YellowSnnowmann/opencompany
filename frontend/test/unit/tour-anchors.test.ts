@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { NAV_SECTIONS } from "@/components/sidebar-navigation";
+import { NAV_SECTIONS, childAnchor } from "@/components/sidebar-navigation";
 import { TOUR } from "@/tour/steps";
 import { VIEWS } from "@/lib/console-routes";
 
@@ -52,6 +52,8 @@ const CONTENT_ANCHORS: Record<string, string> = {
   "overview-graph": "overview",
   // The sidebar's own content region, rendered on every view.
   sidebar: "*",
+  // The conversation list at the top of the sidebar, on every view.
+  conversations: "*",
 };
 
 describe("every guided-tour stop can actually anchor", () => {
@@ -95,7 +97,7 @@ describe("every guided-tour stop can actually anchor", () => {
     expect(anchors).not.toContain("nav-observatory");
   });
 
-  it("says Automations and Room where the sidebar does", () => {
+  it("says Automations where the sidebar does", () => {
     // The tour's prose is the other half of a rename. The anchors follow view
     // ids and so survive one silently — which is exactly how a step titled
     // "Workflows" would have gone on spotlighting a row labelled "Flows".
@@ -106,8 +108,18 @@ describe("every guided-tour stop can actually anchor", () => {
     expect(TOUR.some((stop) => stop.title === "Workflows")).toBe(false);
     expect(TOUR.some((stop) => stop.title === "Flows")).toBe(false);
 
-    const labels = new Set(NAV_SECTIONS.map((section) => section.label));
-    expect(labels.has(automations.title)).toBe(true);
+    // Automations is a row on Company's rail now, so its label is a child of a
+    // section rather than a section of its own — and the stop's anchor is the
+    // one `childAnchor` gives that child.
+    const labelled = NAV_SECTIONS.flatMap((section) =>
+      (section.children ?? []).map((child) => ({ section, child })),
+    ).find(({ child }) => child.label === automations.title);
+    expect(labelled, "no sidebar row is called Automations").toBeDefined();
+    expect(anchorOf(automations.target)).toBe(childAnchor(labelled!.section, labelled!.child));
+  });
+
+  it("no longer points at the Room row, which is not in the sidebar", () => {
+    expect(TOUR.map((stop) => anchorOf(stop.target))).not.toContain("nav-chat");
   });
 
   it("still opens on the welcome and closes on the composer", () => {

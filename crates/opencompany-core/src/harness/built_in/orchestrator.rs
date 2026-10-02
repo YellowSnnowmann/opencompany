@@ -76,7 +76,9 @@ use async_trait::async_trait;
 use futures::future::FutureExt;
 use serde_json::{Value, json};
 
-use tinytools::{PermissionLevel, Tool, ToolResult};
+#[cfg(test)]
+use openhuman_core as oh;
+use tinytools::{PermissionLevel, Tool, ToolResult, ToolTimeout};
 
 use crate::company::{
     Agent as ManifestAgent, RawEdge, RawNode, RawWorkflow, WorkflowDestinationDef, WorkflowFile,
@@ -4943,6 +4945,15 @@ impl Tool for RunWorkflowTool {
 
     fn supports_markdown(&self) -> bool {
         true
+    }
+
+    // A workflow is a supervised sequence of bounded agent/tool calls, not one
+    // ordinary tool operation. Inheriting the 120-second tool deadline drops
+    // the runner before it can journal its outcome and strands child work.
+    // Keep the runner's cancellation path and task-local nesting guard intact,
+    // matching OpenHuman's own supervised multi-agent orchestration tools.
+    fn timeout_policy(&self, _args: &Value) -> ToolTimeout {
+        ToolTimeout::Unbounded
     }
 
     async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {

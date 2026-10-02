@@ -438,13 +438,14 @@ to reopen it.
 
 ## Rule 8: the sidebar is four sections, and sub-navigation lives in it
 
-Ten flat rows became four — **Room**, **Company**, **Connections**, **Flows** —
-with the contents of the one you are in listed beneath them, in the sidebar
-rather than in a rail inside the page.
+Ten flat rows became four — Room, Company, Connections, Automations (once
+"Flows") — and then two: the conversation list now fronts the sidebar, with
+**Company** and **Connections** pinned at its foot and Automations a row on
+Company's rail. A section's pages are the first column of its content area.
 
 The full record is [`console-sections.md`](console-sections.md): why four, why
-the block below the four is fixed rather than an accordion, how Room's channel
-list is moved whole by portal, what happens on the collapsed rail, what Room
+why the block is fixed rather than an accordion, how the channel list is moved
+whole by portal and became one flat list, what happens on the collapsed rail, what Room
 does at twenty channels, and the **nine Rule 6 calls** for the views that have
 no nav row. This file names the rule and points at it, because it is at its
 500-line ceiling and that is the split the repo's own guideline asks for.
@@ -458,7 +459,7 @@ above mean:
 - **Rule 6 now governs nine views, not five.** Overview, Approvals and
   Observatory join it. Each takes a named treatment; none is left implicit.
 - **Rule 7's Connections section survives; its rail does not.** Sub-navigation
-  moved into the sidebar for all four sections at once, so the console never
+  moved into the sidebar for all sections at once, so the console never
   carried two patterns. Finance's rail is the last one and is the obvious next
   conversion.
 

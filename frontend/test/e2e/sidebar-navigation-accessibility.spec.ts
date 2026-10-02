@@ -41,21 +41,22 @@ test("the skip link reaches main content and the sidebar is the primary navigati
 
   const navigation = page.getByRole("navigation", { name: "Main navigation", exact: true });
   await expect(navigation).toBeVisible();
-  // Four sections, and the four are the whole list. Asserted by count as well
-  // as by name: a fifth row creeping back in is the thing this restructure
-  // exists to stop, and four `toBeVisible` calls would not notice it.
-  for (const name of ["Room", "Company", "Connections", "Automations"]) {
+  // Two sections, and the two are the whole list: Room is the conversation list
+  // above them and Automations is a row on Company's rail. Asserted by count as
+  // well as by name below, so a row creeping back in is noticed.
+  for (const name of ["Company", "Connections"]) {
     await expect(navigation.getByRole("button", { name, exact: true })).toBeVisible();
   }
-  // Scoped to the FIRST group — the fixed four. The group after it holds the
-  // active section's contents, which is a different question and a different
-  // count. Asserted by count as well as by name: a fifth row creeping back in
-  // is the thing this restructure exists to stop, and four `toBeVisible` calls
-  // would not notice it.
+  // Scoped to the LAST group — the fixed two at the foot. The group before it is
+  // the conversation list, which is a different question and a different count.
   await expect(
-    page.locator("[data-slot=sidebar-content] [data-sidebar=group]").first()
+    page.locator("[data-slot=sidebar-content] [data-sidebar=group]").last()
       .locator("[data-sidebar=menu-button]"),
-  ).toHaveCount(4);
+  ).toHaveCount(2);
+  // And Room / Automations are not rows any more.
+  for (const name of ["Room", "Automations"]) {
+    await expect(navigation.getByRole("button", { name, exact: true })).toHaveCount(0);
+  }
   // Overview is not among them: it is chrome in the window's title row now,
   // not a destination in a list of destinations. Observatory never had a row
   // here — it is filed under Settings (`settings-pages.ts`). Approvals followed
@@ -81,7 +82,7 @@ test("the skip link reaches main content and the sidebar is the primary navigati
   // places inside this company, and none of the console's own chrome belongs
   // in it.
   const destinations = page.locator("[data-slot=sidebar-content]");
-  await expect(destinations.getByRole("button", { name: "Room", exact: true })).toBeVisible();
+  await expect(destinations.getByRole("button", { name: "Company", exact: true })).toBeVisible();
   await expect(destinations.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
   await expect(page.locator("[data-slot=sidebar-footer]")).toHaveCount(0);
 

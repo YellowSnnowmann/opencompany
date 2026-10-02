@@ -1,7 +1,8 @@
 # Cut a STAGING build: bump the patch version, tag it `v<version>-staging`,
-# and build everything a tester needs — signed macOS DMGs as Actions artifacts
-# and a smoke build of the tenant Docker image — WITHOUT creating a GitHub
-# Release. Nothing a user can install from the repository's front page moves.
+# and build everything a tester needs — signed macOS DMGs and the Windows x64
+# installers as Actions artifacts, and a smoke build of the tenant Docker
+# image — WITHOUT creating a GitHub Release. Nothing a user can install from
+# the repository's front page moves.
 #
 # Step two of the release flow (docs/spec/runtime/releases.md):
 #
@@ -234,9 +235,16 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SM_HOST: ${{ secrets.SM_HOST }}
+      SM_API_KEY: ${{ secrets.SM_API_KEY }}
+      SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+      SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+      KEYPAIR_ALIAS: ${{ secrets.KEYPAIR_ALIAS }}
     with:
       build_ref: ${{ needs.prepare-build.outputs.build_ref }}
       tag: ${{ needs.prepare-build.outputs.tag }}
+      macos: true
+      windows: true
       sign: true
       with_updater: false
       with_release_upload: false
