@@ -141,15 +141,16 @@ async fn a_later_answering_hand_off_takes_the_card_over_from_an_earlier_empty_on
     );
     dispatch_card(&brain, &provider.tasks.clone(), "t-two-handoffs").await;
 
-    let requests = provider.requests.lock().unwrap();
-    let first_request = requests.first().expect("the card reaches the model");
-    let instruction = first_request.join("\n");
-    assert!(
-        instruction.contains("Board-task coordination:")
-            && instruction.contains("Only one hand-off can run."),
-        "the dispatched card's prompt explains its one-handoff limit: {instruction}"
-    );
-    drop(requests);
+    {
+        let requests = provider.requests.lock().unwrap();
+        let first_request = requests.first().expect("the card reaches the model");
+        let instruction = first_request.join("\n");
+        assert!(
+            instruction.contains("Board-task coordination:")
+                && instruction.contains("Only one hand-off can run."),
+            "the dispatched card's prompt explains its one-handoff limit: {instruction}"
+        );
+    }
 
     let after = only_card(&provider.tasks).await;
     // The card settles from the ONE hand-off that owns it — cancelled here,
