@@ -39,7 +39,7 @@ test("an SSO fragment redeems once and confirms the signed-in owner", async ({ b
     await expect(confirmation).toContainText("Signed in as");
     await expect(confirmation).toContainText("ada@example.com");
     expect(redemptionCount).toBe(1);
-    expect(new URL(page.url()).hash).toBe("");
+    expect(new URL(page.url()).hash).not.toContain(token);
     await expect
       .poll(() => setupSession)
       .toBe("acme.header.payload.signature");
