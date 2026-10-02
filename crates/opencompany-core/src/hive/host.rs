@@ -722,10 +722,7 @@ impl DeskHost {
         //
         // An empty audience is this journal's word for desk-visible, which is
         // exactly the set a card may show.
-        let task_id = self
-            .card
-            .clone()
-            .filter(|_| audience.is_empty());
+        let task_id = self.card.clone().filter(|_| audience.is_empty());
         CompanyEvent::AgentReply {
             chat_id: chat.to_owned(),
             agent_id: author.to_owned(),

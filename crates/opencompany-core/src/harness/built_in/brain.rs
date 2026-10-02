@@ -2641,7 +2641,12 @@ impl HarnessBrain {
         // reason.
         let trigger = crate::hive::conducted::Trigger {
             seq: crate::ports::types::EventSeq::new(0),
-            text: match card.note.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+            text: match card
+                .note
+                .as_deref()
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+            {
                 Some(note) => format!("{}\n\n{note}", card.title),
                 None => card.title.to_string(),
             },
