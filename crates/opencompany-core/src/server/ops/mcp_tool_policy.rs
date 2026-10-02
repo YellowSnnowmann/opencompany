@@ -6,7 +6,7 @@
 //! build no probe runs, so the inventory is empty and a read honestly returns
 //! only the rows an operator already decided about.
 
-use axum::extract::Path;
+use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -33,10 +33,21 @@ pub struct ToolPolicyRowDto {
     /// console must render that without looking broken.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggested_tier: Option<crate::company::mcp_policy::ToolTier>,
+    /// The mode enforced in this row's scope — the company's when the read is
+    /// company-wide, this teammate's when it is scoped to one.
     pub mode: crate::company::mcp_policy::ApprovalMode,
     /// Whether an operator decided anything about this row, as opposed to it
     /// inheriting. Derived here; never stored.
     pub is_override: bool,
+    /// Which rule decided [`Self::mode`]. Host-resolved — one of its values names
+    /// a discarded per-agent setting, which no client can derive from the mode.
+    pub source: crate::company::mcp_policy::PolicySource,
+    /// In an agent-scoped read, this teammate's stored mode — present even when
+    /// the narrow-only clamp discarded it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_mode: Option<crate::company::mcp_policy::ApprovalMode>,
+    /// The teammates whose resolved mode for this tool differs from the company's.
+    pub differing_agents: Vec<String>,
 }
 
 /// One tier's bulk default, and whether an operator actually wrote it.
@@ -59,22 +70,42 @@ pub struct TierDefaultDto {
 #[serde(rename_all = "camelCase")]
 pub struct ToolPolicyDto {
     pub server: String,
+    /// The teammate this read is scoped to, or absent for the company document.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
     /// Every tier's bulk default — **total**, so the console never ships its own
     /// copy of the fallbacks and cannot drift from them.
     pub tier_defaults: std::collections::BTreeMap<String, TierDefaultDto>,
     pub tools: Vec<ToolPolicyRowDto>,
     /// When discovery last succeeded, if ever. `0` reads as never.
     pub discovered_at_millis: u64,
+    /// The rebuild reminder, on a mutating response only. Absent on a read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
-/// Renders a resolved policy document for one server.
+impl ToolPolicyDto {
+    /// Attaches the next-turn reminder to a mutating response.
+    fn with_note(mut self) -> Self {
+        self.note = Some(super::mcp::NEXT_TURN_NOTE.to_string());
+        self
+    }
+}
+
+/// Renders a resolved policy document for one server, company-wide or as it
+/// stands for one teammate.
+///
+/// The tier grouping is identical in either scope — tiers are never per-agent —
+/// and only the mode, the source and the stored per-agent value change.
 pub fn tool_policy_dto(
     server: &str,
     policies: &crate::company::mcp_policy::McpToolPolicies,
     inventory: &crate::company::mcp_policy::McpToolInventory,
+    agent: Option<&str>,
 ) -> ToolPolicyDto {
     use crate::company::mcp_policy::{
-        ToolTier, default_mode_for, policy_tool_names, resolve_policy,
+        PolicySource, ToolTier, agent_policy_tool_names, default_mode_for, differing_agents,
+        policy_tool_names, resolve_policy, resolve_policy_for_agent,
     };
 
     let tier_defaults = ToolTier::ALL
@@ -89,25 +120,74 @@ pub fn tool_policy_dto(
         })
         .collect();
 
-    let tools = policy_tool_names(policies, inventory)
+    // An agent-scoped read enumerates the wider set: a teammate can hold a rule
+    // about a tool no probe reached and no company override names.
+    let names: Vec<String> = match agent {
+        Some(agent) => agent_policy_tool_names(policies, inventory, agent).collect(),
+        None => policy_tool_names(policies, inventory).collect(),
+    };
+
+    let tools = names
+        .into_iter()
         .map(|tool| {
             let suggested = inventory.suggested(&tool);
-            let resolved = resolve_policy(policies, &tool, suggested);
-            ToolPolicyRowDto {
-                tool,
-                effective_tier: resolved.tier,
-                suggested_tier: suggested,
-                mode: resolved.mode,
-                is_override: resolved.is_override,
+            let differing = differing_agents(policies, inventory, &tool);
+            match agent {
+                Some(agent) => {
+                    let resolved = resolve_policy_for_agent(policies, agent, &tool, suggested);
+                    ToolPolicyRowDto {
+                        tool,
+                        effective_tier: resolved.server.tier,
+                        suggested_tier: suggested,
+                        mode: resolved.mode,
+                        is_override: resolved.server.is_override,
+                        source: resolved.source,
+                        agent_mode: resolved.asked,
+                        differing_agents: differing,
+                    }
+                }
+                None => {
+                    let resolved = resolve_policy(policies, &tool, suggested);
+                    ToolPolicyRowDto {
+                        tool,
+                        effective_tier: resolved.tier,
+                        suggested_tier: suggested,
+                        mode: resolved.mode,
+                        is_override: resolved.is_override,
+                        source: PolicySource::for_server(resolved.is_override),
+                        agent_mode: None,
+                        differing_agents: differing,
+                    }
+                }
             }
         })
         .collect();
 
     ToolPolicyDto {
         server: server.to_string(),
+        agent: agent.map(str::to_string),
         tier_defaults,
         tools,
         discovered_at_millis: inventory.discovered_at_millis,
+        note: None,
+    }
+}
+
+/// The `?agent=` lens a policy read or write is scoped to.
+#[derive(Debug, Default, Deserialize)]
+pub struct AgentScope {
+    #[serde(default)]
+    pub agent: Option<String>,
+}
+
+impl AgentScope {
+    /// The teammate this request is about, or `None` for the company document.
+    /// A blank value is the company document, not a teammate named "".
+    pub fn agent(&self) -> Option<&str> {
+        self.agent
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
     }
 }
 
@@ -152,9 +232,14 @@ pub struct PutToolPolicyEntry {
 
 /// Applies a PUT body to a stored document, returning the merged result or the
 /// operator-facing reason it cannot be applied.
+///
+/// `agent` picks which half of the document the `tools` entries land in. In an
+/// agent scope the merge is one level shallower — a teammate has modes, not
+/// tiers — and a per-agent tier is refused in either shape it could take.
 pub fn apply_tool_policy_patch(
     mut stored: crate::company::mcp_policy::McpToolPolicies,
     patch: PutToolPolicy,
+    agent: Option<&str>,
 ) -> Result<crate::company::mcp_policy::McpToolPolicies, String> {
     use crate::company::mcp_policy::ToolTier;
 
@@ -163,6 +248,55 @@ pub fn apply_tool_policy_patch(
             "name `tierDefaults`, `tools`, or both — a body naming neither changes nothing."
                 .to_string(),
         );
+    }
+
+    if let Some(agent) = agent {
+        if patch.tier_defaults.is_some() {
+            return Err(
+                "tier defaults are set for everyone, not per teammate — write them without \
+                 `?agent=`."
+                    .to_string(),
+            );
+        }
+        if let Some(entries) = &patch.tools
+            && entries.iter().any(|entry| entry.tier.is_some())
+        {
+            return Err(
+                "a tier classifies the tool, not the teammate — reclassify it for everyone \
+                 without `?agent=`."
+                    .to_string(),
+            );
+        }
+        for entry in patch.tools.unwrap_or_default() {
+            let tool = entry.tool.trim();
+            if tool.is_empty() {
+                return Err("every entry in `tools` needs a `tool` name.".to_string());
+            }
+            match entry.mode {
+                // Names no mode: the reset for this teammate's row only.
+                None => {
+                    if let Some(rules) = stored.agents.get_mut(agent) {
+                        rules.overrides.remove(tool);
+                    }
+                }
+                Some(mode) => {
+                    stored
+                        .agents
+                        .entry(agent.to_string())
+                        .or_default()
+                        .overrides
+                        .insert(
+                            tool.to_string(),
+                            crate::company::mcp_policy::ToolPolicy {
+                                tier: None,
+                                mode: Some(mode),
+                            },
+                        );
+                }
+            }
+        }
+        stored.prune();
+        return Ok(stored);
     }
 
     if let Some(defaults) = patch.tier_defaults {
@@ -262,6 +396,40 @@ pub fn policy_unreadable(name: &str) -> Response {
         .into_response()
 }
 
+/// Confirms `agent` names a roster teammate, so a write cannot store rules
+/// under an id no teammate uses. Read-only routes and agent-scoped resets
+/// skip this — a reset must still be able to clean up a departed teammate's
+/// rules.
+pub fn unknown_agent(agent_id: &str) -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({
+            "error": format!("no teammate named `{agent_id}` on this company's roster"),
+            "code": "not_found",
+        })),
+    )
+        .into_response()
+}
+
+/// Loads the company record and checks `agent` against its roster, returning
+/// the `404` to send back when it is not there.
+pub async fn require_roster_agent(
+    runtime: &CompanyRuntime,
+    agent: &str,
+) -> Result<(), Box<Response>> {
+    match runtime.store().load(runtime.id()).await {
+        Ok(Some(record)) if record.is_roster_agent(agent) => Ok(()),
+        Ok(Some(_)) => Err(Box::new(unknown_agent(agent))),
+        Ok(None) => Err(Box::new(
+            ApiError(crate::error::OpenCompanyError::CompanyNotFound(
+                runtime.id().to_string(),
+            ))
+            .into_response(),
+        )),
+        Err(err) => Err(Box::new(ApiError(err).into_response())),
+    }
+}
+
 /// Reads the stored document strictly, so an unreadable one is a `409` rather
 /// than silently rendered as "no overrides".
 ///
@@ -282,7 +450,11 @@ async fn stored_strict(
     .map(Option::unwrap_or_default)
 }
 
-async fn read_policy(company: ScopedCompany, Path(NamePath { name }): Path<NamePath>) -> Response {
+async fn read_policy(
+    company: ScopedCompany,
+    Path(NamePath { name }): Path<NamePath>,
+    Query(scope): Query<AgentScope>,
+) -> Response {
     let runtime = company.runtime.as_ref();
     let name = name.trim().to_string();
     let decl = match decl_for(runtime, &name).await {
@@ -297,12 +469,19 @@ async fn read_policy(company: ScopedCompany, Path(NamePath { name }): Path<NameP
         &decl.read_only_tools,
         mcp_policy::StoredPolicies::Stored(stored),
     );
-    Json(tool_policy_dto(&name, &policies, &decl.tool_inventory)).into_response()
+    Json(tool_policy_dto(
+        &name,
+        &policies,
+        &decl.tool_inventory,
+        scope.agent(),
+    ))
+    .into_response()
 }
 
 async fn write_policy(
     company: AdminScopedCompany,
     Path(NamePath { name }): Path<NamePath>,
+    Query(scope): Query<AgentScope>,
     body: Option<Json<PutToolPolicy>>,
 ) -> Response {
     let runtime = company.runtime.as_ref();
@@ -311,6 +490,11 @@ async fn write_policy(
         Ok(decl) => decl,
         Err(response) => return *response,
     };
+    if let Some(agent) = scope.agent()
+        && let Err(response) = require_roster_agent(runtime, agent).await
+    {
+        return *response;
+    }
     let stored = match stored_strict(runtime, &name).await {
         Ok(stored) => stored,
         Err(response) => return *response,
@@ -320,7 +504,7 @@ async fn write_policy(
         Some(Json(patch)) => patch,
         None => return bad_request("send a JSON body naming `tierDefaults`, `tools`, or both."),
     };
-    let merged = match apply_tool_policy_patch(stored, patch) {
+    let merged = match apply_tool_policy_patch(stored, patch, scope.agent()) {
         Ok(merged) => merged,
         Err(reason) => return bad_request(&reason),
     };
@@ -343,12 +527,14 @@ async fn write_policy(
         &decl.read_only_tools,
         mcp_policy::StoredPolicies::Stored(merged),
     );
-    Json(tool_policy_dto(&name, &policies, &decl.tool_inventory)).into_response()
+    Json(tool_policy_dto(&name, &policies, &decl.tool_inventory, scope.agent()).with_note())
+        .into_response()
 }
 
 async fn reset_policy(
     company: AdminScopedCompany,
     Path(NamePath { name }): Path<NamePath>,
+    Query(scope): Query<AgentScope>,
 ) -> Response {
     let runtime = company.runtime.as_ref();
     let name = name.trim().to_string();
@@ -356,21 +542,46 @@ async fn reset_policy(
         Ok(decl) => decl,
         Err(response) => return *response,
     };
-    // Does not read the stored document first: this is the repair for one that
-    // cannot be read, so requiring it to parse would lock the operator out of
-    // the only way back.
-    if let Err(err) = mcp_policy::clear_tool_policies(
-        runtime.id(),
-        runtime.secrets().as_ref(),
-        &mcp_policy::tool_policies_key(&name),
-    )
-    .await
-    {
-        return ApiError(err).into_response();
-    }
-    let policies =
-        mcp_policy::effective_policies(&decl.read_only_tools, mcp_policy::StoredPolicies::Absent);
-    Json(tool_policy_dto(&name, &policies, &decl.tool_inventory)).into_response()
+    // An agent-scoped reset clears one teammate's rules and leaves the company
+    // document alone. It has to read first, so an unreadable document is a `409`
+    // here; the company-scoped reset stays the repair for that.
+    let merged = match scope.agent() {
+        Some(agent) => {
+            let mut stored = match stored_strict(runtime, &name).await {
+                Ok(stored) => stored,
+                Err(response) => return *response,
+            };
+            stored.agents.remove(agent);
+            stored.prune();
+            if let Err(err) = mcp_policy::save_tool_policies(
+                runtime.id(),
+                runtime.secrets().as_ref(),
+                &mcp_policy::tool_policies_key(&name),
+                &stored,
+            )
+            .await
+            {
+                return ApiError(err).into_response();
+            }
+            mcp_policy::StoredPolicies::Stored(stored)
+        }
+        None => {
+            let replacement = match mcp_policy::reset_company_policy(
+                runtime.id(),
+                runtime.secrets().as_ref(),
+                &mcp_policy::tool_policies_key(&name),
+            )
+            .await
+            {
+                Ok(replacement) => replacement,
+                Err(err) => return ApiError(err).into_response(),
+            };
+            mcp_policy::StoredPolicies::Stored(replacement)
+        }
+    };
+    let policies = mcp_policy::effective_policies(&decl.read_only_tools, merged);
+    Json(tool_policy_dto(&name, &policies, &decl.tool_inventory, scope.agent()).with_note())
+        .into_response()
 }
 
 fn bad_request(reason: &str) -> Response {
@@ -384,3 +595,14 @@ fn bad_request(reason: &str) -> Response {
 #[cfg(test)]
 #[path = "mcp_tool_policy_tests.rs"]
 mod tests;
+
+/// The `?agent=` lens: what it merges, what it refuses, and what a row says.
+#[cfg(test)]
+#[path = "mcp_tool_policy_agent_tests.rs"]
+mod agent_tests;
+
+/// The roster check on write, and the company reset preserving `agents` —
+/// driven over the real router.
+#[cfg(test)]
+#[path = "mcp_tool_policy_route_tests.rs"]
+mod route_tests;

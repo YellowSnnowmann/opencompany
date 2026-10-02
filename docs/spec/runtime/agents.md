@@ -76,6 +76,7 @@ provider = "anthropic"                  # this agent's own {provider, model}
 model = "claude-sonnet-5"               # pair — see below. Omit both to
                                         # follow the company default.
 tools = ["docs.*", "mcp:notion"]        # grant globs — see tools.md
+skills = ["brand-voice"]                # exact skill slugs — see below
 delegates_to = ["creative"]             # narrow hand-offs to these desks (omit = anywhere)
 budget_usd_daily = 5.0                  # per-agent daily cap
 
@@ -152,6 +153,33 @@ produce and revise its own work. See `src/harness/workspace_tools.rs` for the
 enforcement and why the pre-existing unconfined default is otherwise
 unchanged.
 
+### `skills`
+
+Which of the company's skills this teammate may read, in the same three states
+`tools` uses ([tools.md](tools.md)) and for the same reason: an omitted key has
+to mean *inherit* so every roster written before the key existed keeps working.
+
+| value | means |
+| --- | --- |
+| omitted | inherit — every skill the company has enabled |
+| `[]` | an explicit no-skills scope: no catalogue, no skill read tools |
+| `["brand-voice"]` | narrow to those slugs |
+
+Two differences from `tools`. Entries are **exact slugs**, never globs — a tool
+grant globs over a namespace with real hierarchy, while a slug is a flat
+identifier, so a prefix would silently admit a skill installed after the scope
+was written. And there is no desk level: desks carry a `tools` ceiling and no
+skills, so the resolution is the company's enabled set intersected with this
+list. It is narrow-only either way — a scope can never re-enable a skill the
+company disabled.
+
+The scope is applied **before** the agent's skill tree is written, so a skill
+outside it is never materialized: the catalogue and the three read tools are
+derived from that tree and nothing else, and so cannot disagree with it. A slug
+the company does not have is dropped with a warning naming the agent, rather
+than failing the load, so retiring a skill does not brick a manifest that still
+names it. See [manifest-semantics.md](manifest-semantics.md).
+
 ### `ledgers`
 
 Which of the company's ledgers this agent's five ledger tools
@@ -212,7 +240,10 @@ them. On a desk, colleagues are reached by **speaking**: `post` to the room,
 ([hive.md](hive.md#speaking)); another desk is reached by a referral
 ([hive.md](hive.md#referral)). Every roster agent also carries `spawn_task`,
 and the brief under it (`orchestrator::member_delegation_brief`) says when to
-leave a slice tracked on the board rather than in the conversation. The
+leave a slice tracked on the board rather than in the conversation. A seat in
+a HiveMind episode keeps it too; the card is queued in the turn and written
+when the turn settles, at most three per episode
+([hive.md](hive.md#seats-open-cards)). The
 orchestrator gets the same section ahead of its own brief, so it can assign by
 id without a `query_company` call first.
 
@@ -407,8 +438,7 @@ rename can switch off is not a control.
 | Routing table and exclusions | `src/company/context_routing.rs` |
 | Roster type and constants | `src/company/types.rs` |
 | Manifest wiring and validation | `src/company/manifest.rs` |
-| Iteration cap, stated on every built agent | `src/harness/build.rs` |
-| In-turn spend brake, installed per turn | `src/harness/mod.rs` |
+| Skill scope resolution, shared with the harness | `src/runtime/builder.rs` |
 
 The first three are **always compiled**, though the harness that spends the
 prompt is behind the `openhuman` feature. Composition, clamping and the

@@ -21,6 +21,7 @@ impl crate::runtime::delegation::RunTurn for HaltOkTurn {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 
@@ -170,6 +171,7 @@ impl CappedThenGatedTurn {
                 abnormal_stop: None,
                 halted_for_spend: None,
                 budget_paused: None,
+                ceiling_paused: None,
             });
         }
         // `gated_agent`: announce arrival, then wait to be released. The
@@ -185,6 +187,7 @@ impl CappedThenGatedTurn {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 }
@@ -355,6 +358,7 @@ impl crate::runtime::delegation::RunTurn for RecordingLane {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 

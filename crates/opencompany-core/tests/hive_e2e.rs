@@ -1245,8 +1245,16 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_ask_opens_a_conversation_the_desk_only_references() {
     let home = tempfile::tempdir().unwrap();
+    // Asked once per *episode*, not once per turn. `seat.called` sees one
+    // turn, and the closing round this desk settles into runs on its own
+    // conductor with a fresh session -- so a turn-scoped guard lets the
+    // closing seat ask the same question again and open a second
+    // conversation. The script means "have I asked this yet", which is an
+    // episode-wide question.
+    let asked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let asked_once = std::sync::Arc::clone(&asked);
     let (base_url, script) = spawn_script_with_latency(
-        seat_script("Noted.", |seat| {
+        seat_script("Noted.", move |seat| {
             // `!called` is load-bearing: a turn ends when the seat has
             // *recorded* its part, and an `ask` is not that. Without the
             // guard the same question is asked again on every continuation
@@ -1254,6 +1262,7 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
             if seat.speaker == ENGINEER
                 && !seat.operator_asked().is_empty()
                 && !seat.called("desk_ask")
+                && !asked_once.swap(true, std::sync::atomic::Ordering::SeqCst)
             {
                 return speech(
                     "ask",
@@ -1399,14 +1408,10 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
 
     // **A seat is never offered a hand-off tool it cannot use here.**
     //
-    // `spawn_task`, `delegate_to_desk` and `delegate_to_teammate` are wired
-    // onto every roster agent and queue work the brain drains; no brain
-    // drains inside an episode, so the orchestrator refuses them outright
-    // (`drain_unwired`). On a live run a seat reached for one, took the
-    // refusal as proof that delegating was impossible, and told the operator
-    // to go and make "the board" available -- while `ask`, the tool that
-    // does work here, was on the same belt. The refusal was handled; the
-    // misdiagnosis it invited was not, so the names come off the belt.
+    // The hand-off and lifecycle verbs are wired onto roster agents but
+    // could only refuse on a seat, whose claim permits opening a card and
+    // nothing else; a refused tool argues the seat out of `ask`, so the names
+    // come off the belt. `spawn_task` stays, and `hive_seat_cards` covers it.
     let offered: Vec<String> = script
         .asks()
         .iter()
@@ -1416,7 +1421,12 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
         !offered.is_empty(),
         "the fixture saw no tool schemas at all, so this asserts nothing",
     );
-    for withheld in ["spawn_task", "delegate_to_desk", "delegate_to_teammate"] {
+    for withheld in [
+        "delegate_to_desk",
+        "delegate_to_teammate",
+        "assign_task",
+        "review_task",
+    ] {
         assert!(
             !offered.iter().any(|name| name == withheld),
             "`{withheld}` was offered to an episode seat: {offered:?}",
@@ -2430,7 +2440,23 @@ fn delivered_rows(
 async fn a_seat_publishes_a_deliverable_the_operator_can_edit() {
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
-        seat_script("Noted.", write_publish_then_record),
+        seat_script("Noted.", {
+            // Published once per *episode*. `write_publish_then_record` asks
+            // `seat.called("publish_artifact")`, which sees one turn, and the
+            // closing round is a fresh conductor -- so without this the
+            // closing seat writes and publishes the outline a second time,
+            // filing a second card for one deliverable.
+            let published = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            move |seat: &Seat| {
+                if published.load(std::sync::atomic::Ordering::SeqCst) {
+                    return complete(seat, "The pilot slide outline is published.");
+                }
+                if seat.called("publish_artifact") {
+                    published.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                write_publish_then_record(seat)
+            }
+        }),
         Duration::from_millis(30),
     )
     .await;
@@ -2590,27 +2616,50 @@ async fn a_turn_that_only_publishes_hands_over_on_a_row_of_its_own() {
         .collect();
     assert_eq!(handed.len(), 1, "handed over once: {delivered:?}");
     let (kind, text, outputs, task_id) = handed[0];
-    assert!(
-        text.is_empty(),
-        "a row of its own, with nothing said: {text}"
-    );
+    // **The handover rides on the completion, where it used to ride alone.**
+    //
+    // This row was a bare `Post` with no text: the turn that published said
+    // nothing the room records, so its wave ended and the artifact handed over
+    // on a row of its own. Since tinyhivemind#84 a turn that recorded nothing
+    // is asked again, and what this seat does on the second attempt is the
+    // `complete_episode` it would otherwise have made a wave later -- so the
+    // outputs attach to *that* row. The desk shows one row carrying the
+    // artifact and the words about it rather than two rows carrying one each.
+    //
+    // Worth knowing while reading the rows here: the completion is journalled
+    // twice, with the same text, before this change and after. That duplication
+    // is neither new nor this test's subject.
+    //
+    // What is still asserted is what the test is for -- the artifact hands over
+    // exactly once, on a row belonging to the episode, naming the card it was
+    // published against -- and one thing more than before: that it rides on the
+    // *first* completion. A retry that recorded nothing and left the outputs to
+    // a later wave would still satisfy every claim above it.
     assert_eq!(
         *kind,
-        Some(UtteranceKind::Post),
+        Some(UtteranceKind::CompleteEpisode),
         "it belongs to the episode"
+    );
+    assert!(
+        text.contains("on its card"),
+        "and carries what the seat was asked again to say: {text}"
     );
     assert_eq!(outputs[0]["kind"], json!("artifact"));
     assert_eq!(outputs[0]["taskId"], json!(task_id.clone().unwrap()));
-    let recorded = delivered
+    let first_completion = delivered
         .iter()
         .position(|(kind, ..)| *kind == Some(UtteranceKind::CompleteEpisode))
-        .expect("the engineer recorded its part on a later turn");
+        .expect("the engineer recorded its part");
     let handed_at = delivered
         .iter()
-        .position(|(_, text, ..)| text.is_empty())
+        .position(|(.., outputs, _)| {
+            outputs
+                .as_array()
+                .is_some_and(|outputs| !outputs.is_empty())
+        })
         .unwrap();
-    assert!(
-        handed_at < recorded,
-        "handed over when its turn's wave ended"
+    assert_eq!(
+        handed_at, first_completion,
+        "the artifact hands over on the retry that recorded, not on a later wave: {delivered:?}"
     );
 }

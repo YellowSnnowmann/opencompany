@@ -88,6 +88,7 @@ impl crate::runtime::delegation::RunTurn for StructuredJsonReplyTurn {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 
@@ -237,6 +238,7 @@ impl crate::runtime::delegation::RunTurn for ScalarJsonReplyTurn {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 

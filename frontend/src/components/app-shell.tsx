@@ -72,6 +72,17 @@ import {
 } from "@/hooks/use-events";
 import { EMPTY_EPISODE_FRAMES, reduceEpisodeFrame } from "@/lib/episode-frames";
 import {
+  approvalAgentCounts,
+  clearedOnThread,
+  dropTurnMeta,
+  frameTurnMeta,
+  inflightAgentCounts,
+  recordRunStatus,
+  sameCounts,
+  settledInChat,
+  staleTurnMeta,
+} from "@/lib/agent-presence";
+import {
   coordinationObservations,
   EMPTY_TURN_LEDGER,
   reduceTurnBracket,
@@ -101,7 +112,7 @@ import { REWRITE_RETIRED } from "@/lib/console-route-rewrites";
 import { taskIdFromSegment } from "@/lib/task-route";
 import { toast } from "sonner";
 
-import { foldLiveFrame } from "@/lib/live-frame";
+import { foldTurnFrame } from "@/lib/live-frame";
 
 import {
   type ChatMessage,
@@ -829,6 +840,10 @@ export function AppShell({
   // is every turn answering no journaled message and every older host.
   const setLiveStepsByMessage = scopedRoomWriters.setLiveStepsByMessage;
   const setLiveAgentByTurn = scopedRoomWriters.setLiveAgentByTurn;
+  // What each live turn's frames last said (its thread, and whether the last
+  // one was `replying`), for the agent presence dot. Retired wherever
+  // `liveAgentByTurn` is, plus on a settle bracket.
+  const setTurnMeta = scopedRoomWriters.setTurnMeta;
   /**
    * Retires the live rows of every message that now has durable steps of its
    * own, and of every message named in `alsoDrop`.
@@ -2323,7 +2338,52 @@ export function AppShell({
     foldTurnBracket(event);
     // A seat's bracket inside an episode also drives its lane on the band.
     if (event.episodeId) foldEpisodeFrame(event);
-  }, []);
+    // A settle ends what the frames said about that turn, so its "typing" or
+    // "working" dot goes out with it. Matched on the conversation the bracket
+    // names, folded (`settledInChat`): a seat settles its DM under `dm:<id>`
+    // while the frames named the bare id. A chat-route settle names no chat,
+    // and is retired by the reply/poll instead.
+    if (event.type === "turn_settled" && event.chatId) {
+      const drop = settledInChat(event.chatId, room.readRoom().threadAgents);
+      setTurnMeta((prev) => dropTurnMeta(prev, drop));
+    }
+  }, [setTurnMeta]);
+  // Presence inputs that live in the shell, mirrored into the Room store so the
+  // dot's reader is one store subscription (`useAgentPresence`): the bracket
+  // ledger's open turns, the pending approvals per asking agent, and a coarse
+  // clock the age-out reads.
+  const setLedgerTurns = scopedRoomWriters.setLedgerTurns;
+  const setApprovalAgents = scopedRoomWriters.setApprovalAgents;
+  const setInflightAgents = scopedRoomWriters.setInflightAgents;
+  const setRunStatuses = scopedRoomWriters.setRunStatuses;
+  useEffect(() => {
+    setLedgerTurns(turnLedger.open);
+  }, [turnLedger.open, setLedgerTurns]);
+  useEffect(() => {
+    // An approval a frame already resolved (an expiry included) stops counting
+    // on the frame, not on the feed re-read it triggers.
+    const next = approvalAgentCounts(feed.approvals, decidedApprovals);
+    setApprovalAgents((prev) => (sameCounts(prev, next) ? prev : next));
+  }, [feed.approvals, decidedApprovals, setApprovalAgents]);
+  useEffect(() => {
+    // A card run or delegation in flight is its agent at work, even though no
+    // conversation shows it.
+    const next = inflightAgentCounts(inflightRuns);
+    setInflightAgents((prev) => (sameCounts(prev, next) ? prev : next));
+  }, [inflightRuns, setInflightAgents]);
+  useEffect(() => {
+    // Its own writers, built inside the effect: `scopedRoomWriters` is a new
+    // object every render, and an interval keyed on it would restart before it
+    // ever fired. The same tick collects what the age-out already ignores, so
+    // a turn whose settle never arrived does not sit in the map until reload.
+    const { setPresenceNow, setTurnMeta: collect } = room.writersForScope(roomScopeKey);
+    const id = window.setInterval(() => {
+      const now = Date.now();
+      setPresenceNow(now);
+      collect((prev) => dropTurnMeta(prev, staleTurnMeta(now)));
+    }, 30_000);
+    return () => window.clearInterval(id);
+  }, [roomScopeKey]);
   /** Bumped on `desk_routing_configured`, so an open routing editor re-reads. */
   const [deskRoutingTick, setDeskRoutingTick] = useState(0);
   const [rosterTick, setRosterTick] = useState(0);
@@ -2434,7 +2494,7 @@ export function AppShell({
    * never reused, and `clearLiveRowsSettledBy` already retires them together.
    */
   const clearLiveThread = useCallback(
-    (threadId: string, force = false) => {
+    (threadId: string, force = false, queries = true) => {
       setLiveStepsByThread((prev) =>
         force || prev[threadId]?.length ? { ...prev, [threadId]: [] } : prev,
       );
@@ -2444,13 +2504,18 @@ export function AppShell({
         delete next[threadId];
         return next;
       });
+      // What this thread's frames described: its own bucket, and, when the
+      // turn is over, the per-query ones too (`clearedOnThread`).
+      setTurnMeta((prev) => dropTurnMeta(prev, clearedOnThread(threadId, { queries })));
     },
-    [setLiveStepsByThread, setLiveAgentByTurn],
+    [setLiveStepsByThread, setLiveAgentByTurn, setTurnMeta],
   );
   const onSendStart = useCallback((threadId: string) => {
     pendingPostThreadsRef.current.started(threadId);
     activeTurnThreadRef.current = threadId;
-    clearLiveThread(threadId, true);
+    // Not the per-query presence: a question asked while an earlier one on this
+    // thread still runs must not blank the earlier one's dot.
+    clearLiveThread(threadId, true, false);
     // `lastFrameAt` seeds to `startedAt` so the stall check is "no frame for
     // 30s" from the send, not an instant stall.
     const now = Date.now();
@@ -2785,9 +2850,14 @@ export function AppShell({
   const onTurnEvent = useCallback((event: CompanyStreamEvent) => {
     // The three kinds this folds. `use-events` only routes these here, so the
     // guard is a type narrowing rather than a runtime filter — but it is stated
-    // rather than assumed, because `foldLiveFrame` takes the narrow shape and a
+    // rather than assumed, because `foldTurnFrame` takes the narrow shape and a
     // cast would let a fourth kind through silently if that routing ever grew.
-    if (event.type !== "tool_call" && event.type !== "tool_result" && event.type !== "thinking") {
+    if (
+      event.type !== "tool_call" &&
+      event.type !== "tool_result" &&
+      event.type !== "thinking" &&
+      event.type !== "replying"
+    ) {
       return;
     }
     // Workflow agent-node frames carry `workflowRunId`/`nodeId` instead of a
@@ -2829,13 +2899,18 @@ export function AppShell({
         : undefined;
     const setRows = messageKey ? setLiveStepsByMessage : setLiveStepsByThread;
     const rowKey = messageKey ?? threadId;
+    // `replying` is a live signal, not a row: `foldTurnFrame` never folds it
+    // into the timeline, or the live and folded step counts would disagree.
     setRows((prev) => {
-      const rows = foldLiveFrame(prev[rowKey] ?? [], event);
-      // `null` is "this frame belongs to rows we do not hold" — keep the
-      // previous object so React skips the re-render.
+      const rows = foldTurnFrame(prev[rowKey] ?? [], event);
+      // `null` is "no row for this frame" — keep the previous object so React
+      // skips the re-render.
       if (!rows) return prev;
       return { ...prev, [rowKey]: rows };
     });
+    // What the frame says about the turn's state, for the presence dot: the
+    // thread it named, and whether the agent is now writing its reply.
+    setTurnMeta((prev) => ({ ...prev, [rowKey]: frameTurnMeta(threadId, event.type, Date.now()) }));
     // …and who is speaking, under the same key the rows went to.
     //
     // `openTurns` already carries an agent, but it is the one the host STARTED
@@ -3018,7 +3093,17 @@ export function AppShell({
     pendingApprovals: pending,
     onAgentReply: injectAgentReply,
     onTaskEvent: useCallback(() => setTaskEventTick((n) => n + 1), []),
-    onRunEvent: useCallback(() => setAttemptEventTick((n) => n + 1), []),
+    onRunEvent: useCallback(
+      (event: CompanyStreamEvent) => {
+        setAttemptEventTick((n) => n + 1);
+        // A chat turn's lock: pending (queued) until `running`. Presence reads
+        // it for turns this console did not send (`lib/agent-presence.ts`).
+        if (event.type === "run_status_changed" && !event.taskId) {
+          setRunStatuses((prev) => recordRunStatus(prev, event.runId, event.status));
+        }
+      },
+      [setRunStatuses],
+    ),
     // **A crossing changes a thread this console is already showing.**
     //
     // The fold that renders a crossing — `referralConversation` on the asking
@@ -3314,7 +3399,7 @@ export function AppShell({
           you are in, and who you are signed in as. Both used to sit in the
           sidebar column — the switcher at its head under a reserved strip for
           the traffic lights, the profile row in its footer — which put them at
-          opposite ends of a 13.5rem column and left the lights overlapping a
+          opposite ends of a 15rem column and left the lights overlapping a
           narrow column instead of insetting a bar. See `window-title-bar.tsx`,
           which owns the geometry including the traffic-light inset. */}
       <WindowTitleBar

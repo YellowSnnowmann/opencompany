@@ -140,7 +140,8 @@ describe("a thread's live agent retires with its rows", () => {
   it("is what every thread-bucket clear goes through", () => {
     // The three terminal paths: a send arming, a send settling, and a reply
     // landing for a turn this console did not start.
-    expect(appShell).toContain("clearLiveThread(threadId, true)");
+    // The arm keeps other questions' per-query presence (`clearedOnThread`).
+    expect(appShell).toContain("clearLiveThread(threadId, true, false)");
     expect(appShell).toContain("clearLiveThread(threadId)");
     expect(appShell).toContain("clearLiveThread(event.chatId)");
     // And no path left writing the rows directly, which would skip the agent.

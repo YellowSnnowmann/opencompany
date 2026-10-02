@@ -138,7 +138,7 @@ const ORPHAN_COLOR = 'var(--kg-brain-1)'; // rim dust dims via its lower fill op
  * `flex-wrap` + `max-w-full` are load-bearing, not cosmetic (issue #1385):
  * this strip is pinned bottom-left inside the field's `overflow-hidden` box,
  * so a single non-wrapping row is silently cut off at narrow widths — on
- * mobile, and on desktop whenever the 13.5rem sidebar is expanded. The
+ * mobile, and on desktop whenever the 15rem sidebar is expanded. The
  * trailing caveat is the last item, so it is the first thing to disappear,
  * which would put the one control that explains the wheel out of reach
  * exactly where the wheel is hardest to read.

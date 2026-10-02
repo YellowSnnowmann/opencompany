@@ -194,7 +194,28 @@ Never nest a modal inside a modal.
   so validation cannot be bypassed.
 - **Sidebar** — the console shell's navigation primitive. `SidebarProvider`
   owns expanded/collapsed state and the Cmd/Ctrl+B shortcut. The desktop shell
-  is transparent over `bg-chrome`; the mobile sidebar is a `Sheet` overlay.
+  is transparent over `bg-chrome`; the mobile sidebar is a `Sheet` overlay. It
+  is 15rem wide from `md` up, and its docked channel rail sets DM rows in
+  `text-md` (15px) with a 24px avatar. Below `md` the sidebar is a sheet, and the
+  title bar's switcher drops to a fixed 8rem (6rem below `sm`, where the search
+  is icon-only) so the trailing controls fit a 390px phone.
+- **AgentStatusDot** (`components/agent-status-dot.tsx`) — a teammate's live
+  state as a badge on its avatar: waiting for approval, working, typing,
+  thinking, or queued; nothing at all when inactive. `PresenceDot` stays a
+  person's online/away dot and is never drawn for a teammate. It uses the
+  existing `status-*` tokens, adds no new ones, and never relies on colour
+  alone: working, typing and thinking share `status-running` and differ by shape
+  (spinner arc around a solid centre, three dots, hollow pulsing ring), each of
+  which stays distinct when reduced motion stills it. Where the surface names
+  the state in its own words (the DM row, a mention-picker option), pass
+  `decorative` so the dot is hidden from assistive tech and the name is not read
+  as "Thinking Ada". Where the dot stands alone beside a face (the chat header,
+  the members pane, a team card, the profile), pass `name` so its label says who
+  ("Ada Lovelace: Working"); the hover title stays the bare state. Wrap an
+  avatar in `AgentFace` to opt a surface in; the `surface` prop picks the
+  cut-out ring (`chrome` in the app sidebar, `card` on cards, `popover` in a
+  floating menu such as the `@` picker, `background` on the page or a sheet).
+  Historical message avatars deliberately do not wear it.
 
 ---
 

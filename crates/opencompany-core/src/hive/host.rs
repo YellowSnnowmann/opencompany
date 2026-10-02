@@ -45,6 +45,45 @@ use super::session_log::EventLogSessionLog;
 /// admitted past this company's own policy.
 pub(crate) const TOOL_PREFIX: &str = "desk_";
 
+/// Add one turn's steps to what the seat's next row will carry.
+///
+/// **Appended, not replaced.** A turn that did work and then ended in prose
+/// records nothing, so the room asks the seat again -- and that is exactly the
+/// turn whose tool calls are worth having. Replacing here let the retry's fold
+/// overwrite the first attempt's before any row consumed it, so a retry that
+/// only called `complete_episode` journaled the speech call and dropped the
+/// reads, writes and publishing that produced the answer. Both attempts belong
+/// to the row that finally reports them.
+///
+/// Bounded at [`MAX_ROW_STEPS`], dropping the oldest: a row is a timeline, not
+/// a ledger, and the join of several attempts must not grow without limit.
+fn carry_steps(
+    held: &mut Vec<crate::ports::types::TurnStep>,
+    fresh: Vec<crate::ports::types::TurnStep>,
+) {
+    held.extend(fresh);
+    if held.len() > MAX_ROW_STEPS {
+        held.drain(..held.len() - MAX_ROW_STEPS);
+    }
+}
+
+/// How many progress events a seat's turn may run ahead of the reader.
+///
+/// Backpressure, not a buffer: the core awaits each send, so this is the number
+/// of frames that may be in flight before the turn itself waits. Deep enough
+/// that a burst of tool calls never blocks, small enough that a reader which
+/// stops shows up as a stalled turn rather than as unbounded memory.
+const PROGRESS_DEPTH: usize = 256;
+
+/// The most steps one row may carry, across every attempt behind it.
+///
+/// `fold_steps` already caps a single turn; this bounds their join, because a
+/// seat asked again contributes a second fold to the same row. Oldest-first on
+/// overflow: what a retry adds is the speech call, which the episode
+/// annotation shows anyway, while the reads and writes it is carrying forward
+/// are visible nowhere else.
+const MAX_ROW_STEPS: usize = 100;
+
 /// The author a desk note is written under: the episode speaking, not a
 /// teammate. The session log reads a reserved id as a system row, which is
 /// what keeps it out of the completion fold.
@@ -143,10 +182,32 @@ pub struct DeskHost {
     /// The pool handles this episode's seats run on, resolved before the
     /// runner is built because `build_seat` is sync and the pool is not.
     seated: Mutex<BTreeMap<String, Arc<crate::harness::built_in::CompanyAgent>>>,
+    /// The reader draining one seat's turn, and what it collected.
+    ///
+    /// A turn's progress has to be read while the turn runs -- the core awaits
+    /// its sends, so a sink nobody drains stalls the seat -- and folded only
+    /// once it has finished. So the reader is a task, and `wrap_turn` joins it
+    /// on the way out.
+    watching: Mutex<
+        BTreeMap<
+            String,
+            tokio::task::JoinHandle<Vec<openhuman_core::agent::progress::AgentProgress>>,
+        >,
+    >,
+    /// What that turn did, folded, waiting for the row that reports it.
+    stepped: Mutex<BTreeMap<String, Vec<crate::ports::types::TurnStep>>>,
     /// What each seat's last turn handed over, until a row carries it.
     deliveries: Mutex<BTreeMap<String, seat_park::Delivery>>,
     /// Whether a row was committed since the last checkpoint.
     committed: AtomicBool,
+    /// The cards this episode has opened, and the budget its seats'
+    /// `spawn_task` calls reserve against.
+    cards: Arc<seat_cards::EpisodeCards>,
+    /// The operator's row this episode answers, which names its message card.
+    opened_at: Option<EventSeq>,
+    /// Whether that message read as a question, which holds every seat to
+    /// opening no cards.
+    answering: bool,
 }
 
 /// What a host does with the approvals one seat's turn raised.
@@ -218,8 +279,13 @@ impl DeskHost {
             parked_ids: Mutex::new(BTreeMap::new()),
             parked_lanes: Mutex::new(BTreeMap::new()),
             seated: Mutex::new(BTreeMap::new()),
+            watching: Mutex::new(BTreeMap::new()),
+            stepped: Mutex::new(BTreeMap::new()),
             deliveries: Mutex::new(BTreeMap::new()),
             committed: AtomicBool::new(false),
+            cards: Arc::new(seat_cards::EpisodeCards::default()),
+            opened_at: None,
+            answering: false,
         }
     }
 
@@ -313,6 +379,32 @@ impl DeskHost {
     pub fn locking(mut self, pool: Arc<HarnessPool>) -> Self {
         self.pool = Some(pool);
         self
+    }
+
+    /// The operator's row this episode opened at.
+    #[must_use]
+    pub const fn opened_at(mut self, seq: EventSeq) -> Self {
+        self.opened_at = Some(seq);
+        self
+    }
+
+    /// Hold every seat to the question rule: no cards.
+    #[must_use]
+    pub const fn answering(mut self, answering: bool) -> Self {
+        self.answering = answering;
+        self
+    }
+
+    /// Reads back the cards this episode already has on the board, so its
+    /// limits survive a resume.
+    pub async fn recall_cards(&self) {
+        let Some((record, deps)) = self.roster.as_ref() else {
+            return;
+        };
+        let Some(tasks) = deps.tasks.as_deref() else {
+            return;
+        };
+        self.cards.look(&self.card_desk(tasks, record)).await;
     }
 
     /// Thread every row this episode commits under `root`.
@@ -465,6 +557,40 @@ impl DeskHost {
             })
     }
 
+    /// The channel a note belongs in: the conversation its thread roots, or
+    /// the desk when the thread is the desk's own.
+    ///
+    /// **A note names the thread it is about, and not every thread is on the
+    /// desk.** `nudge_silent_askees_in` addresses a seat inside the
+    /// conversation it went silent in, so the note carries that
+    /// conversation's root -- a row that lives in the pair channel, beside
+    /// the `ask` that opened it and the answer that closes it.
+    ///
+    /// Writing such a note to the desk while keeping the conversation's root
+    /// as its parent stranded it between the two: the parent is in another
+    /// channel, so no desk reader can place the row under anything. A live
+    /// run showed both halves of the cost. The nudge that unblocked a
+    /// conversation rendered in the room as a loose instruction addressed to
+    /// nobody, with no question above it -- and, sitting between the
+    /// operator's message and the first answer, it read to the timeline as a
+    /// second conversation racing in the channel, which folded the whole
+    /// answered episode behind a chip.
+    ///
+    /// Resolved against the map [`Self::channel_for`] resolves a commit's
+    /// against, and for its reason: where a thread's rows go is recorded when
+    /// the conversation opens, and is not guessable from the note.
+    fn note_chat(&self, thread: Option<Sequence>) -> String {
+        thread
+            .and_then(|root| {
+                self.conversations
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(&root.0)
+                    .cloned()
+            })
+            .unwrap_or_else(|| self.desk_id.clone())
+    }
+
     /// The mentions `text` names, resolved against this company (#2441).
     ///
     /// Empty without a seam, which is what a host built with no user
@@ -572,7 +698,16 @@ impl DeskHost {
             chat_id: chat.to_owned(),
             agent_id: author.to_owned(),
             text,
-            steps: Vec::new(),
+            // What the turn behind this row did, if the host watched it. Taken
+            // rather than read: one turn's calls belong to the row it produced,
+            // and a seat that records twice in a turn must not report the same
+            // steps under both.
+            steps: self
+                .stepped
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(author)
+                .unwrap_or_default(),
             outputs: Vec::new(),
             task_id: None,
             episode: None,
@@ -919,6 +1054,21 @@ impl Journal for DeskHost {
             self.journal_or_warn(row);
             return;
         }
+        // A row the driver refused after this host had already appended it.
+        // `commit` stamps `episode.kind` off the utterance, and the fold runs
+        // afterwards -- so a refused `complete_episode` is on the desk saying
+        // the seat finished. The log cannot take it back; this is the
+        // correction written beside it, naming the row by its sequence.
+        if let Event::Refused { seat, why, at, .. } = event {
+            self.journal_or_warn(CompanyEvent::UtteranceRefused {
+                chat_id: self.desk_id.clone(),
+                episode_id: self.episode_id.clone(),
+                seat: seat.clone(),
+                at: at.0,
+                reason: format!("{why:?}"),
+            });
+            return;
+        }
         if let Event::Parked { seat, thread } = event {
             self.journal_or_warn(self.seat_parked_row(seat, *thread));
             return;
@@ -990,7 +1140,7 @@ impl Journal for DeskHost {
 
     fn note(&self, note: &Note) -> tinyhivemind_openhuman::Result<()> {
         let event = self.reply(
-            &self.desk_id.clone(),
+            &self.note_chat(note.thread),
             DESK_AUTHOR,
             note.body.clone(),
             note.thread,
@@ -1166,6 +1316,7 @@ impl EpisodeHost for DeskHost {
             persona.push_str(crate::hive::conclude::PERSONA_NOTE);
             persona.push_str(&broadcast_absent_note(TOOL_PREFIX));
         }
+        persona.push_str(seat_cards::SEAT_CARDS_NOTE);
         self.personas
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1177,6 +1328,62 @@ impl EpisodeHost for DeskHost {
     ///
     /// The episode id is in it because a seat's belt is lent under this key:
     /// two episodes seating the same teammate must not read each other's.
+    /// Narrow one turn of `seat` to `only` — most of a seated turn's belt is
+    /// this host's own, so only this host can withhold it.
+    ///
+    /// Keyed by [`Self::seat_session`], the same key the loan is under, so the
+    /// belt factory finds the narrowing beside the loan it already looks up. The
+    /// guard lifts it however the turn ends.
+    /// Watch this turn, so the row it produces can say what it did.
+    ///
+    /// A seat's tool calls never reached this host: the runner metered a turn's
+    /// usage and reported nothing of its progress, so `reply` journaled every
+    /// row with an empty step list while a turn taken *outside* an episode
+    /// carried all of them. The console showed the difference and nothing
+    /// explained it.
+    ///
+    /// The reader is a task because the channel is backpressure: the core
+    /// awaits its sends, so a sink nobody drains stalls the seat mid-turn.
+    /// [`Self::wrap_turn`] joins it once the turn is over, which is also the
+    /// only moment the fold is complete.
+    fn progress(&self, seat: &str) -> Option<tinyhivemind_openhuman::TurnProgressSink> {
+        let (sink, mut arriving) = tokio::sync::mpsc::channel(PROGRESS_DEPTH);
+        let reader = tokio::spawn(async move {
+            let mut seen = Vec::new();
+            while let Some(event) = arriving.recv().await {
+                seen.push(event);
+            }
+            seen
+        });
+        // A turn that somehow starts twice for one seat leaves the older
+        // reader without a sender, so it ends on its own.
+        self.watching
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(seat.to_owned(), reader);
+        Some(sink)
+    }
+
+    fn narrow_turn(&self, seat: &str, only: &[String]) -> tinyhivemind_openhuman::Narrowing {
+        let held = self
+            .seated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(seat)
+            .cloned();
+        let Some(agent) = held else {
+            return tinyhivemind_openhuman::Narrowing::none();
+        };
+        let seating = agent.seating().clone();
+        let key = self.seat_session(seat);
+        let prefixed: Vec<String> = only
+            .iter()
+            .map(|verb| format!("{}{verb}", crate::hive::host::TOOL_PREFIX))
+            .collect();
+        seating.narrow(key.clone(), prefixed);
+        tinyhivemind_openhuman::Narrowing::until(move || seating.widen(&key))
+    }
+
     fn seat_session(&self, seat: &str) -> String {
         format!("episode:{}:{}", self.episode_id, seat)
     }
@@ -1246,17 +1453,59 @@ impl EpisodeHost for DeskHost {
     fn wrap_turn<'a>(&'a self, seat: &'a str, turn: HostedTurn<'a>) -> HostedTurn<'a> {
         Box::pin(async move {
             let Some(queues) = self.seat_queues() else {
-                return self.locked_turn(seat, turn).await;
+                let outcome = self.locked_turn(seat, turn).await;
+                self.fold_progress(seat).await;
+                return outcome;
             };
-            let mut claims = queues.claim(&self.episode_id, seat, &self.desk_id, self.thread_root);
+            let mut claims = queues.claim(
+                &self.episode_id,
+                seat,
+                &self.desk_id,
+                self.thread_root,
+                self.answering,
+            );
             let outcome = claims.run(self.locked_turn(seat, turn)).await;
             self.keep_seat_claims(seat, claims);
+            self.fold_progress(seat).await;
             outcome
         })
     }
 }
 
 impl DeskHost {
+    /// Join this seat's reader and keep what its turn did, for the row that
+    /// reports it.
+    ///
+    /// Called once the turn is over, which is the only point the fold is
+    /// complete: the turn's sender has dropped by then, so the reader ends on
+    /// its own rather than being cancelled mid-drain.
+    async fn fold_progress(&self, seat: &str) {
+        let reader = self
+            .watching
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(seat);
+        let Some(reader) = reader else { return };
+        let events = match reader.await {
+            Ok(events) => events,
+            // A reader that panicked or was cancelled costs this turn its
+            // steps and nothing else: the row still stands.
+            Err(error) => {
+                tracing::warn!(seat, %error, "[hive] a seat's turn went unwatched");
+                return;
+            }
+        };
+        if events.is_empty() {
+            return;
+        }
+        let steps = crate::harness::built_in::steps::fold_steps(events);
+        if steps.is_empty() {
+            return;
+        }
+        let mut held = self.stepped.lock().unwrap_or_else(PoisonError::into_inner);
+        carry_steps(held.entry(seat.to_owned()).or_default(), steps);
+    }
+
     /// The turn under the teammate's lock, bracketed on the journal. A host
     /// with no pool runs it unserialised and unbracketed.
     fn locked_turn<'a>(&'a self, seat: &'a str, turn: HostedTurn<'a>) -> HostedTurn<'a> {
@@ -1410,6 +1659,7 @@ impl Bracket<'_> {
 }
 
 mod delivery;
+mod seat_cards;
 mod seat_park;
 
 #[cfg(test)]
