@@ -9,6 +9,7 @@
 // rather than at the button keeps "is there somewhere to go" and "go there"
 // from drifting apart.
 
+import type { TaskOpener } from "@/api/tasks";
 import { hostMessageId } from "@/lib/chat";
 import { channelForThread } from "@/views/room/model";
 
@@ -25,10 +26,9 @@ export type OriginConversation =
   | { kind: "channel"; channelId: string; threadId?: string };
 
 /**
- * Resolved through {@link channelForThread}, not a bare `map[originChatId]`:
- * the host compares the General spellings case-insensitively and echoes back
- * whichever one it was addressed with, so a direct index misses a card opened
- * from `MAIN`.
+ * Resolved through {@link channelForThread}, not a bare `map[originChatId]`,
+ * so a `dm:`-prefixed origin resolves too. A card raised in `#general` has the
+ * origin `general`.
  */
 export function originConversation(
   originChatId: string | undefined | null,
@@ -49,4 +49,18 @@ export function originConversation(
     // thread panel would silently fail to open.
     threadId: originParent != null ? hostMessageId(String(originParent)) : undefined,
   };
+}
+
+/**
+ * The words the origin row leads with. A card a teammate opened from a HiveMind
+ * room names that teammate by roster name, or by id while the roster is unread
+ * or no longer carries them.
+ */
+export function originLabel(
+  openedBy: TaskOpener | undefined | null,
+  names?: ReadonlyMap<string, string>,
+): string {
+  if (!openedBy?.agentId) return "Opened from chat";
+  const name = names?.get(openedBy.agentId)?.trim() || openedBy.agentId;
+  return `Opened in chat by ${name}`;
 }

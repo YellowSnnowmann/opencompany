@@ -199,6 +199,7 @@ async fn steer_task_validates_statuses_and_journals_acceptance() {
         .upsert(
             &company,
             &TaskRecord {
+                opened_by: None,
                 id: "idle".into(),
                 title: TaskTitle::authored("Idle"),
                 note: None,

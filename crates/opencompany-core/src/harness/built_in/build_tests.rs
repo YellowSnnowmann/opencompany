@@ -13,6 +13,7 @@ fn manifest_agent(role: &str, description: Option<&str>) -> ManifestAgent {
         tier: None,
         harness: None,
         tools: None,
+        skills: None,
         delegates_to: Vec::new(),
         context: None,
         budget_usd_daily: None,
@@ -130,6 +131,7 @@ fn pin_deps(root: std::path::PathBuf) -> HarnessDeps {
     let mcp_home = Some(root.join("mcp"));
     let audit_root = root;
     HarnessDeps {
+        takeovers: Default::default(),
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -163,6 +165,7 @@ fn pin_deps(root: std::path::PathBuf) -> HarnessDeps {
         run_output_store: None,
         workflow_revisions: None,
         approval_requests: ApprovalRequestQueue::default(),
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities: toolbelt::CapabilityFilter::AllowAll,
@@ -192,56 +195,6 @@ fn pin_deps(root: std::path::PathBuf) -> HarnessDeps {
     }
 }
 
-/// Build one agent with `[speech]` on or off and a journal wired, and
-/// return its live tool names.
-///
-/// The journal is the half `built_tool_names` leaves out (`events: None`),
-/// and it is not optional here: the speech tools **are** the append, so a
-/// host with no `EventLog` registers none of them by design.
-fn built_tool_names_with_speech(speech_enabled: bool) -> Vec<String> {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let mut deps = pin_deps(dir.path().to_path_buf());
-    deps.events = Some(Arc::new(crate::store::FsEventLog::new(dir.path())));
-    let manifest_agent = ManifestAgent {
-        provider: None,
-        global: false,
-        id: "designer".to_string(),
-        role: "Designer".to_string(),
-        name: None,
-        description: None,
-        tier: None,
-        harness: None,
-        tools: None,
-        delegates_to: Vec::new(),
-        context: None,
-        budget_usd_daily: None,
-        prompt: None,
-        prompt_files: Vec::new(),
-        prompt_files_resolved: Vec::new(),
-        classes: Vec::new(),
-        ledgers: None,
-        can_declare_ledgers: true,
-        model: None,
-    };
-    let agent = build_agent(
-        &CompanyId::new("acme"),
-        "Acme",
-        &manifest_agent,
-        ApprovalPolicy::new(&Policy::default(), None),
-        &deps,
-        &["*".to_string()],
-        &[],
-        &[],
-        None,
-        false,
-        speech_enabled,
-    )
-    .expect("agent builds");
-    let mut names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
-    names.sort();
-    names
-}
-
 /// Build one agent under `grants` and return its live tool names, sorted, so
 /// a snapshot compares byte-stably against a literal.
 fn built_tool_names(grants: &[&str], is_orchestrator: bool) -> Vec<String> {
@@ -268,6 +221,7 @@ fn built_tool_names_delegating(
         tier: None,
         harness: None,
         tools: None,
+        skills: None,
         delegates_to: delegates_to.iter().map(|d| d.to_string()).collect(),
         context: None,
         budget_usd_daily: None,
@@ -285,14 +239,13 @@ fn built_tool_names_delegating(
         &CompanyId::new("acme"),
         "Acme",
         &manifest_agent,
-        policy,
+        std::sync::Arc::new(policy),
         &deps,
         &grants,
         &[],
         &[],
         None,
         is_orchestrator,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let mut names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
@@ -322,6 +275,7 @@ fn built_tool_names_with_search(grants: &[&str]) -> Vec<String> {
         tier: None,
         harness: None,
         tools: None,
+        skills: None,
         delegates_to: Vec::new(),
         context: None,
         budget_usd_daily: None,
@@ -339,14 +293,13 @@ fn built_tool_names_with_search(grants: &[&str]) -> Vec<String> {
         &CompanyId::new("acme"),
         "Acme",
         &manifest_agent,
-        policy,
+        std::sync::Arc::new(policy),
         &deps,
         &grants,
         &[],
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let mut names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
@@ -375,6 +328,7 @@ fn built_native_caps_with_search(grants: &[&str]) -> Vec<String> {
         tier: None,
         harness: None,
         tools: None,
+        skills: None,
         delegates_to: Vec::new(),
         context: None,
         budget_usd_daily: None,
@@ -392,14 +346,13 @@ fn built_native_caps_with_search(grants: &[&str]) -> Vec<String> {
         &CompanyId::new("acme"),
         "Acme",
         &manifest_agent,
-        policy,
+        std::sync::Arc::new(policy),
         &deps,
         &grants,
         &[],
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     toolbelt::native_capabilities_on_belt(agent.tools())
@@ -437,6 +390,7 @@ fn built_tool_names_with_byo_search(grants: &[&str], provider: &str) -> Vec<Stri
         harness: None,
         model: None,
         tools: None,
+        skills: None,
         delegates_to: Vec::new(),
         context: None,
         budget_usd_daily: None,
@@ -453,14 +407,13 @@ fn built_tool_names_with_byo_search(grants: &[&str], provider: &str) -> Vec<Stri
         &CompanyId::new("acme"),
         "Acme",
         &manifest_agent,
-        policy,
+        std::sync::Arc::new(policy),
         &deps,
         &grants,
         &[],
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let mut names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
@@ -486,6 +439,7 @@ fn built_tool_names_with_workspace(grants: &[&str]) -> Vec<String> {
         tier: None,
         harness: None,
         tools: None,
+        skills: None,
         delegates_to: Vec::new(),
         context: None,
         budget_usd_daily: None,
@@ -503,14 +457,13 @@ fn built_tool_names_with_workspace(grants: &[&str]) -> Vec<String> {
         &CompanyId::new("acme"),
         "Acme",
         &manifest_agent,
-        policy,
+        std::sync::Arc::new(policy),
         &deps,
         &grants,
         &[],
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let mut names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
@@ -534,6 +487,7 @@ fn built_tool_names_with_artifacts(grants: &[&str]) -> Vec<String> {
         tier: None,
         harness: None,
         tools: None,
+        skills: None,
         delegates_to: Vec::new(),
         context: None,
         budget_usd_daily: None,
@@ -551,14 +505,13 @@ fn built_tool_names_with_artifacts(grants: &[&str]) -> Vec<String> {
         &CompanyId::new("acme"),
         "Acme",
         &manifest_agent,
-        policy,
+        std::sync::Arc::new(policy),
         &deps,
         &grants,
         &[],
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     let mut names: Vec<String> = agent.tools().iter().map(|t| t.name().to_string()).collect();
@@ -588,6 +541,8 @@ fn git_log(workspace: &std::path::Path) -> String {
     .unwrap()
 }
 
+#[path = "build_seat_persona_tests.rs"]
+mod seat_persona_tests;
 #[path = "build_tests_part1.rs"]
 mod tests_part1;
 #[path = "build_tests_part2.rs"]

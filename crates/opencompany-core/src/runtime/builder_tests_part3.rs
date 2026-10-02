@@ -99,6 +99,7 @@ async fn an_inert_board_says_it_cannot_dispatch_once() {
     };
 
     let card = |id: &str, column: &str| crate::ports::tasks::TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: crate::ports::tasks::TaskTitle::authored("Do the thing"),
         note: None,
@@ -319,6 +320,9 @@ async fn boot_reclaims_a_chat_turn_stranded_by_a_previous_host() {
                 chat_id: "general".to_string(),
                 parent: None,
                 by: None,
+                agent_id: None,
+                episode_id: None,
+                round_revision: None,
             },
         )
         .await
@@ -350,7 +354,9 @@ async fn boot_reclaims_a_chat_turn_stranded_by_a_previous_host() {
         .unwrap()
         .into_iter()
         .filter_map(|s| match s.event {
-            CompanyEvent::TurnFailed { turn_id, error } if turn_id == "turn-dead" => Some(error),
+            CompanyEvent::TurnFailed { turn_id, error, .. } if turn_id == "turn-dead" => {
+                Some(error)
+            }
             _ => None,
         })
         .collect();
@@ -405,6 +411,9 @@ async fn a_rebuild_sweeps_no_live_chat_turn() {
                 chat_id: "general".to_string(),
                 parent: None,
                 by: None,
+                agent_id: None,
+                episode_id: None,
+                round_revision: None,
             },
         )
         .await
@@ -474,6 +483,7 @@ async fn boot_returns_a_stranded_card_and_leaves_a_parked_one_alone() {
     let manifest = parse("[company]\nname=\"Acme\"\n[policy]\nmode=\"full\"\n");
     let id = CompanyId::new("acme");
     let card = |task: &str, column: &str| TaskRecord {
+        opened_by: None,
         id: task.to_string(),
         title: crate::ports::tasks::TaskTitle::authored("Draft the spec"),
         note: Some("[maya] started".to_string()),

@@ -1,467 +1,555 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Info, Loader2, Search } from "lucide-react";
-import { toast } from "sonner";
+import { AlertTriangle, BadgeCheck, Check, Loader2, Plus } from "lucide-react";
 
 import type { OpenCompanyClient } from "@/api/client";
 import {
   getMcpRegistryEntry,
-  installMcpRegistryEntry,
   searchMcpRegistry,
   type McpCatalogueDetail,
   type McpCatalogueEntry,
 } from "@/api/mcp-registry";
-import { ApiError } from "@/api/types";
+import type { McpServer } from "@/api/types";
+import { Button } from "@/components/ui/button";
 import {
-  directoryEmptyNotice,
-  missingEnvKeys,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  catalogPublisher,
   REGISTRY_UNWIRED_NOTICE,
+  directoryServerName,
   registryOutage,
   type McpRegistryOutage,
 } from "@/lib/mcp-registry";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  McpServerIcon,
+  openFromItem,
+} from "@/views/connections/McpServerTable";
 
 /** How many directory rows one page asks for. */
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 20;
 
-type Results =
-  | { kind: "idle" }
+/** How long a keystroke waits before it costs a directory call. */
+const DEBOUNCE_MS = 350;
+
+export type DirectoryState =
   | { kind: "loading" }
   | { kind: "outage"; outage: McpRegistryOutage }
   | {
       kind: "ready";
+      entries: McpCatalogueEntry[];
       page: number;
       totalPages: number;
-      servers: McpCatalogueEntry[];
+      loadingMore: boolean;
     };
 
-/** The install dialog's state for the one entry an operator picked. */
-type Picked =
-  | { kind: "loading"; qualifiedName: string }
-  | { kind: "failed"; qualifiedName: string; outage: McpRegistryOutage }
-  | { kind: "ready"; detail: McpCatalogueDetail };
-
-interface Props {
-  client: OpenCompanyClient;
-  company: string | null;
-  /** Called after a successful install so the merged server list re-reads. */
-  onInstalled: () => void;
-}
-
 /**
- * Browse the upstream MCP directories and install from them (issue #1270).
- *
- * The MCP tab could not discover anything: an operator had to arrive already
- * knowing a server's URL and type it in, so the tab stayed empty until someone
- * pasted something into it. This is the catalogue half — the host federates
- * Smithery.ai and `modelcontextprotocol/registry`, and an entry installed here
- * lands in the **same** list above with a `registry` badge, not in a second
- * section.
- *
- * ## It cannot take the server list down with it
- *
- * Everything here is fenced inside this component's own state. The directories
- * are two network hops away and either can be down; the host itself may be
- * built without the `mcp` feature, in which case these routes answer
- * `404 not_wired`. Both are rendered as a notice *inside this panel* — an empty
- * result with a reason — while the company's installed servers above go on
- * rendering. A dead directory is not a broken tab.
- *
- * ## Credentials
- *
- * An entry declares the env keys it needs, and those are the only fields the
- * install form has. Their values are write-only: they go out with the install
- * and no route ever sends one back, so nothing here reads or renders one.
+ * The directory, browsed with no query and searched with one. A failure is an
+ * outage with a reason, never an exception.
  */
-export function McpRegistryBrowser({ client, company, onInstalled }: Props) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Results>({ kind: "idle" });
-  const [picked, setPicked] = useState<Picked | null>(null);
-  const [env, setEnv] = useState<Record<string, string>>({});
-  const [installing, setInstalling] = useState(false);
-  const [installError, setInstallError] = useState<string | null>(null);
-  // Only the newest search may write its answer. Two searches issued quickly —
-  // a fresh query while a page turn is in flight — can land out of order, and
-  // the older answer arriving last would paint results for a query the operator
-  // has already replaced. Bumped on every scope change too, so an answer for
-  // the company just left cannot repaint this panel.
+export function useMcpDirectory(
+  client: OpenCompanyClient,
+  company: string | null,
+  query: string,
+): { state: DirectoryState; loadMore: () => void } {
+  const [state, setState] = useState<DirectoryState>({ kind: "loading" });
   const generation = useRef(0);
+  const term = query.trim();
 
-  // Switching company re-keys everything this panel shows. Without the reset,
-  // one company's directory page and a half-filled install form stay on screen
-  // under another company's heading.
   useEffect(() => {
     generation.current += 1;
-    setResults({ kind: "idle" });
-    setPicked(null);
-    setEnv({});
-    setInstallError(null);
-  }, [client, company]);
+    const mine = generation.current;
+    setState({ kind: "loading" });
+    const timer = window.setTimeout(
+      () => {
+        void (async () => {
+          try {
+            const found = await searchMcpRegistry(client, company, {
+              q: term || undefined,
+              page: 1,
+              pageSize: PAGE_SIZE,
+            });
+            if (generation.current !== mine) return;
+            setState({
+              kind: "ready",
+              entries: found.servers,
+              page: found.page,
+              totalPages: found.totalPages,
+              loadingMore: false,
+            });
+          } catch (err) {
+            if (generation.current !== mine) return;
+            setState({ kind: "outage", outage: registryOutage(err) });
+          }
+        })();
+      },
+      term === "" ? 0 : DEBOUNCE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [client, company, term]);
 
-  const runSearch = useCallback(
-    async (page: number) => {
-      generation.current += 1;
-      const mine = generation.current;
-      setResults({ kind: "loading" });
+  const loadMore = useCallback(() => {
+    if (state.kind !== "ready" || state.loadingMore) return;
+    if (state.page >= state.totalPages) return;
+    const mine = generation.current;
+    const next = state.page + 1;
+    setState({ ...state, loadingMore: true });
+    void (async () => {
       try {
         const found = await searchMcpRegistry(client, company, {
-          q: query,
-          page,
+          q: term || undefined,
+          page: next,
           pageSize: PAGE_SIZE,
         });
         if (generation.current !== mine) return;
-        setResults({
-          kind: "ready",
-          page: found.page,
-          totalPages: found.totalPages,
-          servers: found.servers,
+        setState((prev) => {
+          if (prev.kind !== "ready") return prev;
+          const known = new Set(prev.entries.map((e) => e.qualifiedName));
+          return {
+            kind: "ready",
+            entries: [
+              ...prev.entries,
+              ...found.servers.filter((e) => !known.has(e.qualifiedName)),
+            ],
+            page: found.page,
+            totalPages: found.totalPages,
+            loadingMore: false,
+          };
         });
-      } catch (err) {
+      } catch {
         if (generation.current !== mine) return;
-        // Classified, never rethrown: see the component doc.
-        setResults({ kind: "outage", outage: registryOutage(err) });
+        setState((prev) =>
+          prev.kind === "ready" ? { ...prev, loadingMore: false } : prev,
+        );
       }
-    },
-    [client, company, query],
-  );
+    })();
+  }, [client, company, state, term]);
 
-  async function pick(entry: McpCatalogueEntry) {
-    setInstallError(null);
-    setEnv({});
-    setPicked({ kind: "loading", qualifiedName: entry.qualifiedName });
-    try {
-      const detail = await getMcpRegistryEntry(client, company, entry.qualifiedName);
-      setPicked({ kind: "ready", detail });
-    } catch (err) {
-      setPicked({
-        kind: "failed",
-        qualifiedName: entry.qualifiedName,
-        outage: registryOutage(err),
-      });
-    }
-  }
-
-  async function install(detail: McpCatalogueDetail) {
-    if (installing) return;
-    const missing = missingEnvKeys(detail.requiredEnvKeys, env);
-    if (missing.length > 0) {
-      setInstallError(
-        `This server needs a value for ${missing.join(", ")} before it can be installed.`,
-      );
-      return;
-    }
-    setInstalling(true);
-    setInstallError(null);
-    try {
-      const res = await installMcpRegistryEntry(client, company, {
-        qualifiedName: detail.qualifiedName,
-        env,
-      });
-      // An install that lands "needs a credential" is NOT a rollback — the host
-      // says so explicitly — so it is reported where the operator can act on it
-      // rather than dressed up as a failed install.
-      if (res.test && res.test.status !== "ok") {
-        setInstallError(res.test.message);
-      } else {
-        toast.success(`Installed ${detail.displayName}. ${res.note}`);
-        setPicked(null);
-      }
-      setEnv({});
-      onInstalled();
-    } catch (err) {
-      setInstallError(
-        err instanceof ApiError ? err.message : "Couldn't install that server.",
-      );
-    } finally {
-      setInstalling(false);
-    }
-  }
-
-  return (
-    <div className="space-y-3 border-t border-border pt-3" data-testid="mcp-registry-browser">
-      <div className="space-y-1">
-        <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Add from the MCP directory
-        </h3>
-        <p className="text-xs text-muted-foreground">
-          Search the official MCP registry. An installed server joins the list above and every
-          agent can call it.
-        </p>
-      </div>
-
-      <form
-        className="flex items-end gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void runSearch(1);
-        }}
-      >
-        <div className="flex-1 space-y-1">
-          <Label htmlFor="mcp-registry-q" className="text-xs">
-            Search the directory
-          </Label>
-          <Input
-            id="mcp-registry-q"
-            data-testid="mcp-registry-search"
-            value={query}
-            placeholder="github, linear, postgres…"
-            autoComplete="off"
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-        <Button type="submit" variant="secondary" disabled={results.kind === "loading"}>
-          {results.kind === "loading" ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Search className="size-4" />
-          )}{" "}
-          Search
-        </Button>
-      </form>
-
-      {results.kind === "outage" && <OutageNotice outage={results.outage} />}
-
-      {results.kind === "ready" &&
-        (results.servers.length === 0 ? (
-          <p className="text-sm text-muted-foreground" data-testid="mcp-registry-empty">
-            {directoryEmptyNotice()}
-          </p>
-        ) : (
-          <>
-            <ul className="divide-y divide-border" data-testid="mcp-registry-results">
-              {results.servers.map((entry) => (
-                <li key={entry.qualifiedName} className="space-y-2 py-2 first:pt-0">
-                  <div className="flex items-start gap-2">
-                    <CatalogueIcon entry={entry} />
-                    <div className="min-w-0 flex-1 space-y-0.5">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-sm font-medium">{entry.displayName}</span>
-                        {entry.official && <Badge variant="secondary">official</Badge>}
-                        <Badge variant="outline">{entry.source}</Badge>
-                      </div>
-                      <p className="truncate font-mono text-xs text-muted-foreground">
-                        {entry.qualifiedName}
-                      </p>
-                      {entry.description && (
-                        <p className="text-xs text-muted-foreground">{entry.description}</p>
-                      )}
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      data-testid="mcp-registry-pick"
-                      disabled={installing}
-                      onClick={() => void pick(entry)}
-                    >
-                      Install
-                    </Button>
-                  </div>
-                  {isPicked(picked, entry.qualifiedName) && (
-                    <InstallForm
-                      picked={picked}
-                      env={env}
-                      setEnv={setEnv}
-                      installing={installing}
-                      error={installError}
-                      onCancel={() => setPicked(null)}
-                      onInstall={install}
-                    />
-                  )}
-                </li>
-              ))}
-            </ul>
-            {results.totalPages > 1 && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={results.page <= 1}
-                  onClick={() => void runSearch(results.page - 1)}
-                >
-                  Previous
-                </Button>
-                <span>
-                  Page {results.page} of {results.totalPages}
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={results.page >= results.totalPages}
-                  onClick={() => void runSearch(results.page + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            )}
-          </>
-        ))}
-
-    </div>
-  );
+  return { state, loadMore };
 }
 
-/** Whether the open install dialog belongs to this row. */
-function isPicked(picked: Picked | null, qualifiedName: string): picked is Picked {
-  if (picked === null) return false;
-  const of = picked.kind === "ready" ? picked.detail.qualifiedName : picked.qualifiedName;
-  return of === qualifiedName;
-}
-
-/**
- * The directory is not answering.
- *
- * A missing build feature is said as a missing build feature — an operator can
- * do nothing about it and it is not a fault of theirs or of the network — while
- * a real failure carries the host's own sentence. Neither is a toast: both are
- * facts that stay true while the panel is open.
- */
-function OutageNotice({ outage }: { outage: McpRegistryOutage }) {
-  if (outage.kind === "unwired") {
-    return (
-      <Alert data-testid="mcp-registry-unwired">
-        <Info className="size-4" />
-        <AlertTitle>The MCP directory isn&apos;t in this build</AlertTitle>
-        <AlertDescription>{REGISTRY_UNWIRED_NOTICE}</AlertDescription>
-      </Alert>
-    );
-  }
-  return (
-    <Alert variant="destructive" data-testid="mcp-registry-error">
-      <AlertTriangle className="size-4" />
-      <AlertTitle>Couldn&apos;t search the MCP directory</AlertTitle>
-      <AlertDescription>
-        {outage.message} The servers above are unaffected — this is the catalogue, not your
-        installed set.
-      </AlertDescription>
-    </Alert>
+/** The name this company already holds a directory entry under, if it does. */
+export function installedAs(
+  servers: McpServer[],
+  entry: McpCatalogueEntry,
+): string | null {
+  const byQualified = servers.find(
+    (s) =>
+      s.qualifiedName === entry.qualifiedName ||
+      s.name.trim() === entry.qualifiedName,
   );
+  if (byQualified) return byQualified.name;
+  const slug = directoryServerName(entry.displayName);
+  const byName = servers.find((s) => s.name.trim().toLowerCase() === slug);
+  return byName?.name ?? null;
 }
 
-/**
- * The install form for one picked entry.
- *
- * Its fields are exactly the env keys the entry declared, and they are password
- * inputs with no value ever read back: an install credential is write-only in
- * both directions, the same rule List A's token field follows.
- */
-function InstallForm({
-  picked,
-  env,
-  setEnv,
-  installing,
-  error,
-  onCancel,
-  onInstall,
-}: {
-  picked: Picked;
-  env: Record<string, string>;
-  setEnv: (next: Record<string, string>) => void;
+interface EntryProps {
+  entry: McpCatalogueEntry;
+  installedAs: string | null;
   installing: boolean;
-  error: string | null;
-  onCancel: () => void;
-  onInstall: (detail: McpCatalogueDetail) => void;
-}) {
-  if (picked.kind === "loading") {
-    return (
-      <p className="flex items-center gap-1 text-xs text-muted-foreground">
-        <Loader2 className="size-3 animate-spin" /> Reading what this server needs…
-      </p>
-    );
-  }
-  if (picked.kind === "failed") {
-    return (
-      <p className="text-xs text-destructive" data-testid="mcp-registry-entry-error">
-        {picked.outage.kind === "unwired"
-          ? REGISTRY_UNWIRED_NOTICE
-          : `${picked.outage.message} Nothing was installed.`}
-      </p>
-    );
-  }
+  canManage: boolean;
+  onInstall: (entry: McpCatalogueEntry) => void;
+  onOpen: (entry: McpCatalogueEntry) => void;
+}
 
-  const detail = picked.detail;
-  if (!detail.installable) {
-    return (
-      <p className="text-xs text-destructive" data-testid="mcp-registry-refusal">
-        {detail.refusal ?? "This host can't install that server."}
-      </p>
-    );
-  }
-
+function Verified({ official }: { official: boolean }) {
+  if (!official) return null;
   return (
-    <div className="space-y-2 rounded-md bg-muted/40 p-2" data-testid="mcp-registry-install-form">
-      {detail.endpoint && (
-        <p className="font-mono text-xs break-all text-muted-foreground">{detail.endpoint}</p>
-      )}
-      {detail.requiredEnvKeys.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          This server asks for no credentials — installing connects it straight away.
-        </p>
-      ) : (
-        detail.requiredEnvKeys.map((key) => (
-          <div key={key} className="space-y-1">
-            <Label htmlFor={`mcp-env-${key}`} className="font-mono text-xs">
-              {key}
-            </Label>
-            <Input
-              id={`mcp-env-${key}`}
-              data-testid="mcp-registry-env-field"
-              type="password"
-              autoComplete="new-password"
-              placeholder="write-only"
-              value={env[key] ?? ""}
-              onChange={(e) => setEnv({ ...env, [key]: e.target.value })}
-            />
-          </div>
-        ))
-      )}
-      {error && (
-        <p className="text-xs text-destructive" data-testid="mcp-registry-install-error">
-          {error}
-        </p>
-      )}
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          data-testid="mcp-registry-install"
-          disabled={installing}
-          onClick={() => onInstall(detail)}
-        >
-          {installing ? <Loader2 className="size-4 animate-spin" /> : null} Install
-        </Button>
-        <Button size="sm" variant="ghost" disabled={installing} onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-    </div>
+    <BadgeCheck
+      className="size-4 shrink-0 text-status-done"
+      aria-label="Verified publisher"
+      data-testid="mcp-discover-verified"
+    />
   );
 }
 
-/** A catalogue icon, falling back to an initial when the remote image dies. */
-function CatalogueIcon({ entry }: { entry: McpCatalogueEntry }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [entry.iconUrl]);
-
-  if (!entry.iconUrl || failed) {
+function InstallControl({
+  entry,
+  installedAs,
+  installing,
+  canManage,
+  onInstall,
+}: Omit<EntryProps, "onOpen">) {
+  if (installedAs !== null) {
     return (
       <span
-        aria-hidden="true"
-        className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground"
+        className="flex size-8 items-center justify-center rounded-md border border-status-done-text/30 bg-status-done-text/10 text-status-done-text"
+        aria-label={`${entry.displayName} is installed`}
+        data-testid="mcp-discover-installed"
       >
-        {entry.displayName.charAt(0).toUpperCase()}
+        <Check className="size-4" />
       </span>
     );
   }
+  if (!canManage) return null;
   return (
-    <img
-      src={entry.iconUrl}
-      alt=""
-      aria-hidden="true"
-      loading="lazy"
-      className="size-6 shrink-0 rounded-md object-contain"
-      onError={() => setFailed(true)}
-    />
+    <Button
+      size="icon-sm"
+      variant="outline"
+      disabled={installing}
+      aria-label={`Install ${entry.displayName}`}
+      data-testid="mcp-discover-install"
+      onClick={() => onInstall(entry)}
+    >
+      {installing ? (
+        <Loader2 className="size-4 animate-spin" />
+      ) : (
+        <Plus className="size-4" />
+      )}
+    </Button>
+  );
+}
+
+export function McpDirectoryCard(props: EntryProps) {
+  const { entry, onOpen } = props;
+  const publisher = catalogPublisher(entry);
+  return (
+    <div
+      data-testid="mcp-discover-card"
+      onClick={(event) => openFromItem(event, () => onOpen(entry))}
+      className="flex cursor-pointer gap-3 rounded-xl border border-border p-4 transition-colors select-none hover:bg-muted/40"
+    >
+      <McpServerIcon
+        iconUrl={entry.iconUrl}
+        name={entry.displayName}
+        className="size-10"
+      />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-sm font-medium">
+            {entry.displayName}
+          </span>
+          <Verified official={entry.official} />
+        </div>
+        {entry.description && (
+          <p className="line-clamp-2 text-xs text-muted-foreground">
+            {entry.description}
+          </p>
+        )}
+        {publisher && (
+          <p className="truncate text-xs text-muted-foreground/80">
+            by {publisher}
+          </p>
+        )}
+      </div>
+      <div className="shrink-0">
+        <InstallControl {...props} />
+      </div>
+    </div>
+  );
+}
+
+export function McpDirectoryRow(props: EntryProps) {
+  const { entry, onOpen } = props;
+  const publisher = catalogPublisher(entry);
+  return (
+    <tr
+      data-testid="mcp-discover-row"
+      onClick={(event) => openFromItem(event, () => onOpen(entry))}
+      className="cursor-pointer transition-colors select-none hover:bg-muted/40"
+    >
+      <td className="border-b border-border py-3 pr-3 pl-4 align-middle">
+        <div className="flex min-w-0 items-center gap-2">
+          <McpServerIcon iconUrl={entry.iconUrl} name={entry.displayName} />
+          <span className="truncate text-sm font-medium">
+            {entry.displayName}
+          </span>
+          <Verified official={entry.official} />
+        </div>
+      </td>
+      <td className="hidden border-b border-border px-3 py-3 align-middle text-xs text-muted-foreground md:table-cell">
+        <span className="block truncate">{publisher ?? "—"}</span>
+      </td>
+      <td className="border-b border-border py-3 pr-4 pl-3 align-middle">
+        <div className="flex justify-end">
+          <InstallControl {...props} />
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function DirectoryTable({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-border">
+      <table className="w-full table-fixed border-collapse text-sm">
+        <thead>
+          <tr>
+            <th className="border-b border-border py-2.5 pr-3 pl-4 text-left text-3xs font-medium tracking-wide text-muted-foreground uppercase">
+              Connector
+            </th>
+            <th className="hidden w-48 border-b border-border px-3 py-2.5 text-left text-3xs font-medium tracking-wide text-muted-foreground uppercase md:table-cell">
+              Publisher
+            </th>
+            <th className="w-20 border-b border-border py-2.5 pr-4 pl-3" />
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * One directory entry, before it is installed: what it is, who publishes it,
+ * and whether this host can install it.
+ */
+function McpDirectoryDialog({
+  client,
+  company,
+  entry,
+  installedAs,
+  installing,
+  canManage,
+  onInstall,
+  onClose,
+}: {
+  client: OpenCompanyClient;
+  company: string | null;
+  entry: McpCatalogueEntry | null;
+  installedAs: string | null;
+  installing: boolean;
+  canManage: boolean;
+  onInstall: (entry: McpCatalogueEntry) => void;
+  onClose: () => void;
+}) {
+  const [detail, setDetail] = useState<
+    | { kind: "loading" }
+    | { kind: "ready"; detail: McpCatalogueDetail }
+    | { kind: "failed"; message: string }
+  >({ kind: "loading" });
+
+  useEffect(() => {
+    if (!entry) return;
+    let live = true;
+    setDetail({ kind: "loading" });
+    getMcpRegistryEntry(client, company, entry.qualifiedName)
+      .then((found) => live && setDetail({ kind: "ready", detail: found }))
+      .catch((err) => {
+        if (!live) return;
+        const outage = registryOutage(err);
+        setDetail({
+          kind: "failed",
+          message:
+            outage.kind === "unwired" ? REGISTRY_UNWIRED_NOTICE : outage.message,
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, [client, company, entry]);
+
+  if (!entry) return null;
+  const publisher = catalogPublisher(entry);
+  const refusal =
+    detail.kind === "ready" && !detail.detail.installable
+      ? detail.detail.refusal
+      : undefined;
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-lg" data-testid="mcp-discover-detail">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <McpServerIcon
+              iconUrl={entry.iconUrl}
+              name={entry.displayName}
+              className="size-12"
+            />
+            <div className="min-w-0">
+              <DialogTitle className="flex items-center gap-1.5">
+                <span className="truncate">{entry.displayName}</span>
+                <Verified official={entry.official} />
+              </DialogTitle>
+              {publisher && (
+                <DialogDescription>by {publisher}</DialogDescription>
+              )}
+            </div>
+          </div>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p className="text-muted-foreground">
+            {entry.description ?? "The directory listing carries no description."}
+          </p>
+          {detail.kind === "loading" ? (
+            <Skeleton className="h-8 rounded-md" />
+          ) : detail.kind === "failed" ? (
+            <p className="text-xs text-destructive">{detail.message}</p>
+          ) : detail.detail.endpoint ? (
+            <code className="block truncate rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs select-text">
+              {detail.detail.endpoint}
+            </code>
+          ) : null}
+          {refusal && (
+            <p className="text-xs text-status-blocked-text" data-testid="mcp-discover-refusal">
+              {refusal}
+            </p>
+          )}
+          {!entry.official && (
+            <p
+              className="flex items-start gap-2 rounded-md border border-status-blocked-text/30 bg-status-blocked-text/10 px-2 py-1 text-xs text-status-blocked-text"
+              data-testid="mcp-directory-unverified"
+            >
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                Not a verified publisher. Every tool it exposes still starts
+                un-granted until somebody sets it.
+              </span>
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+          {installedAs !== null ? (
+            <Button disabled data-testid="mcp-discover-detail-installed">
+              <Check className="size-4" /> Installed
+            </Button>
+          ) : (
+            canManage && (
+              <Button
+                data-testid="mcp-discover-detail-install"
+                disabled={installing || refusal !== undefined}
+                onClick={() => onInstall(entry)}
+              >
+                {installing ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Plus className="size-4" />
+                )}
+                Install
+              </Button>
+            )
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Discover: the directory as cards or a list, browsed before anything is typed. */
+export function McpDiscover({
+  client,
+  company,
+  query,
+  layout,
+  servers,
+  installing,
+  canManage,
+  onInstall,
+}: {
+  client: OpenCompanyClient;
+  company: string | null;
+  query: string;
+  layout: "cards" | "list";
+  servers: McpServer[];
+  installing: string | null;
+  canManage: boolean;
+  onInstall: (entry: McpCatalogueEntry) => void;
+}) {
+  const { state, loadMore } = useMcpDirectory(client, company, query);
+  const [previewing, setPreviewing] = useState<McpCatalogueEntry | null>(null);
+  const searching = query.trim() !== "";
+
+  if (state.kind === "outage") {
+    return state.outage.kind === "unwired" ? (
+      <p className="text-xs text-muted-foreground" data-testid="mcp-registry-unwired">
+        {REGISTRY_UNWIRED_NOTICE}
+      </p>
+    ) : (
+      <p className="text-xs text-status-blocked-text" data-testid="mcp-registry-error">
+        <strong className="font-medium">The directory isn&apos;t answering.</strong>{" "}
+        {state.outage.message} Your own servers are unaffected.
+      </p>
+    );
+  }
+
+  const itemProps = (entry: McpCatalogueEntry): EntryProps => ({
+    entry,
+    installedAs: installedAs(servers, entry),
+    installing: installing === entry.qualifiedName,
+    canManage,
+    onInstall,
+    onOpen: setPreviewing,
+  });
+
+  return (
+    <section className="space-y-3" data-testid="mcp-discover">
+      <div className="flex items-center gap-2">
+        <h3 className="text-sm font-medium">
+          {searching ? "Results" : "Top connectors"}
+        </h3>
+        {state.kind === "loading" && (
+          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        )}
+      </div>
+
+      {state.kind === "loading" ? (
+        layout === "cards" ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {Array.from({ length: 4 }, (_, i) => (
+              <Skeleton key={i} className="h-24 rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {Array.from({ length: 4 }, (_, i) => (
+              <Skeleton key={i} className="h-12 rounded-md" />
+            ))}
+          </div>
+        )
+      ) : state.entries.length === 0 ? (
+        <p className="text-sm text-muted-foreground" data-testid="mcp-search-nothing">
+          {searching
+            ? "The directory has no listing for that. A server running inside your own network is added as a custom server."
+            : "The directory returned nothing to show."}
+        </p>
+      ) : layout === "cards" ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {state.entries.map((entry) => (
+            <McpDirectoryCard key={entry.qualifiedName} {...itemProps(entry)} />
+          ))}
+        </div>
+      ) : (
+        <DirectoryTable>
+          {state.entries.map((entry) => (
+            <McpDirectoryRow key={entry.qualifiedName} {...itemProps(entry)} />
+          ))}
+        </DirectoryTable>
+      )}
+
+      {state.kind === "ready" && state.page < state.totalPages && (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={state.loadingMore}
+            data-testid="mcp-discover-more"
+            onClick={loadMore}
+          >
+            {state.loadingMore && <Loader2 className="size-4 animate-spin" />}
+            Show more
+          </Button>
+        </div>
+      )}
+
+      <McpDirectoryDialog
+        client={client}
+        company={company}
+        entry={previewing}
+        installedAs={previewing ? installedAs(servers, previewing) : null}
+        installing={previewing !== null && installing === previewing.qualifiedName}
+        canManage={canManage}
+        onInstall={onInstall}
+        onClose={() => setPreviewing(null)}
+      />
+    </section>
   );
 }

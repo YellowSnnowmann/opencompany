@@ -5,7 +5,10 @@
 // skills exist lives on the client — a hardcoded registry array used to live
 // here, and it had already drifted from what the backend could actually serve.
 
-export type SkillCategory = "Marketing" | "Research" | "Ops" | "Content" | "Finance";
+import { connectionsHref } from "@/views/connection-pages";
+
+export type SkillCategory =
+  "Marketing" | "Research" | "Ops" | "Content" | "Finance";
 
 /**
  * One tint per category — identity, not state.
@@ -42,20 +45,30 @@ export const CATEGORY_STYLES: Record<SkillCategory, string> = {
  * does. Says the two things the screen otherwise implies the opposite of:
  * teammates **read** skills, and **running** one is the orchestrator's job.
  */
+/**
+ * The address of one skill's own page.
+ *
+ * The canonical route is `#/connections/skills`; `#/settings/skills` only still
+ * answers through a rewrite. The slug rides a query key rather than a path
+ * segment because the page it opens is a lens over the list, the way an open MCP
+ * server is (`?server=`), and a link into it must survive a reload.
+ */
+export function skillHref(slug: string): string {
+  return `${connectionsHref("skills")}?skill=${encodeURIComponent(slug)}`;
+}
+
+/** The tint for a category, falling back to a neutral one for an unknown name. */
+export function categoryStyle(category: string): string {
+  return (
+    CATEGORY_STYLES[category as SkillCategory] ??
+    "border-muted-foreground/30 bg-muted text-muted-foreground"
+  );
+}
+
 export const SKILLS_READ_ONLY_NOTE =
   "Skills are reference material your agents read — playbooks they follow, not buttons they press. " +
-  "Enabling one puts it in front of every agent; executing a saved automation stays the orchestrator's job.";
-
-/**
- * What an installed skill's on/off state means for the company's teammates.
- *
- * Deliberately phrased as reach ("can read it") rather than capability ("can use
- * it"): the switch decides whether a skill is visible to a desk agent, and never
- * whether one can execute it.
- */
-export function skillReachLabel(enabled: boolean): string {
-  return enabled ? "Agents can read this" : "Hidden from agents";
-}
+  "Enabling one makes it available to your agents, and each teammate can be scoped to a subset on its own page; " +
+  "executing a saved automation stays the orchestrator's job.";
 
 /**
  * The empty-state line the registry tab shows when it has no rows to render
@@ -69,8 +82,49 @@ export function skillReachLabel(enabled: boolean): string {
  * and came back empty; a non-empty registry filtered to nothing by a search is
  * the third case.
  */
-export function registryEmptyLabel(hasError: boolean, registryIsEmpty: boolean): string {
+export function registryEmptyLabel(
+  hasError: boolean,
+  registryIsEmpty: boolean,
+): string {
   if (hasError) return "Couldn't reach the registry.";
   if (registryIsEmpty) return "This host serves no shared skill registry.";
   return "No skills match that search.";
+}
+
+/**
+ * The longest description the host will store, in Unicode scalar values.
+ *
+ * The Agent Skills spec's limit, enforced by
+ * `company::skill_validate::MAX_DESCRIPTION_CHARS`. The two numbers are coupled
+ * by a host test that reads this file, so a change on either side fails CI
+ * rather than leaving the console counting against a limit the host does not
+ * have.
+ */
+export const SKILL_DESCRIPTION_MAX_CHARS = 1024;
+
+/**
+ * What the description field shows before anything is typed.
+ *
+ * An example rather than a category label. The description is what every agent
+ * reads when it decides whether to open the skill at all, so a vague one makes
+ * a skill inert — and "One line about the skill" invites exactly the vague one.
+ */
+export const SKILL_DESCRIPTION_PLACEHOLDER =
+  "Generate weekly status reports from recent work. Use when asked for updates.";
+
+/** The one-line rule under the description field. */
+export const SKILL_DESCRIPTION_HINT =
+  "Say what it does and when an agent should use it — this line is all an agent " +
+  "reads before deciding to open the skill.";
+
+/**
+ * How many characters of the description limit `value` spends.
+ *
+ * Counts Unicode scalar values, matching the host's `chars().count()`. A
+ * JavaScript `.length` counts UTF-16 code units, so an emoji or any astral
+ * character would be counted twice here and once there — and the operator would
+ * be stopped short of a limit the host would have accepted.
+ */
+export function skillDescriptionCount(value: string): number {
+  return [...value].length;
 }

@@ -44,6 +44,9 @@ fn single_agent_picks_one_addressee_and_falls_back_otherwise() {
                 chat_id: "frits".to_string(),
                 parent: None,
                 by: None,
+                agent_id: None,
+                episode_id: None,
+                round_revision: None,
             },
         )]),
         None
@@ -139,6 +142,7 @@ async fn handed_task_briefing_carries_column_and_attempt_status() {
     );
 
     let card = |id: &str, title: &str, column: &str| TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored(title),
         note: None,
@@ -257,6 +261,7 @@ async fn handed_task_briefing_marks_attempt_status_unavailable_on_a_run_history_
         .upsert(
             rt.id(),
             &TaskRecord {
+                opened_by: None,
                 id: "t-paused".to_string(),
                 title: TaskTitle::authored("Investigate the flaky nightly job"),
                 note: None,
@@ -339,6 +344,7 @@ async fn handed_task_briefing_bounds_attempt_lookups_regardless_of_open_card_cou
             .upsert(
                 rt.id(),
                 &TaskRecord {
+                    opened_by: None,
                     id: format!("t-{n}"),
                     title: TaskTitle::authored(&format!("Card {n}")),
                     note: None,
@@ -574,6 +580,7 @@ members = ["writer"]
     )
     .expect("valid manifest");
     let record = CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),

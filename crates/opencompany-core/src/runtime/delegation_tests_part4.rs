@@ -23,6 +23,7 @@ async fn a_handler_card_in_planning_is_adopted_like_one_in_todo() {
         .upsert(
             &fx.record.id,
             &TaskRecord {
+                opened_by: None,
                 id: "handler-card".to_string(),
                 title: TaskTitle::authored(&title),
                 note: None,
@@ -82,6 +83,7 @@ async fn a_handler_card_assigned_to_the_addressed_teammate_is_still_adopted() {
         .upsert(
             &fx.record.id,
             &TaskRecord {
+                opened_by: None,
                 id: "handler-card".to_string(),
                 title: TaskTitle::authored(&title),
                 note: None,
@@ -134,6 +136,7 @@ async fn a_dm_channel_id_adopts_the_card_it_addressed() {
         .upsert(
             &fx.record.id,
             &TaskRecord {
+                opened_by: None,
                 id: "handler-card".to_string(),
                 title: TaskTitle::authored(&title),
                 note: None,
@@ -182,6 +185,7 @@ async fn a_handler_card_stamped_with_this_turns_thread_is_adopted() {
         .upsert(
             &fx.record.id,
             &TaskRecord {
+                opened_by: None,
                 id: "handler-card".to_string(),
                 title: TaskTitle::authored(&title),
                 note: None,
@@ -234,6 +238,7 @@ async fn a_handler_card_from_another_thread_of_the_same_desk_is_not_adopted() {
         .upsert(
             &fx.record.id,
             &TaskRecord {
+                opened_by: None,
                 id: "another-threads-card".to_string(),
                 title: TaskTitle::authored(&title),
                 note: None,
@@ -288,6 +293,7 @@ async fn a_handler_card_from_another_thread_is_not_adopted() {
         .upsert(
             &fx.record.id,
             &TaskRecord {
+                opened_by: None,
                 id: "another-threads-card".to_string(),
                 title: TaskTitle::authored(&title),
                 note: None,
@@ -337,6 +343,7 @@ async fn a_handler_card_assigned_to_somebody_else_is_not_adopted() {
         .upsert(
             &fx.record.id,
             &TaskRecord {
+                opened_by: None,
                 id: "someone-elses-card".to_string(),
                 title: TaskTitle::authored(&title),
                 note: None,
@@ -386,6 +393,7 @@ async fn a_handler_card_the_operator_moved_on_is_not_adopted() {
         .upsert(
             &fx.record.id,
             &TaskRecord {
+                opened_by: None,
                 id: "moved-on".to_string(),
                 title: TaskTitle::authored(&title),
                 note: None,
@@ -439,11 +447,15 @@ async fn the_stand_down_holds_even_when_the_handlers_card_cannot_be_found() {
     );
     let turn = fx
         .runner(&turns)
+        // The handler's explicit workflow intent is its durable stand-down
+        // signal even when its best-effort card write is absent from the store.
+        .requested(Some(crate::ports::types::MessageIntent::Workflow))
         .handle_operator_message("chief", "draft the launch plan for next quarter", None)
         .await
         .expect("operator message handled");
     assert!(fx.cards().await.is_empty(), "no second card is opened");
     assert!(turn.spawned_task.is_none(), "and none is claimed");
+    assert_eq!(turn.reply, "relayed", "the handler still relays its answer");
 }
 
 /// …and the same thread stays quiet for a question, so a desk chat does not

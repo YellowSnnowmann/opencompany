@@ -963,6 +963,7 @@ pub struct TaskOrigin {
     ///
     /// Required: a thread root without a desk names no conversation, which is
     /// precisely the state the two loose fields could reach.
+    #[serde(deserialize_with = "crate::ports::general_channel::deserialize_general_chat")]
     pub origin_chat_id: String,
     /// The thread within that desk, or `None` for the channel-level
     /// conversation.
@@ -992,6 +993,21 @@ impl TaskOrigin {
             origin_parent: thread_root,
         })
     }
+}
+
+/// The teammate, and the HiveMind episode it sat in, that opened a card from
+/// chat.
+///
+/// Origin says where a card was asked for; this says who put it on the board,
+/// which the console shows as "Opened in chat by <name>".
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskOpener {
+    /// The roster id of the teammate whose `spawn_task` opened the card.
+    pub agent_id: String,
+    /// The episode that teammate was seated in, when it was one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode_id: Option<String>,
 }
 
 /// How many characters of a card title survive.
@@ -1557,6 +1573,10 @@ pub struct TaskRecord {
     /// [`Self::output`], so no stored board needs migrating.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounced: Option<String>,
+    /// Who opened this card from chat, or `None` for every card a person, a
+    /// workflow, a dispatched turn or an ordinary chat turn opened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opened_by: Option<TaskOpener>,
 }
 
 impl TaskRecord {

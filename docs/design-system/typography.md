@@ -9,7 +9,8 @@ that change in place. Three weights. One scale.
 
 Tailwind's own steps are untouched — 460 call sites already depend on them.
 What the system *adds* is the two rungs below `xs` that this console genuinely
-needs and had been spelling as arbitrary values.
+needs and had been spelling as arbitrary values, plus one rung between `sm`
+and `base` for the sidebar's channel and DM rows.
 
 | Class | Size | Line height | Tracking | Use |
 | --- | --- | --- | --- | --- |
@@ -17,14 +18,19 @@ needs and had been spelling as arbitrary values.
 | `text-2xs` | 11px | 16px | +0.005em | Captions, timestamps, key/value rows, sidebar section headers |
 | `text-xs` | 12px | 16px | — | Dense body — the console's workhorse |
 | `text-sm` | 14px | 20px | — | Default body, form labels, buttons |
+| `text-md` | 15px | 22px | — | Sidebar channel and DM rows |
 | `text-base` | 16px | 24px | — | Long-form prose, empty-state copy |
 | `text-lg` | 18px | 28px | — | Card titles |
 | `text-xl` | 20px | 28px | — | Section headings |
 | `text-2xl` | 24px | 32px | — | View titles |
 
-`text-3xs` and `text-2xs` are defined in the `@theme` block of `index.css`.
-Both carry slight positive tracking: below 12px, default spacing closes up and
-legibility drops faster than size alone predicts.
+`text-3xs`, `text-2xs` and `text-md` are defined in the `@theme` block of
+`index.css`. The two small rungs carry slight positive tracking: below 12px,
+default spacing closes up and legibility drops faster than size alone predicts.
+`text-md` exists for one surface: at 14px the rows looked undersized beside
+their 24px avatars, and at 16px they read as prose and outweighed the `text-sm`
+primary nav above them. Do not reach for it elsewhere without a reason as
+specific as that one.
 
 **This scale starts lower than most products', on purpose.** 11px appears 109
 times in this codebase and 10px 50 times. Those are not one-off exceptions to

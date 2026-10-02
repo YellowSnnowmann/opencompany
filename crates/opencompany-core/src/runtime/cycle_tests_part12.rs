@@ -543,6 +543,7 @@ async fn a_cycle_reports_the_effects_it_actually_performed() {
 #[test]
 fn a_settled_line_names_the_landing_and_a_bounce_names_its_reason() {
     let mut card = TaskRecord {
+        opened_by: None,
         id: "t-1".to_string(),
         title: TaskTitle::authored("Draft the investor update"),
         note: None,

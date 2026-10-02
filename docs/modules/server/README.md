@@ -47,7 +47,7 @@ why this is not a read/write split: [authority.md](authority.md).
 | `task_export` | `GET …/tasks/{id}/export` (the task's record as a document, #352) |
 | `memory` | `POST …/memory`, `DELETE …/memory/{id}` (journals `MemoryFactDeleted`) |
 | `workspace` | `GET …/workspace`, `GET …/workspace/file/{id}`, `GET …/workspace/search?q=…` (#607), `POST …/workspace`, `PUT …/workspace/file/{id}`, `PATCH`/`DELETE …/workspace/{id}`, `POST …/workspace/sweep-empty-agent-folders?dry_run=` (#700, removes only folders with no children counted structurally), `POST …/workspace/merge-duplicate-folders?dry_run=` (#759, folds duplicate sibling folders into the oldest twin and reports the file collisions it refuses to decide) (the `GET`s are REST twins of the GraphQL reads — the console has no GraphQL client, #177). Node bodies carry `createdBy`/`updatedBy` (#326) |
-| `skills` | `POST …/skills`, `GET …/skills/registry`, `POST …/skills/{slug}/install\|uninstall`, `PUT …/skills/{slug}` |
+| `skills` | `POST …/skills`, `GET …/skills/registry`, `POST …/skills/{slug}/install\|uninstall`, `PUT …/skills/{slug}`, `GET\|PUT …/skills/{slug}/doc` |
 | `team` | `POST …/team`, `DELETE …/team/{id}`, `PUT …/team/{id}/inbox` (overlay; roster-only in v1) |
 | `mail` | `POST …/inboxes/{key}/read` |
 | `inbox` | `POST …/inboxes/ingest` (HMAC-signed inbound email) |
@@ -72,16 +72,19 @@ duplicate, ambiguous, or over-cap entries remain renderable as `quiet` mentions
 but do not notify anyone. If the field is absent, the host extracts unambiguous
 mentions from the message while ignoring Markdown code regions.
 
-Mention routing is deliberately one-turn and has no fan-out: the first valid
-non-quiet agent mention is the responder, otherwise the desk lead (or normal
-channel fallback) answers. Responder selection is a property of the
-agent-harness brain, which runs the roster's turns; hosted and echo cognition
-reply through their own service, which does not select a roster responder, and
-the resolved mentions still render as chips on the returned message. Additional
-agent mentions, people, desks, and `@everyone` are context for that same turn;
-they do not start additional agent runs. A desk mention contributes that desk's
-context, while `@everyone` expands to the channel's visible audience for
-notification purposes. Clients should
+Mention resolution is `tinyhivemind_core::mention::resolve`, the same on
+every surface. Off a desk it picks one responder and no fan-out: the first
+valid non-quiet agent mention, otherwise the channel's default responder. On a
+desk of two or more the message opens an **episode** and a mention is an
+explicit route: the named seat is assigned first (`router: explicit`) ahead of
+whatever Jev or the lead fallback would have chosen, and the room proceeds
+in rounds from there ([`docs/spec/runtime/hive.md`](../../spec/runtime/hive.md)).
+Responder selection is a property of the agent-harness brain, which runs the
+roster's turns; hosted and echo cognition reply through their own service,
+which does not select a roster responder, and the resolved mentions still
+render as chips on the returned message. People, desks and `@everyone` are
+context; a desk mention from inside a room is a referral when the desk's
+routing block allows one. Clients should
 render the returned mention DTOs, including `label`, `mine`, and optional
 `quiet`, rather than re-resolving display text locally.
 

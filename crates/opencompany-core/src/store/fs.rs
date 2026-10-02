@@ -508,11 +508,12 @@ pub(crate) mod fault_probe;
 /// Issue #1828 review, sixth round: proving the cancellation hazard (and the
 /// fix for it) requires reliably cancelling the caller of `stage_atomic_bytes`
 /// *while* its blocking write is still in flight — a plain `sleep`-based race
-/// would be flaky. `arm` registers a gate for a target path; the blocking
-/// write closure parks on that gate (from a blocking-pool thread, so it never
-/// blocks the async runtime) until `maybe_block` is called and a test signals
-/// `wait_blocked()`, giving the test a deterministic window to `abort()` the
-/// caller before releasing the write to actually run.
+/// would be flaky. `arm` registers a gate for a target path and hands the test
+/// back a handle to it; the blocking write closure parks on that gate (from a
+/// blocking-pool thread, so it never blocks the async runtime) when
+/// `maybe_block` reaches it, waking the handle's `wait()`. That gives the test
+/// a deterministic window to `abort()` the caller before releasing the write to
+/// actually run.
 #[cfg(test)]
 #[path = "fs_stall_probe.rs"]
 pub(crate) mod stall_probe;
@@ -1410,6 +1411,10 @@ struct Meta {
     /// [`CompanyStore::activation_gate_seen`]: crate::ports::store::CompanyStore::activation_gate_seen
     #[serde(default)]
     activation_gate_seen: bool,
+    /// The company-wide `#general` channel. Absent on meta files written
+    /// before it was stored; the builder backfills it.
+    #[serde(default)]
+    general_channel: Option<crate::ports::types::GeneralChannel>,
 }
 
 impl Default for Meta {
@@ -1439,6 +1444,7 @@ impl Default for Meta {
             activation_completed_at: None,
             created_at_millis: None,
             activation_gate_seen: false,
+            general_channel: None,
         }
     }
 }
@@ -1524,6 +1530,27 @@ impl FsCompanyStore {
         let toml_src = toml::to_string(&record.manifest)
             .map_err(|e| OpenCompanyError::Store(format!("cannot serialize manifest: {e}")))?;
 
+        // **The manifest names prompt files; this writes them.**
+        //
+        // `Agent::prompt_files` survives the round trip because it is ordinary
+        // manifest data, but `prompt_files_resolved` is `#[serde(skip)]` -- it
+        // is derived from the bundle and deliberately not persisted in the
+        // record. So a store that saved only the manifest kept the *paths* and
+        // dropped the *bodies*, and `load` had nothing to resolve them against:
+        // the saved directory has no `agents/` in it at all.
+        //
+        // The effect was silent and total. `prompt::bundle_section` renders
+        // from `prompt_files_resolved`, so every agent's checked-in briefing
+        // rendered empty on every rebuild -- a six-seat lab ran a full session
+        // on one-line role descriptions while its authored prompts sat unread
+        // in the bundle, and `dump-prompt.sh` showed them correctly the whole
+        // time because it reads the bundle rather than the store.
+        //
+        // Writing the bodies here makes the saved directory a faithful bundle,
+        // which is what `load` below resolves against. The record still carries
+        // no persisted copy: these are files, re-read like any other bundle.
+        write_prompt_files(&bundle, &record.manifest).await?;
+
         let meta = Meta {
             lifecycle: record.lifecycle.clone(),
             overlay_agents: record.overlay_agents.clone(),
@@ -1545,6 +1572,7 @@ impl FsCompanyStore {
             activation_completed_at: record.activation_completed_at,
             created_at_millis: record.created_at_millis,
             activation_gate_seen,
+            general_channel: Some(record.general_channel.clone()),
         };
         // Write order depends on whether the bundle already exists (issue
         // #1828 review, second round).
@@ -1820,6 +1848,14 @@ impl CompanyStore for FsCompanyStore {
             );
         }
 
+        // Paired with `write_prompt_files` in `save_gated`: the manifest came
+        // back with its `prompt_files` paths and, because the resolved bodies
+        // are `#[serde(skip)]`, without their contents. Resolve them from the
+        // files that save wrote, so an agent rebuilt from the store carries the
+        // same briefing as one built straight from the bundle.
+        let mut manifest = manifest;
+        resolve_saved_prompt_files(&bundle, &mut manifest).await;
+
         Ok(Some(CompanyRecord {
             overlay_agent_edits: meta.overlay_agent_edits,
             overlay_desk_hive: meta.overlay_desk_hive,
@@ -1843,6 +1879,7 @@ impl CompanyStore for FsCompanyStore {
             name_confirmed: meta.name_confirmed,
             activation_completed_at: meta.activation_completed_at,
             created_at_millis: meta.created_at_millis,
+            general_channel: meta.general_channel.unwrap_or_default(),
         }))
     }
 
@@ -2833,3 +2870,91 @@ mod tests_recovery;
 #[cfg(test)]
 #[path = "fs_recovery2_tests.rs"]
 mod tests_recovery2;
+
+/// Write every agent's resolved prompt bodies under the saved bundle.
+///
+/// Paths come from the manifest and are written relative to `agents/`, which is
+/// where [`resolve_saved_prompt_files`] and the bundle loader both look. A path
+/// that escapes that directory is skipped rather than written: the manifest
+/// loader already rejects those, and this is a second gate on the write side so
+/// a record reaching the store by any other route cannot place a file outside
+/// the company's own directory.
+async fn write_prompt_files(
+    bundle: &Bundle,
+    manifest: &crate::company::CompanyManifest,
+) -> Result<()> {
+    for agent in &manifest.agents {
+        for (rel, body) in &agent.prompt_files_resolved {
+            let path = std::path::Path::new(rel);
+            if path.is_absolute()
+                || path.components().any(|c| {
+                    matches!(
+                        c,
+                        std::path::Component::ParentDir
+                            | std::path::Component::RootDir
+                            | std::path::Component::Prefix(_)
+                    )
+                })
+            {
+                continue;
+            }
+            let target = bundle.dir().join("agents").join(path);
+            if let Some(parent) = target.parent() {
+                tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                    OpenCompanyError::Store(format!(
+                        "cannot create prompt directory for `{}`: {e}",
+                        agent.id
+                    ))
+                })?;
+            }
+            tokio::fs::write(&target, body).await.map_err(|e| {
+                OpenCompanyError::Store(format!(
+                    "cannot write prompt file `{rel}` for `{}`: {e}",
+                    agent.id
+                ))
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Re-read the prompt bodies a previous save wrote, filling
+/// `prompt_files_resolved` on each agent.
+///
+/// Best-effort on purpose. A missing file here is not the manifest error it is
+/// at bundle-load time: this runs on every `load`, including for records saved
+/// before the files were written alongside them, and failing the load of an
+/// otherwise-valid company over a briefing document would take the whole
+/// company down to fix a degraded prompt. The agent renders without that
+/// section instead, exactly as it did before this pair existed.
+async fn resolve_saved_prompt_files(
+    bundle: &Bundle,
+    manifest: &mut crate::company::CompanyManifest,
+) {
+    let root = bundle.dir().join("agents");
+    for agent in &mut manifest.agents {
+        if !agent.prompt_files_resolved.is_empty() {
+            continue;
+        }
+        let mut resolved = Vec::new();
+        for rel in &agent.prompt_files {
+            let path = std::path::Path::new(rel);
+            if path.is_absolute()
+                || path.components().any(|c| {
+                    matches!(
+                        c,
+                        std::path::Component::ParentDir
+                            | std::path::Component::RootDir
+                            | std::path::Component::Prefix(_)
+                    )
+                })
+            {
+                continue;
+            }
+            if let Ok(body) = tokio::fs::read_to_string(root.join(path)).await {
+                resolved.push((rel.clone(), body));
+            }
+        }
+        agent.prompt_files_resolved = resolved;
+    }
+}

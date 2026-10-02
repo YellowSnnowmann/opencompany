@@ -1,8 +1,11 @@
 import { useEffect, useRef } from "react";
 import { Hash, Users } from "lucide-react";
 
+import { AgentFace } from "@/components/agent-face";
+import { agentPresenceLabel } from "@/components/agent-status-dot";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { cn } from "@/lib/utils";
+import { useAgentPresence } from "@/room/store";
 import type { Mentionable } from "@/views/room/mentions";
 
 /**
@@ -84,14 +87,34 @@ export function MentionPicker({
               </span>
             )}
           </span>
+          {entry.target.kind === "agent" && <StatusWords agentId={entry.target.id} />}
         </button>
       ))}
     </div>
   );
 }
 
+/**
+ * The agent's live state in words, after its name, for assistive tech. The dot
+ * on the face is decorative, as on the DM row, so an option reads "Ada
+ * Lovelace, Working" rather than "Working Ada Lovelace".
+ */
+function StatusWords({ agentId }: { agentId: string }) {
+  const label = agentPresenceLabel(useAgentPresence(agentId));
+  return label ? <span className="sr-only">, {label}</span> : null;
+}
+
 function RowIcon({ entry }: { entry: Mentionable }) {
-  if (entry.target.kind === "agent" || entry.target.kind === "user") {
+  if (entry.target.kind === "agent") {
+    // Agent-wide state: who you are about to ask is busy wherever it is busy.
+    // A person is never given the dot (`PresenceDot` is theirs).
+    return (
+      <AgentFace agentId={entry.target.id} surface="popover" decorative>
+        <TeammateAvatar name={entry.label} avatar={entry.avatar} className="size-6 shrink-0" />
+      </AgentFace>
+    );
+  }
+  if (entry.target.kind === "user") {
     return (
       <TeammateAvatar
         name={entry.label}

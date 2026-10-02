@@ -10,6 +10,7 @@ where
 
 pub(super) fn desk_record(toml_src: &str, overlay: Vec<OverlayDeskMember>) -> CompanyRecord {
     CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
@@ -51,6 +52,7 @@ pub(super) fn add_overlay(record: &mut CompanyRecord, id: &str, name: &str) {
         role: "Worker".into(),
         description: None,
         tools: None,
+        skills: None,
         model: None,
         harness: None,
     });

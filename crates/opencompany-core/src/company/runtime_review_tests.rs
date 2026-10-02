@@ -168,6 +168,7 @@ async fn runtime_with_a_system_teammate() -> (Arc<Runtime>, TempDir) {
 
 fn card(id: &str, origin: &str, column: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Ship it"),
         note: None,
@@ -213,6 +214,7 @@ fn relay_bubble(origin: &str) -> CompanyEvent {
         parent: None,
         mentions: Vec::new(),
         mention_depth: 0,
+        episode: None,
     }
 }
 
@@ -234,6 +236,7 @@ fn advisory_bubble(origin: &str) -> CompanyEvent {
         parent: None,
         mentions: Vec::new(),
         mention_depth: 0,
+        episode: None,
     }
 }
 
@@ -429,6 +432,7 @@ async fn a_grandfathered_system_teammate_still_anchors_its_own_relay() {
             parent: None,
             mentions: Vec::new(),
             mention_depth: 0,
+            episode: None,
         },
     )
     .await;

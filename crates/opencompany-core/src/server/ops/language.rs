@@ -6,8 +6,8 @@
 //! internals. These consts are the single source for the strings the write
 //! plane emits, mirroring `frontend/src/lib/language.ts`.
 
-/// The default desk name attributed to chat turns with no explicit desk (and to
-/// pre-threading history). Prosumer word for a group-chat channel.
+/// The display name of the `#general` channel. A label, never a chat id: the
+/// id is [`GENERAL_CHANNEL_ID`].
 pub const DEFAULT_DESK: &str = "General";
 
 /// A teammate (never "agent") — the prosumer word for a roster member.
@@ -38,12 +38,18 @@ pub const MANIFEST_DESK_MEMBER_DELETE: &str =
 pub const MANIFEST_DESK_DELETE: &str =
     "This desk is part of your company's blueprint and can't be deleted here.";
 
-/// The name of the company-wide channel, rendered after the `#` in the console
-/// (`frontend/src/lib/desks.ts` `GENERAL_CHANNEL`). Not a desk id: every
-/// spelling of it folds to the General conversation through
-/// [`is_general_chat`](crate::server::chat_history::is_general_chat), which is
-/// what makes it addressable without anything being stored for it.
-pub const GENERAL_CHANNEL: &str = "general";
+/// The id of the company-wide `#general` channel, stamped on every message
+/// written to it. [`DEFAULT_DESK`] is its display name.
+pub use crate::ports::general_channel::GENERAL_CHANNEL_ID;
+
+const _: () = assert!(
+    matches!(DEFAULT_DESK.as_bytes(), b"General")
+        && matches!(
+            crate::ports::general_channel::GENERAL_CHANNEL_NAME.as_bytes(),
+            b"General"
+        ),
+    "the #general display name and the glossary word must agree",
+);
 
 /// Error shown when a write aims a desk mutation at the built-in `#general`
 /// channel — a delete, a membership add or removal, or a hierarchy reorder.
@@ -56,8 +62,8 @@ pub const GENERAL_CHANNEL: &str = "general";
 /// created (issue #1743).
 pub const GENERAL_CHANNEL_IMMUTABLE: &str = concat!(
     "#general is the company-wide channel every teammate is in. ",
-    "It isn't a desk — it has no lead and no membership of its own — ",
-    "so it can't be deleted, staffed, or reordered.",
+    "Its members follow the team roster, so it can't be deleted, ",
+    "staffed, or reordered by hand.",
 );
 
 /// Error shown when a desk create asks for an id that would shadow the built-in
@@ -76,6 +82,58 @@ pub const SKILL_FIELDS_REQUIRED: &str = "A skill needs a name and a description.
 /// Error shown when an install names a slug the shared skill library lacks.
 pub const SKILL_NOT_IN_REGISTRY: &str = "That skill isn't in the registry.";
 
+/// `GET …/skills/{slug}/doc` found no document to serve: the slug is not in the
+/// company's effective set, or the row it has supplies no text. One sentence for
+/// both, because the operator's next move is the same either way.
+pub const SKILL_NO_DOC: &str = "That skill has no document on this company.";
+
+/// `PUT …/skills/{slug}/doc` refused the write on provenance.
+pub const SKILL_DOC_NOT_EDITABLE: &str = concat!(
+    "That skill is authored in the repository, not here, and its document ships with files ",
+    "alongside it. Installed and console-authored skills can be edited.",
+);
+
+/// Error shown when an update names a skill that records no registry install.
+///
+/// A skill written here, or one the company bundles, has no library copy to be
+/// updated *to*. The refusal says that rather than reporting "not found": the
+/// skill is right there in the list, and an operator told it does not exist
+/// will go looking for the one they can see.
+pub const SKILL_NOT_PINNED: &str = concat!(
+    "This skill wasn't installed from the registry, ",
+    "so there's no newer registry copy to move it to.",
+);
+
+/// Error shown when an update names an install whose slug has left the library.
+///
+/// Not a broken install: the skill keeps working from the copy it holds, and
+/// saying so is the difference between "nothing to do" and "something is wrong".
+pub const SKILL_LEFT_REGISTRY: &str = concat!(
+    "This skill is no longer in the registry, so there's nothing newer to move to. ",
+    "It keeps working from the copy you have.",
+);
+
+/// Error shown when an update would overwrite a copy that was edited after it
+/// was installed.
+///
+/// The one refusal the recorded digest exists for. Applying the library's
+/// document would discard the edit with nothing to recover it from, so the
+/// choice stays with a person — and the sentence says what to do instead rather
+/// than only what was declined.
+pub const SKILL_MODIFIED_NO_UPDATE: &str = concat!(
+    "This skill's text was changed after it was installed. ",
+    "Updating would replace those changes, so it's left to you — ",
+    "uninstall it and install it again to take the registry's version.",
+);
+
+/// Error shown when an update names an install that already matches the library.
+pub const SKILL_ALREADY_CURRENT: &str =
+    "This skill already matches the registry — there's nothing to update.";
+
 /// Error shown when a workflow id is not safe to use as a filename.
 pub const WORKFLOW_ID_INVALID: &str =
     "A workflow id can't be empty or contain slashes or `..` — use a plain name.";
+
+#[cfg(test)]
+#[path = "language_tests.rs"]
+mod tests;

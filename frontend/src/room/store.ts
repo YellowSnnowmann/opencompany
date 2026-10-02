@@ -37,6 +37,15 @@
 import { useSyncExternalStore } from "react";
 
 import type { TurnStep } from "@/api/types";
+import {
+  derivePresence,
+  presenceIn,
+  presenceOf,
+  type AgentPresenceState,
+  type PresenceIndex,
+  type PresenceLedgerTurn,
+  type TurnMeta,
+} from "@/lib/agent-presence";
 import type { OpenTurn } from "@/lib/live-reply";
 import type { ChatReceipt } from "@/views/room/ChatLiveReceipt";
 import {
@@ -58,7 +67,39 @@ export interface RoomState {
   liveStepsByThread: Record<string, LiveStep[]>;
   liveStepsByMessage: Record<string, LiveStep[]>;
   receiptByThread: Record<string, ChatReceipt>;
+  /**
+   * Who last reported on each open turn, keyed exactly as its rows are — by
+   * query where the host stamped `messageSeq`, by thread otherwise.
+   *
+   * The live answer to "who is working", as distinct from `openTurns`' answer.
+   * An `OpenTurn` names the agent the host *started* the turn on and never
+   * revises it, which is right for a single responder and wrong the moment the
+   * floor moves: a desk hand-off runs the delegate under the same query, and a
+   * deliberating room passes the floor between seats for the whole episode.
+   * Only the frames say which seat is speaking now, and until this they said it
+   * to nothing — `agentId` arrived on every frame and was dropped.
+   */
+  liveAgentByTurn: Record<string, string>;
   openTurns: Record<string, OpenTurn[]>;
+  /**
+   * What each live turn's frames last said, keyed exactly as `liveAgentByTurn`
+   * is: the thread they named and whether the last one was the host's
+   * `replying` marker. The half of "typing" that `liveStepsBy*` cannot hold,
+   * because a reply with no tool call leaves no row behind.
+   */
+  turnMeta: Record<string, TurnMeta>;
+  /** The turn-bracket ledger's open turns, mirrored from the shell's reducer. */
+  ledgerTurns: PresenceLedgerTurn[];
+  /** Agent id to how many of its approvals are pending, mirrored from the feed. */
+  approvalAgents: Record<string, number>;
+  /** Agent id to how many card runs or delegations it has in flight, from `/tasks/inflight`. */
+  inflightAgents: Record<string, number>;
+  /** Chat run id to the status its last `run_status_changed` named. */
+  runStatuses: Record<string, string>;
+  /** Host thread id to the teammate whose DM it is, from the roster. */
+  threadAgents: Record<string, string>;
+  /** Wall-clock the presence age-out reads; ticked by the shell. */
+  presenceNow: number;
 }
 
 /**
@@ -84,7 +125,15 @@ function emptyState(): RoomState {
     liveStepsByThread: {},
     liveStepsByMessage: {},
     receiptByThread: {},
+    liveAgentByTurn: {},
     openTurns: {},
+    turnMeta: {},
+    ledgerTurns: [],
+    approvalAgents: {},
+    inflightAgents: {},
+    runStatuses: {},
+    threadAgents: {},
+    presenceNow: Date.now(),
   };
 }
 
@@ -170,7 +219,15 @@ const unreadSince = field("unreadSince");
 const liveStepsByThread = field("liveStepsByThread");
 const liveStepsByMessage = field("liveStepsByMessage");
 const receiptByThread = field("receiptByThread");
+const liveAgentByTurn = field("liveAgentByTurn");
 const openTurns = field("openTurns");
+const turnMeta = field("turnMeta");
+const ledgerTurns = field("ledgerTurns");
+const approvalAgents = field("approvalAgents");
+const inflightAgents = field("inflightAgents");
+const runStatuses = field("runStatuses");
+const threadAgents = field("threadAgents");
+const presenceNow = field("presenceNow");
 
 /* ---- writers: `useState` semantics, so call sites move across untouched ---- */
 
@@ -182,7 +239,15 @@ export const setUnreadSince = unreadSince.set;
 export const setLiveStepsByThread = liveStepsByThread.set;
 export const setLiveStepsByMessage = liveStepsByMessage.set;
 export const setReceiptByThread = receiptByThread.set;
+export const setLiveAgentByTurn = liveAgentByTurn.set;
 export const setOpenTurns = openTurns.set;
+export const setTurnMeta = turnMeta.set;
+export const setLedgerTurns = ledgerTurns.set;
+export const setApprovalAgents = approvalAgents.set;
+export const setInflightAgents = inflightAgents.set;
+export const setRunStatuses = runStatuses.set;
+export const setThreadAgents = threadAgents.set;
+export const setPresenceNow = presenceNow.set;
 
 /**
  * Writers bound to the scope that created an asynchronous operation.
@@ -204,7 +269,15 @@ export function writersForScope(key: string) {
     setLiveStepsByThread: guard(setLiveStepsByThread),
     setLiveStepsByMessage: guard(setLiveStepsByMessage),
     setReceiptByThread: guard(setReceiptByThread),
+    setLiveAgentByTurn: guard(setLiveAgentByTurn),
     setOpenTurns: guard(setOpenTurns),
+    setTurnMeta: guard(setTurnMeta),
+    setLedgerTurns: guard(setLedgerTurns),
+    setApprovalAgents: guard(setApprovalAgents),
+    setInflightAgents: guard(setInflightAgents),
+    setRunStatuses: guard(setRunStatuses),
+    setThreadAgents: guard(setThreadAgents),
+    setPresenceNow: guard(setPresenceNow),
   };
 }
 
@@ -218,6 +291,7 @@ export const useUnreadSince = unreadSince.use;
 export const useLiveStepsByThread = liveStepsByThread.use;
 export const useLiveStepsByMessage = liveStepsByMessage.use;
 export const useReceiptByThread = receiptByThread.use;
+export const useLiveAgentByTurn = liveAgentByTurn.use;
 export const useOpenTurns = openTurns.use;
 
 /**
@@ -245,5 +319,66 @@ export function useLiveSteps(threadId: string | null): LiveStep[] {
 export function useThreadTurns(threadId: string | null): OpenTurn[] {
   const read = (): OpenTurn[] =>
     (threadId === null ? undefined : state.openTurns[threadId]) ?? NO_TURNS;
+  return useSyncExternalStore(subscribe, read, read);
+}
+
+/**
+ * The presence index, recomputed only when one of its inputs is replaced.
+ *
+ * Every subscriber of `useAgentPresence` reads the snapshot on every store
+ * change, so without this each frame would re-derive the whole index once per
+ * avatar on screen. Inputs are compared by identity, which is what the field
+ * setters preserve for an unchanged field.
+ */
+let presenceCache: { deps: unknown[]; index: PresenceIndex } | null = null;
+
+function presenceIndex(): PresenceIndex {
+  const deps: unknown[] = [
+    state.openTurns,
+    state.liveStepsByThread,
+    state.liveStepsByMessage,
+    state.liveAgentByTurn,
+    state.turnMeta,
+    state.ledgerTurns,
+    state.approvalAgents,
+    state.inflightAgents,
+    state.runStatuses,
+    state.threadAgents,
+    state.presenceNow,
+  ];
+  if (presenceCache && presenceCache.deps.every((d, i) => Object.is(d, deps[i]))) {
+    return presenceCache.index;
+  }
+  const index = derivePresence({
+    openTurns: state.openTurns,
+    liveStepsByThread: state.liveStepsByThread,
+    liveStepsByMessage: state.liveStepsByMessage,
+    liveAgentByTurn: state.liveAgentByTurn,
+    turnMeta: state.turnMeta,
+    ledgerTurns: state.ledgerTurns,
+    approvalAgents: state.approvalAgents,
+    inflightAgents: state.inflightAgents,
+    runStatuses: state.runStatuses,
+    threadAgents: state.threadAgents,
+    now: state.presenceNow,
+  });
+  presenceCache = { deps, index };
+  return index;
+}
+
+/**
+ * What an agent is doing, as one of six words (see `lib/agent-presence.ts`).
+ *
+ * Across every chat by default. Pass `chatId` for a surface that is about one
+ * conversation (a DM row, a DM header), so an agent busy in another channel does
+ * not light this one. A plain string, so the snapshot has a stable identity with
+ * no constant objects to hold.
+ */
+export function useAgentPresence(agentId: string | null | undefined, chatId?: string | null): AgentPresenceState {
+  const read = (): AgentPresenceState => {
+    if (!agentId) return "inactive";
+    const index = presenceIndex();
+    return chatId ? presenceIn(index, agentId, chatId) : presenceOf(index, agentId);
+  };
   return useSyncExternalStore(subscribe, read, read);
 }

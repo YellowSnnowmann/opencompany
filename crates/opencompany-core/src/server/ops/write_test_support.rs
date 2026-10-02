@@ -74,6 +74,7 @@ pub(super) async fn state_with(
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_desk_hive: Vec::new(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
@@ -124,6 +125,55 @@ pub(super) async fn state_with_registry(home: &std::path::Path) -> AppState {
     state_with_company(home)
         .await
         .with_skills_root(repo_skills_root())
+}
+
+/// A state over `home` whose shared skill library is the tree at `library`.
+///
+/// [`state_with_registry`] points at the repository's real `companies/` tree,
+/// which is the right library for an install test and the wrong one for a drift
+/// test: proving that a moved library entry is reported needs a library the test
+/// itself decides the contents of.
+pub(super) async fn state_with_library(
+    home: &std::path::Path,
+    library: &std::path::Path,
+) -> AppState {
+    state_with_company(home)
+        .await
+        .with_skills_root(library.to_path_buf())
+}
+
+/// Writes `doc` as the shared library's copy of `slug`.
+///
+/// The library is a `companies/`-shaped tree, so the document lands under a
+/// bundle directory — the same layout `load_catalog_skills` reads in production.
+pub(super) async fn seed_library_skill(library: &std::path::Path, slug: &str, doc: &str) {
+    let dir = library.join("shared").join("skills").join(slug);
+    tokio::fs::create_dir_all(&dir).await.expect("library dir");
+    tokio::fs::write(dir.join("SKILL.md"), doc)
+        .await
+        .expect("library skill");
+}
+
+/// Writes one skill delta straight into the store.
+///
+/// Drift is a comparison between what was pinned and what the library now says,
+/// and no route can produce that state on its own — an install pins the library
+/// document it just read, so the two agree by construction. Seeding the row is
+/// how a test reaches the state an operator reaches by waiting for the library
+/// to be republished.
+pub(super) async fn seed_skill_delta(
+    state: &AppState,
+    delta: &crate::ports::skills_state::SkillState,
+) {
+    let runtime = state
+        .registry()
+        .get(&CompanyId::new("acme"))
+        .expect("company");
+    runtime
+        .skills()
+        .set(runtime.id(), delta)
+        .await
+        .expect("seeded delta");
 }
 
 pub(super) async fn persisted_skills(
@@ -278,6 +328,7 @@ pub(super) async fn state_with_manifest_and_defaults(
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_desk_hive: Vec::new(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
@@ -325,6 +376,7 @@ pub(super) async fn state_with_manifest_and_overlays(
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_desk_hive: Vec::new(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
@@ -371,6 +423,7 @@ pub(super) async fn state_with_source_dir(
     let id = CompanyId::new("acme");
     store
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_desk_hive: Vec::new(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
@@ -427,6 +480,7 @@ pub(super) fn workflow_body(id: &str) -> Value {
 
 pub(super) fn discussion_card(id: &str, title: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.into(),
         title: TaskTitle::authored(title),
         note: None,
@@ -460,6 +514,7 @@ pub(super) async fn dispatched_task(
         .upsert(
             company,
             &TaskRecord {
+                opened_by: None,
                 id: "t-1".into(),
                 title: TaskTitle::authored("Ship it"),
                 note: None,
@@ -574,6 +629,7 @@ pub(super) async fn seed_proposal_card_assigned(
         .expect("company");
     let id = crate::ports::generate_id();
     let record = TaskRecord {
+        opened_by: None,
         id: id.clone(),
         title: TaskTitle::authored("Automate the weekly digest"),
         note: None,

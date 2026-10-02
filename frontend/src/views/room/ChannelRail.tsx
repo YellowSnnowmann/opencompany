@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ChevronRight,
   CircleDot,
@@ -7,15 +7,19 @@ import {
   type LucideIcon,
   PanelRight,
   Plus,
-  Radio,
   SquarePen,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { AgentFace } from "@/components/agent-face";
+import { agentPresenceLabel } from "@/components/agent-status-dot";
 import { TeammateAvatar } from "@/components/teammate-avatar";
+import { useFlipList } from "@/hooks/use-flip-list";
+import { useStableList } from "@/hooks/use-stable-list";
 import { cn } from "@/lib/utils";
+import { useAgentPresence } from "@/room/store";
 import { NewMessageDialog } from "./NewMessageDialog";
-import { channelSubtitle, dmFace, type Channel, type ChannelSection } from "./model";
+import { channelSubtitle, dmFace, dmThreadId, type Channel, type ChannelSection } from "./model";
 
 /**
  * What an unread badge actually claims (issue #364).
@@ -68,6 +72,12 @@ interface Props {
    * `routeOpen` straight through.
    */
   currentPage?: boolean;
+  /**
+   * Whether the Direct messages list may slide rows to their new slot when a
+   * message re-sorts it. `RoomView` passes `false` until every channel's
+   * history has landed, so a cold load does not play a storm of moves.
+   */
+  animateReorder?: boolean;
 }
 
 /**
@@ -94,6 +104,7 @@ export function ChannelRail({
   onStartDirectMessage,
   className,
   currentPage = true,
+  animateReorder = false,
 }: Props) {
   // Resolved once and threaded down, so the three row shapes cannot come to
   // disagree about what marking the open channel means.
@@ -128,9 +139,35 @@ export function ChannelRail({
     }
   };
 
+  // The Direct messages order is `latestMessageAt` descending, so a message
+  // moves its row to the top. A row sliding under the pointer can land a click
+  // on the wrong DM (the same hazard as #1414), so the order is held while the
+  // pointer or keyboard focus is anywhere in the rail and reconciles on
+  // release. Focus a click left behind does not hold (`holdPointerFocus`): the
+  // clicked row keeps focus after the pointer leaves, and holding on it froze
+  // the order until focus happened to move. Only the ORDER is held, as ids:
+  // row content (name, unread) still reads live.
+  const dmSection = sections.find((s) => s.id === "dms");
+  const liveDmIds = useMemo(() => dmSection?.channels.map((c) => c.id) ?? [], [dmSection]);
+  const stable = useStableList(liveDmIds, { holdPointerFocus: false });
+  const shownSections = useMemo(() => {
+    if (!dmSection) return sections;
+    const byId = new Map(dmSection.channels.map((c) => [c.id, c]));
+    const held = stable.items.flatMap((id) => byId.get(id) ?? []);
+    // A DM that appeared mid-hold goes last rather than shifting the rows the
+    // pointer is aiming at; the release puts it in its real slot.
+    const late = dmSection.channels.filter((c) => !stable.items.includes(c.id));
+    return sections.map((s) => (s === dmSection ? { ...s, channels: [...held, ...late] } : s));
+  }, [sections, dmSection, stable.items]);
+  const dmRowRef = useFlipList(
+    shownSections.find((s) => s.id === "dms")?.channels.map((c) => c.id) ?? [],
+    { disabled: !animateReorder || collapsed },
+  );
+
   if (collapsed) {
     return (
       <aside
+        {...stable.containerProps}
         className={cn(
           "w-14 shrink-0 flex-col items-center border-r bg-sidebar/40 py-3",
           className,
@@ -166,126 +203,50 @@ export function ChannelRail({
 
   return (
     <aside
+      {...stable.containerProps}
       className={cn(
         "w-64 shrink-0 flex-col border-r bg-sidebar/40 pb-3",
         className,
       )}
     >
-      {sections.map((section) =>
-        section.id === "operator" ? (
-          <PinnedOperatorRow
-            key={section.id}
-            channel={section.channels[0]}
-            active={section.channels[0]?.id === activeId}
-            activeAria={activeAria}
-            onPage={onPage}
-            unread={section.channels[0] ? (unread[section.channels[0].id] ?? 0) : 0}
-            onSelect={onSelect}
-          />
-        ) : (
-          <Section
-            key={section.id}
-            section={section}
-            // Each section header carries its own door, and only its own.
-            // Channels gets "+" (create a channel); Direct messages gets the
-            // compose pencil, because a DM is what it starts. It used to float
-            // alone above the whole list, attached to nothing and reading as
-            // chrome for the rail rather than an action on a section.
-            action={
-              section.id === "channels" ? (
-                onAddChannel && <SectionAction onClick={onAddChannel} label="New channel" icon={Plus} />
-              ) : section.id === "dms" && onStartDirectMessage ? (
-                <NewMessageDialog
-                  directMessages={directMessages}
-                  onSelect={onStartDirectMessage}
-                  trigger={
-                    <SectionAction
-                      label="New message"
-                      icon={SquarePen}
-                      disabled={directMessages.length === 0}
-                    />
-                  }
-                />
-              ) : undefined
-            }
-            activeId={activeId}
-            activeAria={activeAria}
-            onPage={onPage}
-            unread={unread}
-            mentions={mentions}
-            onSelect={onSelect}
-            open={resolvedOpenSections[section.id] ?? true}
-            onToggle={() => toggleSection(section.id)}
-          />
-        ),
-      )}
+      {shownSections.map((section) => (
+        <Section
+          key={section.id}
+          section={section}
+          rowRef={section.id === "dms" ? dmRowRef : undefined}
+          // Each section header carries its own door, and only its own.
+          // Channels gets "+" (create a channel); Direct messages gets the
+          // compose pencil, because a DM is what it starts. It used to float
+          // alone above the whole list, attached to nothing and reading as
+          // chrome for the rail rather than an action on a section.
+          action={
+            section.id === "channels" ? (
+              onAddChannel && <SectionAction onClick={onAddChannel} label="New channel" icon={Plus} />
+            ) : section.id === "dms" && onStartDirectMessage ? (
+              <NewMessageDialog
+                directMessages={directMessages}
+                onSelect={onStartDirectMessage}
+                trigger={
+                  <SectionAction
+                    label="New message"
+                    icon={SquarePen}
+                    disabled={directMessages.length === 0}
+                  />
+                }
+              />
+            ) : undefined
+          }
+          activeId={activeId}
+          activeAria={activeAria}
+          onPage={onPage}
+          unread={unread}
+          mentions={mentions}
+          onSelect={onSelect}
+          open={resolvedOpenSections[section.id] ?? true}
+          onToggle={() => toggleSection(section.id)}
+        />
+      ))}
     </aside>
-  );
-}
-
-/**
- * The Operator feed's row (issue #1757 rework): pinned below a divider,
- * outside every collapsible section, rather than folded into the Channels
- * list `Section` renders. No add door (channel creation stays scoped to the
- * Channels section's own `onAdd`), no member count, no mention badge — the
- * feed is a single read-only broadcast rather than an addressable,
- * multi-party line, so nobody is ever named in it.
- *
- * Unread IS shown (PR #1781 review, Codex P2): a workflow report can land
- * here while another channel is open, same as any other channel, and the
- * collapsed rail's `CompactChannelRow` already surfaced that (it flat-maps
- * every section, this one included, and was never taught to skip it) — this
- * expanded row was the one place unread silently dropped, so folding the
- * rail changed whether the pinned row could tell you something was waiting.
- */
-function PinnedOperatorRow({
-  channel,
-  active,
-  activeAria,
-  onPage,
-  unread,
-  onSelect,
-}: {
-  channel: Channel | undefined;
-  active: boolean;
-  activeAria: "page" | "true";
-  /** Whether this rail's channel is the page on screen — see `onPage`. */
-  onPage: boolean;
-  unread: number;
-  onSelect: (id: string) => void;
-}) {
-  if (!channel) return null;
-  const hasUnread = unread > 0 && !active;
-  return (
-    <div className="mt-2 border-t pt-2">
-      <button
-        type="button"
-        onClick={() => onSelect(channel.id)}
-        aria-current={active ? activeAria : undefined}
-        title={channelSubtitle(channel) ?? undefined}
-        className={cn(
-          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-          active
-            ? onPage
-              ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-              : "font-medium text-foreground"
-            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
-          hasUnread && "font-semibold text-foreground",
-        )}
-      >
-        <ChannelIcon channel={channel} />
-        <span className="min-w-0 flex-1 truncate">{channel.name}</span>
-        {hasUnread && (
-          <span
-            data-testid="channel-unread"
-            title={UNREAD_IS_LOCAL}
-            className="shrink-0 rounded-full bg-primary px-1.5 text-3xs font-semibold leading-4 text-primary-foreground"
-          >
-            {unread > 99 ? "99+" : unread}
-          </span>
-        )}
-      </button>
-    </div>
   );
 }
 
@@ -405,6 +366,7 @@ function Section({
   open,
   onToggle,
   action,
+  rowRef,
 }: {
   section: ChannelSection;
   activeId: string | null;
@@ -418,6 +380,8 @@ function Section({
   onToggle: () => void;
   /** This section's own door, rendered at the right of its caption. */
   action?: ReactNode;
+  /** Per-row ref from `useFlipList`, for a section whose rows slide when it re-sorts. */
+  rowRef?: (channelId: string) => (node: HTMLElement | null) => void;
 }) {
   const hiddenUnread = !open
     ? section.channels.reduce((n, c) => n + (unread[c.id] ?? 0), 0)
@@ -475,9 +439,16 @@ function Section({
       </div>
 
       {open && (
-        <ul className="mt-0.5 flex flex-col gap-px">
+        <ul
+          // A re-sort moves rows in the DOM. Left as scroll-anchor candidates,
+          // a visible row that jumped to the top dragged the scrolled sidebar
+          // with it (to 0, or to wherever the row landed), because anchoring
+          // keeps the anchor node still on screen. Opting the sliding list out
+          // leaves the offset where the operator put it.
+          className={cn("mt-0.5 flex flex-col gap-px", rowRef && "[overflow-anchor:none]")}
+        >
           {section.channels.map((channel) => (
-            <li key={channel.id}>
+            <li key={channel.id} ref={rowRef?.(channel.id)}>
               <ChannelRow
                 channel={channel}
                 active={channel.id === activeId}
@@ -518,6 +489,14 @@ function ChannelRow({
 }) {
   const hasUnread = unread > 0 && !active;
   const hasMentions = mentions > 0;
+  // The dot on the avatar is decorative here (`AgentFace decorative`): its
+  // words go AFTER the name, so the row is announced "Ada Lovelace, Thinking"
+  // and a screen-reader user hears who before what. Same lookup the dot makes.
+  const statusAgent = channel.kind === "dm" && dmFace(channel) ? channel.member?.id : undefined;
+  const status = useAgentPresence(
+    statusAgent,
+    channel.member ? dmThreadId(channel.member) : undefined,
+  );
 
   return (
     <button
@@ -531,7 +510,7 @@ function ChannelRow({
       // `""` — is what suppresses the native bubble.
       title={channelSubtitle(channel) ?? undefined}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-md transition-colors",
         active
           ? onPage
             ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
@@ -540,8 +519,11 @@ function ChannelRow({
         hasUnread && "font-semibold text-foreground",
       )}
     >
-      <ChannelIcon channel={channel} />
+      <ChannelIcon channel={channel} withStatus />
       <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+      {status !== "inactive" && (
+        <span className="sr-only">, {agentPresenceLabel(status)}</span>
+      )}
       {hasMentions && (
         <span
           data-testid="channel-mentions"
@@ -568,20 +550,26 @@ function ChannelRow({
   );
 }
 
-function ChannelIcon({ channel }: { channel: Channel }) {
+function ChannelIcon({ channel, withStatus = false }: { channel: Channel; withStatus?: boolean }) {
   if (channel.kind === "dm") {
     const face = dmFace(channel);
     return face ? (
-      <TeammateAvatar {...face} className="size-5 text-3xs" />
+      // The live state badge rides the expanded row only: the compact rail's
+      // 36px tiles are measured to fit its 48px width and stay as they were.
+      // Scoped to this DM's own thread, so a teammate busy in a channel does
+      // not light every row that names them.
+      <AgentFace
+        agentId={withStatus ? channel.member?.id : undefined}
+        chatId={channel.member ? dmThreadId(channel.member) : undefined}
+        surface="chrome"
+        decorative
+      >
+        <TeammateAvatar {...face} className="size-6 text-2xs" />
+      </AgentFace>
     ) : (
       <CircleDot className="size-4 shrink-0" aria-hidden />
     );
   }
-  // The Operator feed is a broadcast, not an addressable line — `#` implies a
-  // channel you post into, which this one refuses (issue #1757 rework). A
-  // distinct glyph is the honest mark, the same way `Lock` already distinguishes
-  // a private channel from an ordinary one.
-  if (channel.system) return <Radio className="size-4 shrink-0 opacity-70" aria-hidden />;
   const Icon = channel.private ? Lock : Hash;
   return <Icon className="size-4 shrink-0 opacity-70" aria-hidden />;
 }
