@@ -27,6 +27,7 @@ use crate::company::mcp::{
     load_health, load_runtime_index, resolve_effective, save_runtime_index, store_auth,
     validate_one,
 };
+use crate::company::mcp_server_info::{self, McpServerInfo};
 use crate::company::runtime::CompanyRuntime;
 use crate::error::OpenCompanyError;
 use crate::metering::roster_display_names;
@@ -107,9 +108,26 @@ pub(super) struct McpServerDto {
     /// one. The catalogue's stable identity, and what an install is re-keyed on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) qualified_name: Option<String>,
-    /// The directory's icon, when this row came from one.
+    /// The server's icon: what it reported about itself on its last successful
+    /// probe, else — on a row backed by a directory install — the directory's.
+    ///
+    /// A probed icon is an inline `data:` image the host fetched itself; an icon
+    /// URL a remote server chose must never reach an operator's browser.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) icon_url: Option<String>,
+    /// The display name the server reported for itself, when it reported one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) probed_title: Option<String>,
+    /// The server's own description of what it does, when it reported one.
+    ///
+    /// Distinct from [`description`](Self::description), which is what the
+    /// operator or the bundle declared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) probed_description: Option<String>,
+    /// The server's home page, when it reported one. An `http(s)` URL, rendered
+    /// as a link; this host never fetches it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) website_url: Option<String>,
     /// How a registry install is dialled — `http_remote` or `stdio`. Absent on
     /// a List A-only row, which is always HTTP by construction (`command` is a
     /// validation error there).
@@ -317,6 +335,7 @@ fn dto_from_decl(
     decl: &mcp::McpServerDecl,
     reachable_by: Vec<RosterAgentDto>,
     health: Option<McpHealth>,
+    info: McpServerInfo,
 ) -> McpServerDto {
     McpServerDto {
         name: decl.name.clone(),
@@ -330,10 +349,14 @@ fn dto_from_decl(
         timeout_secs: decl.timeout_secs,
         auth_configured: decl.auth.is_configured(),
         // A List A decl knows nothing about a directory install; the merge pass
-        // fills these in when one reconciles onto this row.
+        // fills these in when one reconciles onto this row — including the icon,
+        // which it leaves alone when the probe already found one.
         server_id: None,
         qualified_name: None,
-        icon_url: None,
+        icon_url: info.icon_data_url,
+        probed_title: info.title,
+        probed_description: info.description,
+        website_url: info.website_url,
         transport: None,
         reachable_by,
         health,
@@ -486,7 +509,14 @@ pub(super) async fn merged_rows(runtime: &CompanyRuntime) -> Result<Vec<McpServe
         let health = load_health(runtime.id(), &decl.name, runtime.secrets().as_ref())
             .await
             .map_err(ApiError)?;
-        out.push(dto_from_decl(decl, reachers_of(&grants, decl), health));
+        let info =
+            mcp_server_info::load(runtime.id(), &decl.name, runtime.secrets().as_ref()).await;
+        out.push(dto_from_decl(
+            decl,
+            reachers_of(&grants, decl),
+            health,
+            info,
+        ));
     }
     // The directory half. A registry that cannot be read yields nothing and the
     // declared servers stand on their own — see `mcp_registry::installs`.

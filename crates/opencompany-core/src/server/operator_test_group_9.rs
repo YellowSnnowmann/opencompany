@@ -92,6 +92,7 @@ async fn skipping_an_agent_question_settles_the_card_its_approval_is_linked_to()
         .upsert(
             runtime.id(),
             &crate::ports::tasks::TaskRecord {
+                opened_by: None,
                 id: "t-9".to_string(),
                 title: crate::ports::tasks::TaskTitle::authored("Draft the launch note"),
                 note: None,

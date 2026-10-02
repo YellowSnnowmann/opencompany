@@ -586,6 +586,7 @@ async fn a_hand_off_of_a_message_the_chat_handler_carded_opens_no_second_card() 
         .upsert(
             &fx.record.id,
             &TaskRecord {
+                opened_by: None,
                 id: "handler-card".to_string(),
                 title: TaskTitle::authored(&title),
                 note: None,

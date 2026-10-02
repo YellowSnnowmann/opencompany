@@ -6,11 +6,14 @@
 //! the explicit-request guard, a publish claim and an output claim. `after_turn`
 //! drains the approval bucket and parks it through the runtime's shared
 //! [`ApprovalParker`], under that same turn key, so the resolve path can find
-//! its way back to this episode. `park_seat` files what the turn published on
-//! a card minted for the room, and hands the outputs it produced, along with
-//! that card, to `delivery` to ride the seat's next row on the desk.
+//! its way back to this episode. A seat turn also claims a delegation bucket
+//! of its own, so its `spawn_task` calls queue there and nowhere else.
+//! `park_seat` writes those cards first (`seat_cards`), files what the turn
+//! published on a card the episode already has or mints one, and hands the
+//! outputs it produced, along with that card, to `delivery` to ride the
+//! seat's next row on the desk.
 
-use std::sync::PoisonError;
+use std::sync::{Arc, PoisonError};
 
 use tinyhivemind::Sequence;
 
@@ -23,6 +26,9 @@ use crate::harness::built_in::publish::{
     PendingPublish, PendingPublishQueue, PublishClaim, PublishDestination,
 };
 use crate::harness::built_in::turn_outputs::TurnOutputClaim;
+use crate::harness::orchestrator::{
+    Delegation, DelegationClaim, DelegationQueue, MAX_DELEGATIONS_PER_TURN,
+};
 use crate::ports::types::{ApprovalId, ChatOutput, CompanyEvent, CompanyId, EventSeq, StoredEvent};
 use crate::runtime::approval_park::{ApprovalParker, ParkSite};
 use crate::runtime::episode_resume::{EpisodeReleases, SeatDecision, turn_key};
@@ -33,6 +39,10 @@ use crate::runtime::journal::{ApprovalConversation, TaskLink};
 pub(crate) struct SeatQueues {
     pub(crate) approvals: ApprovalRequestQueue,
     pub(crate) publishes: PendingPublishQueue,
+    pub(crate) delegations: DelegationQueue,
+    /// The episode's card budget, or `None` when this host has no board to
+    /// write cards to -- the seat's `spawn_task` then refuses in its turn.
+    pub(crate) cards: Option<Arc<super::seat_cards::EpisodeCards>>,
 }
 
 impl SeatQueues {
@@ -45,14 +55,26 @@ impl SeatQueues {
     /// producing a report could not hand it over. `settle` drains this bucket
     /// and `park_seat` files it, so the destination is now a promise the host
     /// keeps.
+    ///
+    /// The delegation bucket is the seat's own, keyed like the approval one,
+    /// so a card it queues cannot be drained by a pooled turn or another seat.
+    /// `answering` holds it to the question rule.
     pub(crate) fn claim(
         &self,
         episode_id: &str,
         seat: &str,
         desk_id: &str,
         thread_root: Option<EventSeq>,
+        answering: bool,
     ) -> SeatClaims {
+        let key = turn_key(episode_id, seat);
+        let delegations = match self.cards {
+            Some(_) => self.delegations.claim_seat(key, answering),
+            None => self.delegations.claim_seat_unwired(key),
+        };
         SeatClaims {
+            delegations,
+            cards: self.cards.clone(),
             approvals: self
                 .approvals
                 .claim(ApprovalScope::Seat(turn_key(episode_id, seat))),
@@ -69,6 +91,8 @@ impl SeatQueues {
 
 /// One seat turn's claims, held from the turn's start until `after_turn`.
 pub(crate) struct SeatClaims {
+    delegations: DelegationClaim,
+    cards: Option<Arc<super::seat_cards::EpisodeCards>>,
     approvals: ApprovalClaim,
     queue: ApprovalRequestQueue,
     publish: PublishClaim,
@@ -82,6 +106,8 @@ pub(crate) struct SettledTurn {
     /// themselves rather than a count: the count could only be apologised
     /// for.
     pub(super) publishes: Vec<PendingPublish>,
+    /// The cards the seat queued, to be written by `park_seat`.
+    pub(super) delegations: Vec<Delegation>,
     /// Still open, so filing (which records an artifact output) lands in the
     /// same bucket as whatever the turn itself produced, before either is
     /// read.
@@ -109,22 +135,29 @@ impl SeatClaims {
     where
         F: std::future::Future<Output = T> + Send,
     {
-        Box::pin(
+        let turn = self.delegations.scoped(
             self.approvals.scoped(
                 self.queue
                     .turn_scoped(self.publish.scoped(self.outputs.scoped(turn))),
             ),
-        )
-        .await
+        );
+        match self.cards.clone() {
+            Some(cards) => {
+                let budget: Arc<dyn crate::harness::built_in::card_budget::CardBudget> = cards;
+                Box::pin(crate::harness::built_in::card_budget::scoped(budget, turn)).await
+            }
+            None => Box::pin(turn).await,
+        }
     }
 
-    /// Releases the approval and publish claims, keeping the output claim
-    /// open for `park_seat` to file publishes and drain outputs inside one
-    /// bucket.
+    /// Releases the approval, publish and delegation claims, keeping the
+    /// output claim open for `park_seat` to file publishes and drain outputs
+    /// inside one bucket.
     pub(crate) fn settle(self) -> SettledTurn {
         SettledTurn {
             requests: self.approvals.drain(MAX_APPROVAL_REQUESTS_PER_TURN),
             publishes: self.publish.drain(),
+            delegations: self.delegations.drain(MAX_DELEGATIONS_PER_TURN),
             outputs: self.outputs,
         }
     }
@@ -212,6 +245,8 @@ impl DeskHost {
             self.roster.as_ref().map(|(_, deps)| SeatQueues {
                 approvals: deps.approval_requests.clone(),
                 publishes: deps.pending_publishes.clone(),
+                delegations: deps.delegations.clone(),
+                cards: deps.tasks.as_ref().map(|_| Arc::clone(&self.cards)),
             })
         })
     }
@@ -276,6 +311,8 @@ impl DeskHost {
         self.queues = Some(SeatQueues {
             approvals,
             publishes: PendingPublishQueue::default(),
+            delegations: DelegationQueue::default(),
+            cards: None,
         });
         self
     }
@@ -292,6 +329,8 @@ impl DeskHost {
         self.queues = Some(SeatQueues {
             approvals,
             publishes,
+            delegations: DelegationQueue::default(),
+            cards: None,
         });
         self
     }
@@ -317,11 +356,10 @@ impl DeskHost {
             .remove(seat)
     }
 
-    /// Files what one seat published, on a card minted for this episode.
-    ///
-    /// The card's origin is the desk and the thread the episode answers in,
-    /// so the operator opens the deliverable from the room that produced it
-    /// rather than from a card floating free of any conversation.
+    /// Files what one seat published: on this seat's latest card, else the
+    /// card answering the message, else a card minted for it -- which then
+    /// becomes the message's card, so the next seat's publish lands there
+    /// too.
     ///
     /// # Errors
     ///
@@ -331,30 +369,100 @@ impl DeskHost {
         seat: &str,
         publishes: Vec<PendingPublish>,
     ) -> crate::Result<String> {
-        let Some((_, deps)) = self.roster.as_ref() else {
+        let Some((record, deps)) = self.roster.as_ref() else {
             return Err(crate::OpenCompanyError::Harness(
                 "a seat published a file but this host has no roster to file it with".to_string(),
             ));
         };
         let (publish_chat, publish_root) = self.publish_chat(seat);
-        let card = crate::harness::publish::filing::PublishFiling {
+        let chat =
+            crate::runtime::delegation::ChatTarget::in_thread(Some(&publish_chat), publish_root);
+        let filing = crate::harness::publish::filing::PublishFiling {
             company: &self.company,
             deps,
-        }
-        .record_conversation_publishes(
-            seat,
-            crate::runtime::delegation::ChatTarget::in_thread(Some(&publish_chat), publish_root),
-            publishes,
-        )
-        .await?;
+        };
+        let target = match deps.tasks.as_deref() {
+            Some(tasks) => {
+                let at = self.card_desk(tasks, record);
+                self.cards.look(&at).await;
+                self.cards.publish_target(seat)
+            }
+            None => None,
+        };
+        let card = match target {
+            Some(card) => filing.file_on_card(&card, seat, chat, publishes).await?,
+            None => {
+                let card = filing
+                    .record_conversation_publishes(seat, chat, publishes)
+                    .await?;
+                self.cards.minted_message_card(&card);
+                if let Some(tasks) = deps.tasks.as_deref()
+                    && let Err(error) =
+                        super::seat_cards::stamp_message_card(&self.card_desk(tasks, record), &card)
+                            .await
+                {
+                    tracing::warn!(
+                        company = %self.company,
+                        episode = %self.episode_id,
+                        task_id = %card,
+                        %error,
+                        "[hive] could not mark the minted card as the message's"
+                    );
+                }
+                card
+            }
+        };
         tracing::info!(
             company = %self.company,
             episode = %self.episode_id,
             %seat,
             task_id = %card,
-            "[hive] a seat published; minted a card to carry it"
+            "[hive] a seat published; filed on the episode's card"
         );
         Ok(card)
+    }
+
+    /// The board an episode's cards are written to, as `seat_cards` needs it.
+    pub(super) fn card_desk<'a>(
+        &'a self,
+        tasks: &'a dyn crate::ports::TaskStore,
+        record: &'a crate::ports::types::CompanyRecord,
+    ) -> super::seat_cards::CardDesk<'a> {
+        super::seat_cards::CardDesk {
+            tasks,
+            company: &self.company,
+            record: Some(record),
+            desk_id: &self.desk_id,
+            thread_root: self.thread_root,
+            episode_id: &self.episode_id,
+            opened_at: self.opened_at,
+        }
+    }
+
+    /// Writes the cards a seat's turn queued, under the episode's write lock.
+    async fn open_seat_cards(
+        &self,
+        seat: &str,
+        delegations: Vec<Delegation>,
+    ) -> super::seat_cards::Opened {
+        if delegations.is_empty() {
+            return super::seat_cards::Opened::default();
+        }
+        let Some((record, deps)) = self.roster.as_ref() else {
+            tracing::error!(
+                company = %self.company,
+                episode = %self.episode_id,
+                %seat,
+                "[hive] a seat queued cards on a host with no roster to write them"
+            );
+            return super::seat_cards::Opened::default();
+        };
+        let Some(tasks) = deps.tasks.as_deref() else {
+            return super::seat_cards::Opened::default();
+        };
+        self.cards
+            .open(&self.card_desk(tasks, record), seat, delegations)
+            .await
     }
 
     /// Where one seat's publish is filed, and under which thread.
@@ -380,9 +488,13 @@ impl DeskHost {
         let SettledTurn {
             requests,
             publishes,
+            delegations,
             outputs,
         } = settled;
         let mut problems = Vec::new();
+        let writing = self.cards.writing().await;
+        let opened = self.open_seat_cards(seat, delegations).await;
+        problems.extend(opened.problems);
         // **What the seat published, on a card that carries it (#2464).**
         //
         // This used to be an apology -- "not filed anywhere, tell the
@@ -438,6 +550,8 @@ impl DeskHost {
         // What the turn produced rides its next row on the desk, or a row of
         // its own once the wave has committed everything it will
         // (`delivery.rs`).
+        drop(writing);
+        let task_id = task_id.or_else(|| opened.cards.first().cloned());
         let outputs = outputs.drain();
         self.hold_delivery(seat, Delivery { outputs, task_id });
         if let Some(notice) = requests.overflow_notice() {

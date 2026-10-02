@@ -132,7 +132,26 @@ content-rail rows now, where they keep their labels at every width.
 **portalled** into a slot the sidebar owns (`components/room-rail.tsx`), so
 every behaviour it already had comes with it: collapsible sections, per-kind row
 icons, unread and mention badges, the compact collapsed variant, and the "New
-message" door.
+message" door. The expanded DM rows carry each teammate's live-state badge
+(`AgentStatusDot`, read from `useAgentPresence`), and their order follows the
+latest message: the list holds still while the pointer or keyboard focus is
+inside the rail (a row must not slide under a click) and slides to the new order
+on release, unless reduced motion is asked for. Only a re-sort slides: rows are
+measured within their own list, so collapsing the Channels section above them
+moves the list without animating it. The focus a mouse click leaves
+on a row does not hold it once the pointer has left. A DM's state is keyed on
+the conversation, not the spelling: the bare teammate id the console posts
+under and the `dm:<id>` desk the hive seat brackets its turn under are one key
+(`presenceChatKey`), so a real DM turn lights its row and header. A hive seat
+streams no live frames, so a DM can show working, queued or approval there, but
+not thinking or typing. A DM turn another console sent is known only by its
+bracket, which names no agent: the thread says whose it is, and it reads queued
+until its run's `run_status_changed` says `running`. A card run or delegation in
+flight (`/tasks/inflight`) reads working on agent-wide surfaces (team card,
+profile, `@` picker), never on a DM row. An approval stops counting on its
+`approval_resolved` frame, an expiry included. The row's accessible name is the
+teammate's name first, then the state; a dot that stands alone names the agent
+in its own label ("Ada Lovelace: Working").
 
 A portal rather than a state lift, deliberately. `ChatView` stays the one owner
 of the chat model, the rail renders from that state on the same pass, and the

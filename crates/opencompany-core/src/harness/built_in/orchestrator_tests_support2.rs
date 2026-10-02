@@ -46,6 +46,7 @@ pub(super) fn stage(queue: &DelegationQueue, d: Delegation) -> Staged {
 /// `card` — that name is already the `Delegation` fixture above.
 pub(super) fn task_card(id: &str, title: &str, column: &str, assignee: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored(title),
         note: None,

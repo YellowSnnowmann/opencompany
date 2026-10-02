@@ -481,6 +481,9 @@ pub enum DelegationScope {
     /// several genuinely overlap, bounded only by the #401 in-flight cap. That
     /// is the concurrency this scoping exists for.
     Run(String),
+    /// One HiveMind seat turn, keyed by its episode-seat turn key
+    /// ([`turn_key`](crate::runtime::episode_resume::turn_key)).
+    Seat(String),
 }
 
 tokio::task_local! {
@@ -702,6 +705,35 @@ impl DelegationQueue {
         self.claim_as(Self::current_scope(), DrainClaim::Answering)
     }
 
+    /// Claims one HiveMind seat turn's bucket, keyed by its episode-seat turn
+    /// key.
+    ///
+    /// A seat may open cards and nothing else. When the operator's message
+    /// read as a question the claim answers instead, which refuses card
+    /// writes exactly as a pooled question turn does.
+    #[must_use = "the claim releases on drop; dropping it immediately un-claims the queue"]
+    pub fn claim_seat(&self, turn_key: impl Into<String>, answering: bool) -> DelegationClaim {
+        let state = if answering {
+            DrainClaim::Answering
+        } else {
+            DrainClaim::Seat
+        };
+        self.claim_as(DelegationScope::Seat(turn_key.into()), state)
+    }
+
+    /// Scopes a seat turn on a host with no board to write cards to.
+    ///
+    /// Nothing drains it, so every delegation refuses in the seat's own turn
+    /// as unwired; and because the scope is the seat's, none of them can land
+    /// in a pooled turn's bucket instead.
+    #[must_use = "the claim releases on drop; dropping it immediately un-claims the queue"]
+    pub fn claim_seat_unwired(&self, turn_key: impl Into<String>) -> DelegationClaim {
+        self.claim_as(
+            DelegationScope::Seat(turn_key.into()),
+            DrainClaim::Unclaimed,
+        )
+    }
+
     /// The shared body of the claim constructors.
     ///
     /// # Everything it touches is `scope`'s and only `scope`'s (issue #661)
@@ -858,7 +890,10 @@ impl DelegationQueue {
                     _ => NoDrainReason::WorkflowLifecycle,
                 });
             }
-            DrainClaim::Answering | DrainClaim::Full | DrainClaim::Board => {}
+            DrainClaim::Seat if !matches!(delegation, Delegation::SpawnTask { .. }) => {
+                return Staged::NoDrain(NoDrainReason::Seat);
+            }
+            DrainClaim::Answering | DrainClaim::Full | DrainClaim::Board | DrainClaim::Seat => {}
         }
         // Issue #176: checked after the claim (a context that drains nothing is
         // still the only fact worth reporting) and before the queue lock, so the
@@ -1019,8 +1054,13 @@ impl DelegationQueue {
     /// the cap means some caller bypassed that boundary and is quietly losing
     /// work the model already claimed it had done.
     pub fn drain(&self, cap: usize) -> Vec<Delegation> {
+        self.drain_scope(&Self::current_scope(), cap)
+    }
+
+    /// [`drain`](Self::drain) against an explicitly named scope.
+    fn drain_scope(&self, scope: &DelegationScope, cap: usize) -> Vec<Delegation> {
         let mut guard = self.inner.lock().expect("delegation queue");
-        let Some(bucket) = guard.get_mut(&Self::current_scope()) else {
+        let Some(bucket) = guard.get_mut(scope) else {
             return Vec::new();
         };
         let take = bucket.len().min(cap);
@@ -1132,6 +1172,9 @@ pub enum NoDrainReason {
     /// naming: open a card for the desk instead, which persists and is exactly
     /// what a run *can* do.
     WorkflowHandOff,
+    /// The queue is claimed by a HiveMind seat turn ([`DrainClaim::Seat`]),
+    /// which may open cards and nothing else on the board.
+    Seat,
 }
 
 impl NoDrainReason {
@@ -1149,6 +1192,7 @@ impl NoDrainReason {
             Self::Depth => "depth_capped",
             Self::WorkflowLifecycle => "workflow_lifecycle_operator_only",
             Self::WorkflowHandOff => "workflow_handoff_no_reply_target",
+            Self::Seat => "seat_opens_cards_only",
         }
     }
 }
@@ -1198,6 +1242,10 @@ pub enum DrainClaim {
     /// → run cycles stay bounded precisely because every dispatch requires an
     /// operator act. Relaxing the column rule would take that bound with it.
     Board,
+    /// A HiveMind seat turn has claimed its own scope's bucket. Only
+    /// [`SpawnTask`](Delegation::SpawnTask) may be staged; the seat's settle
+    /// drains it.
+    Seat,
 }
 
 /// The live claim on a [`DelegationQueue`] — proof that some drain site is
@@ -1226,6 +1274,12 @@ impl DelegationClaim {
     /// The scope this claim owns.
     pub fn scope(&self) -> &DelegationScope {
         &self.scope
+    }
+
+    /// Drains up to `cap` of this claim's own staged delegations, wherever
+    /// the caller is running.
+    pub fn drain(&self, cap: usize) -> Vec<Delegation> {
+        self.queue.drain_scope(&self.scope, cap)
     }
 
     /// Runs `fut` with this claim's scope installed, so every delegation call
@@ -2566,6 +2620,7 @@ fn summarize_event(event: &CompanyEvent) -> String {
             let what = match change {
                 SkillChange::Installed => "installed",
                 SkillChange::Updated => "updated",
+                SkillChange::Edited => "edited",
                 SkillChange::Removed => "removed",
             };
             format!("skill {what}: {slug}")
@@ -2577,6 +2632,7 @@ fn summarize_event(event: &CompanyEvent) -> String {
         CompanyEvent::RoundCommitted { .. } => "episode round committed".into(),
         CompanyEvent::BroadcastRouted { .. } => "episode broadcast routed".into(),
         CompanyEvent::DmDelivered { .. } => "episode dm delivered".into(),
+        CompanyEvent::UtteranceRefused { .. } => "episode utterance refused".into(),
         CompanyEvent::ConversationOpened { .. } => "episode conversation opened".into(),
         CompanyEvent::ConversationConcluded { .. } => "episode conversation concluded".into(),
         CompanyEvent::EpisodeSeatParked { .. } => "episode seat waiting on the operator".into(),
@@ -2748,7 +2804,7 @@ impl Tool for SpawnTaskTool {
     }
 
     fn description(&self) -> &str {
-        "Open a task card on the company's board. Nothing said in chat is tracked unless an agent tracks it, so use this when an ask is real work that should be visible and followed up — something you are taking on that outlasts this reply, something for later, or something for somebody else. Provide a `title`, an optional `note` brief, and an optional `assignee` (a desk or teammate id). Do NOT use this to get a hand-off tracked: work you hand off with `delegate_to_desk` or `delegate_to_teammate` already opens its own card, and calling both for the same work opens two."
+        "Open a task card on the company's board. Nothing said in chat is tracked unless an agent tracks it, so use this when an ask is real work that should be visible and followed up — something you are taking on that outlasts this reply, something for later, or something for somebody else. Provide a `title`, an optional `note` brief, and an optional `assignee` (a desk or teammate id). Open one card per piece of work: work that already has a card does not need another."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -2785,6 +2841,7 @@ impl Tool for SpawnTaskTool {
         // a name that resolves to nobody is refused here, in the model's own
         // turn, rather than surviving as a queued card the drain silently
         // opens unowned with no signal anywhere that the assignee was bogus.
+        let mut unverified = None;
         let owner = match assignee.as_deref() {
             Some(name) => match self.store.load(&self.company).await {
                 Ok(Some(record)) => {
@@ -2812,11 +2869,26 @@ impl Tool for SpawnTaskTool {
                     Some(name.to_string())
                 }
                 Err(err) => {
+                    if matches!(DelegationQueue::current_scope(), DelegationScope::Seat(_)) {
+                        tracing::warn!(
+                            company = %self.company,
+                            error = %err,
+                            "[spawn_task] refused a seat's card: the roster could not be read to \
+                             check its assignee"
+                        );
+                        return Ok(ToolResult::error(format!(
+                            "Could not open the card \"{title}\": the roster could not be read \
+                             to check that \"{name}\" is on it. Nothing was queued; try again, \
+                             or leave `assignee` out."
+                        )));
+                    }
                     tracing::warn!(
                         company = %self.company,
                         error = %err,
-                        "[spawn_task] could not read the company record to ground the assignee"
+                        "[spawn_task] could not read the company record to ground the assignee; \
+                         queuing with it unverified"
                     );
+                    unverified = Some(name.to_string());
                     Some(name.to_string())
                 }
             },
@@ -2824,7 +2896,19 @@ impl Tool for SpawnTaskTool {
         };
 
         let effect = format!("the card \"{title}\" was NOT opened");
-        match self.queue.push_within_cap(
+        let seated = match super::card_budget::reserve(&title) {
+            None => false,
+            Some(Ok(())) => true,
+            Some(Err(refusal)) => {
+                tracing::info!(
+                    company = %self.company,
+                    ?refusal,
+                    "[spawn_task] refused a card the conversation's budget does not allow"
+                );
+                return Ok(ToolResult::error(card_refused(&effect, refusal)));
+            }
+        };
+        let staged = self.queue.push_within_cap(
             Delegation::SpawnTask {
                 title: title.clone(),
                 note,
@@ -2832,12 +2916,34 @@ impl Tool for SpawnTaskTool {
             },
             MAX_DELEGATIONS_PER_TURN,
             NO_DEPTH_BOUND,
-        ) {
+        );
+        if seated && staged != Staged::Queued {
+            super::card_budget::release(&title);
+        }
+        match staged {
             Staged::Queued => {}
             Staged::OverCap => return Ok(ToolResult::error(over_cap(&effect))),
             Staged::NoDrain(why) => {
                 return Ok(ToolResult::error(no_drain(SPAWN_TASK_TOOL, &effect, why)));
             }
+        }
+        tracing::debug!(
+            company = %self.company,
+            seated,
+            "[spawn_task] queued a card"
+        );
+        if seated {
+            return Ok(ToolResult::success(format!(
+                "Queued a task card: \"{title}\". It is written to the board when your turn \
+                 ends; you will be told here if it cannot be. Do not describe it as open yet."
+            )));
+        }
+        if let Some(name) = unverified {
+            return Ok(ToolResult::success(format!(
+                "Queued a task card: \"{title}\". It will be opened on the board this turn, but \
+                 its assignee \"{name}\" could not be checked against the roster; if it names \
+                 nobody, the card opens unassigned."
+            )));
         }
         Ok(ToolResult::success(format!(
             "Queued a task card: \"{title}\". It will be opened on the board this turn."
@@ -3618,6 +3724,11 @@ fn no_drain(tool: &str, effect: &str, reason: NoDrainReason) -> String {
              this call; it will fail the same way, and do NOT report the card as reviewed, \
              approved or moved."
         ),
+        NoDrainReason::Seat => format!(
+            "Refused: in this room you can open a card and nothing else on the board, so {effect}. \
+             Ask the teammate concerned with `{prefix}ask` instead. Do NOT report it as done.",
+            prefix = crate::hive::host::TOOL_PREFIX
+        ),
         NoDrainReason::WorkflowHandOff => format!(
             "Refused: you are running inside a workflow, which has no conversation for a desk's \
              reply to come back to, so {effect}. A hand-off is only worth making when somebody is \
@@ -3625,6 +3736,22 @@ fn no_drain(tool: &str, effect: &str, reason: NoDrainReason) -> String {
              `spawn_task` — naming the desk as its assignee — which persists and reaches them. Do \
              not retry this call; it will fail the same way, and do NOT report the work as handed \
              over or the desk as having replied."
+        ),
+    }
+}
+
+/// The refusal `spawn_task` returns when the conversation's card budget does
+/// not allow another card.
+fn card_refused(effect: &str, refusal: super::card_budget::CardRefusal) -> String {
+    match refusal {
+        super::card_budget::CardRefusal::Duplicate => format!(
+            "Refused: a card with this title is already open or queued for this conversation, \
+             so {effect}. Do not open it twice; the existing card tracks it."
+        ),
+        super::card_budget::CardRefusal::Full { cap } => format!(
+            "Refused: this conversation has already opened {cap} cards, the most one message \
+             may, so {effect}. Fold the rest into the cards already open, or tell the operator \
+             plainly what is still untracked."
         ),
     }
 }
@@ -4115,6 +4242,7 @@ impl Tool for AddAgentTool {
             role: role.clone(),
             description,
             tools: tools.clone(),
+            skills: None,
             model: None,
             harness: None,
         };

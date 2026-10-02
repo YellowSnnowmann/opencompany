@@ -99,6 +99,7 @@ async fn an_inert_board_says_it_cannot_dispatch_once() {
     };
 
     let card = |id: &str, column: &str| crate::ports::tasks::TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: crate::ports::tasks::TaskTitle::authored("Do the thing"),
         note: None,
@@ -482,6 +483,7 @@ async fn boot_returns_a_stranded_card_and_leaves_a_parked_one_alone() {
     let manifest = parse("[company]\nname=\"Acme\"\n[policy]\nmode=\"full\"\n");
     let id = CompanyId::new("acme");
     let card = |task: &str, column: &str| TaskRecord {
+        opened_by: None,
         id: task.to_string(),
         title: crate::ports::tasks::TaskTitle::authored("Draft the spec"),
         note: Some("[maya] started".to_string()),

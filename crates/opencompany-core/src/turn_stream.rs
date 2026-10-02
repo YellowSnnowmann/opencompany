@@ -208,7 +208,10 @@ pub struct TypingFrame {
 #[derive(Clone, Debug, Serialize)]
 pub struct TurnStreamEvent {
     /// The wire discriminant: `"tool_call"` (a call just started, `status`
-    /// `running`) or `"tool_result"` (it finished, `status` `ok`/`error`).
+    /// `running`), `"tool_result"` (it finished, `status` `ok`/`error`),
+    /// `"thinking"` (a coalesced thinking row opened) or `"replying"` (the agent
+    /// started writing its reply text: no label or status, and never folded
+    /// into a step, so live and folded step counts stay equal).
     #[serde(rename = "type")]
     pub kind: &'static str,
     /// Monotonic per-turn sequence so the client can order/dedup frames that a
