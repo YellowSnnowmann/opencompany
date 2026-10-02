@@ -3624,6 +3624,25 @@ pub enum EvictionPolicy {
 // ---------------------------------------------------------------------------
 
 /// A message arriving on a channel.
+///
+/// **Deprecated (issue #1958):** `ChannelAdapter::inbound` is a deprecated empty
+/// default and is not the ingress path. This type is retained only so existing
+/// references keep compiling; downstream code should stop using it.
+///
+/// Real ingress is route-specific:
+/// - operator chat → `CompanyEvent::OperatorMessage`
+/// - email → filed into [`crate::ports::InboxStore`]; the email ingest/poll
+///   path may then trigger a cycle using `CompanyEvent::WebhookReceived` with
+///   `channel: "email"`
+/// - webhooks → delivered through their route-specific webhook handler, which
+///   emits `CompanyEvent::WebhookReceived` for that integration
+#[deprecated(
+    since = "0.2.4",
+    note = "ChannelAdapter::inbound is a deprecated empty default (issue #1958). \
+            Operator chat: CompanyEvent::OperatorMessage; \
+            email: InboxStore, then an email cycle tagged channel=email; \
+            webhooks: their route-specific handler emits CompanyEvent::WebhookReceived."
+)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InboundMessage {
     /// The channel the message arrived on.
