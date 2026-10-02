@@ -146,7 +146,9 @@ fn transcripts_under(dir: &std::path::Path) -> Vec<(std::path::PathBuf, String)>
             if path.is_dir() {
                 stack.push(path);
             } else if path.extension().is_some_and(|ext| ext == "jsonl")
-                && path.components().any(|part| part.as_os_str() == "session_raw")
+                && path
+                    .components()
+                    .any(|part| part.as_os_str() == "session_raw")
                 && let Ok(body) = std::fs::read_to_string(&path)
             {
                 out.push((path, body));
