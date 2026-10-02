@@ -635,8 +635,10 @@ async fn a_paypal_grant_with_no_credential_wires_nothing_rather_than_failing() {
 fn the_withheld_list_names_tools_by_their_own_constants() {
     use crate::harness::built_in::EPISODE_WITHHELD_TOOLS;
     use crate::harness::orchestrator::{
-        ASSIGN_TASK_TOOL, CREATE_WORKFLOW_TOOL, DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL,
-        REVIEW_TASK_TOOL, RUN_WORKFLOW_TOOL, SPAWN_TASK_TOOL,
+        ASSIGN_TASK_TOOL, CREATE_WORKFLOW_TOOL, REVIEW_TASK_TOOL, RUN_WORKFLOW_TOOL,
+    };
+    use crate::runtime::delegation_tools::{
+        DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL, SPAWN_TASK_TOOL,
     };
 
     for withheld in [
