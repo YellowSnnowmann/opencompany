@@ -77,6 +77,11 @@ fn list_connections_tool(config: &TenantComposio) -> Box<dyn Tool> {
 
 #[tokio::test]
 async fn each_tenant_only_ever_carries_its_own_token_and_sees_its_own_accounts() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let (url, log) = spawn_backend().await;
 
@@ -140,6 +145,11 @@ async fn each_tenant_only_ever_carries_its_own_token_and_sees_its_own_accounts()
 /// scrub vector protects, so a backend that reflects it still cannot leak it.
 #[tokio::test]
 async fn a_rotated_projected_token_is_presented_and_scrubbed_per_call() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     use crate::company::credentials::TinyhumansTokenSource;
 
@@ -210,6 +220,11 @@ async fn a_rotated_projected_token_is_presented_and_scrubbed_per_call() {
 /// tool's scrub must strip it before the agent ever sees it.
 #[tokio::test]
 async fn error_body_reflecting_the_token_is_scrubbed() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     async fn reflect(headers: HeaderMap) -> axum::Json<Value> {
         let auth = headers
@@ -289,6 +304,11 @@ fn tool_named(config: &TenantComposio, name: &str) -> Box<dyn Tool> {
 /// read can say so and retry later.
 #[tokio::test]
 async fn list_toolkits_reports_a_backend_failure_rather_than_an_empty_catalogue() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let (url, _log) = spawn_failing_backend().await;
     let tool = tool_named(&config(&url, "token-a"), "composio_list_toolkits");
@@ -310,6 +330,11 @@ async fn list_toolkits_reports_a_backend_failure_rather_than_an_empty_catalogue(
 /// on to guess a slug that was never listed.
 #[tokio::test]
 async fn list_tools_reports_a_backend_failure_rather_than_an_empty_listing() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let (url, _log) = spawn_failing_backend().await;
     let tool = tool_named(&config(&url, "token-a"), "composio_list_tools");
@@ -335,6 +360,11 @@ async fn list_tools_reports_a_backend_failure_rather_than_an_empty_listing() {
 /// account at all, and no other tenant's bearer was ever presented.
 #[tokio::test]
 async fn a_backend_failure_on_connections_yields_no_accounts_and_no_other_tenants_token() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let (url, log) = spawn_failing_backend().await;
     let tool = tool_named(&config(&url, "token-a"), "composio_list_connections");
@@ -385,6 +415,11 @@ async fn an_absent_credential_refuses_every_tool_before_the_network() {
 
 #[tokio::test]
 async fn a_repeated_authorize_for_one_toolkit_is_deduped() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let log: AuthLog = Arc::new(Mutex::new(Vec::new()));
     async fn authorize(State(log): State<AuthLog>) -> axum::Json<Value> {

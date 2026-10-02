@@ -275,6 +275,11 @@ async fn a_member_cannot_change_what_the_company_connects_through() {
 /// authorization call without dialling production (issue #801).
 #[tokio::test]
 async fn an_admin_is_unaffected() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     #[cfg(feature = "composio")]
     let backend = spawn_authorize_backend().await;

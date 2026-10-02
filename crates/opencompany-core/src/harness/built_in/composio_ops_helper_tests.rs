@@ -127,6 +127,11 @@ fn config(url: &str, toolkits: Vec<String>) -> TenantComposio {
 
 #[tokio::test]
 async fn authorize_returns_hosted_connect_url() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let url = spawn_backend().await;
     let out = authorize_connect_url(&config(&url, vec!["gmail".into()]), "gmail")
@@ -146,6 +151,11 @@ async fn authorize_rejects_toolkit_outside_allowlist_before_any_network_call() {
 
 #[tokio::test]
 async fn list_connection_states_aggregates_active_and_filters_to_allowlist() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let url = spawn_backend().await;
     // gmail + slack allowed; notion is active upstream but not in the grant.
@@ -166,6 +176,11 @@ async fn list_connection_states_aggregates_active_and_filters_to_allowlist() {
 /// allowlist filter the fold applies.
 #[tokio::test]
 async fn list_connections_detailed_projects_each_account_with_its_identity() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let url = spawn_backend().await;
     let rows = list_connections_detailed(&config(&url, vec!["gmail".into(), "slack".into()]))
@@ -225,6 +240,11 @@ async fn list_connections_detailed_projects_each_account_with_its_identity() {
 /// `connected` is still "any account active", not "the first one".
 #[tokio::test]
 async fn the_per_toolkit_fold_still_summarises_the_detailed_rows() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let url = spawn_backend().await;
     let cfg = config(&url, vec!["gmail".into(), "slack".into()]);
@@ -250,6 +270,11 @@ async fn the_per_toolkit_fold_still_summarises_the_detailed_rows() {
 /// the refusal has to come from the guard, before the call.
 #[tokio::test]
 async fn disconnect_refuses_an_id_outside_this_companys_visible_connections() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let url = spawn_backend().await;
     // `c4` (notion) is a real, active connection upstream — but this
@@ -306,6 +331,11 @@ async fn disconnect_refuses_a_blank_id_before_any_network_call() {
 /// reached [`crate::company::composio::set_default`].
 #[tokio::test]
 async fn pinning_an_account_that_cannot_send_is_refused_and_stores_nothing() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     use crate::company::composio::load_defaults;
     use crate::ports::types::CompanyId;
@@ -375,6 +405,11 @@ async fn pinning_an_account_that_cannot_send_is_refused_and_stores_nothing() {
 /// sorted.
 #[tokio::test]
 async fn list_catalog_toolkits_returns_the_backends_connectable_catalog() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let url = spawn_backend().await;
     let catalog = list_catalog_toolkits(&config(&url, Vec::new()))
@@ -396,6 +431,11 @@ async fn list_catalog_toolkits_returns_the_backends_connectable_catalog() {
 /// group by, nothing to brand with, and nothing to search but the slug.
 #[tokio::test]
 async fn list_catalog_toolkits_carries_the_display_metadata() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let url = spawn_backend().await;
     let catalog = list_catalog_toolkits(&config(&url, Vec::new()))
@@ -442,6 +482,11 @@ async fn list_catalog_toolkits_carries_the_display_metadata() {
 /// console would (correctly) render as a degraded fallback.
 #[tokio::test]
 async fn list_catalog_toolkits_falls_back_to_the_plain_allowlist() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let url = spawn_backend_with(get(legacy_toolkits_handler)).await;
     let catalog = list_catalog_toolkits(&config(&url, Vec::new()))
@@ -463,6 +508,11 @@ async fn list_catalog_toolkits_falls_back_to_the_plain_allowlist() {
 /// ask".
 #[tokio::test]
 async fn list_catalog_toolkits_surfaces_a_fetch_failure() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let out = list_catalog_toolkits(&config("http://127.0.0.1:1", Vec::new())).await;
     out.expect_err("an unreachable backend must not read as an empty catalog");
@@ -470,6 +520,11 @@ async fn list_catalog_toolkits_surfaces_a_fetch_failure() {
 
 #[tokio::test]
 async fn list_connection_states_empty_allowlist_admits_every_toolkit() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let url = spawn_backend().await;
     let states = list_connection_states(&config(&url, Vec::new()))

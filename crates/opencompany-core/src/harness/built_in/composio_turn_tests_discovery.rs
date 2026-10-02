@@ -12,6 +12,11 @@ use super::*;
 /// uses only information the previous step's *result* gave it.
 #[tokio::test]
 async fn an_agent_discovers_and_calls_an_action_unaided_on_two_large_toolkits() {
+    // `composio` implies `openhuman`, which is what compiles `crate::harness` at
+    // all. Without the gate this statement breaks every feature set that builds
+    // these tests without the harness -- `Rust (mail)` and `Rust (mongodb)` both
+    // failed on `cannot find \`harness\` in \`crate\``.
+    #[cfg(feature = "composio")]
     let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let (model_url, script) = spawn_script(vec![
         // 1. What can I do at all? (open mode: 260 actions)
