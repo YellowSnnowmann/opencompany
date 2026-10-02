@@ -473,5 +473,18 @@ Integration specialists keep `integrations_agent`; other agents retain their
 existing identity. This does not construct tools, widen company grants, or confer
 coordinator authority on specialists. The definition label also controls
 OpenHuman transcript filenames/metadata and the prompt context agent id. Those
-identity effects need review before adopting this workaround; a dedicated
-pack-disclosure override would avoid them.
+identity effects are intentional for this disclosure workaround; a dedicated
+pack-disclosure override could avoid them in a future change.
+
+## Self-contained delegated work
+
+A delegated colleague receives its assigned brief with `history_seed: false`.
+Its live history, transcript autoload, and active goal from an unrelated turn
+must not enter that work. The pool also skips automatic retrieval of prior task
+outcomes for this explicit context mode; the agent's memory tools remain
+available for deliberate recall. The parent and its final relay keep their
+normal conversation context.
+
+Unthreaded background work, including workflow steps without a run sink, starts
+with empty live history and leaves none for the next turn. Ordinary channel
+turns retain the existing continuous-session and audience rules.

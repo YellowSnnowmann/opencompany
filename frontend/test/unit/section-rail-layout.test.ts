@@ -98,6 +98,7 @@ describe("which sections get a rail", () => {
       "Work",
       "Workspace",
       "Brain",
+      "Automations",
       "Overview",
       "Invoicing",
       "Wallet",
@@ -142,14 +143,25 @@ describe("which sections get a rail", () => {
     for (const caption of captions) expect(railRows()).not.toContain(caption);
   });
 
-  it("draws none for Room or Automations, so their pane keeps its full width", () => {
-    // Room's sub-navigation is the channel list, which is pinned in the sidebar;
-    // Flows has none to move. A rail here would be 240px charged for nothing.
-    for (const view of ["chat", "workflows"] as View[]) {
-      render(view);
-      expect(container.querySelector("nav"), view).toBeNull();
-      expect(container.querySelector("[data-testid='page']"), view).not.toBeNull();
-    }
+  it("draws none for Room, and Company's rail for Automations", () => {
+    // Room is not a section: its sub-navigation is the conversation list, which
+    // is pinned in the sidebar, so a rail here would be 240px charged for
+    // nothing. Automations is a row on Company's rail, so `#/workflows` draws it
+    // with Automations the current page.
+    render("chat");
+    expect(container.querySelector("nav")).toBeNull();
+    expect(container.querySelector("[data-testid='page']")).not.toBeNull();
+
+    render("workflows");
+    expect(container.querySelector("nav[aria-label='Company']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='page']")).not.toBeNull();
+    // Whatever the rail marks as the current page is Automations — the chip
+    // strip and the column both say the same row.
+    const current = [...container.querySelectorAll('nav [aria-current="page"]')].map((el) =>
+      el.textContent?.trim(),
+    );
+    expect(current.length).toBeGreaterThan(0);
+    expect(new Set(current)).toEqual(new Set(["Automations"]));
   });
 
   it("draws none for an address filed under no section", () => {
@@ -182,6 +194,7 @@ describe("never two rails at once", () => {
       "Work",
       "Workspace",
       "Brain",
+      "Automations",
       "Overview",
       "Invoicing",
       "Wallet",

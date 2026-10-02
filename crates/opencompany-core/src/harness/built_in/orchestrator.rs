@@ -76,7 +76,9 @@ use async_trait::async_trait;
 use futures::future::FutureExt;
 use serde_json::{Value, json};
 
-use tinytools::{PermissionLevel, Tool, ToolResult};
+#[cfg(test)]
+use openhuman_core as oh;
+use tinytools::{PermissionLevel, Tool, ToolResult, ToolTimeout};
 
 use crate::company::{
     Agent as ManifestAgent, RawEdge, RawNode, RawWorkflow, WorkflowDestinationDef, WorkflowFile,
@@ -100,6 +102,9 @@ use crate::ports::types::{
     WorkflowNodeStatus,
 };
 use crate::ports::{CompanyStore, WorkflowRun, WorkflowRunner};
+
+mod insight_reads;
+mod run_output_items;
 
 /// The manifest cognition-tier that marks the orchestrator agent.
 ///
@@ -159,6 +164,7 @@ pub const QUERY_COMPANY_TOOL: &str = "query_company";
 // path share one definition and cannot drift.
 use crate::runtime::assignee;
 use crate::runtime::builder::agent_effective_grants;
+use crate::runtime::delegation::hand_off_target_of;
 use crate::runtime::delegation_tools;
 pub use crate::runtime::delegation_tools::{
     DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL, SPAWN_TASK_TOOL,
@@ -481,6 +487,12 @@ pub enum DelegationScope {
     /// several genuinely overlap, bounded only by the #401 in-flight cap. That
     /// is the concurrency this scoping exists for.
     Run(String),
+    /// One dispatched task card, keyed by its card id.
+    ///
+    /// Task turns can overlap hive seat turns. Keeping a task's one-handoff
+    /// rule in its own bucket prevents it from changing what those turns may
+    /// stage on the shared company queue.
+    Task(String),
     /// One HiveMind seat turn, keyed by its episode-seat turn key
     /// ([`turn_key`](crate::runtime::episode_resume::turn_key)).
     Seat(String),
@@ -566,6 +578,8 @@ pub struct DelegationQueue {
     /// turn's [`drain_refusals`](Self::drain_refusals) would take it, record it
     /// on its own card, and clear it.
     refused: Arc<Mutex<BTreeMap<DelegationScope, Vec<String>>>>,
+    /// Targets refused because this dispatched task already queued its one hand-off.
+    task_handoff_refusals: Arc<Mutex<BTreeMap<DelegationScope, Vec<String>>>>,
     /// The **scope chain**: the resolved desk ids of the hand-offs currently
     /// being executed, outermost first (issue #176).
     ///
@@ -674,6 +688,15 @@ impl DelegationQueue {
         self.claim_as(Self::current_scope(), DrainClaim::Full)
     }
 
+    /// A dispatched card transfers ownership once; unlike chat it cannot collect replies.
+    #[must_use = "the claim releases on drop"]
+    pub fn claim_task(&self, task_id: impl Into<String>) -> DelegationClaim {
+        {
+            let _ = task_id.into();
+            self.claim_as(Self::current_scope(), DrainClaim::Task)
+        }
+    }
+
     /// Claims this queue for a turn whose operator message triaged as a
     /// question (issue #267).
     ///
@@ -700,6 +723,17 @@ impl DelegationQueue {
         self.claim_as(DelegationScope::Run(run_id.into()), DrainClaim::Board)
     }
 
+    /// Claims this queue for a turn whose operator message triaged as a
+    /// question (issue #267).
+    ///
+    /// Identical to [`claim`](Self::claim) in every way that matters to the
+    /// drain — it runs, and it runs the same code — but only delegations that
+    /// [`answer`](Delegation::answers) may be staged under it. The three pure
+    /// board writes are refused at the tool boundary in the model's own turn.
+    ///
+    /// This exists because withholding the claim outright was too blunt: it
+    /// took `delegate_to_desk` away too, and that tool is how a question the
+    /// orchestrator cannot answer alone gets routed to a desk that can.
     #[must_use = "the claim releases on drop; dropping it immediately un-claims the queue"]
     pub fn claim_answering(&self) -> DelegationClaim {
         self.claim_as(Self::current_scope(), DrainClaim::Answering)
@@ -870,7 +904,8 @@ impl DelegationQueue {
     /// opposite of what the bound is for.
     #[must_use = "a refused delegation must be reported to the model, not dropped"]
     pub fn push_within_cap(&self, delegation: Delegation, cap: usize, max_depth: usize) -> Staged {
-        match self.claim_state() {
+        let claim = self.claim_state();
+        match claim {
             DrainClaim::Unclaimed => return Staged::NoDrain(NoDrainReason::Unwired),
             // Issue #267: the operator asked a question. A hand-off is how one
             // gets answered, so it stages; the pure board writes do not.
@@ -893,7 +928,11 @@ impl DelegationQueue {
             DrainClaim::Seat if !matches!(delegation, Delegation::SpawnTask { .. }) => {
                 return Staged::NoDrain(NoDrainReason::Seat);
             }
-            DrainClaim::Answering | DrainClaim::Full | DrainClaim::Board | DrainClaim::Seat => {}
+            DrainClaim::Answering
+            | DrainClaim::Full
+            | DrainClaim::Board
+            | DrainClaim::Task
+            | DrainClaim::Seat => {}
         }
         // Issue #176: checked after the claim (a context that drains nothing is
         // still the only fact worth reporting) and before the queue lock, so the
@@ -914,6 +953,22 @@ impl DelegationQueue {
         }
         let mut guard = self.inner.lock().expect("delegation queue");
         let bucket = guard.entry(Self::current_scope()).or_default();
+        // Match the dispatched-card drain: a second hand-off would otherwise
+        // receive a success receipt and then be discarded without running.
+        if claim == DrainClaim::Task
+            && delegation.answers()
+            && bucket.iter().any(Delegation::answers)
+        {
+            if let Some(target) = hand_off_target_of(&delegation) {
+                self.task_handoff_refusals
+                    .lock()
+                    .expect("delegation queue")
+                    .entry(Self::current_scope())
+                    .or_default()
+                    .push(target.to_string());
+            }
+            return Staged::NoDrain(NoDrainReason::TaskHandoffAlreadyQueued);
+        }
         if bucket.len() >= cap {
             return Staged::OverCap;
         }
@@ -1006,6 +1061,18 @@ impl DelegationQueue {
         drained
     }
 
+    /// Drains hand-off targets rejected by a dispatched task's one-transfer rule.
+    pub fn drain_task_handoff_refusals(&self, cap: usize) -> Vec<String> {
+        let mut guard = self.task_handoff_refusals.lock().expect("delegation queue");
+        let Some(bucket) = guard.get_mut(&Self::current_scope()) else {
+            return Vec::new();
+        };
+        let take = bucket.len().min(cap);
+        let drained = bucket.drain(..take).collect();
+        bucket.clear();
+        drained
+    }
+
     /// Empties the queue (called before an orchestrator turn so stale
     /// delegations from a prior turn never leak into this one).
     ///
@@ -1025,6 +1092,10 @@ impl DelegationQueue {
     fn clear_scope(&self, scope: &DelegationScope) {
         self.inner.lock().expect("delegation queue").remove(scope);
         self.refused.lock().expect("delegation queue").remove(scope);
+        self.task_handoff_refusals
+            .lock()
+            .expect("delegation queue")
+            .remove(scope);
     }
 
     /// Releases a claim: discards everything the claim's scope staged and
@@ -1172,6 +1243,8 @@ pub enum NoDrainReason {
     /// naming: open a card for the desk instead, which persists and is exactly
     /// what a run *can* do.
     WorkflowHandOff,
+    /// A dispatched card already has its one ownership transfer queued.
+    TaskHandoffAlreadyQueued,
     /// The queue is claimed by a HiveMind seat turn ([`DrainClaim::Seat`]),
     /// which may open cards and nothing else on the board.
     Seat,
@@ -1192,6 +1265,7 @@ impl NoDrainReason {
             Self::Depth => "depth_capped",
             Self::WorkflowLifecycle => "workflow_lifecycle_operator_only",
             Self::WorkflowHandOff => "workflow_handoff_no_reply_target",
+            Self::TaskHandoffAlreadyQueued => "task_handoff_already_queued",
             Self::Seat => "seat_opens_cards_only",
         }
     }
@@ -1218,6 +1292,8 @@ pub enum DrainClaim {
     Unclaimed,
     /// A drain site has claimed the queue and will execute anything staged.
     Full,
+    /// A dispatched board card permits one ownership transfer, not fan-out.
+    Task,
     /// A drain site has claimed the queue for a turn whose operator message
     /// triaged as [`MessageTriage::Answer`](crate::company::task_intent::MessageTriage)
     /// (issue #267). The drain runs exactly as under [`Full`](Self::Full); only
@@ -1274,6 +1350,12 @@ impl DelegationClaim {
     /// The scope this claim owns.
     pub fn scope(&self) -> &DelegationScope {
         &self.scope
+    }
+
+    /// Clears only this claimant's bucket, wherever the caller is currently
+    /// executing.
+    pub fn clear(&self) {
+        self.queue.clear_scope(&self.scope);
     }
 
     /// Drains up to `cap` of this claim's own staged delegations, wherever
@@ -1446,11 +1528,14 @@ impl Tool for QueryCompanyTool {
         let query = args.get("query").and_then(Value::as_str).map(str::trim);
         let query = query.filter(|q| !q.is_empty());
 
+        let mut unreadable: Vec<&'static str> = Vec::new();
         let facts = match &self.facts {
-            Some(store) => store
-                .list(&self.company, query, None)
-                .await
-                .unwrap_or_default(),
+            Some(store) => insight_reads::section(
+                store.list(&self.company, query, None).await,
+                "facts",
+                &self.company,
+                &mut unreadable,
+            ),
             None => Vec::new(),
         };
 
@@ -1467,10 +1552,13 @@ impl Tool for QueryCompanyTool {
         // line instead: the orchestrator learns that people are talking on the
         // cards without losing what the company *did*.
         let stored = match &self.events {
-            Some(log) => log
-                .read_from(&self.company, EventSeq::new(0), usize::MAX)
-                .await
-                .unwrap_or_default(),
+            Some(log) => insight_reads::section(
+                log.read_from(&self.company, EventSeq::new(0), usize::MAX)
+                    .await,
+                "recent_activity",
+                &self.company,
+                &mut unreadable,
+            ),
             None => Vec::new(),
         };
         let mut recent: Vec<String> = Vec::new();
@@ -1519,7 +1607,9 @@ impl Tool for QueryCompanyTool {
 
         let mut md = String::from("# Company insight\n");
         md.push_str("\n## Facts\n");
-        if facts.is_empty() {
+        if unreadable.contains(&"facts") {
+            md.push_str(insight_reads::FACTS_UNREADABLE);
+        } else if facts.is_empty() {
             md.push_str("_No durable facts recorded._\n");
         } else {
             // Two bounds, so the facts section can never be the thing that
@@ -1564,7 +1654,9 @@ impl Tool for QueryCompanyTool {
             }
         }
         md.push_str("\n## Recent activity\n");
-        if recent.is_empty() {
+        if unreadable.contains(&"recent_activity") {
+            md.push_str(insight_reads::ACTIVITY_UNREADABLE);
+        } else if recent.is_empty() {
             md.push_str("_No recent activity._\n");
         } else {
             md.push_str(&recent.join("\n"));
@@ -1573,12 +1665,12 @@ impl Tool for QueryCompanyTool {
 
         // Load the persisted record once: it carries both the roster and the
         // manifest's enabled workflow ids (the seed workflows that have no file
-        // under `workflows/`). `None`/error → those sections read empty rather
-        // than failing the whole surface.
-        let record = match &self.store {
-            Some(store) => store.load(&self.company).await.ok().flatten(),
-            None => None,
-        };
+        // under `workflows/`).
+        let record_read = insight_reads::RecordRead::load(self.store.as_ref(), &self.company).await;
+        if record_read.failed() {
+            unreadable.extend(["saved_workflows", "team", "desks"]);
+        }
+        let record = record_read.record();
 
         // Saved workflows: the seed `workflows/*.toml` graphs unioned with the
         // record's runtime-authored bodies (what `create_workflow` persists and
@@ -1605,7 +1697,7 @@ impl Tool for QueryCompanyTool {
         .collect();
         let mut seen: std::collections::HashSet<String> =
             workflows.iter().map(|(id, _)| id.clone()).collect();
-        if let Some(record) = &record {
+        if let Some(record) = record {
             for id in &record.manifest.workflows.enabled {
                 if seen.insert(id.clone()) {
                     workflows.push((id.clone(), id.clone()));
@@ -1614,7 +1706,7 @@ impl Tool for QueryCompanyTool {
         }
         workflows.sort_by(|a, b| a.0.cmp(&b.0));
         md.push_str("\n## Saved workflows\n");
-        if workflows.is_empty() {
+        if workflows.is_empty() && !record_read.failed() {
             md.push_str("_No saved workflows. Author one with `create_workflow`._\n");
         } else {
             for (id, name) in &workflows {
@@ -1623,6 +1715,9 @@ impl Tool for QueryCompanyTool {
                     name.trim(),
                     id
                 ));
+            }
+            if record_read.failed() {
+                md.push_str(insight_reads::WORKFLOWS_PARTIAL);
             }
         }
 
@@ -1633,7 +1728,7 @@ impl Tool for QueryCompanyTool {
         // delegation tools ground, the shape `workflow_build::roster_line`
         // also shows this model.
         let mut roster: Vec<(String, Option<String>, String)> = Vec::new();
-        if let Some(record) = &record {
+        if let Some(record) = record {
             // Resolved through the record: a teammate the operator removed is not
             // a delegation target, and one they renamed is named as it is now.
             for agent in record.effective_agents() {
@@ -1654,7 +1749,11 @@ impl Tool for QueryCompanyTool {
             }
         }
         md.push_str("\n## Team\n");
-        if roster.is_empty() {
+        if record_read.failed() {
+            md.push_str(insight_reads::ROSTER_UNREADABLE);
+        } else if roster.is_empty() && record.is_some() {
+            md.push_str(insight_reads::ROSTER_EMPTY);
+        } else if roster.is_empty() {
             md.push_str("_Roster unavailable._\n");
         } else {
             for (id, _, role) in &roster {
@@ -1673,7 +1772,6 @@ impl Tool for QueryCompanyTool {
         // are exactly the ids `delegate_to_desk` accepts, with each desk's lead
         // named so the two are never confused for one another again.
         let desks: Vec<(String, Option<String>)> = record
-            .as_ref()
             .map(|record| {
                 delegation_tools::desk_ids(record)
                     .into_iter()
@@ -1685,11 +1783,13 @@ impl Tool for QueryCompanyTool {
             })
             .unwrap_or_default();
         md.push_str("\n## Desks\n");
-        if desks.is_empty() {
+        if record_read.failed() {
+            md.push_str(insight_reads::DESKS_UNREADABLE);
+        } else if desks.is_empty() {
             md.push_str("_No desks._\n");
         } else {
             for (id, lead) in &desks {
-                let label = record.as_ref().map_or_else(
+                let label = record.map_or_else(
                     || id.clone(),
                     |r| crate::company::team_brief::desk_label(r, id),
                 );
@@ -1701,10 +1801,7 @@ impl Tool for QueryCompanyTool {
                     // "cannot be handed work" would be a lie about a staffed
                     // channel — while a desk with nobody on the roster really
                     // cannot take anything.
-                    None if record
-                        .as_ref()
-                        .is_some_and(|r| !r.desk_responder_mode(id).is_lead()) =>
-                    {
+                    None if record.is_some_and(|r| !r.desk_responder_mode(id).is_lead()) => {
                         md.push_str("channel without a lead; who answers is picked per message\n")
                     }
                     None => md.push_str("no member on the roster, so it cannot be handed work\n"),
@@ -1775,11 +1872,12 @@ impl Tool for QueryCompanyTool {
                     board_open_count = total_open;
                 }
                 Err(err) => {
-                    tracing::debug!(company = %self.company, error = %err, "query_company: board read failed");
-                    md.push_str("_Board unavailable._\n");
+                    tracing::warn!(company = %self.company, error = %err, "query_company: board read failed");
+                    unreadable.push("board");
+                    md.push_str(insight_reads::BOARD_UNREADABLE);
                 }
             },
-            None => md.push_str("_Board unavailable._\n"),
+            None => md.push_str(insight_reads::BOARD_UNWIRED),
         }
 
         Ok(ToolResult::success_with_markdown(
@@ -1791,6 +1889,7 @@ impl Tool for QueryCompanyTool {
                 "team": roster.len(),
                 "desks": desks.len(),
                 "board_open": board_open_count,
+                "unreadable": unreadable,
             }),
             md,
         ))
@@ -3227,7 +3326,7 @@ impl Tool for DelegateToDeskTool {
             }
         }
         Ok(ToolResult::success(format!(
-            "Delegated to the {desk} desk. Its lead will answer this turn."
+            "Queued for the {desk} desk. The lead runs AFTER you finish your current turn. Finish this turn after queuing the required work; do not poll for its result before returning. On a board task this transfers ownership of the card; on a chat turn the host collects the reply for your relay."
         )))
     }
 }
@@ -3446,9 +3545,13 @@ impl Tool for DelegateToTeammateTool {
         // name it read, and the id is the token it should write next time.
         Ok(ToolResult::success(
             if target.eq_ignore_ascii_case(&teammate) {
-                format!("Handed to {target}. They will answer this turn.")
+                format!(
+                    "Queued for {target}. They run AFTER you finish your current turn. Finish this turn after queuing the required work; do not poll for their result before returning. On a board task this transfers ownership of the card; on a chat turn the host collects the reply for your relay."
+                )
             } else {
-                format!("Handed to {teammate} (`{target}`). They will answer this turn.")
+                format!(
+                    "Queued for {teammate} (`{target}`). They run AFTER you finish your current turn. Finish this turn after queuing the required work; do not poll for their result before returning. On a board task this transfers ownership of the card; on a chat turn the host collects the reply for your relay."
+                )
             },
         ))
     }
@@ -3695,6 +3798,13 @@ fn no_drain(tool: &str, effect: &str, reason: NoDrainReason) -> String {
          model's own turn rather than queuing into a queue nothing will drain"
     );
     match reason {
+        NoDrainReason::TaskHandoffAlreadyQueued => format!(
+            "Refused: this board task already has an ownership transfer queued, so {effect}. \
+             Only the first colleague will run; a task hand-off does not return their answer \
+             to you. Do not claim this second colleague was assigned or reviewed the result. \
+             For a multi-colleague calculation and review, use a manual workflow with separate \
+             agent steps and explicit dependencies instead of multiple hand-offs on one card."
+        ),
         NoDrainReason::Unwired => format!(
             "Refused: nothing here can carry out board work, so {effect}. Board actions are \
              unavailable in this context. Do not retry — it will fail the same way — and do NOT \
@@ -4800,6 +4910,15 @@ impl Tool for RunWorkflowTool {
         true
     }
 
+    // A workflow is a supervised sequence of bounded agent/tool calls, not one
+    // ordinary tool operation. Inheriting the 120-second tool deadline drops
+    // the runner before it can journal its outcome and strands child work.
+    // Keep the runner's cancellation path and task-local nesting guard intact,
+    // matching OpenHuman's own supervised multi-agent orchestration tools.
+    fn timeout_policy(&self, _args: &Value) -> ToolTimeout {
+        ToolTimeout::Unbounded
+    }
+
     async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
         // Accept `id` (canonical) or `workflow` (a natural alias) for the id.
         let wid = args
@@ -5652,14 +5771,7 @@ impl Tool for ReadRunOutputTool {
             // with a real node rather than guess.
             let mut valid: Vec<String> = nodes
                 .iter()
-                .map(|(id, st)| {
-                    let count = st
-                        .get("items")
-                        .and_then(Value::as_array)
-                        .map(Vec::len)
-                        .unwrap_or(0);
-                    format!("`{id}` ({count} item(s))")
-                })
+                .map(|(id, st)| format!("`{id}` ({})", run_output_items::listing_count(st)))
                 .collect();
             valid.sort();
             let list = if valid.is_empty() {
@@ -5673,18 +5785,19 @@ impl Tool for ReadRunOutputTool {
             )));
         };
 
-        let items = state
-            .get("items")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+        let Some(items) = run_output_items::node_items(state) else {
+            tracing::warn!(company = %self.company, run_id = %run_id, node = %node, "read_run_output: node output has no items list");
+            return Ok(ToolResult::error(run_output_items::unreadable_shape(
+                node, run_id,
+            )));
+        };
         if items.is_empty() {
             return Ok(ToolResult::success(format!(
                 "Node `{node}` of run `{run_id}` produced no items."
             )));
         }
 
-        let (full, n) = render_run_items(&items);
+        let (full, n) = render_run_items(items);
         let total = full.chars().count();
         let start = offset.min(total);
         let budget = crate::harness::build::TOOL_RESULT_BUDGET_BYTES
@@ -6232,3 +6345,7 @@ pub(crate) fn create_workflow_parameters_schema() -> Value {
 #[cfg(test)]
 #[path = "orchestrator_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "task_handoff_receipt_tests.rs"]
+mod task_handoff_receipt_tests;

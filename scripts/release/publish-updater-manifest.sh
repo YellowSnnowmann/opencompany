@@ -30,6 +30,9 @@
 #                is asserted against crates/opencompany-app/tauri.conf.json either way — a
 #                manifest whose `version` does not match the application inside
 #                the archive is an update every client takes and then re-offers.
+#   PLATFORMS    comma-separated platform families the release carries, each of
+#                which becomes REQUIRED in the manifest: `macos` (both darwin
+#                keys) and `windows` (windows-x86_64). Defaults to `macos`.
 set -euo pipefail
 
 : "${TAG:?TAG is required, e.g. v0.1.0}"
@@ -38,6 +41,27 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONF="$REPO_ROOT/crates/opencompany-app/tauri.conf.json"
+
+PLATFORMS="${PLATFORMS:-macos}"
+WANT_MACOS=0
+WANT_WINDOWS=0
+IFS=',' read -r -a REQUESTED <<< "$PLATFORMS"
+for family in "${REQUESTED[@]}"; do
+  family="$(printf '%s' "$family" | tr -d '[:space:]')"
+  case "$family" in
+    macos) WANT_MACOS=1 ;;
+    windows) WANT_WINDOWS=1 ;;
+    "") ;;
+    *)
+      echo "::error::PLATFORMS names an unknown platform family '$family' (expected macos, windows)." >&2
+      exit 1
+      ;;
+  esac
+done
+if [ "$WANT_MACOS" -eq 0 ] && [ "$WANT_WINDOWS" -eq 0 ]; then
+  echo "::error::PLATFORMS='$PLATFORMS' selects no platform, so the manifest would advertise nothing." >&2
+  exit 1
+fi
 
 VERSION="${VERSION:-${TAG#v}}"
 BUILT_VERSION="$(jq -r '.version' "$CONF")"
@@ -87,13 +111,21 @@ read_signature() {
   cat "$WORKDIR/$name"
 }
 
-# The platform keys the updater looks itself up under. macOS only, because
-# `build-desktop.yml` is the only desktop release path there is — a
-# Windows or Linux client would find no entry for its target and report no
-# update, which is the honest answer while no such build is published.
+# The platform keys the updater looks itself up under. Windows updates install
+# through the NSIS setup, so that is the entry; the MSI is for manual installs.
+# A Linux client finds no entry for its target and reports no update, which is
+# the honest answer while no Linux build is published.
 # See docs/spec/runtime/desktop-updates.md.
-MAC_AARCH64="$(find_asset '^OpenCompany_.*_aarch64\.app\.tar\.gz$')"
-MAC_X86_64="$(find_asset '^OpenCompany_.*_x64\.app\.tar\.gz$')"
+REQUIRED=()
+if [ "$WANT_MACOS" -eq 1 ]; then
+  MAC_AARCH64="$(find_asset '^OpenCompany_.*_aarch64\.app\.tar\.gz$')"
+  MAC_X86_64="$(find_asset '^OpenCompany_.*_x64\.app\.tar\.gz$')"
+  REQUIRED+=(darwin-aarch64 darwin-x86_64)
+fi
+if [ "$WANT_WINDOWS" -eq 1 ]; then
+  WIN_X86_64="$(find_asset '^OpenCompany_.*_x64-setup\.exe$')"
+  REQUIRED+=(windows-x86_64)
+fi
 
 MANIFEST="$WORKDIR/latest.json"
 jq -n \
@@ -112,14 +144,20 @@ add_platform() {
   echo "[updater] + $key → $name"
 }
 
-add_platform "darwin-aarch64" "$MAC_AARCH64"
-add_platform "darwin-x86_64" "$MAC_X86_64"
+if [ "$WANT_MACOS" -eq 1 ]; then
+  add_platform "darwin-aarch64" "$MAC_AARCH64"
+  add_platform "darwin-x86_64" "$MAC_X86_64"
+fi
+if [ "$WANT_WINDOWS" -eq 1 ]; then
+  add_platform "windows-x86_64" "$WIN_X86_64"
+fi
 
-# Both architectures or nothing. A manifest carrying only Apple Silicon leaves
-# every Intel client silently pinned to the build it already has, with no error
-# anywhere — the failure this whole feature exists to remove, reintroduced by a
-# half-finished matrix.
-MISSING="$(jq -r '["darwin-aarch64","darwin-x86_64"] - (.platforms | keys) | join(", ")' "$MANIFEST")"
+# Every requested platform or nothing. A manifest carrying only Apple Silicon
+# leaves every Intel client silently pinned to the build it already has, with no
+# error anywhere — the failure this whole feature exists to remove,
+# reintroduced by a half-finished matrix. The same holds for Windows.
+REQUIRED_JSON="$(printf '%s\n' "${REQUIRED[@]}" | jq -R . | jq -sc .)"
+MISSING="$(jq -r --argjson required "$REQUIRED_JSON" '$required - (.platforms | keys) | join(", ")' "$MANIFEST")"
 if [ -n "$MISSING" ]; then
   echo "::error::latest.json is missing platform(s): $MISSING. Refusing to publish a partial manifest." >&2
   exit 1

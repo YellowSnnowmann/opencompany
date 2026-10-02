@@ -2149,6 +2149,17 @@ async fn async_main() -> Result<()> {
             let admin_email = std::env::var("OPENCOMPANY_ADMIN_EMAIL")
                 .ok()
                 .filter(|value| !value.trim().is_empty());
+            // The SSO auto-login signing secret (`OPENCOMPANY_SSO_SECRET`). The
+            // platform signs a short-lived, single-use token per "Open company"
+            // deep-link with it; this workload verifies it offline at
+            // `POST /api/v1/sso/redeem`. Blank or unset disables the endpoint
+            // entirely (`server::sso`), so a self-hosted `serve` exposes no SSO
+            // surface until a secret is configured — the same off-by-default
+            // shape the platform credentials take.
+            let sso_secret = std::env::var("OPENCOMPANY_SSO_SECRET")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(opencompany::ports::types::SecretValue);
             // Hosted-brain credential, resolved with the same precedence the
             // harness uses (`harness_inference_from_env`) so `/spec`'s
             // `cycles_available` reflects whether cognition can actually run.
@@ -2253,6 +2264,7 @@ async fn async_main() -> Result<()> {
                 tenant_namespace,
                 admin_email,
                 auth_mode_override,
+                sso_secret,
                 tinyhumans_credential,
                 // Issue #553: the workspace's enforced byte limits, read from
                 // the same `[workspace]` section as the soft disk quotas above
@@ -2416,6 +2428,13 @@ async fn async_main() -> Result<()> {
                     // from it.
                     println!("platform auth: {mode}");
                 }
+            }
+            // SSO auto-login: report whether the redeem endpoint is armed, so an
+            // operator can read the active state off the logs. The presence of a
+            // secret — never its value — is all that is printed; the secret rode
+            // into `AppConfig::sso_secret` above and `server::sso` reads it there.
+            if state.config().sso_secret().is_some() {
+                println!("sso auto-login: enabled");
             }
             // Outbound webhooks: a URL wires the HTTP sink under `webhooks`;
             // without the feature the request is warned and dropped.
