@@ -714,6 +714,17 @@ impl DelegationQueue {
         self.claim_as(DelegationScope::Run(run_id.into()), DrainClaim::Board)
     }
 
+    /// Claims this queue for a turn whose operator message triaged as a
+    /// question (issue #267).
+    ///
+    /// Identical to [`claim`](Self::claim) in every way that matters to the
+    /// drain — it runs, and it runs the same code — but only delegations that
+    /// [`answer`](Delegation::answers) may be staged under it. The three pure
+    /// board writes are refused at the tool boundary in the model's own turn.
+    ///
+    /// This exists because withholding the claim outright was too blunt: it
+    /// took `delegate_to_desk` away too, and that tool is how a question the
+    /// orchestrator cannot answer alone gets routed to a desk that can.
     #[must_use = "the claim releases on drop; dropping it immediately un-claims the queue"]
     pub fn claim_answering(&self) -> DelegationClaim {
         self.claim_as(Self::current_scope(), DrainClaim::Answering)
