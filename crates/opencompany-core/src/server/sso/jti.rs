@@ -55,6 +55,20 @@ impl ConsumedJtis {
         }
     }
 
+    /// Whether a successful redemption has already recorded `jti`.
+    ///
+    /// Used by the empty-host setup session: the signed token is the temporary
+    /// credential, but it becomes usable there only after the redemption route
+    /// has consumed it and returned that session to the caller.
+    pub async fn is_consumed(&self, jti: &str) -> Result<bool, OpenCompanyError> {
+        let path = self.dir.join(sha256_hex(jti));
+        match tokio::fs::metadata(&path).await {
+            Ok(_) => Ok(true),
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
+            Err(source) => Err(io_err(&path, source)),
+        }
+    }
+
     /// Atomically records `jti` as consumed, returning whether this call is the
     /// one that consumed it.
     ///

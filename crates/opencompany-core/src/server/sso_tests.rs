@@ -240,6 +240,19 @@ async fn the_platform_owner_can_redeem_into_setup_on_a_routable_empty_host() {
     let state = empty_routable_state(home.path());
     assert!(state.registry().is_empty());
 
+    let raw_token = valid_token();
+    let before_redeem = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/setup")
+                .header(SESSION_HEADER, format!("acme.{raw_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(before_redeem.status(), StatusCode::CONFLICT);
+
     let response = router(state.clone())
         .oneshot(post(
             "/api/v1/sso/redeem",

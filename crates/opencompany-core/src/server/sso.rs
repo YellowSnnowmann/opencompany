@@ -183,27 +183,34 @@ async fn redeem_from_host(
 
 /// Whether `session` is the platform owner's short-lived setup credential for
 /// an empty registry. Used only by the host-level setup authorizer.
-pub(crate) fn bootstrap_session_is_valid(
+pub(crate) async fn bootstrap_session_is_valid(
     state: &AppState,
     company: &CompanyId,
     token: &str,
-) -> bool {
+) -> Result<bool, crate::server::Rejection> {
     let Some(secret) = state.config().sso_secret() else {
-        return false;
+        return Ok(false);
     };
     if !state.registry().is_empty() {
-        return false;
+        return Ok(false);
     }
     let Ok(claims) = verify_token(secret, token) else {
-        return false;
+        return Ok(false);
     };
     let claimed = state
         .config()
         .namespaced_company_id(CompanyId::new(claims.slug.as_str()));
     let subject = crate::ports::users::normalize_email(&claims.sub);
-    claimed == *company
-        && !subject.is_empty()
-        && state.config().bootstrap_admin().as_deref() == Some(subject.as_str())
+    if claimed != *company
+        || subject.is_empty()
+        || state.config().bootstrap_admin().as_deref() != Some(subject.as_str())
+    {
+        return Ok(false);
+    }
+    ConsumedJtis::new(state.home(), &CompanyId::new("sso-bootstrap"))
+        .is_consumed(&claims.jti)
+        .await
+        .map_err(Into::into)
 }
 
 /// `404` for a redeem attempt on a host with no SSO secret configured.

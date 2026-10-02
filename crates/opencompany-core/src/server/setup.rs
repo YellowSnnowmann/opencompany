@@ -656,7 +656,7 @@ async fn authorize(
 ) -> Result<(), crate::server::Rejection> {
     if state.registry().is_empty()
         && let Some((company, token)) = crate::server::users::cookie::session_from_header(headers)
-        && crate::server::sso::bootstrap_session_is_valid(state, &company, &token)
+        && crate::server::sso::bootstrap_session_is_valid(state, &company, &token).await?
     {
         return Ok(());
     }
