@@ -75,6 +75,11 @@ pub mod composio_catalog;
 /// [`composio_direct`].
 #[cfg(feature = "composio")]
 pub mod composio_direct;
+/// The transport both halves of the Composio surface now share: the loadable
+/// `tinyconnectors` module, configured per company. v0.64.10 removed the
+/// in-process clients each half used to hold. See [`composio_module`].
+#[cfg(feature = "composio")]
+mod composio_module;
 /// End-to-end proof that #410's narrowable, self-describing Composio listing is
 /// reachable from a real turn on two large toolkits — the harness, the grant
 /// gate, the approval policy and the Composio client are all real; only the

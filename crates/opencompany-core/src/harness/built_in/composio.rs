@@ -584,8 +584,8 @@ mod live {
     use crate::ports::UsageMeter;
     use crate::ports::now_millis;
 
+    use crate::harness::built_in::composio_module::ManagedComposio;
     use oh::integrations::IntegrationClient;
-    use oh::integrations::composio::ComposioClient;
     use oh::integrations::composio::types::{
         ComposioAuthorizeResponse, ComposioConnectionsResponse, ComposioDeleteResponse,
         ComposioExecuteResponse, ComposioToolkitsResponse, ComposioToolsResponse,
@@ -615,7 +615,7 @@ mod live {
     /// Build the five per-tenant Composio tools over the tenant's credential.
     ///
     /// Each tool holds the shared [`TenantComposio`] and the toolkit allowlist,
-    /// and builds its [`ComposioClient`] **when it runs** via [`live_call`] — the
+    /// and builds its [`ManagedComposio`] **when it runs** via [`live_call`] — the
     /// bearer is resolved then, not now, so a platform token that rotated since
     /// the roster was built still authenticates. The read tools are `ReadOnly`;
     /// the `authorize` / `execute` tools are `Execute` and additionally park for
@@ -683,7 +683,7 @@ mod live {
         let mut secrets = vec![secret.clone()];
         crate::harness::backend_transport::ensure_installed();
         let client = match config.mode() {
-            ComposioMode::Managed => LiveClient::Managed(ComposioClient::new(Arc::new(
+            ComposioMode::Managed => LiveClient::Managed(ManagedComposio::new(Arc::new(
                 IntegrationClient::new(config.backend_url.clone(), secret.clone()),
             ))),
             ComposioMode::Byok => {
@@ -695,7 +695,7 @@ mod live {
                 let catalog = match config.catalog_token().await {
                     Ok(Some(token)) => {
                         secrets.push(token.clone());
-                        Some(ComposioClient::new(Arc::new(IntegrationClient::new(
+                        Some(ManagedComposio::new(Arc::new(IntegrationClient::new(
                             config.backend_url.clone(),
                             token,
                         ))))
@@ -731,7 +731,7 @@ mod live {
     /// only place that has to state what BYOK cannot do.
     enum LiveClient {
         /// Proxied through the OpenHuman backend — the default route.
-        Managed(ComposioClient),
+        Managed(ManagedComposio),
         /// Straight to the company's own Composio account.
         Byok {
             /// The company's own Composio account — every call but the toolkit
@@ -740,7 +740,7 @@ mod live {
             /// OpenHuman's curated toolkit list, when a managed tier resolved to
             /// fetch it with. `None` on a host with no TinyHumans identity at
             /// all, where the company's own directory is the only list there is.
-            catalog: Option<ComposioClient>,
+            catalog: Option<ManagedComposio>,
         },
     }
 
@@ -895,7 +895,7 @@ mod live {
 
     /// Identical normalized actions from one company agent share a backend key.
     async fn execute_managed(
-        client: &ComposioClient,
+        client: &ManagedComposio,
         tool: &str,
         arguments: Option<Value>,
         connection_id: Option<&str>,
