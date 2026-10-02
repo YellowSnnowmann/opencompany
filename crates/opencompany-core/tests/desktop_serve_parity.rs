@@ -83,6 +83,14 @@ const DELIBERATE_DIFFERENCES: &[(&str, &str)] = &[
          there is no platform provisioning a desktop",
     ),
     (
+        "config.sso_secret",
+        "OPENCOMPANY_SSO_SECRET is the platform's shared SSO signing secret, \
+         injected at provision so a hosted tenant can verify the auto-login \
+         tokens the dashboard mints; a desktop host is opened by its own operator \
+         with no platform issuing tokens, so it honors no SSO surface — the \
+         redeem route 404s without the secret",
+    ),
+    (
         "state.with_quota",
         "caps on provisioned companies; the desktop exposes no provisioning API",
     ),

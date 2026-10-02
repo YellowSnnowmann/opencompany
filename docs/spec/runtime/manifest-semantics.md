@@ -75,12 +75,36 @@ each page under the 500-line cap.
   a colleague's turn *inside* the caller's are gone, because a room is where
   colleagues answer each other, and a referral is how a room asks another.
 
-  Two runtime bounds hold on a crossing, both enforced when the referral is
-  decided rather than by which tools were wired: **depth** —
-  `referral.max_hops` — and **cycles** — a question to a desk already on the
-  current chain (A→B→A) is refused. A refused crossing reaches the run trail
-  verbatim, so the operator reads the fact rather than inferring it from an
-  absence.
+  A dispatched board card accepts one hand-off per turn: it transfers ownership
+  after the current turn finishes and settles from the colleague's output. A
+  second hand-off is refused immediately instead of receiving a success receipt
+  for work the drain would discard. Other permitted board writes still stage.
+  Chat turns can collect multiple colleagues' replies. For several contributors
+  and a final synthesis on a board task, use explicit workflow agent steps and
+  dependencies. A queued receipt is not evidence that the colleague has run.
+
+  Three runtime guards bound what it can do, all enforced at the tool boundary
+  in the member's own turn rather than by which tools were wired (belts are
+  cached per roster, so a tool cannot be withheld from one turn):
+
+  - **Depth** — `[tools].max_delegation_depth`, below.
+  - **Cycles** — a hand-off to a desk already on the current chain (A→B→A), or
+    to the desk the caller itself leads, is refused.
+  - **Allowlist** — a target outside a non-empty `delegates_to` is refused, and
+    the refusal names the desks the member *can* reach so it can retry in the
+    same turn.
+
+  Each refusal reaches both the model and the board: the run trail carries it
+  verbatim, and a refused hand-off is recorded on the dispatched card's note,
+  so the operator reads the fact rather than inferring it from an absence.
+
+  The per-turn fan-out cap (three delegations) applies **per level**, not per
+  message — each turn starts against an empty queue.
+  Cross-desk referrals have two additional runtime bounds, enforced when the
+  referral is decided: **depth** — `referral.max_hops` — and **cycles** — a
+  question to a desk already on the current chain (A→B→A) is refused. A
+  refused crossing reaches the run trail verbatim, so the operator reads the
+  fact rather than inferring it from an absence.
 
   **`budget_usd_daily`** (enforced since issue #304 — before that it was
   validated, stored and displayed, but nothing read it) caps one teammate's

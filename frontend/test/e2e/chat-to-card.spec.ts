@@ -148,13 +148,11 @@ test("a card raised from a channel line links back to the channel", async ({
   // The Engineering desk's own channel, not merely some channel: a regression
   // that landed the jump on the wrong one would still match a bare `/.+/`.
   await expect(page).toHaveURL(/#\/chat\/engineering(?:[/?]|$)/);
-  // `data-active` is a boolean attribute the sidebar row renders empty when
-  // set and omits when not, so the assertion is on its presence.
+  // The conversation list marks the channel the jump landed on as the current
+  // page (Room is not a nav row any more; the list is the sidebar's front).
   await expect(
-    page
-      .locator("[data-slot=sidebar-content]")
-      .getByRole("button", { name: "Room", exact: true }),
-  ).toHaveAttribute("data-active", "");
+    page.locator('[data-testid="room-rail-slot"] [aria-current="page"]'),
+  ).toHaveCount(1);
 
   // And Back returns to the card, because the jump went through the address
   // rather than through shell state the history knows nothing about.

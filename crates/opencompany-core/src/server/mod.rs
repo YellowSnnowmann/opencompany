@@ -24,6 +24,9 @@ pub mod hub_link_callback;
 pub(crate) mod inference_models;
 // Console MCP OAuth callback (issue #90): the unauthenticated browser-redirect
 // landing route. Gated on `mcp` (it needs the OAuth token-exchange path).
+/// Host-level admin password set: the platform gives a company's standing admin
+/// a password, so the owner can sign in directly. See [`admin_password`].
+pub mod admin_password;
 #[cfg(feature = "mcp")]
 pub mod mcp_oauth;
 pub mod operator;
@@ -38,6 +41,8 @@ mod routes;
 /// The first-run setup flow: one surface that configures an instance.
 pub mod setup;
 pub mod shutdown;
+/// SSO auto-login: redeeming a platform-minted token for a session. See [`sso`].
+pub mod sso;
 pub mod users;
 
 #[cfg(test)]

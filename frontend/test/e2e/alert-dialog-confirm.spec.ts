@@ -59,9 +59,10 @@ const backdrop = (page: Page) => page.locator('[data-slot="alert-dialog-overlay"
 
 /** Sidebar navigation only succeeds if nothing is intercepting pointer events. */
 async function expectConsoleInteractive(page: Page) {
+  // A conversation row: the Room nav row is gone, the list is the way in.
   await page
-    .locator('[data-tour="nav-chat"]')
-    .getByRole("button")
+    .locator('[data-testid="room-rail-slot"] li button')
+    .first()
     .click({ timeout: 10_000 });
   await expect(page).toHaveURL(/#\/chat/);
 }

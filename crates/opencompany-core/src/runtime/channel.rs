@@ -6,7 +6,7 @@
 //! (and tests) can read them back, while the console's live POST already reads
 //! `CycleReport.responses` directly. Inbound operator messages arrive as
 //! `OperatorMessage` events through the HTTP chat route, not through this
-//! stream, so `inbound` is an empty stream for now.
+//! port (issue #1958): [`ChannelAdapter`] is an outbound-only sink.
 //!
 //! A workflow report addressed to the operator does not go through this
 //! adapter: `workflows::delivery` journals it into the responsible agent's DM
@@ -15,12 +15,11 @@
 use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
-use futures::stream::{self, BoxStream};
 
 use crate::Result;
 use crate::ports::channel::ChannelAdapter;
 use crate::ports::events::EventLog;
-use crate::ports::types::{CompanyEvent, CompanyId, EventSeq, InboundMessage, OutboundMessage};
+use crate::ports::types::{CompanyEvent, CompanyId, EventSeq, OutboundMessage};
 
 /// The `agent_id` a workflow-delivered report is journaled under, so the
 /// console (and any other reader) can tell a workflow report apart from an
@@ -111,10 +110,6 @@ impl ChannelAdapter for DeskChannel {
         &self.desk_id
     }
 
-    fn inbound(&self) -> BoxStream<'static, InboundMessage> {
-        Box::pin(stream::empty())
-    }
-
     async fn send(&self, msg: OutboundMessage) -> Result<()> {
         self.events
             .append(
@@ -179,10 +174,6 @@ impl ChannelAdapter for OperatorChannel {
         OPERATOR_CHANNEL
     }
 
-    fn inbound(&self) -> BoxStream<'static, InboundMessage> {
-        Box::pin(stream::empty())
-    }
-
     async fn send(&self, msg: OutboundMessage) -> Result<()> {
         self.sent
             .lock()
@@ -240,10 +231,6 @@ impl RecordingChannel {
 impl ChannelAdapter for RecordingChannel {
     fn channel_id(&self) -> &str {
         &self.id
-    }
-
-    fn inbound(&self) -> BoxStream<'static, InboundMessage> {
-        Box::pin(stream::empty())
     }
 
     async fn send(&self, msg: OutboundMessage) -> Result<()> {

@@ -65,6 +65,17 @@ tools gets all four the moment it names an agent for the job — the global
 are not: an agent should not lose the ability to fix a broken page under
 token-budget pressure.
 
+### A manifest that does not read
+
+A page with no `page.toml` lists and reads with its slug as its title, and
+`pages_write` treats it as a new manifest (`title` required). A `page.toml`
+that exists but cannot be used is reported as unknown, never as empty:
+
+| `page.toml` | `pages_list` / `pages_read` | `pages_write` |
+|---|---|---|
+| Unreadable (store error, or the node vanished mid-read) | Says the manifest could not be read and its fields are unknown; `pages_read` still shows the source. | Refused before anything is written, whatever was passed — a write would replace the title, description, icon and visibility with defaults. |
+| Unparseable TOML | Says it could not be parsed; the slug stands in for the title. | Refused unless `title` is passed. With `title`, the manifest is replaced by the fields given (omitted ones reset to defaults) and the reply says so. |
+
 ## The compile contract
 
 `pages_write` compiles `page.tsx` synchronously, whenever `source` is given,

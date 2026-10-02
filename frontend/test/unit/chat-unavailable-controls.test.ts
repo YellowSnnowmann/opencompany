@@ -31,13 +31,23 @@ afterEach(() => {
 });
 
 describe("chat only renders controls it can perform (issue #1336)", () => {
-  // The compose door lives on the Direct messages section header now, mirroring
-  // the "+" on Channels — a DM is what it starts, so it belongs on that
-  // section rather than floating above the whole list attached to nothing. So
-  // the rail has to be given that section for the control to exist at all.
+  // The compose door is the pencil on the "Conversations" row now, and the agent
+  // picker is an item of the menu it opens. The rail has to be given someone to
+  // message for that item to be live.
   const DMS = [{ id: "dms", label: "Direct messages", channels: [] }];
 
-  it("offers the new-message picker in the channel rail when there is someone to message", () => {
+  const agentItem = () =>
+    [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (el) => el.textContent?.trim() === "Start a conversation with the agent",
+    );
+
+  function openCompose() {
+    act(() => {
+      action("Start a conversation")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+  }
+
+  it("offers the agent picker in the compose menu when there is someone to message", () => {
     render(
       createElement(ChannelRail, {
         sections: DMS,
@@ -49,15 +59,12 @@ describe("chat only renders controls it can perform (issue #1336)", () => {
       }),
     );
 
-    const button = action("New message");
-    expect(button).not.toBeNull();
-    expect((button as HTMLButtonElement).disabled).toBe(false);
-    // And it is a sibling of the Channels section's own door, not a different
-    // kind of control that happens to sit nearby: same size, same hit area.
-    expect((button as HTMLElement).className).toContain("rounded-md p-1");
+    openCompose();
+    expect(agentItem()).toBeDefined();
+    expect(agentItem()!.hasAttribute("data-disabled")).toBe(false);
   });
 
-  it("holds the new-message action back when nobody can be messaged", () => {
+  it("holds the agent picker back when nobody can be messaged", () => {
     render(
       createElement(ChannelRail, {
         sections: DMS,
@@ -69,9 +76,9 @@ describe("chat only renders controls it can perform (issue #1336)", () => {
       }),
     );
 
-    const button = action("New message");
-    expect(button).not.toBeNull();
-    expect((button as HTMLButtonElement).disabled).toBe(true);
+    openCompose();
+    expect(agentItem()).toBeDefined();
+    expect(agentItem()!.hasAttribute("data-disabled")).toBe(true);
   });
 
   it("keeps working composer controls and holds unavailable ones back", () => {
