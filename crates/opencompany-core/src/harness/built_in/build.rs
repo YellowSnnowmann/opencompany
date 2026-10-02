@@ -1241,6 +1241,7 @@ pub fn build_agent_with_model(
             // which the `run_workflow` tool loads graphs from.
             deps.skills_source_dir.clone(),
             deps.workflow_runner.clone(),
+            crate::harness::built_in::board_start::for_company(company),
             // Issue #383: the same supervisor the console's cancel route reads,
             // so a run this agent starts is stoppable by an operator too.
             deps.run_supervisor.clone(),

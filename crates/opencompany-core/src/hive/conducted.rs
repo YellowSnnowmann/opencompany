@@ -137,6 +137,11 @@ async fn conduct(
         .seating(Arc::clone(&episode.record), Arc::clone(&episode.deps))
         .locking(Arc::clone(&episode.pool));
         host = host.concluding(episode.concluding);
+        // A card's room stamps its rows with that card, so the room's work shows on
+        // the card's timeline rather than only in a conversation nothing reads.
+        if let Some(card) = episode.desk.card.clone() {
+            host = host.for_card(card);
+        }
         if let Some(parking) = episode.parking.clone() {
             host = host.parking(parking);
         }

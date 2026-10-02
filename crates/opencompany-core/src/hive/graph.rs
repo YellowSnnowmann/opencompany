@@ -33,6 +33,15 @@ pub struct DeskHive {
     pub hive: BoundHive<EmbedSeat>,
     /// The candidate snapshot version a Jev evaluation must echo.
     pub roster_version: u64,
+    /// The board card this room is working, when it is a card's room rather than
+    /// a desk's or a DM's.
+    ///
+    /// Carried so the host can stamp `task_id` on the rows the room writes: the
+    /// card timeline reads by `task_id`, and an episode's rows default to `None`,
+    /// so without this a convened card's work is journaled where the card can see
+    /// it (the key is the card id) and still invisible to the surface that reads
+    /// it. `None` for every desk and DM room.
+    pub card: Option<String>,
 }
 
 impl DeskHive {
@@ -117,6 +126,7 @@ pub fn desk_hives(
                         desk_name: desk.name.clone(),
                         hive,
                         roster_version,
+                        card: None,
                     }),
                 );
             }
@@ -258,6 +268,7 @@ pub fn card_hive(
             desk_name: desk.name.clone(),
             hive,
             roster_version,
+            card: Some(card_id.to_owned()),
         })
 }
 
@@ -309,7 +320,9 @@ fn bind_seats<'a>(
             learned_topics: Vec::new(),
             available: true,
         });
-        seats.bindings.push(AgentBinding::new(member, EmbedSeat(agent)));
+        seats
+            .bindings
+            .push(AgentBinding::new(member, EmbedSeat(agent)));
         seats.members.push(member.to_string());
     }
     seats
@@ -405,6 +418,7 @@ pub fn dm_hives(
                         desk_name: name,
                         hive,
                         roster_version,
+                        card: None,
                     }),
                 );
             }

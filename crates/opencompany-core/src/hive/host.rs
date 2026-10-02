@@ -112,6 +112,12 @@ pub struct DeskHost {
     /// This episode's id, carried on every bracket so the console can draw
     /// one seat's lane within one meeting.
     episode_id: String,
+    /// The board card this room is working, when it is a card's room.
+    ///
+    /// Stamped onto the rows the room writes, because the card timeline reads by
+    /// `task_id` and an episode's rows carry none by default. `None` for a desk
+    /// or DM room, which belong to a conversation rather than to a card.
+    card: Option<String>,
     /// Which wave is running, for the same reason. Bumped as each wave
     /// settles, which is the one moment the loop tells a host a wave ended.
     wave: AtomicU64,
@@ -261,6 +267,7 @@ impl DeskHost {
             company,
             desk_id,
             thread_root: None,
+            card: None,
             events,
             log,
             roster: None,
@@ -650,6 +657,17 @@ impl DeskHost {
         }
     }
 
+    /// Names the board card this room is working, so its rows join that card's
+    /// timeline.
+    ///
+    /// Set only for a card's room. A desk or DM room answers a conversation and has
+    /// no card, so its rows stay unstamped exactly as before.
+    #[must_use]
+    pub fn for_card(mut self, card: impl Into<String>) -> Self {
+        self.card = Some(card.into());
+        self
+    }
+
     /// The wave `seat`'s current turn opened in, or the live counter for a
     /// seat this host never bracketed (see `turn_waves`).
     fn wave_of(&self, seat: &str) -> u64 {
@@ -694,6 +712,20 @@ impl DeskHost {
                 }
             }
         }
+        // Stamped only on a **desk-visible** row, and that is the whole care here.
+        //
+        // The card timeline matches `AgentReply { task_id: Some(id) }` and ignores
+        // `audience` entirely -- the word does not occur in `server/ops/tasks.rs`.
+        // So stamping an aside would publish, in full, a row the desk's own history
+        // shows only as "a private message happened": the card would become a way
+        // around the redaction rather than another reader of it.
+        //
+        // An empty audience is this journal's word for desk-visible, which is
+        // exactly the set a card may show.
+        let task_id = self
+            .card
+            .clone()
+            .filter(|_| audience.is_empty());
         CompanyEvent::AgentReply {
             chat_id: chat.to_owned(),
             agent_id: author.to_owned(),
@@ -709,7 +741,7 @@ impl DeskHost {
                 .remove(author)
                 .unwrap_or_default(),
             outputs: Vec::new(),
-            task_id: None,
+            task_id,
             episode: None,
             // A row of a conversation hangs off the ask that rooted it;
             // otherwise off the thread the episode itself was opened in.

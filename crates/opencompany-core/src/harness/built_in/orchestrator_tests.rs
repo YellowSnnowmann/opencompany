@@ -37,3 +37,5 @@ mod tests_part8;
 mod tests_part9;
 #[path = "orchestrator_tests_seat_scope.rs"]
 mod tests_seat_scope;
+#[path = "orchestrator_tests_start_task.rs"]
+mod tests_start_task;

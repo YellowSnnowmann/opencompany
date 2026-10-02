@@ -48,6 +48,8 @@ pub mod approval_tool;
 /// [`toolbelt::shell_audit`] resolves. See [`audit`].
 pub mod audit;
 pub mod blockers;
+/// ran a workflow can link to it. See [`workflow_refs`].
+pub mod board_start;
 pub mod brain;
 pub mod build;
 pub mod capability_budget;
@@ -204,7 +206,6 @@ pub mod workflow_admin;
 /// but it mints an attempt row because building the workflow is the card's work.
 /// See [`workflow_build`].
 pub mod workflow_build;
-/// ran a workflow can link to it. See [`workflow_refs`].
 pub mod workflow_refs;
 /// End-to-end proof that an agent granted `files` and **not** `shell` can write
 /// a relative path on a company that has never run — the #409 provisioning gap,

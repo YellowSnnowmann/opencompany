@@ -686,7 +686,10 @@ fn only_a_terminal_ending_anchors_the_timeline() {
         column_for_settled_run(RunStatus::WaitingApproval),
         Some(COLUMN_PAUSED)
     );
-    assert_eq!(column_for_settled_run(RunStatus::Paused), Some(COLUMN_PAUSED));
+    assert_eq!(
+        column_for_settled_run(RunStatus::Paused),
+        Some(COLUMN_PAUSED)
+    );
     assert!(!anchors_timeline(RunStatus::WaitingApproval));
     assert!(!anchors_timeline(RunStatus::Paused));
 }

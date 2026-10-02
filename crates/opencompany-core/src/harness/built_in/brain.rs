@@ -1188,311 +1188,337 @@ impl HarnessBrain {
         // rides along because the run's status cannot be re-derived from the
         // card's landing column — `Failed` and `Cancelled` share one column and
         // are not the same outcome (see [`lifecycle::run_status_for`]).
-        let (run_end, result_text) = loop {
-            // Start each turn from an empty queue so nothing a prior turn (this
-            // cycle's operator message, or an earlier redirect rerun) left
-            // behind can hijack this card — the same guard
-            // `handle_operator_message` opens with.
-            self.deps.delegations.clear();
-            // Issue #244, same argument for staged publishes: a redirect
-            // re-runs from the original brief and *abandons* the previous
-            // turn's work, so a file that turn offered must be abandoned with
-            // it. This is inside the loop deliberately; the nudge below is not
-            // part of the loop and never clears, so a nudge cannot discard what
-            // the turn it is asking about published.
-            publish_claim.clear();
-            // Issue #339: an abandoned redirect's workflow run is abandoned with
-            // it, for the same reason — the card's link must name what the turn
-            // that actually settled produced, not what a discarded one did.
-            self.deps.workflow_refs.clear();
-            let outcome = publish_claim
-                .scoped(Box::pin(
-                    dispatch_origin.scoped(Box::pin(
-                        run_turn
-                            // A dispatched task card carries no chat bubble (its steps
-                            // are discarded into the note), so its live turn frames
-                            // must not leak onto the console timeline — run it
-                            // un-streamed (#125 review).
-                            .run_steered_background(
-                                &self.record().id,
-                                &responder,
-                                &instruction,
-                                &control,
-                                // No conversation to bind to: a dispatched card's turn
-                                // answers the board, not a thread (#1890 I). Unchanged
-                                // behaviour — including that it does not clear
-                                // history, since one task can span several turns.
-                                ChatTarget::default(),
-                                // Issue #242: un-streamed does not mean unrecorded. The
-                                // trace this turn produces is written to the attempt
-                                // row as it happens, which is what a redirect re-run
-                                // appends to rather than restarting.
-                                sink.clone(),
-                            ),
-                    )),
-                ))
-                .await;
-            // One-shot read of what (if anything) the operator asked for. `None`
-            // is the ordinary, unsteered path.
-            match control.take() {
-                None => {
-                    // A dispatched task discards its steps — the note is text-only.
-                    match outcome {
-                        Ok(outcome) => {
-                            // Issue #1846 review (Codex #3864988168): a budget
-                            // pause is a terminal state, exactly like a spend
-                            // halt or an iteration-cap pause — the model call
-                            // itself failed, so `outcome.reply` is not a
-                            // completed answer, it is the placeholder/notice
-                            // text `classify_turn` substitutes (mirrors the
-                            // operator-chat path's own
-                            // `BUDGET_PAUSED_PLACEHOLDER_REPLY` treatment
-                            // below). Settling this as `Completed` let a
-                            // background dispatch's exhausted-budget failure
-                            // read on the board as a finished, reviewable
-                            // result — the same asymmetry this issue's
-                            // headline fix closes for the top-level
-                            // orchestrator's own call, just on the dispatched-
-                            // card path instead.
-                            //
-                            // Checked, and returned on, BEFORE the delegation
-                            // drain: per `classify_turn`, the budget-paused arm
-                            // only fires when the model call itself errored,
-                            // which cannot also have queued a hand-off on the
-                            // same attempt — so there is nothing below worth
-                            // draining, and doing so unconditionally would risk
-                            // running a stale hand-off from an earlier retry
-                            // still sitting in the queue.
-                            if let Some(pause) = &outcome.budget_paused {
-                                let result = budget_pause_notice(pause);
-                                settle(&mut card, TaskRunEnd::Paused, &responder, &result);
-                                break (TaskRunEnd::Paused, result);
-                            }
-                            // Issue #204: the turn may have DELEGATED rather
-                            // than done the work. The dispatched responder is
-                            // the orchestrator, which carries `delegate_to_desk`
-                            // / `spawn_task`, and nothing here used to drain
-                            // what those queued — so the hand-off was dropped,
-                            // the turn still read as a clean completion, and the
-                            // card landed in `in_review` under the delegator
-                            // with the delegate never having run. Draining here
-                            // runs the delegate, reassigns the card to them, and
-                            // settles it from THEIR output.
-                            //
-                            // An errored hand-off lands exactly like an errored
-                            // turn (the `Err` arm below), and must NOT propagate
-                            // with `?`. By the time `run_delegation` can fail,
-                            // `hand_card_over` has already persisted the card as
-                            // `in_progress` reassigned to the delegate — so
-                            // unwinding here would skip both the settle and the
-                            // final `upsert` and leave the card sitting in
-                            // `in_progress` under a delegate that produced
-                            // nothing, with no result and nothing to re-dispatch
-                            // it: `task_enters_in_progress` only edge-fires on
-                            // the *transition* into that column, which already
-                            // happened. That is precisely the stranded state
-                            // this fix exists to eliminate.
-                            //
-                            // The card keeps the delegate as its assignee on the
-                            // way to `todo` — the hand-off did happen, and a
-                            // re-dispatch should start from who it was given to.
-                            let handoff = match publish_claim
-                                .scoped(Box::pin(
-                                    self.delegation_runner(run_turn.as_ref(), &record)
-                                        .for_task(&card.id)
-                                        // The delegate's turn is part of THIS attempt —
-                                        // its steps and its spend belong to the card's
-                                        // run, not to nothing (#242).
-                                        .for_run(sink.clone())
-                                        // Issue #1846 review (Codex #3864988176): the
-                                        // card's own (possibly redirect-augmented)
-                                        // instruction — the closest thing a dispatched
-                                        // task has to "the operator's own words" — so a
-                                        // delegate's budget-pause marker re-parks with
-                                        // the brief this attempt is actually running,
-                                        // not the hand-off instruction the model wrote.
-                                        .reissue_message(instruction.clone())
-                                        .handle_task_delegations(&mut card, &responder),
-                                ))
-                                .await
-                            {
-                                Ok(handoff) => handoff,
-                                Err(err) => {
-                                    let result = format!("hand-off failed: {err}");
-                                    // Issue #1861: a hand-off that failed on a
-                                    // rejected model id or a dead integration
-                                    // is as answerable as a direct dispatch
-                                    // that did — the delegate hit the same
-                                    // wall, so it asks the same question.
-                                    let end = self.settle_as_blocker_or_failure(
-                                        &card.id,
-                                        &result,
-                                        sink.as_ref().map(|s| s.run_id()),
-                                    );
-                                    settle(&mut card, end, &responder, &result);
-                                    break (end, result);
+        // A desk-assigned card may convene its desk instead of running one pooled
+        // turn on its lead (behind `OPENCOMPANY_CARD_EPISODES`, default off).
+        //
+        // Branching HERE, rather than anywhere earlier, is what keeps the settle
+        // shared: the room produces the same `(run_end, result_text)` pair the
+        // steer loop does, so everything below — the landing column, the bounce
+        // chip, the attempt row, the note, the relay — is reached unchanged. A
+        // second settle is what this avoids, and a second settle is where the next
+        // lifecycle bug would come from.
+        let convened = self.convene_for_card(&card, &resolution).await;
+        let (run_end, result_text) = if let Some(room) = convened {
+            self.run_card_room(room, &card).await
+        } else {
+            loop {
+                // Start each turn from an empty queue so nothing a prior turn (this
+                // cycle's operator message, or an earlier redirect rerun) left
+                // behind can hijack this card — the same guard
+                // `handle_operator_message` opens with.
+                self.deps.delegations.clear();
+                // Issue #244, same argument for staged publishes: a redirect
+                // re-runs from the original brief and *abandons* the previous
+                // turn's work, so a file that turn offered must be abandoned with
+                // it. This is inside the loop deliberately; the nudge below is not
+                // part of the loop and never clears, so a nudge cannot discard what
+                // the turn it is asking about published.
+                publish_claim.clear();
+                // Issue #339: an abandoned redirect's workflow run is abandoned with
+                // it, for the same reason — the card's link must name what the turn
+                // that actually settled produced, not what a discarded one did.
+                self.deps.workflow_refs.clear();
+                let outcome = publish_claim
+                    .scoped(Box::pin(
+                        dispatch_origin.scoped(Box::pin(
+                            run_turn
+                                // A dispatched task card carries no chat bubble (its steps
+                                // are discarded into the note), so its live turn frames
+                                // must not leak onto the console timeline — run it
+                                // un-streamed (#125 review).
+                                .run_steered_background(
+                                    &self.record().id,
+                                    &responder,
+                                    &instruction,
+                                    &control,
+                                    // No conversation to bind to: a dispatched card's turn
+                                    // answers the board, not a thread (#1890 I). Unchanged
+                                    // behaviour — including that it does not clear
+                                    // history, since one task can span several turns.
+                                    ChatTarget::default(),
+                                    // Issue #242: un-streamed does not mean unrecorded. The
+                                    // trace this turn produces is written to the attempt
+                                    // row as it happens, which is what a redirect re-run
+                                    // appends to rather than restarting.
+                                    sink.clone(),
+                                ),
+                        )),
+                    ))
+                    .await;
+                // One-shot read of what (if anything) the operator asked for. `None`
+                // is the ordinary, unsteered path.
+                match control.take() {
+                    None => {
+                        // A dispatched task discards its steps — the note is text-only.
+                        match outcome {
+                            Ok(outcome) => {
+                                // Issue #1846 review (Codex #3864988168): a budget
+                                // pause is a terminal state, exactly like a spend
+                                // halt or an iteration-cap pause — the model call
+                                // itself failed, so `outcome.reply` is not a
+                                // completed answer, it is the placeholder/notice
+                                // text `classify_turn` substitutes (mirrors the
+                                // operator-chat path's own
+                                // `BUDGET_PAUSED_PLACEHOLDER_REPLY` treatment
+                                // below). Settling this as `Completed` let a
+                                // background dispatch's exhausted-budget failure
+                                // read on the board as a finished, reviewable
+                                // result — the same asymmetry this issue's
+                                // headline fix closes for the top-level
+                                // orchestrator's own call, just on the dispatched-
+                                // card path instead.
+                                //
+                                // Checked, and returned on, BEFORE the delegation
+                                // drain: per `classify_turn`, the budget-paused arm
+                                // only fires when the model call itself errored,
+                                // which cannot also have queued a hand-off on the
+                                // same attempt — so there is nothing below worth
+                                // draining, and doing so unconditionally would risk
+                                // running a stale hand-off from an earlier retry
+                                // still sitting in the queue.
+                                if let Some(pause) = &outcome.budget_paused {
+                                    let result = budget_pause_notice(pause);
+                                    settle(&mut card, TaskRunEnd::Paused, &responder, &result);
+                                    break (TaskRunEnd::Paused, result);
                                 }
-                            };
-                            // `settle` writes the note (attributed to whoever
-                            // actually produced the text) and the landing column
-                            // via the #186 lifecycle seam; the loop still yields
-                            // the reply so the #185/#190 completion events
-                            // report the same text that landed in the note.
-                            let (end, result) = match handoff {
-                                // The delegate answered: they own the card, and
-                                // every downstream write credits them.
-                                // SPIKE: handed over, delegate not yet run.
-                                // Settles `Delegated` — which
-                                // `settled_landing_column` keeps in
-                                // `in_progress` precisely because a hand-off is
-                                // "not an ending" — and the runtime re-fires
-                                // dispatch for the card's new owner.
-                                Some(handoff) if handoff.pending => {
-                                    let delegate = handoff.delegate.clone();
-                                    // The DELEGATOR is who handed it over, so
-                                    // the note is theirs. Reading `responder`
-                                    // after the swap credits the delegate with
-                                    // handing work to itself.
-                                    let delegator =
-                                        std::mem::replace(&mut responder, handoff.delegate);
-                                    let result =
-                                        format!("handed off to {delegate}; awaiting their run");
-                                    settle(&mut card, TaskRunEnd::Delegated, &delegator, &result);
-                                    prior_responders.push(delegator);
-                                    (TaskRunEnd::Delegated, result)
-                                }
-                                Some(handoff) => {
-                                    prior_responders
-                                        .push(std::mem::replace(&mut responder, handoff.delegate));
-                                    let budget_paused = handoff.budget_paused;
-                                    match handoff.reply {
-                                        Some(reply) => {
-                                            // Issue #1846 review (Codex
-                                            // #3865395868): `TaskHandoff` now
-                                            // carries the delegate's own
-                                            // budget pause through from
-                                            // `DeskReply` — this is the other
-                                            // half of the asymmetry the
-                                            // top-level orchestrator's own
-                                            // dispatched call already closed
-                                            // above (`outcome.budget_paused`).
-                                            // Without it a delegate that ran
-                                            // out of credits still settled
-                                            // `Completed`, landing the pause
-                                            // notice in In Review as though it
-                                            // were a finished answer.
-                                            let end = if budget_paused.is_some() {
-                                                TaskRunEnd::Paused
-                                            } else {
-                                                TaskRunEnd::Completed
-                                            };
-                                            settle(&mut card, end, &responder, &reply);
-                                            (end, reply)
-                                        }
-                                        // The hand-off ran and an operator
-                                        // CANCELLED it in flight, so it produced
-                                        // nothing. Naming the cancellation here
-                                        // is safe because `TaskHandoff` only
-                                        // carries `reply: None` for a run
-                                        // `run_delegation` reported as cancelled
-                                        // — a hand-off that ends empty for any
-                                        // other reason reports no hand-off at
-                                        // all and never reaches this arm (issue
-                                        // #213 review).
-                                        //
-                                        // Partial work is discarded and the card
-                                        // returns to To-do, exactly as a
-                                        // cancelled dispatch does — it must not
-                                        // read as finished, and it must not
-                                        // strand in `in_progress` either.
-                                        None => {
-                                            let reply =
-                                                "the delegated run was cancelled before it \
+                                // Issue #204: the turn may have DELEGATED rather
+                                // than done the work. The dispatched responder is
+                                // the orchestrator, which carries `delegate_to_desk`
+                                // / `spawn_task`, and nothing here used to drain
+                                // what those queued — so the hand-off was dropped,
+                                // the turn still read as a clean completion, and the
+                                // card landed in `in_review` under the delegator
+                                // with the delegate never having run. Draining here
+                                // runs the delegate, reassigns the card to them, and
+                                // settles it from THEIR output.
+                                //
+                                // An errored hand-off lands exactly like an errored
+                                // turn (the `Err` arm below), and must NOT propagate
+                                // with `?`. By the time `run_delegation` can fail,
+                                // `hand_card_over` has already persisted the card as
+                                // `in_progress` reassigned to the delegate — so
+                                // unwinding here would skip both the settle and the
+                                // final `upsert` and leave the card sitting in
+                                // `in_progress` under a delegate that produced
+                                // nothing, with no result and nothing to re-dispatch
+                                // it: `task_enters_in_progress` only edge-fires on
+                                // the *transition* into that column, which already
+                                // happened. That is precisely the stranded state
+                                // this fix exists to eliminate.
+                                //
+                                // The card keeps the delegate as its assignee on the
+                                // way to `todo` — the hand-off did happen, and a
+                                // re-dispatch should start from who it was given to.
+                                let handoff = match publish_claim
+                                    .scoped(Box::pin(
+                                        self.delegation_runner(run_turn.as_ref(), &record)
+                                            .for_task(&card.id)
+                                            // The delegate's turn is part of THIS attempt —
+                                            // its steps and its spend belong to the card's
+                                            // run, not to nothing (#242).
+                                            .for_run(sink.clone())
+                                            // Issue #1846 review (Codex #3864988176): the
+                                            // card's own (possibly redirect-augmented)
+                                            // instruction — the closest thing a dispatched
+                                            // task has to "the operator's own words" — so a
+                                            // delegate's budget-pause marker re-parks with
+                                            // the brief this attempt is actually running,
+                                            // not the hand-off instruction the model wrote.
+                                            .reissue_message(instruction.clone())
+                                            .handle_task_delegations(&mut card, &responder),
+                                    ))
+                                    .await
+                                {
+                                    Ok(handoff) => handoff,
+                                    Err(err) => {
+                                        let result = format!("hand-off failed: {err}");
+                                        // Issue #1861: a hand-off that failed on a
+                                        // rejected model id or a dead integration
+                                        // is as answerable as a direct dispatch
+                                        // that did — the delegate hit the same
+                                        // wall, so it asks the same question.
+                                        let end = self.settle_as_blocker_or_failure(
+                                            &card.id,
+                                            &result,
+                                            sink.as_ref().map(|s| s.run_id()),
+                                        );
+                                        settle(&mut card, end, &responder, &result);
+                                        break (end, result);
+                                    }
+                                };
+                                // `settle` writes the note (attributed to whoever
+                                // actually produced the text) and the landing column
+                                // via the #186 lifecycle seam; the loop still yields
+                                // the reply so the #185/#190 completion events
+                                // report the same text that landed in the note.
+                                let (end, result) = match handoff {
+                                    // The delegate answered: they own the card, and
+                                    // every downstream write credits them.
+                                    // SPIKE: handed over, delegate not yet run.
+                                    // Settles `Delegated` — which
+                                    // `settled_landing_column` keeps in
+                                    // `in_progress` precisely because a hand-off is
+                                    // "not an ending" — and the runtime re-fires
+                                    // dispatch for the card's new owner.
+                                    Some(handoff) if handoff.pending => {
+                                        let delegate = handoff.delegate.clone();
+                                        // The DELEGATOR is who handed it over, so
+                                        // the note is theirs. Reading `responder`
+                                        // after the swap credits the delegate with
+                                        // handing work to itself.
+                                        let delegator =
+                                            std::mem::replace(&mut responder, handoff.delegate);
+                                        let result =
+                                            format!("handed off to {delegate}; awaiting their run");
+                                        settle(
+                                            &mut card,
+                                            TaskRunEnd::Delegated,
+                                            &delegator,
+                                            &result,
+                                        );
+                                        prior_responders.push(delegator);
+                                        (TaskRunEnd::Delegated, result)
+                                    }
+                                    Some(handoff) => {
+                                        prior_responders.push(std::mem::replace(
+                                            &mut responder,
+                                            handoff.delegate,
+                                        ));
+                                        let budget_paused = handoff.budget_paused;
+                                        match handoff.reply {
+                                            Some(reply) => {
+                                                // Issue #1846 review (Codex
+                                                // #3865395868): `TaskHandoff` now
+                                                // carries the delegate's own
+                                                // budget pause through from
+                                                // `DeskReply` — this is the other
+                                                // half of the asymmetry the
+                                                // top-level orchestrator's own
+                                                // dispatched call already closed
+                                                // above (`outcome.budget_paused`).
+                                                // Without it a delegate that ran
+                                                // out of credits still settled
+                                                // `Completed`, landing the pause
+                                                // notice in In Review as though it
+                                                // were a finished answer.
+                                                let end = if budget_paused.is_some() {
+                                                    TaskRunEnd::Paused
+                                                } else {
+                                                    TaskRunEnd::Completed
+                                                };
+                                                settle(&mut card, end, &responder, &reply);
+                                                (end, reply)
+                                            }
+                                            // The hand-off ran and an operator
+                                            // CANCELLED it in flight, so it produced
+                                            // nothing. Naming the cancellation here
+                                            // is safe because `TaskHandoff` only
+                                            // carries `reply: None` for a run
+                                            // `run_delegation` reported as cancelled
+                                            // — a hand-off that ends empty for any
+                                            // other reason reports no hand-off at
+                                            // all and never reaches this arm (issue
+                                            // #213 review).
+                                            //
+                                            // Partial work is discarded and the card
+                                            // returns to To-do, exactly as a
+                                            // cancelled dispatch does — it must not
+                                            // read as finished, and it must not
+                                            // strand in `in_progress` either.
+                                            None => {
+                                                let reply =
+                                                    "the delegated run was cancelled before it \
                                                  produced anything"
-                                                    .to_string();
-                                            settle(
-                                                &mut card,
-                                                TaskRunEnd::Cancelled,
-                                                &responder,
-                                                &reply,
-                                            );
-                                            (TaskRunEnd::Cancelled, reply)
+                                                        .to_string();
+                                                settle(
+                                                    &mut card,
+                                                    TaskRunEnd::Cancelled,
+                                                    &responder,
+                                                    &reply,
+                                                );
+                                                (TaskRunEnd::Cancelled, reply)
+                                            }
                                         }
                                     }
-                                }
-                                // Nothing was handed off — the responder did the
-                                // work itself, as before.
-                                None => {
-                                    let result = outcome.reply;
-                                    settle(&mut card, TaskRunEnd::Completed, &responder, &result);
-                                    (TaskRunEnd::Completed, result)
-                                }
-                            };
-                            break (end, result);
-                        }
-                        Err(err) => {
-                            // Issue #1861: the main settle site. A stop the
-                            // classifier recognises as answerable parks a
-                            // blocker and lands the card `paused` with the
-                            // question on it; everything else settles `Failed`
-                            // exactly as before.
-                            let result = format!("dispatch failed: {err}");
-                            let end = self.settle_as_blocker_or_failure(
-                                &card.id,
-                                &result,
-                                sink.as_ref().map(|s| s.run_id()),
-                            );
-                            settle(&mut card, end, &responder, &result);
-                            break (end, result);
+                                    // Nothing was handed off — the responder did the
+                                    // work itself, as before.
+                                    None => {
+                                        let result = outcome.reply;
+                                        settle(
+                                            &mut card,
+                                            TaskRunEnd::Completed,
+                                            &responder,
+                                            &result,
+                                        );
+                                        (TaskRunEnd::Completed, result)
+                                    }
+                                };
+                                break (end, result);
+                            }
+                            Err(err) => {
+                                // Issue #1861: the main settle site. A stop the
+                                // classifier recognises as answerable parks a
+                                // blocker and lands the card `paused` with the
+                                // question on it; everything else settles `Failed`
+                                // exactly as before.
+                                let result = format!("dispatch failed: {err}");
+                                let end = self.settle_as_blocker_or_failure(
+                                    &card.id,
+                                    &result,
+                                    sink.as_ref().map(|s| s.run_id()),
+                                );
+                                settle(&mut card, end, &responder, &result);
+                                break (end, result);
+                            }
                         }
                     }
-                }
-                Some(SteerAction::Cancel) => {
-                    // Partial work is DISCARDED — only a cancellation note lands,
-                    // and the card returns to `todo`. The note is attributed to
-                    // the operator, not the assignee (the lifecycle seam decides
-                    // that). The loop still yields the text for #185/#190.
-                    let result = "cancelled while in flight".to_string();
-                    settle(&mut card, TaskRunEnd::Cancelled, &responder, &result);
-                    break (TaskRunEnd::Cancelled, result);
-                }
-                Some(SteerAction::Pause) => {
-                    // Partial work is PRESERVED in the note; the card parks in the
-                    // `paused` column. The cycle ends normally, so the per-tenant
-                    // serial lock releases while parked — resume is a plain
-                    // `column → in_progress` PATCH that re-triggers dispatch.
-                    let partial = match &outcome {
-                        Ok(outcome) => format!("[paused] {}", outcome.reply),
-                        Err(err) => format!("[paused] dispatch failed: {err}"),
-                    };
-                    settle(&mut card, TaskRunEnd::Paused, &responder, &partial);
-                    break (TaskRunEnd::Paused, partial);
-                }
-                Some(SteerAction::Redirect { instruction: fresh }) => {
-                    redirects += 1;
-                    card.note = Some(append_result(
-                        card.note.as_deref(),
-                        lifecycle::OPERATOR_REDIRECT_ATTRIBUTION,
-                        &fresh,
-                    ));
-                    if redirects > MAX_REDIRECTS_PER_DISPATCH {
-                        // Exhausted the redirect budget — finalize the last run's
-                        // reply to the card's terminal column rather than looping
-                        // forever.
-                        let last = match &outcome {
-                            Ok(outcome) => outcome.reply.clone(),
-                            Err(err) => format!("dispatch failed: {err}"),
+                    Some(SteerAction::Cancel) => {
+                        // Partial work is DISCARDED — only a cancellation note lands,
+                        // and the card returns to `todo`. The note is attributed to
+                        // the operator, not the assignee (the lifecycle seam decides
+                        // that). The loop still yields the text for #185/#190.
+                        let result = "cancelled while in flight".to_string();
+                        settle(&mut card, TaskRunEnd::Cancelled, &responder, &result);
+                        break (TaskRunEnd::Cancelled, result);
+                    }
+                    Some(SteerAction::Pause) => {
+                        // Partial work is PRESERVED in the note; the card parks in the
+                        // `paused` column. The cycle ends normally, so the per-tenant
+                        // serial lock releases while parked — resume is a plain
+                        // `column → in_progress` PATCH that re-triggers dispatch.
+                        let partial = match &outcome {
+                            Ok(outcome) => format!("[paused] {}", outcome.reply),
+                            Err(err) => format!("[paused] dispatch failed: {err}"),
                         };
-                        settle(&mut card, TaskRunEnd::RedirectsExhausted, &responder, &last);
-                        break (TaskRunEnd::RedirectsExhausted, last);
+                        settle(&mut card, TaskRunEnd::Paused, &responder, &partial);
+                        break (TaskRunEnd::Paused, partial);
                     }
-                    // Re-run from the original brief plus the (codepoint-capped)
-                    // operator instruction.
-                    instruction = format!(
-                        "{base_instruction}\n\nOperator redirect: {}",
-                        cap_redirect(&fresh)
-                    );
-                    continue;
+                    Some(SteerAction::Redirect { instruction: fresh }) => {
+                        redirects += 1;
+                        card.note = Some(append_result(
+                            card.note.as_deref(),
+                            lifecycle::OPERATOR_REDIRECT_ATTRIBUTION,
+                            &fresh,
+                        ));
+                        if redirects > MAX_REDIRECTS_PER_DISPATCH {
+                            // Exhausted the redirect budget — finalize the last run's
+                            // reply to the card's terminal column rather than looping
+                            // forever.
+                            let last = match &outcome {
+                                Ok(outcome) => outcome.reply.clone(),
+                                Err(err) => format!("dispatch failed: {err}"),
+                            };
+                            settle(&mut card, TaskRunEnd::RedirectsExhausted, &responder, &last);
+                            break (TaskRunEnd::RedirectsExhausted, last);
+                        }
+                        // Re-run from the original brief plus the (codepoint-capped)
+                        // operator instruction.
+                        instruction = format!(
+                            "{base_instruction}\n\nOperator redirect: {}",
+                            cap_redirect(&fresh)
+                        );
+                        continue;
+                    }
                 }
             }
         };
@@ -2540,6 +2566,123 @@ impl HarnessBrain {
     /// Per message rather than cached: a hive is a validation and a handful
     /// of `Arc` clones, and a roster or desk change is then in force on the
     /// next message with nothing to invalidate.
+    /// The room this card convenes, or `None` for the ordinary pooled dispatch.
+    ///
+    /// Three gates, all of which must hold. The flag, because a convened card's
+    /// episode is awaited inside this cycle and the cycle holds the company-wide
+    /// lock (see `card_episodes_enabled`). A **desk** assignee, because a card
+    /// worked by a room is owned by the desk — that makes convening the operator's
+    /// choice rather than something inferred from a teammate's memberships, which
+    /// has no good answer for somebody on three desks. And a room that actually
+    /// binds, which `card_hive` decides: a desk under two bindable seats cannot
+    /// deliberate, so the card takes the pooled path instead.
+    async fn convene_for_card(
+        &self,
+        card: &TaskRecord,
+        resolution: &assignee::AssigneeResolution,
+    ) -> Option<crate::hive::graph::DeskHive> {
+        if !crate::hive::graph::card_episodes_enabled(&crate::app::config::ProcessEnv) {
+            return None;
+        }
+        let assignee::AssigneeResolution::Desk { desk, .. } = resolution else {
+            return None;
+        };
+        let record = self.record();
+        let mut agents: std::collections::HashMap<String, openhuman_embed::Agent> =
+            std::collections::HashMap::new();
+        for agent in record.effective_agents() {
+            if let Some(live) = self.pool.agent(&record.id, &agent.id).await {
+                agents.insert(agent.id.clone(), live.runtime_agent().clone());
+            }
+        }
+        let roster_version = record.effective_agents().len() as u64;
+        crate::hive::graph::card_hive(&record, &card.id, desk, roster_version, &|id| {
+            agents.get(id).cloned()
+        })
+    }
+
+    /// Runs a card's work as one episode and folds it into the pair the settle
+    /// wants, so everything after the branch is the pooled path's own code.
+    ///
+    /// Awaited, not detached. That is what holds the company-wide lock for the
+    /// episode's life and why the flag defaults off — but it is also what lets the
+    /// existing settle land the card, rather than a second settle written for a
+    /// detached pass.
+    async fn run_card_room(
+        &self,
+        room: crate::hive::graph::DeskHive,
+        card: &TaskRecord,
+    ) -> (lifecycle::TaskRunEnd, String) {
+        let Some(events) = self.deps.events.clone() else {
+            return (
+                lifecycle::TaskRunEnd::Failed,
+                "this card's desk could not convene: no journal is wired for the room to read \
+                 and commit through"
+                    .to_string(),
+            );
+        };
+        let hives = std::collections::HashMap::from([(card.id.clone(), Arc::new(room))]);
+        let dispatcher = crate::hive::dispatch::dispatcher(
+            self.record(),
+            events,
+            hives,
+            Arc::new(HarnessDeps::clone(&self.deps)),
+            Arc::clone(&self.pool),
+            self.mentions.clone(),
+        )
+        .await;
+
+        // `carried_on` so the room reads this as work it has been handed rather
+        // than a question to answer — `Trigger::is_question` is the only thing the
+        // flag gates, and a card brief is an assignment.
+        //
+        // `seq` is zero because a card has no journaled message behind it;
+        // `trigger_for` takes `Option` and defaults the same way for the same
+        // reason.
+        let trigger = crate::hive::conducted::Trigger {
+            seq: crate::ports::types::EventSeq::new(0),
+            text: match card.note.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+                Some(note) => format!("{}\n\n{note}", card.title),
+                None => card.title.to_string(),
+            },
+            parent: None,
+            mentions: Vec::new(),
+            carried_on: true,
+        };
+        let episode_id = uuid::Uuid::new_v4().simple().to_string();
+        match dispatcher
+            .run_desk_message_as(&card.id, trigger, episode_id)
+            .await
+        {
+            // At least one seat reported its work finished. The room's own words
+            // are already journaled on this card's conversation — the hive is
+            // keyed on the card id — so the note says what happened rather than
+            // repeating a transcript the timeline already holds.
+            Ok(report) if report.settled > 0 => (
+                lifecycle::TaskRunEnd::Completed,
+                format!(
+                    "{} worked this card as a room: {} seat turn(s) across {} wave(s), {} \
+                     reporting the work finished.",
+                    card.assignee, report.turns, report.waves, report.settled
+                ),
+            ),
+            // The room ran and nobody claimed the work. That is not a success with
+            // nothing to show; it is a card to put back, which `Failed` does.
+            Ok(report) => (
+                lifecycle::TaskRunEnd::Failed,
+                format!(
+                    "this card's desk convened but no seat reported the work finished after {} \
+                     turn(s)",
+                    report.turns
+                ),
+            ),
+            Err(err) => (
+                lifecycle::TaskRunEnd::Failed,
+                format!("this card's desk could not convene: {err}"),
+            ),
+        }
+    }
+
     async fn desk_hives(
         &self,
         record: &CompanyRecord,
