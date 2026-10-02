@@ -274,7 +274,7 @@ fn the_seat_note_names_the_card_verb_and_no_withheld_one() {
 #[test]
 fn the_seat_note_does_not_promise_a_success_confirmation() {
     // The receipt's promise, verbatim from `SpawnTaskTool::execute`'s seated arm.
-    let receipt = "you will be told here if it cannot be";
+    let receipt = crate::harness::built_in::orchestrator::SPAWN_TASK_FAILURE_ONLY_RECEIPT;
     assert!(
         receipt.contains("if it cannot be"),
         "the receipt no longer promises a failure-only reply; re-read \

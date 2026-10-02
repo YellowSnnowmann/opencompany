@@ -160,9 +160,14 @@ pub const QUERY_COMPANY_TOOL: &str = "query_company";
 use crate::runtime::assignee;
 use crate::runtime::builder::agent_effective_grants;
 use crate::runtime::delegation_tools;
-pub use crate::runtime::delegation_tools::{
+use crate::runtime::delegation_tools::{
     DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL, SPAWN_TASK_TOOL,
 };
+
+/// The exact failure-only promise returned when a seated teammate queues a card.
+/// Shared with the seat brief contract test so the brief cannot drift from what
+/// the tool actually tells the model.
+pub(crate) const SPAWN_TASK_FAILURE_ONLY_RECEIPT: &str = "you will be told here if it cannot be";
 /// The `run_workflow` tool name (issue #67).
 pub const RUN_WORKFLOW_TOOL: &str = "run_workflow";
 /// The `read_run_output` tool name (issue #418 — the `run_workflow` companion
@@ -2934,7 +2939,7 @@ impl Tool for SpawnTaskTool {
         if seated {
             return Ok(ToolResult::success(format!(
                 "Queued a task card: \"{title}\". It is written to the board when your turn \
-                 ends; you will be told here if it cannot be. Do not describe it as open yet."
+                 ends; {SPAWN_TASK_FAILURE_ONLY_RECEIPT}. Do not describe it as open yet."
             )));
         }
         if let Some(name) = unverified {
