@@ -7,6 +7,7 @@
 //! unavailable rather than silently ignored.
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{SsoClaims, SsoRejection};
 
@@ -54,10 +55,17 @@ pub(super) fn verify_hs256(secret: &str, token: &str) -> Result<SsoClaims, SsoRe
     .map(|data| data.claims)
     .map_err(|_| SsoRejection::Invalid)?;
 
-    // Refuse a token whose declared lifetime exceeds the contract. `saturating_sub`
-    // folds a malformed `exp < iat` into `0`, which passes this cap and is then
-    // refused by the expiry check above on any realistic clock.
-    if claims.exp.saturating_sub(claims.iat) > MAX_TOKEN_LIFETIME_SECS + CLOCK_LEEWAY_SECS {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| SsoRejection::Invalid)?
+        .as_secs();
+    // Validate both ends of the interval independently. A far-future `iat`
+    // otherwise gives a short declared lifetime while allowing a token minted
+    // years ahead, and saturating subtraction would accept `exp < iat`.
+    if claims.iat > now.saturating_add(CLOCK_LEEWAY_SECS)
+        || claims.exp <= claims.iat
+        || claims.exp > now.saturating_add(MAX_TOKEN_LIFETIME_SECS + CLOCK_LEEWAY_SECS)
+    {
         return Err(SsoRejection::Invalid);
     }
 

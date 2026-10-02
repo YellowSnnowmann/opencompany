@@ -154,8 +154,14 @@ fn token_with_iat(secret: &str, slug: &str, sub: &str, jti: &str, iat: u64, exp:
 }
 
 fn far_future() -> u64 {
-    // ~2050, comfortably beyond any test run.
-    2_524_608_000
+    now_secs() + 300
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock is after the Unix epoch")
+        .as_secs()
 }
 
 fn post(uri: &str, body: serde_json::Value) -> Request<Body> {
@@ -332,16 +338,15 @@ async fn an_expired_token_is_refused() {
 async fn a_token_claiming_a_longer_life_than_the_contract_is_refused() {
     let home = home();
     let state = enabled_state(home.path()).await;
-    // Unexpired (exp far in the future) but minted an hour before exp — a declared
-    // lifetime far beyond the 5-minute contract. The expiry check passes, so this
-    // is refused by the lifetime cap rather than by expiry.
+    // Unexpired but minted an hour before exp — a declared lifetime far beyond
+    // the 5-minute contract. The expiry check passes, so the lifetime cap refuses it.
     let over_long = token_with_iat(
         SSO_SECRET,
         "acme",
         ADMIN,
         "jti-cap",
-        far_future() - 3600,
-        far_future(),
+        now_secs(),
+        now_secs() + 3600,
     );
     assert_rejected(
         &state,
@@ -349,6 +354,38 @@ async fn a_token_claiming_a_longer_life_than_the_contract_is_refused() {
         "a token with an over-long declared lifetime",
     )
     .await;
+}
+
+#[tokio::test]
+async fn a_future_issued_at_is_refused() {
+    let home = home();
+    let state = enabled_state(home.path()).await;
+    let issued_at = now_secs() + 600;
+    let future = token_with_iat(
+        SSO_SECRET,
+        "acme",
+        ADMIN,
+        "jti-future-iat",
+        issued_at,
+        issued_at + 120,
+    );
+    assert_rejected(&state, &future, "a future issued-at timestamp").await;
+}
+
+#[tokio::test]
+async fn an_expiration_before_issuance_is_refused() {
+    let home = home();
+    let state = enabled_state(home.path()).await;
+    let now = now_secs();
+    let reversed = token_with_iat(
+        SSO_SECRET,
+        "acme",
+        ADMIN,
+        "jti-reversed-times",
+        now + 20,
+        now + 10,
+    );
+    assert_rejected(&state, &reversed, "expiration before issuance").await;
 }
 
 #[tokio::test]
