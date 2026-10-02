@@ -159,6 +159,7 @@ pub const QUERY_COMPANY_TOOL: &str = "query_company";
 // path share one definition and cannot drift.
 use crate::runtime::assignee;
 use crate::runtime::builder::agent_effective_grants;
+use crate::runtime::delegation::hand_off_target_of;
 use crate::runtime::delegation_tools;
 pub use crate::runtime::delegation_tools::{
     DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL, SPAWN_TASK_TOOL,

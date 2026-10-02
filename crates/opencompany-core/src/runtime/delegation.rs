@@ -3597,7 +3597,10 @@ fn kind_label(delegation: &Delegation) -> &'static str {
 /// distinction still matters — the card note that says *why* delivery failed —
 /// picks its wording from the delegation's own variant at the call site rather
 /// than from a second accessor.
-fn hand_off_target_of(delegation: &Delegation) -> Option<&str> {
+///
+/// Crate-visible because the delegation queue records a dispatched card's
+/// refused second hand-off by this same target at the staging boundary.
+pub(crate) fn hand_off_target_of(delegation: &Delegation) -> Option<&str> {
     match delegation {
         Delegation::DelegateToDesk { desk, .. } => Some(desk),
         Delegation::DelegateToTeammate { teammate, .. } => Some(teammate),
