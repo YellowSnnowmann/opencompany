@@ -3519,7 +3519,7 @@ export function AppShell({
       >
 
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
-          <SidebarContent data-tour="sidebar">
+          <SidebarContent data-tour="sidebar" className="min-h-0 flex-1">
           <SidebarNavigation view={view} onNavigate={setView} />
         </SidebarContent>
         {/* The console's own utilities sit at the FOOT of the column, under the

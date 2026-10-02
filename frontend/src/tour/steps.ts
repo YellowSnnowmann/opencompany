@@ -57,7 +57,7 @@ export const TOUR: TourStop[] = [
     target: '[data-tour="sidebar"]',
     placement: "right",
     title: "Welcome to your company",
-    body: "Four places: the Room you talk in, your Company, what it's Connected to, and the Automations it repeats. Open one and what's inside it appears underneath.",
+    body: "Your conversations are on top; Company and Connections are pinned at the bottom. Open one and what's inside it appears beside the page.",
   },
   {
     // Addressed rather than inheriting the last channel: `#general` is present
@@ -71,20 +71,23 @@ export const TOUR: TourStop[] = [
   },
   {
     view: "chat",
-    target: '[data-tour="nav-chat"]',
+    // The conversation list itself — the Room nav row it used to spotlight is
+    // gone, and the list is on every route now.
+    target: '[data-tour="conversations"]',
     placement: "right",
     title: "Your AI staff",
-    body: "Every channel and direct message is listed here while you're in the Room. The agents that do the work each have one.",
+    body: "Every channel and direct message is listed here, on every page. The agents that do the work each have one.",
   },
   {
     view: "company",
     target: '[data-tour="nav-company"]',
     placement: "right",
     title: "Your company",
-    body: "Who's on it, what they're working on, the files they keep, what they remember, and what it all costs — five pages under one row.",
+    body: "Who's on it, what they're working on, the files they keep, what they remember, and what it all costs, and the automations it runs — six pages under one row.",
   },
   {
     view: "workflows",
+    // A row on Company's rail now, not a sidebar row of its own.
     target: '[data-tour="nav-workflows"]',
     placement: "right",
     title: "Automations",

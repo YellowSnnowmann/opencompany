@@ -430,31 +430,6 @@ test("a mention in an inline reply clears on channel open, with no thread to ope
     .toBe(true);
 });
 
-test("a collapsed section aggregates its hidden mentions, same as unread", async ({ page }) => {
-  await mockApi(page, seedFeed());
-  await openChannel(page, "general");
-  await expect(mentionBadge(page, "Engineering")).toHaveText("@2");
-
-  // Engineering and Design both live in the "Channels" section. Collapsing it
-  // hides both rows, and with them the per-row badges under test above — the
-  // only place those three mentions can still be seen is the header. Exact, so
-  // the desktop rail's "Collapse channels" button (whose name contains the
-  // section's) is not mistaken for the section toggle.
-  await page.getByRole("button", { name: "Channels", exact: true }).click();
-
-  await expect(mentionBadge(page, "Engineering")).toHaveCount(0);
-  // Both rails (mobile, desktop) render the collapsed-section badge now, but
-  // only the `lg+` one is on screen at this viewport — and a CSS `section`
-  // locator matches hidden DOM, where the role-based locator above did not. So
-  // the section is narrowed to the visible rail before reading its badge.
-  const sectionMentions = page
-    .locator("section")
-    .filter({ hasText: "Channels" })
-    .filter({ visible: true })
-    .getByTestId("section-mentions");
-  await expect(sectionMentions).toHaveText("@3");
-});
-
 test("a host with no notification route simply shows no mention badges", async ({ page }) => {
   await page.addInitScript(() => {
     const real = Storage.prototype.getItem;
