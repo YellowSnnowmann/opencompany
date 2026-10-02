@@ -565,8 +565,9 @@ async fn start_task_dispatches_a_desk_card_through_the_live_room_path() {
             !ask.tools.iter().any(|name| {
                 name == opencompany::harness::built_in::orchestrator::CREATE_WORKFLOW_TOOL
                     || name == opencompany::harness::built_in::orchestrator::RUN_WORKFLOW_TOOL
+                    || name == opencompany::hive::tools::READ_TOOL
             }),
-            "episode seats must not receive workflow verbs: {:?}",
+            "episode seats must not receive withheld tools: {:?}",
             ask.tools
         );
     }
