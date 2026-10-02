@@ -64,6 +64,7 @@ export async function mockCompany(page: Page, opts: MockOptions = {}): Promise<S
     };
   });
 
+  const createdDesks: unknown[] = [];
   const buffered: string[] = [];
   let waiter: ((frames: string[]) => void) | null = null;
   const sse: Sse = {
@@ -93,7 +94,28 @@ export async function mockCompany(page: Page, opts: MockOptions = {}): Promise<S
 
     if (path === "/api/v1/companies") return json([status]);
     if (path === `/api/v1/companies/${COMPANY}`) return json(status);
-    if (path.endsWith("/desks")) return json([]);
+    if (path.endsWith("/desks")) {
+      // Channels a spec creates through the rail's own "Create a new channel"
+      // flow, echoed back on the next read like the host would.
+      if (route.request().method() === "POST") {
+        const input = route.request().postDataJSON() as {
+          name: string;
+          description?: string;
+          members?: string[];
+          responder?: "lead" | "auto";
+        };
+        const created = {
+          id: input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+          name: input.name,
+          description: input.description,
+          members: input.members ?? [],
+          responder: input.responder,
+        };
+        createdDesks.push(created);
+        return json(created, 201);
+      }
+      return json(createdDesks);
+    }
     if (path.endsWith("/team")) return json(ROSTER);
     if (path.endsWith("/chat/mentionables")) {
       return json({

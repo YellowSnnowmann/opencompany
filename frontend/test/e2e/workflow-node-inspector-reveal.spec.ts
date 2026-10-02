@@ -69,6 +69,20 @@ async function closeCopilotIfOpen(page: Page) {
   }
 }
 
+/**
+ * The run-history overlay opens on select (issue #1683) and floats over the
+ * canvas's LEFT edge, where the graph's first node sits. This spec is about the
+ * inspector on the right, so it closes the history first — the same isolation
+ * it gives the copilot above, and for the same reason.
+ */
+async function closeHistoryIfOpen(page: Page) {
+  const toggle = page.getByTestId("workflow-history-toggle");
+  if (await toggle.isVisible().catch(() => false)) {
+    if ((await toggle.getAttribute("aria-pressed")) === "true") await toggle.click();
+    await expect(page.getByTestId("workflow-run-history")).toBeHidden();
+  }
+}
+
 async function box(locator: Locator) {
   const b = await locator.boundingBox();
   expect(b, "element has no box").not.toBeNull();
@@ -105,6 +119,7 @@ async function setup(page: Page, width: number, height = 900) {
   await dismissTour(page);
   await openWorkflow(page, FIXTURE);
   await closeCopilotIfOpen(page);
+  await closeHistoryIfOpen(page);
 
   const flow = canvas(page);
   await expect(flow).toBeVisible({ timeout: 30_000 });
@@ -192,6 +207,7 @@ test("a node nowhere near the panel does not move the canvas at all", async ({
   await dismissTour(page);
   await openWorkflow(page, FIXTURE);
   await closeCopilotIfOpen(page);
+  await closeHistoryIfOpen(page);
 
   const flow = canvas(page);
   await expect(flow).toBeVisible({ timeout: 30_000 });

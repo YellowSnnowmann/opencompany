@@ -54,9 +54,9 @@ function renderedRows(): string[] {
   );
 }
 
-/** The four fixed rows, read from the group that never changes. */
+/** The two fixed rows, read from the bottom group that never changes. */
 function fixedRows(): string[] {
-  const group = container.querySelectorAll("[data-sidebar='group']")[0];
+  const group = container.querySelectorAll("[data-sidebar='group']")[1];
   return [...group.querySelectorAll("[data-sidebar='menu-button']")].map(
     (el) => el.textContent?.trim() ?? "",
   );
@@ -89,12 +89,10 @@ afterEach(() => {
 
 describe("the sidebar's section table", () => {
   it("is exactly these top-level rows, in this order", () => {
-    expect(NAV_SECTIONS.map((section) => section.label)).toEqual([
-      "Room",
-      "Company",
-      "Connections",
-      "Automations",
-    ]);
+    // Room and Automations left the table: the conversation list is the front
+    // of the sidebar rather than a row, and Automations is a row on Company's
+    // rail. Company and Connections are the only sections left.
+    expect(NAV_SECTIONS.map((section) => section.label)).toEqual(["Company", "Connections"]);
   });
 
   it("keeps the surfaces that lost their row out of the table entirely", () => {
@@ -117,28 +115,32 @@ describe("the sidebar's section table", () => {
     expect(views).not.toContain("notifications");
   });
 
-  it("files the company's five surfaces under Company, in this order", () => {
+  it("files the company's surfaces under Company, in this order, Automations before Finance", () => {
     const company = NAV_SECTIONS.find((section) => section.label === "Company")!;
     expect(company.children?.map((child) => [child.label, child.view])).toEqual([
       ["Agents", "company"],
       ["Work", "ledgers"],
       ["Workspace", "workspace"],
       ["Brain", "brain"],
+      // A plain top-level child, not inside the Finance caption: `sectionOwning`
+      // reads only direct children, and a plain row after the caption would
+      // read as one of its pages.
+      ["Automations", "workflows"],
       ["Finance", "finances"],
     ]);
   });
 
   it("calls the automation surface Automations, over the view id every address uses", () => {
     // A view id is an address — every `#/workflows/<id>` a run row points at —
-    // and renaming a row is not a reason to break them. "Work" has been the
-    // `ledgers` view since #1284 for the same reason. The `data-tour` anchors
-    // follow the view id, so the tour and the e2e specs do not move when a word
-    // does.
-    const automations = NAV_SECTIONS.find((section) => section.label === "Automations")!;
+    // and renaming a row is not a reason to break them. It is a child of
+    // Company now, and still the `workflows` view.
+    const company = NAV_SECTIONS.find((section) => section.label === "Company")!;
+    const automations = company.children!.find((child) => child.label === "Automations")!;
     expect(automations.view).toBe("workflows");
-
-    const room = NAV_SECTIONS.find((section) => section.label === "Room")!;
-    expect(room.view).toBe("chat");
+    expect(automations.group).toBeFalsy();
+    // And Room is not a section: the `chat` route stays, only the row went.
+    expect(NAV_SECTIONS.some((section) => section.view === "chat")).toBe(false);
+    expect(NAV_SECTIONS.some((section) => section.view === "workflows")).toBe(false);
   });
 
   it("keeps the Agents row and the page it reaches called the same thing", () => {
@@ -197,9 +199,16 @@ describe("which section an address belongs to", () => {
   });
 
   it("claims a section's children for that section", () => {
-    for (const view of ["company", "ledgers", "workspace", "brain", "finances"] as View[]) {
+    for (const view of ["company", "ledgers", "workspace", "brain", "workflows", "finances"] as View[]) {
       expect(sectionOwning(view)?.label).toBe("Company");
     }
+  });
+
+  it("claims Company for Automations, and nothing for Room", () => {
+    // `#/workflows` lights Company and draws its rail with Automations current.
+    // `#/chat` belongs to no section: the conversation list is not a row.
+    expect(sectionOwning("workflows")?.label).toBe("Company");
+    expect(sectionOwning("chat")).toBeUndefined();
   });
 
   it("claims Connections for both of its sub-pages", () => {
@@ -243,6 +252,7 @@ describe("which child row is open", () => {
     // `#/ledgers/goals` is a declared list on the same Work surface.
     expect(childActive(company, child("Work"), "ledgers", "goals")).toBe(true);
     expect(childActive(company, child("Workspace"), "workspace", "node-7")).toBe(true);
+    expect(childActive(company, child("Automations"), "workflows", "wf-1")).toBe(true);
   });
 
   it("lights exactly one child per address", () => {
@@ -257,13 +267,13 @@ describe("which child row is open", () => {
 });
 
 describe("the rendered sidebar", () => {
-  it("is the top-level rows and the Room rail's slot, on every section", () => {
+  it("is the two bottom rows and the conversation list's slot, on every section", () => {
     // The middle region stopped swapping with the section you are in (issue
-    // #2130). It is the channel list, always — so the section rows are the only
-    // rows this column paints, whichever address is open, and a section's own
-    // pages are rows on its content rail instead
+    // #2130). It is the conversation list, always, and Company and Connections
+    // are the only rows this column paints, whichever address is open — a
+    // section's own pages are rows on its content rail instead
     // (`section-rail-layout.test.ts`).
-    const rows = ["Room", "Company", "Connections", "Automations"];
+    const rows = ["Company", "Connections"];
     for (const view of ["chat", "company", "connections", "workflows"] as View[]) {
       render(view);
       expect(fixedRows(), view).toEqual(rows);
@@ -275,33 +285,46 @@ describe("the rendered sidebar", () => {
     }
   });
 
-  it("separates the four from the rail with space, not a rule", () => {
-    // A horizontal line here reads as hardware bolted across a column that is
-    // already quiet, and it would have been the only rule in it — the console
-    // draws none above its footer either. The break is a deliberate gap.
+  it("puts the conversation list first and the two rows last, so they stay pinned", () => {
+    render("company");
+    const groups = [...container.querySelectorAll("[data-sidebar='group']")];
+    expect(groups).toHaveLength(2);
+    expect(groups[0].querySelector("[data-testid='room-rail-slot']")).not.toBeNull();
+    expect(groups[1].querySelector("[data-tour='nav-company']")).not.toBeNull();
+    expect(groups[1].querySelector("[data-tour='nav-connections']")).not.toBeNull();
+    // The list takes the leftover height and scrolls inside itself; the rows do
+    // neither, so a list at its cap cannot push them out of reach.
+    expect(groups[0].className).toContain("min-h-0");
+    expect(groups[0].className).toContain("flex-1");
+    const slot = groups[0].querySelector("[data-testid='room-rail-slot']")!;
+    expect(slot.className).toContain("overflow-y-auto");
+    expect(groups[1].className).toContain("shrink-0");
+    expect(groups[1].className).not.toContain("flex-1");
+  });
+
+  it("separates the list from the two rows with a border and no top padding", () => {
     render("company");
     expect(container.querySelectorAll("[data-sidebar='separator']")).toHaveLength(0);
 
     const groups = [...container.querySelectorAll("[data-sidebar='group']")];
-    expect(groups).toHaveLength(2);
-    // The row rhythm, and nothing on top of it: the fixed block's `pb-1` plus
-    // `SidebarContent`'s `gap-1` is the same 8px step as any two rows in the
-    // column. This carried a `pt-5` — 24px — on the argument that the break had
-    // to be legible at a glance; it read instead as the channel list having
-    // come loose from the four rows above it, which are one navigation surface
-    // with it. No top padding on either group, so neither can drift back.
+    // The seam is the group's own border, the idiom the title row uses. No
+    // `pt-` on either group, so neither can drift back to the 24px gap that
+    // read as the list coming loose from the rows.
+    expect(groups[1].className).toContain("border-t");
     expect(groups[0].className).not.toContain("pt-");
     expect(groups[1].className).not.toContain("pt-");
+    // The bottom padding is the shell's own frame gap, the same token the
+    // content card keeps under it, so Connections' bottom edge lines up with
+    // the card's. Reused, not a new number.
+    expect(groups[1].className).toContain("pb-(--frame-inset)");
   });
 
   it("keeps the rail on the 3rem icon rail rather than hiding it there", () => {
     // `ChannelRail` has a compact variant built for exactly this width, and
     // dropping it would make collapsing the sidebar silently lose the channel
-    // list — the regression issue #1018 filed about the approvals badge. The
-    // fixed child lists that USED to be hidden at this width are content-rail
-    // rows now, so nothing in this region is hidden any more.
+    // list — the regression issue #1018 filed about the approvals badge.
     render("company");
-    const rail = [...container.querySelectorAll("[data-sidebar='group']")][1];
+    const rail = [...container.querySelectorAll("[data-sidebar='group']")][0];
     expect(rail.className).not.toContain("group-data-[collapsible=icon]:hidden");
     // And the gutter goes, so the compact rows' unread dots do not land in
     // horizontal overflow (measured: slot clientWidth 32 against scrollWidth 34).
@@ -310,21 +333,32 @@ describe("the rendered sidebar", () => {
 
   it("marks the section an address is in, and only that", () => {
     render("workspace");
-    // Which of the four you are in. Which of its PAGES is open is said on the
+    // Which of the two you are in. Which of its PAGES is open is said on the
     // content rail now, so nothing in this column claims to say it twice.
     expect(fixedRows().filter((_, i) =>
-      [...container.querySelectorAll("[data-sidebar='group']")[0]
+      [...container.querySelectorAll("[data-sidebar='group']")[1]
         .querySelectorAll("[data-sidebar='menu-button']")][i].hasAttribute("data-active"),
     )).toEqual(["Company"]);
     expect(container.querySelectorAll('[aria-current="page"]')).toHaveLength(0);
   });
 
   it("lights a section's own row when nothing under it is open", () => {
-    render("chat");
+    render("company");
     const row = [...container.querySelectorAll("[data-sidebar='menu-button']")].find(
-      (el) => el.textContent?.trim() === "Room",
+      (el) => el.textContent?.trim() === "Company",
     )!;
     expect(row.hasAttribute("data-active")).toBe(true);
+  });
+
+  it("lights Company, and nothing on Room, for the Automations address", () => {
+    render("workflows");
+    const lit = [...container.querySelectorAll("[data-sidebar='menu-button']")]
+      .filter((el) => el.hasAttribute("data-active"))
+      .map((el) => el.textContent?.trim());
+    expect(lit).toEqual(["Company"]);
+    // And on the Room route no row is lit: the list is not a section.
+    render("chat");
+    expect(container.querySelectorAll("[data-sidebar='menu-button'][data-active]")).toHaveLength(0);
   });
 
   it("renders one node per tour anchor, whichever section is open", () => {

@@ -1364,6 +1364,14 @@ impl HarnessAgentRunner {
                     "A step in this workflow could not set the owner of card {}.",
                     row.task_id.as_deref().unwrap_or("(unknown)")
                 )),
+                crate::ports::WorkflowBoardAction::BoardUnwired => Some(format!(
+                    "A step in this workflow could not write to the board because this runtime \
+                     has no task board, so the card \"{}\" was not opened or changed.",
+                    row.title
+                        .as_deref()
+                        .or(row.task_id.as_deref())
+                        .unwrap_or("(unknown)")
+                )),
                 _ => None,
             };
             if let Some(notice) = notice {

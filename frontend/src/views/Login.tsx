@@ -216,7 +216,7 @@ export function Login({ client, company, notice, onSignedIn }: Props) {
 
     void (async () => {
       try {
-        const result = await redeemSso(client, token);
+        const result = await redeemSso(client, company, token);
         if (!mountedRef.current) return;
         setSso({ phase: "done", email: result.email });
         // A beat on the confirmation, then into the app. Short enough not to be

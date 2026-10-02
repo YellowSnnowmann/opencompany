@@ -61,15 +61,15 @@ use crate::chargebee::types::{ChargeLine, ChargebeeConfig};
 use std::sync::{Arc, Mutex};
 
 /// A canned reply: `"<METHOD> <path fragment>"`, status, JSON body.
-type Route = (&'static str, u16, &'static str);
+pub(super) type Route = (&'static str, u16, &'static str);
 /// The stub's shared state: what it has seen, and what to answer with.
 type StubState = (Arc<Mutex<Vec<Seen>>>, Arc<Vec<Route>>);
 
 /// One request the stub saw.
 #[derive(Clone, Debug)]
-struct Seen {
-    method: String,
-    path: String,
+pub(super) struct Seen {
+    pub(super) method: String,
+    pub(super) path: String,
     query: String,
     body: String,
     /// The `chargebee-idempotency-key` header, when one was sent.
@@ -88,7 +88,7 @@ struct Seen {
 /// attempt: the Nth request matching a prefix gets that prefix's Nth entry,
 /// clamped to the last. That is what lets a test drive a failure and its
 /// retry through one route table; a prefix listed once behaves as before.
-async fn stub<F, Fut, T>(routes: Vec<Route>, call: F) -> (Result<T>, Vec<Seen>)
+pub(super) async fn stub<F, Fut, T>(routes: Vec<Route>, call: F) -> (Result<T>, Vec<Seen>)
 where
     F: FnOnce(ChargebeeClient) -> Fut,
     Fut: std::future::Future<Output = Result<T>>,

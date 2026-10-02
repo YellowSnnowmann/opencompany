@@ -449,15 +449,17 @@ pub enum WorkflowBoardAction {
     /// An existing card's owner was set or cleared (`assign_task`). **No column
     /// moved** — see [`WorkflowRun::board`].
     Assigned,
-    /// `spawn_task` did not produce a card: the store refused the write, or this
-    /// runtime has no task board wired at all. No `taskId`, because there is no
-    /// card to point at.
+    /// `spawn_task` did not produce a card: the store refused the write. No
+    /// `taskId`, because there is no card to point at.
     SpawnFailed,
     /// `assign_task` did not change the card's owner: the store refused the
     /// write, the card is no longer on the board, or the name did not resolve to
     /// anybody on the roster (issue #205 — an unresolvable owner is deliberately
     /// not written, leaving the previous one in place).
     AssignFailed,
+    /// A `spawn_task` or `assign_task` that could not run because this runtime
+    /// has no task board wired. Nothing was written.
+    BoardUnwired,
 }
 
 impl WorkflowBoardAction {
@@ -467,7 +469,10 @@ impl WorkflowBoardAction {
     /// board write the node was told would happen and that did not is the one
     /// thing on this path an operator cannot infer from the card itself.
     pub fn failed(&self) -> bool {
-        matches!(self, Self::SpawnFailed | Self::AssignFailed)
+        matches!(
+            self,
+            Self::SpawnFailed | Self::AssignFailed | Self::BoardUnwired
+        )
     }
 }
 
@@ -499,7 +504,8 @@ pub struct WorkflowRunBoardRow {
     pub action: WorkflowBoardAction,
     /// The card the row is about.
     ///
-    /// Absent on [`SpawnFailed`](WorkflowBoardAction::SpawnFailed) — no card was
+    /// Absent on [`SpawnFailed`](WorkflowBoardAction::SpawnFailed) and on a spawn's
+    /// [`BoardUnwired`](WorkflowBoardAction::BoardUnwired) — no card was
     /// written, so there is no id, and synthesizing one would name a card that
     /// is not on the board. Present on every other arm.
     #[serde(default, skip_serializing_if = "Option::is_none")]

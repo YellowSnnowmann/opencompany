@@ -14,12 +14,28 @@ import type { Channel } from "./model";
 interface Props {
   directMessages: Channel[];
   onSelect: (id: string) => void;
-  trigger: ReactElement;
+  /** Absent when the caller opens it from elsewhere (a menu item) via `open`. */
+  trigger?: ReactElement;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Defaults to the agent-DM wording; the channel picker reuses this dialog. */
+  title?: string;
+  description?: string;
 }
 
 /** Pick any teammate to open a direct-message composer. */
-export function NewMessageDialog({ directMessages, onSelect, trigger }: Props) {
-  const [open, setOpen] = useState(false);
+export function NewMessageDialog({
+  directMessages,
+  onSelect,
+  trigger,
+  open: openProp,
+  onOpenChange,
+  title = "New message",
+  description = "Choose an agent to start a direct message.",
+}: Props) {
+  const [openLocal, setOpenLocal] = useState(false);
+  const open = openProp ?? openLocal;
+  const setOpen = onOpenChange ?? setOpenLocal;
 
   function select(id: string) {
     onSelect(id);
@@ -28,11 +44,11 @@ export function NewMessageDialog({ directMessages, onSelect, trigger }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={trigger} />
+      {trigger && <DialogTrigger render={trigger} />}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New message</DialogTitle>
-          <DialogDescription>Choose an agent to start a direct message.</DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
           {directMessages.map((channel) => (

@@ -70,7 +70,7 @@ export function RunFailurePanel({
     // mutually exclusive sibling this panel replaces in the same slot.
     <aside
       aria-label="Run failure"
-      className="flex h-full flex-col border-t bg-card/60 xl:border-t-0 xl:border-l"
+      className="flex h-full flex-col border-t bg-card/60 xl:border-0 xl:bg-transparent"
       data-testid="workflow-run-failure"
     >
       <div className="flex items-center justify-between px-4 py-2">

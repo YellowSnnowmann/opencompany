@@ -1102,6 +1102,7 @@ impl<'a> DelegationRunner<'a> {
         use crate::ports::{WorkflowBoardAction, WorkflowRunBoardRow};
 
         let mut rows = Vec::with_capacity(delegations.len());
+        let unwired = self.tasks.is_none();
         for delegation in delegations {
             // Read the row's structural fields off the delegation BEFORE it is
             // consumed by the drain. Nothing here is the model's prose beyond the
@@ -1146,10 +1147,12 @@ impl<'a> DelegationRunner<'a> {
                         title,
                         assignee,
                     },
-                    // `Ok` with no id: this runtime wired no task board. Not an
-                    // error the node should fail on, and not a card either.
                     None => WorkflowRunBoardRow {
-                        action: WorkflowBoardAction::SpawnFailed,
+                        action: if unwired {
+                            WorkflowBoardAction::BoardUnwired
+                        } else {
+                            WorkflowBoardAction::SpawnFailed
+                        },
                         task_id: None,
                         title,
                         assignee,
@@ -1158,6 +1161,8 @@ impl<'a> DelegationRunner<'a> {
                 (false, Ok(outcome)) => WorkflowRunBoardRow {
                     action: if outcome.assigned {
                         WorkflowBoardAction::Assigned
+                    } else if unwired {
+                        WorkflowBoardAction::BoardUnwired
                     } else {
                         WorkflowBoardAction::AssignFailed
                     },
@@ -2195,6 +2200,21 @@ impl<'a> DelegationRunner<'a> {
                 ),
             ));
         }
+        for target in self.queue.drain_task_handoff_refusals(self.max_delegations) {
+            tracing::warn!(
+                task_id = %card.id,
+                delegator = %delegator,
+                target = %target,
+                "[task] a second hand-off was refused because this task already transferred ownership"
+            );
+            card.note = Some(append_note(
+                card.note.as_deref(),
+                delegator,
+                &format!(
+                    "Hand-off to {target} was refused because this board task already has its one +                     ownership transfer queued. Only the first colleague will run; this second +                     target was not assigned."
+                ),
+            ));
+        }
         let queued = self.queue.drain(self.max_delegations);
         if queued.is_empty() {
             return Ok(None);
@@ -2468,7 +2488,7 @@ impl<'a> DelegationRunner<'a> {
                 &member,
                 &instruction,
                 &control,
-                self.target(chat_id),
+                ChatTarget::deliberating(chat_id, self.thread_root),
                 // Issue #242: when this drain is running inside a
                 // dispatched card, the delegate's turn is part of that
                 // card's attempt — its steps and its spend belong to the
@@ -3582,7 +3602,10 @@ fn kind_label(delegation: &Delegation) -> &'static str {
 /// distinction still matters — the card note that says *why* delivery failed —
 /// picks its wording from the delegation's own variant at the call site rather
 /// than from a second accessor.
-fn hand_off_target_of(delegation: &Delegation) -> Option<&str> {
+///
+/// Crate-visible because the delegation queue records a dispatched card's
+/// refused second hand-off by this same target at the staging boundary.
+pub(crate) fn hand_off_target_of(delegation: &Delegation) -> Option<&str> {
     match delegation {
         Delegation::DelegateToDesk { desk, .. } => Some(desk),
         Delegation::DelegateToTeammate { teammate, .. } => Some(teammate),

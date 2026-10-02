@@ -11,7 +11,7 @@ async fn query_company_board_section_reports_unavailable_on_a_read_failure_not_e
         !text.contains("No open cards"),
         "must not claim the board is empty when it could not be read: {text}"
     );
-    assert!(text.contains("Board unavailable"), "{text}");
+    assert!(text.contains("The board could not be read"), "{text}");
 
     let payload = match &result.content[0] {
         openhuman_core::skills::types::ToolContent::Json { data } => data.clone(),
@@ -22,6 +22,7 @@ async fn query_company_board_section_reports_unavailable_on_a_read_failure_not_e
         "board_open must stay at zero on a read failure, not report a fabricated count: \
          {payload}"
     );
+    assert_eq!(payload["unreadable"], json!(["board"]), "{payload}");
 }
 
 #[tokio::test]
