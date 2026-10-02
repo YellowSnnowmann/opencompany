@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isMascotRef } from "@/lib/avatar";
 import { Textarea } from "@/components/ui/textarea";
 import { AGENT_FIELDS } from "@/lib/agent";
 
@@ -30,11 +31,21 @@ export interface NewMemberFields {
   /**
    * The face, chosen before the teammate exists.
    *
-   * `addTeamMember` takes no avatar, so a caller writes it as a second call
-   * once the host has answered with an id — best-effort, because a teammate
-   * with the wrong face is still a teammate.
+   * It rides the create request (`birthLook`, `lib/new-member-look.ts`), so the
+   * teammate is born wearing it; a host that predates that has it written
+   * afterwards, best-effort, because a teammate with the wrong face is still a
+   * teammate.
    */
   avatar?: string;
+  /**
+   * The mascot's display mode, costume and two colors, when the face is a
+   * mascot and the operator chose any of them. `undefined` is the file's own
+   * default for each, not "none" — same three-way meaning as on the picker.
+   */
+  mascotMode?: string;
+  mascotCostume?: string;
+  mascotSkinColor?: string;
+  mascotHandColor?: string;
   /**
    * Land on the new teammate's page, rather than staying where the dialog was
    * opened from.
@@ -92,6 +103,12 @@ export function AddMemberDialog({ open, onOpenChange, onAdd, client, company }: 
   const [role, setRole] = useState("");
   /** `undefined` is the hashed mascot — a face nobody chose is still a face. */
   const [avatar, setAvatar] = useState<string | undefined>(undefined);
+  // The mascot's look, kept even while the face is switched to something else so
+  // that switching back restores it — but only sent when the face is a mascot.
+  const [mascotMode, setMascotMode] = useState<string | undefined>(undefined);
+  const [mascotCostume, setMascotCostume] = useState<string | undefined>(undefined);
+  const [mascotSkinColor, setMascotSkinColor] = useState<string | undefined>(undefined);
+  const [mascotHandColor, setMascotHandColor] = useState<string | undefined>(undefined);
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
 
@@ -100,6 +117,10 @@ export function AddMemberDialog({ open, onOpenChange, onAdd, client, company }: 
     setRole("");
     setDescription("");
     setAvatar(undefined);
+    setMascotMode(undefined);
+    setMascotCostume(undefined);
+    setMascotSkinColor(undefined);
+    setMascotHandColor(undefined);
   }
 
   // Both required: a nameless agent is unrecognisable on the roster, and the
@@ -117,6 +138,11 @@ export function AddMemberDialog({ open, onOpenChange, onAdd, client, company }: 
         description: description.trim(),
         instructions: "",
         avatar,
+        // A look only means something on a mascot: switching to a shipped face
+        // after tuning one must not send the mascot's costume with it.
+        ...(isMascotRef(avatar ?? "")
+          ? { mascotMode, mascotCostume, mascotSkinColor, mascotHandColor }
+          : {}),
         landOnProfile: true,
       });
     } catch {
@@ -175,6 +201,14 @@ export function AddMemberDialog({ open, onOpenChange, onAdd, client, company }: 
               seed={name.trim() || "new-agent"}
               name={name.trim() || "New agent"}
               onChange={setAvatar}
+              mascotMode={mascotMode}
+              mascotCostume={mascotCostume}
+              mascotSkinColor={mascotSkinColor}
+              mascotHandColor={mascotHandColor}
+              onChangeMascotMode={setMascotMode}
+              onChangeMascotCostume={setMascotCostume}
+              onChangeMascotSkinColor={setMascotSkinColor}
+              onChangeMascotHandColor={setMascotHandColor}
               disabled={creating}
             />
           </div>

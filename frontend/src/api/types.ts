@@ -1485,6 +1485,26 @@ export interface TeamMemberDto {
    */
   avatar?: string;
   /**
+   * The mascot costume this teammate wears, when somebody has chosen one — the
+   * same field, from the same host-side helper, as `AgentDetailDto.mascotCostume`.
+   *
+   * Absent means the file's own default costume. Added alongside the two color
+   * fields below to close a real fidelity gap: every mass-render surface built
+   * from this list (the chat header, the DM sidebar, the org chart, the members
+   * pane, a message row) used to draw the id-hashed default look for a mascot
+   * wearer, because `avatar` alone said "this is a mascot" without saying which
+   * one — only the detail read (opened by clicking that very avatar) carried
+   * the chosen look. A host predating this field sends nothing, same rollout
+   * skew as `avatar` itself.
+   */
+  mascotCostume?: string;
+  /** See {@link mascotCostume}. */
+  mascotSkinColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotHandColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotMode?: string;
+  /**
    * Whether this teammate has an enabled inbox, as the host's `InboxStore` sees
    * it. Absent on hosts predating the field; the console reads that as `false`.
    */
@@ -1753,6 +1773,31 @@ export interface AgentDetailDto {
    * same field and the same contract as `TeamMemberDto.avatar`.
    */
   avatar?: string;
+  /**
+   * Whether this teammate's `mascot:animated` canvas plays, when somebody has
+   * chosen a mode — one of `MASCOT_MODES` in `lib/avatar.ts`. Only meaningful
+   * when `avatar` is `"mascot:animated"`. Absent means the file's own default
+   * mode (`"animated"`), not "no mascot".
+   */
+  mascotMode?: string;
+  /**
+   * The mascot costume this teammate wears, when somebody has chosen one —
+   * one of `MASCOT_COSTUMES` in `lib/avatar.ts`. Applies whichever mode is in
+   * force. Absent means the file's own default costume.
+   */
+  mascotCostume?: string;
+  /**
+   * The mascot's skin (body) color, when somebody has chosen one — one of
+   * `MASCOT_SKIN_COLORS` in `lib/avatar.ts`. Absent means the file's own
+   * default.
+   */
+  mascotSkinColor?: string;
+  /**
+   * The mascot's hand/accent color, when somebody has chosen one — one of
+   * `MASCOT_HAND_COLORS` in `lib/avatar.ts`. Absent means the file's own
+   * default.
+   */
+  mascotHandColor?: string;
   /** The cap in force and its attribution; same absent-means-uncapped contract as `TeamMemberDto`. */
   budgetUsdDaily?: number;
   spentTodayUsd?: number;
@@ -1852,6 +1897,31 @@ export interface EditAgentInput {
    * sets it. See `lib/avatar.ts`.
    */
   avatar?: string | null;
+  /**
+   * Whether this teammate's `mascot:animated` canvas plays, three-state
+   * exactly like `avatar`: `undefined` leaves it alone, `null` resets it to
+   * the file's own default mode (`"animated"`), and a value from
+   * `MASCOT_MODES` (`lib/avatar.ts`) sets it. Meaningful only alongside a
+   * `mascot:` `avatar`, but the host accepts it regardless — the picker
+   * sends it before committing the mascot itself.
+   */
+  mascotMode?: string | null;
+  /**
+   * The mascot costume this teammate wears, three-state exactly like
+   * `mascotMode`: `undefined` leaves it, `null` resets it to the file's own
+   * default costume, an id from `MASCOT_COSTUMES` sets it.
+   */
+  mascotCostume?: string | null;
+  /**
+   * The mascot's skin (body) color, three-state exactly like `mascotMode`; an
+   * id from `MASCOT_SKIN_COLORS` sets it.
+   */
+  mascotSkinColor?: string | null;
+  /**
+   * The mascot's hand/accent color, three-state exactly like `mascotMode`; an
+   * id from `MASCOT_HAND_COLORS` sets it.
+   */
+  mascotHandColor?: string | null;
   /**
    * The teammate's own model — an ACP model hint (issue #1245), or the model
    * half of its `{provider, model}` pair on a built-in harness (keys rework,

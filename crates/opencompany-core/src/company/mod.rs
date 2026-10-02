@@ -74,6 +74,13 @@ pub mod ledger_file;
 /// write — only hold if exactly one code path enforces them.
 pub mod ledgers;
 mod manifest;
+/// The curated closed lists behind `mascot:animated` (`docs/spec/runtime/
+/// avatars.md`): which of the file's costumes a teammate wears, and its two
+/// independent colors. Kept apart from [`avatar`] because that module owns
+/// the *reference grammar* (`tiny:`/`blob:`/`mascot:`), while this one owns
+/// what a `mascot:` wearer additionally overrides — a different axis, and a
+/// different closed vocabulary, validated the same way.
+pub mod mascot;
 pub mod mcp;
 /// The one rule that decides whether two MCP records name the same server,
 /// shared by the console's server list and the agent prompt that tells a model

@@ -64,6 +64,7 @@ import {
   type AddMemberOutcome,
   type MissedStep,
 } from "@/lib/member-feedback";
+import { birthLook, writeUnechoedLook } from "@/lib/new-member-look";
 import {
   addableTo,
   buildOrgTree,
@@ -437,6 +438,10 @@ export function OrgChartView({
             // produce, and the reason an E2E test asserts the wire body rather
             // than the screen.
             instructions: fields.instructions?.trim() || undefined,
+            // The look rides the create, like the persona above — and for the
+            // same reason: this surface used to drop it, so the same dialog
+            // opened from the roster kept what this one lost.
+            ...birthLook(fields),
           },
           company,
         );
@@ -451,6 +456,13 @@ export function OrgChartView({
           );
         }
         throw e;
+      }
+      // Only what a host that predates the look did not echo is written now.
+      if (!(await writeUnechoedLook(client, company, created, fields))) {
+        missed.push({
+          what: "their icon couldn't be set",
+          fix: "Pick one again from their profile.",
+        });
       }
       if (deskId) {
         try {
@@ -1087,6 +1099,10 @@ function DeskNode({
                         <TeammateAvatar
                           name={member.name}
                           avatar={member.avatar}
+                          mascotCostume={member.mascotCostume}
+                          mascotSkinColor={member.mascotSkinColor}
+                          mascotHandColor={member.mascotHandColor}
+                          mascotMode={member.mascotMode}
                           tone={member.tone}
                           className="size-5 shrink-0"
                         />
@@ -1225,6 +1241,10 @@ function Seat({
       <TeammateAvatar
         name={seat.name}
         avatar={seat.avatar}
+        mascotCostume={seat.mascotCostume}
+        mascotSkinColor={seat.mascotSkinColor}
+        mascotHandColor={seat.mascotHandColor}
+        mascotMode={seat.mascotMode}
         tone={toneFor(seat.id)}
         className="size-5 shrink-0"
       />
@@ -1380,6 +1400,10 @@ function Unplaced({ tree }: { tree: OrgTree }) {
                       <TeammateAvatar
                         name={member.name}
                         avatar={member.avatar}
+                        mascotCostume={member.mascotCostume}
+                        mascotSkinColor={member.mascotSkinColor}
+                        mascotHandColor={member.mascotHandColor}
+                        mascotMode={member.mascotMode}
                         tone={member.tone}
                         className="size-5 shrink-0"
                       />
@@ -1394,6 +1418,10 @@ function Unplaced({ tree }: { tree: OrgTree }) {
                       <TeammateAvatar
                         name={member.name}
                         avatar={member.avatar}
+                        mascotCostume={member.mascotCostume}
+                        mascotSkinColor={member.mascotSkinColor}
+                        mascotHandColor={member.mascotHandColor}
+                        mascotMode={member.mascotMode}
                         tone={member.tone}
                         className="size-5 shrink-0"
                       />

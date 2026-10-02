@@ -274,4 +274,3 @@ export async function signInAsMember(
 export function skillPageUrl(slug: string): string {
   return `/#/connections/skills?skill=${encodeURIComponent(slug)}`;
 }
-

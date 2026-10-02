@@ -255,6 +255,35 @@ struct TeamMemberDto {
     /// no way to offer "reset to the default face".
     #[serde(skip_serializing_if = "Option::is_none")]
     avatar: Option<String>,
+    /// The mascot costume this teammate wears, when somebody has chosen one —
+    /// the same field, from the same helper, as `GET …/team/{agent_id}`
+    /// (`docs/spec/runtime/avatars.md`).
+    ///
+    /// Absent means the file's own default costume. Carried on the roster read
+    /// for the reason `avatar` itself is: every mass-render surface built from
+    /// this list — the chat header, the DM sidebar, the org chart, the members
+    /// pane, a message row — drew the id-hashed default costume for *every*
+    /// mascot wearer until this shipped, because `avatar` alone told a caller
+    /// "this is a mascot" but not which one. Only `GET …/team/{agent_id}`
+    /// (opened by clicking that very avatar) carried the real look, so a
+    /// teammate's face changed the moment its own detail page opened — the gap
+    /// this field closes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_costume: Option<String>,
+    /// Whether the mascot moves (`"animated"`) or holds one pose (`"static"`),
+    /// when somebody has chosen one. See [`Self::mascot_costume`] for why this
+    /// is on the list read: a teammate set to `static` must hold still in a chat
+    /// gutter too, not only on its profile sheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_mode: Option<String>,
+    /// The mascot's skin (body) color, when somebody has chosen one. See
+    /// [`Self::mascot_costume`] for why this is on the list read at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_skin_color: Option<String>,
+    /// The mascot's hand/accent color, when somebody has chosen one. See
+    /// [`Self::mascot_costume`] for why this is on the list read at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_hand_color: Option<String>,
     /// Whether this teammate came from the **global baseline**
     /// (`docs/spec/runtime/globals.md`) rather than from this company — the
     /// same `Agent::global` marker the merge itself sets (issue #1404).
@@ -300,6 +329,28 @@ struct AddMember {
     /// the hashed default.
     #[serde(default)]
     avatar: Option<String>,
+    /// The mascot's display mode, costume and two colors this teammate is born
+    /// wearing (`docs/spec/runtime/avatars.md`), so the create dialog's look is
+    /// one write rather than a create and a `PATCH`. Each is validated against
+    /// the same closed list the `PATCH` route uses
+    /// ([`crate::company::mascot::parse_choices`]); a plain `Option` for the same
+    /// reason `avatar` is one — at creation there is nothing to reset to, so
+    /// `null`, omitted and blank all mean the file's own default. Meaningful
+    /// only alongside a `mascot:` `avatar`, but not refused without one, the
+    /// same latitude the `PATCH` gives a picker previewing a look. Open to any
+    /// member, like `avatar`: they decide nothing about what the company can
+    /// reach.
+    #[serde(default)]
+    mascot_mode: Option<String>,
+    /// See [`Self::mascot_mode`].
+    #[serde(default)]
+    mascot_costume: Option<String>,
+    /// See [`Self::mascot_mode`].
+    #[serde(default)]
+    mascot_skin_color: Option<String>,
+    /// See [`Self::mascot_mode`].
+    #[serde(default)]
+    mascot_hand_color: Option<String>,
     /// The job shape that decides this teammate's tool belt, sent by the
     /// first-run setup build-out (issue #1674). When present it derives the
     /// grant list through
@@ -526,6 +577,14 @@ fn member_row(
         // alike, so both arms of the list above get the chosen face with no
         // second lookup to keep in step.
         avatar: record.effective_avatar(agent_id),
+        // Same three helpers `GET …/team/{agent_id}` resolves its own
+        // mascot_costume/skin_color/hand_color from (issue: mass-render
+        // surfaces showed the default look while the detail page — reading
+        // these same helpers already — showed the real one).
+        mascot_costume: record.effective_mascot_costume(agent_id),
+        mascot_mode: record.effective_mascot_mode(agent_id),
+        mascot_skin_color: record.effective_mascot_skin_color(agent_id),
+        mascot_hand_color: record.effective_mascot_hand_color(agent_id),
         // Through the same helper as the four above, for the same reason: the
         // roster read is what the first-run gate is decided on, so a second
         // copy of the provenance rule here is a second thing to forget.
@@ -659,6 +718,17 @@ async fn add_member(
         }
         None => None,
     };
+
+    // The mascot look needs no I/O to validate — four closed, in-memory lists —
+    // so it is checked here, before the lock and before anything is written: a
+    // refused value must not leave a teammate behind wearing none of it.
+    let mascot = crate::company::mascot::parse_choices(
+        body.mascot_mode.as_deref(),
+        body.mascot_costume.as_deref(),
+        body.mascot_skin_color.as_deref(),
+        body.mascot_hand_color.as_deref(),
+    )
+    .map_err(|e| ApiError(e).into_response())?;
 
     // Serialize per-company writes so concurrent console POST /team and
     // orchestrator add_agent calls can't clobber each other's overlay_agents.
@@ -799,6 +869,19 @@ async fn add_member(
             ..Default::default()
         });
     }
+    // The look, in the same atomic save as the teammate and its face. Fields
+    // left `None` are left alone by the upsert, so a partial look writes only
+    // what was chosen.
+    if !mascot.is_empty() {
+        record.upsert_agent_override(AgentOverride {
+            agent_id: agent.id.clone(),
+            mascot_mode: mascot.mode.clone(),
+            mascot_costume: mascot.costume.clone(),
+            mascot_skin_color: mascot.skin_color.clone(),
+            mascot_hand_color: mascot.hand_color.clone(),
+            ..Default::default()
+        });
+    }
     company.runtime.store().save(&record).await?;
     // The audit row for a teammate coming into existence.
     //
@@ -872,6 +955,13 @@ async fn add_member(
         budget_set_by: attribution.as_ref().map(|entry| entry.set_by.id.clone()),
         budget_set_at_millis: attribution.as_ref().map(|entry| entry.at_millis),
         avatar: resolved_avatar,
+        // What this request chose, echoed the way `avatar` is, so the console can
+        // tell the host took them (an older host echoes none, and the console
+        // then falls back to a `PATCH`) and draws the new card in its own look.
+        mascot_costume: mascot.costume,
+        mascot_mode: mascot.mode,
+        mascot_skin_color: mascot.skin_color,
+        mascot_hand_color: mascot.hand_color,
         // An operator just created this one, so it is by construction not from
         // the baseline — the merge only ever appends to the manifest roster.
         // It is also exactly the write that closes the first-run gate.
