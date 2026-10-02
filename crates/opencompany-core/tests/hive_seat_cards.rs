@@ -474,14 +474,9 @@ async fn start_task_dispatches_a_desk_card_through_the_live_room_path() {
                 .expect("the board card was created before the start request");
             return call("start_task", json!({ "task_id": id }));
         }
-        let card_room_turn = ask.messages.iter().any(|message| {
-            message.get("role").and_then(Value::as_str) == Some("user")
-                && message
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .is_some_and(|content| content.contains("Task: Run the card room integration"))
-        });
-        if card_room_turn && !entered_room.swap(true, Ordering::SeqCst) {
+        if support::room::seat_of(ask, ROLES).is_some()
+            && !entered_room.swap(true, Ordering::SeqCst)
+        {
             // Hold the first seat response long enough for the operator to steer
             // the live card run through the production route.
             std::thread::sleep(Duration::from_millis(750));
