@@ -274,6 +274,7 @@ async fn the_backstop_returns_a_card_its_run_abandoned() {
         .upsert(
             rt.id(),
             &TaskRecord {
+                opened_by: None,
                 id: "t-1".to_string(),
                 title: TaskTitle::authored("Draft the spec"),
                 note: None,
@@ -362,6 +363,7 @@ async fn the_backstop_leaves_a_parked_card_exactly_where_the_operator_put_it() {
         .upsert(
             rt.id(),
             &TaskRecord {
+                opened_by: None,
                 id: "t-1".to_string(),
                 title: TaskTitle::authored("Draft the spec"),
                 note: Some("[operator] parked this".to_string()),

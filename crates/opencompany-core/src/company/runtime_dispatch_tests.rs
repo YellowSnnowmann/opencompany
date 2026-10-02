@@ -506,6 +506,7 @@ async fn a_dispatch_opens_a_pending_attempt_before_the_cycle_spawns() {
         .expect("runtime");
 
     let card = TaskRecord {
+        opened_by: None,
         id: "t-1".to_string(),
         title: TaskTitle::authored("Ship it"),
         note: None,
@@ -601,6 +602,7 @@ async fn a_dispatch_refused_by_a_quiescing_runtime_settles_its_attempt() {
     );
 
     let card = TaskRecord {
+        opened_by: None,
         id: "t-1".to_string(),
         title: TaskTitle::authored("Ship it"),
         note: None,

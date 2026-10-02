@@ -15,17 +15,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isMascotRef } from "@/lib/avatar";
+import { Textarea } from "@/components/ui/textarea";
+import { AGENT_FIELDS } from "@/lib/agent";
+
+/** The shared spec for `description`, so this form and the edit form agree. */
+const DESCRIPTION_FIELD = AGENT_FIELDS.find((f) => f.key === "description")!;
 
 export interface NewMemberFields {
   name: string;
   role: string;
-  /**
-   * Blank from this dialog, which no longer asks for it.
-   *
-   * Kept on the type because the write path still carries it: a teammate
-   * created here has no description *yet*, and the field is where the profile
-   * page's copilot writes one.
-   */
+  /** What this teammate does, in a line. Blank is allowed. */
   description: string;
   /** The standing instructions this teammate is born with. Blank from here. */
   instructions?: string;
@@ -51,7 +50,7 @@ export interface NewMemberFields {
    * Land on the new teammate's page, rather than staying where the dialog was
    * opened from.
    *
-   * Always set by this dialog now: it collects three things, so everything else
+   * Always set by this dialog now: it collects the essentials, so everything else
    * about the teammate is filled in on the page this opens. A caller whose
    * write fell back to a local-only row has no id to navigate to and may
    * ignore it.
@@ -76,10 +75,10 @@ interface Props {
 }
 
 /**
- * Add an agent: a name, a face, and a post. Reached from the chat pane's member
- * list, the org chart's desk cards, and the roster.
+ * Add an agent: a name, a face, a post, and what they do. Reached from the chat
+ * pane's member list, the org chart's desk cards, and the roster.
  *
- * # Why it collects three things
+ * # Why it collects what it does
  *
  * It used to be the whole teammate — name, role, description, persona
  * instructions and an inbox switch — with a copilot that would design all of it
@@ -90,13 +89,14 @@ interface Props {
  * A teammate is not finished at the moment it is created, and this dialog was
  * the only place pretending otherwise. What it needs is enough to make a real
  * record the operator can then open: who they are, what they look like on a
- * roster of thirteen, and what they do. Everything else — the description, the
- * persona, the tools, the model — is on the teammate's own page, next to the
- * copilot that drafts it and the record it is grounded in.
+ * roster of thirteen, what post they hold, and what they actually do. The
+ * persona, the tools and the model are on the teammate's own page, next to the
+ * copilot that drafts them and the record they are grounded in.
  *
- * So this creates and gets out of the way: the write lands and the operator is
- * put on the new agent's page, which is where the fine-tuning was always going
- * to happen.
+ * The description is optional but asked for here, because it is the line every
+ * other surface shows under the name — and the one the teammate is introduced
+ * by. Its label and placeholder come from `AGENT_FIELDS`, so this form and the
+ * edit form cannot describe the same field differently.
  */
 export function AddMemberDialog({ open, onOpenChange, onAdd, client, company }: Props) {
   const [name, setName] = useState("");
@@ -109,11 +109,13 @@ export function AddMemberDialog({ open, onOpenChange, onAdd, client, company }: 
   const [mascotCostume, setMascotCostume] = useState<string | undefined>(undefined);
   const [mascotSkinColor, setMascotSkinColor] = useState<string | undefined>(undefined);
   const [mascotHandColor, setMascotHandColor] = useState<string | undefined>(undefined);
+  const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
 
   function reset() {
     setName("");
     setRole("");
+    setDescription("");
     setAvatar(undefined);
     setMascotMode(undefined);
     setMascotCostume(undefined);
@@ -133,7 +135,7 @@ export function AddMemberDialog({ open, onOpenChange, onAdd, client, company }: 
       landed = await onAdd({
         name: name.trim(),
         role: role.trim(),
-        description: "",
+        description: description.trim(),
         instructions: "",
         avatar,
         // A look only means something on a mascot: switching to a shipped face
@@ -169,7 +171,7 @@ export function AddMemberDialog({ open, onOpenChange, onAdd, client, company }: 
         <DialogHeader>
           <DialogTitle>Add agent</DialogTitle>
           <DialogDescription>
-            Name them and give them a post. You can fill in the rest on their page.
+            Name them, give them a post, and say what they do. You can fill in the rest on their page.
           </DialogDescription>
         </DialogHeader>
 
@@ -222,8 +224,21 @@ export function AddMemberDialog({ open, onOpenChange, onAdd, client, company }: 
               data-testid="team-add-role"
             />
             <p className="text-xs text-muted-foreground">
-              What they do. The company gives an agent its starting tools from this.
+              The company gives an agent its starting tools from this.
             </p>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="agent-add-description">{DESCRIPTION_FIELD.label}</Label>
+            <Textarea
+              id="agent-add-description"
+              value={description}
+              disabled={creating}
+              rows={3}
+              placeholder={DESCRIPTION_FIELD.placeholder}
+              onChange={(e) => setDescription(e.target.value)}
+              data-testid="team-add-description"
+            />
           </div>
         </div>
 

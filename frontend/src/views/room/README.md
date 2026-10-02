@@ -197,8 +197,9 @@ chart's desk level, since no desk can name a parent desk. See
 | `model.ts` | A barrel re-exporting the three above, so one import address still reaches all of it. Declares nothing. |
 | `RoundBand.tsx` | One round of a desk answering as a room: the seats that ran together, each lane's live state, and the rows they produced (`data-testid="round-band"`, `data-round-status`). |
 | `EpisodeCompleteMarker.tsx` | The centred pill that says an episode is over — how many rounds, who closed it, and whether the host cut it off. |
-| `ChannelRail.tsx` | The channel/DM list, with collapsible sections. |
+| `ChannelRail.tsx` | The channel/DM list, with collapsible sections. The DM order is held while the pointer or keyboard focus is in the rail (`useStableList` with `holdPointerFocus: false`, #1414; a click's leftover focus does not hold) and slides to its new slot on release (`useFlipList`, expanded rail only, never while hydrating or under reduced motion). |
 | `ChatHeader.tsx` | The bar above the timeline. |
+| `PresenceDot.tsx` | A person's online/away dot. Never a teammate's: see `components/agent-status-dot.tsx`. |
 | `MessageTimeline.tsx` | The scroll body: day dividers, channel intro, loading skeleton, typing row. |
 | `MessageRow.tsx` | One line — avatar gutter, author, body, reactions, hover action bar, the board-card chip (link plus its dismissal, issue #984), and the utterance chip on a row an episode committed (`components/episode/UtteranceChip`). |
 | `MessageComposer.tsx` | The composer dock; also used compact in the thread panel. |

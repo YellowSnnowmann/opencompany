@@ -65,6 +65,7 @@ import { ChannelCreateDialog } from "./room/ChannelCreateDialog";
 import { ChannelRail } from "./room/ChannelRail";
 import { ChatHeader } from "./room/ChatHeader";
 import { MembersPane } from "./room/MembersPane";
+import { dmRawTurns } from "./room/rawTurnScope";
 import { TypingLine } from "./room/TypingLine";
 import { InflightRunBar } from "./room/InflightRunBar";
 import { MessageComposer } from "./room/MessageComposer";
@@ -988,6 +989,14 @@ export function RoomView({
     >
   >(new Map());
 
+  // Which teammate each DM thread belongs to, for the agent presence dot: a turn
+  // just accepted on a DM has named nobody yet, and the thread is the only clue.
+  // The roster is the RoomView's own (it resolves it independently of the
+  // shell), so the mapping is written from here.
+  useEffect(() => {
+    room.setThreadAgents(Object.fromEntries(members.map((m) => [dmThreadId(m), m.id])));
+  }, [members]);
+
   // No channels exist until the host has answered. Resolving against a
   // half-built list is exactly the first-paint swap issue #370 describes.
   //
@@ -1312,6 +1321,12 @@ export function RoomView({
   const historyPending = channel
     ? loadingTeam || !historyReady(hydration, channel.id)
     : false;
+  // Every channel's history has landed (and the roster with it). The DM list
+  // re-sorts as each history arrives, which is not a reorder worth animating.
+  const railHydrated =
+    !loadingTeam &&
+    hydration.discovered &&
+    Object.values(hydration.byChannel).every((status) => status === "ready");
   // Folded from the raw transcript, and then folded back onto it: an
   // exchange two seats are having is written to their pair channel, so the
   // rows never reach this desk and only the episode fold has seen them.
@@ -2779,6 +2794,9 @@ export function RoomView({
             // `aria-current="page"`: this rail's open channel and the section
             // rail's open sub-page.
             currentPage={routeOpen}
+            // Slide DM rows to their new slot only once every channel's history
+            // has landed: the cold load re-sorts the list as each one arrives.
+            animateReorder={railHydrated}
             // In the sidebar the rail IS the column: it drops its own width,
             // its own border and its own fill, and lets the sidebar's scroll
             // container handle a long list.
@@ -3344,22 +3362,6 @@ const RAW_TURN_PAGE = 200;
 type RawLoad = "loading" | "ready" | "unsupported" | "error";
 
 /**
- * Whether a session row belongs to the DM with `agentId`.
- *
- * Both spellings, because the host lists both: `chat_history::agent_channels`
- * registers a teammate's DM under its **bare** id (what `dmThreadId` posts to,
- * after issue #364 re-keyed DMs) *and* under `dm:<id>` (the console's channel
- * key and a documented route key). Matching one would silently drop every line
- * keyed the other way — including, depending on which wrote it, the whole of
- * the operator's own side of the conversation.
- */
-function inDmWith(row: AgentSessionMessageDto, agentId: string): boolean {
-  return (
-    row.sessionChannelId === agentId || row.sessionChannelId === `dm:${agentId}`
-  );
-}
-
-/**
  * How many merged-channel pages one DM's raw-turns read will walk before
  * giving up on filling {@link RAW_TURN_PAGE}. Bounds the read the same way
  * `SESSION_SCAN_LIMIT` bounds the host's own delta walk — a DM that has gone
@@ -3386,7 +3388,12 @@ async function fetchDmRawTurns(
   agentId: string,
   company: string | null | undefined,
 ): Promise<AgentSessionMessageDto[]> {
-  const collected: AgentSessionMessageDto[] = [];
+  // Whole pages are kept and scoped at the end, not filtered as they arrive.
+  // A conversation's rows belong here only because a row on the DM's own
+  // channel shares their episode, and the two can land on different pages —
+  // filtering per page would drop a pair row read before the DM row that
+  // vouches for it.
+  const seen: AgentSessionMessageDto[] = [];
   let before: string | undefined;
   for (let page = 0; page < RAW_TURN_PAGE_WALK_LIMIT; page += 1) {
     const rows = await client.agentSession(agentId, company, {
@@ -3395,12 +3402,17 @@ async function fetchDmRawTurns(
     });
     // Oldest-first, same order the route answers in: an earlier page's rows
     // belong in front of what is already collected, not behind it.
-    collected.unshift(...rows.filter((row) => inDmWith(row, agentId)));
-    if (rows.length < RAW_TURN_PAGE || collected.length >= RAW_TURN_PAGE) break;
+    seen.unshift(...rows);
+    if (
+      rows.length < RAW_TURN_PAGE ||
+      dmRawTurns(seen, agentId).length >= RAW_TURN_PAGE
+    )
+      break;
     const oldest = rows[0]?.id;
     if (!oldest || oldest === before) break;
     before = oldest;
   }
+  const collected = dmRawTurns(seen, agentId);
   return collected.length > RAW_TURN_PAGE
     ? collected.slice(collected.length - RAW_TURN_PAGE)
     : collected;

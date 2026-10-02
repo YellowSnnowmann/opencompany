@@ -440,6 +440,7 @@ pub fn build_agent_with_model(
                     Box::new(oh::mcp::registry::tools::McpRegistryListToolsTool::new(
                         config.clone(),
                     )),
+                    manifest_agent.id.clone(),
                     grants.to_vec(),
                     company.clone(),
                     deps.secrets.clone(),
@@ -448,6 +449,7 @@ pub fn build_agent_with_model(
                     Box::new(oh::mcp::registry::tools::McpRegistryToolCallTool::new(
                         config,
                     )),
+                    manifest_agent.id.clone(),
                     grants.to_vec(),
                     company.clone(),
                     deps.secrets.clone(),
@@ -1093,6 +1095,8 @@ pub fn build_agent_with_model(
             deps.skills_source_dir.as_deref(),
             &deps.skills_registry,
             skill_deltas,
+            &manifest_agent.id,
+            manifest_agent.skills.as_deref(),
         ) {
             Ok(effective) => {
                 if !effective.is_empty() {
@@ -1126,8 +1130,11 @@ pub fn build_agent_with_model(
         // those names that actually run for a company agent now — can reach
         // this company's own registered servers by name. See
         // `embed_servers_for_agent`'s doc comment for the full story.
-        company_mcp_servers =
-            crate::harness::mcp::embed_servers_for_agent(&deps.mcp_servers, grants);
+        company_mcp_servers = crate::harness::mcp::embed_servers_for_agent(
+            &deps.mcp_servers,
+            &manifest_agent.id,
+            grants,
+        );
         let mcp_security = Arc::new(SecurityPolicy::default());
         // The known-secret set for the scrubber: every credential the agent's
         // granted servers carry, so no configured token can leak into an
@@ -1136,7 +1143,7 @@ pub fn build_agent_with_model(
         // request: an empty request inherits the company belt and can therefore
         // reach servers even when `manifest_agent.tools` is empty.
         let secrets = granted_secrets(&deps.mcp_servers, grants);
-        let mcp_policies = granted_policies(&deps.mcp_servers, grants);
+        let mcp_policies = granted_policies(&deps.mcp_servers, &manifest_agent.id, grants);
         tools.push(Box::new(McpListToolsTool::new(registry.clone())));
         // `OcMcpCallTool` replaces upstream's `McpCallTool`: same name/schema,
         // but it classifies + scrubs failures, rewrites the agent-facing text,
@@ -1207,6 +1214,7 @@ pub fn build_agent_with_model(
             &deps.mcp_servers,
             &installs,
             grants,
+            &manifest_agent.id,
         ));
     }
 
@@ -1759,6 +1767,28 @@ pub fn agent_spec_for(
                     "[hive] a guest seat was lent a takeover but got no verb: `complete_episode` was \
                      not on its belt to wrap"
                 );
+            }
+            // **A turn the room narrowed.**
+            //
+            // The room asks for this when a turn must end in a particular call
+            // rather than in prose -- the seat said something the room cannot
+            // hear, and is being asked again. Most of a seated belt is this
+            // host's own, so only here can the rest be withheld.
+            //
+            // This is deliberately the *last* thing done to the belt. The names
+            // the room gives are its served ones, so they have to be present to
+            // be kept -- but anything added after this filter escapes it, and
+            // `desk_take_over` did: a turn narrowed to `desk_complete_episode`
+            // was still offered the verb that claims the work instead, which is
+            // the one thing the retry is not asking for. The takeover lifts its
+            // `complete_episode` off a spare belt rather than this one, so the
+            // seat keeps the verb it is being narrowed to.
+            //
+            // An empty narrowing never reaches here (`narrowed_to` filters it):
+            // a belt of nothing refuses the call outright.
+            if let Some(only) = seating.narrowed_to(turn.session_id()) {
+                tools.retain(|tool| only.iter().any(|name| name == tool.name()));
+                visible.retain(|name| only.contains(name));
             }
             // **The gate is the episode's, over this company's.**
             //

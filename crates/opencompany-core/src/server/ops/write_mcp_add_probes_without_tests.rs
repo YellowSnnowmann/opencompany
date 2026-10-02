@@ -208,6 +208,7 @@ async fn task_detail_assembles_timeline_and_lineage() {
     let runtime = state.registry().get(&company).unwrap();
 
     let card = |id: &str, title: &str, parent: Option<&str>| TaskRecord {
+        opened_by: None,
         id: id.into(),
         title: TaskTitle::authored(title),
         note: None,

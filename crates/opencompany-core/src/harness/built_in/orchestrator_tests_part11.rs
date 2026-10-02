@@ -197,6 +197,13 @@ async fn spawn_task_fails_open_when_the_company_record_cannot_be_read() {
         "a store failure must not block opening the card: {}",
         outcome.text()
     );
+    assert!(
+        outcome
+            .text()
+            .contains("its assignee \"eng\" could not be checked against the roster"),
+        "the receipt must not read as a checked assignee: {}",
+        outcome.text()
+    );
     let drained = queue.drain(MAX_DELEGATIONS_PER_TURN);
     assert_eq!(
         drained,

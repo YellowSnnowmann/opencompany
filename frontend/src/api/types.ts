@@ -1645,6 +1645,23 @@ export interface TeamMemberDto {
    */
   tools?: AgentToolsDto;
   /**
+   * This teammate's skill scope — the same three states, from the same host-side
+   * constructor, that `GET .../team/{agentId}` serves.
+   *
+   * On the list because a skill's detail panel scopes **one skill across many
+   * teammates**, and the write is that teammate's whole `skills` list. The next
+   * list is a function of the stored one: `["a","b"]` plus the slug is
+   * `["a","b",S]`, and a surface that sent `[S]` would strip every other skill
+   * that teammate has while reporting success. The per-skill `agents` projection
+   * cannot carry the stored lists — that payload is quadratic in skills — so this
+   * read does.
+   *
+   * **Optional on the type, not on the wire**, same rule as `tools`: absent means
+   * the host does not answer, and a panel that cannot read a teammate's stored
+   * list must not offer to change it.
+   */
+  skills?: AgentSkillsDto;
+  /**
    * The desks this teammate sits on (issue #601), same shape as the detail
    * read. Desks are the company's real grouping, so these are what the
    * overview graph draws its department pillars from.
@@ -1748,6 +1765,7 @@ export interface AgentDetailDto {
    */
   isOrchestrator: boolean;
   tools: AgentToolsDto;
+  skills: AgentSkillsDto;
   desks: AgentDeskDto[];
   inboxEnabled: boolean;
   /**
@@ -1818,6 +1836,27 @@ export interface AgentToolsDto {
    */
   deskCeilingActive: boolean;
   effective: string[];
+}
+
+/**
+ * An agent's skill scope against the company's enabled set.
+ *
+ * `requested` is three-state exactly like {@link AgentToolsDto.requested}:
+ * `null` **inherits** every enabled skill, `[]` is a deliberate **no-skills**
+ * scope, and a non-empty array **narrows**. A surface that treats `null` and
+ * `[]` alike reports the opposite of the truth for exactly those agents.
+ *
+ * A slug in `requested` but missing from `effective` was asked for and not
+ * granted, because the company does not have it enabled — the same
+ * asked-for-but-dropped shape the tool grant has.
+ */
+export interface AgentSkillsDto {
+  requested: string[] | null;
+  /** The company's enabled set — the ceiling, and what the picker offers. */
+  companyAvailable: string[];
+  effective: string[];
+  /** Whether an operator override sets this scope rather than the manifest. */
+  overridden: boolean;
 }
 
 /** A desk this agent sits on, and whether it leads it. */
@@ -1913,6 +1952,13 @@ export interface EditAgentInput {
    * re-scope a grant the operator did not touch.
    */
   tools?: string[] | null;
+  /**
+   * The teammate's own skill scope, the same four-state wire shape as `tools`:
+   * `undefined` leaves it alone, `null` resets it to every enabled skill, `[]`
+   * is a deliberate no-skills scope, and a non-empty array narrows. Entries are
+   * exact slugs — the host refuses a wildcard.
+   */
+  skills?: string[] | null;
 }
 
 /** One declared or detected harness. */
@@ -2164,8 +2210,25 @@ export interface McpServer {
   serverId?: string;
   /** The directory's qualified name (`@org/server`), when this row came from one. */
   qualifiedName?: string;
-  /** The directory's icon, when this row came from one. */
+  /**
+   * The server's mark: what it reported about itself on its last successful
+   * probe, else the directory's on a row backed by an install.
+   *
+   * An inline `data:` image the host fetched itself. An icon address a remote
+   * server chose must never become a request from the operator's browser.
+   */
   iconUrl?: string;
+  /** The display name the server reported for itself, when it reported one. */
+  probedTitle?: string;
+  /**
+   * The server's own description of what it does, when it reported one.
+   *
+   * Distinct from {@link McpServer.description}, which is what the operator or
+   * the bundle declared.
+   */
+  probedDescription?: string;
+  /** The server's home page, when it reported one. A link; nothing fetches it. */
+  websiteUrl?: string;
   /** How an install is dialled — `http_remote` or `stdio`. Absent on a List A-only row. */
   transport?: string;
 }
@@ -2364,6 +2427,17 @@ export interface CapabilityStatusDto {
    * send the field) and must never be rendered as "absent".
    */
   mcpInBuild?: boolean;
+  /**
+   * Whether a tool set to "needs approval" actually parks the call, or is
+   * allowed through as if it were set to Allow.
+   *
+   * The permissions surfaces read it from here because it is the one fact they
+   * cannot derive: every other reading on them says which mode is stored, so an
+   * operator who sets "needs approval" and is told nothing walks away believing
+   * the tool is gated. `undefined` is **unknown** (an older host that does not
+   * send the field) and must never be rendered as "does not park".
+   */
+  approvalsPark?: boolean;
   /**
    * Whether this company's teammates can actually think, and why not when they
    * cannot (issue #1735).
