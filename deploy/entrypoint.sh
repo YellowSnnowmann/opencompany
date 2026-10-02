@@ -3,16 +3,12 @@
 # The value may be an example directory name (e.g. venture_capital) or a
 # friendly alias (e.g. fund). This is the "which module spins up" switch.
 #
-# A BLANK or absent $OPENCOMPANY_COMPANY means blank — `serve` runs with **no**
-# `--company`, so an empty `/data` boots an empty registry. That is what puts
-# the console into the first-run setup wizard: `AppSpec.setup_complete` is false
-# with no company registered (`app/types.rs`), so `ConnectionConsole` shows
-# `SetupWizard.tsx`, and the wizard's `POST /api/v1/setup` seeds the company the
-# user picks. The platform launches an unconfigured instance and lets the owner
-# build it in the wizard, rather than pre-picking a template here (WS-A design:
-# opencompany-sso-onboarding-design.md, Part 1). A named value still selects a
-# baked company exactly as before, so a local `--company`-style boot is
-# unchanged.
+# An explicitly blank $OPENCOMPANY_COMPANY means `serve` runs with **no**
+# `--company`, so an empty `/data` boots an empty registry and the console opens
+# first-run setup. A routable unconfigured launch is authorized by the
+# platform's per-tenant SSO bootstrap token. The image default is
+# `marketing_agency`; the platform overrides it with an explicit blank. A named
+# value selects a baked company as before.
 set -eu
 
 COMPANY="${OPENCOMPANY_COMPANY:-}"

@@ -106,7 +106,95 @@ struct RedeemBody {
 /// something a person does precisely because they hold no session yet, so it
 /// does no auth of its own. Its authority is the signed token it verifies.
 pub fn router() -> Router<AppState> {
-    public_scoped("/sso/redeem", post(redeem))
+    Router::new()
+        .route("/api/v1/sso/redeem", post(redeem_from_host))
+        .merge(public_scoped("/sso/redeem", post(redeem)))
+}
+
+/// `POST /api/v1/sso/redeem` — resolve the company from the signed claim.
+///
+/// Unlike the company-scoped alias, this form can also authorize the first-run
+/// setup wizard while the host has no company registered yet.
+async fn redeem_from_host(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<RedeemBody>,
+) -> Result<Response, crate::server::Rejection> {
+    let Some(secret) = state.config().sso_secret() else {
+        return Ok(sso_disabled());
+    };
+    let claims = match verify_token(secret, &body.token) {
+        Ok(claims) => claims,
+        #[cfg(not(feature = "platform-jwt"))]
+        Err(SsoRejection::Unavailable) => return Ok(sso_disabled()),
+        Err(SsoRejection::Invalid) => return Ok(invalid_token()),
+    };
+    let company = state
+        .config()
+        .namespaced_company_id(CompanyId::new(claims.slug.as_str()));
+
+    if let Some(runtime) = state.registry().get(&company) {
+        return redeem_for_runtime(runtime, state, headers, body).await;
+    }
+    if !state.registry().is_empty() {
+        return Ok(invalid_token());
+    }
+
+    // An empty hosted instance has no manifest or company session to mint yet.
+    // Its only eligible owner is the address injected by the platform. Consume
+    // this bootstrap redemption separately from the later company session so
+    // the returned short-lived JWT can authorize the setup API until a company
+    // is registered.
+    let subject = crate::ports::users::normalize_email(&claims.sub);
+    if subject.is_empty() || state.config().bootstrap_admin().as_deref() != Some(subject.as_str()) {
+        return Ok(invalid_token());
+    }
+    if !ConsumedJtis::new(state.home(), &CompanyId::new("sso-bootstrap"))
+        .consume(&claims.jti, claims.exp)
+        .await?
+    {
+        return Ok(invalid_token());
+    }
+    let Some(session) = crate::server::users::cookie::session_header_value(&company, &body.token)
+    else {
+        return Ok(invalid_token());
+    };
+    tracing::info!(company = %company, "sso auto-login authorized first-run setup");
+    Ok(Json(serde_json::json!({
+        "id": subject,
+        "email": subject,
+        "role": "admin",
+        "company": company.as_ref(),
+        "hasPassword": false,
+        "mustChangePassword": false,
+        "session": session,
+    }))
+    .into_response())
+}
+
+/// Whether `session` is the platform owner's short-lived setup credential for
+/// an empty registry. Used only by the host-level setup authorizer.
+pub(crate) fn bootstrap_session_is_valid(
+    state: &AppState,
+    company: &CompanyId,
+    token: &str,
+) -> bool {
+    let Some(secret) = state.config().sso_secret() else {
+        return false;
+    };
+    if !state.registry().is_empty() {
+        return false;
+    }
+    let Ok(claims) = verify_token(secret, token) else {
+        return false;
+    };
+    let claimed = state
+        .config()
+        .namespaced_company_id(CompanyId::new(claims.slug.as_str()));
+    let subject = crate::ports::users::normalize_email(&claims.sub);
+    claimed == *company
+        && !subject.is_empty()
+        && state.config().bootstrap_admin().as_deref() == Some(subject.as_str())
 }
 
 /// `404` for a redeem attempt on a host with no SSO secret configured.
@@ -143,8 +231,15 @@ async fn redeem(
     headers: HeaderMap,
     Json(body): Json<RedeemBody>,
 ) -> Result<Response, crate::server::Rejection> {
-    let runtime = company.runtime.clone();
+    redeem_for_runtime(company.runtime, state, headers, body).await
+}
 
+async fn redeem_for_runtime(
+    runtime: std::sync::Arc<crate::company::runtime::CompanyRuntime>,
+    state: AppState,
+    headers: HeaderMap,
+    body: RedeemBody,
+) -> Result<Response, crate::server::Rejection> {
     // Off unless configured. Read before any work so a disabled host answers
     // identically whatever the token is.
     let Some(secret) = state.config().sso_secret() else {

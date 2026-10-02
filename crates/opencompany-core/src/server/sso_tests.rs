@@ -113,6 +113,17 @@ async fn enabled_state(home: &std::path::Path) -> AppState {
     .await
 }
 
+fn empty_routable_state(home: &std::path::Path) -> AppState {
+    AppState::new(AppConfig {
+        bind: "0.0.0.0:8080".to_string(),
+        admin_email: Some(ADMIN.to_string()),
+        sso_secret: Some(SecretValue(SSO_SECRET.to_string())),
+        ..AppConfig::default()
+    })
+    .with_home(home.to_path_buf())
+    .with_connections(ConnectionsRuntime::new())
+}
+
 /// Signs a JWT with `secret` over the given claims.
 fn sign(secret: &str, claims: &serde_json::Value) -> String {
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -221,6 +232,49 @@ async fn a_valid_token_signs_the_admin_in_and_sets_a_cookie() {
     assert_eq!(json["email"], "ada@example.com");
     assert_eq!(json["role"], "admin");
     assert_eq!(json["company"], "acme");
+}
+
+#[tokio::test]
+async fn the_platform_owner_can_redeem_into_setup_on_a_routable_empty_host() {
+    let home = home();
+    let state = empty_routable_state(home.path());
+    assert!(state.registry().is_empty());
+
+    let response = router(state.clone())
+        .oneshot(post(
+            "/api/v1/sso/redeem",
+            serde_json::json!({ "token": valid_token() }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let sign_in = body_json(response).await;
+    assert_eq!(sign_in["email"], "ada@example.com");
+    assert_eq!(sign_in["company"], "acme");
+    let session = sign_in["session"].as_str().expect("bootstrap session");
+
+    let setup = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/setup")
+                .header(SESSION_HEADER, session)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(setup.status(), StatusCode::OK);
+
+    let anonymous = router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/setup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), StatusCode::CONFLICT);
 }
 
 #[tokio::test]
