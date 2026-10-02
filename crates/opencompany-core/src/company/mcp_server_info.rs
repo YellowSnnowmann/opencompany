@@ -169,7 +169,11 @@ pub async fn save(
 pub async fn fetch_icon(url: &str) -> Option<String> {
     use futures::StreamExt;
 
-    if openhuman_core::tools::validate_url(url, &[]).is_err() {
+    // The same guard, after the `tinytools-std` extraction took it out of
+    // `openhuman-core`: open allowlist, so every SSRF rule still applies
+    // (loopback, RFC1918, link-local, `localhost`, IPv4-mapped IPv6) while any
+    // public host is permitted.
+    if tinytools_std::url_guard::validate_url(url, &[]).is_err() {
         return None;
     }
     let client = reqwest::Client::builder()
