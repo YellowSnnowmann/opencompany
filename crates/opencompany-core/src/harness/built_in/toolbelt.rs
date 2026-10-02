@@ -91,11 +91,10 @@ use oh::config::{AuditConfig, HttpRequestConfig};
 use oh::security::{
     AuditLogger, AutonomyLevel, SecurityPolicy, get_or_create_workspace_audit_logger,
 };
-use oh::tools::{
-    ApplyPatchTool, CurlTool, GitOperationsTool, HttpRequestTool, ImageInfoTool, WebFetchTool,
-    WorkspaceStateTool,
-};
+use oh::tools::{CurlTool, HttpRequestTool, ImageInfoTool, WebFetchTool, WorkspaceStateTool};
+// Moved out of `openhuman-core` by OpenHuman v0.64.10.
 use tinytools::Tool;
+use tinytools_std::filesystem::{ApplyPatchTool, GitOperationsTool};
 
 use crate::harness::policy::PolicyMode;
 
@@ -217,12 +216,12 @@ const MAX_CSV_ROWS: usize = 100_000;
 const MAX_CSV_INPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CSV_BYTES: usize = 8 * 1024 * 1024;
 
-type CsvExportTool = GuardedTool<oh::tools::CsvExportTool, CsvLimits>;
+type CsvExportTool = GuardedTool<tinytools_std::filesystem::CsvExportTool, CsvLimits>;
 
 impl CsvExportTool {
     fn new(security: Arc<SecurityPolicy>) -> Self {
         Self {
-            inner: oh::tools::CsvExportTool::new(security),
+            inner: tinytools_std::filesystem::CsvExportTool::new(security),
             guard: CsvLimits,
         }
     }

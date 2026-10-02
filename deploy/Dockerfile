@@ -65,7 +65,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     else \
       cargo build --release -p opencompany-core --bin opencompany; \
     fi; \
-    install -Dm755 target/release/opencompany /out/opencompany
+    install -Dm755 target/release/opencompany /out/opencompany; \
+    mkdir -p /out/modules; \
+    case ",$FEATURES," in \
+      *,openhuman,*) \
+        CARGO_TARGET_DIR=/build/target/tinysearch \
+          cargo build --release --lib \
+            --manifest-path vendor/openhuman/vendor/tinysearch/crates/tinysearch/Cargo.toml; \
+        install -Dm644 /build/target/tinysearch/release/libtinysearch.so \
+          /out/modules/libtinysearch.so; \
+        ;; \
+    esac
 
 # Upload symbols from the shared target cache. The token is a BuildKit secret,
 # never a build argument, image layer, or final-image environment value.
@@ -209,6 +219,26 @@ COPY companies ./companies
 # unprivileged runtime user (uid 10001 under the platform's securityContext)
 # can read it even with a read-only root filesystem.
 COPY --from=console /console/dist /app/console
+# The TinySearch module: the native library `search_byo` loads to run a search
+# on a company's **own** provider key (`search/provider/<slug>/key` in the
+# secret store). The engines moved into this module in OpenHuman v0.64.10, so
+# reaching them is the only way to honour a BYO key — and the key is delivered
+# to the module as private configuration, never written to disk.
+#
+# Built from `vendor/`, not downloaded from the pinned release, for three
+# reasons. It is the same revision this binary's `tinysearch-bus` was compiled
+# against, so the configuration sent and the configuration read cannot drift.
+# The runtime user is unprivileged against a read-only root filesystem and may
+# have no writable cache directory for the installer to extract into. And an API
+# server fetching a library over the network on a tenant's first search is
+# egress nobody asked for.
+#
+# The directory is created unconditionally by the builder, so a build without
+# the `openhuman` feature copies it empty; `OPENCOMPANY_TINYSEARCH_MODULE` then
+# names a file that is not there, which the host reports and falls back from
+# rather than failing to start.
+COPY --from=builder /out/modules/ /app/modules/
+ENV OPENCOMPANY_TINYSEARCH_MODULE=/app/modules/libtinysearch.so
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh && mkdir -p /data
 

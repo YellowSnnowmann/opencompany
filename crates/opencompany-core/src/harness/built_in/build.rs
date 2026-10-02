@@ -104,9 +104,13 @@ use openhuman_core as oh;
 use oh::security::SecurityPolicy;
 #[cfg(feature = "mcp")]
 use oh::tools::McpListToolsTool;
-use oh::tools::{EditFileTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ListFilesTool};
+// OpenHuman v0.64.10 moved the filesystem tools into `tinytools-std`; the same
+// vendored copy `openhuman-core` depends on, so these are the one type.
 use openhuman_embed::{Access, AgentDefinitionSpec, AgentSpec, ToolScopeSpec};
 use tinytools::Tool;
+use tinytools_std::filesystem::{
+    EditFileTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ListFilesTool,
+};
 
 use crate::company::Agent as ManifestAgent;
 use crate::company::inference::store as inference_store;
@@ -1675,6 +1679,22 @@ pub fn agent_spec_for(
         let unadvertised = blueprint.unadvertised.clone();
         spec = spec.tools(move |turn| {
             let mut tools = crate::hive::shared_tool::owned_belt(&belt);
+            // Persisted OpenHuman sessions can retain the old upstream
+            // Composio declarations in their tool snapshot. Keep inert,
+            // non-visible executors for those names so a resumed turn can
+            // validate its snapshot; never replace the company-scoped tools
+            // when the host has wired them for this agent.
+            let legacy_composio =
+                crate::harness::built_in::tool_posture::retired_composio_tools();
+            for retired in legacy_composio {
+                if !tools.iter().any(|tool| tool.name() == retired.name()) {
+                    tools.push(retired);
+                }
+            }
+            let is_legacy_composio = |name: &str| {
+                crate::harness::built_in::tool_posture::RETIRED_COMPOSIO_TOOL_NAMES
+                    .contains(&name)
+            };
             // **A seated turn carries the episode's tools too.**
             //
             // The belt is composed per turn and the turn says which
@@ -1687,7 +1707,7 @@ pub fn agent_spec_for(
                 let visible: std::collections::HashSet<String> = tools
                     .iter()
                     .map(|tool| tool.name().to_owned())
-                    .filter(|name| !unadvertised.contains(name))
+                    .filter(|name| !unadvertised.contains(name) && !is_legacy_composio(name))
                     .collect();
                 let belt = openhuman_embed::HostTurnTools {
                     tools,
@@ -1727,7 +1747,11 @@ pub fn agent_spec_for(
             );
             let kept = |name: &str| withheld.as_deref() != Some(name);
             let mut visible: std::collections::HashSet<String> =
-                tools.iter().map(|tool| tool.name().to_owned()).collect();
+                tools
+                    .iter()
+                    .map(|tool| tool.name().to_owned())
+                    .filter(|name| !is_legacy_composio(name))
+                    .collect();
             visible.extend(episode.names().iter().filter(|name| kept(name)).cloned());
             let mut episode_tools = episode.tools;
             episode_tools.retain(|tool| kept(tool.name()));
@@ -1860,6 +1884,7 @@ pub fn agent_spec_for(
         // pooled path to the same one.
         config.agent.tool_dispatcher = "native".into();
         withhold_openhuman_docs(config);
+        withhold_openhuman_composio(config);
     })
 }
 
@@ -1867,6 +1892,49 @@ pub fn agent_spec_for(
 /// seeds into every agent's MCP registry, along with the docs tools it backs.
 fn withhold_openhuman_docs(config: &mut oh::config::Config) {
     config.gitbooks.enabled = false;
+}
+
+/// Keeps OpenHuman's own five Composio agent tools out of this agent's runtime,
+/// because **they share every name with OpenCompany's own**:
+/// `composio_authorize`, `composio_execute`, `composio_list_connections`,
+/// `composio_list_toolkits`, `composio_list_tools`.
+///
+/// `ToolScopeSpec::Named` selects by name from everything the runtime
+/// registered, so two registrations answering to one name is not a shadowing but
+/// a contradiction: the driver refuses the turn with "tool snapshot has
+/// conflicting declarations for `composio_list_toolkits`". The e2e case that
+/// catches it is `composio-account-choice.spec.ts`.
+///
+/// Why this starts failing at v0.64.10, having been fine before: the
+/// registration gate is `user_is_signed_in_to_composio`, whose *name* did not
+/// change but whose body did. It was
+/// `create_composio_client(config).is_ok()`, which in backend mode needed
+/// `build_composio_client` — a Composio-specific client. It is now
+/// `resolve_composio_route(config).is_ok()`, which in backend mode needs only
+/// `build_client` — *any* integration client. Every OpenCompany instance has one
+/// of those, because the TinyHumans key that satisfies it is the same key
+/// inference runs on. So upstream's tools went from never registering here to
+/// always registering.
+///
+/// The mode string is necessary but not sufficient: an embedder may also pin a
+/// host credential, which takes precedence over mode selection. There is no
+/// `is_active()` gate for Composio the way there is for `google_places`,
+/// `stock_prices` and `twilio` — those three sit inside the `build_client` block
+/// and each tests its own config; Composio is called outside it. `enabled` on
+/// `ComposioConfig` looks like the switch and is not: nothing in
+/// `openhuman-core` reads it. Clear the host-pinned credential and set an
+/// unroutable mode so the upstream registration probe fails closed regardless
+/// of the host's credentials.
+///
+/// Nothing here loses a capability. OpenCompany's Composio surface resolves its
+/// own credentials from the [`SecretStore`](crate::ports::SecretStore) per
+/// company and reaches the module through
+/// [`composio_module`](super::composio_module), which builds its route blob
+/// itself and never consults this field — grep for `composio.mode` outside this
+/// function and the only hit is a doc comment.
+fn withhold_openhuman_composio(config: &mut oh::config::Config) {
+    config.composio.host_credential = None;
+    config.composio.mode = "opencompany-serves-composio-itself".into();
 }
 
 /// The names an agent's `ToolScopeSpec::Named` scope lists: the belt's

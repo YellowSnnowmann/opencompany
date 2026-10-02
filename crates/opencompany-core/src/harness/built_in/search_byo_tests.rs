@@ -417,3 +417,149 @@ fn debug_redacts_the_key() {
     assert!(!rendered.contains("super-secret"), "{rendered}");
     assert!(rendered.contains("<redacted>"), "{rendered}");
 }
+
+/// The belt is now assembled from the vendored TinySearch catalogue rather than
+/// from constructors the compiler checks, so an upstream rename is no longer a
+/// build error — it is a provider that silently wires one tool fewer, and a
+/// company that quietly loses `web_search` while its key is still configured.
+/// This is the pin that turns that back into a test failure.
+#[test]
+fn the_vendored_catalogue_still_publishes_every_tool_a_provider_wires() {
+    let catalogue = tinysearch_bus::provider_tool_specs();
+    let expected: [(&str, &[&str]); 4] = [
+        (
+            "brave",
+            &[
+                "brave_web_search",
+                "brave_news_search",
+                "brave_image_search",
+                "brave_video_search",
+            ],
+        ),
+        (
+            "exa",
+            &["exa_search", "exa_find_similar", "exa_get_contents"],
+        ),
+        ("querit", &["querit_search"]),
+        ("searxng", &["searxng_search"]),
+    ];
+    for (provider, tools) in expected {
+        let specs = catalogue
+            .get(provider)
+            .unwrap_or_else(|| panic!("the catalogue no longer publishes `{provider}`"));
+        for tool in tools {
+            assert!(
+                specs.iter().any(|spec| spec.name == *tool),
+                "`{provider}` no longer publishes `{tool}`; the belt would wire one tool fewer",
+            );
+        }
+    }
+}
+
+/// `exa_answer` is a fourth Exa tool the upstream catalogue gained and this host
+/// does not wire. Adding it means adding it to [`BYO_SEARCH_TOOLS`] in the same
+/// change, or the capability gate has a name it cannot classify — so the
+/// deferral is recorded here rather than left to be noticed.
+#[test]
+fn the_one_catalogue_tool_this_host_defers_is_named() {
+    let catalogue = tinysearch_bus::provider_tool_specs();
+    let exa = catalogue.get("exa").expect("exa");
+    assert!(
+        exa.iter().any(|spec| spec.name == "exa_answer"),
+        "`exa_answer` is gone upstream; drop this test with it",
+    );
+    assert!(
+        !BYO_SEARCH_TOOLS.contains(&"exa_answer"),
+        "`exa_answer` is now declared, so wire it in `extras` and delete this test",
+    );
+}
+
+/// The guidance layer is *wired*, not merely present.
+///
+/// `declaration::documented` is applied at two call sites in
+/// `byo_search_tools` — the aliased canonical tool and each provider extra —
+/// and its own tests exercise the transform directly. Neither would notice a
+/// call site that stopped applying it, which is the mistake available here: the
+/// extras arm was edited separately from the canonical one, and a belt whose
+/// `web_search` is documented while `brave_news_search` is not would look right
+/// in every other test.
+///
+/// So this asserts it through the real entry point, on the `Tool` objects the
+/// agent is actually handed.
+#[test]
+fn every_tool_on_a_byo_belt_reaches_the_model_documented() {
+    for provider in ["brave", "exa", "querit", "searxng"] {
+        let config = TenantSearch {
+            provider: provider.to_string(),
+            api_key: Some("k".to_string()),
+            endpoint: Some("https://searx.example".to_string()),
+        };
+        let tools = byo_search_tools(&config);
+        assert!(!tools.is_empty(), "{provider} wired no tools");
+        for tool in &tools {
+            let name = tool.name();
+            assert!(
+                tool.description().split_whitespace().count() >= 20,
+                "{provider}/{name} is described in {} words, so the call site is \
+                 not applying `declaration::documented`",
+                tool.description().split_whitespace().count(),
+            );
+            let schema = tool.parameters_schema();
+            let properties = schema["properties"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{provider}/{name} declares no properties"));
+            for (property, declared) in properties {
+                assert!(
+                    declared
+                        .get("description")
+                        .and_then(|text| text.as_str())
+                        .is_some_and(|text| !text.trim().is_empty()),
+                    "{provider}/{name}.{property} reaches the model undocumented",
+                );
+            }
+        }
+    }
+}
+
+/// Brave's result count is `count`, everyone else's is `max_results`. The tool
+/// reads both, and this is the pin that keeps the belt honest about which one
+/// each provider actually advertises — reading the wrong one meant an agent
+/// paid for twenty results and was shown five.
+#[test]
+fn braves_belt_advertises_count_and_the_others_advertise_max_results() {
+    let brave = TenantSearch {
+        provider: "brave".to_string(),
+        api_key: Some("k".to_string()),
+        endpoint: None,
+    };
+    let web_search = byo_search_tools(&brave)
+        .into_iter()
+        .find(|tool| tool.name() == "web_search")
+        .expect("brave wires web_search");
+    let schema = web_search.parameters_schema();
+    let properties = schema["properties"].as_object().expect("properties");
+    assert!(properties.contains_key("count"), "{properties:?}");
+    assert!(!properties.contains_key("max_results"), "{properties:?}");
+
+    for provider in ["exa", "querit", "searxng"] {
+        let config = TenantSearch {
+            provider: provider.to_string(),
+            api_key: Some("k".to_string()),
+            endpoint: Some("https://searx.example".to_string()),
+        };
+        let web_search = byo_search_tools(&config)
+            .into_iter()
+            .find(|tool| tool.name() == "web_search")
+            .unwrap_or_else(|| panic!("{provider} wires web_search"));
+        let schema = web_search.parameters_schema();
+        let properties = schema["properties"].as_object().expect("properties");
+        assert!(
+            properties.contains_key("max_results"),
+            "{provider}: {properties:?}",
+        );
+        assert!(
+            !properties.contains_key("count"),
+            "{provider}: {properties:?}"
+        );
+    }
+}

@@ -159,8 +159,9 @@ fn transcripts_under(dir: &std::path::Path) -> Vec<(std::path::PathBuf, String)>
     out
 }
 
-/// Recursive helper: every `*.md` display companion under `dir` whose body
-/// contains `marker`.
+/// Recursive helper: session transcript display companions under `dir` whose
+/// body contains `marker`. Other Markdown projections can contain the same
+/// turn, but they are not the session's display companion.
 fn display_companions_containing(dir: &std::path::Path, marker: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
@@ -174,6 +175,7 @@ fn display_companions_containing(dir: &std::path::Path, marker: &str) -> Vec<Str
                 stack.push(path);
             } else if path.extension().is_some_and(|ext| ext == "md")
                 && let Ok(body) = std::fs::read_to_string(&path)
+                && body.starts_with("# Session transcript —")
                 && body.contains(marker)
             {
                 out.push(body);
