@@ -11,9 +11,6 @@ use crate::ports::types::ContextChunk;
 
 #[test]
 fn dispatched_cards_are_isolated_from_an_agents_other_conversations() {
-    // A turn that names no conversation runs on its own session; one that
-    // does resumes the agent's conversation session; one that brings its own
-    // context is isolated whatever it names (plan hive-desks, Phase 2).
     assert!(CompanyAgent::isolated_session(None, true));
     assert!(!CompanyAgent::isolated_session(Some("general"), true));
     assert!(CompanyAgent::isolated_session(Some("general"), false));
@@ -137,6 +134,7 @@ fn overlay_agent_to_manifest_carries_the_tool_grant() {
         role: "Researcher".into(),
         description: None,
         tools: Some(vec!["docs.*".into(), "payment.send".into()]),
+        skills: None,
         model: None,
         harness: None,
     };
@@ -161,6 +159,7 @@ fn overlay_agent_to_manifest_carries_the_tool_grant() {
         role: "Generalist".into(),
         description: None,
         tools: None,
+        skills: None,
         model: None,
         harness: None,
     };
@@ -186,6 +185,7 @@ fn overlay_agent_to_manifest_carries_the_display_name() {
         role: "Content Writer".into(),
         description: None,
         tools: None,
+        skills: None,
         model: None,
         harness: None,
     };
@@ -213,6 +213,7 @@ fn overlay_agent_to_manifest_carries_the_provider() {
         role: "Web search".into(),
         description: None,
         tools: None,
+        skills: None,
         model: Some("test-model-small".into()),
         harness: None,
     };
@@ -235,6 +236,7 @@ fn overlay_fingerprint_moves_on_a_tools_only_edit() {
             role: "r".into(),
             description: None,
             tools,
+            skills: None,
             model: None,
             harness: None,
         }]
@@ -276,6 +278,7 @@ fn overlay_fingerprint_moves_on_a_model_or_harness_change() {
             role: "r".into(),
             description: None,
             tools: None,
+            skills: None,
             model: model.map(str::to_string),
             harness: harness.map(str::to_string),
         }]
@@ -325,6 +328,7 @@ fn a_provider_edit_moves_the_overlay_and_override_fingerprints() {
             role: "r".into(),
             description: None,
             tools: None,
+            skills: None,
             model: Some("test-model-large".into()),
             harness: None,
         }]

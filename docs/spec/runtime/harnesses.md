@@ -232,7 +232,7 @@ workflow run ............................. no time bound
 
 The ceiling is the vendored harness policy's `max_wall_clock_ms`, set in
 `vendor/openhuman/src/openhuman/agent/tinyagents/mod.rs::run_policy_for`. It
-defaults to ten minutes, is overridden with
+defaults to `DEFAULT_AGENT_TURN_TIMEOUT_SECS`, is overridden with
 **`OPENHUMAN_AGENT_TURN_TIMEOUT_SECS`** (whole seconds; `0` removes it
 entirely), and is process-global — not per node, not per workflow, and not
 settable from a manifest or from the console.
@@ -253,11 +253,19 @@ model call for run 'agent_turn' exceeded its remaining wall-clock budget (56636 
 
 Every word of that is true and it is almost impossible to read correctly. The
 number is the budget that **remained** when that call was issued — not the
-call's duration, and not the ceiling. A turn that ran the full ten minutes
-therefore reports a figure ten times smaller than the limit it hit, and reads
-as though one slow model call were at fault. Issue #1680 was filed on exactly
-that reading: a node that had already spent about nine minutes before its last
-model call started was diagnosed as a 56-second budget being too tight.
+call's duration, and not the ceiling. A turn that ran the full ceiling
+therefore reports a figure far smaller than the limit it hit, and reads as
+though one slow model call were at fault. Issue #1680 was filed on exactly that
+reading: a node that had already spent about nine minutes before its last model
+call started was diagnosed as a 56-second budget being too tight.
+
+**The ceiling's value has already moved, which is why nothing here quotes it.**
+#1680 and #1761 were written when `DEFAULT_AGENT_TURN_TIMEOUT_SECS` was 600 —
+the arithmetic in that issue (`600000 - 56636`) only works at that value, and
+the 10m 01s death matches it exactly. The vendored bump in #2466 raised it to
+**3600**, so the default ceiling is now an hour and this crate sets no override
+anywhere. That is the drift `wall_clock_ceiling_message` declines to restate a
+literal `600` for, and a test asserts the message contains no such number.
 
 `CompanyAgent::classify_turn` (`src/harness/built_in/mod.rs`) therefore times
 each turn attempt and rewrites this one class of error, naming what the turn
@@ -272,9 +280,21 @@ Two constraints on that message are deliberate:
   `600` would go stale on the next vendored bump without anything failing. The
   elapsed time is measured and the knob's *name* is a fact independent of its
   value, so both can be stated honestly while the number cannot.
-- **A ceiling hit stays a hard failure.** It is not retried — the one-shot
-  empty-reply retry would turn a ten-minute failure into a twenty-minute one —
-  and it fails the node rather than degrading to a partial result.
+- **A ceiling hit is never retried.** The one-shot empty-reply retry would turn
+  a ten-minute failure into a twenty-minute one, so `CeilingPaused` is terminal
+  on both classifier passes.
+
+### A ceiling hit pauses; it does not fail the run
+
+Until issue #1680's second half it failed the run, and that was the expensive
+half of the defect rather than the misleading message. A ceiling hit now settles
+as a pause carrying what the turn had already done, like the three other limits
+that stop a turn short.
+
+Moved to [`agents-turn-limits.md`](agents-turn-limits.md) on this repo's
+500-line cap, and because that page already owns the sibling limits: it is where
+all four are compared, where what survives a ceiling hit is set out, and where
+the workflow-node and delegation behaviour is described.
 
 ### The per-tool bounds this crate *does* set
 
@@ -443,3 +463,16 @@ legacy out-of-process JSON-RPC path (`src/openhuman/`, feature
 | the desktop's own wiring | `crates/opencompany-app/src/embedded.rs` |
 | runner transport (declared, not yet an engine) | `src/runner/dispatch.rs` |
 | per-harness roster narrowing | `HarnessDeps::serves` |
+
+## Self-contained delegated work
+
+A delegated colleague receives its assigned brief with `history_seed: false`.
+Its live history, transcript autoload, and active goal from an unrelated turn
+must not enter that work. The pool also skips automatic retrieval of prior task
+outcomes for this explicit context mode; the agent's memory tools remain
+available for deliberate recall. The parent and its final relay keep their
+normal conversation context.
+
+Unthreaded background work, including workflow steps without a run sink, starts
+with empty live history and leaves none for the next turn. Ordinary channel
+turns retain the existing continuous-session and audience rules.

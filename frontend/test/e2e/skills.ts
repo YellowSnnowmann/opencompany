@@ -10,8 +10,16 @@
 
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
-/** The Skills tab's address. Bare `#/skills` no longer names a view. */
-export const SKILLS_URL = "/#/settings/skills";
+/**
+ * The Skills tab's address. Bare `#/skills` no longer names a view.
+ *
+ * The canonical spelling, not the retired `#/settings/skills`. That one still
+ * resolves — `lib/console-route-rewrites.ts` sends it here — but the rewrite
+ * lands through `canonicalize`, which rebuilds the hash from the path alone and
+ * drops every query key with it. A helper that appends `?view=` to the retired
+ * address would silently get the tab's default instead.
+ */
+export const SKILLS_URL = "/#/connections/skills";
 
 /** The company's effective skills, as the host serves them. */
 export interface HostSkill {
@@ -23,6 +31,14 @@ export interface HostSkill {
   enabled: boolean;
   version?: string | null;
   updatedAtMillis?: number | null;
+  /** The revisions either side of a library change, when the library has moved
+   * since this install pinned its snapshot. */
+  updateAvailable?: { from?: string | null; to?: string | null } | null;
+  /** Whether the stored copy no longer matches what was recorded at install. */
+  modified?: boolean;
+  /** Every teammate the host resolved a stance for, and whether it holds the
+   * skill right now. */
+  agents?: { id: string; state: string; holds: boolean }[];
 }
 
 /**
@@ -37,25 +53,46 @@ export interface HostSkill {
 export async function suppressTour(page: Page) {
   await page.addInitScript(() => {
     const seen = JSON.stringify({ skipped: true, seenAt: Date.now() });
-    for (const key of ["oc-tour:single", "oc-tour:e2e-harness-co", "oc-tour:null"]) {
+    for (const key of [
+      "oc-tour:single",
+      "oc-tour:e2e-harness-co",
+      "oc-tour:null",
+    ]) {
       window.localStorage.setItem(key, seen);
     }
   });
 }
 
-/** Opens the Skills tab and waits for the list to have rendered. */
-export async function openSkills(page: Page) {
-  await page.goto(SKILLS_URL);
-  await expect(page.getByTestId("skills-read-only-note")).toBeVisible({ timeout: 30_000 });
+/**
+ * Opens the Skills tab and waits for the list to have rendered.
+ *
+ * Asks for cards by default. The Installed tab opens on rows, and the helpers
+ * below — and most specs using them — assert against `installed-card`; naming
+ * the view here keeps those assertions driving the drawing they were written
+ * for, instead of each spec silently testing whichever shape the tab defaults
+ * to this month. Pass `"list"` to drive rows deliberately.
+ */
+export async function openSkills(page: Page, view: "cards" | "list" = "cards") {
+  await page.goto(`${SKILLS_URL}?view=${view}`);
+  await expect(page.getByTestId("skills-read-only-note")).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
-/** The installed row for `name`. */
+/** The installed card for `name`, in the cards drawing. */
 export function installedCard(page: Page, name: string) {
   return page.getByTestId("installed-card").filter({ hasText: name });
 }
 
+/** The installed row for `name`, in the rows drawing the tab opens on. */
+export function installedRow(page: Page, name: string) {
+  return page.getByTestId("installed-row").filter({ hasText: name });
+}
+
 /** The company's effective skill set, read straight from the host. */
-export async function hostSkills(request: APIRequestContext): Promise<HostSkill[]> {
+export async function hostSkills(
+  request: APIRequestContext,
+): Promise<HostSkill[]> {
   const answer = await request.get("/api/v1/company/skills");
   expect(answer.ok(), `GET …/skills failed: ${answer.status()}`).toBeTruthy();
   return (await answer.json()) as HostSkill[];
@@ -96,12 +133,20 @@ export function skillDoc(fields: {
 
 /** What `setInputFiles` wants for a document held in memory. */
 export function markdownUpload(filename: string, doc: string) {
-  return { name: filename, mimeType: "text/markdown", buffer: Buffer.from(doc, "utf8") };
+  return {
+    name: filename,
+    mimeType: "text/markdown",
+    buffer: Buffer.from(doc, "utf8"),
+  };
 }
 
 /** What `setInputFiles` wants for an archive built in memory. */
 export function archiveUpload(filename: string, slug: string, doc: string) {
-  return { name: filename, mimeType: "application/zip", buffer: zipOneSkill(slug, doc) };
+  return {
+    name: filename,
+    mimeType: "application/zip",
+    buffer: zipOneSkill(slug, doc),
+  };
 }
 
 /**
@@ -218,6 +263,14 @@ export async function signInAsMember(
   const verified = await context.post("/api/v1/company/auth/verify", {
     data: { code: devCode },
   });
-  expect(verified.ok(), `member sign-in failed: ${await verified.text()}`).toBeTruthy();
+  expect(
+    verified.ok(),
+    `member sign-in failed: ${await verified.text()}`,
+  ).toBeTruthy();
   expect((await verified.json()).role).toBe("member");
+}
+
+/** A skill's own page, addressed directly. */
+export function skillPageUrl(slug: string): string {
+  return `/#/connections/skills?skill=${encodeURIComponent(slug)}`;
 }

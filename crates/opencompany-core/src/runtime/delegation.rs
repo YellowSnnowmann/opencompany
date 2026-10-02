@@ -563,6 +563,13 @@ pub(crate) struct DeskReply {
     /// Folded exactly as `halted_for_spend` is, first-wins, for the same
     /// reason: one bubble, one figure worth naming.
     pub(crate) budget_paused: Option<crate::harness::BudgetPause>,
+    /// Whether the turn behind this answer hit the harness's per-turn
+    /// **wall-clock ceiling** (issue #1680).
+    ///
+    /// Folded exactly as `budget_paused` is, first-wins, for the same reason:
+    /// one bubble, one duration worth naming, and the relay turn replaces the
+    /// reply text so tracking only the last value would erase an earlier pause.
+    pub(crate) ceiling_paused: Option<crate::harness::CeilingPause>,
 }
 
 /// What was already decided about the operator message a drain belongs to
@@ -755,6 +762,13 @@ pub(crate) struct OperatorTurn {
     /// figure worth naming, and the relay turn replaces the reply text so
     /// tracking only the last value would erase an earlier pause.
     pub(crate) budget_paused: Option<crate::harness::BudgetPause>,
+    /// Whether the turn behind this answer hit the harness's per-turn
+    /// **wall-clock ceiling** (issue #1680).
+    ///
+    /// Folded exactly as `budget_paused` is, first-wins, for the same reason:
+    /// one bubble, one duration worth naming, and the relay turn replaces the
+    /// reply text so tracking only the last value would erase an earlier pause.
+    pub(crate) ceiling_paused: Option<crate::harness::CeilingPause>,
 }
 
 /// What a **dispatched card's** turn handed off (issue #204).
@@ -1652,6 +1666,13 @@ impl<'a> DelegationRunner<'a> {
         // inference budget/credits must survive the relay turn replacing the
         // reply text, exactly like a spend halt.
         let mut budget_paused = outcome.budget_paused;
+        // Issue #1680: sticky the same way, first-wins. A responder whose own
+        // turn ran out of wall-clock time must survive the relay turn replacing
+        // the reply text, exactly like a spend halt or a budget pause. No
+        // re-park sibling is needed below, unlike #1846's: a ceiling pause has
+        // no redeem path at all -- there is nothing to top up and no
+        // checkpoint, so nothing is ever replayed on the operator's behalf.
+        let mut ceiling_paused = outcome.ceiling_paused;
         // A `spawn_task` opens a card silently; a `delegate_to_desk` runs the desk
         // lead and hands its answer back to RELAY rather than surfacing as a
         // disconnected sibling bubble. Any future delegation that surfaces its own
@@ -1696,6 +1717,7 @@ impl<'a> DelegationRunner<'a> {
             halted_for_spend = halted_for_spend.or(desk.halted_for_spend);
             desk_paused |= desk.budget_paused.is_some();
             budget_paused = budget_paused.or(desk.budget_paused);
+            ceiling_paused = ceiling_paused.or(desk.ceiling_paused);
             desk_replies.push((desk.member, desk.reply));
         }
         // CEO-relay hand-back: when a synchronous desk delegation answered, run
@@ -1730,6 +1752,16 @@ impl<'a> DelegationRunner<'a> {
         // also carries the RESPONDER's own pause, and a responder that paused
         // on the turn that queued the hand-off still has a real desk answer to
         // relay. Widening the gate to it would silently drop that answer.
+        //
+        // Issue #1680: deliberately **not** widened to a ceiling pause either,
+        // and the two reasons the budget skip rests on are exactly why. The
+        // provider has not run dry — a relay call will work — and no caller
+        // replaces the reply on a ceiling pause the way
+        // `BUDGET_PAUSED_PLACEHOLDER_REPLY` does on a budget one, so the relay's
+        // inference buys the operator something real: a synthesised answer over
+        // the branches that DID finish, with `ceiling_paused` riding alongside
+        // to say that one of them stopped short. Skipping it here would trade
+        // that for a bare responder reply and tell the operator less.
         if !desk_replies.is_empty() && !desk_paused {
             let relay_prompt = build_relay_prompt(message, &desk_replies);
             self.queue.clear();
@@ -1848,6 +1880,7 @@ impl<'a> DelegationRunner<'a> {
                 );
             }
             budget_paused = budget_paused.or(relay.budget_paused);
+            ceiling_paused = ceiling_paused.or(relay.ceiling_paused);
         } else if !desk_replies.is_empty() {
             // The relay was skipped because a desk paused (see above), so the
             // operator bubble stays the responder's own reply — which the
@@ -1909,6 +1942,7 @@ impl<'a> DelegationRunner<'a> {
             hit_iteration_cap,
             halted_for_spend,
             budget_paused,
+            ceiling_paused,
         })
     }
 
@@ -2434,7 +2468,7 @@ impl<'a> DelegationRunner<'a> {
                 &member,
                 &instruction,
                 &control,
-                self.target(chat_id),
+                ChatTarget::deliberating(chat_id, self.thread_root),
                 // Issue #242: when this drain is running inside a
                 // dispatched card, the delegate's turn is part of that
                 // card's attempt — its steps and its spend belong to the
@@ -2616,6 +2650,13 @@ impl<'a> DelegationRunner<'a> {
         // the same reason — a deeper delegate's pause is folded INTO this
         // member's answer, and there is one figure worth naming per bubble.
         let mut budget_paused = outcome.budget_paused;
+        // Issue #1680: and so does a wall-clock ceiling hit, first-wins on the
+        // same grounds. Before this issue a ceiling hit never reached a fold at
+        // all -- it left the turn as an `Err` -- so a deeper delegate that ran
+        // out of time took the whole chain down. Folded, it becomes what it is:
+        // one branch of the answer that stopped short, named on the bubble the
+        // operator reads.
+        let mut ceiling_paused = outcome.ceiling_paused;
         for deeper in nested.desk_replies {
             reply.push_str(&format!(
                 "\n\n{} (delegated by {member}) replied:\n{}",
@@ -2625,6 +2666,7 @@ impl<'a> DelegationRunner<'a> {
             hit_iteration_cap |= deeper.hit_iteration_cap;
             halted_for_spend = halted_for_spend.or(deeper.halted_for_spend);
             budget_paused = budget_paused.or(deeper.budget_paused);
+            ceiling_paused = ceiling_paused.or(deeper.ceiling_paused);
         }
         // A cancelled nested run folds in as a cancellation, NEVER as a
         // reply: the member said it was handing that slice on, and an
@@ -2686,6 +2728,7 @@ impl<'a> DelegationRunner<'a> {
                 hit_iteration_cap,
                 halted_for_spend,
                 budget_paused,
+                ceiling_paused,
             }),
             cancelled: false,
             // Issue #442: the hand-off's own card, reported the same way

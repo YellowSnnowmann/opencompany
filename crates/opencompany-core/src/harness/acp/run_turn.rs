@@ -694,6 +694,7 @@ pub fn fold(turn: AcpTurn) -> TurnOutcome {
         // The external process's own budget handling (if any) is opaque to
         // this side.
         budget_paused: None,
+        ceiling_paused: None,
     }
 }
 

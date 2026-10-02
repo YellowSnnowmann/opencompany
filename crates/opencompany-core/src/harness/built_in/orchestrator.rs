@@ -2625,6 +2625,7 @@ fn summarize_event(event: &CompanyEvent) -> String {
             let what = match change {
                 SkillChange::Installed => "installed",
                 SkillChange::Updated => "updated",
+                SkillChange::Edited => "edited",
                 SkillChange::Removed => "removed",
             };
             format!("skill {what}: {slug}")
@@ -4246,6 +4247,7 @@ impl Tool for AddAgentTool {
             role: role.clone(),
             description,
             tools: tools.clone(),
+            skills: None,
             model: None,
             harness: None,
         };
