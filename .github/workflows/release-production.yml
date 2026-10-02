@@ -1,7 +1,7 @@
 # Cut a PRODUCTION release from the `release` branch: bump the version, tag
-# `v<version>`, build and notarize both macOS DMGs plus the
-# auto-updater's artifacts, write the release notes, and publish the GitHub
-# Release — all from one dispatch.
+# `v<version>`, build and notarize both macOS DMGs, build the Windows x64
+# installers, produce the auto-updater's artifacts, write the release notes, and
+# publish the GitHub Release — all from one dispatch.
 #
 # Step three of the release flow (docs/spec/runtime/releases.md):
 #
@@ -21,8 +21,10 @@
 #                   commit `chore(release): v<version> [skip ci]` to release,
 #                   tag it, merge release back into main.
 #   create-release  generate the notes and create the Release AS A DRAFT.
-#   build-desktop   both DMGs, signed + notarized, plus the updater archives,
-#                   attached to the draft (build-desktop.yml).
+#   build-desktop   both DMGs, signed + notarized, and the Windows `-setup.exe`
+#                   + `.msi` (with `windows`), plus the updater archives and
+#                   signatures, attached to the draft (build-desktop.yml). A
+#                   failed Windows leg fails the cut like a macOS one.
 #   publish-docker  the tenant image, built from the tag (so it reports the
 #                   bumped version), checked by the sentry-test gate, and
 #                   pushed to GHCR as `:v<version>`. The only place a release
@@ -33,7 +35,8 @@
 # on the snapshot; the desktop and Docker builds below compile the tag with
 # `--locked` anyway. A third compile of the same tree added ~30 minutes to
 # every cut and found nothing the other two would not.
-#   updater-manifest `latest.json` assembled from both architectures' assets.
+#   updater-manifest `latest.json` assembled from both macOS architectures'
+#                   assets, and the Windows setup's with `windows`.
 #   promote-image   point GHCR `:latest` at `:v<version>` (same digest, no
 #                   rebuild) once everything else has succeeded.
 #   publish-release check every required asset is on the draft, then flip it
@@ -72,6 +75,11 @@ on:
         options: [patch, minor, major]
       create_release:
         description: Tag and publish the GitHub Release. Off = bump and build only (a rehearsal).
+        required: false
+        type: boolean
+        default: true
+      windows:
+        description: Also build and ship the Windows x64 installers, and advertise them in latest.json.
         required: false
         type: boolean
         default: true
@@ -343,9 +351,16 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SM_HOST: ${{ secrets.SM_HOST }}
+      SM_API_KEY: ${{ secrets.SM_API_KEY }}
+      SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+      SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+      KEYPAIR_ALIAS: ${{ secrets.KEYPAIR_ALIAS }}
     with:
       build_ref: ${{ needs.prepare-build.outputs.build_ref }}
       tag: ${{ needs.prepare-build.outputs.tag }}
+      macos: true
+      windows: ${{ inputs.windows }}
       sign: true
       with_updater: ${{ inputs.create_release }}
       with_release_upload: ${{ inputs.create_release }}
@@ -621,7 +636,7 @@ jobs:
   # `latest.json` is written into the DRAFT, before publish. A release
   # published without a manifest pins every existing install to the build it
   # already has — silently, with no error anywhere, permanently. The script
-  # refuses a partial manifest naming only one architecture.
+  # refuses a partial manifest missing any platform named in PLATFORMS.
   updater-manifest:
     name: Publish updater manifest (latest.json)
     needs: [prepare-build, build-desktop]
@@ -641,6 +656,7 @@ jobs:
           TAG: ${{ needs.prepare-build.outputs.tag }}
           VERSION: ${{ needs.prepare-build.outputs.version }}
           REPO: ${{ github.repository }}
+          PLATFORMS: ${{ inputs.windows && 'macos,windows' || 'macos' }}
         run: bash scripts/release/publish-updater-manifest.sh
 
   publish-release:
@@ -653,25 +669,37 @@ jobs:
       contents: write
     steps:
       # Every asset a release must carry, or the release is not cut. The DMGs
-      # are what a person installs; the archives and signatures are what an
-      # installed client updates from; `latest.json` is how it finds them.
+      # and Windows installers are what a person installs; the archives and
+      # signatures are what an installed client updates from; `latest.json` is
+      # how it finds them.
       - name: Validate required assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare-build.outputs.tag }}
+          WINDOWS: ${{ inputs.windows }}
         run: |
           set -euo pipefail
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > assets.txt
           echo "Assets on $TAG:"; sed 's/^/  /' assets.txt
+          required=(
+            '^OpenCompany_.*_aarch64\.dmg$'
+            '^OpenCompany_.*_x64\.dmg$'
+            '^OpenCompany_.*_aarch64\.app\.tar\.gz$'
+            '^OpenCompany_.*_aarch64\.app\.tar\.gz\.sig$'
+            '^OpenCompany_.*_x64\.app\.tar\.gz$'
+            '^OpenCompany_.*_x64\.app\.tar\.gz\.sig$'
+            '^latest\.json$'
+          )
+          if [ "$WINDOWS" = "true" ]; then
+            required+=(
+              '^OpenCompany_.*_x64-setup\.exe$'
+              '^OpenCompany_.*_x64-setup\.exe\.sig$'
+              '^OpenCompany_.*_x64_en-US\.msi$'
+              '^OpenCompany_.*_x64_en-US\.msi\.sig$'
+            )
+          fi
           missing=0
-          for pattern in \
-            '^OpenCompany_.*_aarch64\.dmg$' \
-            '^OpenCompany_.*_x64\.dmg$' \
-            '^OpenCompany_.*_aarch64\.app\.tar\.gz$' \
-            '^OpenCompany_.*_aarch64\.app\.tar\.gz\.sig$' \
-            '^OpenCompany_.*_x64\.app\.tar\.gz$' \
-            '^OpenCompany_.*_x64\.app\.tar\.gz\.sig$' \
-            '^latest\.json$'; do
+          for pattern in "${required[@]}"; do
             if ! grep -qE "$pattern" assets.txt; then
               echo "::error::required asset missing from $TAG: $pattern" >&2
               missing=1

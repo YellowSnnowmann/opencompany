@@ -212,6 +212,7 @@ async fn seed_paused_card(runtime: &Arc<CompanyRuntime>, id: &str) {
         .upsert(
             &runtime.id,
             &TaskRecord {
+                opened_by: None,
                 id: id.to_string(),
                 title: TaskTitle::authored("Draft the launch note"),
                 note: None,

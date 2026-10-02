@@ -619,3 +619,75 @@ async fn a_chain_where_nobody_paused_reports_no_budget_pause() {
         out.budget_paused
     );
 }
+
+/// Issue #1680: the ceiling pause survives the same folds, two levels down.
+///
+/// The sibling of `a_nested_delegates_budget_pause_reaches_the_operator_turn`
+/// above, and it exists for the reason that one does: the deeper reply is
+/// folded INTO the shallower member's answer, so without carrying the pause
+/// with it the operator reads an answer whose missing half was cut for time
+/// and is told nothing.
+///
+/// Before this issue there was nothing to fold — a ceiling hit left the turn
+/// as an `Err` and took the whole chain down, so a deep delegate running long
+/// failed the operator's message rather than reporting one stalled branch.
+#[tokio::test]
+async fn a_nested_delegates_ceiling_pause_reaches_the_operator_turn() {
+    let fx = Fixture::nested();
+    let turns = ScriptedTurns::new(
+        &fx,
+        vec![
+            Turn::tooling("handing it to engineering", vec![handoff("ship the API")]),
+            Turn::tooling(
+                "I built it; asking research about the rate limits",
+                vec![nested_handoff("what rate limits do competitors use?")],
+            ),
+            // Two levels down, and out of *time* partway through.
+            Turn::ceiling_paused(
+                "Paused — researcher's turn reached the longest a single turn may run.",
+                "researcher",
+                601_000,
+            ),
+            // And the relay still runs, which is the half that differs from the
+            // budget sibling — see the `desk_paused` gate's own comment.
+            Turn::reply("engineering shipped the API; the rate-limit survey stalled"),
+        ],
+    );
+
+    let out = fx
+        .runner(&turns)
+        .handle_operator_message("chief", "ship the API", Some("general"))
+        .await
+        .expect("operator message handled");
+
+    let pause = out
+        .ceiling_paused
+        .expect("a ceiling pause two levels down must reach the operator bubble");
+    assert_eq!(
+        pause.agent, "researcher",
+        "the notice must name the teammate that actually ran out of time, not the relay"
+    );
+    assert_eq!(
+        pause.elapsed,
+        std::time::Duration::from_millis(601_000),
+        "and carry its own clock, so the notice can quote a duration the operator can place"
+    );
+    // The sibling it must not be confused with: adding credits buys nothing
+    // here, so the budget field stays clear and the caller picks the right
+    // notice off these two.
+    assert!(
+        out.budget_paused.is_none(),
+        "a ceiling hit is not a credits pause"
+    );
+    // The other half, and the reason the `desk_paused` gate was NOT widened to
+    // this pause: a budget pause skips the relay because the provider has run
+    // dry and the caller overwrites the reply anyway. Neither is true here, so
+    // the relay runs and the operator reads a synthesised answer over the
+    // branches that did finish — with the pause reported beside it, not instead
+    // of it.
+    assert_eq!(
+        out.reply, "engineering shipped the API; the rate-limit survey stalled",
+        "the relay is not skipped on a ceiling pause: {}",
+        out.reply
+    );
+}

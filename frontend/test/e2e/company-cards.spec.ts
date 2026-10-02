@@ -154,6 +154,7 @@ async function mockApi(page: Page) {
         editable: ["name", "role", "description"],
         isOrchestrator: false,
         tools: { requested: [], companyAllow: ["web_search"], deskAllow: [], deskCeilingActive: false, effective: ["web_search"] },
+        skills: { requested: null, companyAvailable: [], effective: [], overridden: false },
         desks: [{ id: "research", name: "Research", lead: true }],
         inboxEnabled: false,
       });
@@ -351,9 +352,9 @@ test("#1193 the Company nav row means the roster, even after visiting Desks", as
   // org chart for an operator who clicked "Company" wanting their team: the
   // remembered-mode failure #1193 removed, wearing a different mechanism.
   // Somewhere outside the Company section, so coming back is a real
-  // navigation. Room, because Overview is not a sidebar row any more.
-  await page.getByRole("link", { name: "Room", exact: true })
-    .or(page.getByRole("button", { name: "Room", exact: true }))
+  // navigation. Connections, because Overview and Room are not sidebar rows.
+  await page.getByRole("link", { name: "Connections", exact: true })
+    .or(page.getByRole("button", { name: "Connections", exact: true }))
     .first()
     .click();
   await page.getByRole("link", { name: "Company", exact: true })

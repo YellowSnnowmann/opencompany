@@ -61,7 +61,7 @@ test.describe("sidebar toggle reachability", () => {
     const trigger = page.getByRole("button", { name: "Toggle sidebar" });
     await expect(trigger).toBeInViewport();
     await trigger.click();
-    await expect(page.getByText("Automations", { exact: true })).toBeVisible();
+    await expect(page.getByText("Connections", { exact: true })).toBeVisible();
   });
 
   test("the seam control is desktop-only, so the sheet has exactly one way back", async ({
@@ -141,7 +141,7 @@ test.describe("sidebar toggle reachability", () => {
 
     await page.getByRole("button", { name: "Toggle sidebar" }).click();
     const sheet = page.getByRole("dialog", { name: "Sidebar" });
-    const destination = sheet.getByRole("button", { name: "Room", exact: true });
+    const destination = sheet.getByRole("button", { name: "Company", exact: true });
     await destination.focus();
     await expect(destination).toBeFocused();
 
@@ -196,7 +196,7 @@ test.describe("sidebar toggle reachability", () => {
 
     // Still reachable and still functional in its own right.
     await trigger.click();
-    await expect(page.getByText("Automations", { exact: true })).toBeVisible();
+    await expect(page.getByText("Connections", { exact: true })).toBeVisible();
   });
 
   test("the inline sidebar's collapse control is a named, keyboard-operable control on the seam", async ({

@@ -507,11 +507,19 @@ function Line({
     // Anchored like a timeline row: a reply lives here and nowhere else, so a
     // deep link naming one has nothing to find without this
     // (`search/sources.ts` emits `?thread=…&m=…` for exactly this case).
-    <div data-message-id={message.id} className="flex gap-2.5 px-4 py-2 data-[found]:bg-primary/10">
+    <div
+      data-message-id={message.id}
+      data-avatar-hover-scope
+      className="flex gap-2.5 px-4 py-2 data-[found]:bg-primary/10"
+    >
       <TeammateAvatar
         name={sender.name}
         tone={sender.tone}
         avatar={sender.avatar}
+        mascotCostume={sender.mascotCostume}
+        mascotSkinColor={sender.mascotSkinColor}
+        mascotHandColor={sender.mascotHandColor}
+        mascotMode={sender.mascotMode}
         company={sender.kind === "company"}
         className="size-8"
         // Named by whose line it is, so a spec can assert that your face and

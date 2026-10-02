@@ -1518,6 +1518,26 @@ export interface TeamMemberDto {
    */
   avatar?: string;
   /**
+   * The mascot costume this teammate wears, when somebody has chosen one — the
+   * same field, from the same host-side helper, as `AgentDetailDto.mascotCostume`.
+   *
+   * Absent means the file's own default costume. Added alongside the two color
+   * fields below to close a real fidelity gap: every mass-render surface built
+   * from this list (the chat header, the DM sidebar, the org chart, the members
+   * pane, a message row) used to draw the id-hashed default look for a mascot
+   * wearer, because `avatar` alone said "this is a mascot" without saying which
+   * one — only the detail read (opened by clicking that very avatar) carried
+   * the chosen look. A host predating this field sends nothing, same rollout
+   * skew as `avatar` itself.
+   */
+  mascotCostume?: string;
+  /** See {@link mascotCostume}. */
+  mascotSkinColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotHandColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotMode?: string;
+  /**
    * Whether this teammate has an enabled inbox, as the host's `InboxStore` sees
    * it. Absent on hosts predating the field; the console reads that as `false`.
    */
@@ -1658,6 +1678,23 @@ export interface TeamMemberDto {
    */
   tools?: AgentToolsDto;
   /**
+   * This teammate's skill scope — the same three states, from the same host-side
+   * constructor, that `GET .../team/{agentId}` serves.
+   *
+   * On the list because a skill's detail panel scopes **one skill across many
+   * teammates**, and the write is that teammate's whole `skills` list. The next
+   * list is a function of the stored one: `["a","b"]` plus the slug is
+   * `["a","b",S]`, and a surface that sent `[S]` would strip every other skill
+   * that teammate has while reporting success. The per-skill `agents` projection
+   * cannot carry the stored lists — that payload is quadratic in skills — so this
+   * read does.
+   *
+   * **Optional on the type, not on the wire**, same rule as `tools`: absent means
+   * the host does not answer, and a panel that cannot read a teammate's stored
+   * list must not offer to change it.
+   */
+  skills?: AgentSkillsDto;
+  /**
    * The desks this teammate sits on (issue #601), same shape as the detail
    * read. Desks are the company's real grouping, so these are what the
    * overview graph draws its department pillars from.
@@ -1761,6 +1798,7 @@ export interface AgentDetailDto {
    */
   isOrchestrator: boolean;
   tools: AgentToolsDto;
+  skills: AgentSkillsDto;
   desks: AgentDeskDto[];
   inboxEnabled: boolean;
   /**
@@ -1768,6 +1806,31 @@ export interface AgentDetailDto {
    * same field and the same contract as `TeamMemberDto.avatar`.
    */
   avatar?: string;
+  /**
+   * Whether this teammate's `mascot:animated` canvas plays, when somebody has
+   * chosen a mode — one of `MASCOT_MODES` in `lib/avatar.ts`. Only meaningful
+   * when `avatar` is `"mascot:animated"`. Absent means the file's own default
+   * mode (`"animated"`), not "no mascot".
+   */
+  mascotMode?: string;
+  /**
+   * The mascot costume this teammate wears, when somebody has chosen one —
+   * one of `MASCOT_COSTUMES` in `lib/avatar.ts`. Applies whichever mode is in
+   * force. Absent means the file's own default costume.
+   */
+  mascotCostume?: string;
+  /**
+   * The mascot's skin (body) color, when somebody has chosen one — one of
+   * `MASCOT_SKIN_COLORS` in `lib/avatar.ts`. Absent means the file's own
+   * default.
+   */
+  mascotSkinColor?: string;
+  /**
+   * The mascot's hand/accent color, when somebody has chosen one — one of
+   * `MASCOT_HAND_COLORS` in `lib/avatar.ts`. Absent means the file's own
+   * default.
+   */
+  mascotHandColor?: string;
   /** The cap in force and its attribution; same absent-means-uncapped contract as `TeamMemberDto`. */
   budgetUsdDaily?: number;
   spentTodayUsd?: number;
@@ -1806,6 +1869,27 @@ export interface AgentToolsDto {
    */
   deskCeilingActive: boolean;
   effective: string[];
+}
+
+/**
+ * An agent's skill scope against the company's enabled set.
+ *
+ * `requested` is three-state exactly like {@link AgentToolsDto.requested}:
+ * `null` **inherits** every enabled skill, `[]` is a deliberate **no-skills**
+ * scope, and a non-empty array **narrows**. A surface that treats `null` and
+ * `[]` alike reports the opposite of the truth for exactly those agents.
+ *
+ * A slug in `requested` but missing from `effective` was asked for and not
+ * granted, because the company does not have it enabled — the same
+ * asked-for-but-dropped shape the tool grant has.
+ */
+export interface AgentSkillsDto {
+  requested: string[] | null;
+  /** The company's enabled set — the ceiling, and what the picker offers. */
+  companyAvailable: string[];
+  effective: string[];
+  /** Whether an operator override sets this scope rather than the manifest. */
+  overridden: boolean;
 }
 
 /** A desk this agent sits on, and whether it leads it. */
@@ -1847,6 +1931,31 @@ export interface EditAgentInput {
    */
   avatar?: string | null;
   /**
+   * Whether this teammate's `mascot:animated` canvas plays, three-state
+   * exactly like `avatar`: `undefined` leaves it alone, `null` resets it to
+   * the file's own default mode (`"animated"`), and a value from
+   * `MASCOT_MODES` (`lib/avatar.ts`) sets it. Meaningful only alongside a
+   * `mascot:` `avatar`, but the host accepts it regardless — the picker
+   * sends it before committing the mascot itself.
+   */
+  mascotMode?: string | null;
+  /**
+   * The mascot costume this teammate wears, three-state exactly like
+   * `mascotMode`: `undefined` leaves it, `null` resets it to the file's own
+   * default costume, an id from `MASCOT_COSTUMES` sets it.
+   */
+  mascotCostume?: string | null;
+  /**
+   * The mascot's skin (body) color, three-state exactly like `mascotMode`; an
+   * id from `MASCOT_SKIN_COLORS` sets it.
+   */
+  mascotSkinColor?: string | null;
+  /**
+   * The mascot's hand/accent color, three-state exactly like `mascotMode`; an
+   * id from `MASCOT_HAND_COLORS` sets it.
+   */
+  mascotHandColor?: string | null;
+  /**
    * The teammate's own model — an ACP model hint (issue #1245), or the model
    * half of its `{provider, model}` pair on a built-in harness (keys rework,
    * issue #2306, slice 3a). Same double-option shape as `description`: absent
@@ -1876,6 +1985,13 @@ export interface EditAgentInput {
    * re-scope a grant the operator did not touch.
    */
   tools?: string[] | null;
+  /**
+   * The teammate's own skill scope, the same four-state wire shape as `tools`:
+   * `undefined` leaves it alone, `null` resets it to every enabled skill, `[]`
+   * is a deliberate no-skills scope, and a non-empty array narrows. Entries are
+   * exact slugs — the host refuses a wildcard.
+   */
+  skills?: string[] | null;
 }
 
 /** One declared or detected harness. */

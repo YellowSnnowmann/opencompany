@@ -51,7 +51,7 @@ addressed or stored under one.
 first, with `id: "general"`, `kind: "general"` and `mutable: false`. Its id is
 also its thread id — sends address `chat: "general"`, history reads
 `?desk=general`, and live frames, notifications and card origins all carry
-`general`. `buildChannels` pins it first in the Channels section.
+`general`. `buildChannels` pins it first among the channels.
 
 **Its membership is the roster**, kept by the host: adding, removing or retiring
 a teammate updates it server-side and journals a `DeskMembersChanged`, so the
@@ -197,7 +197,7 @@ chart's desk level, since no desk can name a parent desk. See
 | `model.ts` | A barrel re-exporting the three above, so one import address still reaches all of it. Declares nothing. |
 | `RoundBand.tsx` | One round of a desk answering as a room: the seats that ran together, each lane's live state, and the rows they produced (`data-testid="round-band"`, `data-round-status`). |
 | `EpisodeCompleteMarker.tsx` | The centred pill that says an episode is over — how many rounds, who closed it, and whether the host cut it off. |
-| `ChannelRail.tsx` | The channel/DM list, with collapsible sections. The DM order is held while the pointer or keyboard focus is in the rail (`useStableList` with `holdPointerFocus: false`, #1414; a click's leftover focus does not hold) and slides to its new slot on release (`useFlipList`, expanded rail only, never while hydrating or under reduced motion). |
+| `ChannelRail.tsx` | The channel/DM list: one flat list under a "Conversations" caption (channels first, then DMs; no section headings or folds), with a `+` menu (new channel / new agent — `onAddAgent` asks `RoomView` to open `AddMemberDialog`) and a compose menu (start a conversation in a channel / with the agent) on the caption's row. The DM order is held while the pointer or keyboard focus is in the rail (`useStableList` with `holdPointerFocus: false`, #1414; a click's leftover focus does not hold) and slides to its new slot on release (`useFlipList`, expanded rail only, never while hydrating or under reduced motion). |
 | `ChatHeader.tsx` | The bar above the timeline. |
 | `PresenceDot.tsx` | A person's online/away dot. Never a teammate's: see `components/agent-status-dot.tsx`. |
 | `MessageTimeline.tsx` | The scroll body: day dividers, channel intro, loading skeleton, typing row. |
@@ -208,7 +208,7 @@ chart's desk level, since no desk can name a parent desk. See
 | `useBottomAnchor.ts` | The four rules that keep a transcript on its newest row — arrival, growth, scroller resize, content resize — plus whether it is still parked there. Used by both panes above. |
 | `JumpToLatest.tsx` | The control offered while the reader has scrolled away; a sibling of the scroller, never a child. |
 | `MembersPane.tsx` | Who is in this channel, then the rest of the roster. |
-| `AddMemberDialog.tsx` | Define a teammate. |
+| `AddMemberDialog.tsx` | Define a teammate: name, post, and a face — including a mascot's mode, costume and colors, sent on the create request (`lib/new-member-look.ts`). |
 
 `../RoomView.tsx` owns the state and composes them.
 

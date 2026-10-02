@@ -51,6 +51,8 @@ pub mod blockers;
 pub mod brain;
 pub mod build;
 pub mod capability_budget;
+/// The task-local card budget a HiveMind seat's `spawn_task` reserves against.
+pub mod card_budget;
 #[cfg(feature = "chargebee")]
 pub mod chargebee;
 /// Guarding a chat-only (`suppress_tools`) turn's reply against the tool-call
@@ -895,6 +897,7 @@ fn spend_gate_refusal(reply: String, cause: SpendGateCause) -> TurnOutcome {
         abnormal_stop: Some(cause.abnormal_stop().to_string()),
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }
 }
 
@@ -1033,6 +1036,25 @@ enum AttemptOutcome {
         /// The actionable, operator-facing halt copy.
         summary: String,
     },
+    /// The turn hit the harness's per-turn **wall-clock ceiling** (issue
+    /// #1680) — the fourth and last of the limits that stop a turn short.
+    ///
+    /// **Not retryable** (the one-shot retry would double a failure that by
+    /// construction already ran for the whole ceiling, which is why #1761 made
+    /// this `Hard` in the first place) and,
+    /// since this issue, **not a `Hard` error** either: the turn's folded
+    /// [`TurnStep`] timeline is the nine minutes of work that *caused* the
+    /// ceiling to fire, and a `Hard` arm threw it away at the `reply.map`
+    /// below. It ends the turn gracefully with the actionable summary as the
+    /// reply, exactly as [`BudgetPaused`](Self::BudgetPaused) does.
+    CeilingPaused {
+        /// The actionable, operator-facing copy.
+        summary: String,
+        /// How long this attempt ran before the ceiling fired. Carried rather
+        /// than re-measured because the notice quotes it, and only the
+        /// classifier is holding the attempt's own clock.
+        elapsed: Duration,
+    },
     /// A hard error (auth/build/non-budget provider rejection/etc.) —
     /// propagated loudly, never swallowed.
     Hard(OpenCompanyError),
@@ -1140,6 +1162,28 @@ pub struct TurnOutcome {
     /// credits, not continuing or raising a cap. Conflating it with either
     /// would tell the operator the wrong next action.
     pub budget_paused: Option<BudgetPause>,
+    /// The turn **hit the harness's per-turn wall-clock ceiling** (issue
+    /// #1680) rather than dying with a hard error.
+    ///
+    /// `Some` exactly when [`classify_turn`](CompanyAgent) recognised the
+    /// vendored harness's wall-clock leaf via
+    /// [`is_wall_clock_ceiling`]. `None` on every other path.
+    ///
+    /// The **fourth** distinct terminal state, and the one whose operator
+    /// action differs from all three siblings. An iteration-cap pause is
+    /// resumable with "continue"; an in-turn spend halt means the company's
+    /// own cap was reached; a budget pause means the account is out of money.
+    /// A ceiling hit means the turn was given more work than fits in one
+    /// turn — there is no checkpoint to continue from (so this must never
+    /// invite "continue", which would spend another full ceiling reaching the
+    /// same wall) and no amount of money changes it. The lever is narrowing
+    /// the ask, or raising `OPENHUMAN_AGENT_TURN_TIMEOUT_SECS`.
+    ///
+    /// Unlike [`budget_paused`](Self::budget_paused), this pause carries
+    /// genuine partial work: [`steps`](Self::steps) is the tool timeline the
+    /// turn had already built, which is folded unconditionally and was being
+    /// discarded whenever the reply was an `Err`.
+    pub ceiling_paused: Option<CeilingPause>,
 }
 
 /// What one in-turn spend halt cost, and whose cap it was measured against
@@ -1204,6 +1248,53 @@ pub struct BudgetPause {
     /// [`agent_budget_exhausted_notice`]'s pre-dispatch refusal and to the
     /// vendored sub-agent halt's summary, so "out of budget" reads the same
     /// way everywhere a company hits it.
+    pub summary: String,
+}
+
+/// One turn stopped by the harness's per-turn wall-clock ceiling (issue
+/// #1680).
+///
+/// The fourth sibling of [`BudgetPause`], [`SpendHalt`] and
+/// [`TurnOutcome::hit_iteration_cap`], and the only one of the four that used
+/// to be a hard error. #1761 established the diagnosis — the ceiling bounds
+/// the whole turn, model time included, and the figure the harness prints is
+/// the budget that *remained* when the last call was issued — and made the
+/// error text honest. It deliberately left the failure hard. This is the other
+/// half: a ceiling hit settles as a pause, so the work the turn had already
+/// done survives it.
+///
+/// **Not resume, and not resumable.** There is no checkpoint — the reply the
+/// turn was composing is gone, because the vendored harness returns an `Err`
+/// with no partial `String` in it. What survives is
+/// [`TurnOutcome::steps`](TurnOutcome::steps), the folded tool timeline, which
+/// on a ceiling hit is by definition substantial: the ceiling fired *because*
+/// the agent worked for the full budget. For the workflow node that filed this
+/// issue that timeline is the fetched material the summary was going to be
+/// written from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CeilingPause {
+    /// The teammate whose turn hit the ceiling.
+    pub agent: String,
+    /// How long the attempt ran. Measured per attempt, not across the retry,
+    /// for the reason #1761 gives: each `agent.turn` opens a fresh harness run
+    /// with a fresh budget, so a duration spanning two attempts would be
+    /// compared against a ceiling neither of them saw.
+    pub elapsed: Duration,
+    /// #1761's honest copy, verbatim: the measured elapsed, the statement that
+    /// the harness's own figure is a remainder, the knob that moves the
+    /// ceiling, and the underlying error appended as raised.
+    ///
+    /// **Two surfaces, two lengths.** This is the long one, and it goes to the
+    /// workflow run surface (`RunHistoryPanel` renders an attempt's error as
+    /// the row's headline), because the appended leaf is the only thing that
+    /// names *which call was in flight* and that is a debugging fact. The chat
+    /// notice is `brain::ceiling_pause_notice`, built from `agent` and
+    /// `elapsed` alone: short, actionable, and refusing the word "continue".
+    ///
+    /// Dropped in this branch's first cut on the reasoning that the turn's
+    /// `reply` already carried it, then restored: PR #2554 review turned up the
+    /// three paths that overwrite that reply with an unauthored placeholder, so
+    /// `reply` is not a surface this text survives on.
     pub summary: String,
 }
 
@@ -1601,6 +1692,11 @@ impl CompanyAgent {
         }
 
         let budget_pause_summary: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+        // Issue #1680, the sibling slot. Same idiom and same reason: the
+        // classifier runs inside the stop-hook body and cannot return a second
+        // value, so the one fact it learned travels out in a slot read below.
+        let ceiling_pause: std::sync::Mutex<Option<(String, Duration)>> =
+            std::sync::Mutex::new(None);
 
         // A hive seat turn (plan hive-desks, Phase 4): the driver's episode
         // coordinates ride on the in-flight registration below so the MCP
@@ -1727,6 +1823,13 @@ impl CompanyAgent {
                         }
                         Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
                     }
+                    AttemptOutcome::CeilingPaused { summary, elapsed } => {
+                        let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+                        if let Ok(mut slot) = ceiling_pause.lock() {
+                            *slot = Some((redacted.clone(), elapsed));
+                        }
+                        Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
+                    }
                     AttemptOutcome::Empty => {
                         let spend_halted = spend_brake.as_ref().is_some_and(|(_, halted)| {
                             halted.load(std::sync::atomic::Ordering::SeqCst)
@@ -1747,6 +1850,19 @@ impl CompanyAgent {
                                     let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
                                     if let Ok(mut slot) = budget_pause_summary.lock() {
                                         *slot = Some(redacted.clone());
+                                    }
+                                    Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
+                                }
+                                // A ceiling can fire on the retry too: the
+                                // first attempt returned the transient empty
+                                // class, the second worked until the budget ran
+                                // out. Terminal here as well -- this arm is the
+                                // end of the ladder, so there is nothing left
+                                // to re-enter.
+                                AttemptOutcome::CeilingPaused { summary, elapsed } => {
+                                    let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+                                    if let Ok(mut slot) = ceiling_pause.lock() {
+                                        *slot = Some((redacted.clone(), elapsed));
                                     }
                                     Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
                                 }
@@ -1904,6 +2020,23 @@ impl CompanyAgent {
                 pause.summary
             );
         }
+        let ceiling_paused = ceiling_pause
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
+            .map(|(summary, elapsed)| CeilingPause {
+                agent: self.agent_id.clone(),
+                elapsed,
+                summary,
+            });
+        if let Some(pause) = &ceiling_paused {
+            tracing::info!(
+                agent = %self.agent_id,
+                elapsed_ms = pause.elapsed.as_millis(),
+                progress_events = events.len(),
+                "[turn] hit the per-turn wall-clock ceiling; keeping the steps it had taken"
+            );
+        }
         let steps = steps::fold_steps(events);
 
         let outcome = reply.map(|reply| TurnOutcome {
@@ -1917,6 +2050,7 @@ impl CompanyAgent {
             abnormal_stop: None,
             halted_for_spend,
             budget_paused,
+            ceiling_paused,
         });
         (outcome, usages)
     }
@@ -2015,16 +2149,24 @@ impl CompanyAgent {
             Ok(reply) if reply.trim().is_empty() => AttemptOutcome::Empty,
             Ok(reply) => AttemptOutcome::Reply(reply),
             Err(err) if is_transient_empty_response(&err) => AttemptOutcome::Empty,
-            // Issue #1680: still Hard — a ceiling hit is not retryable and the
-            // one-shot retry must not double a ten-minute failure — but told in
-            // terms the operator can act on rather than the harness's own.
-            Err(err) if is_wall_clock_ceiling(&err) => {
-                AttemptOutcome::Hard(OpenCompanyError::Harness(wall_clock_ceiling_message(
-                    &self.agent_id,
-                    elapsed,
-                    &err,
-                )))
-            }
+            // Issue #1680: a graceful pause, not a hard error.
+            //
+            // Still **not retryable** — the `Empty` arm's one-shot retry must
+            // not double a ten-minute failure, which is why #1761 reached for
+            // `Hard` and why neither classifier pass may re-enter a turn from
+            // here. `CeilingPaused` is terminal in exactly the way
+            // `BudgetPaused` is.
+            //
+            // What changes is what the stop *costs*. A `Hard` arm here reached
+            // `reply.map(..)` as an `Err`, so the folded `TurnStep` timeline —
+            // computed one line above it, unconditionally — was dropped. On a
+            // ceiling hit that timeline is the whole of the turn's work. The
+            // honest text from #1761 is preserved verbatim as the pause's
+            // summary; only the channel it travels in has changed.
+            Err(err) if is_wall_clock_ceiling(&err) => AttemptOutcome::CeilingPaused {
+                summary: wall_clock_ceiling_message(&self.agent_id, elapsed, &err),
+                elapsed,
+            },
             // Issue #1846: the top-level orchestrator's own inference call
             // carries no delegated-tool envelope, so it cannot be recognised by
             // `RepeatedToolFailureMiddleware`'s envelope-gated check — only by
@@ -2364,9 +2506,13 @@ fn humanise_elapsed(elapsed: Duration) -> String {
 /// run began. Model time is therefore fully counted against it, as is tool
 /// time, sub-agent time and retry backoff. But the number the harness prints is
 /// the budget that **remained** when the offending call was issued, not that
-/// call's duration and not the ceiling — so a turn that genuinely ran for the
-/// full ten minutes reports a figure ten times smaller than the limit it hit,
-/// and reads as though one slow model call were at fault.
+/// call's duration and not the ceiling — so a turn that genuinely ran for its
+/// full ceiling reports a figure far smaller than the limit it hit, and reads
+/// as though one slow model call were at fault. (#1680's own arithmetic,
+/// `600000 - 56636`, holds only at the 600-second default it was filed
+/// against; the #2466 vendored bump moved `DEFAULT_AGENT_TURN_TIMEOUT_SECS` to
+/// 3600, which is exactly the drift the message below declines to restate a
+/// literal for.)
 ///
 /// That reading is what issue #1680 was filed on: a node that had spent about
 /// nine minutes before its last model call even started was diagnosed as a 56
@@ -2774,9 +2920,17 @@ enum CeilingGate {
     Refused(TurnOutcome),
 }
 
+/// As [`CeilingGate`], for the monthly-spend axis.
+///
+/// `Refused` is **boxed** where `CeilingGate`'s is not, and only because of the
+/// size ratio between the two variants rather than any difference in meaning:
+/// `Admitted` here holds a guard of a few bytes, so a `TurnOutcome` beside it
+/// trips `clippy::large_enum_variant` (it did, on #1680 adding a field).
+/// `CeilingGate::Admitted` carries a `TokenReservation` and stays under the
+/// threshold. Pure indirection on a value that is destructured immediately.
 enum MonthlyBudgetGate {
     Admitted(Option<tokio::sync::OwnedMutexGuard<()>>),
-    Refused(TurnOutcome),
+    Refused(Box<TurnOutcome>),
 }
 
 impl HarnessPool {
@@ -4419,10 +4573,10 @@ impl HarnessPool {
                     cap = configured_cap,
                     "[company-budget] company record is unavailable; refusing inference dispatch"
                 );
-                return MonthlyBudgetGate::Refused(spend_gate_refusal(
+                return MonthlyBudgetGate::Refused(Box::new(spend_gate_refusal(
                     unmeasurable_monthly_budget_notice(configured_cap),
                     SpendGateCause::Unmeasurable,
-                ));
+                )));
             }
             Err(error) => {
                 tracing::error!(
@@ -4432,10 +4586,10 @@ impl HarnessPool {
                     %error,
                     "[company-budget] ledger read failed; refusing inference dispatch"
                 );
-                return MonthlyBudgetGate::Refused(spend_gate_refusal(
+                return MonthlyBudgetGate::Refused(Box::new(spend_gate_refusal(
                     unmeasurable_monthly_budget_notice(configured_cap),
                     SpendGateCause::Unmeasurable,
-                ));
+                )));
             }
         };
 
@@ -4457,10 +4611,10 @@ impl HarnessPool {
                 cap,
                 "[company-budget] monthly spend cap reached; refusing inference dispatch"
             );
-            return MonthlyBudgetGate::Refused(spend_gate_refusal(
+            return MonthlyBudgetGate::Refused(Box::new(spend_gate_refusal(
                 monthly_budget_exhausted_notice(cap),
                 SpendGateCause::Exhausted,
-            ));
+            )));
         }
 
         MonthlyBudgetGate::Admitted(Some(guard))
@@ -4505,7 +4659,7 @@ impl HarnessPool {
             .await
         {
             MonthlyBudgetGate::Admitted(guard) => guard,
-            MonthlyBudgetGate::Refused(refusal) => return Ok(refusal),
+            MonthlyBudgetGate::Refused(refusal) => return Ok(*refusal),
         };
 
         let runtime = crate::harness::openhuman_runtime::global(
@@ -4685,7 +4839,7 @@ impl HarnessPool {
 
         let _monthly_budget = match self.monthly_budget_refusal(company, agent_id, deps).await {
             MonthlyBudgetGate::Admitted(guard) => guard,
-            MonthlyBudgetGate::Refused(refusal) => return Ok(refusal),
+            MonthlyBudgetGate::Refused(refusal) => return Ok(*refusal),
         };
 
         // Per-agent daily spend cap (issue #304): the same HARD, pre-model-call
@@ -4780,7 +4934,7 @@ impl HarnessPool {
         // Skipped entirely for a chat-only turn (issue #1725): a greeting /
         // "Just chatting" reply must not be grounded in prior task outcomes, and
         // pulling them is the exact context leak the fast path exists to stop.
-        let augmented = if crate::runtime::delegation::is_chat_only_turn() {
+        let augmented = if crate::runtime::delegation::is_chat_only_turn() || !chat.history_seed {
             message.to_string()
         } else {
             // **Retrieved on the operator's own words, injected into the
@@ -5094,6 +5248,15 @@ impl HarnessPool {
             steer.and_then(SteerControl::pending),
             Some(SteerAction::Cancel)
         ) && outcome.budget_paused.is_none()
+            // Issue #1680 -- CodeRabbit on PR #2554, and the guard's own
+            // reasoning above applies verbatim. A ceiling-paused turn's `reply`
+            // is the scrubbed `wall_clock_ceiling_message`: host-authored, not
+            // an answer the teammate produced. Writing it back would recall
+            // "you hit the wall-clock ceiling" as prior context in the NEXT
+            // turn, and on record as something this teammate said. The steps
+            // this pause preserves are the turn's real work and travel on the
+            // outcome; the diagnosis is not memory.
+            && outcome.ceiling_paused.is_none()
         {
             deps.context
                 .put(
@@ -5294,6 +5457,11 @@ async fn refresh_oauth_decls(
 /// the roster, and drop every live agent session for a cosmetic change — issue
 /// #1676's review note.
 ///
+/// A skill scope is one of the things the harness reads — it decides which
+/// skills are materialized into the teammate's tree — so a row carrying only a
+/// scope is not avatar-only, and filtering it here would leave the fingerprint
+/// unmoved for the commonest scope edit: one teammate, nothing else changed.
+///
 /// An explicit `Some(vec![])` tool list, `Some("")` instructions and `Some("")`
 /// model/harness (the stored form of "cleared") stay real overrides ("the
 /// company's standard grant" / "cleared" / "the blueprint's model and harness"),
@@ -5303,6 +5471,7 @@ fn is_avatar_only(edit: &crate::ports::types::AgentOverride) -> bool {
         && edit.role.is_none()
         && edit.description.is_none()
         && edit.tools.is_none()
+        && edit.skills.is_none()
         && edit.instructions.is_none()
         && edit.model.is_none()
         && edit.harness.is_none()
@@ -5357,6 +5526,12 @@ fn overlay_fingerprint(
         edit.role.hash(&mut hasher);
         edit.description.hash(&mut hasher);
         edit.tools.hash(&mut hasher);
+        // A skill scope decides which skills are materialized into this
+        // teammate's tree, so it moves the roster the same way a grant edit
+        // does. Without it every other axis is stable on a scope-only change,
+        // the cached roster is reused, and the scope is silently ignored until
+        // the process restarts.
+        edit.skills.hash(&mut hasher);
         // A routing override changes the harness binding the roster must build,
         // so it has to move this fingerprint too — otherwise re-binding one
         // teammate to another model/harness would persist and be silently
@@ -5384,6 +5559,7 @@ fn overlay_fingerprint(
         // order (an operator's own list), length folded in first via the slice
         // length above so `["a","b"]` cannot collide with `["ab"]`.
         agent.tools.hash(&mut hasher);
+        agent.skills.hash(&mut hasher);
         // The overlay's own routing binding (`overlay_agent_to_manifest` carries
         // both straight through), so a model/harness change on an overlay
         // teammate invalidates the cached roster exactly as an edit of a
@@ -5947,22 +6123,13 @@ pub(crate) fn seat_persona(
         orchestrator::orchestrator_id(&live_roster).as_deref() == Some(manifest_agent.id.as_str()),
         &crate::company::team_brief::seat_team_section(company, &manifest_agent.id),
     )?;
-    // **The hand-off tools come off an episode seat's belt.**
+    // **The hand-off and lifecycle tools come off an episode seat's belt.**
     //
-    // `spawn_task`, `delegate_to_desk` and `delegate_to_teammate` are wired
-    // onto every roster agent (`build.rs`), and each queues work the
-    // [`HarnessBrain`] drains. Inside an episode nothing drains that queue,
-    // so the orchestrator refuses the call in the model's own turn rather
-    // than parking it forever (`drain_unwired`).
-    //
-    // The refusal is handled; what it invites is not. A seat that reaches for
-    // one concludes delegation is impossible here and reports that to the
-    // operator -- "board actions are unavailable, so delegation is blocked",
-    // asking them to go and fix a board that was never the problem -- while
-    // the hive's own `ask` sat on the same belt the whole time. Offering a
-    // tool that cannot work in this context is worse than withholding it: it
-    // does not just fail, it argues the seat out of the tool that would have
-    // worked.
+    // A seat reaches a teammate with the episode's own `ask`, and its turn
+    // claims a delegation bucket that permits opening a card and nothing else
+    // (`DrainClaim::Seat`). A tool on the belt that can only refuse argues the
+    // seat out of the verb that works, so these are withheld rather than left
+    // to refuse. `spawn_task` stays: the seat's settle writes its cards.
     //
     // Removed from the belt AND from the provider-visible names, because
     // `episode_seat` builds the allowlist from these and a name the model can
@@ -5978,18 +6145,9 @@ pub(crate) fn seat_persona(
     // **And the briefs that describe them.**
     //
     // A seat is built by the same builder as an ordinary roster agent, so it
-    // inherits the orchestrator runtime's prose wholesale: how to hand work
-    // on, and how the board tracks it. Inside an episode there is no drain
-    // and no board, and `tinyhivemind` is the thing running the room -- a
-    // seat reaches a teammate with `ask`, which the episode's own belt
-    // serves.
-    //
-    // Taking the tools without the prose is the worst of both: the persona
-    // spends a paragraph on `delegate_to_teammate`, the belt does not have
-    // it, and a seat that goes looking concludes the capability was
-    // withdrawn. On a live run one did exactly that and told the operator to
-    // go and make "the board" available -- reporting, accurately, an
-    // affordance its prompt had promised and its belt could not honour.
+    // inherits the orchestrator runtime's prose about handing work on and
+    // tracking it, which names the withheld tools. What a seat may do with
+    // cards is told to it by the host instead (`SEAT_CARDS_NOTE`).
     //
     // Removed by exact match on what was appended, so a brief that is
     // reworded upstream is either removed whole or left whole, never
@@ -6007,18 +6165,9 @@ pub(crate) fn seat_persona(
 
     // **And the ledger catalogue, which names them too.**
     //
-    // The two briefs above are not the only prose that hands a seat a verb
-    // name. `ledger_brief` prints every native ledger's `written_by`, and the
-    // board's says "`spawn_task` to open a card, `assign_task` to hand it
-    // over" -- true of the company, and false of a seat whose belt was just
-    // stripped of the first. The strip above is by exact match on two known
-    // blocks and could not see a third.
-    //
-    // A live run paid for it. The claimer read the catalogue, went looking,
-    // found nothing, and told the operator "opening the task card on the
-    // board isn't something I can do directly from here", then routed the
-    // work through a teammate it had invented a reason to involve. The same
-    // failure the comment above describes, arriving by a different sentence.
+    // `ledger_brief` prints every native ledger's `written_by`, and the
+    // board's names `assign_task` beside `spawn_task` -- true of the company,
+    // and false of a seat. Swapped for a line that is true of a seat.
     //
     // Driven off `EPISODE_WITHHELD_TOOLS` rather than off the `tasks` slug,
     // so a ledger declared later whose writer prose names a withheld verb is
@@ -6052,11 +6201,15 @@ pub(crate) fn seat_persona(
 
 /// The roster tools an episode seat is **not** built with.
 ///
-/// Every one of these queues work for the [`HarnessBrain`] to drain, and no
-/// brain drains inside an episode. See `build_episode_seat` for why they are
+/// A seat's delegation claim permits opening a card and nothing else, so each
+/// of these could only refuse there. See `seat_persona` for why they are
 /// withheld rather than left to refuse.
-pub(crate) const EPISODE_WITHHELD_TOOLS: [&str; 3] =
-    ["spawn_task", "delegate_to_desk", "delegate_to_teammate"];
+pub(crate) const EPISODE_WITHHELD_TOOLS: [&str; 4] = [
+    "delegate_to_desk",
+    "delegate_to_teammate",
+    "assign_task",
+    "review_task",
+];
 
 pub(crate) fn build_roster(
     runtime: &openhuman_embed::Runtime,
@@ -6292,6 +6445,10 @@ fn overlay_agent_to_manifest(overlay: &OverlayAgent) -> ManifestAgent {
         // A non-empty list is intersected with `[tools].allow` by that same
         // function below (narrow-only, never a widen).
         tools: overlay.tools.clone(),
+        // The overlay's own skill scope, carried the same way, so a
+        // console-created teammate is scoped exactly as a manifest one is.
+        // `None` is every enabled skill, unchanged from before the field.
+        skills: overlay.skills.clone(),
         // An overlay teammate declares no delegation allowlist, and an empty
         // list is unrestricted (`delegation_tools::reach_is_unrestricted`): it
         // carries the hand-off tools like every roster agent and may reach
@@ -6451,6 +6608,9 @@ mod built_in_tests_part09;
 #[cfg(test)]
 #[path = "built_in_tests_part10.rs"]
 mod built_in_tests_part10;
+#[cfg(all(test, feature = "openhuman"))]
+#[path = "built_in_tests_part11.rs"]
+mod built_in_tests_part11;
 /// Per-agent MCP tool permissions at the five seams that enforce them.
 #[cfg(all(test, feature = "openhuman"))]
 #[path = "mcp_agent_policy_tests.rs"]
@@ -6462,3 +6622,7 @@ mod mcp_policy_freshness_tests;
 #[cfg(all(test, feature = "openhuman"))]
 #[path = "mcp_reads_tests.rs"]
 mod mcp_reads_tests;
+
+#[cfg(test)]
+#[path = "built_in_tests_skill_scope_freshness.rs"]
+mod tests_skill_scope_freshness;

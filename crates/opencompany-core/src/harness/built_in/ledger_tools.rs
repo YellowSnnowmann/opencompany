@@ -41,6 +41,10 @@ use crate::company::ledgers::{self, Ledgers, Query};
 use crate::company::{LedgerAccess, LedgerGrant};
 use crate::ledger::{LedgerAuthor, LedgerSource, LedgerSpec, ORDERS};
 
+mod list;
+
+use list::ListLedgers;
+
 /// Names every ledger this company has.
 pub const LIST_LEDGERS_TOOL: &str = "list_ledgers";
 /// Reads rows off one ledger.
@@ -124,30 +128,16 @@ pub fn written_by_note(spec: &crate::ledger::LedgerSpec) -> String {
 
 /// What replaces it for a seat inside an episode.
 ///
-/// The standing line names both verbs that write the board, and only one of
-/// them is off this belt: `EPISODE_WITHHELD_TOOLS` takes `spawn_task`, while
-/// `assign_task` is the orchestrator's and stays. The swap runs for every
-/// episode seat, the orchestrator's included, so a sentence denying both
-/// would tell that seat it cannot hand a card over when it can -- the same
-/// defect this exists to remove, pointed the other way. It therefore claims
-/// only what is true of every seat: the verb that *opens* a card is gone.
-///
-/// A live run shows what leaving the standing line costs: the claimer read
-/// the catalogue, went looking for `spawn_task`, told the operator "opening
-/// the task card on the board isn't something I can do directly from here",
-/// and invented a route through another teammate.
-///
-/// The registry line stays as it is -- it describes the company, and
-/// `registry_tests` holds it to naming those verbs on purpose. What changes
-/// is what an episode seat is shown in its place.
+/// A seat opens a card with `spawn_task` and has no verb that hands one over,
+/// so the line says both and points at the teammate instead.
 ///
 /// Takes the prefix for the reason every note here does: the belt carries
 /// `desk_ask`, and a note that says `ask` names a tool the seat cannot see.
 #[must_use]
 pub fn episode_written_by_note(prefix: &str) -> String {
     format!(
-        " _(read-only here, and the verb that opens a card is not on your belt inside an \
-         episode either. `{prefix}ask` the teammate who should do the work instead.)_"
+        " _(read-only here. Inside an episode you open a card with `spawn_task`; handing one \
+         over is not on your belt, so `{prefix}ask` the teammate who should take it.)_"
     )
 }
 
@@ -295,77 +285,6 @@ fn ledger_argument() -> Value {
 }
 
 // ---------------------------------------------------------------------------
-// list_ledgers
-// ---------------------------------------------------------------------------
-
-struct ListLedgers {
-    ctx: Ledgers,
-    ledger_grants: Option<Vec<LedgerGrant>>,
-}
-
-#[async_trait]
-impl Tool for ListLedgers {
-    fn name(&self) -> &str {
-        LIST_LEDGERS_TOOL
-    }
-
-    fn description(&self) -> &str {
-        "Name every ledger this company keeps, with what each one holds, its statuses and how many \
-         rows are open. USE FOR finding where something belongs before recording it, and for \
-         checking whether an axis already exists before declaring a new one. Read a ledger's rows \
-         with `read_ledger`."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({ "type": "object", "properties": {}, "additionalProperties": false })
-    }
-
-    fn permission_level(&self) -> PermissionLevel {
-        PermissionLevel::ReadOnly
-    }
-
-    async fn execute(&self, _arguments: Value) -> anyhow::Result<ToolResult> {
-        let registry = match ledgers::registry(&self.ctx).await {
-            Ok(registry) => registry,
-            Err(error) => {
-                return Ok(ToolResult::error(format!(
-                    "Could not read this company's ledgers: {error}."
-                )));
-            }
-        };
-        let mut out = String::new();
-        for spec in registry
-            .specs()
-            .iter()
-            .filter(|spec| ledger_access(&self.ledger_grants, &spec.slug).is_some())
-        {
-            let entries = ledgers::entries(&self.ctx, spec).await.unwrap_or_default();
-            out.push_str(&format!(
-                "- `{}` — {}\n  statuses: {}\n  {} open, {} closed\n",
-                spec.slug,
-                crate::ledger::budget::truncate(&spec.purpose, 300),
-                spec.statuses
-                    .iter()
-                    .map(|status| status.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                entries.open_count(spec),
-                entries.closed_count(spec),
-            ));
-            if spec.source == LedgerSource::Native {
-                out.push_str(&format!("  read-only here: {}\n", spec.written_by));
-            }
-        }
-        // Surfaced rather than swallowed: a company whose ledger silently
-        // stopped appearing has no way to find out why.
-        for fault in registry.faults() {
-            out.push_str(&format!("- (not loaded) {fault}\n"));
-        }
-        Ok(ToolResult::success(out))
-    }
-}
-
-// ---------------------------------------------------------------------------
 // read_ledger
 // ---------------------------------------------------------------------------
 
@@ -454,10 +373,7 @@ impl Tool for ReadLedger {
             return Ok(ToolResult::success(format!(
                 "`{}` has no rows matching that. It holds {} in total.",
                 spec.slug,
-                ledgers::entries(&self.ctx, &spec)
-                    .await
-                    .map(|entries| entries.entries.len())
-                    .unwrap_or_default()
+                read.open + read.closed
             )));
         }
         let mut out = String::new();
@@ -792,3 +708,7 @@ const _: Option<Arc<()>> = None;
 #[cfg(test)]
 #[path = "ledger_tools_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "ledger_tools_unreadable_tests.rs"]
+mod unreadable_tests;

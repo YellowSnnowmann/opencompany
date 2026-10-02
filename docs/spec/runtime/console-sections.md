@@ -1,15 +1,66 @@
-# The console's four sections
+# The console's sections
 
-The sidebar is four rows — **Room**, **Company**, **Connections**, **Flows** —
-with the Room rail pinned beneath them on every one of them. This file is the
-record of that decision. It is Rule 8 of
+The sidebar is the **conversation list** on top and two rows — **Company** and
+**Connections** — pinned at its foot. Automations is a row on Company's rail.
+This file is the record of how it got there: the four-row decision below
+(Room, Company, Connections, Flows — "Flows" is now **Automations**), and the
+consolidation after it, which is the next section. It is Rule 8 of
 [`ledgers-console-ia.md`](ledgers-console-ia.md) written out, because that file
 is at its 500-line ceiling and this is the largest IA change it has seen.
+
+## The consolidation: conversations on top, two rows at the foot
+
+The four-row sidebar below was cut again to two, by moving what the other two
+rows were into places that already existed. Nothing was retired but the rows.
+
+- **Room is not a row.** The conversation list *is* the front of the sidebar,
+  and it is already on every route (it is portalled in by `RoomView`, which is
+  mounted everywhere). A row that said "Room" over a list that is always there
+  was a second way into what is already on screen. The `chat` route, `RoomView`
+  and everything in `views/room/` are intact; `#/chat/<id>` still resolves and
+  `DEFAULT_VIEW` is still `chat`. Only the nav row went.
+- **Automations is a row on Company's rail**, a plain child after Brain and
+  before the Finance caption. It must be a *direct* child of the section:
+  `sectionOwning` reads only `section.children`, so a grandchild with its own
+  view would not light Company. After the Finance caption it would read as one
+  of Finance's pages. `#/workflows` therefore lights Company and draws its rail
+  with Automations current; the address, `data-tour="nav-workflows"` and the
+  canvas are unchanged.
+- **Channels and Direct messages are one list.** The two captioned, collapsible
+  sections are gone: one flat list, channels first and then DMs, each kind in
+  the order it already had. The row's own icon (`#`, a lock, the teammate's
+  avatar) is what tells them apart. A caption, **Conversations**, names the list
+  — a `div`, not a heading and not a control (issue #1392 keeps headings out of
+  rails; `nav-rail-headings.test.ts` is the guard for `section-rail.tsx`).
+- **Two doors on the caption's row.** `+` opens a menu: *Create a new channel*
+  (the channel creator) and *Create a new agent* — the real `AddMemberDialog`
+  that Company > Agents "Add agent" opens, mounted by `RoomView` with its own
+  handler, so it pops in place on any route. The pencil opens *Start a
+  conversation in a channel* and *Start a conversation with the agent* (the
+  channel and agent pickers, `NewMessageDialog`). There is deliberately no
+  Search item: the title bar owns search (⌘K), and the rail once faked a keydown
+  to reach it.
+- **The foot.** The list takes the leftover height and scrolls inside its own
+  slot (`min-h-0 flex-1`, `overflow-y-auto`); Company and Connections are a
+  `shrink-0` group under it, so a list at its cap cannot push them out of reach.
+  The seam is the group's own `border-t`. Its bottom padding is
+  `pb-(--frame-inset)` — the same gap the content card keeps under itself
+  (`mb-(--frame-inset)`, 0.75rem) — so Connections' bottom edge and the card's
+  are one line (measured: both 888 at a 900px window). The strip below is the
+  column's own transparent fill over the shell chrome, not a second surface.
+
+The tour follows the anchors: "Your AI staff" spotlights
+`data-tour="conversations"` (the list's slot) rather than the removed
+`nav-chat`, and the Automations stop still targets `nav-workflows`, which is now
+the Company rail row.
+
+The rest of this file describes the four-row design and why. Where it says
+**Room** or **Flows** as a row, read the list and **Automations** as above.
 
 Read Rule 6 there first. It governs what a view without a nav row must be, and
 eight views need that call making here.
 
-## Why four
+## Why four (superseded by two — see above)
 
 Ten flat rows is not a list an operator scans, it is a wall — the same judgement
 Rule 2 made when it rejected a sidebar row per declared list, one screen earlier
@@ -25,7 +76,7 @@ question an operator is answering:
 | I want to say something, or see what was said | **Room** |
 | Something about my company: who, what, where, what it remembers, what it costs | **Company** |
 | Can my teammates reach X yet? | **Connections** |
-| What does this company do on repeat? | **Flows** |
+| What does this company do on repeat? | **Automations** (was "Flows") |
 
 Everything else is chrome (Settings, Feedback, Discord in the footer; Overview
 and Approvals in the window's title row) or is filed under one of the four.
@@ -49,7 +100,7 @@ Connections content rail and removed it on exactly that argument.
 meant spending that region on them — and what it was spending was the **channel
 list**, which only appeared while you were in Room. The channel list is the one
 list an operator returns to continuously, from wherever they are. Losing it on
-every trip to Company, Connections or Flows is not a width, it is a round trip:
+every trip to Company, Connections or Automations is not a width, it is a round trip:
 go to Room, find the channel, come back. That costs more than 240px does.
 
 So the trade is inverted. The sidebar's middle region is the Room rail,
@@ -69,10 +120,11 @@ content — and exactly one rail on screen at a time:
 - **Settings keeps its own** because it is not one of the four at all. It is a
   footer utility, and its rail *is* this pattern; the shared component copies
   its geometry (`w-60` from `lg`, chips below) rather than the other way round.
-- **Room and Flows draw none.** Room's sub-navigation is the pinned channel
-  list. Flows has none to move: the canvas's Workflows/Runs toggle is a control
-  on the page's title row whose state is client-side rather than an address, so
-  promoting it would be inventing sub-pages rather than relocating any.
+- **Room draws none, and Automations is a row on Company's.** Room's
+  sub-navigation is the pinned conversation list. Automations has no sub-pages
+  to move: the canvas's Automations/Runs toggle is a control on the page's title
+  row whose state is client-side rather than an address, so promoting it would be
+  inventing sub-pages rather than relocating any.
 
 ### Not an accordion, and no longer a swap either
 
@@ -80,14 +132,15 @@ The four rows are always visible, always contiguous, always in the same place.
 Selecting a section does not expand a row in place and does not displace a row's
 siblings — and since #2130 it does not swap the block below them either. That
 block is the channel list on every route, which makes the whole column fixed
-furniture: the same four rows and the same list, wherever you are.
+furniture: the same rows and the same list, wherever you are. (Two rows below the list
+today; the diagram is the four-row layout it replaced.)
 
 ```text
 ┌─────────────────┐┌────────────┬──────────────────┐
 │ ■ Room          ││ COMPANY    │                  │
 │   Company       ││  Agents    │  the page        │
 │   Connections   ││  Work      │                  │
-│   Flows         ││  Workspace │                  │
+│   Automations   ││  Workspace │                  │
 │                 ││  Brain     │                  │
 │ CHANNELS      + ││  Finance   │                  │
 │  # engineering  ││   Overview │  the section's   │
@@ -104,7 +157,7 @@ furniture: the same four rows and the same list, wherever you are.
 ```
 
 The accordion — each row expanding under itself — was the first shape this took
-and was rejected twice over. The rows move, so "Flows is the fourth thing" only
+and was rejected twice over. The rows move, so "Automations is the fourth thing" only
 holds while nothing above it is open. And the one region whose contents are
 unbounded, the channel list, pushes every row after it off the bottom at an
 ordinary twenty channels: the wall, recreated inside one row.
@@ -112,14 +165,16 @@ ordinary twenty channels: the wall, recreated inside one row.
 A fixed block also has no per-row open/closed state to keep. Which section is
 showing is which section you are in, and the route already carries that.
 
-**Space, not a rule, between the two blocks.** The column is quiet and the
-console draws no rule above its footer, so a divider here would have been the
-only seam in it. The gap is set deliberately (`pt-5`) rather than left as
-whatever a removed element's margins happened to be.
+**The seam between the two blocks.** It was space, not a rule, while the list
+sat *under* the rows: the column is quiet, and a divider would have been its only
+seam. With the rows now at the foot the seam is the group's own `border-t`, the
+idiom the title row uses against the page. The old `pt-5` (24px) is long gone —
+it read as the list having come loose from the rows — and there is no top
+padding on either group; `sidebar-sections.test.ts` pins that.
 
 ### On the collapsed rail
 
-The four icons stay, and so does the channel list: `ChannelRail` has a compact
+The two icons stay, and so does the channel list: `ChannelRail` has a compact
 variant built for exactly that width, and dropping it would make collapsing the
 sidebar silently lose the channel list — the regression issue #1018 filed about
 the approvals badge, in a new place. Nothing else is in this region to hide any
@@ -128,17 +183,18 @@ content-rail rows now, where they keep their labels at every width.
 
 ## Room is the chat column, moved whole
 
-`views/chat/ChannelRail.tsx` is not reimplemented in the sidebar. It is
+`views/room/ChannelRail.tsx` is not reimplemented in the sidebar. It is
 **portalled** into a slot the sidebar owns (`components/room-rail.tsx`), so
-every behaviour it already had comes with it: collapsible sections, per-kind row
-icons, unread and mention badges, the compact collapsed variant, and the "New
-message" door. The expanded DM rows carry each teammate's live-state badge
+every behaviour it already had comes with it — bar the collapsible sections,
+which the consolidation retired for one flat list: per-kind row icons, unread
+and mention badges, the compact collapsed variant, and the two doors on the
+Conversations row. The expanded DM rows carry each teammate's live-state badge
 (`AgentStatusDot`, read from `useAgentPresence`), and their order follows the
 latest message: the list holds still while the pointer or keyboard focus is
 inside the rail (a row must not slide under a click) and slides to the new order
 on release, unless reduced motion is asked for. Only a re-sort slides: rows are
-measured within their own list, so collapsing the Channels section above them
-moves the list without animating it. The focus a mouse click leaves
+measured within the list, so a channel appearing above them moves the list
+without animating it. The focus a mouse click leaves
 on a row does not hold it once the pointer has left. A DM's state is keyed on
 the conversation, not the spelling: the bare teammate id the console posts
 under and the `dm:<id>` desk the hive seat brackets its turn under are one key
@@ -172,7 +228,7 @@ model into the shell would now be *worse* than it was: the console would
 re-render on every unread tick from every section rather than only from Room.
 
 What the portal costs, stated plainly: ~2,400 lines of chat model stay mounted
-while an operator is on Company or Flows. The **data** was already resident —
+while an operator is on Company or Automations. The **data** was already resident —
 the shell owns the transcripts, the mention feed and the unread map precisely
 *because* `ChatView` used to unmount — so what is newly kept is the view's own
 state and its desks/roster reads, not the traffic. `ChatView` takes one roster
@@ -235,7 +291,9 @@ goes dark and its contents block disappears with it.
 
 ## Labels and view ids are allowed to differ
 
-"Room" is the `chat` view. "Flows" is `workflows`. "Work" has been `ledgers`
+"Room" was the `chat` view and is no longer a row, though `chat` still routes.
+"Automations" is `workflows` (called "Flows" before, and a row on Company's rail
+now). "Work" has been `ledgers`
 since #1284, and "Agents" is `company`.
 
 A view id is an **address** — every `#/chat/<channelId>` link ever minted, every

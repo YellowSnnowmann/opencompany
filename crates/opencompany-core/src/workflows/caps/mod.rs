@@ -1364,6 +1364,14 @@ impl HarnessAgentRunner {
                     "A step in this workflow could not set the owner of card {}.",
                     row.task_id.as_deref().unwrap_or("(unknown)")
                 )),
+                crate::ports::WorkflowBoardAction::BoardUnwired => Some(format!(
+                    "A step in this workflow could not write to the board because this runtime \
+                     has no task board, so the card \"{}\" was not opened or changed.",
+                    row.title
+                        .as_deref()
+                        .or(row.task_id.as_deref())
+                        .unwrap_or("(unknown)")
+                )),
                 _ => None,
             };
             if let Some(notice) = notice {
@@ -2526,6 +2534,7 @@ impl HarnessAgentRunner {
                             abnormal_stop: None,
                             halted_for_spend: None,
                             budget_paused: None,
+                            ceiling_paused: None,
                         },
                     ));
                 }
@@ -2917,8 +2926,13 @@ impl HarnessAgentRunner {
             }
         }
 
+        // Issue #1680: a ceiling hit joins the two stops that skip the judge.
+        // There is no output to judge -- the draft never existed -- so running
+        // the gate would spend a model call to be told that the pause copy is
+        // not a sufficient answer, which is already known here.
         if outcome.budget_paused.is_none()
             && outcome.halted_for_spend.is_none()
+            && outcome.ceiling_paused.is_none()
             && let Some(verify) = request.get("verify")
         {
             let criteria = verify
@@ -2932,7 +2946,9 @@ impl HarnessAgentRunner {
                     instruction: &message,
                     output: &outcome.reply,
                     criteria,
-                    execution_failed: outcome.hit_iteration_cap || outcome.budget_paused.is_some(),
+                    execution_failed: outcome.hit_iteration_cap
+                        || outcome.budget_paused.is_some()
+                        || outcome.ceiling_paused.is_some(),
                 },
             )
             .await;
@@ -3167,6 +3183,28 @@ impl HarnessAgentRunner {
                 crate::ports::RunStatus::Failed,
                 Some(crate::harness::built_in::brain::spend_halt_notice(halt)),
             )
+        } else if let Some(pause) = &outcome.ceiling_paused {
+            // Issue #1680. Same `capped` channel as the three arms above, for
+            // the reason the budget arm states: the engine routes every one of
+            // these through `LimitStop`, so `tinyflows::observability` reports
+            // the step `Success` while this settle marks the attempt `Failed`,
+            // and `reclassify_capped_nodes` is what reconciles the two.
+            //
+            // Before this issue a ceiling hit never reached here at all — it
+            // left `run_turn` as an `Err` and took the run down with it. The
+            // node now settles `Failed` with an explanation, and the run
+            // continues to whatever the graph does next, which is what
+            // "**Send update** is reached" on #1680 asked for.
+            self.capped.push(lineage_node.clone());
+            (
+                crate::ports::RunStatus::Failed,
+                // The LONG copy, not the chat notice: `RunHistoryPanel` renders
+                // an attempt's error as the row's headline, and the leaf
+                // #1761 appends verbatim is the only thing that names which
+                // call was in flight. The short, actionable notice is for the
+                // chat bubble, where a debugging leaf would be noise.
+                Some(pause.summary.clone()),
+            )
         } else {
             (crate::ports::RunStatus::Succeeded, None)
         };
@@ -3307,6 +3345,14 @@ impl AgentRunner for HarnessAgentRunner {
         } else if outcome.halted_for_spend.is_some() {
             StopReason::LimitStop {
                 limit: "spend_halt".to_string(),
+            }
+        } else if outcome.ceiling_paused.is_some() {
+            // Issue #1680: a ceiling hit is not a finish either. Reporting
+            // `Finished` here would bind the pause copy downstream as if it
+            // were the node's deliverable -- exactly the failure mode #1880's
+            // review identified for a refused or cancelled turn.
+            StopReason::LimitStop {
+                limit: "wall_clock_ceiling".to_string(),
             }
         } else {
             StopReason::Finished

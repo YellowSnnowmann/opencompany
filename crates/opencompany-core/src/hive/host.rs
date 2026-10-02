@@ -200,6 +200,14 @@ pub struct DeskHost {
     deliveries: Mutex<BTreeMap<String, seat_park::Delivery>>,
     /// Whether a row was committed since the last checkpoint.
     committed: AtomicBool,
+    /// The cards this episode has opened, and the budget its seats'
+    /// `spawn_task` calls reserve against.
+    cards: Arc<seat_cards::EpisodeCards>,
+    /// The operator's row this episode answers, which names its message card.
+    opened_at: Option<EventSeq>,
+    /// Whether that message read as a question, which holds every seat to
+    /// opening no cards.
+    answering: bool,
 }
 
 /// What a host does with the approvals one seat's turn raised.
@@ -275,6 +283,9 @@ impl DeskHost {
             stepped: Mutex::new(BTreeMap::new()),
             deliveries: Mutex::new(BTreeMap::new()),
             committed: AtomicBool::new(false),
+            cards: Arc::new(seat_cards::EpisodeCards::default()),
+            opened_at: None,
+            answering: false,
         }
     }
 
@@ -368,6 +379,32 @@ impl DeskHost {
     pub fn locking(mut self, pool: Arc<HarnessPool>) -> Self {
         self.pool = Some(pool);
         self
+    }
+
+    /// The operator's row this episode opened at.
+    #[must_use]
+    pub const fn opened_at(mut self, seq: EventSeq) -> Self {
+        self.opened_at = Some(seq);
+        self
+    }
+
+    /// Hold every seat to the question rule: no cards.
+    #[must_use]
+    pub const fn answering(mut self, answering: bool) -> Self {
+        self.answering = answering;
+        self
+    }
+
+    /// Reads back the cards this episode already has on the board, so its
+    /// limits survive a resume.
+    pub async fn recall_cards(&self) {
+        let Some((record, deps)) = self.roster.as_ref() else {
+            return;
+        };
+        let Some(tasks) = deps.tasks.as_deref() else {
+            return;
+        };
+        self.cards.look(&self.card_desk(tasks, record)).await;
     }
 
     /// Thread every row this episode commits under `root`.
@@ -1279,6 +1316,7 @@ impl EpisodeHost for DeskHost {
             persona.push_str(crate::hive::conclude::PERSONA_NOTE);
             persona.push_str(&broadcast_absent_note(TOOL_PREFIX));
         }
+        persona.push_str(seat_cards::SEAT_CARDS_NOTE);
         self.personas
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1419,7 +1457,13 @@ impl EpisodeHost for DeskHost {
                 self.fold_progress(seat).await;
                 return outcome;
             };
-            let mut claims = queues.claim(&self.episode_id, seat, &self.desk_id, self.thread_root);
+            let mut claims = queues.claim(
+                &self.episode_id,
+                seat,
+                &self.desk_id,
+                self.thread_root,
+                self.answering,
+            );
             let outcome = claims.run(self.locked_turn(seat, turn)).await;
             self.keep_seat_claims(seat, claims);
             self.fold_progress(seat).await;
@@ -1615,6 +1659,7 @@ impl Bracket<'_> {
 }
 
 mod delivery;
+mod seat_cards;
 mod seat_park;
 
 #[cfg(test)]

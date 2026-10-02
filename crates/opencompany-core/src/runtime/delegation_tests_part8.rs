@@ -74,6 +74,7 @@ async fn a_refusal_inside_a_members_turn_is_recorded_against_that_member() {
 async fn a_dispatched_card_stays_with_the_level_one_member() {
     let fx = Fixture::nested();
     let mut card = TaskRecord {
+        opened_by: None,
         id: "card-1".to_string(),
         title: TaskTitle::authored("Ship the API"),
         note: None,
@@ -240,6 +241,7 @@ async fn approving_a_card_that_is_not_on_the_board_does_not_report_success() {
 async fn a_valid_delegation_after_an_unknown_card_still_lands() {
     let fx = Fixture::new();
     let card = TaskRecord {
+        opened_by: None,
         id: "card-real".to_string(),
         title: TaskTitle::authored("Draft the launch plan"),
         note: None,
@@ -319,6 +321,7 @@ async fn a_valid_delegation_after_an_unknown_card_still_lands() {
 async fn a_known_card_id_still_assigns_and_reports_no_failure() {
     let fx = Fixture::new();
     let card = TaskRecord {
+        opened_by: None,
         id: "card-real".to_string(),
         title: TaskTitle::authored("Draft the launch plan"),
         note: None,

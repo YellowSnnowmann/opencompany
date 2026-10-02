@@ -116,6 +116,10 @@ pub mod registry;
 pub mod run_events;
 pub mod run_supervisor;
 pub mod scheduler;
+/// The To-do card a `spawn_task` opens, shared by the pooled drain and a
+/// HiveMind seat's settle.
+#[cfg(feature = "openhuman")]
+pub mod spawn_card;
 pub mod tools;
 /// Issue #983: settling chat turns a previous host process left open, the
 /// transcript-side twin of the run reaper. See [`turn_sweep`].

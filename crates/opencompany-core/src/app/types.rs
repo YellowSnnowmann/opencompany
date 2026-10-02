@@ -124,6 +124,22 @@ pub struct AppConfig {
     /// [`RuntimeBuilder::with_auth_mode_override`](crate::runtime::RuntimeBuilder::with_auth_mode_override),
     /// which is where it beats the manifest.
     pub auth_mode_override: Option<AuthMode>,
+    /// The HS256 secret that verifies SSO auto-login tokens
+    /// (`OPENCOMPANY_SSO_SECRET`), redacted in `Debug`.
+    ///
+    /// The platform mints a short-lived, single-use token per "Open company"
+    /// deep-link and signs it with this secret; the company app verifies it
+    /// **offline** at `POST /api/v1/sso/redeem` and, on first use, claims the
+    /// standing admin for the token's `sub` and establishes a session. See
+    /// [`server::sso`](crate::server::sso) and the WS-A design
+    /// (`opencompany-sso-onboarding-design.md`, Part 2).
+    ///
+    /// `None` — and an empty or whitespace-only value — disables the endpoint
+    /// entirely: `sso/redeem` answers `404` until a secret is configured, so a
+    /// self-hosted deployment that never sets one exposes no SSO surface. It is a
+    /// clean no-op, matching the shape [`Self::platform_auth`] uses for the
+    /// machine credentials.
+    pub sso_secret: Option<SecretValue>,
 }
 
 impl Default for AppConfig {
@@ -148,6 +164,7 @@ impl Default for AppConfig {
             tenant_namespace: None,
             admin_email: None,
             auth_mode_override: None,
+            sso_secret: None,
         }
     }
 }
@@ -402,6 +419,20 @@ impl AppConfig {
             .filter(|email| !email.is_empty())
     }
 
+    /// The configured SSO signing secret, or `None` when SSO auto-login is off.
+    ///
+    /// A blank or whitespace-only value reads as `None` — the same rule
+    /// [`server::platform_auth::configure`](crate::server::platform_auth::configure)
+    /// applies to the machine credentials, so an empty injected variable can
+    /// never become an accepted signing key. [`server::sso`](crate::server::sso)
+    /// treats `None` as "endpoint disabled" and answers `404`.
+    pub fn sso_secret(&self) -> Option<&str> {
+        self.sso_secret
+            .as_ref()
+            .map(|secret| secret.0.trim())
+            .filter(|secret| !secret.is_empty())
+    }
+
     /// Namespaces a company id for shared-single-DB mode.
     ///
     /// Returns `<tenant>--<id>` when [`Self::tenant_namespace`] is set and `id`
@@ -507,6 +538,7 @@ impl std::fmt::Debug for AppConfig {
                 &redacted(&self.tinyhumans_credential),
             )
             .field("platform_auth", &self.platform_auth)
+            .field("sso_secret", &redacted(&self.sso_secret))
             .field("max_companies", &self.max_companies)
             .field("max_companies_per_tenant", &self.max_companies_per_tenant)
             .field("webhook", &self.webhook)

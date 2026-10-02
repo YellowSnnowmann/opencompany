@@ -130,6 +130,8 @@ fn router_with_console(state: AppState, console_dir: Option<PathBuf>) -> Router 
         .merge(crate::server::feedback_board::router())
         .merge(crate::server::users::router())
         .merge(crate::server::users::admin::router())
+        .merge(crate::server::sso::router())
+        .merge(crate::server::admin_password::router())
         .merge(crate::server::graphql::router())
         // Unauthenticated TinyHumans key-grant return leg, for a host with no
         // console at its own origin (the desktop). Trust is the parked state.

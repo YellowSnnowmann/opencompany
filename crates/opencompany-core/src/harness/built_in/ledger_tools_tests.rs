@@ -683,7 +683,7 @@ async fn a_write_the_store_refuses_is_reported_rather_than_receipted_as_recorded
 /// `seat_persona` swaps this by `find()` on the rendered substring. That is
 /// only safe while `ledger_brief` renders it through the same function, so
 /// the first assertion is the contract: reformat the line there and the swap
-/// stops matching, silently, and the seat is handed `spawn_task` again.
+/// stops matching, silently, and the seat is shown `assign_task` again.
 #[test]
 fn the_boards_catalogue_line_is_replaceable_and_its_episode_form_promises_nothing() {
     let registry = Registry::build([]);
@@ -718,19 +718,8 @@ fn the_boards_catalogue_line_is_replaceable_and_its_episode_form_promises_nothin
          {episode}"
     );
 
-    // **And it must not deny a verb the seat still has.**
-    //
-    // `assign_task` is the orchestrator's and is not withheld, while this
-    // swap runs for every episode seat including that one. A sentence saying
-    // the card verbs are gone would tell the orchestrator it cannot hand a
-    // card over when it can -- the same defect, pointed the other way, and
-    // the withheld-direction assertions above cannot see it.
     assert!(
-        !episode.contains("hand"),
-        "the note claims only that opening a card is gone, never handing one over: {episode}"
-    );
-    assert!(
-        !episode.contains("assign_task") && !episode.contains("desk_assign_task"),
-        "`assign_task` survives an episode on the orchestrator's belt: {episode}"
+        episode.contains("`spawn_task`"),
+        "a seat opens cards, so the note names the verb it keeps: {episode}"
     );
 }

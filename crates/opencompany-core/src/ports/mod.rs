@@ -3,8 +3,9 @@
 //! Each port is one trait in one file, matching the binding names in
 //! `docs/spec/runtime/ports.md`. Traits are `#[async_trait::async_trait]` so
 //! they remain object-safe as `Arc<dyn Port>`; sync accessor/stream methods
-//! (`EventLog::subscribe`, `ChannelAdapter::inbound`, `channel_id`) stay plain
-//! `fn`. Shared payload/id/enum types live in [`types`].
+//! (`EventLog::subscribe`, `ChannelAdapter::channel_id`, the deprecated
+//! `ChannelAdapter::inbound` default) stay plain `fn`. Shared payload/id/enum
+//! types live in [`types`].
 
 mod ids;
 
@@ -88,7 +89,7 @@ pub use secrets::SecretStore;
 pub use sessions::{SessionKind, SessionRecord, SessionStore};
 pub use skills_state::{SkillInstall, SkillSource, SkillState, SkillStateStore, SkillTier};
 pub use store::CompanyStore;
-pub use tasks::{TaskOrigin, TaskRecord, TaskStore};
+pub use tasks::{TaskOpener, TaskOrigin, TaskRecord, TaskStore};
 pub use tools::ToolProvider;
 pub use types::*;
 pub use usage::{SampleKind, UsageMeter, UsageSample};

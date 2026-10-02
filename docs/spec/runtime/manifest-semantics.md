@@ -26,6 +26,31 @@ each page under the 500-line cap.
   "inherit" rather than "nothing" — and why, since #1804, an **explicit empty**
   agent `tools` list (`[]`) is a deliberate deny-all rather than an inherit.
 
+  **`skills`** narrows which skills this teammate may read, and spells the same
+  three states as `tools`:
+
+  | value | means |
+  |---|---|
+  | omitted | inherit — every skill the company has enabled |
+  | `[]` | an explicit no-skills scope: no catalogue, no skill read tools |
+  | `["brand-voice"]` | narrow to those slugs |
+
+  Two levels, not three: desks carry a `tools` ceiling but no skills, so the
+  resolution is the company's effective set intersected with this list. It is
+  narrow-only — a scope can never re-enable a skill the company disabled, or one
+  a `[globals].disable` entry turned off.
+
+  Entries are **exact slugs**, not globs. A tool grant globs over a namespace
+  with real hierarchy; a slug is a flat identifier, so a prefix would silently
+  admit a skill installed after the scope was written. A slug the company does
+  not have is dropped with a warning rather than failing the load, so retiring a
+  skill does not brick a manifest that still names it.
+
+  The scope is applied before an agent's skill tree is written, so a skill
+  outside it is never materialized — the catalogue and the three read tools are
+  derived from that tree, and an unlisted skill has nothing for
+  `read_skill_resource` to open.
+
   **`delegates_to`** (issue #176) narrows which **desks** a question from this
   agent may cross to, and follows the same rule as `tools` and `ledgers`:
   **omitted or empty means unrestricted**. On its own desk an agent reaches
@@ -50,12 +75,36 @@ each page under the 500-line cap.
   a colleague's turn *inside* the caller's are gone, because a room is where
   colleagues answer each other, and a referral is how a room asks another.
 
-  Two runtime bounds hold on a crossing, both enforced when the referral is
-  decided rather than by which tools were wired: **depth** —
-  `referral.max_hops` — and **cycles** — a question to a desk already on the
-  current chain (A→B→A) is refused. A refused crossing reaches the run trail
-  verbatim, so the operator reads the fact rather than inferring it from an
-  absence.
+  A dispatched board card accepts one hand-off per turn: it transfers ownership
+  after the current turn finishes and settles from the colleague's output. A
+  second hand-off is refused immediately instead of receiving a success receipt
+  for work the drain would discard. Other permitted board writes still stage.
+  Chat turns can collect multiple colleagues' replies. For several contributors
+  and a final synthesis on a board task, use explicit workflow agent steps and
+  dependencies. A queued receipt is not evidence that the colleague has run.
+
+  Three runtime guards bound what it can do, all enforced at the tool boundary
+  in the member's own turn rather than by which tools were wired (belts are
+  cached per roster, so a tool cannot be withheld from one turn):
+
+  - **Depth** — `[tools].max_delegation_depth`, below.
+  - **Cycles** — a hand-off to a desk already on the current chain (A→B→A), or
+    to the desk the caller itself leads, is refused.
+  - **Allowlist** — a target outside a non-empty `delegates_to` is refused, and
+    the refusal names the desks the member *can* reach so it can retry in the
+    same turn.
+
+  Each refusal reaches both the model and the board: the run trail carries it
+  verbatim, and a refused hand-off is recorded on the dispatched card's note,
+  so the operator reads the fact rather than inferring it from an absence.
+
+  The per-turn fan-out cap (three delegations) applies **per level**, not per
+  message — each turn starts against an empty queue.
+  Cross-desk referrals have two additional runtime bounds, enforced when the
+  referral is decided: **depth** — `referral.max_hops` — and **cycles** — a
+  question to a desk already on the current chain (A→B→A) is refused. A
+  refused crossing reaches the run trail verbatim, so the operator reads the
+  fact rather than inferring it from an absence.
 
   **`budget_usd_daily`** (enforced since issue #304 — before that it was
   validated, stored and displayed, but nothing read it) caps one teammate's

@@ -129,6 +129,7 @@ pub(crate) fn run_card(
     origin_run_id: Option<&str>,
 ) -> crate::ports::TaskRecord {
     crate::ports::TaskRecord {
+        opened_by: None,
         id: id.into(),
         title: crate::ports::tasks::TaskTitle::authored(title),
         note: None,

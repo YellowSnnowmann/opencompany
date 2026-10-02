@@ -941,12 +941,23 @@ async fn report(runtime: &Arc<CompanyRuntime>) -> Report {
 /// A generous bound: every seat turn here is a couple of loopback calls.
 const EPISODE: Duration = Duration::from_secs(60);
 
+// These cases boot separate companies, but OpenHuman's embedded runtime is
+// process-wide and retains the first model configuration it is given. Keep
+// each end-to-end scenario from routing turns into another scenario's scripted
+// model server.
+static E2E_RUNTIME_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn lock_e2e_runtime() -> tokio::sync::MutexGuard<'static, ()> {
+    E2E_RUNTIME_LOCK.lock().await
+}
+
 // ---------------------------------------------------------------------------
 // 1: a desk answers through the seat its routing named
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_desk_answers_through_the_seat_its_routing_named() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", record_part),
@@ -1011,12 +1022,7 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
     assert_eq!(done.len(), 1, "{done:?}");
     assert_eq!(done[0].1, ENGINEERING);
     assert_eq!(done[0].2, EpisodeReason::CompleteEpisode);
-    // One wave of seat turns, plus the closing round. `rounds` is
-    // `report.waves + closing_waves`, and the closing round runs on its own
-    // conductor -- which is why `rounds()` above, folded from `TurnStarted`
-    // rows, still sees exactly one. The two count different things and both
-    // are right.
-    assert_eq!(done[0].3, 2, "the seat's wave, and the closing round");
+    assert_eq!(done[0].3, 1, "one wave ran");
 
     // **The episode wrote down what a restart would otherwise lose.**
     //
@@ -1050,15 +1056,6 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
 
     // Recording *is* a seat's contribution: there is no separate "say
     // something" act in a completion episode, so one seat leaves one row.
-    //
-    // Two rows here, from the one seat. The first is its own part. The second
-    // is the closing round's: once the desk settles, OpenCompany asks Jev
-    // whether an assembly is still owed, seats whoever it names for a single
-    // turn, and that turn's `complete_episode` message becomes the episode's
-    // summary -- `summary_seq` and `completed_by` are filled from it. On a
-    // one-seat desk the seat it names is the seat that just finished, so the
-    // same agent records twice. The scripted model says the same words both
-    // times; a real one would assemble.
     let desk = replies(&rows, ENGINEERING);
     let kinds: Vec<(String, Option<UtteranceKind>)> = desk
         .iter()
@@ -1066,11 +1063,8 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
         .collect();
     assert_eq!(
         kinds,
-        vec![
-            (ENGINEER.to_string(), Some(UtteranceKind::CompleteEpisode)),
-            (ENGINEER.to_string(), Some(UtteranceKind::CompleteEpisode)),
-        ],
-        "the seat's own part, then the closing round's summary: {desk:?}"
+        vec![(ENGINEER.to_string(), Some(UtteranceKind::CompleteEpisode))],
+        "the seat's recorded part is its reply: {desk:?}"
     );
     assert!(
         desk.iter()
@@ -1101,18 +1095,11 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
     let measured = report(&runtime).await;
     assert_eq!(measured.episodes_completed, 1);
     assert_eq!(measured.same_agent_overlaps, 0);
-    // The measure reads the journalled `rounds`, so it carries the closing
-    // round too -- it is a round of work, and analytics should see it. It no
-    // longer equals what `rounds()` folds out of the desk's turn rows: the
-    // closing round does leave a turn row, but stamped wave `0` like the
-    // first, because it runs on a conductor that numbers from zero. Folding
-    // by revision therefore cannot see it.
     assert_eq!(
-        measured.episodes[&done[0].0].rounds, 2,
-        "the measure counts the closing round as well: {measured:?}"
+        measured.episodes[&done[0].0].rounds, 1,
+        "the measure counts the wave the turn rows carry: {measured:?}"
     );
-    // Two completions: the seat's own part, and the closing round's summary.
-    assert_eq!(measured.utterance_kinds["complete_episode"], 2);
+    assert_eq!(measured.utterance_kinds["complete_episode"], 1);
     assert!(
         !measured.utterance_kinds.contains_key("post"),
         "`post` is not served to a seat: {measured:?}"
@@ -1145,15 +1132,10 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
             _ => None,
         })
         .collect();
-    // Two turns, both stamped wave `0`. The second is the closing round's,
-    // and it numbers its own waves from zero because it runs on a conductor
-    // of its own -- so wave numbers are unique per conductor, not per
-    // episode. `rounds()` above folds these two into one entry only because
-    // it collapses a repeated seat within a revision.
     assert_eq!(
         attributed,
-        vec![(ENGINEER.to_string(), 0), (ENGINEER.to_string(), 0)],
-        "the seat's turn and the closing round's, each naming its own wave"
+        vec![(ENGINEER.to_string(), 0)],
+        "the seat turn names its episode and its wave"
     );
 }
 
@@ -1163,6 +1145,7 @@ async fn a_desk_answers_through_the_seat_its_routing_named() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_broadcast_without_jev_falls_back_deterministically() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         // This is the hand-off test, so this is the script that hands off:
@@ -1273,6 +1256,7 @@ async fn a_broadcast_without_jev_falls_back_deterministically() {
 /// message actually takes on a desk now.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_ask_opens_a_conversation_the_desk_only_references() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     // Asked once per *episode*, not once per turn. `seat.called` sees one
     // turn, and the closing round this desk settles into runs on its own
@@ -1437,14 +1421,10 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
 
     // **A seat is never offered a hand-off tool it cannot use here.**
     //
-    // `spawn_task`, `delegate_to_desk` and `delegate_to_teammate` are wired
-    // onto every roster agent and queue work the brain drains; no brain
-    // drains inside an episode, so the orchestrator refuses them outright
-    // (`drain_unwired`). On a live run a seat reached for one, took the
-    // refusal as proof that delegating was impossible, and told the operator
-    // to go and make "the board" available -- while `ask`, the tool that
-    // does work here, was on the same belt. The refusal was handled; the
-    // misdiagnosis it invited was not, so the names come off the belt.
+    // The hand-off and lifecycle verbs are wired onto roster agents but
+    // could only refuse on a seat, whose claim permits opening a card and
+    // nothing else; a refused tool argues the seat out of `ask`, so the names
+    // come off the belt. `spawn_task` stays, and `hive_seat_cards` covers it.
     let offered: Vec<String> = script
         .asks()
         .iter()
@@ -1454,7 +1434,12 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
         !offered.is_empty(),
         "the fixture saw no tool schemas at all, so this asserts nothing",
     );
-    for withheld in ["spawn_task", "delegate_to_desk", "delegate_to_teammate"] {
+    for withheld in [
+        "delegate_to_desk",
+        "delegate_to_teammate",
+        "assign_task",
+        "review_task",
+    ] {
         assert!(
             !offered.iter().any(|name| name == withheld),
             "`{withheld}` was offered to an episode seat: {offered:?}",
@@ -1513,6 +1498,7 @@ async fn an_ask_opens_a_conversation_the_desk_only_references() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_single_member_desk_answers_with_one_ordinary_turn() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted — the front desk has it.", |seat| {
@@ -1575,6 +1561,7 @@ const TAGLINE: &str = "Checkout, now with fewer steps.";
 #[ignore = "cross-desk referral is not reconnected to the conductor"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_cross_desk_referral_crosses_only_the_answer_back() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", |seat| {
@@ -1788,6 +1775,7 @@ fn cross_desk_overlap(rows: &[StoredEvent]) -> bool {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", record_part),
@@ -1887,6 +1875,7 @@ const ASK_TWO: &str = "When is the rollout window?";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", |seat| {
@@ -2003,6 +1992,7 @@ async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
 /// each other yet.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_seat_at_two_desks_is_shown_the_other_as_context() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     // The hand-off script, because the fallback plan names one seat and it is
     // never the CEO: the seat it opens with broadcasts, the fallback places
@@ -2235,6 +2225,7 @@ fn told(script: &support::script_model::Script, words: &str) -> usize {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_approved_request_resumes_the_seat_and_completes_the_episode() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         ask_then_record(
@@ -2260,11 +2251,9 @@ async fn an_approved_request_resumes_the_seat_and_completes_the_episode() {
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
     dump(&rows, &script);
     assert_eq!(seat_resumed(&rows), vec![ENGINEER.to_string()]);
-    // Twice: the resumed turn, and the closing round's turn, which carries
-    // the same brief. Both are real turns the seat was shown the decision on.
     assert_eq!(
         told(&script, "approved your request: Email the client"),
-        2,
+        1,
         "the resumed seat is shown the decision once"
     );
     assert!(
@@ -2282,6 +2271,7 @@ async fn an_approved_request_resumes_the_seat_and_completes_the_episode() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_denied_request_resumes_the_seat_with_the_denial() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         ask_then_record(
@@ -2306,13 +2296,13 @@ async fn a_denied_request_resumes_the_seat_with_the_denial() {
 
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
     dump(&rows, &script);
-    // The resumed turn and the closing round's turn, as above.
-    assert_eq!(told(&script, "denied your request: Email the client"), 2);
+    assert_eq!(told(&script, "denied your request: Email the client"), 1);
     assert_eq!(told(&script, "approved your request"), 0);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_answered_escalation_reaches_the_seat_that_asked() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         ask_then_record(
@@ -2345,12 +2335,12 @@ async fn an_answered_escalation_reaches_the_seat_that_asked() {
 
     let rows = wait_for(&runtime, "the episode to complete", EPISODE, completed(1)).await;
     dump(&rows, &script);
-    // The resumed turn and the closing round's turn, as above.
-    assert_eq!(told(&script, "\"eu-west first\""), 2);
+    assert_eq!(told(&script, "\"eu-west first\""), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_parked_episode_resumes_from_its_checkpoint_after_a_restart() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         ask_then_record(
@@ -2470,6 +2460,7 @@ fn delivered_rows(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_seat_publishes_a_deliverable_the_operator_can_edit() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", {
@@ -2597,6 +2588,7 @@ async fn a_seat_publishes_a_deliverable_the_operator_can_edit() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_turn_that_only_publishes_hands_over_on_a_row_of_its_own() {
+    let _runtime_guard = lock_e2e_runtime().await;
     let home = tempfile::tempdir().unwrap();
     let published = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let marked = Arc::clone(&published);

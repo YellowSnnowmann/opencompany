@@ -57,6 +57,7 @@ import {
   type Task,
   type TaskApproval,
   type TaskDetail,
+  type TaskOpener,
   type TaskPlan,
 } from "@/api/tasks";
 import {
@@ -91,7 +92,7 @@ import {
   taskApprovalRows,
   RESUME_BLOCKED_REASON,
 } from "@/lib/task-approvals";
-import { originConversation } from "@/lib/task-origin";
+import { originConversation, originLabel } from "@/lib/task-origin";
 import { formatDuration, timeOf } from "@/lib/timeline-format";
 import { TimelineList, runStatusTone } from "@/views/runs/RunTimeline";
 import { startVisiblePolling } from "@/lib/visible-poll";
@@ -472,6 +473,7 @@ export function TaskDetailView({
    * roster read is shared with every other surface asking the same question.
    */
   const askerNames = useAskerNames(client, company, [...parked]);
+  const [openerNames, setOpenerNames] = useState<Map<string, string>>();
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [inflight, setInflight] = useState<InflightRun | null>(null);
   const [loading, setLoading] = useState(true);
@@ -548,6 +550,22 @@ export function TaskDetailView({
       dispose();
     };
   }, [load]);
+
+  const openerId = detail?.task.openedBy?.agentId;
+  useEffect(() => {
+    if (!openerId) return;
+    let live = true;
+    void client
+      .listTeam(company)
+      .catch(() => [])
+      .then((roster) => {
+        if (!live) return;
+        setOpenerNames(new Map(roster.map((m) => [m.id, m.name?.trim() || m.role])));
+      });
+    return () => {
+      live = false;
+    };
+  }, [client, company, openerId]);
 
   // Issue #1015: the push half. Re-read the detail the moment the host says an
   // attempt moved, rather than up to `POLL_MS` later — and at all, which the
@@ -782,6 +800,8 @@ export function TaskDetailView({
             <OriginThreadRow
               originChatId={detail.task.originChatId}
               originParent={detail.task.originParent}
+              openedBy={detail.task.openedBy}
+              names={openerNames}
               chatChannelByThread={chatChannelByThread}
               onOpenChannel={onOpenChannel}
             />
@@ -1592,17 +1612,21 @@ export function ControlBar({
 export function OriginThreadRow({
   originChatId,
   originParent,
+  openedBy,
+  names,
   chatChannelByThread,
   onOpenChannel,
 }: {
   originChatId?: string;
   originParent?: number;
+  openedBy?: TaskOpener;
+  names?: ReadonlyMap<string, string>;
   chatChannelByThread?: Readonly<Record<string, string>>;
   onOpenChannel?: (channelId: string, threadId?: string) => void;
 }) {
   const origin = originConversation(originChatId, chatChannelByThread, originParent);
   if (origin.kind === "none") return null;
-  const label = "Opened from chat";
+  const label = originLabel(openedBy, names);
   if (origin.kind === "unreachable" || !onOpenChannel) {
     return (
       <div className="flex items-center gap-2 rounded-xl border bg-card/40 px-3 py-2 text-xs text-muted-foreground">

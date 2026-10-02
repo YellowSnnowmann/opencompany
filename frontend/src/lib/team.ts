@@ -5,6 +5,7 @@
 
 import type { AgentDeskDto, TeamMemberDto } from "@/api/types";
 import { avatarRef, hashedFlavour } from "@/lib/avatar";
+import { birthLook, type NewMemberLook } from "@/lib/new-member-look";
 
 /** A desk a teammate sits on, as the roster read reports it. */
 export type TeamMemberDesk = AgentDeskDto;
@@ -22,6 +23,27 @@ export interface TeamMember {
    * resolvable reference, never absent — every teammate has a face.
    */
   avatar: string;
+  /**
+   * The mascot's chosen costume and colors, when `avatar` names a mascot and
+   * somebody has chosen a look. Undefined means the file's own default —
+   * exactly the `avatar`/no-choice rule, carried on three more fields instead
+   * of folded into one.
+   *
+   * Carried through untouched from `TeamMemberDto` so every mass-render
+   * surface built from a `TeamMember` — the roster grid, the org chart, the
+   * members pane, a DM sidebar row, a message row — draws the teammate's real
+   * look instead of the file's default, the same way the detail page already
+   * does. Before the host started sending these, `avatar` alone told this
+   * component "draw a mascot" without saying which one, and every one of
+   * those surfaces rendered the default costume for every mascot wearer.
+   */
+  mascotCostume?: string;
+  /** See {@link mascotCostume}. */
+  mascotSkinColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotHandColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotMode?: string;
   /**
    * Whether this teammate has an inbox on the host. Read from `GET …/team` and
    * written by `PUT …/team/{id}/inbox` — never guessed client-side, so the Inbox
@@ -165,6 +187,12 @@ export function roleSubtitle(name: string, role: string): string | null {
   return trimmed.toLowerCase() === name.trim().toLowerCase() ? null : trimmed;
 }
 
+/** A teammate's display name, falling back to its role and then to its id. */
+export function teammateName(id: string, team: TeamMemberDto[] | null): string {
+  const member = team?.find((candidate) => candidate.id === id);
+  return member?.name?.trim() || member?.role?.trim() || id;
+}
+
 /** What a roster card says a teammate thinks with. */
 export interface ModelSummary {
   /** The one line the card draws. Never a fabricated model name. */
@@ -221,6 +249,13 @@ export function fromDto(dto: TeamMemberDto): TeamMember {
     // needs "chosen" and "default" kept apart and reads the detail DTO, which
     // carries the raw field.
     avatar: avatarRef(dto.avatar, dto.id || name),
+    // Carried through as-is, same rule as `avatar` itself: `undefined` means
+    // "nobody has chosen" (or a host predating the field), and coalescing it
+    // to a picked look here would be a fabrication the picker never made.
+    mascotCostume: dto.mascotCostume,
+    mascotSkinColor: dto.mascotSkinColor,
+    mascotHandColor: dto.mascotHandColor,
+    mascotMode: dto.mascotMode,
     inboxEnabled: dto.inboxEnabled ?? false,
     global: dto.global,
     // Carried through as-is: `undefined` means uncapped and must stay
@@ -307,16 +342,25 @@ function roleHash(role: string): string {
  * The starter roster keys on role because that is what distinguishes its
  * fabricated rows.
  */
-export function newMember(fields: { name: string; role: string; description: string }): TeamMember {
+export function newMember(
+  fields: { name: string; role: string; description: string } & NewMemberLook,
+): TeamMember {
   const memberId = localMemberId(fields.name);
+  const look = birthLook(fields);
   return {
     id: memberId,
     name: fields.name.trim(),
     role: fields.role.trim(),
     description: fields.description.trim(),
     tone: toneFor(memberId),
-    // Nobody has chosen a face for a teammate that was created a moment ago.
-    avatar: avatarFor(memberId),
+    // The face the operator picked in the dialog, else the one hashed from the
+    // id. With no host to write it to, this row is the only place the look
+    // lives — for as long as the row does, which is until the next reload.
+    avatar: look.avatar ?? avatarFor(memberId),
+    mascotMode: look.mascotMode,
+    mascotCostume: look.mascotCostume,
+    mascotSkinColor: look.mascotSkinColor,
+    mascotHandColor: look.mascotHandColor,
     inboxEnabled: false,
     // Nothing on a host has granted this teammate anything or seated it
     // anywhere yet, so both are stated empty rather than guessed.

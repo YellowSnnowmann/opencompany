@@ -1,4 +1,5 @@
 pub(super) use super::*;
+pub(super) use crate::ports::tasks::COLUMN_TODO;
 pub(super) use crate::ports::tasks::TaskTitle;
 
 pub(super) use std::collections::VecDeque;
@@ -58,6 +59,14 @@ pub(super) struct Turn {
     /// teammate's turn ran out of inference credits" and then asserts the
     /// pause survives the delegation folds, including the nested one.
     pub(super) budget_paused: Option<crate::harness::BudgetPause>,
+    /// The wall-clock ceiling pause this turn reports (issue #1680),
+    /// standing in for `classify_turn` recognising the vendored harness's
+    /// wall-clock leaf. Scripted for the same reason as the two fields above
+    /// — these fixtures run no model, and the real ceiling needs one that
+    /// works for ten minutes — so this is how a test scripts "this
+    /// teammate's turn ran out of time" and then asserts the pause survives
+    /// the delegation folds, including the nested one.
+    pub(super) ceiling_paused: Option<crate::harness::CeilingPause>,
 }
 
 impl Turn {
@@ -144,6 +153,20 @@ impl Turn {
         }
     }
 
+    /// A turn that hit the harness's per-turn wall-clock ceiling (issue
+    /// #1680) — the sibling of [`budget_paused`](Self::budget_paused).
+    pub(super) fn ceiling_paused(reply: &str, agent: &str, elapsed_ms: u64) -> Self {
+        Self {
+            reply: reply.to_string(),
+            ceiling_paused: Some(crate::harness::CeilingPause {
+                agent: agent.to_string(),
+                elapsed: std::time::Duration::from_millis(elapsed_ms),
+                summary: format!("{agent} hit the per-turn wall-clock ceiling"),
+            }),
+            ..Self::default()
+        }
+    }
+
     /// A turn whose **first** tool call parked for approval, so it produced
     /// nothing: the reply is the agent saying it is blocked, not a result.
     /// This is the shape in the issue #465 report.
@@ -190,6 +213,7 @@ pub(super) struct ScriptedTurns {
     /// the call in `with_chat_only_hint(true, ..)` itself, which cannot
     /// catch the classifier failing to derive it).
     chat_only_at_turn: Mutex<Vec<bool>>,
+    pub(super) history_seed_at_turn: Mutex<Vec<bool>>,
     /// What the tool boundary answered for each
     /// [`Turn::tool_pushes`] entry, in order across all turns (issue #267).
     staged: Mutex<Vec<orchestrator::Staged>>,
@@ -210,6 +234,7 @@ impl ScriptedTurns {
             board_at_turn: Mutex::new(Vec::new()),
             committed_at_turn: Mutex::new(Vec::new()),
             chat_only_at_turn: Mutex::new(Vec::new()),
+            history_seed_at_turn: Mutex::new(Vec::new()),
             staged: Mutex::new(Vec::new()),
             tasks: fx.tasks.clone(),
             company: fx.record.id.clone(),
@@ -359,6 +384,12 @@ impl ScriptedTurns {
             // a budget pause survives the DELEGATION folds, including the
             // nested one, exactly like a spend halt.
             budget_paused: turn.budget_paused,
+            // Issue #1680: scripted the same way and for the same reason —
+            // the real classification needs a model turn that works until
+            // the ceiling fires. What this fixture proves is that a ceiling
+            // pause survives the DELEGATION folds, including the nested one,
+            // exactly like a budget pause.
+            ceiling_paused: turn.ceiling_paused,
         }
     }
 }
@@ -372,6 +403,10 @@ impl RunTurn for ScriptedTurns {
         message: &str,
         _chat_id: ChatTarget<'_>,
     ) -> Result<TurnOutcome> {
+        self.history_seed_at_turn
+            .lock()
+            .unwrap()
+            .push(_chat_id.history_seed);
         Ok(self.next(agent_id, message, None).await)
     }
 
@@ -384,6 +419,10 @@ impl RunTurn for ScriptedTurns {
         _chat_id: ChatTarget<'_>,
         _run_sink: Option<Arc<RunTraceSink>>,
     ) -> Result<TurnOutcome> {
+        self.history_seed_at_turn
+            .lock()
+            .unwrap()
+            .push(_chat_id.history_seed);
         Ok(self.next(agent_id, message, Some(control)).await)
     }
 
@@ -396,6 +435,10 @@ impl RunTurn for ScriptedTurns {
         _chat: ChatTarget<'_>,
         _run_sink: Option<Arc<RunTraceSink>>,
     ) -> Result<TurnOutcome> {
+        self.history_seed_at_turn
+            .lock()
+            .unwrap()
+            .push(_chat.history_seed);
         Ok(self.next(agent_id, message, Some(control)).await)
     }
 }

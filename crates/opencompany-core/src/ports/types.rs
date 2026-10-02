@@ -284,6 +284,13 @@ pub enum SkillChange {
     Installed,
     /// An existing install was re-pinned to the library's current document.
     Updated,
+    /// The stored document was rewritten in the console's skill editor.
+    ///
+    /// Distinct from `Updated`: that one takes the library's text, this one
+    /// replaces it with the operator's. An audit reader who cannot tell them
+    /// apart cannot tell a re-pin from a local rewrite of what every agent
+    /// reads.
+    Edited,
     /// The delta was removed.
     Removed,
 }
@@ -3617,6 +3624,25 @@ pub enum EvictionPolicy {
 // ---------------------------------------------------------------------------
 
 /// A message arriving on a channel.
+///
+/// **Deprecated (issue #1958):** `ChannelAdapter::inbound` is a deprecated empty
+/// default and is not the ingress path. This type is retained only so existing
+/// references keep compiling; downstream code should stop using it.
+///
+/// Real ingress is route-specific:
+/// - operator chat → `CompanyEvent::OperatorMessage`
+/// - email → filed into [`crate::ports::InboxStore`]; the email ingest/poll
+///   path may then trigger a cycle using `CompanyEvent::WebhookReceived` with
+///   `channel: "email"`
+/// - webhooks → delivered through their route-specific webhook handler, which
+///   emits `CompanyEvent::WebhookReceived` for that integration
+#[deprecated(
+    since = "0.2.4",
+    note = "ChannelAdapter::inbound is a deprecated empty default (issue #1958). \
+            Operator chat: CompanyEvent::OperatorMessage; \
+            email: InboxStore, then an email cycle tagged channel=email; \
+            webhooks: their route-specific handler emits CompanyEvent::WebhookReceived."
+)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InboundMessage {
     /// The channel the message arrived on.
@@ -4124,6 +4150,13 @@ pub struct OverlayAgent {
     /// serializing exactly as it did before (no `tools` key).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<String>>,
+    /// The per-teammate skill scope, carried the same way as
+    /// [`Agent::skills`](crate::company::types::Agent::skills) — see that
+    /// field's docs for the three states. `None` (the default, and how every
+    /// overlay record written before this field existed deserializes) inherits
+    /// every skill the company has enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Vec<String>>,
     /// A per-agent model override, carried the same way as
     /// [`Agent::model`](crate::company::types::Agent) — see that field's docs.
     /// `None` (the default, and how every record written before this field
@@ -4221,6 +4254,29 @@ pub struct AgentOverride {
         skip_serializing_if = "Option::is_none"
     )]
     pub tools: Option<Option<Vec<String>>>,
+    /// The operator's replacement skill scope, in the same double-option shape
+    /// [`tools`](Self::tools) uses, so "not overridden" stays apart from
+    /// "override it to inherit":
+    ///
+    /// | value | means |
+    /// |---|---|
+    /// | `None` | not overridden — the manifest `skills` line flows through unchanged |
+    /// | `Some(None)` | override to **inherit** every enabled skill |
+    /// | `Some(Some(vec![]))` | override to an **explicit no-skills** scope |
+    /// | `Some(Some(slugs))` | override to **narrow** to those slugs |
+    ///
+    /// The inner value is assigned verbatim onto
+    /// [`Agent::skills`](crate::company::Agent::skills) by
+    /// [`CompanyRecord::effective_manifest_agent`], so the manifest field's own
+    /// contract carries the meaning; this layer only adds "was it set at all".
+    /// Still intersected with the company's effective set at read time, so it can
+    /// only narrow a teammate within what the company already enabled.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub skills: Option<Option<Vec<String>>>,
     /// The operator's replacement persona prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
@@ -4241,6 +4297,42 @@ pub struct AgentOverride {
     /// choice of face is the same act whichever kind was clicked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
+    /// Whether a `mascot:animated` wearer's canvas plays at all — one of
+    /// [`crate::company::mascot::MASCOT_MODES`], validated the same way
+    /// [`Self::avatar`] is before it is stored.
+    ///
+    /// Only meaningful alongside a `mascot:` [`Self::avatar`], but carried as
+    /// its own field for the same reason [`Self::mascot_costume`] is: the
+    /// reference itself stays the closed, simple grammar
+    /// [`crate::company::avatar::AvatarRef`] documents (`docs/spec/runtime/
+    /// avatars.md`'s avatar-grammar notes), never a vector for encoding
+    /// arbitrary per-agent appearance state. `None` means **the file's own
+    /// default mode** (`"animated"`, matching what every `mascot:animated`
+    /// wearer already rendered before this override existed), not "no
+    /// mascot".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mascot_mode: Option<String>,
+    /// The mascot costume this teammate wears, when somebody has chosen one —
+    /// one of [`crate::company::mascot::MASCOT_COSTUMES`], validated the same
+    /// way. Applies to both [`Self::mascot_mode`]s: a static wearer freezes on
+    /// this costume's resting frame, an animated one lands here as its
+    /// baseline. `None` means the file's own default costume (the mascot's
+    /// cap, [`crate::company::mascot::DEFAULT_MASCOT_COSTUME`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mascot_costume: Option<String>,
+    /// The mascot's skin (body) color, when somebody has chosen one — one of
+    /// [`crate::company::mascot::MASCOT_SKIN_COLORS`], validated the same
+    /// way, and independent of [`Self::mascot_hand_color`]. Applies to both
+    /// display modes, same as [`Self::mascot_costume`]. `None` means the
+    /// file's own default skin color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mascot_skin_color: Option<String>,
+    /// The mascot's hand/accent color, when somebody has chosen one — one of
+    /// [`crate::company::mascot::MASCOT_HAND_COLORS`], validated the same
+    /// way, and independent of [`Self::mascot_skin_color`]. `None` means the
+    /// file's own default hand color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mascot_hand_color: Option<String>,
     /// The model this teammate runs, as an overlay on the blueprint.
     ///
     /// `Some("")` is the stored form of "cleared", matching `description`:
@@ -4579,15 +4671,39 @@ impl AgentOverride {
     /// persisting a row the console would render as "overridden" — the same
     /// contract [`PolicyOverride`] draws for its own absent fields.
     pub fn is_empty(&self) -> bool {
-        self.name.is_none()
-            && self.role.is_none()
-            && self.description.is_none()
-            && self.tools.is_none()
-            && self.instructions.is_none()
-            && self.avatar.is_none()
-            && self.model.is_none()
-            && self.harness.is_none()
-            && self.provider.is_none()
+        // Destructured, so a field added to the struct is a compile error here
+        // rather than one this predicate silently stops counting.
+        let Self {
+            agent_id: _,
+            name,
+            role,
+            description,
+            tools,
+            skills,
+            instructions,
+            avatar,
+            mascot_mode,
+            mascot_costume,
+            mascot_skin_color,
+            mascot_hand_color,
+            model,
+            harness,
+            provider,
+        } = self;
+        name.is_none()
+            && role.is_none()
+            && description.is_none()
+            && tools.is_none()
+            && skills.is_none()
+            && instructions.is_none()
+            && avatar.is_none()
+            && mascot_mode.is_none()
+            && mascot_costume.is_none()
+            && mascot_skin_color.is_none()
+            && mascot_hand_color.is_none()
+            && model.is_none()
+            && harness.is_none()
+            && provider.is_none()
     }
 }
 
@@ -6122,32 +6238,66 @@ impl CompanyRecord {
             .iter_mut()
             .find(|held| held.agent_id == entry.agent_id)
         {
-            if entry.name.is_some() {
-                held.name = entry.name;
+            // Destructured, so a field added to the struct is a compile error
+            // here rather than one this merge silently stops carrying.
+            let AgentOverride {
+                agent_id: _,
+                name,
+                role,
+                description,
+                tools,
+                skills,
+                instructions,
+                avatar,
+                mascot_mode,
+                mascot_costume,
+                mascot_skin_color,
+                mascot_hand_color,
+                model,
+                harness,
+                provider,
+            } = entry;
+            if name.is_some() {
+                held.name = name;
             }
-            if entry.role.is_some() {
-                held.role = entry.role;
+            if role.is_some() {
+                held.role = role;
             }
-            if entry.description.is_some() {
-                held.description = entry.description;
+            if description.is_some() {
+                held.description = description;
             }
-            if entry.tools.is_some() {
-                held.tools = entry.tools;
+            if tools.is_some() {
+                held.tools = tools;
             }
-            if entry.instructions.is_some() {
-                held.instructions = entry.instructions;
+            if skills.is_some() {
+                held.skills = skills;
             }
-            if entry.avatar.is_some() {
-                held.avatar = entry.avatar;
+            if instructions.is_some() {
+                held.instructions = instructions;
             }
-            if entry.model.is_some() {
-                held.model = entry.model;
+            if avatar.is_some() {
+                held.avatar = avatar;
             }
-            if entry.harness.is_some() {
-                held.harness = entry.harness;
+            if mascot_mode.is_some() {
+                held.mascot_mode = mascot_mode;
             }
-            if entry.provider.is_some() {
-                held.provider = entry.provider;
+            if mascot_costume.is_some() {
+                held.mascot_costume = mascot_costume;
+            }
+            if mascot_skin_color.is_some() {
+                held.mascot_skin_color = mascot_skin_color;
+            }
+            if mascot_hand_color.is_some() {
+                held.mascot_hand_color = mascot_hand_color;
+            }
+            if model.is_some() {
+                held.model = model;
+            }
+            if harness.is_some() {
+                held.harness = harness;
+            }
+            if provider.is_some() {
+                held.provider = provider;
             }
             return;
         }
@@ -6204,6 +6354,9 @@ impl CompanyRecord {
         }
         if let Some(tools) = entry.tools.as_ref() {
             merged.tools = tools.clone();
+        }
+        if let Some(skills) = entry.skills.as_ref() {
+            merged.skills = skills.clone();
         }
         if let Some(instructions) = entry.instructions.as_ref() {
             merged.prompt = Some(instructions.clone());
@@ -6393,6 +6546,91 @@ impl CompanyRecord {
         self.retain_nonempty_agent_edits();
     }
 
+    /// Whether a `mascot:animated` wearer's canvas plays for `agent_id`, or
+    /// `None` for "the file's own default mode" (`"animated"`) — not "no
+    /// mascot"; see [`AgentOverride::mascot_mode`].
+    pub fn effective_mascot_mode(&self, agent_id: &str) -> Option<String> {
+        self.agent_override(agent_id)
+            .and_then(|o| o.mascot_mode.clone())
+    }
+
+    /// Drops `agent_id`'s chosen mascot mode so the file's own default
+    /// (`"animated"`) applies again. Same field-wise-clear contract as
+    /// [`Self::clear_agent_avatar`].
+    pub fn clear_agent_mascot_mode(&mut self, agent_id: &str) {
+        if let Some(entry) = self
+            .overlay_agent_edits
+            .iter_mut()
+            .find(|entry| entry.agent_id == agent_id)
+        {
+            entry.mascot_mode = None;
+        }
+        self.retain_nonempty_agent_edits();
+    }
+
+    /// The mascot costume in force for `agent_id`, or `None` for "the file's
+    /// own default costume"; see [`AgentOverride::mascot_costume`].
+    pub fn effective_mascot_costume(&self, agent_id: &str) -> Option<String> {
+        self.agent_override(agent_id)
+            .and_then(|o| o.mascot_costume.clone())
+    }
+
+    /// Drops `agent_id`'s chosen mascot costume so the file's own default
+    /// applies again. Same field-wise-clear contract as
+    /// [`Self::clear_agent_avatar`].
+    pub fn clear_agent_mascot_costume(&mut self, agent_id: &str) {
+        if let Some(entry) = self
+            .overlay_agent_edits
+            .iter_mut()
+            .find(|entry| entry.agent_id == agent_id)
+        {
+            entry.mascot_costume = None;
+        }
+        self.retain_nonempty_agent_edits();
+    }
+
+    /// The mascot skin color in force for `agent_id`, or `None` for "the
+    /// file's own default"; see [`AgentOverride::mascot_skin_color`].
+    pub fn effective_mascot_skin_color(&self, agent_id: &str) -> Option<String> {
+        self.agent_override(agent_id)
+            .and_then(|o| o.mascot_skin_color.clone())
+    }
+
+    /// Drops `agent_id`'s chosen mascot skin color so the file's own default
+    /// applies again. Same field-wise-clear contract as
+    /// [`Self::clear_agent_avatar`].
+    pub fn clear_agent_mascot_skin_color(&mut self, agent_id: &str) {
+        if let Some(entry) = self
+            .overlay_agent_edits
+            .iter_mut()
+            .find(|entry| entry.agent_id == agent_id)
+        {
+            entry.mascot_skin_color = None;
+        }
+        self.retain_nonempty_agent_edits();
+    }
+
+    /// The mascot hand color in force for `agent_id`, or `None` for "the
+    /// file's own default"; see [`AgentOverride::mascot_hand_color`].
+    pub fn effective_mascot_hand_color(&self, agent_id: &str) -> Option<String> {
+        self.agent_override(agent_id)
+            .and_then(|o| o.mascot_hand_color.clone())
+    }
+
+    /// Drops `agent_id`'s chosen mascot hand color so the file's own default
+    /// applies again. Same field-wise-clear contract as
+    /// [`Self::clear_agent_avatar`].
+    pub fn clear_agent_mascot_hand_color(&mut self, agent_id: &str) {
+        if let Some(entry) = self
+            .overlay_agent_edits
+            .iter_mut()
+            .find(|entry| entry.agent_id == agent_id)
+        {
+            entry.mascot_hand_color = None;
+        }
+        self.retain_nonempty_agent_edits();
+    }
+
     /// Drops any override row left carrying no edits at all.
     ///
     /// Shared by the two clear paths so neither can forget a field: a row that
@@ -6400,22 +6638,7 @@ impl CompanyRecord {
     /// whose continued existence would move the harness's overlay fingerprint
     /// for no change.
     fn retain_nonempty_agent_edits(&mut self) {
-        // Every field the override can carry, not just the ones it carried
-        // when this was written. A predicate that names a subset deletes rows
-        // that are still holding the fields it forgot — here, resetting a
-        // teammate's instructions would take their harness and model with it,
-        // silently reverting both to the blueprint.
-        self.overlay_agent_edits.retain(|entry| {
-            entry.name.is_some()
-                || entry.role.is_some()
-                || entry.description.is_some()
-                || entry.tools.is_some()
-                || entry.instructions.is_some()
-                || entry.avatar.is_some()
-                || entry.model.is_some()
-                || entry.harness.is_some()
-                || entry.provider.is_some()
-        });
+        self.overlay_agent_edits.retain(|entry| !entry.is_empty());
     }
 
     /// Whether `wid` is switched on (issue #276) — the single predicate the

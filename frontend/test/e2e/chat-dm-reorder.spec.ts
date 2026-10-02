@@ -86,27 +86,41 @@ for (const scheme of ["light", "dark"] as const) {
       expect(box!.height).toBeLessThan(48);
     });
 
-    test("collapsing Channels above does not slide the DM rows; a re-sort still does", async ({ page }) => {
+    test("a channel appearing above does not slide the DM rows; a re-sort still does", async ({ page }) => {
+      // The height above the DM rows changes without anything re-sorting. This
+      // used to be collapsing the Channels section; the sections are gone, and a
+      // channel created through the rail's own "+" menu is the change that is
+      // left — it lands above every DM and pushes them down by one row.
       const sse = await mockCompany(page);
       await open(page);
       await page.mouse.move(700, 400);
       const started = await countRailAnimations(page);
-      const channels = page
-        .getByTestId("room-rail-slot")
-        .getByRole("button", { name: "Channels", exact: true });
       const before = (await dmRow(page, LAST.name).boundingBox())!.y;
-      await channels.click();
-      await expect(channels).toHaveAttribute("aria-expanded", "false");
+
+      await page.getByRole("button", { name: "New", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Create a new channel" }).click();
+      const form = page.getByRole("dialog");
+      await form.getByPlaceholder("e.g. Launch week").fill("Launch week");
+      // The first teammate in the Members list.
+      await form.locator("li button").first().click();
+      await form.getByRole("button", { name: "Create channel" }).click();
+      await expect(form).toHaveCount(0);
       await page.mouse.move(700, 400);
-      // The whole list moved up, and moving is all it did: nothing re-sorted.
+
+      // The whole DM list moved DOWN, and moving is all it did: nothing re-sorted.
       await expect
         .poll(async () => (await dmRow(page, LAST.name).boundingBox())!.y)
-        .toBeLessThan(before);
+        .toBeGreaterThan(before);
       expect(await started()).toBe(0);
-      await page.screenshot({ path: test.info().outputPath(`rail-15-channels-collapsed-${scheme}.png`) });
+      await page.screenshot({ path: test.info().outputPath(`rail-15-channel-added-${scheme}.png`) });
 
+      // The new channel is the first row now, so the DM that spoke lands second.
       sse.push(reply(LAST, 1));
-      await expect.poll(() => firstRowName(page)).toBe(LAST.name);
+      await expect
+        .poll(async () =>
+          (await railRows(page).nth(1).locator("span.truncate").first().innerText()).trim(),
+        )
+        .toBe(LAST.name);
       expect(await started()).toBeGreaterThan(0);
     });
 

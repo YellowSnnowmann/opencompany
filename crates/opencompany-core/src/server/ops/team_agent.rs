@@ -127,13 +127,18 @@ pub(super) enum AgentSource {
 /// the others, so this is their union. It widens nothing on its own — `tools`,
 /// `model`, `harness` and `provider` stay admin-gated in [`edit_agent`], and
 /// [`EDITABLE_FIELDS_MEMBER`] is unchanged from what #1530 left it.
-const EDITABLE_FIELDS: [&str; 9] = [
+const EDITABLE_FIELDS: [&str; 14] = [
     "name",
     "role",
     "description",
     "tools",
+    "skills",
     "instructions",
     "avatar",
+    "mascotMode",
+    "mascotCostume",
+    "mascotSkinColor",
+    "mascotHandColor",
     "model",
     "harness",
     "provider",
@@ -147,7 +152,17 @@ const EDITABLE_FIELDS: [&str; 9] = [
 /// gives: a console renders a field read-only exactly when the host says it is,
 /// so offering `tools` to a member who would meet a `403` on save is precisely
 /// the drift `editable` exists to remove.
-const EDITABLE_FIELDS_MEMBER: [&str; 5] = ["name", "role", "description", "instructions", "avatar"];
+const EDITABLE_FIELDS_MEMBER: [&str; 9] = [
+    "name",
+    "role",
+    "description",
+    "instructions",
+    "avatar",
+    "mascotMode",
+    "mascotCostume",
+    "mascotSkinColor",
+    "mascotHandColor",
+];
 
 /// One agent, in full — everything #264 lists as unreachable.
 #[derive(Debug, Serialize)]
@@ -218,6 +233,7 @@ pub(super) struct AgentDetailDto {
     /// off `tier` alone, so an untagged roster's real orchestrator is named.
     is_orchestrator: bool,
     tools: AgentToolsDto,
+    skills: AgentSkillsDto,
     desks: Vec<AgentDeskDto>,
     inbox_enabled: bool,
     /// The face this teammate wears, when somebody has chosen one — the same
@@ -226,6 +242,25 @@ pub(super) struct AgentDetailDto {
     /// console draws the mascot it hashes from the id.
     #[serde(skip_serializing_if = "Option::is_none")]
     avatar: Option<String>,
+    /// Whether this teammate's `mascot:animated` canvas plays, when somebody
+    /// has chosen a mode (`docs/spec/runtime/avatars.md`). Only meaningful
+    /// when `avatar` is `"mascot:animated"`. Absent means the file's own
+    /// default mode (`"animated"`), not "no mascot".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_mode: Option<String>,
+    /// The mascot costume this teammate wears, when somebody has chosen one.
+    /// Applies whichever mode is in force. Absent means the file's own
+    /// default costume.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_costume: Option<String>,
+    /// The mascot's skin (body) color, when somebody has chosen one. Absent
+    /// means the file's own default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_skin_color: Option<String>,
+    /// The mascot's hand/accent color, when somebody has chosen one. Absent
+    /// means the file's own default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_hand_color: Option<String>,
     /// The cap in force, its spend, and its attribution — the same fields and
     /// the same absent-means-uncapped contract as `GET …/team`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -275,6 +310,30 @@ pub(super) struct AgentToolsDto {
     desk_ceiling_active: bool,
     /// What the agent actually holds, after all three levels.
     effective: Vec<String>,
+}
+
+/// An agent's skill scope against the company's enabled set, so the resolution
+/// is legible rather than asserted.
+///
+/// Built **only** through [`agent_skills`], for the reason [`agent_tools`]
+/// gives: two surfaces deriving this independently is how a console ends up
+/// advertising a skill the harness never materializes.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct AgentSkillsDto {
+    /// The scope the agent asks for, in its three states: `null` = **inherit**
+    /// every enabled skill, `[]` = an **explicit no-skills** scope, `[slugs]` =
+    /// **narrow**. The console renders all three distinctly.
+    requested: Option<Vec<String>>,
+    /// The company's enabled set — the ceiling this scope narrows within, and
+    /// what the picker offers.
+    company_available: Vec<String>,
+    /// What the agent actually holds. A slug in `requested` but missing here was
+    /// asked for and not granted, because the company does not have it enabled.
+    effective: Vec<String>,
+    /// Whether an operator override is currently setting this scope, rather than
+    /// the manifest line. Reported so an override is legible instead of silent.
+    overridden: bool,
 }
 
 /// A desk this agent sits on.
@@ -518,6 +577,51 @@ pub(super) fn agent_tools(record: &CompanyRecord, agent_id: &str) -> AgentToolsD
     }
 }
 
+/// The skill slugs an agent *asks* for, resolved identically for every reader.
+///
+/// Sibling of [`requested_grants`] in shape and in reason: a manifest
+/// teammate's `[[agent]].skills` line with any operator override already
+/// applied, or an overlay teammate's own scope. Returns the field's three-state
+/// value verbatim — `None` inherits, `Some(vec![])` is a deliberate no-skills
+/// scope, `Some(slugs)` narrows.
+pub(crate) fn requested_skills(record: &CompanyRecord, agent_id: &str) -> Option<Vec<String>> {
+    if let Some(agent) = record.effective_agent(agent_id) {
+        return agent.skills.clone();
+    }
+    record
+        .overlay_agents
+        .iter()
+        .find(|agent| agent.id == agent_id)
+        .and_then(|agent| agent.skills.clone())
+}
+
+/// One agent's skill scope against `company_enabled`, the company's effective
+/// enabled set.
+///
+/// The narrowing is [`agent_effective_skills`], the same function the harness
+/// materializes from, so the console cannot advertise a skill the agent will not
+/// get. Unlike [`agent_tools`] this takes the ceiling as an argument rather than
+/// reading it off the record: resolving a company's skills is I/O, and keeping
+/// it out of here keeps the projection pure and single.
+pub(super) fn agent_skills(
+    record: &CompanyRecord,
+    agent_id: &str,
+    company_enabled: &[String],
+) -> AgentSkillsDto {
+    let requested = requested_skills(record, agent_id);
+    AgentSkillsDto {
+        effective: crate::runtime::builder::agent_effective_skills(
+            company_enabled,
+            requested.as_deref(),
+        ),
+        requested,
+        company_available: company_enabled.to_vec(),
+        overridden: record
+            .agent_override(agent_id)
+            .is_some_and(|entry| entry.skills.as_ref().is_some_and(Option::is_some)),
+    }
+}
+
 /// The `PATCH` body. Every field is optional, and an absent field is left
 /// alone: this is a patch, not a replacement, so a console that renders only
 /// some of an agent's fields cannot blank the rest by omission.
@@ -565,6 +669,23 @@ pub(super) struct EditAgent {
     /// its workspace folder, budget row, desk memberships and inbox.
     #[serde(default, deserialize_with = "double_option")]
     tools: Option<Option<Vec<String>>>,
+    /// The teammate's skill scope. The same double option `tools` uses, and the
+    /// same four rows:
+    ///
+    /// | body | parses as | means |
+    /// |---|---|---|
+    /// | `{}` | `None` | leave the scope alone |
+    /// | `{"skills": null}` | `Some(None)` | reset to **inherit** every enabled skill |
+    /// | `{"skills": []}` | `Some(Some([]))` | an **explicit no-skills** scope |
+    /// | `{"skills": ["…"]}` | `Some(Some([…]))` | **narrow** to those slugs |
+    ///
+    /// Entries are exact slugs, never globs. A slug the company has not enabled
+    /// is stored and reported as asked-for-but-not-granted rather than refused,
+    /// because the picker renders against a set fetched at page load and a
+    /// concurrent uninstall would otherwise fail an honest save. A slug that is
+    /// not a safe directory name is refused outright — it is a path segment.
+    #[serde(default, deserialize_with = "double_option")]
+    skills: Option<Option<Vec<String>>>,
     /// The teammate's persona instructions (issue #1530). A **double option**,
     /// the same three-state contract as `description`:
     ///
@@ -600,6 +721,40 @@ pub(super) struct EditAgent {
     /// that reach the record name something this host already holds.
     #[serde(default, deserialize_with = "double_option")]
     avatar: Option<Option<String>>,
+    /// Whether this teammate's `mascot:animated` canvas plays. Same
+    /// double-option contract as `avatar`:
+    ///
+    /// | body | parses as | means |
+    /// |---|---|---|
+    /// | `{}` | `None` | leave the mode alone |
+    /// | `{"mascotMode": null}` | `Some(None)` | reset to the file's own default mode (`"animated"`) |
+    /// | `{"mascotMode": "static"}` | `Some(Some(…))` | wear that mode |
+    ///
+    /// Meaningful only alongside a `mascot:` `avatar`, but not refused when
+    /// sent without one — the same "store the choice, apply it once the right
+    /// avatar is worn" latitude a picker UI needs when it lets an operator
+    /// preview a mode before committing the mascot itself. Validated by
+    /// [`crate::company::mascot::parse_mode`] against the closed list. Open
+    /// to any member, matching `avatar`: picking a colleague's display mode
+    /// is not a privilege boundary.
+    #[serde(default, deserialize_with = "double_option")]
+    mascot_mode: Option<Option<String>>,
+    /// The mascot costume this teammate wears. Same double-option contract
+    /// and member-open gate as `mascot_mode`; `null` resets to the file's own
+    /// default costume, an id sets it. Applies whichever mode is in force.
+    /// Validated by [`crate::company::mascot::parse_costume`].
+    #[serde(default, deserialize_with = "double_option")]
+    mascot_costume: Option<Option<String>>,
+    /// The mascot's skin (body) color. Same double-option contract and
+    /// member-open gate as `mascot_mode`. Validated by
+    /// [`crate::company::mascot::parse_skin_color`].
+    #[serde(default, deserialize_with = "double_option")]
+    mascot_skin_color: Option<Option<String>>,
+    /// The mascot's hand/accent color. Same double-option contract and
+    /// member-open gate as `mascot_mode`. Validated by
+    /// [`crate::company::mascot::parse_hand_color`].
+    #[serde(default, deserialize_with = "double_option")]
+    mascot_hand_color: Option<Option<String>>,
     /// The teammate's own model override (issue #1245's per-agent follow-up).
     /// A double option for the same reason as `description`: absent leaves it
     /// alone, `null` clears it back to the harness's own default, and a
@@ -647,7 +802,32 @@ async fn agent_detail(
         .load(company.id())
         .await?
         .ok_or_else(|| OpenCompanyError::CompanyNotFound(company.id().to_string()))?;
-    detail(&company, &record, &agent_id, is_admin).await
+    let company_skills = company_enabled_skills(&state, &company).await?;
+    detail(&company, &record, &agent_id, is_admin, &company_skills).await
+}
+
+/// The company's **enabled** skill slugs — the ceiling a teammate's scope
+/// narrows within, and what the picker offers.
+///
+/// The same resolution `GET …/skills` reports, filtered to the enabled entries:
+/// that route keeps the disabled rows because they carry the switch that turns
+/// a skill back on, and a teammate has no such switch.
+pub(super) async fn company_enabled_skills(
+    state: &AppState,
+    company: &ScopedCompany,
+) -> Result<Vec<String>, ApiError> {
+    let mut deltas = company.runtime.skills().list(company.id()).await?;
+    deltas.extend(crate::company::skill_effective::globals_skill_disables(
+        &company.runtime.globals_disable().await?,
+    ));
+    let registry = state.shared_skill_registry()?;
+    Ok(
+        crate::company::skill_effective::resolve(company.runtime.source_dir(), &registry, &deltas)?
+            .into_iter()
+            .filter(|skill| skill.enabled)
+            .map(|skill| skill.slug)
+            .collect(),
+    )
 }
 
 /// `PATCH {scope}/team/{agent_id}` — edit a teammate.
@@ -767,6 +947,48 @@ async fn edit_agent(
         }
     };
 
+    // The mascot mode/costume/colors need no I/O to validate — all four are
+    // closed, in-memory lists — so unlike `avatar` they are checked here
+    // rather than resolved, and the checked values are what gets written
+    // under the lock below. Same double-option unwrap shape as
+    // `resolved_avatar`.
+    let resolved_mascot_mode: Option<Option<String>> = match &body.mascot_mode {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(value)) => {
+            let parsed = crate::company::mascot::parse_mode(value)
+                .map_err(|e| ApiError(e).into_response())?;
+            Some(Some(parsed.to_string()))
+        }
+    };
+    let resolved_mascot_costume: Option<Option<String>> = match &body.mascot_costume {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(value)) => {
+            let parsed = crate::company::mascot::parse_costume(value)
+                .map_err(|e| ApiError(e).into_response())?;
+            Some(Some(parsed.to_string()))
+        }
+    };
+    let resolved_mascot_skin_color: Option<Option<String>> = match &body.mascot_skin_color {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(value)) => {
+            let parsed = crate::company::mascot::parse_skin_color(value)
+                .map_err(|e| ApiError(e).into_response())?;
+            Some(Some(parsed.to_string()))
+        }
+    };
+    let resolved_mascot_hand_color: Option<Option<String>> = match &body.mascot_hand_color {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(value)) => {
+            let parsed = crate::company::mascot::parse_hand_color(value)
+                .map_err(|e| ApiError(e).into_response())?;
+            Some(Some(parsed.to_string()))
+        }
+    };
+
     // Serialize with every other write to `overlay_agents`, so a console edit
     // and a concurrent `add_agent` cannot clobber one another's roster.
     let write_lock = company_write_lock(company.id());
@@ -826,6 +1048,7 @@ async fn edit_agent(
     // admin-only in full, so admin-first is self-consistent there. This one is
     // admin-only *per field*, which is what makes the ordering load-bearing.
     if body.tools.is_some()
+        || body.skills.is_some()
         || body.model.is_some()
         || body.harness.is_some()
         || body.provider.is_some()
@@ -843,6 +1066,11 @@ async fn edit_agent(
     let tools: Option<Option<Vec<String>>> = body
         .tools
         .map(|maybe_globs| maybe_globs.map(|globs| trimmed_globs(&globs)).transpose())
+        .transpose()
+        .map_err(|e| e.into_response())?;
+    let skills: Option<Option<Vec<String>>> = body
+        .skills
+        .map(|maybe_slugs| maybe_slugs.map(|slugs| trimmed_slugs(&slugs)).transpose())
         .transpose()
         .map_err(|e| e.into_response())?;
     // Present-and-null clears; a blank string clears too — an empty override
@@ -1038,6 +1266,7 @@ async fn edit_agent(
             name,
             role,
             tools,
+            skills,
             ..Default::default()
         };
         // An empty string is the stored form of "cleared" — the write path
@@ -1100,6 +1329,13 @@ async fn edit_agent(
         if let Some(tools) = tools {
             agent.tools = tools;
         }
+        // Stored verbatim in its three-state form, exactly like `tools`. The
+        // company's enabled set is applied at read time by
+        // `agent_effective_skills`, so a slug the company does not have is
+        // surfaced as asked-for-but-not-granted rather than dropped here.
+        if let Some(skills) = skills {
+            agent.skills = skills;
+        }
         // Issue #1245's per-agent follow-up: already trimmed/blank-cleared
         // and cross-validated above.
         if let Some(model) = model {
@@ -1152,6 +1388,50 @@ async fn edit_agent(
         }
     }
 
+    // The chosen mascot mode/costume/colors, written the same field-wise way
+    // as `avatar` — each validated above, with no I/O to get ahead of the
+    // write lock for.
+    if let Some(mode) = resolved_mascot_mode {
+        match mode {
+            Some(value) => record.upsert_agent_override(AgentOverride {
+                agent_id: agent_id.clone(),
+                mascot_mode: Some(value),
+                ..Default::default()
+            }),
+            None => record.clear_agent_mascot_mode(&agent_id),
+        }
+    }
+    if let Some(costume) = resolved_mascot_costume {
+        match costume {
+            Some(value) => record.upsert_agent_override(AgentOverride {
+                agent_id: agent_id.clone(),
+                mascot_costume: Some(value),
+                ..Default::default()
+            }),
+            None => record.clear_agent_mascot_costume(&agent_id),
+        }
+    }
+    if let Some(skin_color) = resolved_mascot_skin_color {
+        match skin_color {
+            Some(value) => record.upsert_agent_override(AgentOverride {
+                agent_id: agent_id.clone(),
+                mascot_skin_color: Some(value),
+                ..Default::default()
+            }),
+            None => record.clear_agent_mascot_skin_color(&agent_id),
+        }
+    }
+    if let Some(hand_color) = resolved_mascot_hand_color {
+        match hand_color {
+            Some(value) => record.upsert_agent_override(AgentOverride {
+                agent_id: agent_id.clone(),
+                mascot_hand_color: Some(value),
+                ..Default::default()
+            }),
+            None => record.clear_agent_mascot_hand_color(&agent_id),
+        }
+    }
+
     company.runtime.store().save(&record).await?;
 
     // Release both locks before the possible rebuild below (PR #1875 review
@@ -1199,7 +1479,10 @@ async fn edit_agent(
     // re-resolve rather than assume: an admin editing only a name must still
     // read back `tools` as editable.
     let is_admin = is_admin_actor(&headers, &state, &company, peer).await;
-    detail(&company, &record, &agent_id, is_admin)
+    let company_skills = company_enabled_skills(&state, &company)
+        .await
+        .map_err(|e| e.into_response())?;
+    detail(&company, &record, &agent_id, is_admin, &company_skills)
         .await
         .map_err(|e| e.into_response().into())
 }
@@ -1265,6 +1548,39 @@ fn trimmed_globs(globs: &[String]) -> Result<Vec<String>, ApiError> {
     Ok(out)
 }
 
+/// Trims, drops duplicates and refuses an unsafe entry in a skill scope.
+///
+/// Sibling of [`trimmed_globs`], with one difference that matters: a slug is a
+/// directory name under the agent's materialized tree, so an entry that is not a
+/// safe slug is refused here rather than stored and ignored. An entry that is
+/// well-formed but names a skill the company does not have **is** stored — see
+/// [`EditAgent::skills`].
+fn trimmed_slugs(slugs: &[String]) -> Result<Vec<String>, ApiError> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(slugs.len());
+    for slug in slugs {
+        let trimmed = slug.trim();
+        if trimmed.is_empty() {
+            return Err(ApiError(OpenCompanyError::InvalidRequest(
+                "a skill scope entry can't be a blank string. Omit `skills` to leave the scope \
+                 as is, send `null` to give this teammate every enabled skill, or send an empty \
+                 list to give it none."
+                    .to_string(),
+            )));
+        }
+        if !crate::company::skill_effective::valid_slug(trimmed) {
+            return Err(ApiError(OpenCompanyError::InvalidRequest(format!(
+                "'{trimmed}' is not a skill slug. Use the slug exactly as the Skills page \
+                 shows it — lowercase letters, digits and hyphens, no wildcards."
+            ))));
+        }
+        if seen.insert(trimmed.to_string()) {
+            out.push(trimmed.to_string());
+        }
+    }
+    Ok(out)
+}
+
 /// Whether the signed-in caller may administer this company — the question
 /// [`EDITABLE_FIELDS`] keys off, asked without refusing.
 ///
@@ -1290,6 +1606,7 @@ async fn detail(
     record: &CompanyRecord,
     agent_id: &str,
     is_admin: bool,
+    company_skills: &[String],
 ) -> Result<Json<AgentDetailDto>, ApiError> {
     // The manifest row with the operator's stored edits applied — the same
     // resolution `build_roster` performs, so the card and the running teammate
@@ -1378,6 +1695,7 @@ async fn detail(
         provider: declared_provider(record, agent_id),
         is_orchestrator: is_orchestrator(record, agent_id),
         tools: agent_tools(record, agent_id),
+        skills: agent_skills(record, agent_id, company_skills),
         desks: desks_for(record, agent_id),
         inbox_enabled,
         budget_usd_daily: cap,
@@ -1385,6 +1703,10 @@ async fn detail(
         budget_set_by: attribution.map(|entry| entry.set_by.id.clone()),
         budget_set_at_millis: attribution.map(|entry| entry.at_millis),
         avatar: record.effective_avatar(agent_id),
+        mascot_mode: record.effective_mascot_mode(agent_id),
+        mascot_costume: record.effective_mascot_costume(agent_id),
+        mascot_skin_color: record.effective_mascot_skin_color(agent_id),
+        mascot_hand_color: record.effective_mascot_hand_color(agent_id),
     }))
 }
 
@@ -2361,11 +2683,17 @@ mod tests_a_manifest_teammates_tools;
 #[path = "team_agent_a_member_may_change_tests.rs"]
 mod tests_a_member_may_change;
 #[cfg(test)]
+#[path = "team_agent_a_new_teammate_wears_its_look_tests.rs"]
+mod tests_a_new_teammate_wears_its_look;
+#[cfg(test)]
 #[path = "team_agent_harness_and_model_persist_tests.rs"]
 mod tests_harness_and_model_persist;
 #[cfg(test)]
 #[path = "team_agent_requested_grants_reads_overlay_tests.rs"]
 mod tests_requested_grants_reads_overlay;
+#[cfg(test)]
+#[path = "team_agent_skill_scope_tests.rs"]
+mod tests_skill_scope;
 #[cfg(test)]
 #[path = "team_agent_the_roster_list_carries_tests.rs"]
 mod tests_the_roster_list_carries;
