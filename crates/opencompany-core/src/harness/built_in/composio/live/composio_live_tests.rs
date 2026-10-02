@@ -90,6 +90,7 @@ fn authorize_tool(config: &TenantComposio, company: &str) -> Arc<dyn Tool> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn authorize_clones_share_one_pending_handoff_under_a_race() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     for attempt in 0..5 {
         let fixture = authorize_fixture().await;
         let barrier = Arc::new(tokio::sync::Barrier::new(8));
@@ -118,6 +119,7 @@ async fn authorize_clones_share_one_pending_handoff_under_a_race() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_slow_authorize_does_not_block_an_unrelated_toolkit() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     use axum::{Router, extract::State, routing::post};
 
     #[derive(Default)]
@@ -186,6 +188,7 @@ async fn a_slow_authorize_does_not_block_an_unrelated_toolkit() {
 
 #[tokio::test]
 async fn authorize_reconnects_after_a_terminal_or_missing_connection() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     for status in [
         "ACTIVE",
         "CONNECTED",
@@ -229,6 +232,7 @@ async fn authorize_reconnects_after_a_terminal_or_missing_connection() {
 
 #[tokio::test]
 async fn authorize_unknown_or_unreadable_status_does_not_start_another_handoff() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let fixture = authorize_fixture().await;
     let tool = authorize_tool(&fixture.config, "acme");
     let first = tool.execute(json!({ "toolkit": "gmail" })).await.unwrap();
@@ -254,6 +258,7 @@ async fn authorize_unknown_or_unreadable_status_does_not_start_another_handoff()
 
 #[tokio::test]
 async fn authorize_failed_post_is_not_cached() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let fixture = authorize_fixture().await;
     let tool = authorize_tool(&fixture.config, "acme");
     fixture.state.lock().unwrap().fail_authorize = true;
@@ -271,6 +276,7 @@ async fn authorize_failed_post_is_not_cached() {
 
 #[tokio::test]
 async fn authorize_expires_pending_handoffs_at_the_documented_lifetime() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let fixture = authorize_fixture().await;
     let tool = authorize_tool(&fixture.config, "acme");
     let first = tool.execute(json!({ "toolkit": "gmail" })).await.unwrap();
@@ -293,6 +299,7 @@ async fn authorize_expires_pending_handoffs_at_the_documented_lifetime() {
 
 #[tokio::test]
 async fn authorize_keys_isolate_companies_credentials_and_extra_parameters() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let fixture = authorize_fixture().await;
     let first = authorize_tool(&fixture.config, "acme");
     let another_company = authorize_tool(&fixture.config.clone(), "another-company");
@@ -333,6 +340,7 @@ async fn authorize_keys_isolate_companies_credentials_and_extra_parameters() {
 
 #[tokio::test]
 async fn authorize_cache_refuses_capacity_without_starting_an_untracked_handoff() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let fixture = authorize_fixture().await;
     let tool = authorize_tool(&fixture.config, "acme");
     for i in 0..MAX_PENDING_AUTHORIZATIONS {

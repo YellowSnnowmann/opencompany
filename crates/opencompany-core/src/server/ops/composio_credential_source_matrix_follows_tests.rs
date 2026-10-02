@@ -275,6 +275,7 @@ async fn a_member_cannot_change_what_the_company_connects_through() {
 /// authorization call without dialling production (issue #801).
 #[tokio::test]
 async fn an_admin_is_unaffected() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     #[cfg(feature = "composio")]
     let backend = spawn_authorize_backend().await;
     #[cfg(feature = "composio")]

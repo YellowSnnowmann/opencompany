@@ -474,6 +474,27 @@ fn named(values: Option<&[String]>) -> Vec<String> {
         .collect()
 }
 
+/// Serializes tests that drive the module, because the route is process-global.
+///
+/// The module is one instance holding one route, so two tests configuring it at
+/// once flip each other's route out from under an in-flight call: the one that
+/// then has to reconfigure waits on the other's read guard, which is held across
+/// its request. Thirty-one tests across five modules reach the module, and
+/// without this the suite's result depends on which of them happen to overlap.
+///
+/// It serializes the *tests*, not the behaviour — each still observes its own
+/// calls exactly as production makes them. What it deliberately does not model
+/// is contention between companies, which is real: see this module's own notes
+/// on one tenant's slow call delaying another's.
+#[cfg(test)]
+pub(crate) async fn route_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+    static GUARD: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    GUARD
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await
+}
+
 #[cfg(test)]
 #[path = "composio_module_tests.rs"]
 mod tests;

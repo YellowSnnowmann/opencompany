@@ -78,8 +78,13 @@ pub mod composio_direct;
 /// The transport both halves of the Composio surface now share: the loadable
 /// `tinyconnectors` module, configured per company. v0.64.10 removed the
 /// in-process clients each half used to hold. See [`composio_module`].
+//
+// `pub(crate)` only so the tests that drive the module can reach its route
+// guard: thirty-one of them across five modules share one process-global route,
+// and they have to serialize against each other. Nothing outside this module's
+// own two callers uses it in a non-test build.
 #[cfg(feature = "composio")]
-mod composio_module;
+pub(crate) mod composio_module;
 /// End-to-end proof that #410's narrowable, self-describing Composio listing is
 /// reachable from a real turn on two large toolkits — the harness, the grant
 /// gate, the approval policy and the Composio client are all real; only the

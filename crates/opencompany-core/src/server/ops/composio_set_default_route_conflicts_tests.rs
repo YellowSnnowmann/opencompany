@@ -254,6 +254,7 @@ mod gated_tests {
     /// real mapping with a loopback backend standing in for Composio.
     #[tokio::test]
     async fn disconnect_maps_an_unknown_id_to_404_not_502() {
+        let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
         let (backend, deletes) = spawn_connections_backend(false).await;
         let env = crate::test_support::EnvVarGuard::capture(&[
             crate::company::composio::TINYHUMANS_API_URL_ENV,
@@ -291,6 +292,7 @@ mod gated_tests {
     /// account that is right there in the list.
     #[tokio::test]
     async fn disconnect_maps_a_backend_failure_to_502_not_404() {
+        let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
         let (backend, deletes) = spawn_connections_backend(true).await;
         let env = crate::test_support::EnvVarGuard::capture(&[
             crate::company::composio::TINYHUMANS_API_URL_ENV,

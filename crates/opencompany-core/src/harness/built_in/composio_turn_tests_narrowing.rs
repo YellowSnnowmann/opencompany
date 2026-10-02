@@ -6,6 +6,7 @@ use super::*;
 /// the agent had no reason to stop and eventually hit the repetition guard.
 #[tokio::test]
 async fn a_repeated_oversized_listing_still_tells_the_agent_to_narrow_instead() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let (model_url, script) = spawn_script(vec![
         Turn::Call {
             tool: "composio_list_tools",
@@ -55,6 +56,7 @@ async fn a_repeated_oversized_listing_still_tells_the_agent_to_narrow_instead() 
 /// the Notion one, and the toolkit slug is never hardcoded anywhere in the path.
 #[tokio::test]
 async fn a_narrowed_listing_on_an_unknown_toolkit_needs_no_provider_specific_code() {
+    let _serial = crate::harness::built_in::composio_module::route_test_guard().await;
     let (model_url, script) = spawn_script(vec![
         Turn::Call {
             tool: "composio_list_tools",
