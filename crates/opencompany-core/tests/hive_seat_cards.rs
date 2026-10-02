@@ -554,6 +554,22 @@ async fn start_task_dispatches_a_desk_card_through_the_live_room_path() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
     assert_eq!(detail["task"]["assignee"], STUDIO);
+    let seat_asks = script
+        .asks()
+        .into_iter()
+        .filter(|ask| support::room::seat_of(ask, ROLES).is_some())
+        .collect::<Vec<_>>();
+    assert!(!seat_asks.is_empty(), "the card room did not ask a seat");
+    for ask in seat_asks {
+        assert!(
+            !ask.tools.iter().any(|name| {
+                name == opencompany::harness::built_in::orchestrator::CREATE_WORKFLOW_TOOL
+                    || name == opencompany::harness::built_in::orchestrator::RUN_WORKFLOW_TOOL
+            }),
+            "episode seats must not receive workflow verbs: {:?}",
+            ask.tools
+        );
+    }
     assert!(
         detail["task"]["note"].as_str().is_some_and(|note| {
             note.contains("[operator redirect] Use the new research scope")
