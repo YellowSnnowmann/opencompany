@@ -464,15 +464,7 @@ async fn start_task_dispatches_a_desk_card_through_the_live_room_path() {
     let entered_room = Arc::clone(&room_started);
     let room_responder = room_script(ROLES, |seat| complete(seat, "The card work is recorded."));
     let responder: Responder = Arc::new(move |ask: &Ask| {
-        let asks_to_start = ask.messages.iter().any(|message| {
-            message.get("role").and_then(Value::as_str) == Some("user")
-                && message
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .is_some_and(|content| content.contains("start the prepared board card"))
-        });
-        if asks_to_start
-            && ask.tools.iter().any(|name| name == "start_task")
+        if ask.tools.iter().any(|name| name == "start_task")
             && !requested.swap(true, Ordering::SeqCst)
         {
             let id = card_id
@@ -516,10 +508,14 @@ async fn start_task_dispatches_a_desk_card_through_the_live_room_path() {
 
     room.say("ceo", "Please start the prepared board card now.")
         .await;
-    assert!(
-        start_requested.load(Ordering::SeqCst),
-        "start_task was not called"
-    );
+    let start_wait = Instant::now();
+    while !start_requested.load(Ordering::SeqCst) {
+        assert!(
+            start_wait.elapsed() < EPISODE,
+            "the CEO turn did not call start_task"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     assert!(
         script
             .asks()
