@@ -29,7 +29,9 @@
 //! only when every one of these holds:
 //!
 //! 1. The **HS256 signature** verifies against [`AppConfig::sso_secret`].
-//! 2. It has **not expired** (`exp`).
+//! 2. It has **not expired** (`exp`), its `iat` is not in the future beyond
+//!    the clock-skew allowance, and its declared lifetime is at most five
+//!    minutes plus that allowance.
 //! 3. Its `slug` **is this company** — a token minted for company A cannot sign
 //!    anyone into company B, exactly as a session cookie for A cannot.
 //! 4. Its `sub` is a **standing admin** of this company
@@ -40,6 +42,11 @@
 //! 5. Its `jti` has **not been consumed** before. Single use is enforced by an
 //!    atomic `create_new` marker file under the data root (see
 //!    [`ConsumedJtis`]); a replay of a still-valid token is refused.
+//!
+//! The host-level `/api/v1/sso/redeem` route resolves the company from the
+//! signed slug. On an empty hosted instance it instead accepts only the
+//! configured platform owner and returns a short-lived setup credential; the
+//! company-scoped alias remains available after a company is registered.
 //!
 //! On success the admin is claimed (first use) or logged in (later uses) through
 //! the same materialization the magic link uses
@@ -88,7 +95,8 @@ pub struct SsoClaims {
     /// A unique token id, recorded on redemption so the token cannot be used
     /// twice.
     pub jti: String,
-    /// Issued-at, epoch seconds. Carried for auditability; not itself a gate.
+    /// Issued-at, epoch seconds. Future values beyond clock skew are refused,
+    /// and the declared lifetime is bounded alongside expiry.
     pub iat: u64,
     /// Expiry, epoch seconds. A token past this is refused.
     pub exp: u64,
@@ -100,11 +108,12 @@ struct RedeemBody {
     token: String,
 }
 
-/// Builds the SSO route fragment: `POST …/sso/redeem`.
+/// Builds the host-level and company-scoped SSO redemption routes.
 ///
-/// Mounted on [`public_scoped`] like the login routes — an SSO redemption is
-/// something a person does precisely because they hold no session yet, so it
-/// does no auth of its own. Its authority is the signed token it verifies.
+/// Both routes are public like the login routes because a person redeems SSO
+/// precisely because they hold no session yet. Authority comes from the signed
+/// token; the host-level route also handles the platform owner on an empty
+/// first-run instance.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/sso/redeem", post(redeem_from_host))
