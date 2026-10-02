@@ -1852,12 +1852,28 @@ const MAX_BLOCKING_THREADS: usize = 512;
 const DEFAULT_LOG_FILTER: &str = "error,tinyagents::observability=warn,policy::shadow_floor=info";
 
 fn main() -> Result<()> {
+    // The SSO auto-login signing secret (`OPENCOMPANY_SSO_SECRET`). Read and
+    // remove it BEFORE the Tokio runtime is created, to ensure this is a
+    // single-threaded operation. `std::env::remove_var` is not thread-safe on
+    // non-Windows platforms when other threads are running (CodeGhost21, #2537).
+    let sso_secret = std::env::var("OPENCOMPANY_SSO_SECRET")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(opencompany::ports::types::SecretValue);
+    // Scrub the secret from the environment now that it is captured. A tenant
+    // runs agents with shell/MCP tools that inherit this process's environment;
+    // the injected per-tenant SSO key must not be readable by them. AppConfig
+    // holds the only copy from here on.
+    if sso_secret.is_some() {
+        // SAFETY: this is single-threaded startup, before any thread is spawned.
+        unsafe { std::env::remove_var("OPENCOMPANY_SSO_SECRET") };
+    }
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_stack_size(WORKER_STACK_BYTES)
         .max_blocking_threads(MAX_BLOCKING_THREADS)
         .build()?
-        .block_on(async_main())
+        .block_on(async_main(sso_secret))
 }
 
 /// The filter to install, given whatever `RUST_LOG` holds.
