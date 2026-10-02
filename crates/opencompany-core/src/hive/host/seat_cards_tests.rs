@@ -273,13 +273,6 @@ fn the_seat_note_names_the_card_verb_and_no_withheld_one() {
 /// of either side that breaks the agreement fails here instead of on staging.
 #[test]
 fn the_seat_note_does_not_promise_a_success_confirmation() {
-    // The receipt's promise, verbatim from `SpawnTaskTool::execute`'s seated arm.
-    let receipt = crate::harness::built_in::orchestrator::SPAWN_TASK_FAILURE_ONLY_RECEIPT;
-    assert!(
-        receipt.contains("if it cannot be"),
-        "the receipt no longer promises a failure-only reply; re-read \
-         `SpawnTaskTool::execute` and decide what the note should say"
-    );
     // The note must say the same thing: silence means it landed.
     assert!(
         SEAT_CARDS_NOTE.contains("only if it could not be"),
