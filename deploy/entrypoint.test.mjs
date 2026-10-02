@@ -9,6 +9,17 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const entrypoint = path.join(root, "deploy", "entrypoint.sh");
 
+test("ECS task definition keeps the self-hosted company default", () => {
+  const taskDefinition = JSON.parse(
+    fs.readFileSync(path.join(root, "deploy", "aws-ecs-task-definition.json"), "utf8"),
+  );
+  const company = taskDefinition.containerDefinitions[0].environment.find(
+    ({ name }) => name === "OPENCOMPANY_COMPANY",
+  );
+
+  assert.equal(company?.value, "marketing_agency");
+});
+
 function run(company) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencompany-entrypoint-"));
   const bin = path.join(dir, "bin");
