@@ -196,6 +196,21 @@ pub(super) async fn execute(
     tenant: &TenantSearch,
     request: ExecuteToolRequest,
 ) -> Result<ExecuteToolResponse, String> {
+    #[cfg(test)]
+    if let Some(response) = TEST_RESPONSE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .await
+        .take()
+    {
+        *TEST_CALL.get_or_init(|| Mutex::new(None)).lock().await = Some((
+            tenant.provider.clone(),
+            tenant.api_key.clone(),
+            request.name.clone(),
+        ));
+        return Ok(response);
+    }
+
     let configuration = serde_json::to_value(configuration(tenant))
         .map_err(|error| format!("search configuration could not be encoded: {error}"))?;
     let current = fingerprint(&configuration);
@@ -231,6 +246,30 @@ pub(super) async fn execute(
         .await
         .map_err(|error| format!("search ExecuteTool failed: {error}"))
 }
+
+/// Supply a one-shot module response for a harness-level BYO search test.
+///
+/// The test still builds the real catalogue tool and sends it through the
+/// supervised harness turn; only the dynamic module boundary is replaced, so
+/// CI does not need a platform-specific module artifact or a provider key.
+#[cfg(test)]
+pub(super) async fn set_test_response(response: ExecuteToolResponse) {
+    *TEST_RESPONSE.get_or_init(|| Mutex::new(None)).lock().await = Some(response);
+}
+
+#[cfg(test)]
+pub(super) async fn take_test_call() -> Option<(String, Option<String>, String)> {
+    TEST_CALL
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .await
+        .take()
+}
+
+#[cfg(test)]
+static TEST_RESPONSE: OnceLock<Mutex<Option<ExecuteToolResponse>>> = OnceLock::new();
+#[cfg(test)]
+static TEST_CALL: OnceLock<Mutex<Option<(String, Option<String>, String)>>> = OnceLock::new();
 
 #[cfg(test)]
 #[path = "module_tests.rs"]

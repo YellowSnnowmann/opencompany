@@ -220,6 +220,16 @@ impl TenantSearch {
 mod declaration;
 mod module;
 
+#[cfg(test)]
+pub(crate) async fn set_module_test_response(response: tinysearch_bus::ExecuteToolResponse) {
+    module::set_test_response(response).await;
+}
+
+#[cfg(test)]
+pub(crate) async fn take_module_test_call() -> Option<(String, Option<String>, String)> {
+    module::take_test_call().await
+}
+
 pub use live::{BYO_SEARCH_TOOLS, byo_search_tools};
 
 mod live {
