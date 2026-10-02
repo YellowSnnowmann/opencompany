@@ -64,6 +64,8 @@ pub(super) fn verify_hs256(secret: &str, token: &str) -> Result<SsoClaims, SsoRe
     // years ahead, and saturating subtraction would accept `exp < iat`.
     if claims.iat > now.saturating_add(CLOCK_LEEWAY_SECS)
         || claims.exp <= claims.iat
+        || claims.exp.saturating_sub(claims.iat)
+            > MAX_TOKEN_LIFETIME_SECS + CLOCK_LEEWAY_SECS
         || claims.exp > now.saturating_add(MAX_TOKEN_LIFETIME_SECS + CLOCK_LEEWAY_SECS)
     {
         return Err(SsoRejection::Invalid);

@@ -340,13 +340,14 @@ async fn a_token_claiming_a_longer_life_than_the_contract_is_refused() {
     let state = enabled_state(home.path()).await;
     // Unexpired but minted an hour before exp — a declared lifetime far beyond
     // the 5-minute contract. The expiry check passes, so the lifetime cap refuses it.
+    let now = now_secs();
     let over_long = token_with_iat(
         SSO_SECRET,
         "acme",
         ADMIN,
         "jti-cap",
-        now_secs(),
-        now_secs() + 3600,
+        now.saturating_sub(400),
+        now + 120,
     );
     assert_rejected(
         &state,
