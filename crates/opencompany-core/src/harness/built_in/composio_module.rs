@@ -157,16 +157,14 @@ impl Route {
 /// company making two Composio calls in a row is the common case inside a turn,
 /// and each reconfiguration is a bus round-trip.
 ///
-/// Only the hash is kept, which is the point — comparing routes means comparing
-/// bearer tokens, and a process-lifetime static holding one in cleartext is a
-/// credential sitting somewhere nothing needs it. Upstream keeps its own for the
-/// same stated reason. The hash is never logged, and `DefaultHasher` is only
-/// ever compared against another value from this same process.
-fn fingerprint(route: &serde_json::Value) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    route.to_string().hash(&mut hasher);
-    hasher.finish()
+/// Only the digest is kept, which is the point — comparing routes means
+/// comparing bearer tokens, and a process-lifetime static holding one in
+/// cleartext is a credential sitting somewhere nothing needs it. Upstream keeps
+/// its own for the same stated reason. SHA-256 is deterministic and the digest
+/// is never logged or reversible to the route.
+fn fingerprint(route: &serde_json::Value) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(route.to_string().as_bytes()).into()
 }
 
 /// The route the module currently holds, behind a lock that distinguishes
@@ -184,8 +182,8 @@ fn fingerprint(route: &serde_json::Value) -> u64 {
 /// `Configure` failed partway. The module is loaded through [`loader_config`],
 /// which names no company, so the first call is precisely the one that must not
 /// be skipped.
-fn configured() -> &'static tokio::sync::RwLock<Option<u64>> {
-    static HELD: OnceLock<tokio::sync::RwLock<Option<u64>>> = OnceLock::new();
+fn configured() -> &'static tokio::sync::RwLock<Option<[u8; 32]>> {
+    static HELD: OnceLock<tokio::sync::RwLock<Option<[u8; 32]>>> = OnceLock::new();
     HELD.get_or_init(|| tokio::sync::RwLock::new(None))
 }
 
@@ -301,15 +299,18 @@ where
 /// route this just set is provably the route held when the caller calls, so
 /// there is nothing to re-check and no loop to spin.
 async fn routed(
-    current: u64,
+    current: [u8; 32],
     blob: serde_json::Value,
-) -> Result<tokio::sync::RwLockReadGuard<'static, Option<u64>>, String> {
+) -> Result<tokio::sync::RwLockReadGuard<'static, Option<[u8; 32]>>, String> {
     // The common case: the module already holds this route, and concurrent
     // callers that want it share this guard rather than queueing.
     let held = configured().read().await;
     if *held == Some(current) {
         return Ok(held);
     }
+    // Drop the read guard before waiting for the writer. The fingerprint is
+    // checked again while holding that writer below, so another configuration
+    // cannot change it between the check and the write.
     drop(held);
 
     let mut held = configured().write().await;

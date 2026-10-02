@@ -103,13 +103,11 @@ pub(super) fn configuration(tenant: &TenantSearch) -> SearchConfig {
 /// module is still applying the previous one.
 ///
 /// Hashes the credential along with everything else, which is the point — a
-/// rotated key must reconfigure. The hash is never logged, and `DefaultHasher`
-/// is only ever compared against another value from this same process.
-fn fingerprint(configuration: &serde_json::Value) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    configuration.to_string().hash(&mut hasher);
-    hasher.finish()
+/// rotated key must reconfigure. SHA-256 is deterministic across process runs,
+/// and the digest is never logged or reversible to the credential.
+fn fingerprint(configuration: &serde_json::Value) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(configuration.to_string().as_bytes()).into()
 }
 
 /// The lock held across reconfigure-and-call, carrying the fingerprint of the
@@ -122,8 +120,8 @@ fn fingerprint(configuration: &serde_json::Value) -> u64 {
 /// with the very configuration it is about to use, whereas ours is loaded with
 /// [`loader_config`], which deliberately carries no company key. For this host
 /// the first call is precisely the one that must not be skipped.
-fn configured() -> &'static Mutex<Option<u64>> {
-    static HELD: OnceLock<Mutex<Option<u64>>> = OnceLock::new();
+fn configured() -> &'static Mutex<Option<[u8; 32]>> {
+    static HELD: OnceLock<Mutex<Option<[u8; 32]>>> = OnceLock::new();
     HELD.get_or_init(|| Mutex::new(None))
 }
 
