@@ -406,6 +406,86 @@ async fn a_teammate_can_wear_a_tiny_flavour_and_take_it_off() {
     );
 }
 
+/// The gap found live 2026-09-26: a mascot's chosen costume and colors
+/// reached `GET …/team/{agent_id}` but not `GET …/team`, so the chat header,
+/// the DM sidebar, the org chart and a message row — every surface built from
+/// the roster list — drew the file's default look for a wearer whose profile
+/// sheet (which reads the detail route) showed the real one. Same contract as
+/// `a_teammate_can_wear_a_tiny_flavour_and_take_it_off` above, extended to the
+/// three fields that closed it.
+#[tokio::test]
+async fn the_roster_list_carries_the_chosen_mascot_costume_and_colors() {
+    let home_dir = home();
+    let state = state_with_manifest(home_dir.path(), ROSTER).await;
+
+    let (status, worn) = patch_agent(
+        &state,
+        "ceo",
+        json!({
+            "avatar": "tiny:teal",
+            "mascotCostume": "headphones",
+            "mascotMode": "static",
+            "mascotSkinColor": "coral",
+            "mascotHandColor": "forest",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{worn}");
+    assert_eq!(worn["mascotCostume"], "headphones", "{worn}");
+    assert_eq!(worn["mascotMode"], "static", "{worn}");
+    assert_eq!(worn["mascotSkinColor"], "coral", "{worn}");
+    assert_eq!(worn["mascotHandColor"], "forest", "{worn}");
+
+    // Visible on the roster list too — what every mass-render surface in the
+    // console (the chat header, the DM sidebar, the org chart, a message row)
+    // is actually built from, as opposed to the detail read the profile sheet
+    // uses.
+    let (_, roster) = send(&state, "GET", "/api/v1/company/team", None).await;
+    let row = roster
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == "ceo")
+        .expect("the ceo is on the roster");
+    assert_eq!(row["avatar"], "tiny:teal", "{row}");
+    assert_eq!(row["mascotCostume"], "headphones", "{row}");
+    assert_eq!(row["mascotMode"], "static", "{row}");
+    assert_eq!(row["mascotSkinColor"], "coral", "{row}");
+    assert_eq!(row["mascotHandColor"], "forest", "{row}");
+
+    // Resetting each is absent, not null-carrying-an-empty-string — the same
+    // rule `avatar` follows — and that has to hold on the roster row too, not
+    // just on the detail read.
+    let (status, bare) = patch_agent(
+        &state,
+        "ceo",
+        json!({
+            "mascotCostume": null,
+            "mascotMode": null,
+            "mascotSkinColor": null,
+            "mascotHandColor": null,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{bare}");
+    assert!(bare.get("mascotCostume").is_none(), "{bare}");
+    assert!(bare.get("mascotMode").is_none(), "{bare}");
+    assert!(bare.get("mascotSkinColor").is_none(), "{bare}");
+    assert!(bare.get("mascotHandColor").is_none(), "{bare}");
+
+    let (_, roster_after) = send(&state, "GET", "/api/v1/company/team", None).await;
+    let row_after = roster_after
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == "ceo")
+        .expect("the ceo is on the roster");
+    assert!(row_after.get("mascotCostume").is_none(), "{row_after}");
+    assert!(row_after.get("mascotMode").is_none(), "{row_after}");
+    assert!(row_after.get("mascotSkinColor").is_none(), "{row_after}");
+    assert!(row_after.get("mascotHandColor").is_none(), "{row_after}");
+}
+
 /// Resetting a face must not reset a persona, and vice versa. The two share
 /// one override row, so this is the route-level net under the record-level
 /// invariant.

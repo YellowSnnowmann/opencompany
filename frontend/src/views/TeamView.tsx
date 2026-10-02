@@ -40,6 +40,7 @@ import {
   reportAddMember,
   type MissedStep,
 } from "@/lib/member-feedback";
+import { birthLook, writeUnechoedLook } from "@/lib/new-member-look";
 import { fromDto, modelSummary, newMember, roleSubtitle, type TeamMember } from "@/lib/team";
 import { workloadByAssignee, type Workload } from "@/lib/team-workload";
 import { usd } from "@/lib/money";
@@ -366,6 +367,8 @@ export function TeamView({
           // Blank stays off the wire: at creation there is no blueprint to
           // override, so an empty box means "no persona", not "an empty one".
           instructions: fields.instructions || undefined,
+          // The look rides the create, so the teammate is born wearing it.
+          ...birthLook(fields),
         },
         company,
       );
@@ -390,17 +393,14 @@ export function TeamView({
     }
 
     const missed: MissedStep[] = [];
-    // The face, against the host's real agent id — `addTeamMember` takes none.
-    // Before the redirect, so the page the operator lands on already wears it.
-    if (fields.avatar) {
-      try {
-        await client.updateAgent(created.id, { avatar: fields.avatar }, company);
-      } catch {
-        missed.push({
-          what: "their icon couldn't be set",
-          fix: "Pick one again from their profile.",
-        });
-      }
+    // The look rode the create request; only what the host did not echo back (a
+    // host that predates it) is written now, against its real agent id. Before
+    // the redirect, so the page the operator lands on already wears it.
+    if (!(await writeUnechoedLook(client, company, created, fields))) {
+      missed.push({
+        what: "their icon couldn't be set",
+        fix: "Pick one again from their profile.",
+      });
     }
     // The dialog's write is only half of its flow. It collects a name, a face
     // and a post, so the description and the persona are still to be written —
@@ -784,6 +784,7 @@ function MemberCard({
   return (
     <Card
       data-testid="team-card"
+      data-avatar-hover-scope
       className={cn(
         "relative transition-colors",
         onOpen && "cursor-pointer hover:border-primary/40 hover:shadow-sm",
@@ -801,7 +802,16 @@ function MemberCard({
             smudge and the bare tone tile is the honest fallback.
           */}
           <AgentFace agentId={member.id} size="md" surface="card" name={member.name}>
-            <TeammateAvatar name={member.name} tone={member.tone} avatar={member.avatar} className="size-11 rounded-xl text-sm" />
+            <TeammateAvatar
+              name={member.name}
+              tone={member.tone}
+              avatar={member.avatar}
+              mascotCostume={member.mascotCostume}
+              mascotSkinColor={member.mascotSkinColor}
+              mascotHandColor={member.mascotHandColor}
+              mascotMode={member.mascotMode}
+              className="size-11 rounded-xl text-sm"
+            />
           </AgentFace>
           {onOpen ? (
             <button

@@ -1,10 +1,38 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Building2 } from "lucide-react";
 
 import { useConsole } from "@/lib/console-context";
-import { resolveAvatarSrc, staticAvatarSrc, retainAvatar, releaseAvatar, blobNodeId, subscribeAvatarNode } from "@/lib/avatar";
+import {
+  resolveAvatarSrc,
+  staticAvatarSrc,
+  retainAvatar,
+  releaseAvatar,
+  blobNodeId,
+  subscribeAvatarNode,
+  isMascotRef,
+} from "@/lib/avatar";
+import { DEFAULT_MASCOT_TRIGGER, type MascotTrigger } from "@/lib/mascot-pose";
 import { TEAM_TONES, avatarFor, initials } from "@/lib/team";
 import { cn } from "@/lib/utils";
+
+/**
+ * The Rive runtime + the mascot asset are ~1.8 MB combined — code-split so
+ * every tile that is *not* a `mascot:` wearer (the overwhelming majority)
+ * pays nothing for it, the same reasoning `agent-profile-sheet.tsx` and
+ * `views/team/AgentDetailView.tsx` already apply to their own hero avatars.
+ */
+const LazyMascotAvatar = lazy(() =>
+  import("@/components/mascot-avatar").then((m) => ({ default: m.MascotAvatar })),
+);
+
+/**
+ * The mascot tile that rests on a settled frame and reacts once on hover — every
+ * mascot tile that is not `animate="loop"`. Same chunk as `MascotAvatar` (it
+ * imports it), so it costs nothing extra on the wire.
+ */
+const LazyPoseMascot = lazy(() =>
+  import("@/components/mascot-pose").then((m) => ({ default: m.PoseMascot })),
+);
 
 interface Props {
   name: string;
@@ -30,6 +58,44 @@ interface Props {
    * falls back to the mascot hashed from that.
    */
   avatar?: string;
+  /**
+   * The mascot's chosen costume and colors — from the roster read
+   * (`TeamMember`/`TeamMemberDto`), the same values `AgentDetailDto` carries, so
+   * a teammate looks the same in a chat gutter as on its own profile sheet.
+   * Meaningful only when `avatar` is `"mascot:animated"`; ignored otherwise.
+   * Undefined means the file's own default costume/color.
+   */
+  mascotCostume?: string;
+  /** See {@link mascotCostume}. */
+  mascotSkinColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotHandColor?: string;
+  /**
+   * `"static"` holds the mascot on one pose; anything else (including
+   * undefined) is the file's own default, `"animated"`. See
+   * `MascotAvatar`'s own `mode` prop for what each does.
+   */
+  mascotMode?: string;
+  /**
+   * When a mascot animates on this surface (`MascotTrigger`, `lib/mascot-pose.ts`).
+   * Defaults to `"hover"`: a settled frame that plays once when the enclosing
+   * row is hovered or focused, and no live canvas at rest — right for the
+   * sidebar, chat header, message rows, member lists and the like, where a
+   * looping mascot would blank a third of the time and animate in lockstep.
+   * `"loop"` keeps a live instance playing; `"none"` is the settled frame only.
+   * A static teammate and `prefers-reduced-motion` are always `"none"`. Ignored
+   * for an avatar that is not a mascot. The hero surfaces mount `MascotAvatar`
+   * directly, which is the loop.
+   */
+  animate?: MascotTrigger;
+  /**
+   * This teammate has a turn open right now — passed by the rows that exist
+   * exactly while one does (the live receipt, the working row, the typing row).
+   * A mascot bobs and wears its replying costume for as long as it is true; it
+   * composes with {@link animate}, so `"none"`, a static teammate and reduced
+   * motion never reply. Ignored for an avatar that is not a mascot.
+   */
+  replying?: boolean;
   className?: string;
   /**
    * Forwarded to the tile so a spec can name one avatar among several on a page.
@@ -55,6 +121,12 @@ export function TeammateAvatar({
   company,
   markOnly,
   avatar,
+  mascotCostume,
+  mascotSkinColor,
+  mascotHandColor,
+  mascotMode,
+  animate = DEFAULT_MASCOT_TRIGGER,
+  replying,
   className,
   "data-testid": testId,
 }: Props) {
@@ -91,7 +163,21 @@ export function TeammateAvatar({
     );
   }
 
-  return <AvatarTile name={name} tone={tone} avatar={avatar} className={className} testId={testId} />;
+  return (
+    <AvatarTile
+      name={name}
+      tone={tone}
+      avatar={avatar}
+      mascotCostume={mascotCostume}
+      mascotSkinColor={mascotSkinColor}
+      mascotHandColor={mascotHandColor}
+      mascotMode={mascotMode}
+      animate={animate}
+      replying={replying}
+      className={className}
+      testId={testId}
+    />
+  );
 }
 
 /**
@@ -106,21 +192,39 @@ function AvatarTile({
   name,
   tone,
   avatar,
+  mascotCostume,
+  mascotSkinColor,
+  mascotHandColor,
+  mascotMode,
+  animate,
+  replying,
   className,
   testId,
 }: {
   name: string;
   tone?: string;
   avatar?: string;
+  mascotCostume?: string;
+  mascotSkinColor?: string;
+  mascotHandColor?: string;
+  mascotMode?: string;
+  animate: MascotTrigger;
+  replying?: boolean;
   className?: string;
   testId?: string;
 }) {
   const ref = avatar ?? avatarFor(name);
+  const mascot = isMascotRef(ref);
+  // `useAvatarSrc` is still called unconditionally for a mascot reference —
+  // hooks cannot sit behind a branch — but it is cheap: `staticAvatarSrc`
+  // returns `null` for `mascot:` on purpose (`lib/avatar.ts`), so this never
+  // fetches anything for one.
   const src = useAvatarSrc(ref);
 
-  // The tone tile stays underneath the image on purpose: it is what shows if
-  // the avatar 404s or has not loaded yet, so the gutter never collapses to a
-  // blank square mid-scroll.
+  // The tone tile stays underneath the image (or the mascot) on purpose: it
+  // is what shows if the avatar 404s, has not loaded yet, or — for a mascot —
+  // while its canvas is still loading or the tile is far off-screen
+  // (`MascotTile` below).
   return (
     <span
       className={cn(
@@ -132,19 +236,138 @@ function AvatarTile({
       data-testid={testId}
     >
       <span className="absolute inset-0 flex items-center justify-center">{initials(name)}</span>
-      {/* Nothing is drawn until there is something to draw. An uploaded face is
-          fetched through the authenticated client, so its `src` arrives a tick
-          late — rendering an `img` with no source in the meantime would paint
-          the browser's broken-image glyph over the initials this tile is showing
-          precisely so that the gap is never empty. */}
-      {src && (
-        <img
-          src={src}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          className="relative size-full object-cover"
+      {mascot ? (
+        <MascotTile
+          costume={mascotCostume}
+          skinColor={mascotSkinColor}
+          handColor={mascotHandColor}
+          mode={mascotMode}
+          animate={animate}
+          replying={replying}
+          className="absolute inset-0 rounded-none"
         />
+      ) : (
+        // Nothing is drawn until there is something to draw. An uploaded face
+        // is fetched through the authenticated client, so its `src` arrives a
+        // tick late — rendering an `img` with no source in the meantime would
+        // paint the browser's broken-image glyph over the initials this tile
+        // is showing precisely so that the gap is never empty.
+        src && (
+          <img
+            src={src}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="relative size-full object-cover"
+          />
+        )
+      )}
+    </span>
+  );
+}
+
+/**
+ * How far past the viewport edge a mascot tile still holds what it draws with,
+ * and how long after leaving that range it lets go.
+ *
+ * A live (`animate="loop"`) tile is one Rive instance (artboard + state machine
+ * + render loop); a settled-frame tile holds a frame subscription and, on a
+ * cold look, a slot in the capture queue. A long transcript has a tile per
+ * message, so the count that matters is "how many are near the screen", not
+ * "how many exist" — a tile that has been out of range for a second or two is
+ * unmounted and its instance or subscription freed, and remounts (from the
+ * shared parsed file and the frame cache, so cheaply) when it comes back. The
+ * grace period keeps a tile that is scrolled just past the edge and back from
+ * being torn down and rebuilt on every wobble.
+ */
+const MASCOT_MARGIN_PX = 300;
+const MASCOT_RELEASE_MS = 1500;
+
+/**
+ * Whether the element behind the returned ref is near the viewport.
+ *
+ * `IntersectionObserver` measures against every clipping ancestor, so a row
+ * scrolled out of the transcript's own scroller is "far" even while it is
+ * inside the window's bounds. Without the API (jsdom) everything counts as
+ * near, which is what a unit test rendering one tile wants.
+ */
+function useNearViewport() {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setNear(true);
+      return;
+    }
+    let release: ReturnType<typeof setTimeout> | undefined;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        clearTimeout(release);
+        if (entry.isIntersecting) setNear(true);
+        else release = setTimeout(() => setNear(false), MASCOT_RELEASE_MS);
+      },
+      { rootMargin: `${MASCOT_MARGIN_PX}px` },
+    );
+    observer.observe(el);
+    return () => {
+      clearTimeout(release);
+      observer.disconnect();
+    };
+  }, []);
+  return [ref, near] as const;
+}
+
+/**
+ * The live mascot for one tile — the same component, with the same look, that
+ * every hero surface mounts. Fills its parent (`absolute inset-0` from the
+ * caller); until its canvas has loaded (or while the tile is far off-screen)
+ * it paints nothing, leaving `AvatarTile`'s initials span as the only thing on
+ * screen — the same "never blank" contract its `<img>` branch keeps.
+ */
+function MascotTile({
+  costume,
+  skinColor,
+  handColor,
+  mode,
+  animate,
+  replying,
+  className,
+}: {
+  costume?: string;
+  skinColor?: string;
+  handColor?: string;
+  mode?: string;
+  animate: MascotTrigger;
+  replying?: boolean;
+  className?: string;
+}) {
+  const [ref, near] = useNearViewport();
+  return (
+    <span ref={ref} className={cn("block", className)}>
+      {near && (
+        <Suspense fallback={null}>
+          {animate === "loop" ? (
+            <LazyMascotAvatar
+              costume={costume}
+              skinColor={skinColor}
+              handColor={handColor}
+              mode={mode}
+              state={replying ? "replying" : "idle"}
+              className="size-full rounded-none"
+            />
+          ) : (
+            <LazyPoseMascot
+              animate={animate}
+              replying={replying}
+              costume={costume}
+              skinColor={skinColor}
+              handColor={handColor}
+              mode={mode}
+              className="size-full rounded-none"
+            />
+          )}
+        </Suspense>
       )}
     </span>
   );

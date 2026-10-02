@@ -263,6 +263,10 @@ async fn the_host_states_which_fields_are_editable() {
             "skills",
             "instructions",
             "avatar",
+            "mascotMode",
+            "mascotCostume",
+            "mascotSkinColor",
+            "mascotHandColor",
             "model",
             "harness",
             "provider"

@@ -10,24 +10,27 @@ when somebody **chooses**.
 
 ## The grammar
 
-A chosen face is stored as one short string in exactly one of two forms:
+A chosen face is stored as one short string in exactly one of three forms:
 
 | Form | Means |
 |---|---|
 | `tiny:<flavour>` | one of the eleven shipped mascots — a flavour of tiny |
 | `blob:<nodeId>` | a custom image somebody uploaded, held as a binary workspace node |
+| `mascot:<kind>` | one of the shipped animated mascots — a curated Rive character, never uploaded |
 
-Absent is a **third state and the default**: *nobody has chosen*. It is
-deliberately distinct from either stored form, because "put the default face
-back" has to be expressible and neither `tiny:` nor an empty string can express
-it. Every read skips the key rather than defaulting it, and every write treats
-`null` — and a blanked input, which is the same intent typed — as the reset.
+Absent is a **fourth state and the default**: *nobody has chosen*. It is
+deliberately distinct from every stored form, because "put the default face
+back" has to be expressible and none of the stored forms nor an empty string
+can express it. Every read skips the key rather than defaulting it, and every
+write treats `null` — and a blanked input, which is the same intent typed — as
+the reset.
 
 The flavour list lives in `src/company/avatar.rs` (`TINY_FLAVOURS`) and is
 mirrored in `frontend/src/lib/avatar.ts`. They are kept in step by
 `frontend/test/unit/avatar-reference.test.ts`, which reads the Rust source: a
 flavour one side accepts and the other has no file for renders as a broken image
-on every surface at once, and nothing else in the build would notice.
+on every surface at once, and nothing else in the build would notice. The
+animated mascot kinds (`MASCOT_KINDS`) are kept in step the same way.
 
 ### Why the grammar is closed
 
@@ -40,13 +43,79 @@ behalf of whoever wrote it. `javascript:` is script injection.
 reports who looked at the roster and when. Either outlives the account that set
 it.
 
-Both accepted forms name something **this host already holds**, so rendering one
-reaches nothing the viewer's session did not already reach.
+Every accepted form names either bytes held by this host or an asset shipped
+with the console. Only `blob:` points to host-held bytes; `tiny:` and `mascot:`
+name entries from closed sets of console-shipped assets. Rendering any form
+reaches no remote URL supplied by the person who chose the avatar.
+
+### Why `mascot:` is curated, not uploaded
+
+A `.riv` file (the format behind the animated mascots) is a programmable,
+document-like format with its own runtime, not a raster image `sniff_image` can
+validate by signature and dimensions — the same class of thing SVG is refused
+for below. Accepting one as an arbitrary `blob:`-style upload would reopen
+exactly that risk inside a file format nobody sniffs the internals of. So
+`mascot:<kind>` is validated the same way `tiny:<flavour>` is: a closed,
+compile-time list (`MASCOT_KINDS`) naming a `.riv` file shipped with the
+console under `frontend/public/avatars/`, never something a member's own bytes
+could become.
 
 The same reasoning is why a `blob:` reference is validated against its
 *referent*, not just its shape (`avatar::resolve`): any member can type a node
 id, and one pointed at a 60 MB PDF would make every face on the page try to
 decode a PDF as an image, for everyone, on every load.
+
+### Mascot appearance: mode, costume and color
+
+`mascot:animated` stays the simple, closed form above — it names *which
+character*, and v1 ships exactly one. A wearer's four further choices (does
+the canvas play at all, which costume, which skin color, which hand color)
+are **not** encoded into that string. They are separate per-agent override
+fields (`AgentOverride::mascot_mode`/`mascot_costume`/`mascot_skin_color`/
+`mascot_hand_color`), the same closed-list, absent-means-default pattern
+every other field on that struct already uses, validated by
+`src/company/mascot.rs` and mirrored in `frontend/src/lib/avatar.ts`:
+
+| Field | Closed list | Default when unset |
+|---|---|---|
+| `mascot_mode` | `MASCOT_MODES` — `"animated"` \| `"static"` | `"animated"` |
+| `mascot_costume` | `MASCOT_COSTUMES` — nine ids | `"cap"` |
+| `mascot_skin_color` | `MASCOT_SKIN_COLORS` — six ids | `"default"` |
+| `mascot_hand_color` | `MASCOT_HAND_COLORS` — six ids | `"default"` |
+
+The four fields are read on **both** `GET …/team/{agent_id}` and the roster list
+`GET …/team` (absent when unset), so every surface built from the roster — the
+chat header, DM sidebar, members pane, org chart, message rows — draws a
+teammate's real look rather than the file's default.
+
+**Static** holds one pose: the mascot plays just long enough to reach a settled,
+clearly-visible frame, that exact frame is kept as an image, and the live
+instance is released. It is not "pause the runtime": the file is not a set of
+stills — each costume plays a rise-in on load and (all but two) an idle loop that
+ducks the mascot out of frame about every six seconds, so no arbitrary moment is
+"the resting frame" — and a paused instance redraws differently from a playing
+one. `prefers-reduced-motion` gets the same treatment. Hover and "replying"
+reactivity is not attached in static mode. **Animated** is a live canvas at
+the hero surfaces — looping, reactive to hover, landing on the chosen costume as
+its baseline — and, on every smaller tile, a settled frame that plays a one-shot
+reaction when its row is hovered (a per-surface `animate` trigger: `loop`,
+`hover`, `none`; small tiles default to `hover`, so they never blink out with the
+file's idle duck-out). While its teammate has a turn in progress — the chat's live
+receipt, working and typing rows, and not a queued or stalled one — a small tile
+also bobs and wears the headband costume. `hover`/`replying` stay the two fixed `mascotAnimationNumber` values
+that reactivity already used before a costume choice existed, rather than
+following the chosen costume, so a chosen "look" reads as one outfit rather than
+one outfit at rest and a different one on hover. See
+`docs/issue/mascot-profile-avatar/rendering-strategy.md` for how a screenful of
+them is kept cheap.
+
+The nine costume ids and their `mascotAnimationNumber` values were not
+guessed from the `.riv` file's internal clip names (a typo'd, pre-runtime
+string-table read got one wrong — see `crate::company::mascot`'s module
+docs) — they were watched play, live, screenshot by screenshot. Costume `4`
+is deliberately excluded from the nine: it renders a different resting frame
+depending on which costume the state machine was previously on, so it is not
+a stable, addressable choice the way the other nine are.
 
 ## Uploads
 
@@ -83,7 +152,31 @@ one would reintroduce, inside a file, precisely what refusing URLs keeps out.
 | Subject | Field | Written by |
 |---|---|---|
 | A teammate | `AgentOverride::avatar` on the company record | `PATCH …/team/{agent_id}`, `POST …/team` |
+| A teammate's mascot mode | `AgentOverride::mascot_mode` | `PATCH …/team/{agent_id}`, `POST …/team` |
+| A teammate's mascot costume | `AgentOverride::mascot_costume` | `PATCH …/team/{agent_id}`, `POST …/team` |
+| A teammate's mascot skin color | `AgentOverride::mascot_skin_color` | `PATCH …/team/{agent_id}`, `POST …/team` |
+| A teammate's mascot hand color | `AgentOverride::mascot_hand_color` | `PATCH …/team/{agent_id}`, `POST …/team` |
 | A person | `UserRecord::avatar` | `PATCH …/auth/me` |
+
+### Born wearing it
+
+`POST …/team` takes the same four mascot fields as `PATCH …/team/{agent_id}`
+(`mascotMode`, `mascotCostume`, `mascotSkinColor`, `mascotHandColor`), so a
+teammate is created already wearing the look chosen in the Add-agent dialog —
+the dialog reuses the picker's mascot panel. Validation is the one
+`company::mascot::parse_choices`, over the same closed lists as the `PATCH`
+route, and it runs **before** anything is written: a bad value is a `400`
+naming the accepted set ("Pick one of: …") and creates nobody. A field that is
+absent, `null` or blank means "the file's own default" and stores nothing. The
+response echoes what was stored.
+
+The console sends the look on the create request and, for a host that predates
+the fields (unknown keys are ignored, so it answers without echoing them),
+writes only the fields the response did not echo with a follow-up `PATCH`
+(`frontend/src/lib/new-member-look.ts`, shared by the roster, the chat pane and
+the org chart). Those last two used to drop the face on the floor; only the
+roster wrote it. A console with no host to write to keeps the look on the local
+row (`newMember` in `lib/team.ts`) for as long as that row lives.
 
 A teammate's face rides on the **override** row rather than on `OverlayAgent`,
 so one field answers for both kinds of teammate: an override may name a

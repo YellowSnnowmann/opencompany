@@ -208,7 +208,7 @@ chart's desk level, since no desk can name a parent desk. See
 | `useBottomAnchor.ts` | The four rules that keep a transcript on its newest row — arrival, growth, scroller resize, content resize — plus whether it is still parked there. Used by both panes above. |
 | `JumpToLatest.tsx` | The control offered while the reader has scrolled away; a sibling of the scroller, never a child. |
 | `MembersPane.tsx` | Who is in this channel, then the rest of the roster. |
-| `AddMemberDialog.tsx` | Define a teammate. |
+| `AddMemberDialog.tsx` | Define a teammate: name, post, and a face — including a mascot's mode, costume and colors, sent on the create request (`lib/new-member-look.ts`). |
 
 `../RoomView.tsx` owns the state and composes them.
 
