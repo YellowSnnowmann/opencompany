@@ -380,3 +380,76 @@ async fn a_seat_turn_publishes_into_its_own_episode() {
         "the seat is told which file could not be filed: {told:?}"
     );
 }
+
+fn seat_queues(cards: bool) -> (crate::harness::orchestrator::DelegationQueue, SeatQueues) {
+    let delegations = crate::harness::orchestrator::DelegationQueue::default();
+    let queues = SeatQueues {
+        approvals: ApprovalRequestQueue::default(),
+        publishes: PendingPublishQueue::default(),
+        delegations: delegations.clone(),
+        cards: cards.then(|| Arc::new(super::super::seat_cards::EpisodeCards::default())),
+    };
+    (delegations, queues)
+}
+
+fn card(title: &str) -> crate::harness::orchestrator::Delegation {
+    crate::harness::orchestrator::Delegation::SpawnTask {
+        title: title.to_owned(),
+        note: None,
+        assignee: None,
+    }
+}
+
+async fn stage(
+    queue: &crate::harness::orchestrator::DelegationQueue,
+    claims: &mut SeatClaims,
+) -> crate::harness::orchestrator::Staged {
+    claims
+        .run(async {
+            queue.push_within_cap(
+                card("Draft the post"),
+                crate::harness::orchestrator::MAX_DELEGATIONS_PER_TURN,
+                usize::MAX,
+            )
+        })
+        .await
+}
+
+#[tokio::test]
+async fn a_seat_turn_queues_its_cards_in_its_own_bucket_and_settles_them() {
+    let (queue, queues) = seat_queues(true);
+    let pooled = queue.claim();
+    let mut claims = queues.claim("ep1", "one", "engineering", None, false);
+    assert_eq!(
+        stage(&queue, &mut claims).await,
+        crate::harness::orchestrator::Staged::Queued
+    );
+    assert!(
+        queue
+            .drain(crate::harness::orchestrator::MAX_DELEGATIONS_PER_TURN)
+            .is_empty(),
+        "a pooled turn's drain never sees a seat's card"
+    );
+    let settled = claims.settle();
+    assert_eq!(settled.delegations, vec![card("Draft the post")]);
+    drop(pooled);
+}
+
+#[tokio::test]
+async fn a_seat_on_a_question_or_without_a_board_queues_nothing() {
+    use crate::harness::orchestrator::{NoDrainReason, Staged};
+    let (queue, queues) = seat_queues(true);
+    let mut asked = queues.claim("ep1", "one", "engineering", None, true);
+    assert_eq!(
+        stage(&queue, &mut asked).await,
+        Staged::NoDrain(NoDrainReason::Triage)
+    );
+    let (queue, queues) = seat_queues(false);
+    let _pooled = queue.claim();
+    let mut unwired = queues.claim("ep1", "one", "engineering", None, false);
+    assert_eq!(
+        stage(&queue, &mut unwired).await,
+        Staged::NoDrain(NoDrainReason::Unwired),
+        "a full pooled claim beside it must not take the seat's card"
+    );
+}

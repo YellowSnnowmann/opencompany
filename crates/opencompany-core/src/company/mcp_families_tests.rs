@@ -8,6 +8,10 @@
 use super::*;
 use crate::company::mcp::{AuthMaterial, McpSource};
 
+/// The teammate every existing case renders for. None of them writes a
+/// per-agent rule, so each must read exactly as it did before the lens existed.
+const AGENT: &str = "engineer";
+
 fn decl(name: &str, endpoint: &str) -> McpServerDecl {
     McpServerDecl {
         name: name.to_string(),
@@ -40,7 +44,7 @@ fn install(server_id: &str, display_name: &str, endpoint: Option<&str>) -> Regis
 
 #[test]
 fn an_agent_reaching_no_mcp_server_is_told_nothing() {
-    assert_eq!(server_family_brief(&[], &[], &grants(&["*"])), "");
+    assert_eq!(server_family_brief(&[], &[], &grants(&["*"]), AGENT), "");
 }
 
 #[test]
@@ -49,6 +53,7 @@ fn a_declared_server_names_the_call_tool_and_not_the_registry_one() {
         &[decl("notion", "https://notion.example/mcp")],
         &[],
         &grants(&["mcp:notion"]),
+        AGENT,
     );
     assert!(brief.contains("`notion`"), "{brief}");
     assert!(brief.contains("mcp_call_tool"), "{brief}");
@@ -69,6 +74,7 @@ fn a_directory_install_names_the_registry_tool_and_its_server_id() {
             Some("https://exa.example/mcp"),
         )],
         &grants(&["mcp_registry"]),
+        AGENT,
     );
     assert!(brief.contains("Exa Search"), "{brief}");
     assert!(brief.contains("exa-7f3"), "{brief}");
@@ -89,6 +95,7 @@ fn two_different_servers_get_a_line_each() {
             Some("https://exa.example/mcp"),
         )],
         &grants(&["mcp:notion", "mcp_registry"]),
+        AGENT,
     );
     assert_eq!(
         brief.lines().filter(|l| l.starts_with("- ")).count(),
@@ -110,6 +117,7 @@ fn one_server_reached_two_ways_is_one_line_naming_both() {
             Some("https://gh.example:443/mcp/"),
         )],
         &grants(&["mcp:github", "mcp_registry"]),
+        AGENT,
     );
     assert_eq!(
         brief.lines().filter(|l| l.starts_with("- ")).count(),
@@ -131,6 +139,7 @@ fn a_stdio_install_has_no_address_and_so_reconciles_with_nothing() {
         &[decl("github", "https://gh.example/mcp")],
         &[install("local-1", "Filesystem", None)],
         &grants(&["mcp:github", "mcp_registry"]),
+        AGENT,
     );
     assert_eq!(
         brief.lines().filter(|l| l.starts_with("- ")).count(),
@@ -148,6 +157,7 @@ fn a_grant_reaching_one_declared_server_does_not_name_the_other() {
         ],
         &[],
         &grants(&["mcp:notion"]),
+        AGENT,
     );
     assert!(brief.contains("`notion`"), "{brief}");
     assert!(!brief.contains("stripe"), "{brief}");
@@ -166,6 +176,7 @@ fn a_scoped_registry_grant_does_not_name_a_second_install() {
             ),
         ],
         &grants(&["mcp_registry.exa-7f3"]),
+        AGENT,
     );
     assert!(brief.contains("exa-7f3"), "{brief}");
     assert!(!brief.contains("brave-9a1"), "{brief}");
@@ -178,7 +189,12 @@ fn a_disabled_server_reaches_nobody_and_is_named_to_nobody() {
     let mut shelved = install("exa-7f3", "Exa Search", Some("https://exa.example/mcp"));
     shelved.enabled = false;
     assert_eq!(
-        server_family_brief(&[off], &[shelved], &grants(&["mcp:notion", "mcp_registry"])),
+        server_family_brief(
+            &[off],
+            &[shelved],
+            &grants(&["mcp:notion", "mcp_registry"]),
+            AGENT
+        ),
         ""
     );
 }
@@ -194,7 +210,7 @@ fn a_bulk_install_is_capped_and_says_how_many_it_left_out() {
             )
         })
         .collect();
-    let brief = server_family_brief(&[], &installs, &grants(&["mcp_registry"]));
+    let brief = server_family_brief(&[], &installs, &grants(&["mcp_registry"]), AGENT);
     assert_eq!(
         brief.lines().filter(|l| l.starts_with("- `")).count(),
         CAP,
@@ -220,7 +236,7 @@ fn a_declared_list_is_never_truncated_because_no_tool_can_list_it() {
     let decls: Vec<McpServerDecl> = (0..CAP + 2)
         .map(|n| decl(&format!("server-{n}"), &format!("https://n{n}.example/mcp")))
         .collect();
-    let brief = server_family_brief(&decls, &[], &grants(&["mcp:*"]));
+    let brief = server_family_brief(&decls, &[], &grants(&["mcp:*"]), AGENT);
     assert_eq!(
         brief.lines().filter(|l| l.starts_with("- `")).count(),
         CAP + 2,
@@ -246,7 +262,12 @@ fn installs_absorb_the_cap_and_the_overflow_points_at_the_install_listing() {
             )
         })
         .collect();
-    let brief = server_family_brief(&decls, &installs, &grants(&["mcp:*", "mcp_registry"]));
+    let brief = server_family_brief(
+        &decls,
+        &installs,
+        &grants(&["mcp:*", "mcp_registry"]),
+        AGENT,
+    );
     assert_eq!(
         brief.lines().filter(|l| l.starts_with("- `")).count(),
         CAP,
@@ -280,6 +301,7 @@ fn a_name_that_would_break_out_of_its_line_is_left_to_live_enumeration() {
         ],
         &[],
         &grants(&["mcp:*"]),
+        AGENT,
     );
     assert!(brief.contains("`notion`"), "{brief}");
     assert!(
@@ -305,6 +327,7 @@ fn a_directory_label_or_id_carrying_a_backtick_is_not_rendered() {
             install("id-`x`", "Bad `Server`", Some("https://bad.example/mcp")),
         ],
         &grants(&["mcp_registry"]),
+        AGENT,
     );
     assert!(brief.contains("\"server_id\": \"good-id\""), "{brief}");
     assert!(
@@ -322,6 +345,7 @@ fn the_brief_never_claims_to_be_every_mcp_server_an_agent_has() {
         &[decl("notion", "https://notion.example/mcp")],
         &[],
         &grants(&["mcp:notion"]),
+        AGENT,
     );
     assert!(
         brief.contains("Other MCP servers may be attached to you as well"),
@@ -344,6 +368,7 @@ fn a_tenant_bearing_query_is_not_evidence_that_two_rows_are_one_server() {
             Some("https://gw.example/mcp?tenant=beta"),
         )],
         &grants(&["mcp:*", "mcp_registry"]),
+        AGENT,
     );
     assert!(
         !brief.contains("the same server"),
@@ -367,6 +392,7 @@ fn an_address_claimed_by_two_installs_pairs_with_neither() {
             install("id-b", "Server B", Some("https://notion.example/mcp")),
         ],
         &grants(&["mcp:*", "mcp_registry"]),
+        AGENT,
     );
     assert!(!brief.contains("the same server"), "{brief}");
     assert_eq!(
@@ -388,6 +414,7 @@ fn a_plain_shared_address_still_reconciles_into_one_line() {
             Some("https://notion.example/mcp/"),
         )],
         &grants(&["mcp:*", "mcp_registry"]),
+        AGENT,
     );
     assert!(brief.contains("the same server"), "{brief}");
     assert_eq!(
@@ -413,6 +440,7 @@ fn a_quote_or_backslash_in_directory_metadata_is_not_rendered() {
             install("back\\slash", "Slashed", Some("https://slash.example/mcp")),
         ],
         &grants(&["mcp_registry"]),
+        AGENT,
     );
     assert!(brief.contains("\"server_id\": \"good-id\""), "{brief}");
     assert!(!brief.contains("other"), "{brief}");
@@ -430,6 +458,7 @@ fn a_reachable_server_nobody_can_name_still_reports_an_overflow() {
         &[decl("bad\u{0007}name", "https://bad.example/mcp")],
         &[],
         &grants(&["mcp:*"]),
+        AGENT,
     );
     assert!(!brief.is_empty(), "the count must not vanish with the name");
     assert!(brief.contains("…and 1 more"), "{brief}");

@@ -142,6 +142,7 @@ async fn handed_task_briefing_carries_column_and_attempt_status() {
     );
 
     let card = |id: &str, title: &str, column: &str| TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored(title),
         note: None,
@@ -260,6 +261,7 @@ async fn handed_task_briefing_marks_attempt_status_unavailable_on_a_run_history_
         .upsert(
             rt.id(),
             &TaskRecord {
+                opened_by: None,
                 id: "t-paused".to_string(),
                 title: TaskTitle::authored("Investigate the flaky nightly job"),
                 note: None,
@@ -342,6 +344,7 @@ async fn handed_task_briefing_bounds_attempt_lookups_regardless_of_open_card_cou
             .upsert(
                 rt.id(),
                 &TaskRecord {
+                    opened_by: None,
                     id: format!("t-{n}"),
                     title: TaskTitle::authored(&format!("Card {n}")),
                     note: None,

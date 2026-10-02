@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BOTTOM_SLACK_PX, isAtBottom } from "@/views/room/bottomAnchor";
+import { BOTTOM_SLACK_PX, isAtBottom, readsAsFollowing } from "@/views/room/bottomAnchor";
 
 /**
  * The predicate every anchoring rule is gated on, and the negation of the
@@ -41,5 +41,30 @@ describe("isAtBottom", () => {
 
   it("is true for a box with no height yet, before any content has arrived", () => {
     expect(isAtBottom({ scrollHeight: 0, scrollTop: 0, clientHeight: 0 })).toBe(true);
+  });
+});
+
+describe("readsAsFollowing", () => {
+  // A 400px box over 2000px of transcript: the bottom is scrollTop 1600.
+  const at = (scrollTop: number) => ({ scrollHeight: 2000, scrollTop, clientHeight: 400 });
+
+  it("follows whenever the view is at the bottom, glide or not", () => {
+    expect(readsAsFollowing(at(1600), { gliding: false, previousTop: 1700 })).toBe(true);
+    expect(readsAsFollowing(at(1600), { gliding: true, previousTop: 0 })).toBe(true);
+  });
+
+  it("keeps following through the pane's own glide, short of the bottom", () => {
+    // The glide towards the question just sent, with the reply landing mid-way:
+    // every event on the way down is short of the (moving) bottom.
+    expect(readsAsFollowing(at(900), { gliding: true, previousTop: 800 })).toBe(true);
+    expect(readsAsFollowing(at(900), { gliding: true, previousTop: 900 })).toBe(true);
+  });
+
+  it("reads the reader scrolling up during a glide as leaving", () => {
+    expect(readsAsFollowing(at(700), { gliding: true, previousTop: 800 })).toBe(false);
+  });
+
+  it("reads any stop short of the bottom as leaving when no glide is under way", () => {
+    expect(readsAsFollowing(at(900), { gliding: false, previousTop: 800 })).toBe(false);
   });
 });

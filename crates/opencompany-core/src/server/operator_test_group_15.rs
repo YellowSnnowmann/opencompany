@@ -499,6 +499,7 @@ async fn review_card_settles_the_clicked_task_not_the_desks_latest() {
             .upsert(
                 runtime.id(),
                 &crate::ports::tasks::TaskRecord {
+                    opened_by: None,
                     id: task_id.to_string(),
                     title: TaskTitle::authored("Ship it"),
                     note: None,
@@ -576,6 +577,7 @@ async fn review_card_rejects_a_task_id_not_in_review_on_this_desk() {
         .upsert(
             runtime.id(),
             &crate::ports::tasks::TaskRecord {
+                opened_by: None,
                 id: "t-review".to_string(),
                 title: TaskTitle::authored("Ship it"),
                 note: None,
@@ -638,6 +640,7 @@ async fn review_card_revise_re_enters_in_progress_with_the_note() {
         .upsert(
             runtime.id(),
             &crate::ports::tasks::TaskRecord {
+                opened_by: None,
                 id: "t-1".to_string(),
                 title: TaskTitle::authored("Ship it"),
                 note: Some("[writer] first draft".to_string()),

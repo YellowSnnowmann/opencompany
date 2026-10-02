@@ -29,6 +29,7 @@ fn a_confined_turns_budget_pause_is_a_system_notice_not_a_copilot_reply() {
             agent: confine::CONFINED_AGENT_ID.to_string(),
             summary: "Add credits to your account, then resend your message.".to_string(),
         }),
+        ceiling_paused: None,
     };
 
     let bubble = confined_turn_bubble(outcome);
@@ -327,5 +328,63 @@ async fn record_conversation_publishes_rejects_an_empty_batch() {
             .expect("list")
             .is_empty(),
         "no card must be minted for an empty batch"
+    );
+}
+
+/// Issue #1680, PR #2554 review — **the regression that review turned up.**
+///
+/// The direct sibling of the budget test above, and it failed before the fix
+/// for the identical reason. `confined_turn_bubble` matched only
+/// `budget_paused`, so a confined workflow-copilot turn that hit the wall-clock
+/// ceiling fell through to `confined_bubble` and was attributed to
+/// `CONFINED_AGENT_ID` — publishing `wall_clock_ceiling_message`, which is
+/// host-authored runtime copy, as the copilot's own answer. That is exactly the
+/// #885/#966 author-vs-channel conflation this file exists to prevent, just via
+/// the fourth limit instead of the third.
+#[test]
+fn a_confined_turns_ceiling_pause_is_a_system_notice_not_a_copilot_reply() {
+    let outcome = crate::harness::TurnOutcome {
+        // What `classify_turn`'s `AttemptOutcome::CeilingPaused` arm really
+        // leaves in `reply`: #1761's honest copy. Present here because that is
+        // precisely the string that must NOT end up under the copilot's name.
+        reply: "turn for copilot hit the harness's per-turn wall-clock ceiling after 10m 01s."
+            .to_string(),
+        steps: Vec::new(),
+        hit_iteration_cap: false,
+        abnormal_stop: None,
+        halted_for_spend: None,
+        budget_paused: None,
+        ceiling_paused: Some(crate::harness::CeilingPause {
+            agent: confine::CONFINED_AGENT_ID.to_string(),
+            elapsed: std::time::Duration::from_millis(601_000),
+            summary: "hit the per-turn wall-clock ceiling after 10m 01s".to_string(),
+        }),
+    };
+
+    let bubble = confined_turn_bubble(outcome);
+
+    assert_eq!(
+        bubble.agent.as_deref(),
+        Some(crate::ports::SYSTEM_AUTHOR),
+        "a ceiling pause is never something the copilot said: {:?}",
+        bubble.agent
+    );
+    assert_ne!(
+        bubble.agent.as_deref(),
+        Some(confine::CONFINED_AGENT_ID),
+        "the pre-fix defect: falling through to confined_bubble attributes runtime copy to \
+         the copilot itself"
+    );
+    assert!(
+        !bubble.text.to_ascii_lowercase().contains("continue"),
+        "and it must not invite a resume there is no checkpoint for: {}",
+        bubble.text
+    );
+    // Not the credits notice, whose prefix is what the console keys its
+    // "Add credits & resend" button off — there is nothing to redeem here.
+    assert!(
+        !bubble.text.starts_with(BUDGET_PAUSE_NOTICE_PREFIX),
+        "a ceiling pause must not borrow the redeemable budget prefix: {}",
+        bubble.text
     );
 }

@@ -134,6 +134,7 @@ fn overlay_agent_to_manifest_carries_the_tool_grant() {
         role: "Researcher".into(),
         description: None,
         tools: Some(vec!["docs.*".into(), "payment.send".into()]),
+        skills: None,
         model: None,
         harness: None,
     };
@@ -158,6 +159,7 @@ fn overlay_agent_to_manifest_carries_the_tool_grant() {
         role: "Generalist".into(),
         description: None,
         tools: None,
+        skills: None,
         model: None,
         harness: None,
     };
@@ -183,6 +185,7 @@ fn overlay_agent_to_manifest_carries_the_display_name() {
         role: "Content Writer".into(),
         description: None,
         tools: None,
+        skills: None,
         model: None,
         harness: None,
     };
@@ -210,6 +213,7 @@ fn overlay_agent_to_manifest_carries_the_provider() {
         role: "Web search".into(),
         description: None,
         tools: None,
+        skills: None,
         model: Some("test-model-small".into()),
         harness: None,
     };
@@ -232,6 +236,7 @@ fn overlay_fingerprint_moves_on_a_tools_only_edit() {
             role: "r".into(),
             description: None,
             tools,
+            skills: None,
             model: None,
             harness: None,
         }]
@@ -273,6 +278,7 @@ fn overlay_fingerprint_moves_on_a_model_or_harness_change() {
             role: "r".into(),
             description: None,
             tools: None,
+            skills: None,
             model: model.map(str::to_string),
             harness: harness.map(str::to_string),
         }]
@@ -322,6 +328,7 @@ fn a_provider_edit_moves_the_overlay_and_override_fingerprints() {
             role: "r".into(),
             description: None,
             tools: None,
+            skills: None,
             model: Some("test-model-large".into()),
             harness: None,
         }]

@@ -69,6 +69,7 @@ fn assignee(id: &str) -> BlockerSenderSignals {
 
 fn card(id: &str, column: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Draft the launch note"),
         note: None,

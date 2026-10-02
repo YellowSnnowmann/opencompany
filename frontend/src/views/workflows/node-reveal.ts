@@ -36,7 +36,7 @@
 //   shrink the canvas — make the slot in-flow, as the rails are at `xl`. That
 //     is a reflow of everything rather than an animation of one thing, and
 //     `CanvasShell`'s arithmetic already rules it out below `xl`: two rails
-//     plus the app's 216px nav is most of a laptop window before the canvas
+//     plus the app's 240px nav is most of a laptop window before the canvas
 //     enters into it.
 //
 // A pan moves the least, keeps the operator's zoom, and what it pushes off the

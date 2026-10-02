@@ -146,6 +146,46 @@ pub fn eligible(desk_id: &str, reason: EpisodeReason, spoke: usize) -> bool {
         && matches!(reason, EpisodeReason::CompleteEpisode)
 }
 
+/// How many distinct seats recorded their part on the desk in this episode:
+/// the `spoke` that [`eligible`] takes.
+///
+/// # Why not the driver's `Report::settled`
+///
+/// That counts finished *assignments*, and the conductor seats every desk
+/// member as a participant -- a member the routing plan did not open with is
+/// entered already complete at the opening watermark. So a two-seat desk whose
+/// one routed seat answered settles 2, and a one-seat episode got a closing
+/// turn asking that seat to summarise itself, which `eligible` exists to
+/// refuse (and which six `hive_e2e` cases caught as an extra wave).
+///
+/// What counts is a `complete_episode` row on the desk -- a seat's recorded
+/// part, which is what [`PERSONA_NOTE`] tells the closer it is assembling.
+/// Not every desk row: the host's own notices (`system`: an operator's
+/// decision, a refused finish, a hand-off landing) are nobody's part, and a
+/// seat whose only desk row is a `broadcast` handed its work to someone else
+/// rather than recording any. An answer given inside an `ask` conversation
+/// lands on the pair's own chat and went back to the seat that asked, which
+/// already holds it.
+#[must_use]
+pub fn contributors(rows: &[crate::ports::types::StoredEvent], desk_id: &str) -> usize {
+    rows.iter()
+        .filter_map(|stored| match &stored.event {
+            crate::ports::types::CompanyEvent::AgentReply {
+                chat_id,
+                agent_id,
+                episode: Some(episode),
+                ..
+            } if chat_id == desk_id
+                && episode.kind == crate::ports::types::UtteranceKind::CompleteEpisode =>
+            {
+                Some(agent_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+}
+
 /// What Jev is asked, when it is asked who should close.
 ///
 /// Phrased as the desk's own next message rather than as a question about

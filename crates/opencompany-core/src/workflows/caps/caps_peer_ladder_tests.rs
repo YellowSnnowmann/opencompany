@@ -100,6 +100,7 @@ impl RunTurn for ConsultedPeerTurn {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 
@@ -121,6 +122,7 @@ impl RunTurn for ConsultedPeerTurn {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 }
@@ -478,6 +480,7 @@ async fn a_consultation_cannot_re_enter_the_recovery_ladder() {
                 abnormal_stop: None,
                 halted_for_spend: None,
                 budget_paused: None,
+                ceiling_paused: None,
             })
         }
 
@@ -499,6 +502,7 @@ async fn a_consultation_cannot_re_enter_the_recovery_ladder() {
                 abnormal_stop: None,
                 halted_for_spend: None,
                 budget_paused: None,
+                ceiling_paused: None,
             })
         }
     }

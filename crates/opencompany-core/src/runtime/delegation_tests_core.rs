@@ -1,4 +1,5 @@
 pub(super) use super::*;
+pub(super) use crate::ports::tasks::COLUMN_TODO;
 pub(super) use crate::ports::tasks::TaskTitle;
 
 pub(super) use std::collections::VecDeque;
@@ -58,6 +59,14 @@ pub(super) struct Turn {
     /// teammate's turn ran out of inference credits" and then asserts the
     /// pause survives the delegation folds, including the nested one.
     pub(super) budget_paused: Option<crate::harness::BudgetPause>,
+    /// The wall-clock ceiling pause this turn reports (issue #1680),
+    /// standing in for `classify_turn` recognising the vendored harness's
+    /// wall-clock leaf. Scripted for the same reason as the two fields above
+    /// — these fixtures run no model, and the real ceiling needs one that
+    /// works for ten minutes — so this is how a test scripts "this
+    /// teammate's turn ran out of time" and then asserts the pause survives
+    /// the delegation folds, including the nested one.
+    pub(super) ceiling_paused: Option<crate::harness::CeilingPause>,
 }
 
 impl Turn {
@@ -139,6 +148,20 @@ impl Turn {
             budget_paused: Some(crate::harness::BudgetPause {
                 agent: agent.to_string(),
                 summary: summary.to_string(),
+            }),
+            ..Self::default()
+        }
+    }
+
+    /// A turn that hit the harness's per-turn wall-clock ceiling (issue
+    /// #1680) — the sibling of [`budget_paused`](Self::budget_paused).
+    pub(super) fn ceiling_paused(reply: &str, agent: &str, elapsed_ms: u64) -> Self {
+        Self {
+            reply: reply.to_string(),
+            ceiling_paused: Some(crate::harness::CeilingPause {
+                agent: agent.to_string(),
+                elapsed: std::time::Duration::from_millis(elapsed_ms),
+                summary: format!("{agent} hit the per-turn wall-clock ceiling"),
             }),
             ..Self::default()
         }
@@ -361,6 +384,12 @@ impl ScriptedTurns {
             // a budget pause survives the DELEGATION folds, including the
             // nested one, exactly like a spend halt.
             budget_paused: turn.budget_paused,
+            // Issue #1680: scripted the same way and for the same reason —
+            // the real classification needs a model turn that works until
+            // the ceiling fires. What this fixture proves is that a ceiling
+            // pause survives the DELEGATION folds, including the nested one,
+            // exactly like a budget pause.
+            ceiling_paused: turn.ceiling_paused,
         }
     }
 }

@@ -646,6 +646,7 @@ async fn planning_first_clears_a_stale_bounce_chip_same_as_a_redispatch() {
     let runtime = std::sync::Arc::new(runtime);
 
     let card = TaskRecord {
+        opened_by: None,
         id: "card-1".to_string(),
         title: TaskTitle::authored("Draft the spec"),
         note: None,
@@ -724,6 +725,7 @@ async fn a_direct_move_to_done_clears_a_stale_bounce_chip() {
     let runtime = std::sync::Arc::new(runtime);
 
     let card = TaskRecord {
+        opened_by: None,
         id: "card-2".to_string(),
         title: TaskTitle::authored("Draft the spec"),
         note: None,

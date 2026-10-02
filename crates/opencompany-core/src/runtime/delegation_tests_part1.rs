@@ -514,6 +514,7 @@ async fn also_mentioned_wording_names_the_out_of_reach_teammate() {
 async fn an_operator_turn_approval_actually_lands_the_card() {
     let fx = Fixture::new();
     let card = TaskRecord {
+        opened_by: None,
         id: "card-1".to_string(),
         title: TaskTitle::authored("Draft the launch plan"),
         note: Some("[engineer] drafted".to_string()),
