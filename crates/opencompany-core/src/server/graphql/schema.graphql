@@ -69,7 +69,7 @@ type AgentRun {
 	usage: RunUsage!
 	"""
 	The settled step count.
-
+	
 	**Null while the attempt is live**, deliberately: `step_count` is written
 	by the settle, so returning the stored `0` for a running attempt would be
 	a lie that a client cannot detect. A live reader counts `steps` instead,
@@ -125,7 +125,7 @@ type Approval {
 	"""
 	Epoch-millis this approval default-denies if nobody decides it
 	(issue #971). `Float` for the same reason as `atMillis`.
-
+	
 	Carried here rather than left to the REST summary alone so the two
 	projections of one approval cannot drift into disagreeing about when it
 	dies — which is the sort of divergence a reader discovers by acting on
@@ -134,7 +134,7 @@ type Approval {
 	expiresAtMillis: Float
 	"""
 	Whether `amountUsd` was withheld from this reader by their role (#618).
-
+	
 	Carried for the same reason it is on the REST summary: a `null` amount
 	otherwise means "this effect involves no money", and a Member looking at
 	a withheld payment would read it as a free action.
@@ -142,7 +142,7 @@ type Approval {
 	contentsHidden: Boolean!
 	"""
 	The workflow run waiting on this approval, when one is (issue #880).
-
+	
 	Structural — a run id, nothing more — and it is what lets a reader join
 	a card on the Approvals page back to the run that opened it. Null for
 	every park with no workflow behind it (a chat turn, a scheduler tick, a
@@ -152,7 +152,7 @@ type Approval {
 	"""
 	Which workflow a parked `workflow.approve` gate is asking about
 	(issue #1418), when the effect is one.
-
+	
 	Carried for the same reason it is on the REST summary: it is the second
 	half of the run address, and it must survive role redaction or a Member
 	holding up a stalled workflow would see `workflow_run_id` and still have
@@ -200,7 +200,7 @@ type Chat {
 	The desk's message history, most-recent last. `before` is an opaque
 	EventLog cursor (a stringified sequence position); only messages before
 	it are returned.
-
+	
 	Filtering + projection is shared with the REST `GET .../chat/history`
 	route via [`chat_history::history_for_desk`] (issue #65) so the two
 	surfaces can never disagree about a desk's transcript.
@@ -227,7 +227,7 @@ type Company {
 	pendingApprovals: Int!
 	"""
 	The approvals currently awaiting the operator for this company.
-
+	
 	Contents are role-gated exactly as on the REST list (issue #618), and
 	ownership is resolved exactly as there (#1891). This is the surface that
 	made the question worth asking: it maps the same projection, so either
@@ -261,11 +261,11 @@ type Company {
 	"""
 	Attempts at work — a card dispatch, a chat turn, or a workflow node —
 	newest first, each with its step trace.
-
+	
 	`workflowRunId` is the join that had no answer before agent nodes minted
 	rows: a node's turn has neither a card nor a conversation, so nothing
 	could ask what a workflow run's agents did.
-
+	
 	The unredacted half of each step is **role-gated**: a member sees the
 	scrubbed trace, and only a principal who may read sensitive contents sees
 	the raw reasoning, arguments and output (`approval_visibility`).
@@ -273,7 +273,7 @@ type Company {
 	agentRuns(taskId: ID, workflowRunId: ID, limit: Int! = 50): [AgentRun!]!
 	"""
 	One attempt by id, with its step trace; null when absent.
-
+	
 	The unredacted half is role-gated exactly as on [`agent_runs`](Self::agent_runs).
 	"""
 	agentRun(id: ID!): AgentRun
@@ -330,11 +330,11 @@ type Company {
 	smtp: SmtpStatus!
 	"""
 	The approval policy in force (issue #1070).
-
+	
 	Answers from the same derivation `GET {scope}/policy` uses, so the two
 	read surfaces cannot report different tiers for one company. Read-only:
 	the write plane stays REST-and-admin-only (issue #562).
-
+	
 	This sits beside [`Self::approvals`] on purpose. That field says what is
 	parked; this one says whether anything ever parks, and an empty queue
 	means opposite things under `supervised` and `full`.
@@ -567,7 +567,7 @@ type FsNode {
 	"""
 	The payload's media type — **set only on a binary node** (issue #553),
 	and null on a folder or a prose note.
-
+	
 	Its presence is the whole test for "this node holds bytes, not text", and
 	without it no GraphQL consumer could discover that binaries exist at all:
 	a payload's text `read` is an empty body by contract, so a 4 MB PNG and a
@@ -578,7 +578,7 @@ type FsNode {
 	mime: String
 	"""
 	The payload's length in bytes; null unless `mime` is set.
-
+	
 	`Float`, not `Int`, because the store's `size` is a `u64` and GraphQL's
 	`Int` is 32-bit — the same choice `usage` and `Approval.atMillis` made,
 	for the same reason. Today's 64 MiB per-write cap fits in an `Int`; the
@@ -589,7 +589,7 @@ type FsNode {
 	"""
 	The payload's sha256, the same digest the blob route serves as its
 	`ETag`; null unless `mime` is set.
-
+	
 	This is what makes "the bytes changed" observable to a consumer that
 	cannot see the bytes — a re-publish keeps the node id and changes this.
 	"""
@@ -924,7 +924,7 @@ type Policy {
 	manifestApprovalTtlHours: Float
 	"""
 	Whether an operator override is in force.
-
+	
 	Distinct from comparing `mode` with `manifestMode`: an override that
 	happens to match the manifest is still an override, and is still what a
 	reset would remove.
@@ -1151,7 +1151,7 @@ type Skill {
 	"""
 	Where every roster agent stands on this skill — the read-side inversion
 	of the per-agent allowlist, the same projection `GET …/skills` reports.
-
+	
 	A list, never null: this resolver loads the company record, so it can
 	always say. An empty list means the company has no teammates.
 	"""
@@ -1173,7 +1173,7 @@ type SkillAgentScope {
 	"""
 	Which of the three stored states this agent is in for this skill:
 	`inherited` | `included` | `excluded`.
-
+	
 	`inherited` and `excluded` are not interchangeable. An agent that has
 	never been scoped and one given an explicit empty list both hold nothing
 	while the skill is disabled, and only the first holds it again when the
@@ -1305,7 +1305,7 @@ type TeamMember {
 	This teammate's daily spend cap in force (issue #304), or null when it
 	has none. Null-vs-set is the capped/uncapped distinction — `0` would
 	mean "capped at nothing".
-
+	
 	Since #343 this is the **effective** cap: an operator override set from
 	the console when one is stored, the manifest value otherwise.
 	"""
@@ -1597,7 +1597,7 @@ type WorkflowSummary {
 	"""
 	Whether the workflow id appears in the company manifest's
 	`[workflows].enabled` list.
-
+	
 	This is manifest membership, **not** "does this workflow exist and can it
 	run". A runtime-authored workflow is listed here whether or not it is
 	manifest-enabled, and `Company.workflow(id)` / the run routes serve any
