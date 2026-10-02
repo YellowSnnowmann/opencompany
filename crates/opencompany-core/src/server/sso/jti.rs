@@ -165,12 +165,11 @@ fn should_prune(now: u64) -> bool {
         if now.saturating_sub(previous) < PRUNE_INTERVAL_SECS {
             return false;
         }
-        match LAST_PRUNE_AT.compare_exchange_weak(
-            previous,
-            now,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
+        // This atomic only suppresses redundant directory scans; it publishes
+        // no associated data, so relaxed ordering is sufficient. The strong
+        // form avoids spurious retries while contending callers refresh the
+        // observed timestamp below.
+        match LAST_PRUNE_AT.compare_exchange(previous, now, Ordering::Relaxed, Ordering::Relaxed) {
             Ok(_) => return true,
             Err(actual) => previous = actual,
         }
