@@ -5,7 +5,7 @@ test("an SSO fragment redeems once and confirms the signed-in owner", async ({ b
   const context = await browser.newContext({ storageState: undefined });
   const page = await context.newPage();
   let redemptionCount = 0;
-  let setupCookie: string | undefined;
+  let setupCarrier: string | undefined;
 
   await page.route("**/auth/config", (route) =>
     route.fulfill({ json: { mode: "email", passwords: true, magicLink: true, claimable: false } }),
@@ -32,7 +32,8 @@ test("an SSO fragment redeems once and confirms the signed-in owner", async ({ b
     route.fulfill({ json: { setup_complete: false } }),
   );
   await page.route("**/api/v1/setup", async (route) => {
-    setupCookie = route.request().headers().cookie;
+    const headers = route.request().headers();
+    setupCarrier = headers["x-opencompany-session"] ?? headers.cookie;
     await route.fulfill({ status: 503, json: { error: "test setup response" } });
   });
 
@@ -44,8 +45,8 @@ test("an SSO fragment redeems once and confirms the signed-in owner", async ({ b
     expect(redemptionCount).toBe(1);
     expect(new URL(page.url()).hash).not.toContain(token);
     await expect
-      .poll(() => setupCookie)
-      .toContain("oc_session_acme=acme.header.payload.signature");
+      .poll(() => setupCarrier)
+      .toContain("acme.header.payload.signature");
   } finally {
     await context.close();
   }
