@@ -51,6 +51,49 @@
 
 use openhuman_core as oh;
 
+/// Tool names that older OpenHuman session snapshots may still declare.
+///
+/// They stay executable only as inert compatibility entries: the host's own
+/// company-scoped tools remain the only Composio implementation, and these
+/// entries are never added to a turn's visible names.
+pub(crate) const RETIRED_COMPOSIO_TOOL_NAMES: [&str; 5] = [
+    "composio_authorize",
+    "composio_execute",
+    "composio_list_connections",
+    "composio_list_toolkits",
+    "composio_list_tools",
+];
+
+pub(crate) fn retired_composio_tools() -> Vec<Box<dyn tinytools::Tool>> {
+    RETIRED_COMPOSIO_TOOL_NAMES
+        .iter()
+        .map(|name| Box::new(RetiredComposioTool(name)) as Box<dyn tinytools::Tool>)
+        .collect()
+}
+
+struct RetiredComposioTool(&'static str);
+
+#[async_trait::async_trait]
+impl tinytools::Tool for RetiredComposioTool {
+    fn name(&self) -> &str {
+        self.0
+    }
+
+    fn description(&self) -> &str {
+        "Retired OpenHuman Composio tool. Use the company-scoped Composio integration instead."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "additionalProperties": true})
+    }
+
+    async fn execute(&self, _args: serde_json::Value) -> anyhow::Result<tinytools::ToolResult> {
+        Ok(tinytools::ToolResult::error(
+            "This legacy OpenHuman Composio tool is disabled; use the company-scoped Composio integration.",
+        ))
+    }
+}
+
 /// Groups this host lets OpenHuman supply alongside its own tools.
 ///
 /// OpenCompany wires Composio itself, using company-scoped credentials. The

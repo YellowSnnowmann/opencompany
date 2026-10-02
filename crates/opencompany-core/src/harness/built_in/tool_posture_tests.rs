@@ -15,3 +15,15 @@ fn host_advertises_every_pack_except_upstream_composio() {
         );
     }
 }
+
+#[tokio::test]
+async fn legacy_composio_compatibility_tools_are_inert() {
+    let tools = retired_composio_tools();
+    let names = tools.iter().map(|tool| tool.name()).collect::<Vec<_>>();
+    assert_eq!(names, RETIRED_COMPOSIO_TOOL_NAMES);
+
+    for tool in tools {
+        let result = tool.execute(serde_json::json!({})).await.unwrap();
+        assert!(result.is_error);
+    }
+}

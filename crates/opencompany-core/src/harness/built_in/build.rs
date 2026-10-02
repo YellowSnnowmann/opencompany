@@ -1679,6 +1679,22 @@ pub fn agent_spec_for(
         let unadvertised = blueprint.unadvertised.clone();
         spec = spec.tools(move |turn| {
             let mut tools = crate::hive::shared_tool::owned_belt(&belt);
+            // Persisted OpenHuman sessions can retain the old upstream
+            // Composio declarations in their tool snapshot. Keep inert,
+            // non-visible executors for those names so a resumed turn can
+            // validate its snapshot; never replace the company-scoped tools
+            // when the host has wired them for this agent.
+            let legacy_composio =
+                crate::harness::built_in::tool_posture::retired_composio_tools();
+            for retired in legacy_composio {
+                if !tools.iter().any(|tool| tool.name() == retired.name()) {
+                    tools.push(retired);
+                }
+            }
+            let is_legacy_composio = |name: &str| {
+                crate::harness::built_in::tool_posture::RETIRED_COMPOSIO_TOOL_NAMES
+                    .contains(&name)
+            };
             // **A seated turn carries the episode's tools too.**
             //
             // The belt is composed per turn and the turn says which
@@ -1691,7 +1707,7 @@ pub fn agent_spec_for(
                 let visible: std::collections::HashSet<String> = tools
                     .iter()
                     .map(|tool| tool.name().to_owned())
-                    .filter(|name| !unadvertised.contains(name))
+                    .filter(|name| !unadvertised.contains(name) && !is_legacy_composio(name))
                     .collect();
                 let belt = openhuman_embed::HostTurnTools {
                     tools,
@@ -1731,7 +1747,11 @@ pub fn agent_spec_for(
             );
             let kept = |name: &str| withheld.as_deref() != Some(name);
             let mut visible: std::collections::HashSet<String> =
-                tools.iter().map(|tool| tool.name().to_owned()).collect();
+                tools
+                    .iter()
+                    .map(|tool| tool.name().to_owned())
+                    .filter(|name| !is_legacy_composio(name))
+                    .collect();
             visible.extend(episode.names().iter().filter(|name| kept(name)).cloned());
             let mut episode_tools = episode.tools;
             episode_tools.retain(|tool| kept(tool.name()));
