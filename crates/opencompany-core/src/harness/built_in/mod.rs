@@ -6608,6 +6608,9 @@ mod built_in_tests_part09;
 #[cfg(test)]
 #[path = "built_in_tests_part10.rs"]
 mod built_in_tests_part10;
+#[cfg(all(test, feature = "openhuman"))]
+#[path = "built_in_tests_part11.rs"]
+mod built_in_tests_part11;
 /// Per-agent MCP tool permissions at the five seams that enforce them.
 #[cfg(all(test, feature = "openhuman"))]
 #[path = "mcp_agent_policy_tests.rs"]

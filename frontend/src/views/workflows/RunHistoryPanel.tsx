@@ -421,7 +421,7 @@ export function RunHistoryPanel({
     // rather than only by tabbing past the graph.
     <aside
       aria-label="Run history"
-      className="flex h-full flex-col border-t bg-card/60 xl:border-t-0 xl:border-r"
+      className="flex h-full flex-col border-t bg-card/60 xl:border-0 xl:bg-transparent"
       data-testid="workflow-run-history"
     >
       {/* `flex-wrap` rather than a breakpoint: at 320px the workflow name drops

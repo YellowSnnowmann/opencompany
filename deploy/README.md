@@ -5,6 +5,12 @@ runs is a single switch — `OPENCOMPANY_COMPANY`** — an example directory nam
 (`venture_capital`, `marketing_agency`, …) or an alias (`fund`,
 `marketing`, `software`, `studio`, `law`, `accelerator`, `signals`, …).
 
+Leave `OPENCOMPANY_COMPANY` **blank or unset** to boot **unconfigured**: the
+host starts with no company on an empty data root, and the console opens the
+first-run **setup wizard** where the operator builds the company. This is what
+the hosting platform launches so a fresh instance is configured by its owner
+rather than pre-seeded from a template.
+
 The same two images deploy everywhere below; only the wiring differs.
 
 ## Local / Docker or Podman — Compose

@@ -414,7 +414,14 @@ pub(super) async fn insert_or_adopt(
 /// This is where an invite becomes an account. Redemption is not a separate
 /// flow with its own credential: first login and Nth login are the same code
 /// path, which is what keeps the two from drifting apart.
-async fn upsert_from_eligibility(
+///
+/// `pub(crate)` so [`server::sso`](crate::server::sso) claims-or-logs-in the
+/// admin through the same materialization: an SSO redemption whose `sub` has
+/// already been proven a standing admin is a login, and creating the account on
+/// first use is the claim. Reusing this keeps "first SSO login mints a
+/// passwordless admin, Nth logs the same account in" identical to the magic-link
+/// path rather than a second, drifting one.
+pub(crate) async fn upsert_from_eligibility(
     runtime: &CompanyRuntime,
     email: &str,
     role: UserRole,
@@ -547,10 +554,15 @@ pub(crate) async fn create_session(
 /// cannot receive a cookie at all (see [`cookie::SESSION_CARRIER_HEADER`]).
 ///
 /// One choke point for every browser login path — magic link, password, the
-/// first-admin claim and wallet — so a carrier is added once rather than four
-/// times, and no path can
-/// acquire one without the session-minting invariants in [`create_session`].
-async fn mint_session(
+/// first-admin claim, wallet and SSO auto-login — so a carrier is added once
+/// rather than five times, and no path can acquire one without the
+/// session-minting invariants in [`create_session`].
+///
+/// `pub(crate)` so [`server::sso`](crate::server::sso) mints its session the
+/// same way: an SSO redemption is a login like any other, and routing it through
+/// this function is what keeps it honoring the cross-origin header carrier
+/// without re-deriving the cookie/header split.
+pub(crate) async fn mint_session(
     state: &AppState,
     runtime: &CompanyRuntime,
     user: &UserRecord,
