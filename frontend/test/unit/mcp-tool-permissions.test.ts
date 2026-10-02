@@ -181,6 +181,8 @@ describe("what the panel renders after a write", () => {
         suggestedTier: "write_delete",
         mode: "always_allow",
         isOverride: true,
+        source: "server_inherited",
+        differingAgents: [],
       },
     ],
   });
@@ -199,6 +201,8 @@ describe("what the panel renders after a write", () => {
             suggestedTier: "write_delete",
             mode: "needs_approval",
             isOverride: false,
+            source: "server_inherited",
+            differingAgents: [],
           },
         ],
       }),
@@ -218,6 +222,8 @@ describe("what the panel renders after a write", () => {
       {
         tools: [{ tool: "delete_page" }],
       },
+      // The company document, which a blank `?agent=` addresses.
+      null,
     );
     // The clear control is gone because the echoed row is no longer an
     // override — the panel re-derived from the response.
@@ -297,6 +303,8 @@ describe("a tool the allow and deny lists keep from being sent", () => {
             effectiveTier: "interactive",
             mode: "needs_approval",
             isOverride: false,
+            source: "server_inherited",
+            differingAgents: [],
           },
         ],
       }),
@@ -316,6 +324,8 @@ describe("a tool the allow and deny lists keep from being sent", () => {
             effectiveTier: "interactive",
             mode: "needs_approval",
             isOverride: false,
+            source: "server_inherited",
+            differingAgents: [],
           },
         ],
       }),
@@ -369,6 +379,8 @@ describe("a probe that ran while the panel was open", () => {
             suggestedTier: "read_only",
             mode: "needs_approval",
             isOverride: false,
+            source: "server_inherited",
+            differingAgents: [],
           },
         ],
       }),
@@ -396,6 +408,8 @@ function tool(over: Partial<ToolPolicyRow> & { tool: string }): ToolPolicyRow {
     effectiveTier: "read_only",
     mode: "always_allow",
     isOverride: false,
+    source: "server_inherited",
+    differingAgents: [],
     ...over,
   };
 }
@@ -462,6 +476,8 @@ describe("the three tiers as sections", () => {
             effectiveTier: "read_only",
             suggestedTier: "write_delete",
             isOverride: true,
+            source: "server_inherited",
+            differingAgents: [],
           }),
           tool({
             tool: "move_page",
@@ -705,6 +721,7 @@ describe("the mode a row is set to", () => {
       "acme",
       { kind: "declared", name: "notion" },
       { tools: [{ tool: "get_page", mode: "blocked" }] },
+      null,
     );
     expect(
       container

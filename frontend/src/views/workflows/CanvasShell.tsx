@@ -71,7 +71,7 @@
 //
 // The arithmetic that fixes the breakpoint: a rail is in-flow, so it costs the
 // canvas real width, while the overlay only covers it. Two 320px rails (640px)
-// plus the app's own 216px nav sidebar is 856px before the canvas or the
+// plus the app's own 240px nav sidebar is 856px before the canvas or the
 // overlay even enter into it — most of a laptop window. So both rails are
 // in-flow only at `xl` (≥1280px viewport) — below that each falls back to the
 // bottom strip it has always been, stacking canvas → leftRail's strip →

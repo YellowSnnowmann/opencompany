@@ -27,6 +27,7 @@ async fn chat_history_projects_the_card_a_reply_opened() {
         .upsert(
             runtime.id(),
             &crate::ports::tasks::TaskRecord {
+                opened_by: None,
                 id: "t-77".to_string(),
                 title: TaskTitle::authored("Draft the launch note"),
                 note: None,
@@ -350,6 +351,7 @@ async fn tasks_page_reflects_upserts_and_column_filter() {
         .upsert(
             runtime.id(),
             &TaskRecord {
+                opened_by: None,
                 id: "t1".into(),
                 title: TaskTitle::authored("Launch"),
                 note: None,

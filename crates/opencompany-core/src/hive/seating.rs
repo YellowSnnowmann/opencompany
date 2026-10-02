@@ -122,6 +122,13 @@ pub fn broadcast_withheld_in(withheld: bool, prefix: &str) -> Option<String> {
 #[derive(Clone, Default)]
 pub struct EpisodeBelts {
     lent: Arc<Mutex<HashMap<String, SeatLoan>>>,
+    /// Conversations whose *next* turn is narrowed to a named set of tools.
+    ///
+    /// Separate from the loan because a loan is made once per episode while a
+    /// narrowing is one turn's: the room asks for it as that turn opens and it
+    /// lifts when the turn ends. Keyed the same way, so the belt factory finds
+    /// it beside the loan it is already looking up.
+    narrowed: Arc<Mutex<HashMap<String, Vec<String>>>>,
 }
 
 impl std::fmt::Debug for EpisodeBelts {
@@ -156,6 +163,42 @@ impl EpisodeBelts {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(conversation)
+            .cloned()
+    }
+
+    /// Narrow every turn on `conversation` to `only`, until [`Self::widen`].
+    ///
+    /// For a turn that must end in a particular call rather than in prose. Names
+    /// are the *served* ones, prefix included, because that is what the belt
+    /// factory compares against.
+    pub fn narrow(&self, conversation: impl Into<String>, only: Vec<String>) {
+        self.narrowed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(conversation.into(), only);
+    }
+
+    /// Give `conversation` its whole belt back.
+    pub fn widen(&self, conversation: &str) {
+        self.narrowed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(conversation);
+    }
+
+    /// The tools this turn is narrowed to, if it is narrowed at all.
+    ///
+    /// `None` for every ordinary turn. An empty list is treated as no narrowing
+    /// rather than a belt of nothing: requiring a choice among no tools refuses
+    /// the call outright, which would turn a caller's mistake into a dead turn.
+    #[must_use]
+    pub fn narrowed_to(&self, conversation: Option<&str>) -> Option<Vec<String>> {
+        let conversation = conversation?;
+        self.narrowed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(conversation)
+            .filter(|only| !only.is_empty())
             .cloned()
     }
 

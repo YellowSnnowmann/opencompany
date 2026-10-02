@@ -2980,6 +2980,7 @@ fn cycle_task_id(
             | CompanyEvent::EpisodeCompleted { .. }
             | CompanyEvent::ConversationOpened { .. }
             | CompanyEvent::ConversationConcluded { .. }
+            | CompanyEvent::UtteranceRefused { .. }
             | CompanyEvent::EpisodeSeatParked { .. }
             | CompanyEvent::EpisodeSeatResumed { .. }
             | CompanyEvent::EpisodeStateSaved { .. }
@@ -3236,6 +3237,7 @@ fn cycle_conversation(
             | CompanyEvent::EpisodeCompleted { .. }
             | CompanyEvent::ConversationOpened { .. }
             | CompanyEvent::ConversationConcluded { .. }
+            | CompanyEvent::UtteranceRefused { .. }
             | CompanyEvent::EpisodeSeatParked { .. }
             | CompanyEvent::EpisodeSeatResumed { .. }
             | CompanyEvent::EpisodeStateSaved { .. }
@@ -3574,6 +3576,7 @@ impl<'a> CycleHostImpl<'a> {
             });
         };
         let card = TaskRecord {
+            opened_by: None,
             id: generate_id(),
             title: crate::ports::tasks::TaskTitle::system(&parsed.title),
             note: parsed.note,
@@ -3698,6 +3701,7 @@ impl<'a> CycleHostImpl<'a> {
             ),
         };
         let card = TaskRecord {
+            opened_by: None,
             id: generate_id(),
             title: crate::ports::tasks::mint_task_title(
                 &parsed.instruction,

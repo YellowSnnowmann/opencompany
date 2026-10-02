@@ -25,6 +25,7 @@ async fn a_reply_that_is_json_satisfies_field_present_on_a_json_dotted_path() {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1937c"));
     let publish_refusal_claim =
@@ -97,6 +98,7 @@ async fn the_parsed_reply_lands_in_the_emitted_value_a_downstream_binding_reads(
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1937d"));
     let publish_refusal_claim =
@@ -170,6 +172,7 @@ async fn a_reply_that_parses_as_json_is_not_merged_without_a_declared_postcondit
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1937e"));
     let publish_refusal_claim =
@@ -240,6 +243,7 @@ async fn a_bare_array_reply_replaces_the_emitted_value_wholesale() {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1937f"));
     let publish_refusal_claim =
@@ -313,6 +317,7 @@ async fn a_bare_scalar_reply_fails_field_present_on_the_bare_json_root() {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1937g"));
     let publish_refusal_claim =
@@ -474,6 +479,7 @@ async fn a_field_resolved_away_by_an_authored_expression_fails_closed_at_run_tur
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1937h"));
     let publish_refusal_claim =
@@ -549,6 +555,7 @@ async fn a_colliding_field_would_diverge_between_gate_and_emitted_value() {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     }));
     let board_claim = Arc::new(deps.delegations.claim_board("run-1937g"));
     let publish_refusal_claim =

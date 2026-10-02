@@ -65,11 +65,11 @@ impl ProgressPump {
         let collector = tokio::spawn(async move {
             let mut events = Vec::new();
             let mut seq: u64 = 0;
-            let mut thinking_open = false;
+            let mut live = steps::LiveRunState::default();
             while let Some(event) = rx.recv().await {
                 let event = step_labels.apply(event);
                 if let Some(ctx) = &stream
-                    && let Some(frame) = steps::stream_event_from(&event, seq, &mut thinking_open)
+                    && let Some(frame) = steps::stream_event_from(&event, seq, &mut live)
                 {
                     let frame = frame.with_agent(ctx.agent_id.clone());
                     let frame = match &ctx.route {

@@ -450,6 +450,7 @@ async fn a_task_detail_response_carries_the_thread_root_of_a_threaded_origin() {
         .upsert(
             &company,
             &TaskRecord {
+                opened_by: None,
                 id: "threaded".into(),
                 title: TaskTitle::authored("Ship the brief"),
                 note: None,

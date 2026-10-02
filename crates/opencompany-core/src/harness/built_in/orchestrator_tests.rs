@@ -35,3 +35,5 @@ mod tests_part7;
 mod tests_part8;
 #[path = "orchestrator_tests_part9.rs"]
 mod tests_part9;
+#[path = "orchestrator_tests_seat_scope.rs"]
+mod tests_seat_scope;

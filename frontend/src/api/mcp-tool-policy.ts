@@ -19,6 +19,19 @@ export type ApprovalMode = "always_allow" | "needs_approval" | "blocked";
 /** The group a tool is defaulted under. */
 export type ToolTier = "read_only" | "interactive" | "write_delete";
 
+/**
+ * Which rule decided a row's mode. Host-resolved, snake_case on the wire.
+ *
+ * `agent_clamped` names a discarded per-teammate setting: the stored value was
+ * less restrictive than the server's, so the server's mode stands and
+ * `agentMode` carries what was set.
+ */
+export type PolicySource =
+  | "server_inherited"
+  | "server_pinned"
+  | "agent_pinned"
+  | "agent_clamped";
+
 /** One remote tool, as the host resolves it. */
 export interface ToolPolicyRow {
   tool: string;
@@ -30,9 +43,18 @@ export interface ToolPolicyRow {
    * disagreement is the reclassification, not a fault.
    */
   suggestedTier?: ToolTier;
+  /** The mode enforced in this read's scope — the company's, or one teammate's. */
   mode: ApprovalMode;
   /** Whether an operator decided this row, as opposed to it inheriting. */
   isOverride: boolean;
+  source: PolicySource;
+  /**
+   * In an agent-scoped read, the teammate's own stored mode — present even when
+   * the narrow-only clamp discarded it.
+   */
+  agentMode?: ApprovalMode;
+  /** The teammates whose resolved mode for this tool differs from the company's. */
+  differingAgents: string[];
 }
 
 /**
@@ -59,6 +81,8 @@ export interface TierDefault {
  */
 export interface ToolPolicyDocument {
   server: string;
+  /** The teammate this document is scoped to, or absent for the company's. */
+  agent?: string;
   tierDefaults: Record<ToolTier, TierDefault>;
   tools: ToolPolicyRow[];
   /** When discovery last succeeded. `0` reads as never. */
@@ -92,6 +116,18 @@ function registryPath(client: OpenCompanyClient, company: string | null, serverI
 }
 
 /**
+ * Whose document a call is about: one teammate, or `null` for the company's.
+ *
+ * `?agent=` is appended unconditionally; a blank value addresses the company
+ * document.
+ */
+export type PolicyScope = string | null;
+
+function scoped(path: string, agent: PolicyScope): string {
+  return `${path}?agent=${encodeURIComponent(agent ?? "")}`;
+}
+
+/**
  * Where a row's policy lives.
  *
  * Built from `McpServer.source`, never from whether a `serverId` is present —
@@ -119,8 +155,11 @@ export function readToolPolicy(
   client: OpenCompanyClient,
   company: string | null,
   target: Target,
+  agent: PolicyScope = null,
 ): Promise<ToolPolicyDocument> {
-  return client.get<ToolPolicyDocument>(pathFor(client, company, target));
+  return client.get<ToolPolicyDocument>(
+    scoped(pathFor(client, company, target), agent),
+  );
 }
 
 /** Apply a patch and get the resulting document back. */
@@ -129,15 +168,27 @@ export function writeToolPolicy(
   company: string | null,
   target: Target,
   patch: ToolPolicyPatch,
+  agent: PolicyScope = null,
 ): Promise<ToolPolicyDocument> {
-  return client.put<ToolPolicyDocument>(pathFor(client, company, target), patch);
+  return client.put<ToolPolicyDocument>(
+    scoped(pathFor(client, company, target), agent),
+    patch,
+  );
 }
 
-/** Drop the whole stored document, leaving the declaration as the policy. */
+/**
+ * Drop the stored document for this scope.
+ *
+ * An agent-scoped delete clears that teammate's layer only, and answers 409 on
+ * an unreadable document; only the company-scoped reset repairs that.
+ */
 export function resetToolPolicy(
   client: OpenCompanyClient,
   company: string | null,
   target: Target,
+  agent: PolicyScope = null,
 ): Promise<ToolPolicyDocument> {
-  return client.del<ToolPolicyDocument>(pathFor(client, company, target));
+  return client.del<ToolPolicyDocument>(
+    scoped(pathFor(client, company, target), agent),
+  );
 }

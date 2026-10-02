@@ -28,6 +28,7 @@ pub(crate) async fn runtime_with(
 
 pub(crate) fn card(id: &str, assignee: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Ship the changelog"),
         note: None,

@@ -18,6 +18,7 @@ async fn boot_reaper_notifies_a_bounced_card_same_as_the_live_paths() {
     let manifest = parse("[company]\nname=\"Acme\"\n[policy]\nmode=\"full\"\n");
     let id = CompanyId::new("acme");
     let card = |task: &str, column: &str| TaskRecord {
+        opened_by: None,
         id: task.to_string(),
         title: crate::ports::tasks::TaskTitle::authored("Draft the spec"),
         note: None,

@@ -131,6 +131,44 @@ async fn the_pump_returns_every_event_in_order_after_finish() {
     assert!(matches!(events[0], AgentProgress::TurnStarted));
 }
 
+#[tokio::test]
+async fn replying_frame_carries_agent_chat_and_message_seq() {
+    use crate::ports::types::CompanyId;
+    use futures::StreamExt;
+
+    let company = CompanyId::new("acme-pump-replying");
+    let mut bus = crate::turn_stream::subscribe(&company);
+    let ctx = TurnStreamCtx {
+        company: company.clone(),
+        agent_id: "rae".to_string(),
+        route: LiveRoute::Chat {
+            chat_id: "dm:rae".to_string(),
+        },
+        message_seq: Some(12),
+    };
+    let pump = ProgressPump::start(StepLabels::default(), Some(ctx), None);
+    let tx = pump.sender();
+    for delta in ["Hel", "lo"] {
+        tx.send(AgentProgress::TextDelta {
+            delta: delta.to_string(),
+            iteration: 1,
+        })
+        .await
+        .expect("send");
+    }
+    drop(tx);
+    pump.finish().await;
+
+    let frame = bus.next().await.expect("a frame");
+    let frame = frame.as_turn().expect("a turn frame");
+    assert_eq!(frame.kind, "replying");
+    assert_eq!(frame.agent_id.as_deref(), Some("rae"));
+    assert_eq!(frame.chat_id.as_deref(), Some("dm:rae"));
+    assert_eq!(frame.message_seq, Some(12));
+    let second = tokio::time::timeout(std::time::Duration::from_millis(50), bus.next()).await;
+    assert!(second.is_err(), "two deltas of one run are one frame");
+}
+
 /// #988's invariant, pinned where it can be checked without running a turn.
 ///
 /// The end-to-end pair in `spend_halt_turn_tests` covers the same ground but

@@ -218,6 +218,7 @@ impl ArtifactWritingTurn {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 }
@@ -435,6 +436,7 @@ impl CappedThenSettlingTurn {
                 abnormal_stop: None,
                 halted_for_spend: None,
                 budget_paused: None,
+                ceiling_paused: None,
             });
         }
         if !self.blocked {
@@ -464,6 +466,7 @@ impl CappedThenSettlingTurn {
             abnormal_stop: None,
             halted_for_spend: None,
             budget_paused: None,
+            ceiling_paused: None,
         })
     }
 }
