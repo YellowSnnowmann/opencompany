@@ -85,6 +85,31 @@ let root: Root;
 let added: Array<Record<string, unknown>>;
 let patched: Array<{ id: string; patch: Record<string, unknown> }>;
 
+/**
+ * jsdom ships no `matchMedia`, and the mascot avatar swatch this dialog's
+ * picker now renders (`AvatarPicker`'s flavour grid,
+ * `rendering-strategy.md`'s "12th tile") pulls in `@rive-app/react-canvas`,
+ * whose own `useDevicePixelRatio` reaches for `matchMedia` unguarded — so
+ * without this the dialog fails to mount at all. Same stub as
+ * `chat-cognition-banner.test.ts` / `working-indicator.test.ts`.
+ */
+function stubMatchMedia() {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+      onchange: null,
+    }),
+  });
+}
+
 function fakeClient(): OpenCompanyClient {
   return {
     scopeFor: (company: string | null) => `/api/v1/${company ?? "company"}`,
@@ -103,6 +128,7 @@ function fakeClient(): OpenCompanyClient {
 }
 
 beforeEach(() => {
+  stubMatchMedia();
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -264,5 +290,89 @@ describe("the Add-agent dialog", () => {
     // mascot from the id, and sending that back would turn "nobody chose" into
     // a stored choice — the distinction `avatarRef` exists to keep.
     expect(patched).toHaveLength(0);
+  });
+});
+
+describe("the Add-agent dialog's mascot look", () => {
+  /** Chooses the mascot face, then tunes it, the way the operator would. */
+  async function tuneMascot() {
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-animated"]'));
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-mode-static"]'));
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-costume-headband"]'));
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-skin-peach"]'));
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-hand-charcoal"]'));
+  }
+
+  async function create() {
+    type("agent-add-name", "Growth");
+    type("agent-add-role", "Growth Marketer");
+    await act(async () => {
+      submit().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+  }
+
+  it("offers no mascot options until the face is a mascot", async () => {
+    await mount();
+    await openDialog();
+    expect(document.querySelector('[data-testid="avatar-mascot-appearance"]')).toBeNull();
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-animated"]'));
+    expect(document.querySelector('[data-testid="avatar-mascot-appearance"]')).not.toBeNull();
+  });
+
+  it("sends the chosen look on the create request itself", async () => {
+    await mount();
+    await openDialog();
+    await tuneMascot();
+    await create();
+
+    expect(added).toHaveLength(1);
+    expect(added[0]).toMatchObject({
+      avatar: "mascot:animated",
+      mascotMode: "static",
+      mascotCostume: "headband",
+      mascotSkinColor: "peach",
+      mascotHandColor: "charcoal",
+    });
+  });
+
+  it("writes only what the host did not echo, for a host that predates the fields", async () => {
+    // `fakeClient` answers without echoing any look — an older host.
+    await mount();
+    await openDialog();
+    await tuneMascot();
+    await create();
+
+    expect(patched).toHaveLength(1);
+    expect(patched[0].id).toBe("growth");
+    expect(patched[0].patch).toMatchObject({
+      avatar: "mascot:animated",
+      mascotMode: "static",
+      mascotCostume: "headband",
+    });
+  });
+
+  it("sends no mascot field for a shipped face chosen after tuning a mascot", async () => {
+    await mount();
+    await openDialog();
+    await tuneMascot();
+    click(document.querySelector<HTMLElement>('[data-testid^="avatar-flavour-"]'));
+    await create();
+
+    expect(added[0].avatar).toMatch(/^tiny:/);
+    expect(added[0].mascotMode).toBeUndefined();
+    expect(added[0].mascotCostume).toBeUndefined();
+    expect(added[0].mascotSkinColor).toBeUndefined();
+    expect(added[0].mascotHandColor).toBeUndefined();
+  });
+
+  it("sends nothing when the mascot was picked but not tuned", async () => {
+    await mount();
+    await openDialog();
+    click(document.querySelector<HTMLElement>('[data-testid="avatar-mascot-animated"]'));
+    await create();
+
+    expect(added[0].avatar).toBe("mascot:animated");
+    expect(added[0].mascotCostume).toBeUndefined();
+    expect(added[0].mascotMode).toBeUndefined();
   });
 });

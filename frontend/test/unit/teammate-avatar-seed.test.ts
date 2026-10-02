@@ -74,4 +74,37 @@ describe("agent mascot seeding", () => {
       expect(avatarFor(row.name)).toMatch(/^tiny:[a-z]+$/);
     }
   });
+
+  it("`fromDto` carries the chosen mascot costume and colors through untouched", () => {
+    // Found live 2026-09-26: `TeamMemberDto` gained `mascotCostume` /
+    // `mascotSkinColor` / `mascotHandColor` alongside `avatar`, but nothing
+    // in `fromDto` read them onto `TeamMember` — so every mass-render surface
+    // built from the roster list (the chat header, the DM sidebar, the org
+    // chart, a message row) kept drawing the file's default look for a
+    // mascot wearer, while the profile sheet — reading the detail DTO, which
+    // already carried these — showed the real one. This pins the carry-through
+    // so a future field on the DTO cannot go quietly unread here again.
+    const member = fromDto({
+      id: "designer",
+      name: "Designer",
+      role: "Designer",
+      avatar: "mascot:animated",
+      mascotCostume: "beanie",
+      mascotSkinColor: "blue",
+      mascotHandColor: "amber",
+    });
+    expect(member.mascotCostume).toBe("beanie");
+    expect(member.mascotSkinColor).toBe("blue");
+    expect(member.mascotHandColor).toBe("amber");
+  });
+
+  it("`fromDto` leaves the mascot fields undefined rather than inventing a look", () => {
+    // Absent-vs-chosen is the same rule `avatar` follows: a host predating the
+    // field, or a teammate nobody has customized, must read as "no choice
+    // made" — never coalesced into some picked-looking value.
+    const member = fromDto({ id: "designer", name: "Designer", role: "Designer" });
+    expect(member.mascotCostume).toBeUndefined();
+    expect(member.mascotSkinColor).toBeUndefined();
+    expect(member.mascotHandColor).toBeUndefined();
+  });
 });
