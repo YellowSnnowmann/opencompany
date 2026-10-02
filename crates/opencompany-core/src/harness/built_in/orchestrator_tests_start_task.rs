@@ -141,7 +141,8 @@ async fn start_task_reports_a_card_changed_during_the_dispatch_race() {
         .await
         .unwrap();
     let handle = BoardStarterHandle::default();
-    handle.set(&(Arc::new(ChangedBeforeStart) as Arc<dyn BoardStarter>));
+    let racing = Arc::new(ChangedBeforeStart);
+    handle.set(&(Arc::clone(&racing) as Arc<dyn BoardStarter>));
 
     let result = tool(&board, handle)
         .execute(serde_json::json!({ "task_id": "c1" }))
