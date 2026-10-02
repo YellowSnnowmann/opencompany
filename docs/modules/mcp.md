@@ -426,3 +426,12 @@ The check is a store read plus a hash, not a rebuild, so it costs the same
 whether or not anything moved. What it does not reach is a turn already in
 flight: an agent mid-turn finishes on the belt it started with, because the
 fingerprint is compared before the turn, not during it.
+
+## `read_only_tools` and where this is headed
+
+The current flat allowlist is planned to become a per-tool, three-tier
+permission model (Interactive / Read-only / Write-delete, with bulk defaults
+and per-tool overrides). The design brief and rollout order are in
+[`docs/issues/mcp-refactoring-enhancing/`](../issues/mcp-refactoring-enhancing/README.md)
+(tracking issue #2373). `read_only_tools` remains the migration input; this
+brief does not change runtime behavior.
