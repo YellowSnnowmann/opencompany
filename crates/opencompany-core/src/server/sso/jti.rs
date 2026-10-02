@@ -24,10 +24,19 @@
 
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::OpenCompanyError;
 use crate::ports::types::CompanyId;
 use crate::server::users::token::sha256_hex;
+
+/// Retain replay markers for one minute after token expiry to cover verifier
+/// clock leeway.
+const MARKER_EXPIRY_GRACE_SECS: u64 = 60;
+/// Avoid walking the marker directory on every redemption.
+const PRUNE_INTERVAL_SECS: u64 = 60;
+static LAST_PRUNE_AT: AtomicU64 = AtomicU64::new(0);
 
 /// The consumed-`jti` marker directory for one company, under the data root.
 ///
@@ -87,6 +96,13 @@ impl ConsumedJtis {
             .await
             .map_err(|source| io_err(&self.dir, source))?;
 
+        let now = unix_time_secs();
+        if should_prune(now)
+            && let Err(err) = self.prune_expired_at(now).await
+        {
+            tracing::warn!("sso: could not prune expired consumed jti markers: {err}");
+        }
+
         match tokio::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -104,6 +120,59 @@ impl ConsumedJtis {
             }
             Err(err) if err.kind() == ErrorKind::AlreadyExists => Ok(false),
             Err(source) => Err(io_err(&path, source)),
+        }
+    }
+
+    /// Removes markers whose token expiry and verifier leeway have passed.
+    /// Markers with missing or unreadable expiry stamps are kept: pruning must
+    /// not turn an uncertain marker into a replayable token.
+    async fn prune_expired_at(&self, now: u64) -> Result<(), OpenCompanyError> {
+        let mut entries = tokio::fs::read_dir(&self.dir)
+            .await
+            .map_err(|source| io_err(&self.dir, source))?;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|source| io_err(&self.dir, source))?
+        {
+            let path = entry.path();
+            let Ok(stamp) = tokio::fs::read_to_string(&path).await else {
+                continue;
+            };
+            let Ok(exp) = stamp.parse::<u64>() else {
+                continue;
+            };
+            if exp.saturating_add(MARKER_EXPIRY_GRACE_SECS) < now
+                && let Err(source) = tokio::fs::remove_file(&path).await
+                && source.kind() != ErrorKind::NotFound
+            {
+                tracing::warn!("sso: could not remove expired consumed jti marker: {source}");
+            }
+        }
+        Ok(())
+    }
+}
+
+fn unix_time_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
+fn should_prune(now: u64) -> bool {
+    let mut previous = LAST_PRUNE_AT.load(Ordering::Relaxed);
+    loop {
+        if now.saturating_sub(previous) < PRUNE_INTERVAL_SECS {
+            return false;
+        }
+        match LAST_PRUNE_AT.compare_exchange_weak(
+            previous,
+            now,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return true,
+            Err(actual) => previous = actual,
         }
     }
 }
