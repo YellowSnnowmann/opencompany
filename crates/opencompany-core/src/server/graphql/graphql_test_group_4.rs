@@ -91,8 +91,18 @@ async fn workspace_search_resolves_hits_with_paths_and_totals() {
 fn sdl_snapshot_matches() {
     let expected = include_str!("schema.graphql");
     let actual = super::sdl();
+    // The schema printer indents empty lines inside doc comments with tabs;
+    // those tabs are not part of the SDL contract and should not have to live
+    // in the checked-in snapshot as trailing whitespace.
+    let normalize = |sdl: &str| {
+        sdl.lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     assert_eq!(
-        actual, expected,
+        normalize(&actual),
+        normalize(expected),
         "GraphQL SDL drifted from schema.graphql; regenerate with \
          `cargo test -- --ignored regenerate_sdl_snapshot`"
     );
