@@ -108,6 +108,7 @@ pub(crate) async fn runtime_with_agent(
 /// A `workflow`-deliverable card sitting In Progress, with an optional plan.
 pub(crate) fn card(id: &str, plan: Option<crate::ports::tasks::TaskPlan>) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Automate the weekly digest"),
         note: Some("It should go out every Monday morning.".to_string()),

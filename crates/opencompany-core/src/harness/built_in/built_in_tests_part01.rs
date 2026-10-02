@@ -11,12 +11,13 @@ use crate::ports::types::ContextChunk;
 
 #[test]
 fn dispatched_cards_are_isolated_from_an_agents_other_conversations() {
-    assert!(CompanyAgent::isolates_background_history(None, true));
-    assert!(!CompanyAgent::isolates_background_history(
-        Some("general"),
-        true
-    ));
-    assert!(!CompanyAgent::isolates_background_history(None, false));
+    // A turn that names no conversation runs on its own session; one that
+    // does resumes the agent's conversation session; one that brings its own
+    // context is isolated whatever it names (plan hive-desks, Phase 2).
+    assert!(CompanyAgent::isolated_session(None, true));
+    assert!(!CompanyAgent::isolated_session(Some("general"), true));
+    assert!(CompanyAgent::isolated_session(Some("general"), false));
+    assert!(CompanyAgent::isolated_session(None, false));
 }
 
 /// The fingerprint moves when the tier moves (issue #562).
@@ -136,6 +137,7 @@ fn overlay_agent_to_manifest_carries_the_tool_grant() {
         role: "Researcher".into(),
         description: None,
         tools: Some(vec!["docs.*".into(), "payment.send".into()]),
+        skills: None,
         model: None,
         harness: None,
     };
@@ -160,6 +162,7 @@ fn overlay_agent_to_manifest_carries_the_tool_grant() {
         role: "Generalist".into(),
         description: None,
         tools: None,
+        skills: None,
         model: None,
         harness: None,
     };
@@ -185,6 +188,7 @@ fn overlay_agent_to_manifest_carries_the_display_name() {
         role: "Content Writer".into(),
         description: None,
         tools: None,
+        skills: None,
         model: None,
         harness: None,
     };
@@ -212,6 +216,7 @@ fn overlay_agent_to_manifest_carries_the_provider() {
         role: "Web search".into(),
         description: None,
         tools: None,
+        skills: None,
         model: Some("test-model-small".into()),
         harness: None,
     };
@@ -234,6 +239,7 @@ fn overlay_fingerprint_moves_on_a_tools_only_edit() {
             role: "r".into(),
             description: None,
             tools,
+            skills: None,
             model: None,
             harness: None,
         }]
@@ -275,6 +281,7 @@ fn overlay_fingerprint_moves_on_a_model_or_harness_change() {
             role: "r".into(),
             description: None,
             tools: None,
+            skills: None,
             model: model.map(str::to_string),
             harness: harness.map(str::to_string),
         }]
@@ -324,6 +331,7 @@ fn a_provider_edit_moves_the_overlay_and_override_fingerprints() {
             role: "r".into(),
             description: None,
             tools: None,
+            skills: None,
             model: Some("test-model-large".into()),
             harness: None,
         }]
@@ -586,7 +594,8 @@ async fn mock_context_addresses_survive_deletion_without_reuse() {
 #[tokio::test]
 async fn roster_builds_every_manifest_agent() {
     let fx = fixture();
-    let roster = build_roster(&record(), &fx.deps, &[], &HashMap::new()).expect("roster builds");
+    let roster = build_roster(&test_runtime(), &record(), &fx.deps, &[], &HashMap::new())
+        .expect("roster builds");
     let ids: Vec<_> = roster.iter().map(|a| a.agent_id.as_str()).collect();
     assert_eq!(ids, vec!["ceo", "engineer"]);
     assert_eq!(roster[0].role, "Chief Executive");
@@ -612,7 +621,8 @@ async fn roster_builds_every_manifest_agent() {
 async fn every_roster_teammate_gets_its_own_openhuman_session_name() {
     let rec = record();
     let fx = fixture();
-    let roster = build_roster(&rec, &fx.deps, &[], &HashMap::new()).expect("roster builds");
+    let roster =
+        build_roster(&test_runtime(), &rec, &fx.deps, &[], &HashMap::new()).expect("roster builds");
 
     for agent in &roster {
         assert_eq!(

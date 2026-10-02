@@ -41,16 +41,11 @@ fn mint_agent_id_never_returns_a_reserved_id() {
     assert_eq!(record.mint_agent_id("Agents"), "agents_2");
     assert_eq!(record.mint_agent_id("desks"), "desks_2");
     assert_eq!(record.mint_agent_id("System"), "system_2");
-    // Issue #1743: both spellings of the built-in `#general` channel. A
-    // teammate minted onto one becomes the answer to every unaddressed
-    // message on the company-wide line — `responder_for` checks roster ids
-    // before falling back to the orchestrator — and the console renders
-    // that line's transcript as the teammate's DM.
     assert_eq!(record.mint_agent_id("Main"), "main_2");
     assert_eq!(record.mint_agent_id("General"), "general_2");
     assert_eq!(
         RESERVED_AGENT_IDS,
-        ["operator", "agents", "desks", "system", "main", "General"]
+        ["operator", "agents", "desks", "system", "main", "general"]
     );
 }
 
@@ -95,6 +90,7 @@ fn resolve_teammate_key_takes_an_id_or_a_display_name() {
         role: "Designer".into(),
         description: None,
         tools: None,
+        skills: None,
         model: None,
         harness: None,
     });
@@ -141,6 +137,7 @@ fn resolve_teammate_key_never_lets_a_name_shadow_an_id() {
         role: "Growth".into(),
         description: None,
         tools: None,
+        skills: None,
         model: None,
         harness: None,
     });
@@ -164,6 +161,7 @@ fn resolve_teammate_key_reports_a_name_two_teammates_answer_to() {
             role: "Designer".into(),
             description: None,
             tools: None,
+            skills: None,
             model: None,
             harness: None,
         });

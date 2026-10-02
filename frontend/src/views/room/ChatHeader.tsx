@@ -10,11 +10,12 @@ import {
   Users,
 } from "lucide-react";
 
+import { AgentFace } from "@/components/agent-face";
 import { AgentAvatarButton } from "@/components/agent-profile-sheet";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { channelSubtitle, channelTitle, dmFace, type Channel } from "./model";
+import { channelSubtitle, channelTitle, dmFace, dmThreadId, type Channel } from "./model";
 
 interface Props {
   channel: Channel;
@@ -33,9 +34,8 @@ interface Props {
    * Whether this conversation can be shown as the agent's raw turns.
    *
    * A DM has exactly one teammate on the other end, so "the raw turns" names
-   * something. A `#channel` has several and a system feed has none, so the
-   * control is absent there rather than present and ambiguous — the same rule
-   * the member pane follows for the Operator feed.
+   * something. A `#channel` has several, so the control is absent there
+   * rather than present and ambiguous.
    */
   rawAvailable?: boolean;
   /** Whether the raw view is the one currently on screen. */
@@ -152,24 +152,20 @@ export function ChatHeader({
         </Button>
       )}
 
-      {/* Issue #1757: the Operator system channel is a read-only report feed
-          with no members, so it offers no agent pane. */}
-      {!channel.system && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn(
-            "h-7 gap-1.5 rounded-full border px-2.5 text-xs",
-            membersOpen ? "bg-accent" : "bg-muted/60",
-          )}
-          onClick={onToggleMembers}
-          aria-pressed={membersOpen}
-        >
-          <Users className="size-3.5" />
-          <span className="tabular-nums">{memberCount}</span>
-          <span className="sr-only">{membersOpen ? "Hide" : "Show"} agents</span>
-        </Button>
-      )}
+      <Button
+        variant="ghost"
+        size="sm"
+        className={cn(
+          "h-7 gap-1.5 rounded-full border px-2.5 text-xs",
+          membersOpen ? "bg-accent" : "bg-muted/60",
+        )}
+        onClick={onToggleMembers}
+        aria-pressed={membersOpen}
+      >
+        <Users className="size-3.5" />
+        <span className="tabular-nums">{memberCount}</span>
+        <span className="sr-only">{membersOpen ? "Hide" : "Show"} agents</span>
+      </Button>
     </header>
   );
 }
@@ -196,9 +192,17 @@ function KindIcon({ channel }: { channel: Channel }) {
     return face ? (
       // The teammate this line is *with* — clicking their face here opens who
       // they are (issue #1653), same as clicking it in the transcript below.
-      <AgentAvatarButton agentId={channel.member?.id} name={channel.name}>
-        <TeammateAvatar {...face} className="size-6" />
-      </AgentAvatarButton>
+      <AgentFace
+        agentId={channel.member?.id}
+        chatId={channel.member ? dmThreadId(channel.member) : undefined}
+        size="md"
+        surface="background"
+        name={channel.name}
+      >
+        <AgentAvatarButton agentId={channel.member?.id} name={channel.name}>
+          <TeammateAvatar {...face} className="size-6" />
+        </AgentAvatarButton>
+      </AgentFace>
     ) : (
       <CircleDot className={cls} aria-hidden />
     );

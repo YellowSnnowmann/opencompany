@@ -1,4 +1,6 @@
 use super::*;
+use crate::ports::TaskOrigin;
+use crate::ports::tasks::COLUMN_IN_REVIEW;
 
 /// The "zero tool work" claim in #552, proven rather than asserted: a
 /// second agent reads the first agent's deliverable through the ordinary
@@ -245,6 +247,7 @@ async fn a_failed_node_write_still_records_the_artifact() {
 }
 fn card(id: &str, assignee: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Ship the thing"),
         note: None,

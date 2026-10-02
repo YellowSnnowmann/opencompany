@@ -515,6 +515,7 @@ agent = "claude"
     )
     .expect("valid manifest");
     let record = CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
@@ -606,6 +607,7 @@ fn a_copilot_turn_is_authored_by_the_copilot_not_the_operator_channel() {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     });
     assert_eq!(bubble.channel, "operator", "the destination is unchanged");
     assert_eq!(

@@ -213,9 +213,15 @@ function render(ch: Channel, rows: TimelineItem[], historyPending = false) {
   });
 }
 
-/** The scrolling body is the component's outermost element. */
+/**
+ * The scrolling body.
+ *
+ * Addressed by its test id rather than as the outermost element: the jump
+ * control is its sibling, so the component's root is now the positioned
+ * wrapper holding both.
+ */
 function scroller(): HTMLElement {
-  return container.firstElementChild as HTMLElement;
+  return container.querySelector('[data-testid="channel-transcript"]') as HTMLElement;
 }
 
 /** The content column rule 2b observes — the scroller's one child. */
@@ -341,6 +347,40 @@ describe("growth while the channel is open", () => {
     render(ch, items(41, ch));
 
     expect(calls).toEqual([{ top: CONTENT_HEIGHT, behavior: "smooth" }]);
+  });
+
+  it("keeps following through its own glide towards the bottom", () => {
+    const ch = channel("engineering");
+    render(ch, items(40, ch));
+    // A reply grows the transcript and the pane glides; its own travel is down.
+    contentHeight += 400;
+    render(ch, items(41, ch));
+    calls = [];
+    scrollTop += 100;
+    act(() => {
+      scroller().dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    render(ch, items(42, ch));
+    expect(calls).toEqual([{ top: contentHeight, behavior: "smooth" }]);
+  });
+
+  it("stops following when the reader scrolls down mid-glide and stops short", () => {
+    const ch = channel("engineering");
+    render(ch, items(40, ch));
+    contentHeight += 400;
+    render(ch, items(41, ch));
+    calls = [];
+    // The reader's wheel takes over the glide; their travel is down too, but
+    // it stops short of the bottom, so it is theirs and not the pane's.
+    act(() => {
+      scroller().dispatchEvent(new WheelEvent("wheel", { deltaY: 100, bubbles: true }));
+    });
+    scrollTop += 100;
+    act(() => {
+      scroller().dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    render(ch, items(42, ch));
+    expect(calls).toHaveLength(0);
   });
 });
 

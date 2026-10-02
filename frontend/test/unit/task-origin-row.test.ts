@@ -4,6 +4,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { originLabel } from "@/lib/task-origin";
 import { OriginThreadRow } from "@/views/TaskDetailView";
 
 /**
@@ -83,5 +84,42 @@ describe("the Opened-from-chat row", () => {
     render({ originChatId: "t1", chatChannelByThread: { t1: "desk-eng" } });
     expect(container.querySelector("button")).toBeNull();
     expect(container.textContent).toContain("Opened from chat");
+  });
+
+  it("names the teammate who opened the card from a HiveMind room", () => {
+    render({
+      originChatId: "t1",
+      openedBy: { agentId: "writer", episodeId: "ep-1" },
+      names: new Map([["writer", "Wren"]]),
+      chatChannelByThread: { t1: "desk-eng" },
+      onOpenChannel: () => {},
+    });
+    expect(container.textContent).toContain("Opened in chat by Wren");
+    expect(container.textContent).toContain("Open the conversation");
+  });
+
+  it("falls back to the teammate's id when the roster does not name them", () => {
+    render({
+      originChatId: "gone",
+      openedBy: { agentId: "writer" },
+      chatChannelByThread: {},
+    });
+    expect(container.textContent).toContain("Opened in chat by writer");
+  });
+});
+
+describe("originLabel", () => {
+  it("says only where a card came from when no teammate opened it", () => {
+    expect(originLabel(undefined)).toBe("Opened from chat");
+    expect(originLabel({ agentId: "" })).toBe("Opened from chat");
+  });
+
+  it("prefers the roster name, ignoring a blank one", () => {
+    expect(originLabel({ agentId: "ceo" }, new Map([["ceo", "Ada"]]))).toBe(
+      "Opened in chat by Ada",
+    );
+    expect(originLabel({ agentId: "ceo" }, new Map([["ceo", "  "]]))).toBe(
+      "Opened in chat by ceo",
+    );
   });
 });

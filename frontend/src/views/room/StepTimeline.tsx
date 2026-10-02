@@ -31,9 +31,10 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
+import { teammateName } from "@/components/episode/teammate-name";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 
-import type { AsideConversationDto, ReferralConversationDto } from "@/api/types";
+import type { AgentConversationDto, ReferralConversationDto } from "@/api/types";
 
 import {
   AWAITING_APPROVAL_LABEL,
@@ -44,69 +45,6 @@ import {
 } from "@/api/types";
 import { consoleHref } from "@/lib/console-paths";
 import { cn } from "@/lib/utils";
-
-/**
- * A private aside, collapsed onto the move it rode under.
- *
- * Same idiom as {@link ReferralConversation}, deliberately — both are detail
- * behind a line rather than part of the desk's own conversation. What differs is
- * what the collapse means. A referral's rows are dropped host-side, so expanding
- * is the only way to read them at all. An aside is withheld from *agents*
- * outside it and never from a person: `Audience::admits` admits every operator
- * unconditionally, because privacy here is a deliberation device and not a
- * security boundary. So this collapse is tidiness — it stops a two-seat sidebar
- * reading like the room's own voice — and expanding reveals nothing the reader
- * was not already entitled to.
- *
- * Closed by default, and the count is the point of the closed state: it says how
- * much was said without saying it.
- */
-export function AsideConversation({ aside }: { aside: AsideConversationDto }) {
-  const [open, setOpen] = useState(false);
-  const count = aside.lines.length;
-  if (count === 0) return null;
-  // Everyone but the author, who is this row's own speaker and already named.
-  const addressed = aside.members.slice(1);
-
-  return (
-    <div className="mt-1 w-full max-w-[85%] sm:max-w-[75%]">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium text-muted-foreground transition-colors hover:bg-accent/60"
-      >
-        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        <span>
-          aside {addressed.map((id) => `@${id}`).join(", ")} · {count} message
-          {count === 1 ? "" : "s"}
-        </span>
-      </button>
-      {open && (
-        // Dashed, where a referral's is solid: the border is the one cue that
-        // this was said beside the room rather than across a desk boundary.
-        <ol className="mt-0.5 flex flex-col gap-2 rounded-lg border border-dashed bg-card/60 px-2.5 py-2">
-          {aside.lines.map((line, i) => (
-            // `AsideLineDto` carries no id of its own (issue: tinysweeper
-            // review), so the index alone is not a stable key if the lines
-            // are ever reordered or merged. Pairing it with the author keeps
-            // a reordered author's rows from swapping component instances
-            // with an unrelated author's.
-            <li key={`${line.authorId}-${i}`} className="flex gap-2">
-              <TeammateAvatar name={line.authorId} className="mt-0.5 size-5 shrink-0" />
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-2xs leading-none font-semibold">{line.authorId}</span>
-                <span className="text-2xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
-                  {line.text}
-                </span>
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
-  );
-}
 
 /**
  * The scrubbed processing steps behind a company reply, rendered above its
@@ -205,6 +143,7 @@ export function StepTimeline({
 export function ReferralConversation({
   crossing,
   rowId,
+  agentNames,
 }: {
   crossing: ReferralConversationDto;
   /**
@@ -213,6 +152,8 @@ export function ReferralConversation({
    * renders the finished wording, which is what every surface did before.
    */
   rowId?: string;
+  /** Roster id to display name, for the asker and the other side. */
+  agentNames?: Readonly<Record<string, string>>;
 }) {
   const [open, setOpen] = useState(false);
   const running = useCrossingRunning(rowId);
@@ -250,13 +191,19 @@ export function ReferralConversation({
               claim about something being over, so it waits until it is. */}
           {running
             ? crossing.inbound
-              ? `answering @${crossing.otherId}`
-              : `${crossing.askerId} is talking to ${
-                  crossing.direct ? `@${crossing.otherId}` : `#${crossing.otherDeskId}`
+              ? `answering @${teammateName(crossing.otherId, agentNames)}`
+              : `${teammateName(crossing.askerId, agentNames)} is talking to ${
+                  crossing.direct
+                    ? `@${teammateName(crossing.otherId, agentNames)}`
+                    : `#${crossing.otherDeskId}`
                 }`
             : crossing.inbound
-              ? `asked by @${crossing.otherId}`
-              : `asked ${crossing.direct ? `@${crossing.otherId}` : `#${crossing.otherDeskId}`}`}{" "}
+              ? `asked by @${teammateName(crossing.otherId, agentNames)}`
+              : `asked ${
+                  crossing.direct
+                    ? `@${teammateName(crossing.otherId, agentNames)}`
+                    : `#${crossing.otherDeskId}`
+                }`}{" "}
           {/* "so far" while it runs, because the number is not the total yet. */}
           · {count} message{count === 1 ? "" : "s"}
           {running ? " so far" : ""}
@@ -271,8 +218,8 @@ export function ReferralConversation({
         <ol className="mt-0.5 flex flex-col gap-2 rounded-lg border bg-card/60 px-2.5 py-2">
           {crossing.lines.map((line, i) => {
             const who = line.outbound
-              ? crossing.askerId
-              : line.authorLabel || line.authorId;
+              ? teammateName(crossing.askerId, agentNames)
+              : line.authorLabel || teammateName(line.authorId, agentNames);
             // The desk each side is speaking from — the asker's is this one, so
             // it goes unsaid; the answer comes from somewhere the reader may not
             // have open.
@@ -284,6 +231,83 @@ export function ReferralConversation({
                       a person or a desk, and repeating the answerer's desk on
                       their line was what made a `@name` crossing read as though
                       the desk had been asked. */}
+                  <span className="text-2xs leading-none font-semibold">{who}</span>
+                  <span className="text-2xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+                    {line.text}
+                  </span>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One agent-to-agent exchange, as one collapsed line on the row that opened it.
+ *
+ * Same idiom as {@link ReferralConversation} above, and deliberately so: to a
+ * reader these are the same act — somebody on this desk stepped aside to ask
+ * somebody else, and the desk's own transcript cannot show it. What differs is
+ * only where the rows live. A crossing's relayed rows are dropped host-side;
+ * these are kept, in the pair channel the two seats wrote to, and the host
+ * folds them here because a desk reads its own channel and they are not in it.
+ *
+ * Closed by default, for the reason a crossing is: the count says how much was
+ * said without saying it, and the desk still reads as its own conversation.
+ *
+ * `concluded` comes from the host rather than from a running-turn lookup — the
+ * conclusion is journaled, so there is no need to infer it from whether a turn
+ * happens to be open.
+ */
+export function AgentConversation({
+  exchange,
+  agentNames,
+}: {
+  exchange: AgentConversationDto;
+  /** Roster id to display name, for the asker and the askee. */
+  agentNames?: Readonly<Record<string, string>>;
+}) {
+  const [open, setOpen] = useState(false);
+  const count = exchange.lines.length;
+  if (count === 0) return null;
+  const running = !exchange.concluded;
+
+  return (
+    <div className="mt-1 w-full max-w-[85%] sm:max-w-[75%]" data-testid="agent-conversation">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        data-conversation-state={running ? "live" : exchange.forced ? "unanswered" : "answered"}
+        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium text-muted-foreground transition-colors hover:bg-accent/60"
+      >
+        {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        <span>
+          {/* Present tense while it is still happening, for the reason the
+              crossing above words it that way: past tense is a claim that
+              something is over, and this one says so from the journal. */}
+          {running
+            ? `${teammateName(exchange.askerId, agentNames)} is talking to @${teammateName(exchange.askeeId, agentNames)}`
+            : exchange.forced
+              ? `asked @${teammateName(exchange.askeeId, agentNames)}, unanswered`
+              : `asked @${teammateName(exchange.askeeId, agentNames)}`}{" "}
+          · {count} message{count === 1 ? "" : "s"}
+          {running ? " so far" : ""}
+        </span>
+      </button>
+      {open && (
+        <ol className="mt-0.5 flex flex-col gap-2 rounded-lg border bg-card/60 px-2.5 py-2">
+          {exchange.lines.map((line, i) => {
+            const who = line.outbound
+              ? teammateName(exchange.askerId, agentNames)
+              : line.authorLabel || teammateName(line.authorId, agentNames);
+            return (
+              <li key={i} className="flex gap-2">
+                <TeammateAvatar name={who} className="mt-0.5 size-5 shrink-0" />
+                <div className="flex min-w-0 flex-col gap-0.5">
                   <span className="text-2xs leading-none font-semibold">{who}</span>
                   <span className="text-2xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
                     {line.text}
@@ -427,6 +451,7 @@ export function ReferralChip({
   sequence,
   direction,
   direct = false,
+  agentNames,
 }: {
   deskId: string;
   deskName: string;
@@ -434,11 +459,12 @@ export function ReferralChip({
   sequence: number;
   direction: "asked" | "answered";
   direct?: boolean;
+  agentNames?: Readonly<Record<string, string>>;
 }) {
   // Whoever was actually addressed. A crossing put to a PERSON never reached
   // their desk — that desk holds none of the exchange and its other members had
   // no part in it — so naming the desk here credited a room that was never asked.
-  const who = direct ? `@${askerId}` : deskName;
+  const who = direct ? `@${teammateName(askerId, agentNames)}` : deskName;
   const label = direction === "asked" ? `Asked by ${who}` : `Answered by ${who}`;
   const body = (
     <>

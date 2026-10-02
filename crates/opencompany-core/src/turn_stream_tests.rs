@@ -228,6 +228,30 @@ fn serializes_to_typed_camelcase_wire_shape() {
     assert!(j.get("agentId").is_none(), "empty optional omitted");
 }
 
+/// `replying` carries no label, status or tool id: on the wire it is the
+/// discriminant plus routing, so the console cannot mistake it for a step.
+#[test]
+fn a_replying_frame_serializes_with_no_label_or_status() {
+    let f = TurnStreamEvent {
+        kind: "replying",
+        seq: 4,
+        ..TurnStreamEvent::default()
+    };
+    let j = serde_json::to_value(
+        f.with_agent("rae")
+            .with_chat("dm:rae")
+            .with_message_seq(Some(9)),
+    )
+    .expect("serialize");
+    assert_eq!(j["type"], "replying");
+    assert_eq!(j["agentId"], "rae");
+    assert_eq!(j["chatId"], "dm:rae");
+    assert_eq!(j["messageSeq"], 9);
+    for key in ["label", "status", "toolCallId", "detail", "result"] {
+        assert!(j.get(key).is_none(), "{key} must be omitted: {j}");
+    }
+}
+
 /// Two turns racing in one chat are tellable apart, and by nothing else.
 ///
 /// `chatId` is the *conversation*; two questions asked in one channel share

@@ -97,6 +97,17 @@ fn a_thinking_marker_produces_no_empty_bubble() {
 }
 
 #[test]
+fn a_replying_marker_maps_to_nothing() {
+    // `replying` says an agent started writing and carries no text, so there is
+    // nothing an ACP client could render from it.
+    let event = TurnStreamEvent {
+        kind: "replying",
+        ..TurnStreamEvent::default()
+    };
+    assert!(from_turn_stream(&event).is_none());
+}
+
+#[test]
 fn the_notification_envelope_is_well_formed() {
     let wrapped = notification("sess-1", json!({ "sessionUpdate": "tool_call" }));
     assert_eq!(wrapped["jsonrpc"], "2.0");

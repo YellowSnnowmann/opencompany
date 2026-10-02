@@ -20,90 +20,55 @@
 //! `GET …/skills` and `GET …/skills/registry` — stay open to any member; only
 //! the writes decide anything.
 
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post, put};
+use axum::routing::{post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
-use crate::company::skill_effective::{self, EffectiveSkill, valid_slug};
-use crate::company::{SkillDoc, parse_skill_md, render_skill_md};
+use crate::company::skill_effective::{self, EffectiveSkill};
+use crate::company::skill_scope::agents_for_skill;
+use crate::company::skill_validate::{MAX_SLUG_CHARS, slugify, validate_slug, validate_slug_shape};
+use crate::company::{
+    SkillDoc, SkillDrift, VersionChange, effective_drift, parse_skill_md, render_skill_md,
+    skill_digest,
+};
 use crate::error::OpenCompanyError;
-use crate::ports::skills_state::{SkillSource, SkillState};
-use crate::ports::types::CompanyId;
+use crate::ports::now_millis;
+use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState};
+use crate::ports::types::SkillChange;
 use crate::server::error::ApiError;
 use crate::server::ops::language;
 use crate::server::ops::{AdminScopedCompany, ScopedCompany, scoped};
 
 /// The default category stamped on a skill whose doc carries none.
 const DEFAULT_CATEGORY: &str = "Ops";
-/// The publisher stamped on shared-library skills (mirrors the GraphQL type).
-const REGISTRY_PUBLISHER: &str = "OpenCompany";
 
-/// The largest a skill's persisted `SKILL.md` (frontmatter and body together)
-/// may be.
-///
-/// A skill's content lands in every agent's effective prompt, company-wide, so
-/// this is a prompt budget rather than a storage limit. A quarter mebibyte
-/// matches the codebase's existing ceiling for inline prose,
-/// `MAX_ARTIFACT_BODY_BYTES` — generous for hand-authored instructions, and
-/// still small enough that no single skill can quietly dominate what every
-/// agent reads on every turn.
-const MAX_SKILL_DOC_BYTES: usize = 256 * 1024;
+mod doc;
+mod draft;
+mod drift;
+mod journal;
+mod registry;
+pub(crate) mod scope;
+mod update;
+mod upload;
+pub(crate) mod vet;
 
-/// Refuses a skill document over [`MAX_SKILL_DOC_BYTES`].
-///
-/// Checked on the assembled `SKILL.md` rather than the raw request fields, so
-/// it bounds what actually lands in the agent's prompt regardless of which
-/// field (name, description, or body) grew.
-fn check_skill_doc_size(doc: &str) -> Result<(), ApiError> {
-    if doc.len() > MAX_SKILL_DOC_BYTES {
-        return Err(ApiError(OpenCompanyError::InvalidRequest(format!(
-            "that skill is {:.1} KB — a skill's content has to be under {} KB.",
-            doc.len() as f64 / 1024.0,
-            MAX_SKILL_DOC_BYTES / 1024
-        ))));
-    }
-    Ok(())
-}
-
-/// Per-company serialization for the skill write routes.
-///
-/// `install` and `create_custom` write a fresh [`SkillState`] straight through
-/// [`SkillStateStore::set`](crate::ports::SkillStateStore::set) and are
-/// raceless on their own — the store upserts by slug, so two of them landing
-/// concurrently is an ordinary last-write-wins. `set_enabled` is the one
-/// genuine read-modify-write: it lists the existing delta so it can preserve
-/// the slug's `source` and `custom_doc`, then writes a new one back. An
-/// install or an authoring landing in the middle of that window would be
-/// silently reverted — its fresh doc and source overwritten by whatever
-/// `set_enabled` read before it ran. Taking this lock unconditionally in every
-/// write handler, exactly as `smtp.rs`'s `write_lock` does for its own
-/// read-modify-write, keeps that ordering rule in one place rather than in
-/// each handler.
-fn write_lock(company: &CompanyId) -> Arc<tokio::sync::Mutex<()>> {
-    static LOCKS: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<CompanyId, Arc<tokio::sync::Mutex<()>>>>,
-    > = std::sync::OnceLock::new();
-    let locks = LOCKS.get_or_init(Default::default);
-    let mut locks = locks.lock().expect("skill write locks poisoned");
-    Arc::clone(
-        locks
-            .entry(company.clone())
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
-    )
-}
+// Re-exported rather than imported where used: the submodules reach these
+// through `super::`, and the sibling test files resolve them through
+// `use super::*`.
+pub(crate) use vet::{ScanSummary, VetRefusal, check_skill_doc_size, vet_skill, write_lock};
 
 /// Builds the skills route fragment.
 pub fn router() -> Router<AppState> {
     scoped("/skills/{slug}/install", post(install))
+        .merge(upload::router())
+        .merge(doc::router())
+        .merge(draft::router())
+        .merge(update::router())
         .merge(scoped("/skills/{slug}/uninstall", post(uninstall)))
-        // `registry` is a static segment, so it wins over the `{slug}` pattern
-        // above regardless of registration order (and the methods differ anyway).
-        .merge(scoped("/skills/registry", get(list_registry)))
+        .merge(registry::router())
         .merge(scoped("/skills/{slug}", put(set_enabled)))
         .merge(scoped("/skills", post(create_custom).get(list_skills)))
 }
@@ -122,6 +87,41 @@ struct InstalledSkill {
     /// Lets a future "update available" affordance diff an install against the
     /// live registry without any extra stored state.
     version: Option<String>,
+    /// When the operator last wrote this skill's delta, in epoch milliseconds.
+    /// `None` for a skill no delta covers — a bundled or baseline skill nobody
+    /// has touched — and for a row stored before the field existed.
+    updated_at_millis: Option<u64>,
+    /// What the scan said, on the write that stored this skill. Absent on a
+    /// read: the report belongs to the write that produced the document, and
+    /// re-deriving one on every list would report a verdict nobody acted on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scan: Option<ScanSummary>,
+    /// The revisions either side of a library change, when the library's
+    /// document has moved since this install pinned its snapshot.
+    ///
+    /// Absent when it has not moved, and on every row that pinned nothing —
+    /// a bundled skill has no library copy to be a revision *of*.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    update_available: Option<VersionChange>,
+    /// Whether the stored document no longer matches the digest recorded at
+    /// install.
+    ///
+    /// A plain boolean, always on the wire, `false` on a row that pinned
+    /// nothing. An absent boolean reads as "unknown", and the console would
+    /// then have to decide whether to warn about a skill nothing can be said
+    /// about.
+    modified: bool,
+    /// Where every roster agent stands on this skill — the read-side inversion
+    /// of the per-agent allowlist ([`crate::company::skill_scope`]), which the
+    /// skill's detail panel renders its picker from.
+    ///
+    /// Absent means **this answer does not report the roster**, which the
+    /// console reads as "cannot say" and renders without a picker. An empty list
+    /// is a different statement — the company has no teammates — so the two must
+    /// not collapse, and the absent form is the safe one for a route that has
+    /// not resolved the roster.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agents: Option<Vec<crate::company::skill_scope::SkillAgentScope>>,
 }
 
 impl InstalledSkill {
@@ -159,13 +159,28 @@ impl InstalledSkill {
             source: state.source,
             enabled: state.enabled,
             version,
+            updated_at_millis: state.updated_at_millis,
+            scan: None,
+            update_available: None,
+            modified: false,
+            agents: None,
         }
+    }
+
+    /// Attaches the report of the write that stored this skill.
+    fn with_scan(mut self, scan: ScanSummary) -> Self {
+        self.scan = Some(scan);
+        self
     }
 
     /// Projects one entry of the company's effective set
     /// ([`skill_effective::resolve`]) to the console shape. An entry no layer
     /// supplied a document for is rendered from its slug alone.
-    fn from_effective(skill: &EffectiveSkill) -> Self {
+    ///
+    /// `registry` is the host's shared library, which a pinned install is
+    /// measured against — the list is where an operator learns that one has
+    /// moved on without them.
+    fn from_effective(skill: &EffectiveSkill, registry: &[SkillDoc]) -> Self {
         let doc = skill.doc();
         Self {
             id: skill.slug.clone(),
@@ -179,40 +194,13 @@ impl InstalledSkill {
             source: skill.source,
             enabled: skill.enabled,
             version: doc.and_then(|doc| doc.version.clone()),
+            updated_at_millis: skill.updated_at_millis,
+            scan: None,
+            update_available: None,
+            modified: false,
+            agents: None,
         }
-    }
-}
-
-/// One skill in the shared library, as the console's registry tab browses it.
-///
-/// Deliberately **metadata only** — no `body`. Mirrors the GraphQL
-/// `RegistrySkill` type so the two transports agree field for field.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RegistrySkill {
-    id: String,
-    name: String,
-    description: String,
-    category: String,
-    publisher: String,
-    /// The library revision this entry ships, from frontmatter. `None` for a
-    /// skill authored before `version` existed.
-    version: Option<String>,
-}
-
-impl RegistrySkill {
-    fn from_doc(doc: &SkillDoc) -> Self {
-        Self {
-            id: doc.slug.clone(),
-            name: doc.name.clone(),
-            description: doc.description.clone(),
-            category: doc
-                .category
-                .clone()
-                .unwrap_or_else(|| DEFAULT_CATEGORY.to_string()),
-            publisher: REGISTRY_PUBLISHER.to_string(),
-            version: doc.version.clone(),
-        }
+        .with_drift(effective_drift(skill, registry))
     }
 }
 
@@ -240,6 +228,9 @@ struct InstallSkill {
     description: Option<String>,
     #[serde(default)]
     category: Option<String>,
+    /// Install despite a blocking scan verdict, for this request only.
+    #[serde(default)]
+    force: bool,
 }
 
 /// The custom-skill body.
@@ -247,6 +238,9 @@ struct InstallSkill {
 struct CreateSkill {
     name: String,
     description: String,
+    /// Save despite a blocking scan verdict, for this request only.
+    #[serde(default)]
+    force: bool,
     #[serde(default)]
     category: Option<String>,
     #[serde(default)]
@@ -272,10 +266,17 @@ async fn list_skills(
     ));
     let registry = state.shared_skill_registry()?;
     let effective = skill_effective::resolve(company.runtime.source_dir(), &registry, &deltas)?;
+    let roster = scope::roster_scopes(&company.runtime).await?;
     Ok(Json(
         effective
             .iter()
-            .map(InstalledSkill::from_effective)
+            .map(|skill| {
+                InstalledSkill::from_effective(skill, &registry).with_agents(agents_for_skill(
+                    &skill.slug,
+                    skill.enabled,
+                    &roster,
+                ))
+            })
             .collect(),
     ))
 }
@@ -294,11 +295,13 @@ async fn list_skills(
 /// 2. **Slug absent from a non-empty registry** → `404`. This is a typo or a
 ///    stale client; silently persisting a stub is what produced content-less
 ///    installs in the first place.
-/// 3. **Empty registry** → fall back to the client's metadata, as before. An
+/// 3. **Empty registry** → fall back to the client's metadata, recorded as
+///    [`SkillSource::Custom`] since no library supplied the document. An
 ///    empty registry means this host serves no shared library at all
 ///    (platform-provisioned mode, no `skills_root`), so there is nothing to
 ///    resolve against and refusing every install would break hosted tenants
-///    outright.
+///    outright. The row records [`SkillSource::Custom`], because the document
+///    is the client's own and no library copy exists to compare it against.
 ///
 /// A *configured* library that fails to load is a `500`, never case 3: silently
 /// degrading a broken shared library to "no library" would hand the client
@@ -310,17 +313,25 @@ async fn install(
     Path(SlugPath { slug }): Path<SlugPath>,
     body: Option<Json<InstallSkill>>,
 ) -> Result<Json<InstalledSkill>, ApiError> {
-    if !valid_slug(&slug) {
-        return Err(ApiError(OpenCompanyError::InvalidRequest(format!(
-            "`{slug}` is not a valid skill slug. Skills live under `skills/<slug>/`, so a slug \
-             is `[a-z0-9][a-z0-9-]*`."
-        ))));
+    if let Err(problem) = validate_slug(&slug) {
+        return Err(ApiError(OpenCompanyError::InvalidRequest(problem)));
     }
+    let meta = body.map(|Json(body)| body).unwrap_or_default();
+    let force = meta.force;
     let lock = write_lock(company.id());
     let _guard = lock.lock().await;
     let registry = state.shared_skill_registry()?;
-    let doc = match registry.iter().find(|doc| doc.slug == slug) {
-        Some(doc) => render_skill_md(doc),
+    let (doc, source, install) = match registry.iter().find(|doc| doc.slug == slug) {
+        Some(doc) => {
+            let rendered = render_skill_md(doc);
+            let pin = SkillInstall {
+                digest: skill_digest(&rendered),
+                version: doc.version.clone(),
+                installed_by: Some(company.actor()),
+                installed_at_millis: now_millis(),
+            };
+            (rendered, SkillSource::Registry, Some(pin))
+        }
         None if !registry.is_empty() => {
             return Err(ApiError(OpenCompanyError::NotFound(
                 language::SKILL_NOT_IN_REGISTRY.to_string(),
@@ -330,47 +341,56 @@ async fn install(
             // No shared library backs this host. Persist a real `SKILL.md` built
             // from the client's metadata (the description doubles as the body) so
             // `EffectiveSkills::materialize` surfaces the skill to the agent
-            // instead of skipping a content-less delta.
-            let meta = body.map(|Json(b)| b).unwrap_or_default();
+            // instead of skipping a content-less delta. A client that supplies no
+            // description gets the name as one: an empty scalar is a document the
+            // parser refuses, and the delta it stored reached no agent.
+            //
+            // `Custom` is the honest provenance: nothing about this document
+            // came from a shared library, so nothing can ever be diffed against
+            // one to say it is stale or authentic.
             let name = meta
                 .name
                 .filter(|n| !n.trim().is_empty())
                 .unwrap_or_else(|| titleize(&slug));
-            let description = meta.description.unwrap_or_default();
-            skill_md(&name, &description, meta.category.as_deref(), &description)
+            let description = meta
+                .description
+                .filter(|description| !description.trim().is_empty())
+                .unwrap_or_else(|| name.clone());
+            (
+                skill_md(&name, &description, meta.category.as_deref(), &description),
+                SkillSource::Custom,
+                None,
+            )
         }
     };
     check_skill_doc_size(&doc)?;
+    let scan = vet_skill(&slug, &doc, force).map_err(ApiError::from)?;
     let delta = SkillState {
         slug,
         enabled: true,
-        source: SkillSource::Registry,
+        source,
         custom_doc: Some(doc),
+        updated_at_millis: Some(now_millis()),
+        install,
     };
     company.runtime.skills().set(company.id(), &delta).await?;
-    Ok(Json(InstalledSkill::from_state(&delta)))
-}
-
-/// `GET …/skills/registry` — the shared skill library the console's registry tab
-/// browses.
-///
-/// **Metadata only, by construction**: [`RegistrySkill`] has no `body` field, so
-/// the payload stays flat regardless of how large the library grows. Install is
-/// server-authoritative, so the client never needs a body — it posts a slug and
-/// the host resolves the content.
-///
-/// Scoped (and so authorized) like every other console route even though the
-/// library itself is host-global; the registry is not public.
-async fn list_registry(
-    State(state): State<AppState>,
-    _company: ScopedCompany,
-) -> Result<Json<Vec<RegistrySkill>>, ApiError> {
+    journal::journal_write(
+        &company.runtime,
+        &company.actor(),
+        &delta,
+        SkillChange::Installed,
+    )
+    .await?;
+    // A pin minted from the library's current document, over a document stored
+    // from the same render: current and unmodified by construction, so this
+    // needs no second comparison to say so.
+    let stood = delta.install.as_ref().map(|_| SkillDrift::default());
+    let roster = scope::roster_scopes(&company.runtime).await?;
     Ok(Json(
-        state
-            .shared_skill_registry()?
-            .iter()
-            .map(RegistrySkill::from_doc)
-            .collect(),
+        InstalledSkill::from_state(&delta)
+            .with_scan(scan)
+            .with_drift(stood)
+            .with_agents(agents_for_skill(&delta.slug, delta.enabled, &roster)),
     ))
 }
 
@@ -391,6 +411,8 @@ async fn uninstall(
         // Only registry installs and custom skills can be uninstalled.
         Some(state) if matches!(state.source, SkillSource::Registry | SkillSource::Custom) => {
             company.runtime.skills().remove(company.id(), &slug).await?;
+            journal::journal_removal(&company.runtime, &company.actor(), &slug, state.source)
+                .await?;
             Ok(StatusCode::NO_CONTENT)
         }
         // A built-in (company) skill — with or without a delta row — cannot be
@@ -402,20 +424,19 @@ async fn uninstall(
 }
 
 async fn set_enabled(
+    State(app): State<AppState>,
     company: AdminScopedCompany,
     Path(SlugPath { slug }): Path<SlugPath>,
     Json(body): Json<SetEnabled>,
 ) -> Result<Json<InstalledSkill>, ApiError> {
-    if !valid_slug(&slug) {
-        return Err(ApiError(OpenCompanyError::InvalidRequest(format!(
-            "`{slug}` is not a valid skill slug. Skills live under `skills/<slug>/`, so a slug \
-             is `[a-z0-9][a-z0-9-]*`."
-        ))));
+    if let Err(problem) = validate_slug_shape(&slug) {
+        return Err(ApiError(OpenCompanyError::InvalidRequest(problem)));
     }
     let lock = write_lock(company.id());
     let _guard = lock.lock().await;
-    // Preserve an existing delta's source and custom doc; a first toggle of a
-    // built-in company skill records a Company-sourced override.
+    // A toggle writes no document, so everything an install recorded carries
+    // through unchanged; a first toggle of a built-in company skill records a
+    // Company-sourced override.
     let existing = company
         .runtime
         .skills()
@@ -423,20 +444,33 @@ async fn set_enabled(
         .await?
         .into_iter()
         .find(|s| s.slug == slug);
+    let (source, custom_doc, install) = match existing {
+        Some(row) => (row.source, row.custom_doc, row.install),
+        None => (SkillSource::Company, None, None),
+    };
     let state = SkillState {
         slug,
         enabled: body.enabled,
-        source: existing
-            .as_ref()
-            .map(|s| s.source)
-            .unwrap_or(SkillSource::Company),
-        custom_doc: existing.and_then(|s| s.custom_doc),
+        source,
+        custom_doc,
+        updated_at_millis: Some(now_millis()),
+        install,
     };
     company.runtime.skills().set(company.id(), &state).await?;
-    Ok(Json(InstalledSkill::from_state(&state)))
+    // The toggle moved nothing a pin measures, so the row stands where it stood
+    // — which the answer has to say, because the console folds this row into the
+    // list it is already showing.
+    let stood = drift::row_drift(&app.shared_skill_registry()?, &state);
+    let roster = scope::roster_scopes(&company.runtime).await?;
+    Ok(Json(
+        InstalledSkill::from_state(&state)
+            .with_drift(stood)
+            .with_agents(agents_for_skill(&state.slug, state.enabled, &roster)),
+    ))
 }
 
 async fn create_custom(
+    State(state): State<AppState>,
     company: AdminScopedCompany,
     Json(body): Json<CreateSkill>,
 ) -> Result<Json<InstalledSkill>, ApiError> {
@@ -447,7 +481,10 @@ async fn create_custom(
     }
     let lock = write_lock(company.id());
     let _guard = lock.lock().await;
-    let slug = slugify(&body.name);
+    let slug = unique_slug(
+        &slugify(&body.name),
+        &taken_slugs(&state, &company.runtime).await?,
+    );
     let doc = skill_md(
         &body.name,
         &body.description,
@@ -455,14 +492,29 @@ async fn create_custom(
         body.body.as_deref().unwrap_or(""),
     );
     check_skill_doc_size(&doc)?;
+    let scan = vet_skill(&slug, &doc, body.force).map_err(ApiError::from)?;
     let state = SkillState {
         slug,
         enabled: true,
         source: SkillSource::Custom,
         custom_doc: Some(doc),
+        install: None,
+        updated_at_millis: Some(now_millis()),
     };
     company.runtime.skills().set(company.id(), &state).await?;
-    Ok(Json(InstalledSkill::from_state(&state)))
+    journal::journal_write(
+        &company.runtime,
+        &company.actor(),
+        &state,
+        SkillChange::Installed,
+    )
+    .await?;
+    let roster = scope::roster_scopes(&company.runtime).await?;
+    Ok(Json(
+        InstalledSkill::from_state(&state)
+            .with_scan(scan)
+            .with_agents(agents_for_skill(&state.slug, state.enabled, &roster)),
+    ))
 }
 
 /// Builds a `SKILL.md` document from a name, description, optional category, and
@@ -487,25 +539,56 @@ fn skill_md(name: &str, description: &str, category: Option<&str>, content: &str
     format!("---\n{frontmatter}---\n{content}\n")
 }
 
-/// Turns a display name into a filesystem-and-URL-safe slug.
-fn slugify(name: &str) -> String {
-    let mut slug = String::with_capacity(name.len());
-    let mut prev_dash = false;
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            slug.push(ch.to_ascii_lowercase());
-            prev_dash = false;
-        } else if !prev_dash {
-            slug.push('-');
-            prev_dash = true;
+/// Every slug the company already resolves — bundled, registry-installed and
+/// authored alike.
+///
+/// Authoring has to avoid all three, not just the stored deltas: a bundled
+/// skill has no delta row at all, so a check against the store alone would
+/// still let an authored skill take `web-research` from the bundle.
+async fn taken_slugs(
+    state: &AppState,
+    runtime: &crate::company::runtime::CompanyRuntime,
+) -> Result<std::collections::HashSet<String>, ApiError> {
+    let mut deltas = runtime.skills().list(runtime.id()).await?;
+    deltas.extend(skill_effective::globals_skill_disables(
+        &runtime.globals_disable().await?,
+    ));
+    let registry = state.shared_skill_registry()?;
+    Ok(
+        skill_effective::resolve(runtime.source_dir(), &registry, &deltas)?
+            .into_iter()
+            .map(|skill| skill.slug)
+            .collect(),
+    )
+}
+
+/// `base`, or the first free `base-2`, `base-3`, … within [`MAX_SLUG_CHARS`].
+///
+/// A slug is a store key and a directory name, and authoring derives it from a
+/// free-text display name, so two names can arrive at one slug: they differ
+/// only past the truncation point, or they contain no alphanumerics at all and
+/// both fall back to `skill`. Writing under a taken slug replaces whatever
+/// holds it — another authored skill, or a bundled document an agent reads —
+/// so the collision is resolved here rather than at the store.
+fn unique_slug(base: &str, taken: &std::collections::HashSet<String>) -> String {
+    if !taken.contains(base) {
+        return base.to_string();
+    }
+    for n in 2..=1000 {
+        let suffix = format!("-{n}");
+        let room = MAX_SLUG_CHARS.saturating_sub(suffix.chars().count());
+        let stem = base.chars().take(room).collect::<String>();
+        let stem = stem.trim_end_matches('-');
+        let candidate = if stem.is_empty() {
+            format!("skill{suffix}")
+        } else {
+            format!("{stem}{suffix}")
+        };
+        if !taken.contains(&candidate) {
+            return candidate;
         }
     }
-    let trimmed = slug.trim_matches('-').to_string();
-    if trimmed.is_empty() {
-        "skill".to_string()
-    } else {
-        trimmed
-    }
+    format!("skill-{}", crate::ports::now_millis())
 }
 
 /// Turns a slug into a human title (`web-research` → `Web Research`).
@@ -526,6 +609,9 @@ fn titleize(slug: &str) -> String {
 #[cfg(test)]
 #[path = "skills_part2_tests.rs"]
 mod tests_part2;
+#[cfg(test)]
+#[path = "skills_scan_tests.rs"]
+mod tests_scan;
 #[cfg(test)]
 #[path = "skills_skill_md_frontmatter_resists_tests.rs"]
 mod tests_skill_md_frontmatter_resists;

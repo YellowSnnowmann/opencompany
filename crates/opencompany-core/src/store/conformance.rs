@@ -38,7 +38,7 @@ use crate::ports::run_output::{
     MAX_RUN_OUTPUTS_PER_COMPANY, WorkflowRunOutputRecord, WorkflowRunOutputStore,
 };
 use crate::ports::sessions::{SessionKind, SessionRecord, SessionStore};
-use crate::ports::skills_state::{SkillSource, SkillState, SkillStateStore};
+use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState, SkillStateStore};
 use crate::ports::store::CompanyStore;
 use crate::ports::tasks::{TaskOrigin, TaskRecord, TaskStore, TaskTitle};
 use crate::ports::types::{
@@ -194,6 +194,7 @@ fn sample_overlay_agents() -> Vec<crate::ports::types::OverlayAgent> {
             role: "Head of Support".to_string(),
             description: Some("Answers customer mail and escalates refunds.".to_string()),
             tools: Some(vec!["docs.*".to_string(), "web".to_string()]),
+            skills: None,
             // Both set, so a backend that drops either fails here — the same
             // reason `tools` is a narrowed `Some` here, `None` on the next, and
             // an explicit empty `Some(vec![])` on the third.
@@ -209,6 +210,7 @@ fn sample_overlay_agents() -> Vec<crate::ports::types::OverlayAgent> {
             // `None` = inherit the standard company-wide grant. Must rehydrate
             // as `None`, never as `Some(vec![])` (which since #1804 is deny-all).
             tools: None,
+            skills: None,
             // The absent half of the pair: `None` must rehydrate as `None`,
             // never as an empty string pinning the teammate to a nameless
             // harness.
@@ -225,6 +227,7 @@ fn sample_overlay_agents() -> Vec<crate::ports::types::OverlayAgent> {
             // opposite of `None`. Must survive as `Some(vec![])`, never collapse
             // to `None` (which would silently re-grant the whole company belt).
             tools: Some(Vec::new()),
+            skills: None,
             model: None,
             harness: None,
         },
@@ -292,6 +295,10 @@ fn sample_agent_overrides() -> Vec<crate::ports::types::AgentOverride> {
         role: Some("Chief Vibes".to_string()),
         description: Some(String::new()),
         tools: Some(Some(vec!["docs.*".to_string()])),
+        // The scope round-trips in its three-state form for the same reason
+        // `tools` does: an explicit no-skills scope that came back as `None`
+        // would silently turn a deny-all into every enabled skill.
+        skills: Some(Some(vec!["brand-voice".to_string()])),
         instructions: Some("Be exceedingly concise and decisive.".to_string()),
         // A dropped avatar reads as "nobody has chosen", so the teammate's face
         // would silently revert to the hashed default on the next restart — the
@@ -314,6 +321,7 @@ fn sample_agent_overrides() -> Vec<crate::ports::types::AgentOverride> {
 /// assert it survives persistence, issue #85).
 fn record(id: &CompanyId) -> CompanyRecord {
     CompanyRecord {
+        general_channel: sample_general_channel(),
         overlay_desk_hive: Vec::new(),
         overlay_agent_edits: sample_agent_overrides(),
         // Non-empty so a backend that drops the field is caught: without the
@@ -362,6 +370,15 @@ fn record(id: &CompanyId) -> CompanyRecord {
         name_confirmed: false,
         activation_completed_at: None,
         created_at_millis: None,
+    }
+}
+
+/// A stored `#general` with members, so a backend that drops the field fails.
+fn sample_general_channel() -> crate::ports::types::GeneralChannel {
+    crate::ports::types::GeneralChannel {
+        id: crate::ports::types::GENERAL_CHANNEL_ID.to_string(),
+        name: crate::ports::types::GENERAL_CHANNEL_NAME.to_string(),
+        members: vec!["ceo".to_string(), "writer".to_string()],
     }
 }
 
@@ -590,6 +607,11 @@ pub async fn assert_isolation_by_company(
         loaded.overlay_retired_agents,
         vec!["eng".to_string()],
         "overlay_retired_agents did not survive save/load"
+    );
+    assert_eq!(
+        loaded.general_channel,
+        sample_general_channel(),
+        "general_channel did not survive save/load"
     );
     assert!(
         loaded
@@ -1131,6 +1153,9 @@ pub async fn assert_event_retention(events: Arc<dyn EventLog>) {
                     chat_id: "general".to_string(),
                     parent: None,
                     by: None,
+                    agent_id: None,
+                    episode_id: None,
+                    round_revision: None,
                 },
             )
             .await
@@ -1142,6 +1167,11 @@ pub async fn assert_event_retention(events: Arc<dyn EventLog>) {
             CompanyEvent::TurnFailed {
                 turn_id: "turn-0".to_string(),
                 error: "the host restarted".to_string(),
+                agent_id: None,
+                chat_id: None,
+                episode_id: None,
+                round_revision: None,
+                outcome: None,
             },
         )
         .await
@@ -1322,6 +1352,11 @@ pub async fn assert_export_totality(
         vec!["eng".to_string()],
         "overlay_retired_agents did not round-trip through the store — a removed \
          teammate would come back on the next load"
+    );
+    assert_eq!(
+        loaded.general_channel,
+        sample_general_channel(),
+        "general_channel did not round-trip through the store"
     );
     // Issue #562: the console-set tier round-trips on every backend, for the
     // same reason — an approval gate that forgets across a restart is not a gate.
@@ -1589,6 +1624,7 @@ pub async fn assert_task_store(tasks: Arc<dyn TaskStore>) {
     let alpha = CompanyId::new("alpha");
     let beta = CompanyId::new("beta");
     let task = |id: &str, col: &str, at: u64| TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored(&format!("title {id}")),
         note: Some(format!("note {id}")),
@@ -4221,6 +4257,8 @@ pub async fn assert_notification_store(notes: Arc<dyn NotificationStore>) {
 }
 
 pub async fn assert_skill_state_store(skills: Arc<dyn SkillStateStore>) {
+    use crate::ports::types::{Actor, ActorKind};
+
     let alpha = CompanyId::new("alpha");
     let beta = CompanyId::new("beta");
     let state = |slug: &str, enabled: bool, source: SkillSource| SkillState {
@@ -4228,6 +4266,8 @@ pub async fn assert_skill_state_store(skills: Arc<dyn SkillStateStore>) {
         enabled,
         source,
         custom_doc: None,
+        install: None,
+        updated_at_millis: None,
     };
 
     skills
@@ -4260,6 +4300,8 @@ pub async fn assert_skill_state_store(skills: Arc<dyn SkillStateStore>) {
                 enabled: true,
                 source: SkillSource::Custom,
                 custom_doc: Some("---\nname: Mine\n---\nbody".to_string()),
+                install: None,
+                updated_at_millis: None,
             },
         )
         .await
@@ -4277,6 +4319,54 @@ pub async fn assert_skill_state_store(skills: Arc<dyn SkillStateStore>) {
     assert!(skills.remove(&alpha, "web-research").await.unwrap());
     assert!(!skills.remove(&alpha, "web-research").await.unwrap());
     assert_eq!(skills.list(&alpha).await.unwrap().len(), 1);
+
+    // An install's provenance round-trips whole. Every backend persists the
+    // whole delta as JSON, so a dropped digest would be a serialization bug,
+    // not a schema one — and it would leave a pin nothing can check.
+    let pinned = SkillInstall {
+        digest: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".to_string(),
+        version: Some("1.2.0".to_string()),
+        installed_by: Some(Actor {
+            kind: ActorKind::Operator,
+            id: "ops@example.com".to_string(),
+        }),
+        installed_at_millis: 1_700_000_000_000,
+    };
+    skills
+        .set(
+            &alpha,
+            &SkillState {
+                slug: "pinned".to_string(),
+                enabled: true,
+                source: SkillSource::Registry,
+                custom_doc: Some("---\nname: Pinned\nversion: 1.2.0\n---\nsteps".to_string()),
+                updated_at_millis: None,
+                install: Some(pinned.clone()),
+            },
+        )
+        .await
+        .unwrap();
+    let stored = skills
+        .list(&alpha)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.slug == "pinned")
+        .unwrap();
+    assert_eq!(stored.install, Some(pinned));
+
+    // A delta that installed nothing carries no pin, and reads back as none.
+    assert!(
+        skills
+            .list(&alpha)
+            .await
+            .unwrap()
+            .iter()
+            .find(|s| s.slug == "my-skill")
+            .unwrap()
+            .install
+            .is_none()
+    );
 }
 
 /// Asserts the [`WorkspaceStore`] contract: isolation, create/read/write,

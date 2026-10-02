@@ -5,6 +5,23 @@ fn anyhow_str(msg: &str) -> anyhow::Error {
     anyhow::anyhow!("{msg}")
 }
 
+fn plain_decl(name: &str, endpoint: &str) -> McpServerDecl {
+    McpServerDecl {
+        name: name.to_string(),
+        endpoint: endpoint.to_string(),
+        description: None,
+        allowed_tools: Vec::new(),
+        disallowed_tools: Vec::new(),
+        read_only_tools: Vec::new(),
+        timeout_secs: 30,
+        enabled: true,
+        source: McpSource::Runtime,
+        auth: AuthMaterial::None,
+        tool_policies: Default::default(),
+        tool_inventory: Default::default(),
+    }
+}
+
 fn oauth_decl(name: &str, endpoint: &str, access_token: &str) -> McpServerDecl {
     McpServerDecl {
         name: name.to_string(),
@@ -24,6 +41,8 @@ fn oauth_decl(name: &str, endpoint: &str, access_token: &str) -> McpServerDecl {
             token_endpoint: "https://as.example/token".to_string(),
             expires_at: u64::MAX,
         },
+        tool_policies: Default::default(),
+        tool_inventory: Default::default(),
     }
 }
 
@@ -344,4 +363,216 @@ fn operator_message_is_actionable_and_scrubbed() {
     );
     assert!(msg.contains("browserbase"), "{msg}");
     assert!(msg.to_lowercase().contains("credential"), "{msg}");
+}
+
+// ---- discovery records an inventory alongside the health --------------
+
+use std::collections::HashMap as StdHashMap;
+use std::sync::Mutex as StdMutex;
+
+use crate::company::mcp_policy::{ToolTier, load_tool_inventory, tool_inventory_key};
+use crate::ports::SecretStore;
+use crate::ports::types::SecretValue;
+
+#[derive(Default)]
+struct RecordingSecrets {
+    map: StdMutex<StdHashMap<String, String>>,
+}
+
+#[async_trait::async_trait]
+impl SecretStore for RecordingSecrets {
+    async fn get(&self, _c: &CompanyId, key: &str) -> crate::Result<Option<SecretValue>> {
+        Ok(self
+            .map
+            .lock()
+            .unwrap()
+            .get(key)
+            .map(|v| SecretValue(v.clone())))
+    }
+    async fn set(&self, _c: &CompanyId, key: &str, value: SecretValue) -> crate::Result<()> {
+        self.map.lock().unwrap().insert(key.to_string(), value.0);
+        Ok(())
+    }
+}
+
+/// A probe that cannot reach the server records health but must leave any
+/// previous inventory alone: the tools it offered before an outage are the best
+/// answer during one, and clearing them would drop every tool a stored tier
+/// default reaches.
+#[tokio::test]
+async fn a_failed_probe_leaves_the_previous_inventory_standing() {
+    let company = CompanyId::new("acme");
+    let secrets = RecordingSecrets::default();
+    let key = tool_inventory_key("fixture");
+    secrets
+        .set(
+            &company,
+            &key,
+            SecretValue(
+                serde_json::json!({
+                    "tools": { "search_pages": "read_only" },
+                    "discoveredAtMillis": 5u64
+                })
+                .to_string(),
+            ),
+        )
+        .await
+        .unwrap();
+
+    // Nothing listens here, so the listing fails and returns no names.
+    let decl = plain_decl("fixture", "http://127.0.0.1:1/mcp");
+    let health = probe_and_record(&company, &decl, &secrets).await;
+    assert_ne!(health.status, McpStatus::Ok);
+
+    let kept = load_tool_inventory(&company, &secrets, &key).await;
+    assert_eq!(kept.suggested("search_pages"), Some(ToolTier::ReadOnly));
+    assert_eq!(kept.discovered_at_millis, 5);
+}
+
+/// A failed probe still persists its health, so the console reports the outage.
+#[tokio::test]
+async fn a_failed_probe_still_persists_its_health() {
+    let company = CompanyId::new("acme");
+    let secrets = RecordingSecrets::default();
+    let decl = plain_decl("fixture", "http://127.0.0.1:1/mcp");
+    let health = probe_and_record(&company, &decl, &secrets).await;
+
+    let stored = crate::company::mcp::load_health(&company, "fixture", &secrets)
+        .await
+        .unwrap()
+        .expect("health persisted");
+    assert_eq!(stored.status, health.status);
+}
+
+/// A successful probe records what the server said about itself, off the same
+/// handshake the listing already performed. The icon it advertises is not
+/// fetched here — a loopback source is exactly what the outbound SSRF guard
+/// refuses — so the record carries no icon and the console draws its letter
+/// tile.
+/// A loopback MCP server whose handshake describes itself, returning its address.
+async fn self_describing_fixture() -> std::net::SocketAddr {
+    use axum::routing::post;
+    use axum::{Json, Router};
+    use serde_json::{Value, json};
+
+    async fn handler(Json(body): Json<Value>) -> Json<Value> {
+        let id = body.get("id").cloned().unwrap_or(Value::Null);
+        let result = match body.get("method").and_then(Value::as_str).unwrap_or("") {
+            "initialize" => json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "serverInfo": {
+                    "name": "fixture",
+                    "title": "Fixture Docs",
+                    "description": "Up-to-date documentation for any library.",
+                    "websiteUrl": "https://fixture.example",
+                    "icons": [{ "src": "http://127.0.0.1:1/icon.png", "sizes": "48x48" }],
+                },
+            }),
+            "tools/list" => json!({
+                "tools": [{
+                    "name": "search_pages",
+                    "description": "Searches the docs.",
+                    "inputSchema": { "type": "object" }
+                }]
+            }),
+            _ => return Json(json!({ "jsonrpc": "2.0" })),
+        };
+        Json(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, Router::new().route("/mcp", post(handler)))
+            .await
+            .unwrap();
+    });
+
+    addr
+}
+
+#[tokio::test]
+async fn a_probe_records_what_the_server_says_about_itself() {
+    let addr = self_describing_fixture().await;
+    let company = CompanyId::new("acme");
+    let secrets = RecordingSecrets::default();
+    let decl = plain_decl("fixture", &format!("http://{addr}/mcp"));
+    let health = probe_and_record(&company, &decl, &secrets).await;
+    assert_eq!(health.status, McpStatus::Ok, "{}", health.message);
+
+    let info = crate::company::mcp_server_info::load(&company, "fixture", &secrets).await;
+    assert_eq!(info.title.as_deref(), Some("Fixture Docs"));
+    assert_eq!(
+        info.description.as_deref(),
+        Some("Up-to-date documentation for any library.")
+    );
+    assert_eq!(info.website_url.as_deref(), Some("https://fixture.example"));
+    assert!(
+        info.icon_data_url.is_none(),
+        "a private-host icon source must not be fetched"
+    );
+}
+
+/// A probe that cannot reach the server must leave the description it recorded
+/// earlier standing, for the same reason it leaves the inventory alone.
+#[tokio::test]
+async fn a_failed_probe_leaves_the_previous_description_standing() {
+    use crate::company::mcp_server_info::{self, McpServerInfo};
+
+    let company = CompanyId::new("acme");
+    let secrets = RecordingSecrets::default();
+    let stored = McpServerInfo {
+        title: Some("Fixture Docs".to_string()),
+        description: Some("Docs.".to_string()),
+        website_url: None,
+        icon_data_url: None,
+    };
+    mcp_server_info::save(&company, "fixture", &stored, &secrets)
+        .await
+        .unwrap();
+
+    let decl = plain_decl("fixture", "http://127.0.0.1:1/mcp");
+    assert_ne!(
+        probe_and_record(&company, &decl, &secrets).await.status,
+        McpStatus::Ok
+    );
+    assert_eq!(
+        mcp_server_info::load(&company, "fixture", &secrets).await,
+        stored
+    );
+}
+
+/// A server whose handshake carries no usable icon keeps the logo stored for it
+/// earlier, such as the directory's, while its own title still wins.
+#[tokio::test]
+async fn a_probe_keeps_a_stored_logo_the_handshake_does_not_replace() {
+    use crate::company::mcp_server_info::{self, McpServerInfo};
+
+    let addr = self_describing_fixture().await;
+    let company = CompanyId::new("acme");
+    let secrets = RecordingSecrets::default();
+    let logo = "data:image/png;base64,iVBORw0KGgo=".to_string();
+    mcp_server_info::save(
+        &company,
+        "fixture",
+        &McpServerInfo {
+            title: Some("Stored".to_string()),
+            description: None,
+            website_url: None,
+            icon_data_url: Some(logo.clone()),
+        },
+        &secrets,
+    )
+    .await
+    .unwrap();
+
+    let decl = plain_decl("fixture", &format!("http://{addr}/mcp"));
+    assert_eq!(
+        probe_and_record(&company, &decl, &secrets).await.status,
+        McpStatus::Ok
+    );
+    let info = mcp_server_info::load(&company, "fixture", &secrets).await;
+    assert_eq!(info.title.as_deref(), Some("Fixture Docs"));
+    assert_eq!(info.icon_data_url, Some(logo));
 }

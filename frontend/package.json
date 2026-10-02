@@ -1,7 +1,7 @@
 {
   "name": "opencompany-console",
   "private": true,
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "A company-agnostic operator console for any OpenCompany host, built with Vite + React.",
   "type": "module",
   "engines": {
@@ -25,6 +25,7 @@
     "e2e:first-run": "PW_FIRST_RUN=1 playwright test",
     "e2e:live-llm": "PW_LIVE_LLM=1 playwright test",
     "e2e:euler": "PW_LIVE_LLM=1 PW_EULER=1 playwright test",
+    "e2e:hive": "PW_LIVE_BRAIN=1 PW_HIVE=1 playwright test",
     "e2e:visual": "PW_VISUAL=1 playwright test",
     "e2e:visual:update": "PW_VISUAL=1 playwright test --update-snapshots",
     "tauri:dev": "../scripts/desktop-dev.sh",

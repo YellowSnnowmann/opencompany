@@ -232,7 +232,7 @@ workflow run ............................. no time bound
 
 The ceiling is the vendored harness policy's `max_wall_clock_ms`, set in
 `vendor/openhuman/src/openhuman/agent/tinyagents/mod.rs::run_policy_for`. It
-defaults to ten minutes, is overridden with
+defaults to `DEFAULT_AGENT_TURN_TIMEOUT_SECS`, is overridden with
 **`OPENHUMAN_AGENT_TURN_TIMEOUT_SECS`** (whole seconds; `0` removes it
 entirely), and is process-global — not per node, not per workflow, and not
 settable from a manifest or from the console.
@@ -253,11 +253,19 @@ model call for run 'agent_turn' exceeded its remaining wall-clock budget (56636 
 
 Every word of that is true and it is almost impossible to read correctly. The
 number is the budget that **remained** when that call was issued — not the
-call's duration, and not the ceiling. A turn that ran the full ten minutes
-therefore reports a figure ten times smaller than the limit it hit, and reads
-as though one slow model call were at fault. Issue #1680 was filed on exactly
-that reading: a node that had already spent about nine minutes before its last
-model call started was diagnosed as a 56-second budget being too tight.
+call's duration, and not the ceiling. A turn that ran the full ceiling
+therefore reports a figure far smaller than the limit it hit, and reads as
+though one slow model call were at fault. Issue #1680 was filed on exactly that
+reading: a node that had already spent about nine minutes before its last model
+call started was diagnosed as a 56-second budget being too tight.
+
+**The ceiling's value has already moved, which is why nothing here quotes it.**
+#1680 and #1761 were written when `DEFAULT_AGENT_TURN_TIMEOUT_SECS` was 600 —
+the arithmetic in that issue (`600000 - 56636`) only works at that value, and
+the 10m 01s death matches it exactly. The vendored bump in #2466 raised it to
+**3600**, so the default ceiling is now an hour and this crate sets no override
+anywhere. That is the drift `wall_clock_ceiling_message` declines to restate a
+literal `600` for, and a test asserts the message contains no such number.
 
 `CompanyAgent::classify_turn` (`src/harness/built_in/mod.rs`) therefore times
 each turn attempt and rewrites this one class of error, naming what the turn
@@ -272,9 +280,21 @@ Two constraints on that message are deliberate:
   `600` would go stale on the next vendored bump without anything failing. The
   elapsed time is measured and the knob's *name* is a fact independent of its
   value, so both can be stated honestly while the number cannot.
-- **A ceiling hit stays a hard failure.** It is not retried — the one-shot
-  empty-reply retry would turn a ten-minute failure into a twenty-minute one —
-  and it fails the node rather than degrading to a partial result.
+- **A ceiling hit is never retried.** The one-shot empty-reply retry would turn
+  a ten-minute failure into a twenty-minute one, so `CeilingPaused` is terminal
+  on both classifier passes.
+
+### A ceiling hit pauses; it does not fail the run
+
+Until issue #1680's second half it failed the run, and that was the expensive
+half of the defect rather than the misleading message. A ceiling hit now settles
+as a pause carrying what the turn had already done, like the three other limits
+that stop a turn short.
+
+Moved to [`agents-turn-limits.md`](agents-turn-limits.md) on this repo's
+500-line cap, and because that page already owns the sibling limits: it is where
+all four are compared, where what survives a ceiling hit is set out, and where
+the workflow-node and delegation behaviour is described.
 
 ### The per-tool bounds this crate *does* set
 
@@ -327,8 +347,7 @@ for more than one turn can do", not "the model was slow".
 ## OpenHuman's own library front door
 
 Upstream's `openhuman-embed` crate (`vendor/openhuman/crates/openhuman-embed`)
-is the host-facing library API, and since the 2026-09-16 pin it is a
-**two-step** shape: one `Runtime` per process, then any number of `Agent`s on
+is the host-facing library API, and it is a **two-step** shape: one `Runtime` per process, then any number of `Agent`s on
 it, each fully described and independent of the others:
 
 ```rust
@@ -372,73 +391,51 @@ no resident session, so idle agents cost ~nothing and one agent can serve
 overlapping turns. `Harness` is the one-agent shorthand over the same two
 types; `Core` wraps a `CoreRuntime` the host built itself with `CoreBuilder`.
 
-### Why `built_in` does not use it (yet)
+### How `built_in` uses it
 
-The reason has changed. It used to be **one harness per process**: the keyring
-master key, RPC bearer, global event bus and `Once`-guarded domain subscribers
-are process-scoped, so a second `Harness` returned `AlreadyRunning`. That is
-still true of the *runtime* — `Runtime::builder().build()` refuses a second one
-— but agents are now the unit of multiplicity, which is exactly the shape a
-process running many companies × many teammates needs.
+`built_in` **is** this front door. `harness::openhuman_runtime::global` boots
+the one `Runtime` at `serve` (workspace `<data-dir>/openhuman`, the TinyHumans
+key as its credential, `TINYHUMANS_API_URL` as its backend), and
+`harness::build::agent_spec_for(record, agent, deps)` renders every manifest
+`[[agent]]` into an `AgentSpec`:
 
-What still keeps `built_in` on `oh::agent::AgentBuilder`
-(`src/harness/built_in/build.rs`) is that `AgentSpec` is **pure config**: a
-facade turn builds its agent with `Agent::from_config_with_definition` from
-the agent's `Config` + `AgentDefinition`, and there is no seam for what this
-crate injects at the builder —
+| what the company declares | where it lands on the spec |
+|---|---|
+| persona, bundle and context sections, team and tool briefs, skills catalogue, sandbox brief (`company/prompt.rs`, `skills.rs`, `toolbelt.rs`) | `.system_prompt(..)` |
+| the OpenHuman-native subset of its grants (`shell`, `file_*`, `web_fetch`, …) | `.definition(AgentDefinitionSpec::new().tools(ToolScopeSpec::Named(..)).disallow_tools(..).max_iterations(25))` |
+| `[inference]` / the agent's own `{provider, model}` pair (`company/inference.rs`), BYOK included | `.provider(Provider::openai_compatible(url, key).model(m))`, served through the loopback model bridge so usage is metered |
+| the approval policy | `.access(Access::full())` — OpenHuman's runtime-wide gate stays off; OpenCompany decides allow / deny / park in its own MCP handler |
+| every OpenCompany tool (ledger, tasks, pages, workspace, memory, composio, hosting, approvals) and the speech tools | `.mcp(McpServer::http("opencompany", url).auth(BearerToken).allow_tools(..))` — see [hive.md](hive.md#speaking) |
+| each `mcp:*` grant | one more `.mcp(..)` |
+| the company's skills, the company workspace | `.skills_dir(<home>/skills)`, `.action_dir(<workspace>)` |
 
-| `AgentBuilder` seam this crate uses | what it carries | `AgentSpec` equivalent |
-|---|---|---|
-| `.chat_model(HarnessModel)` | metered, per-company-credential inference with live `last_turn_usage` | `Provider` (route + model only, no metering hook) |
-| `.tools(...)` | the granted, capability-filtered belt: workspace/pages/desk/composio/search/ledger tools, checkpoint-wrapped | none — tools come from the config's domains and packs |
-| `.memory(OcMemory)` | the company's own `ContextStore` | `dedicated_memory` (a second upstream store, not ours) |
-| `.tool_policy(ApprovalPolicy)` | per-company consequence tiers, budgets, `readonly` brake | `Access` (three fixed tiers) |
-| `.prompt_builder(...)` | the role persona, skills catalogue, routed context | `system_prompt` / `system_prompt_suffix` (text only) |
-| `.payload_summarizer(PayloadExtractor)` | one-call extraction on the company's credential | none (upstream dispatches a sub-agent) |
-| `.event_context(session_key, channel)` | `{company}:{agent}` on the event bus for speech tools | agent id only |
-| `.tool_dispatcher(...)` | native vs attribute-tolerant XML by provider profile | none |
+`runtime.agent(spec)` mints the handle under
+`session_key::runtime_agent_id(company, agent)`; `HarnessPool.ensure` rebuilds
+the roster on the same fingerprints it always had, taking every old
+`turn_lock` first (bounded) and dropping the old handles before minting new
+ones, because an id stays reserved while any clone of it lives.
 
-Nothing about the MCP or skills surface is lost by staying one level down:
-MCP servers become an `McpServerRegistry` built from the company's
-`McpServerDecl`s and reach the prompt as bridge tools, and the skills
-catalogue is rendered into the persona body (`src/harness/built_in/skills.rs`).
+A turn is `agent.turn(message).session(openhuman_session_key).cwd(..)
+.on_progress(tx).send()` under the agent's `turn_lock`; `progress_pump.rs`
+maps `AgentProgress` onto `turn_stream::LiveFrame`s (`tool_call`, `tool_result`,
+`thinking`, and a text-free `replying` on the first text delta of a run, the same
+for an ACP teammate's first `agent_message_chunk`) and reads cost from
+`ModelCallCompleted` / `TurnCostUpdated`. There is no resident session, no
+`Mutex<Agent>`, and no history seeding: OpenHuman owns the thread, and the
+company's delta is prepended to the message ([speech.md](speech.md)).
 
-### What adopting it would buy, and the path there
+What that buys, measured rather than argued: turns of **different** agents
+overlap — within a desk round and across desks — and a turn of one agent
+never overlaps another turn of the same agent. `opencompany measure` and
+`scripts/measure-coordination.mjs` report both numbers on
+`companies/hive_demo`; the second must be zero.
 
-The cost of staying on `AgentBuilder` is that this crate never establishes a
-`CoreContext`, so every vendored intrinsic that reads the ambient one resolves
-a **process-global** workspace instead — which is why `memory_tools.rs`,
-`mcp.rs`, `skills.rs`, `workflow_build/tools.rs` and `tool_posture.rs` each
-carry an oc-authored replacement or a process-wide workaround. And it is why
-`CompanyAgent` holds one long-lived `Mutex<Agent>` per teammate
-(`src/harness/built_in/mod.rs`): a vendored turn takes `&mut self`, so one
-teammate's turns serialise and every teammate keeps a resident session, tool
-belt and history, whether or not it is mid-turn. That is the opposite of the
-"many agents, low RAM, idle costs nothing" model upstream measured for the
-2 GB / 2 vCPU target (`vendor/openhuman/docs/library-benchmarking.md`).
-
-The path is upstream-first, then in this crate:
-
-1. **Upstream: a host-injection seam on `AgentSpec`** — accept a host-built
-   tool vector (or a tool factory), a `Memory`, a `ChatModel`, a `ToolPolicy`,
-   a `SystemPromptBuilder` and a payload summarizer, threaded through to
-   `Agent::from_config_with_definition` (or a sibling that takes an
-   `AgentBuilder` closure). Every row in the table above is then satisfiable
-   and the facade's per-agent `CoreContext` comes for free.
-2. **Here: build one `CoreRuntime` at `serve` boot** (`CoreBuilder::new(
-   HostKind::Library).workspace(<data-dir>/openhuman).domains(DomainSet::
-   harness() + skills + mcp).services(ServiceSet::none())`), and mint one
-   `Runtime::agent(spec)` per `(company, teammate)` in place of `build_agent`'s
-   `AgentBuilder`. `HarnessPool`'s roster then caches cheap `Agent` handles
-   instead of `Mutex<Agent>` sessions, turns on one teammate overlap, and the
-   ambient-context workarounds above become deletable one by one.
-3. **Measure**, with upstream's `library-fleet.sh` shape pointed at this
-   process, before deleting anything — the tokio tuning this crate already
-   shares (`AGENT_WORKER_STACK_BYTES`, `MAX_BLOCKING_THREADS`) is the floor,
-   not the ceiling.
-
-Until step 1 lands, `set_product_identity("opencompany")` and the shared tokio
-constants are the only pieces of the front door this crate uses.
+What is deliberately not on the spec: a host-built tool vector (OpenHuman has
+no seam for one, hence the MCP server), a host `Memory` (the company's
+`ContextStore` is reached as the `memory_*` MCP tools) and a host
+`ToolPolicy` (the approval decision is made where the tool is served). The
+legacy out-of-process JSON-RPC path (`src/openhuman/`, feature
+`openhuman-rpc`) is gone.
 
 ---
 
@@ -451,6 +448,10 @@ constants are the only pieces of the front door this crate uses.
 | per-agent dispatch | `src/harness/router.rs` |
 | building the lanes at boot, resolving `acp` engines | `src/harness/lanes.rs` |
 | the built-in engine | `src/harness/built_in/` |
+| the one process-wide `openhuman_embed::Runtime` | `src/harness/openhuman_runtime.rs` |
+| a manifest agent as an `AgentSpec` (`agent_spec_for`) | `src/harness/built_in/build.rs` |
+| `AgentProgress` → live frames and cost | `src/harness/built_in/progress_pump.rs` |
+| the `opencompany` MCP server the agents' tools are served on | `src/hive/mcp_server.rs` |
 | the `AcpAgent`/`AcpAgentFactory`/`AcpObserver` ports (ungated) | `src/ports/acp.rs` |
 | the ACP `RunTurn` (folds a port `AcpTurn` into `TurnStep`) | `src/harness/acp/run_turn.rs` |
 | live frames while an ACP turn runs (`live_frame_from`, `observer_for`) | `src/harness/acp/run_turn.rs` |

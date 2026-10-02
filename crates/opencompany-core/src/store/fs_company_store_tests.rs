@@ -17,6 +17,184 @@ pub(super) fn sample_manifest() -> crate::company::CompanyManifest {
     toml::from_str(toml_src).expect("parse manifest")
 }
 
+/// A record whose agent carries `prompt_files`, resolved as the bundle loader
+/// would leave it.
+fn record_with_prompt_files(id: &CompanyId) -> CompanyRecord {
+    let mut manifest = sample_manifest();
+    let agent = manifest
+        .agents
+        .iter_mut()
+        .find(|a| a.id == "ceo")
+        .expect("the sample manifest has a ceo");
+    agent.prompt_files = vec![
+        "prompts/house-style.md".to_string(),
+        "prompts/ceo.md".to_string(),
+    ];
+    agent.prompt_files_resolved = vec![
+        (
+            "prompts/house-style.md".to_string(),
+            "# How this company writes\nState the claim first.".to_string(),
+        ),
+        (
+            "prompts/ceo.md".to_string(),
+            "# Chief\nYou decide what gets built.".to_string(),
+        ),
+    ];
+    CompanyRecord {
+        general_channel: Default::default(),
+        overlay_retired_agents: Vec::new(),
+        overlay_agent_edits: Vec::new(),
+        overlay_desk_hive: Vec::new(),
+        id: id.clone(),
+        manifest,
+        ledger: Vec::new(),
+        lifecycle: "running".to_string(),
+        overlay_agents: Vec::new(),
+        overlay_desk_members: Vec::new(),
+        overlay_desk_order: Vec::new(),
+        overlay_desks: Vec::new(),
+        overlay_workflows: Vec::new(),
+        overlay_budgets: Vec::new(),
+        overlay_policy: None,
+        overlay_tool_grants: None,
+        overlay_desk_tools: Default::default(),
+        disabled_workflows: Vec::new(),
+        template_provenance: None,
+        setup: None,
+        name_confirmed: false,
+        activation_completed_at: None,
+        created_at_millis: None,
+    }
+}
+
+/// An agent's prompt files survive the store round trip.
+///
+/// # The defect this pins
+///
+/// `prompt_files` is ordinary manifest data and always round-tripped. The
+/// bodies live in `prompt_files_resolved`, which is `#[serde(skip)]` because a
+/// persisted copy would go stale against the bundle -- correct, but it leaves
+/// the store with paths and nothing to resolve them against, because the save
+/// wrote only the manifest and the saved directory had no `agents/` in it at
+/// all.
+///
+/// The effect was silent and total: every agent in a company loaded from the
+/// store was assembled with its briefing empty and answered off its one-line
+/// role. Nothing errored -- an empty resolve is indistinguishable from an agent
+/// that declares no prompt files -- and `dump-prompt.sh` showed the prompts
+/// correctly the whole time, because it reads the bundle rather than the store.
+/// All 26 shipped company templates use `prompt_files`; `software_company`
+/// alone carries 14 KB of briefing across 9 files.
+#[tokio::test]
+async fn an_agents_prompt_files_survive_the_store_round_trip() {
+    let root_dir = tmp_root();
+    let store = FsCompanyStore::new(root_dir.path());
+    let id = CompanyId::new("acme");
+
+    store.save(&record_with_prompt_files(&id)).await.unwrap();
+
+    let loaded = store.load(&id).await.unwrap().expect("record exists");
+    let ceo = loaded
+        .manifest
+        .agents
+        .iter()
+        .find(|a| a.id == "ceo")
+        .expect("the ceo survives the round trip");
+
+    assert_eq!(
+        ceo.prompt_files,
+        vec![
+            "prompts/house-style.md".to_string(),
+            "prompts/ceo.md".to_string()
+        ],
+        "the paths are ordinary manifest data and were never the broken half"
+    );
+    assert_eq!(
+        ceo.prompt_files_resolved.len(),
+        2,
+        "both bodies must come back, or the agent is built with an empty briefing: {:?}",
+        ceo.prompt_files_resolved
+    );
+    let body = |want: &str| {
+        ceo.prompt_files_resolved
+            .iter()
+            .find(|(path, _)| path == want)
+            .map(|(_, body)| body.clone())
+            .unwrap_or_else(|| panic!("`{want}` resolved to nothing"))
+    };
+    assert!(
+        body("prompts/house-style.md").contains("State the claim first"),
+        "the body is the prose itself, not a path echoed back"
+    );
+    assert!(
+        body("prompts/ceo.md").contains("You decide what gets built"),
+        "every named file resolves, not just the first"
+    );
+}
+
+/// The saved directory is a faithful bundle, not a manifest with dangling
+/// references.
+///
+/// Asserted on disk rather than only through `load`, because the bundle loader
+/// and a hosted tenant both read these files directly. A load that resolved
+/// from some in-memory cache would pass the round-trip test above while leaving
+/// the store unreadable to anything else.
+#[tokio::test]
+async fn the_saved_bundle_holds_the_prompt_files_on_disk() {
+    let root_dir = tmp_root();
+    let store = FsCompanyStore::new(root_dir.path());
+    let id = CompanyId::new("acme");
+
+    store.save(&record_with_prompt_files(&id)).await.unwrap();
+
+    let agents = root_dir.path().join("companies/acme/agents");
+    for rel in ["prompts/house-style.md", "prompts/ceo.md"] {
+        let path = agents.join(rel);
+        assert!(
+            path.is_file(),
+            "`{rel}` was not written to the store: {path:?}"
+        );
+    }
+    assert!(
+        std::fs::read_to_string(agents.join("prompts/ceo.md"))
+            .expect("readable")
+            .contains("You decide what gets built"),
+        "the file on disk carries the body, so the bundle loader can re-read it"
+    );
+}
+
+/// A path that escapes `agents/` is skipped rather than written.
+///
+/// The manifest loader already rejects these; this is the second gate on the
+/// write side, so a record reaching the store by any other route cannot place a
+/// file outside the company's own directory.
+#[tokio::test]
+async fn a_prompt_file_path_that_escapes_the_bundle_is_not_written() {
+    let root_dir = tmp_root();
+    let store = FsCompanyStore::new(root_dir.path());
+    let id = CompanyId::new("acme");
+
+    let mut record = record_with_prompt_files(&id);
+    let agent = record
+        .manifest
+        .agents
+        .iter_mut()
+        .find(|a| a.id == "ceo")
+        .expect("ceo");
+    agent.prompt_files_resolved = vec![(
+        "../../escaped.md".to_string(),
+        "should never be written".to_string(),
+    )];
+
+    store.save(&record).await.unwrap();
+
+    assert!(
+        !root_dir.path().join("escaped.md").exists()
+            && !root_dir.path().join("companies/escaped.md").exists(),
+        "a traversing path must be skipped, not written outside the company directory"
+    );
+}
+
 #[tokio::test]
 async fn company_store_saves_and_loads() {
     let root_dir = tmp_root();
@@ -24,6 +202,7 @@ async fn company_store_saves_and_loads() {
     let store = FsCompanyStore::new(&root);
     let id = CompanyId::new("acme");
     let record = CompanyRecord {
+        general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
         overlay_desk_hive: Vec::new(),
@@ -91,6 +270,7 @@ async fn save_publishes_the_gate_marker_before_the_manifest() {
 
     store
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
             overlay_desk_hive: Vec::new(),
@@ -150,6 +330,7 @@ async fn updating_an_existing_bundle_publishes_the_manifest_before_the_gate_mark
     let bundle = Bundle::new(root.clone(), &id);
 
     let first_save = CompanyRecord {
+        general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
         overlay_desk_hive: Vec::new(),
@@ -209,6 +390,7 @@ async fn a_save_interrupted_after_the_first_write_still_reads_back_as_absent() {
     fault_probe::fail_next_write(&bundle.meta_json());
 
     let record = || CompanyRecord {
+        general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
         overlay_desk_hive: Vec::new(),
@@ -293,6 +475,7 @@ async fn an_update_interrupted_on_the_second_write_does_not_persist_the_lifecycl
     let bundle = Bundle::new(root.clone(), &id);
 
     let record = |lifecycle: &str| CompanyRecord {
+        general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
         overlay_desk_hive: Vec::new(),
@@ -398,6 +581,7 @@ async fn an_update_interrupted_on_the_second_write_does_not_persist_the_manifest
         let mut manifest = sample_manifest();
         manifest.company.name = company_name.to_string();
         CompanyRecord {
+            general_channel: Default::default(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
             overlay_desk_hive: Vec::new(),
@@ -517,6 +701,7 @@ async fn cancelling_a_save_does_not_delete_a_temp_a_commit_still_owns() {
     let bundle = Bundle::new(root.clone(), &id);
 
     let record_named = |name: &str| CompanyRecord {
+        general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
         overlay_desk_hive: Vec::new(),
@@ -552,11 +737,11 @@ async fn cancelling_a_save_does_not_delete_a_temp_a_commit_still_owns() {
 
     // Park the metadata staging write, then abort the save while it is
     // held there — the update path stages meta.json first.
-    let release = stall_probe::arm(&bundle.meta_json());
+    let gate = stall_probe::arm_scoped(&bundle.meta_json());
     let after = record_named("After");
     let reader = FsCompanyStore::new(&root);
     let handle = tokio::spawn(async move { store.save(&after).await });
-    stall_probe::wait_blocked().await;
+    gate.wait().await;
     handle.abort();
     let joined = handle.await;
     assert!(
@@ -564,7 +749,7 @@ async fn cancelling_a_save_does_not_delete_a_temp_a_commit_still_owns() {
         "the save task must actually have been cancelled for this test \
              to mean anything, got {joined:?}"
     );
-    release.send(()).expect("stall gate still open");
+    gate.release().expect("stall gate still open");
 
     // Whatever the cancellation left behind, the bundle must never be a
     // new manifest paired with stale metadata, and must not accumulate

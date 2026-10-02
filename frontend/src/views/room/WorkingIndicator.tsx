@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
-
 import type { TurnStep } from "@/api/types";
+import { usePrefersReducedMotion } from "@/hooks/use-prefers-reduced-motion";
 import { cn } from "@/lib/utils";
 
 /**
@@ -188,35 +187,4 @@ export function runningStepLabel(steps?: readonly TurnStep[]): string | undefine
     }
   }
   return undefined;
-}
-
-/**
- * Whether the viewer asked for reduced motion, kept live.
- *
- * Reads `false` where `matchMedia` is unavailable (jsdom without a stub, an
- * older embedded webview): a pulse for a viewer who never asked for stillness
- * is the lesser failure.
- *
- * Subscribing has two spellings. `MediaQueryList` only became an `EventTarget`
- * in Safari 14; before that — and in the WebKitGTK builds of that vintage, both
- * of which Tauri v2's floor still admits — it carries the deprecated
- * `addListener` alone. Calling `addEventListener` there does not degrade, it
- * throws a `TypeError` out of this effect and takes the chat view down with it.
- * A moving dot is not worth that, so prefer the modern spelling and fall back.
- */
-function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    const mql = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    if (!mql) return;
-    setReduced(mql.matches);
-    const onChange = () => setReduced(mql.matches);
-    if (typeof mql.addEventListener === "function") {
-      mql.addEventListener("change", onChange);
-      return () => mql.removeEventListener("change", onChange);
-    }
-    mql.addListener(onChange);
-    return () => mql.removeListener(onChange);
-  }, []);
-  return reduced;
 }

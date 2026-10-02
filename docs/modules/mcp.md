@@ -2,13 +2,13 @@
 
 Issue #50. Each company can expose remote **MCP tool servers** to its agents.
 An agent granted a server reaches it through the generic bridge tools
-(`mcp_list_servers`, `mcp_list_tools`, `mcp_call_tool`), reusing OpenHuman's
+(`mcp_list_tools`, `mcp_call_tool`), reusing OpenHuman's
 `mcp_client` registry, its HTTP transport, and its prompt-injection safety
 filter over remote tool metadata.
 
 Hosted v1 boundary: **HTTP transport only**. Stdio / subprocess servers are
 rejected with a clear error — the tenant image ships no Node, Python or package
-manager to launch one with. Still out of scope: live pool invalidation.
+manager to launch one with.
 
 Directory browsing landed in issue #1270; see [The directory](#the-directory).
 
@@ -53,10 +53,10 @@ key `mcp/{name}/auth`. It is **write-only** over the API: set via the `token`
 field on add/update, stored in the secret store, and **never** returned. The
 read shape carries only an `authConfigured` boolean.
 
-The agent-facing surface is redacted too: `OcMcpListServersTool`
-([`harness::mcp`](../../src/harness/mcp.rs)) replaces OpenHuman's own
-`mcp_list_servers` (which serializes bearer tokens into agent-visible output)
-with a drop-in that emits the same shape minus any credential. A regression
+The agent-facing surface is redacted too: no company agent's tool scope names
+`mcp_list_servers`, because OpenHuman's own implementation serializes each
+server's credentials into agent-visible output. The persona brief names the
+agent's granted servers instead — names only, no endpoint or auth. A regression
 test drives `mcp_call_tool` against an in-process MCP server and asserts the
 bearer reaches the *server* over the wire but never appears in any `ToolResult`.
 
@@ -85,17 +85,23 @@ classified for audit, but policy-generated HITL is disabled.
 needs sign-off calls `request_approval` explicitly before invoking it.
 `readonly` remains a hard denial.
 
-`mcp_list_servers` and `mcp_list_tools` do not require approval. They read
-local registration state with credentials already redacted and reach nothing.
-This matters more than one saved prompt: the persona brief appended to every
-MCP-granted agent *instructs* it to answer capability questions from a live
-`mcp_list_servers` call rather than from memory. These reads must remain
+`mcp_list_tools` does not require approval. It changes nothing and is billed
+for nothing. This matters more than one saved prompt: the persona brief
+appended to every MCP-granted agent *instructs* it to answer capability
+questions from a live `mcp_list_tools` call on a named server rather than from
+memory. These reads must remain
 uninterrupted so the guidance that prevents stale answers is usable on an
 agent's first move.
 
 The classifications remain declared in
 [`policy::consequence`](../../src/policy/consequence.rs) for audit and for a
 future policy-HITL mode.
+
+## Per-tool permissions
+
+Each server carries a policy document saying, per remote tool, whether a call
+runs, parks for approval, or is refused outright. See
+[Per-tool permissions](mcp-tool-permissions.md).
 
 ## HTTP surface
 
@@ -113,7 +119,7 @@ alias `…/company/…`). See [`server::ops::mcp`](../../src/server/ops/mcp.rs).
 | `PUT` | `…/mcp/config` | Replace the declared set from that document (admin-only). |
 | `GET` | `…/mcp/registry/search?q=&page=&pageSize=` | Browse the upstream directories. |
 | `GET` | `…/mcp/registry/entry?qualifiedName=` | One entry, with the install decision already made. |
-| `POST` | `…/mcp/registry/install` | Install an entry (+ write-only `env` values) and connect it. |
+| `POST` | `…/mcp/registry/install` | Declare an entry as one of this company's servers (+ a write-only credential). |
 | `POST` | `…/mcp/registry/{serverId}/connect` | Dial an installed server. |
 | `POST` | `…/mcp/registry/{serverId}/disconnect` | Drop the live session, keeping the install. |
 | `PUT` | `…/mcp/registry/{serverId}/env` | Rotate an install's credentials (write-only). |
@@ -128,6 +134,26 @@ takes the ordinary company scope.
 Discovery is gated on the `openhuman` feature (the MCP transport lives there);
 without it the route reports `not_wired` and the console falls back to the
 declared tool lists. Every mutating response carries a `note` reminder.
+
+`…/mcp/registry/install` writes the **same runtime index** `POST …/mcp/servers`
+writes, so a server found in the directory is an ordinary `runtime`-sourced row
+and the rest of the surface — conflicts, manifest override rules, probes,
+credential rotation, delete — treats it exactly like one an admin typed in by
+hand. It used to write OpenHuman's *separate* install store, through an RPC
+that upstream has since removed: the directory there is browse-only now, and a
+server found in it is declared by the reader rather than installed by a
+catalogue action. Declaring it here, from the entry the console already
+fetched, is what saves the operator retyping an endpoint they are looking at.
+
+The credential is supplied the way `POST …/mcp/servers` supplies one — a
+`token` plus an `authKind` of `bearer`, `header` or `queryParam` — not as the
+`env` map the removed RPC took. An entry's `requiredEnvKeys` names a launcher's
+environment, and a hosted HTTPS endpoint has no launcher, so how the secret
+reaches the server is a question to answer rather than guess from a key's
+spelling. The console shows those keys beside the field as guidance.
+
+The other registry routes still address OpenHuman's install store, which still
+holds anything installed there before this change.
 
 ## `mcp.json` — the same configuration as one document
 
@@ -190,118 +216,10 @@ validation is one more thing that can fall out of step with it.
 
 ## The directory
 
-Issue #1270. Before it, the tab could only contain what somebody already knew
-the address of: an operator arrived with a URL or the list stayed empty. Nothing
-in `src/server/` reached `McpRuntime`
-([`harness::mcp`](../../src/harness/built_in/mcp.rs)), the wrapper over
-OpenHuman's own MCP registry — the open `modelcontextprotocol/registry`, a
-SQLite store of installs, named write-only env credentials, boot-time connect and
-a supervisor — even though it is constructed for every company.
-
-[`server::ops::mcp_registry`](../../src/server/ops/mcp_registry.rs) is that
-routing layer.
-
-### One list, not two sections
-
-`GET …/mcp/servers` returns declared servers **and** directory installs as one
-list, each row badged with its provenance. A server present in both — installed
-from the directory *and* typed in by URL — is **one reconciled row**, matched on
-the normalised endpoint: lowercased scheme and host, default port dropped, query
-and fragment stripped, trailing slash dropped.
-
-The query string has to go, because a declared server may carry its credential
-as a query parameter; a comparison that kept it would never match, and the
-operator would get the same server twice with two credentials and two health
-badges disagreeing.
-
-**The declared side wins the provenance.** `source` decides the badge and
-whether the console offers a delete, and both must answer to the declared list: a
-manifest server cannot be deleted, only disabled, so an install must not be able
-to capture that row and relabel it deletable. The deeper reason is that the
-declared list is what the *agents* reach — `registry_for_agent` builds each
-agent's registry from it and scopes it by `mcp:<name>` grants. Nothing is lost:
-`serverId` rides on the reconciled row, so the registry routes still address it.
-
-The registry contributes only what the declared side has no field for —
-`serverId`, `qualifiedName`, `iconUrl`, `transport`, a `description` where there
-was none, and a `health` where the server has never been probed (a real probe
-wins, since it dials the way the agents' bridge tools do). `authConfigured` is
-the union. All four registry fields are omitted when absent, so a declared row's
-JSON is byte-identical to what it was before this existed.
-
-### One directory, and no key to keep
-
-The browse surface queries the open `modelcontextprotocol/registry` and nothing
-else. Entries declaring no remote endpoint are discarded by the
-hosted-transport filter — correctly: this deployment launches no local
-subprocess — so what an operator sees is what this host can actually dial.
-
-**Smithery was the other half and was removed.** It carried more hosted servers,
-but upstream adds it only when an API key resolves, so it came with a
-per-company credential slot on a console tab: a key to store write-only, rotate,
-clear, explain two working tiers of (its own vs one host-wide account shared by
-every tenant), and answer support questions about. A directory that needs a
-credential before it shows anything is a directory that reads as broken until
-somebody pays for it. What remains needs nothing, and a server the registry does
-not list is still one paste of a URL away — which is how every declared server
-got there before the directory existed at all.
-
-Upstream still reads a host-process `SMITHERY_API_KEY` if one is set; nothing in
-this deployment writes, reads or reports it.
-
-### Delete dispatches
-
-`DELETE …/mcp/servers/{name}` removes what the row actually has: the
-runtime-index entry, the upstream install, or **both** for a reconciled row.
-Dropping only the index row there would leave the install connected with its
-tools still on every belt — a delete the operator watches fail. Manifest and
-default rows stay `409`.
-
-### Hosted transport only
-
-Directory search is pinned to the hosted-transport filter, so a stdio-only entry
-never reaches the operator's screen; the install route refuses one again by name,
-because a caller can POST a qualified name search never offered. The blocker is
-not the read-only root filesystem — tenants mount a writable `/data` — but that
-the runtime image is `debian:bookworm-slim` plus `ca-certificates`, `curl`,
-`libssl3` and X11 libs. A stdio install would fail on `npx: not found`.
-
-### Nothing crosses the wire blind
-
-Env values are write-only exactly like a declared server's `token`. Upstream's
-catalogue DTOs end in a flattened `extra` map that round-trips every key the
-registries emit, so each projection names the fields it forwards. An install's
-raw `last_error` is **dropped**, not scrubbed: the scrubber's redaction pass
-needs the credential values to replace, and this surface deliberately never
-loads them — only the stable `auth_hint` code and a fixed sentence per status
-cross the wire.
-
-### A failing registry does not break the read
-
-An unreadable store or a directory that will not answer resolves to "no
-installs", and `GET …/mcp/servers` still returns the declared list. The declared
-half is what governs what the agents reach, so it is the half that must survive.
-
-### Per-agent scoping applies to installs, gated by an explicit grant
-
-`harness::built_in::build` wires the registry bridge tools
-(`mcp_registry_list_tools` / `mcp_registry_tool_call`) onto an agent's belt only
-when its effective grants explicitly include `mcp_registry` (or a
-`mcp_registry.<sub>` grant) — see
-[`grants_mcp_registry_explicit`](../../src/company/types.rs). A catch-all `*`
-does **not** confer it, the same rule as `composio`/`media`/`search`: the
-registry pair reaches any server the company has installed and connected,
-addressed at call time by a bare `server_id`, with none of the declared
-bridge's per-server scoping. Granted but no registry home configured wires
-nothing (fail-closed) rather than erroring.
-
-A registry row's `reachableBy` has not caught up to this gate yet: it still
-lists the whole roster (and nobody when the install is disabled), the shape it
-had when the tools were wired unconditionally. An agent without the
-`mcp_registry` grant can therefore appear as a reacher on the Connections
-screen even though the harness will not wire it the tools — narrowing
-`reachableBy` to agents holding the grant is a tracked follow-up, not done
-here.
+A company can also **install** a server from the MCP directory rather than
+declaring one. Those installs, how they reconcile with declared servers, the
+explicit grant that reaches them and the per-install scoping under it live in
+[Directory-installed MCP servers](mcp-registry.md).
 
 ## Which builds can honour a server (issue #567)
 
@@ -337,27 +255,54 @@ builds with `mcp` (`TENANT_FEATURES` in `deploy-staging.yml`); the default
 One component reads the server routes —
 [`McpServersSection`](../../frontend/src/views/connections/McpServersSection.tsx),
 over the standalone functions in `frontend/src/api/mcp.ts` (List A) and
-`frontend/src/api/mcp-registry.ts` (the directory) — rendered from two places:
-inline on Connections, and as the **Connections** tab of Settings, MCP Servers.
+`frontend/src/api/mcp-registry.ts` (the directory) — rendered inline on
+Connections and as Settings, MCP Servers
+([`McpServersView`](../../frontend/src/views/McpServersView.tsx)).
 
-That page ([`McpServersView`](../../frontend/src/views/McpServersView.tsx)) has a
-second tab, **mcp.json**
-([`McpJsonEditor`](../../frontend/src/views/mcp/McpJsonEditor.tsx)), over
-`…/mcp/config`. Two tabs rather than two pages because they are not two things:
-both go through the same host into the same store, so an edit in one shows up in
-the other on its next read. A save bumps the key the rows are mounted on, so the
-list re-reads rather than describing the configuration as it was before the file
-was written.
+The page has two modes on one switch
+([`mcp-view-controls.tsx`](../../frontend/src/views/connections/mcp-view-controls.tsx)),
+kept in the hash as `?view=yours|discover`:
 
-A row's controls are icons, each carrying its sentence as a tooltip **and** as
-its accessible name ([`McpIconButton`](../../frontend/src/views/mcp/McpIconButton.tsx)):
-credential (sign in / add a token / set env credentials), connect or disconnect,
-re-check, list tools, enable or disable, remove. At labelled-button width a row
-six controls deep wrapped onto a second line, and the line it pushed off was the
-one carrying the endpoint — the row's own information lost to its chrome. The
-enable control being an icon is why a disabled server also says `disabled` in
-words beside its badges: an icon in an off state reads as "press to turn off" as
-readily as the reverse.
+- **Yours** searches this company's own servers and nothing else; typing never
+  reaches the directory. A term that matches nothing offers to search the
+  directory for it, which carries the term into Discover.
+- **Discover** is the public directory, with its own field. Before anything is
+  typed it shows the top connectors (see
+  [mcp-registry.md](mcp-registry.md#ranking-and-top-connectors)); "Browse the
+  directory" on an empty company opens it, and a company with no servers opens
+  on it.
+
+Each mode has a card / list toggle, remembered per mode in `localStorage`
+(`opencompany.mcp.layout.<mode>`). Yours defaults to a list and Discover to
+cards. The list is one table shape for both: name and icon, source (`md` and
+up), status, reach (`lg` and up), and the actions. The name column takes
+whatever width the others leave and truncates; the page does not scroll
+sideways at phone width.
+
+A row has no expander. Clicking anywhere on it that is not a control opens the
+server's page (`?server=<name>`); the primary action (sign in, add a token,
+connect) and an overflow menu holding enable/disable, re-check, tools,
+permissions and remove are the only controls on it. A double-click or a drag
+opens the page and selects nothing.
+
+**mcp.json** ([`McpJsonEditor`](../../frontend/src/views/mcp/McpJsonEditor.tsx))
+is a button and a pop-up over `…/mcp/config`, opened by `?tab=json` as well, and
+read-only for a member. It is the same store the rows read: a save re-reads the
+server list (`onSaved` → `refresh()`), so the rows never describe the
+configuration as it was before the file was written.
+
+**Add custom server**
+([`McpAddServerDialog`](../../frontend/src/views/connections/McpAddServerDialog.tsx))
+asks for a name and an MCP URL only. A server that answers its probe is
+confirmed in place ("Added and connected · N tools"); one that needs a sign-in,
+a token or env credentials continues in the connect dialog.
+
+The **connect dialog**
+([`McpConnectDialog`](../../frontend/src/views/mcp/McpConnectDialog.tsx)) is
+where every connect flow lands — a custom add, a directory install, a connect
+from the overflow, a sign-in. It carries the sign-in in flight, the token and
+env forms, and the tools list, and ends on "Connected · N tools" rather than a
+toast that has gone by the time the operator looks for it.
 
 There is deliberately no MCP method on `OpenCompanyClient`. A second set used to
 sit there, declaring a `{ servers }` wrapper around this table's bare array,
@@ -369,23 +314,23 @@ compiler — only by whoever opens the page.
 ### Browsing the directory
 
 [`McpRegistryBrowser`](../../frontend/src/views/connections/McpRegistryBrowser.tsx)
-sits inside the same card as the add-a-URL form, under the same manage gate
-(issue #403 — an install hands every teammate a new set of tools). What it
-installs lands in the list above it with a `registry` badge; there is no second
-section, for the reason the whole merge exists.
+renders Discover under the same manage gate as adding a server (issue #403 — an
+install hands every teammate a new set of tools). An entry opens a pop-up with
+its endpoint, publisher and verified badge before anything is installed; an
+entry this company already holds says so and offers no install. What it
+installs lands in Yours with a `registry` badge.
 
 An entry's install form is exactly the `requiredEnvKeys` the host derived from
 the connection the install will use, as password fields. Those values are
 write-only in both directions: nothing sends one back, and the merged row
 reports only `authConfigured`.
 
-Its failures are its own. Both upstream directories are network hops and either
-can be down, and on a build without the `mcp` feature every `…/mcp/registry/…`
-route answers `404 not_wired` — so `registryOutage` in
-`frontend/src/lib/mcp-registry.ts` turns *every* rejection into one of two
-notices rendered inside the panel, and never rethrows. A dead directory is an
-empty result with a reason; a missing feature is a sentence about the build. The
-company's installed servers keep rendering through both.
+Its failures are its own. The directory is a network hop and can be down, and on
+a build without the `mcp` feature every `…/mcp/registry/…` route answers
+`404 not_wired` — so `registryOutage` in `frontend/src/lib/mcp-registry.ts`
+turns *every* rejection into one of two notices and never rethrows. A dead
+directory is an empty result with a reason; a missing feature is a sentence
+about the build. The company's installed servers keep rendering through both.
 
 ### Provenance picks the routes, not just the badge
 
@@ -411,19 +356,14 @@ guessing.
 
 ### Opening one server
 
-A row's name opens the server into
-[`ProviderDetail`](../../frontend/src/views/connections/ProviderDetail.tsx) — the
-same panel a Composio provider opens into (issues #404, #821), on a
-`ConnectionSubject` union rather than a second MCP-specific panel. The reason is
-the paragraph above one level up: two surfaces describing the same idea acquire
-two vocabularies and then drift.
-
-The panel is read-only. Enable, `Test`, `Tools` and `Remove` stay on the row;
-what it adds is what the row cannot say. Its provenance and removal prose are
-`mcpProvenanceNote` / `mcpRemovalNote` — one sentence per source, because the
-panel used to read `manifest` against everything-else and told a directory
-install it "was added from the console and lives in this company's runtime
-store", true of neither half of it.
+A server opens into its own page
+([`McpServerPage`](../../frontend/src/views/mcp/McpServerPage.tsx)), laid out
+after a connector page: icon, name, provenance and standing in the header with
+the primary action and disconnect beside them; then its description, tools and
+permissions, the agents that can reach it, and usage. Connection facts sit
+behind a **details** pop-up rather than at the foot of the page. Its provenance
+and removal prose are `mcpProvenanceNote` / `mcpRemovalNote` — one sentence per
+source.
 
 - **Connected, and as what.** MCP has no connection object, so this is assembled
   from two facts a single badge would collapse: `enabled` (whether any agent
@@ -439,10 +379,50 @@ store", true of neither half of it.
 - **What a disconnect reaches**: the tool belt on the next turn, and nothing at
   the server's own end. A manifest server says it cannot be removed at all.
 
-## Pool-staleness caveat
+## What a server says about itself
 
-Agents materialize their MCP registry once, when the
-[`HarnessPool`](../../src/harness/mod.rs) builds a company's roster. Mid-session
-edits (add / disable / token rotation) therefore reach a live agent only on the
-next `HarnessPool.ensure()` rebuild — practically, a company restart. Every
-mutating API response says so. Live pool invalidation is out of scope for v1.
+`initialize` carries a `serverInfo` block the protocol leaves open-ended, and a
+server may put a `title`, a `description`, a `websiteUrl` and an `icons` array in
+it. The probe reads it off the transport's cached handshake — the listing already
+performed one, so this costs no extra round trip — and keeps it at
+`mcp/{name}/server_info`, beside the health record. Coverage is patchy in
+practice (Context7 answers with all four, DeepWiki with none), so every field is
+optional and absent stays absent: a placeholder would be this host asserting
+something the server never said. A failed probe leaves the previous record
+standing, as it does the inventory.
+
+The read carries them as `probedTitle`, `probedDescription`, `websiteUrl` and
+`iconUrl`. `probedDescription` is separate from `description`, which is what the
+operator or the bundle declared — the console offers the server's own words as
+the default for that field rather than overwriting a declaration with them.
+
+**An icon is fetched by the host, never linked.** The URL is chosen by whoever
+runs the remote server, and in an `src=` it is a beacon that fires for every
+operator who opens the Connections page and reports to that host who looked and
+when. So the bytes are fetched during the probe behind the outbound SSRF guard
+with redirects off, capped by reading the body rather than trusting a declared
+length, typed from their own signature rather than the claimed `Content-Type`
+(which is how an SVG — a document that can carry script — is refused whatever it
+was labelled), held to the avatar decompression-bomb check, and stored inline as
+a `data:` URI. Rendering one therefore reaches nothing. A fetch that fails leaves
+`iconUrl` absent and the console draws its letter tile. The stored value is
+re-checked on read, so a tampered store cannot turn the field back into a remote
+request. Same reasoning as the avatar grammar in
+[`src/company/avatar.rs`](../../src/company/avatar.rs).
+
+## When a config change reaches an agent
+
+An agent materializes its MCP registry when the
+[`HarnessPool`](../../src/harness/mod.rs) builds a company's roster, but the
+pool re-checks that registry on the way into every turn. `ensure_with_policy`
+re-resolves the effective server set, hashes it with `mcp_fingerprint`, and
+rebuilds the roster when the hash moved against the cached `mcp_fingerprints`
+entry. A mid-session edit — add, disable, token rotation, a per-tool permission
+change — therefore reaches a live agent on its **next turn**, with no company
+restart. Every mutating API response says as much (`NEXT_TURN_NOTE` in
+`src/server/ops/mcp.rs`).
+
+The check is a store read plus a hash, not a rebuild, so it costs the same
+whether or not anything moved. What it does not reach is a turn already in
+flight: an agent mid-turn finishes on the belt it started with, because the
+fingerprint is compared before the turn, not during it.

@@ -6,6 +6,7 @@ use crate::ports::types::{CompanyId, TokenUsage};
 
 fn task(id: &str, parent: Option<&str>, planning_cost: f64) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored(id),
         note: None,
@@ -58,6 +59,8 @@ fn run(id: &str, task_id: &str, status: RunStatus, cost: f64) -> RunRecord {
         step_count: 0,
         workflow_run_id: None,
         node_id: None,
+        episode_id: None,
+        round_revision: None,
     }
 }
 

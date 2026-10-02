@@ -155,7 +155,10 @@ Two things do not stream. Assistant text adds no live row (the reply is the
 bubble body, and nothing on this bus carries the text itself), and a
 non-terminal `tool_call_update` (`pending`/`in_progress`) publishes nothing —
 its row is already on screen as `running`, which is also exactly what `fold`
-leaves the step as.
+leaves the step as. The first `agent_message_chunk` of a run of text does
+publish one text-free `replying` marker (once per run; a tool call or thought
+re-arms it), which the console reads as "typing" and never folds into a row
+(`events.md`).
 
 A tool call's `title` and result summary are **bounded by the transport**
 (`MAX_TITLE_CHARS` / `MAX_RESULT_CHARS` in `local_agent.rs`) before either
