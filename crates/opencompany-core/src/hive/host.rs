@@ -1328,62 +1328,6 @@ impl EpisodeHost for DeskHost {
     ///
     /// The episode id is in it because a seat's belt is lent under this key:
     /// two episodes seating the same teammate must not read each other's.
-    /// Narrow one turn of `seat` to `only` — most of a seated turn's belt is
-    /// this host's own, so only this host can withhold it.
-    ///
-    /// Keyed by [`Self::seat_session`], the same key the loan is under, so the
-    /// belt factory finds the narrowing beside the loan it already looks up. The
-    /// guard lifts it however the turn ends.
-    /// Watch this turn, so the row it produces can say what it did.
-    ///
-    /// A seat's tool calls never reached this host: the runner metered a turn's
-    /// usage and reported nothing of its progress, so `reply` journaled every
-    /// row with an empty step list while a turn taken *outside* an episode
-    /// carried all of them. The console showed the difference and nothing
-    /// explained it.
-    ///
-    /// The reader is a task because the channel is backpressure: the core
-    /// awaits its sends, so a sink nobody drains stalls the seat mid-turn.
-    /// [`Self::wrap_turn`] joins it once the turn is over, which is also the
-    /// only moment the fold is complete.
-    fn progress(&self, seat: &str) -> Option<tinyhivemind_openhuman::TurnProgressSink> {
-        let (sink, mut arriving) = tokio::sync::mpsc::channel(PROGRESS_DEPTH);
-        let reader = tokio::spawn(async move {
-            let mut seen = Vec::new();
-            while let Some(event) = arriving.recv().await {
-                seen.push(event);
-            }
-            seen
-        });
-        // A turn that somehow starts twice for one seat leaves the older
-        // reader without a sender, so it ends on its own.
-        self.watching
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(seat.to_owned(), reader);
-        Some(sink)
-    }
-
-    fn narrow_turn(&self, seat: &str, only: &[String]) -> tinyhivemind_openhuman::Narrowing {
-        let held = self
-            .seated
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(seat)
-            .cloned();
-        let Some(agent) = held else {
-            return tinyhivemind_openhuman::Narrowing::none();
-        };
-        let seating = agent.seating().clone();
-        let key = self.seat_session(seat);
-        let prefixed: Vec<String> = only
-            .iter()
-            .map(|verb| format!("{}{verb}", crate::hive::host::TOOL_PREFIX))
-            .collect();
-        seating.narrow(key.clone(), prefixed);
-        tinyhivemind_openhuman::Narrowing::until(move || seating.widen(&key))
-    }
-
     fn seat_session(&self, seat: &str) -> String {
         format!("episode:{}:{}", self.episode_id, seat)
     }
