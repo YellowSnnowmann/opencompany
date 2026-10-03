@@ -488,7 +488,7 @@ function RowAvatar({
         <TeammateAvatar {...face} className={cn(ROUND, "size-10 text-sm")} />
       </AgentFace>
     ) : (
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-(--avatar-radius) bg-muted">
         <CircleDot className="size-4" aria-hidden />
       </span>
     );
@@ -497,7 +497,7 @@ function RowAvatar({
   if (group.length === 0) {
     const Icon = channel.private ? Lock : Hash;
     return (
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-(--avatar-radius) bg-muted text-muted-foreground">
         <Icon className="size-4" aria-hidden />
       </span>
     );
