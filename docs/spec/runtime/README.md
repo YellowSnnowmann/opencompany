@@ -209,7 +209,7 @@ The kernel owns:
 
 The kernel explicitly does **not** own cognition (Medulla), model routing
 (TinyHumans backend), tool implementations (OpenHuman / TinyAgents), memory
-internals (TinyCortex or any store), or the agent economy (tiny.place).
+internals (any memory engine or store), or the agent economy (tiny.place).
 
 ## Crate layout (target)
 
