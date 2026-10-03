@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { channelInfo, openChannelInfo } from "./chat-helpers";
+
 /**
  * End-to-end proof for issues #369 and #370 — a channel says who is in *it*,
  * and never shows you a different channel without saying so.
