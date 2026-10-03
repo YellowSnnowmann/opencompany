@@ -79,8 +79,8 @@ static TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("static tool-call tag pattern must compile")
 });
 
-/// The plain-text call marker family `native_salvage::CALL_MARKERS` recovers
-/// on an authorized turn (`function_call:{…}`, `tool_call:{…}`, …) — the same
+/// The plain-text call marker family the shared text parser recovers on an
+/// authorized turn (`function_call:{…}`, `tool_call:{…}`, …) — the same
 /// shape is still tool-call markup, not an answer, when nothing authorized it.
 static PLAIN_CALL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(function_call|functioncall|tool_calls?)\s*:\s*\{")
