@@ -57,7 +57,7 @@ const VIEWPORTS = [
  * this spec is the one that wants the tour.
  */
 async function startTour(page: Page): Promise<void> {
-  await page.goto("/#/overview");
+  await page.goto("/#/chat");
   const start = page.getByRole("button", { name: "Take the tour" });
   await expect(start, "first run should offer the tour").toBeVisible();
   await start.click();
