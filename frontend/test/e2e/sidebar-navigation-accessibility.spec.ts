@@ -26,8 +26,8 @@ test("the skip link reaches main content and the sidebar is the primary navigati
   // in the same commit, so nothing focusable appears between them.
   await skip.waitFor();
 
-  // This is the first tab stop, ahead of the sidebar's host switcher and its
-  // destination rows, even though the fixed sidebar renders before main.
+  // This is the first tab stop, ahead of the sidebar's conversations and its
+  // tabs, even though the sidebar renders before main.
   await page.keyboard.press("Tab");
   await expect(skip).toBeFocused();
   await expect(skip).toBeVisible();
@@ -109,7 +109,6 @@ for (const width of [480, 390]) {
     await page.keyboard.press("Escape");
 
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.evaluate(() => window.localStorage.removeItem("oc.appearance.sidebarWidth"));
     const column = await page.locator('[data-slot="sidebar-container"]').boundingBox();
     expect(Math.round(column!.width), "the desktop sidebar column").toBe(288);
   });
