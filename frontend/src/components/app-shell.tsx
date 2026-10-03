@@ -3425,7 +3425,7 @@ export function AppShell({
           search={<TitleBarSearch variant="sidebar" client={client} company={company} />}
         />
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
-          <SidebarContent data-tour="sidebar" className="min-h-0 flex-1">
+          <SidebarContent data-tour="sidebar" className="min-h-0 flex-1 pt-0">
           <SidebarNavigation />
         </SidebarContent>
         {/* The console's own utilities sit at the FOOT of the column, under the
