@@ -984,7 +984,10 @@ export function PolicySettings({ client, company, canManage }: Props) {
             )}
             <div
               data-testid="policy-hitl-status"
-              className="rounded-md border border-status-blocked/30 bg-status-blocked-soft p-3 text-xs text-muted-foreground"
+              // Neutral, not the amber "blocked" wash: it states how approvals
+              // work on this host, which is information rather than a warning —
+              // and the amber at 16% read as a muddy olive block in dark mode.
+              className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground"
             >
               {policyHitlEnabled ? (
                 <>
@@ -1031,13 +1034,14 @@ export function PolicySettings({ client, company, canManage }: Props) {
                     className={cn(
                       "w-full rounded-md border p-3 text-left transition-colors",
                       "disabled:cursor-not-allowed disabled:opacity-60",
-                      looser &&
-                        "border-status-blocked/40 bg-status-blocked-soft hover:bg-status-blocked-soft",
-                      active
-                        ? looser
-                          ? "ring-1 ring-status-blocked/30"
-                          : "border-primary bg-primary/5"
-                        : "hover:bg-muted/50",
+                      // The chosen tier wears the accent, as every selection in
+                      // the console does; the others stay neutral. Tiers wider
+                      // than the current one were each washed in amber, which
+                      // put two or three warning blocks on the page at once and
+                      // turned olive on dark — the oversight→autonomy scale
+                      // above already says which way each step goes, and a
+                      // widening still asks for confirmation before it lands.
+                      active ? "border-primary bg-primary/10" : "hover:bg-muted/50",
                     )}
                   >
                     <div className="flex items-center gap-2">
