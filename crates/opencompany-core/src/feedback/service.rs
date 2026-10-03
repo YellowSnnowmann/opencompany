@@ -376,8 +376,8 @@ async fn forward_to_hub(
     }
 }
 
-/// The roster names/handles to redact (agent ids plus the company `@handle`
-/// stem is intentionally *not* redacted — it is the public provenance signer).
+/// The roster names to redact (agent ids). The company id is intentionally
+/// *not* redacted — it is the public provenance signer.
 fn roster_names(manifest: Option<&CompanyManifest>) -> Vec<String> {
     manifest
         .map(|m| m.agents.iter().map(|a| a.id.clone()).collect())
