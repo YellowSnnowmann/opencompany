@@ -62,7 +62,7 @@ struct Envelope<T> {
 ///
 /// `U+0000` is deliberately absent: RFC 8259 requires escaping `U+0000`
 /// through `U+001F`, so `serde_json` already emits it as `\u0000`.
-const CHARACTERS_ENGINES_STRIP: [char; 1] = ['\u{FFFD}'];
+pub(super) const CHARACTERS_ENGINES_STRIP: [char; 1] = ['\u{FFFD}'];
 
 /// Encodes a typed record for an item's text.
 ///
@@ -70,7 +70,7 @@ const CHARACTERS_ENGINES_STRIP: [char; 1] = ['\u{FFFD}'];
 /// ASCII, so a character from [`CHARACTERS_ENGINES_STRIP`] can only ever occur
 /// inside a string literal, and substituting its `\uXXXX` form yields an
 /// equivalent document.
-fn encode<T: Serialize>(record: &T) -> Result<String> {
+pub(super) fn encode<T: Serialize>(record: &T) -> Result<String> {
     let json = serde_json::to_string(&Envelope {
         v: ENVELOPE_VERSION,
         record,
