@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { hostSwitcher } from "./host-switcher";
 
 /**
  * The "Manage hosts" page, and how much of this file's original coverage is
@@ -32,7 +33,7 @@ test.beforeEach(async ({ page }) => {
 test("the host switcher's Manage hosts item opens the manage-hosts page", async ({ page }) => {
   await page.goto("/#/company");
 
-  const trigger = page.getByTestId("host-switcher");
+  const trigger = await hostSwitcher(page);
   await expect(trigger).toBeVisible({ timeout: 30_000 });
   await trigger.click();
 

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { hostSwitcher } from "./host-switcher";
 
 /**
  * Hosts on this computer, and how much of this file's original coverage is
@@ -37,7 +38,7 @@ test.beforeEach(async ({ page }) => {
 test("the host switcher's Add a host item opens the add-a-host screen", async ({ page }) => {
   await page.goto("/#/company");
 
-  const trigger = page.getByTestId("host-switcher");
+  const trigger = await hostSwitcher(page);
   await expect(trigger).toBeVisible({ timeout: 30_000 });
   await trigger.click();
 

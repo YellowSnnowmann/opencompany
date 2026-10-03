@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { hostSwitcher } from "./host-switcher";
 
 
 
@@ -286,7 +287,7 @@ test("a remembered host does not take the launch just by being older", async ({
   // Both hosts are registered, so the switcher offers a choice. Counted off the
   // closed trigger, which carries the roster size so a count does not depend on
   // a menu being open.
-  await expect(page.getByTestId("host-switcher")).toHaveAttribute("data-host-count", "2", {
+  await expect(await hostSwitcher(page)).toHaveAttribute("data-host-count", "2", {
     timeout: 30_000,
   });
   // The console on screen is a working one — which it could not be if the
@@ -307,7 +308,7 @@ test("a remembered host does not take the launch just by being older", async ({
   // it cannot stand in for them. The assertion above (no connection error, and
   // the embedded host's console on screen) is what still says the launch went to
   // the right one.
-  await expect(page.getByTestId("host-switcher")).toHaveAttribute("data-host-count", /[2-9]/);
+  await expect(await hostSwitcher(page)).toHaveAttribute("data-host-count", /[2-9]/);
 });
 
 test("a desktop waits for its own host rather than borrowing a remembered one", async ({
@@ -399,7 +400,7 @@ test("a paired host on plain http is refused, and says why", async ({ page, base
   // what told the operator not to go looking at a working network — is hidden
   // with the roster (`src/product-scope.ts`). The refusal itself is unchanged
   // and is still asserted where it matters most: nothing was sent.
-  await expect(page.getByTestId("host-switcher")).toHaveAttribute("data-worst-status", "down");
+  await expect(await hostSwitcher(page)).toHaveAttribute("data-worst-status", "down");
 
   // And nothing was sent there. The status is not a label applied after a round
   // trip; the round trip is what must not happen.
@@ -435,7 +436,7 @@ test("an unencrypted host with no credential still connects", async ({ page, bas
   await page.goto("/#/company/work/tasks");
 
   // Read off the closed trigger: one host, so its state is the worst state.
-  await expect(page.getByTestId("host-switcher")).toHaveAttribute("data-worst-status", "live", {
+  await expect(await hostSwitcher(page)).toHaveAttribute("data-worst-status", "live", {
     timeout: 30_000,
   });
 });
