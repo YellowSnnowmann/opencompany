@@ -1836,9 +1836,6 @@ export function RoomView({
   // A local the closures below can capture as non-null: TypeScript hoists
   // function declarations, so the guard above does not narrow inside them.
   const active = channel;
-  // Whether the open channel is a real, host-backed desk — as opposed to a DM
-  // or a fallback desk (`lib/desks.ts`, used before `/desks` answers).
-  const activeIsDesk = active.kind === "channel" && (desks ?? []).some((d) => d.id === active.id);
   // The host thread this channel is addressed on. A real desk channel's id
   // doubles as its thread id (`deskFromDto`), so addressing by it routes to
   // that desk's lead. A DM's id is console-local (`dmChannelId`), not a host
