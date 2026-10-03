@@ -19,8 +19,8 @@
 
 mod support;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -459,9 +459,11 @@ async fn start_task_dispatches_a_desk_card_through_the_live_room_path() {
     let task_id = Arc::new(std::sync::Mutex::new(None::<String>));
     let start_requested = Arc::new(AtomicBool::new(false));
     let room_started = Arc::new(AtomicBool::new(false));
+    let allow_room_to_finish = Arc::new((Mutex::new(false), Condvar::new()));
     let card_id = Arc::clone(&task_id);
     let requested = Arc::clone(&start_requested);
     let entered_room = Arc::clone(&room_started);
+    let room_release = Arc::clone(&allow_room_to_finish);
     let room_responder = room_script(ROLES, |seat| complete(seat, "The card work is recorded."));
     let responder: Responder = Arc::new(move |ask: &Ask| {
         if ask.tools.iter().any(|name| name == "start_task")
@@ -477,9 +479,13 @@ async fn start_task_dispatches_a_desk_card_through_the_live_room_path() {
         if support::room::seat_of(ask, ROLES).is_some()
             && !entered_room.swap(true, Ordering::SeqCst)
         {
-            // Hold the first seat response long enough for the operator to steer
-            // the live card run through the production route.
-            std::thread::sleep(Duration::from_millis(750));
+            // Keep the first seat turn in flight until the operator has steered
+            // the card through the production route.
+            let (release, wake) = &*room_release;
+            let released = release.lock().unwrap();
+            let _ = wake
+                .wait_timeout_while(released, Duration::from_secs(10), |released| !*released)
+                .unwrap();
         }
         room_responder(ask)
     });
@@ -527,7 +533,7 @@ async fn start_task_dispatches_a_desk_card_through_the_live_room_path() {
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    let (status, body) = room
+    let steer = room
         .post(
             &format!("/tasks/{id}/steer"),
             json!({
@@ -536,6 +542,12 @@ async fn start_task_dispatches_a_desk_card_through_the_live_room_path() {
             }),
         )
         .await;
+    {
+        let (release, wake) = &*allow_room_to_finish;
+        *release.lock().unwrap() = true;
+        wake.notify_all();
+    }
+    let (status, body) = steer;
     assert_eq!(status, 202, "{body}");
 
     let started = Instant::now();
