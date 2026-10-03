@@ -1785,7 +1785,7 @@ async fn run_memory_cmd(cmd: MemoryCmd) -> Result<()> {
     let MemoryCmd::Migrate { .. } = cmd;
     Err(opencompany::error::OpenCompanyError::Config(
         "`memory migrate` requires a build with the `tinymemory` feature (the provider seam \
-         its Portability family lives on)."
+         `migrate` copies through)."
             .into(),
     ))
 }
