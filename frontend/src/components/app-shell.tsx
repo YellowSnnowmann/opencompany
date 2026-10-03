@@ -3369,9 +3369,11 @@ export function AppShell({
         // and `left-*` would be fighting `inset-y-0` and `data-[side=left]:
         // left-0` on the same element and the winner would come down to
         // stylesheet order. `.sidebar-material` (index.css) is the
-        // translucent fill the blur reads through.
+        // translucent fill the blur reads through. No shadow: the card is
+        // edged by the same 15% ink border as the composer, so the two boxes
+        // that frame the page read as one system.
         style={{ top: 8, bottom: 8, left: 8, height: "auto" }}
-        className="sidebar-material z-30 overflow-hidden rounded-2xl border border-sidebar-float-border shadow-[2px_4px_10px_-4px_rgb(0_0_0/0.06),4px_14px_28px_-14px_rgb(0_0_0/0.10)] backdrop-blur-2xl"
+        className="sidebar-material z-30 overflow-hidden rounded-2xl border border-foreground/15 backdrop-blur-2xl"
       >
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
           <SidebarContent data-tour="sidebar" className="min-h-0 flex-1 pt-0">
