@@ -43,7 +43,7 @@ pub mod outbox;
 // come to disagree about what verifies. Wallet sign-in is configuration rather
 // than a build option, so this cannot be behind a feature without making a
 // configurable mode silently unimplemented in the shipped binary.
-pub mod signer;
+
 #[cfg(feature = "tinyplace")]
 pub mod siwx;
 #[cfg(feature = "tinyplace")]
@@ -58,7 +58,7 @@ pub use client::{HttpTinyplaceClient, MockTinyplaceClient, TinyplaceClient};
 #[cfg(feature = "tinyplace")]
 pub use outbox::{Outbox, OutboxAction};
 #[cfg(feature = "tinyplace")]
-pub use signer::{LocalSigner, load_or_create_signer};
+
 #[cfg(feature = "tinyplace")]
 pub use siwx::{NonceCache, SiwxHeader, SiwxPayload};
 #[cfg(feature = "tinyplace")]
