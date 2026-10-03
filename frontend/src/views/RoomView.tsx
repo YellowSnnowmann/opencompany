@@ -2784,6 +2784,7 @@ export function RoomView({
             openSections={railOpenSections}
             onToggleSection={toggleRailSection}
             directMessages={directMessageChannels(members)}
+            members={members}
             onStartDirectMessage={selectChannel}
             onAddChannel={onAddChannel}
             // The same `AddMemberDialog` and `addMember` the empty pane and the
