@@ -1,7 +1,7 @@
 # Which CI lane runs each Cargo feature's tests — and for the features no lane
 # runs, why that is deliberate. Asserted by scripts/ci/assert-feature-lanes.sh.
 #
-# Issue #770. Cargo features are additive and every test lane in ci.yml pins an
+# Issue #770. Cargo features are additive and every CI test lane pins an
 # explicit feature set, so a feature-gated test's DEFAULT FATE is "compiled by
 # `Check (--all-features)`, executed by nothing". That is not a hypothetical:
 # six features had accumulated never-executed tests before this file existed,
@@ -24,13 +24,13 @@
 #                         could narrow them away (a bare `--lib` or `--tests`).
 #                         `features` is the exact `--features` string that lane
 #                         passes, which must appear on a `cargo test` line in
-#                         ci.yml. `(default)` means the default feature set,
+#                         scripts/ci/lanes/lanes-plan.mjs. `(default)` means the default feature set,
 #                         covered by the bare `cargo test --locked` in `Rust`.
 #
 #   status = partial      a lane exists but is FILTERED, so it runs the named
 #                         modules and not necessarily every gated test.
 #                         `features` as above; `detail` lists the filters, and
-#                         every one of them must also appear in ci.yml.
+#                         every one of them must also appear in the lane plan.
 #
 #   status = compile-only no lane runs this feature's tests, ON PURPOSE.
 #                         `features` is `-`; `detail` is the REASON, which is
