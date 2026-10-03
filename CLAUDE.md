@@ -206,6 +206,81 @@ selects nothing exits 0.
 Maintain at least 80% coverage for meaningful library behavior. Document any
 intentionally untested edge case in the PR description.
 
+## Submodule ownership
+
+OpenCompany is the host. It composes OpenHuman and TinyHiveMind into a company
+runtime and owns what only a company has: bundles under `companies/`, the
+global baseline, ledgers, users, storage ports, the server and console, hosted
+mode, and the host adapters that bind the vendored projects (`src/harness/`
+for OpenHuman, `src/hive/` for TinyHiveMind). It is not the implementation home
+for behavior a vendored project defines.
+
+**Put a change in the repo that owns it, not where it is easiest to land.**
+Before editing, find the owner below. Implement a library capability, bug fix
+or contract change in that submodule, open its PR against the canonical
+`tinyhumansai/*` upstream, and move the gitlink here only once that commit is
+available to other clones. OpenCompany may carry the host adapter and the
+integration tests that prove the composition, but do not copy a module's
+implementation in, and do not paper over a submodule's defect on the host
+side. A host-side workaround is a stopgap, not a fix: file or fix it upstream
+in the same piece of work. For a change spanning a library and its host
+adapter, raise the library PR first and keep each PR and gitlink bump
+independently reviewable.
+
+Direct submodules under `vendor/`:
+
+| Submodule | Owns |
+| --- | --- |
+| `openhuman` | The agent runtime: `openhuman-core` business domains (agents, memory, tools, security, skills, MCP, hosting), the `openhuman-embed` `Runtime` → `Agent` facade every company turn goes through, the `openhuman-tinyhumans` backend transport, and JSON-RPC. Its own `AGENTS.md` names the owner of every library underneath it. |
+| `tinyhivemind` | Hive mind mechanics for agent group chats: desks, rosters, mentions, shared transcripts, routing, bounded group deliberation, and the completion driver, all as pure folds over a transcript the host owns. |
+
+TinyHiveMind's crates, and what stays here:
+
+| Crate | Owns |
+| --- | --- |
+| `tinyhivemind-core` | Desks, rosters, mentions and conversation identity — the pure algebra, no IO. |
+| `tinyhivemind` | Runtime-neutral session ports (`SessionLog` paging), the attributed transcript projection, and the `speech` vocabulary (post / broadcast / dm / complete_episode). |
+| `tinyhivemind-hive` | Bounded deliberation: trace grammar, salience, quorum with cross-inhibition, the attention market, and the pure episode `step`. |
+| `tinyhivemind-embed` | Host-neutral conversation surfaces (`ConversationRef`, `MessageRoute`, `RoutingPolicy`) and Jev-first `route_message` / `route_broadcast`. |
+| `tinyhivemind-typesafe` | Jev System One wire types and `JevRouter` behind the `SystemOneTransport` port. No HTTP client. |
+| `tinyhivemind-driver` | The completion driver: who runs next in an episode, what a committed row means, what a seat is told. |
+| `tinyhivemind-tools` | The episode's tool record a host drains: what a seat may call and what its calls did. |
+| `tinyhivemind-mcp` | The room's tools served over MCP. |
+| `tinyhivemind-openhuman` | The OpenHuman seat adapter (`OpenHumanHive`): a seat as an `openhuman-embed` agent or a raw session. |
+
+OpenCompany keeps, in `src/hive/`, only what binds those to a company: one desk
+per `[[group_chat]]`, seating from the company roster, the `opencompany` MCP
+server, durable journaling of episode state (committed only after the reply is
+journaled), referral, and the `reqwest` implementation of `SystemOneTransport`
+(`hive/jev.rs`). A change to deliberation rules, routing policy, transcript
+projection, mention parsing or the driver's scheduling belongs in TinyHiveMind,
+which by its own charter never opens a file, socket or database and never names
+a host type — so storage and company policy never move the other way.
+
+Libraries reached through OpenHuman are owned by the projects its
+`vendor/openhuman/AGENTS.md` lists, not by OpenHuman and not by this repo. The
+ones OpenCompany links directly — `tinytools` / `tinytools-agent` /
+`tinytools-std` (via `tinyagents/vendor/tinytools`), `tinymcp`,
+`tinyconnectors`, `tinysearch-bus`, `tinyflows`, `tinyinference-*` and
+`tinymemory` / `tinycortex` — change in their own repositories. The bump then
+travels outward one gitlink at a time: the library, then `vendor/openhuman`,
+then here.
+
+Duplicated copies are not second sources:
+
+- `vendor/tinyhivemind/vendor/` carries its own `openhuman`, `tinytools`,
+  `tinyinference` and `tinyjevclient` for its standalone CI. Never edit them
+  from here. The root `Cargo.toml` `[patch]` tables redirect those git sources
+  onto `vendor/openhuman`, so the process holds one `Agent`, one `Tool` and one
+  `ChatModel` type.
+- The OpenHuman `rev` TinyHiveMind pins and the `vendor/openhuman` gitlink must
+  agree. CI's "Assert no duplicated OpenHuman-family crates" step fails when
+  they drift; bump them together.
+
+When ownership is unclear, read the submodule's `AGENTS.md`, README and crate
+boundaries before editing. Initialize everything with
+`git submodule update --init --recursive`.
+
 ## Documentation Expectations
 
 Keep `README.md`, `docs/spec/README.md`, and module docs in `docs/modules/`
