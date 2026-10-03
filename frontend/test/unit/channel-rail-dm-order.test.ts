@@ -125,7 +125,9 @@ describe("ChannelRail DM order", () => {
     const first = container.querySelector<HTMLButtonElement>("li button")!;
     act(() => first.focus());
     render(["cy", "ann", "bob"], { cy: 3 });
-    expect(order()[2]).toContain("3");
+    expect(order()[2]).toBe("cy");
+    const rows = container.querySelectorAll("li");
+    expect(rows[2].querySelector('[data-testid="channel-unread"]')?.textContent).toBe("3");
   });
 
   it("puts a DM that appears mid-hold last rather than shifting the rows", () => {
