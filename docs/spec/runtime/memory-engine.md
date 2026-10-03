@@ -36,8 +36,8 @@ set is whatever the pinned crate ships; the console catalog
 | `cortexdb` | CortexDB, called directly over its own API | `https://api-v1.cortexdb.ai` |
 | `tinyhumans` | CortexDB hosted by the TinyHumans backend | `https://api.tinyhumans.ai` |
 
-`cortex` is accepted as an alias of `cortexdb` (hosted tenants provisioned
-before the migration inject it). `supermemory`, `mem0` and `cognee` are
+`cortex` is accepted as an alias of `cortexdb` (the manager injects that id
+at provision). `supermemory`, `mem0` and `cognee` are
 **retired**: they are refused by name with a hint to migrate off them, never
 silently mapped onto another engine (`RETIRED_ENGINES` in
 `src/store/memory/driver.rs`). An unknown id is refused naming the ids this
