@@ -730,6 +730,12 @@ jobs:
       # built.
       - name: Test the analytics surface
         run: scripts/ci/run-scoped-suite.sh "analytics" analytics analytics
+      # The TinyHumans hub clients (feedback forwarding, the key exchange) are
+      # gated on `tinyhumans`; their HTTP-level tests run against a local stub.
+      - name: Test (tinyhumans hub clients)
+        run: |
+          scripts/ci/run-scoped-suite.sh "tinyhumans feedback" tinyhumans feedback::tinyhumans
+          scripts/ci/run-scoped-suite.sh "tinyhumans hub identity" tinyhumans server::hub_identity
 
       # `crash-reporting`: the `before_send` hook, which is the only part of
       # crash reporting that needs a `sentry::` type to exist at all.
