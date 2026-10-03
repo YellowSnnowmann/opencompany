@@ -573,7 +573,6 @@ fn company_builder(
     // instance gets them, which is what makes a fresh install useful with no
     // per-company setup. Already normalized when the config resolved.
     .with_default_mcp_servers(state.config().default_mcp_servers.clone())
-    .with_host_base_url(state.config().host_base_url())
     .with_workspace_quota(state.config().workspace_quota)
     .with_workspace_git_enabled(state.config().workspace_git_enabled)
     // Issue #752: the backend that serves this host's secrets, which the
