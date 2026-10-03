@@ -405,7 +405,7 @@ impl ContextStore for ProviderContextStore {
                     snippet: snippet(&chunk.body),
                     // The port promises `[0, 1]`; engines rank on their own
                     // scale, so clamp rather than trust it.
-                    score: hit.score.clamp(0.0, 1.0),
+                    score: f64::from(hit.score).clamp(0.0, 1.0),
                 })
             })
             .take(limit)

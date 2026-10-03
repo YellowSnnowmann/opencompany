@@ -291,7 +291,11 @@ impl Bound {
                 id: Some(key.to_string()),
             },
             tags,
-            observed_at: Some(tinymemory::chrono::Utc::now()),
+            // From the host clock the ports already use; the contract re-exports
+            // `chrono` without its `clock` feature.
+            observed_at: i64::try_from(crate::ports::now_millis())
+                .ok()
+                .and_then(tinymemory::chrono::DateTime::from_timestamp_millis),
             ..MemoryMeta::default()
         };
         let receipt = self
