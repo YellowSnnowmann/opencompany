@@ -18,8 +18,8 @@
 # #1738 was filed reading that as the product's intent, which is what a surface
 # only developers see and only users don't will keep producing.
 #
-# `ci.yml`'s copy already had a comment telling the next person to keep it in
-# step with the release workflow. This is that instruction, enforced. The
+# The CI copy (then in `ci.yml`, now in the lane plan) already had a comment
+# telling the next person to keep it in step with the release workflow. This is that instruction, enforced. The
 # release workflow is the source of truth: it is the one whose value reaches a
 # user.
 #
@@ -30,7 +30,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 RELEASE_WORKFLOW=.github/workflows/build-desktop.yml
-CI_WORKFLOW=.github/workflows/ci.yml
+CI_WORKFLOW=scripts/ci/lanes/lanes-plan.mjs
 DEV_SCRIPT=scripts/desktop-dev.sh
 CONSOLE_MANIFEST=frontend/package.json
 DESKTOP_DOC=docs/spec/runtime/desktop.md
@@ -121,7 +121,7 @@ check() {
   fi
 }
 
-# `ci.yml`'s Desktop lane: every cargo command run against the desktop manifest.
+# The lane plan's desktop lane: every cargo command run against the desktop manifest.
 # Both the clippy and the test step must carry the features — a lane that lints
 # the shipped set but tests the default one is the same hole in half.
 #
@@ -142,7 +142,9 @@ while IFS= read -r entry; do
   line="${entry%%:*}"
   # No match leaves this empty, which `check` reports as `<none>` rather than
   # skipping. That is the point of selecting by command above.
-  value="$(printf '%s' "${entry#*:}" | sed -n 's/.*--features[= ]\{1,\}\([^ ]*\).*/\1/p')"
+  # Stops at a quote as well as a space: the plan writes each command as a JS
+  # string, so the last flag is followed by its closing quote.
+  value="$(printf '%s' "${entry#*:}" | sed -n 's/.*--features[= ]\{1,\}\([^ "]*\).*/\1/p')"
   check "$CI_WORKFLOW:$line" "$value"
 done <<< "$ci_lines"
 
