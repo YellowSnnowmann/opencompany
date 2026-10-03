@@ -91,7 +91,9 @@ export function buildPlan({ profile, areas, env = {} }) {
   const targetDir = (lane) => (ex63 ? `${scratch}/target/${lane}` : null);
   const rustEnv = ex63 ? { RUSTC_WRAPPER: "sccache" } : {};
   // The guest's persistent cache disk: npm's cache and Playwright's browsers
-  // survive from job to job there. Hosted runners use actions/setup-node's
+  // survive from job to job there. Env values are expanded by lanes.mjs
+  // (`${NAME}`, `${NAME:-default}`, and `${ROOT}` for the checkout root),
+  // because a spawned process's environment is never shell-expanded. Hosted runners use actions/setup-node's
   // npm cache and download Chromium per job.
   const cacheDisk = "${CI_CACHE_DIR:-/cache}";
   const nodeEnv = ex63
@@ -547,7 +549,6 @@ export function buildPlan({ profile, areas, env = {} }) {
         {
           name: "pnpm-lockfile-floor",
           when: areas.frontend,
-          after: ["pnpm-lockfile"],
           run: "cd frontend && npx --yes pnpm@10 install --frozen-lockfile --lockfile-only",
         },
       ],
@@ -555,7 +556,7 @@ export function buildPlan({ profile, areas, env = {} }) {
     {
       // The console suites against the default-feature host binary.
       name: "e2e",
-      env: { ...nodeEnv, PW_HOST_BINARY: "${GITHUB_WORKSPACE:-$PWD}/ci-out/bin/opencompany" },
+      env: { ...nodeEnv, PW_HOST_BINARY: "${ROOT}/ci-out/bin/opencompany" },
       checks: [
         ...frontendPrep("e2e"),
         {
@@ -574,7 +575,6 @@ export function buildPlan({ profile, areas, env = {} }) {
           name: "e2e-first-run",
           when: app,
           needs: ["playwright-install", "core:host-binary"],
-          after: ["e2e"],
           run: "scripts/ci/assert-e2e-spec-ran.sh",
         },
       ],
@@ -586,7 +586,7 @@ export function buildPlan({ profile, areas, env = {} }) {
       name: "e2e-live",
       env: {
         ...nodeEnv,
-        PW_HOST_BINARY: "${GITHUB_WORKSPACE:-$PWD}/ci-out/bin/opencompany-gated",
+        PW_HOST_BINARY: "${ROOT}/ci-out/bin/opencompany-gated",
         PW_COMPOSIO: "1",
       },
       checks: [
