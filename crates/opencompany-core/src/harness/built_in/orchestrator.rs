@@ -2872,6 +2872,8 @@ fn summarize_event(event: &CompanyEvent) -> String {
             }
         },
         CompanyEvent::OnboardingCompleted { .. } => "activation completed".to_string(),
+        // A retired or unrecognised kind read back from an old journal.
+        CompanyEvent::Unknown => "unrecognised event".to_string(),
     }
 }
 
