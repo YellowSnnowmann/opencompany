@@ -77,7 +77,6 @@ use futures::future::FutureExt;
 use serde_json::{Value, json};
 
 #[cfg(test)]
-use openhuman_core as oh;
 use tinytools::{PermissionLevel, Tool, ToolResult, ToolTimeout};
 
 use crate::company::{

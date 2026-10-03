@@ -455,7 +455,11 @@ mod cortex {
             "content": { "text": body.pointer("/content/text").cloned().unwrap_or(Value::Null) },
             "context": { "recorded_at": "2026-09-04T00:00:00Z" },
         }));
-        Json(json!({ "event_id": id, "status": "captured" }))
+        Json(json!({
+            "event_id": id,
+            "status": "captured",
+            "replayed_from_idempotency": false,
+        }))
     }
 
     async fn cx_events(
