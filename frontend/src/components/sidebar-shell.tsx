@@ -17,50 +17,36 @@ import type { ReactNode } from "react";
 import { SidebarFooter, SidebarHeader } from "@/components/ui/sidebar";
 
 /**
- * The card's head: the search field beside the collapse toggle.
+ * The card's head: the search field, alone.
  *
  * The company switcher sat here first and lives on the Settings rail now: which
  * company a window is pointed at is set once and rarely, and the head of the
- * column is where you go many times a minute. On the collapsed icon rail the
- * two stack, the same width rule the channel list's compact rows follow.
+ * column is where you go many times a minute. The collapse toggle beside it is
+ * gone too — the column is held open (`app-shell.tsx`).
  */
-export function SidebarShellHeader({
-  toggle,
-  search,
-}: {
-  toggle: ReactNode;
-  search: ReactNode;
-}) {
+export function SidebarShellHeader({ search }: { search: ReactNode }) {
   return (
-    <SidebarHeader
-      data-testid="sidebar-shell-header"
-      className="flex-row items-center gap-1 px-2 pt-2 pb-1 group-data-[collapsible=icon]:flex-col"
-    >
-      <div className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">{search}</div>
-      {toggle}
+    <SidebarHeader data-testid="sidebar-shell-header" className="px-2 pt-2 pb-0">
+      {search}
     </SidebarHeader>
   );
 }
 
 /**
  * The card's foot: one row of icon tabs — Company, Connections, Overview,
- * Notifications, Settings — over you.
+ * Notifications, Settings, Discord — over you.
  *
  * The tabs replaced two labelled rows (Company, Connections) above the foot
- * and a separate cluster of utility glyphs beside the profile: five
+ * and a separate cluster of utility glyphs beside the profile: the
  * destinations an operator reaches from anywhere, read as one strip rather
- * than two lists in two styles. You and the Discord link sit under them. On
- * the collapsed rail both rows turn into columns so every glyph keeps its 32px.
+ * than two lists in two styles. You sit under them.
  */
 export function SidebarShellFooter({
   tabs,
   profile,
-  aside,
 }: {
   tabs: ReactNode;
   profile: ReactNode;
-  /** Trailing the profile row: the Discord link. */
-  aside?: ReactNode;
 }) {
   return (
     <SidebarFooter
@@ -70,16 +56,11 @@ export function SidebarShellFooter({
       <nav
         aria-label="Sections"
         data-testid="sidebar-shell-tabs"
-        className="flex items-center justify-between gap-0.5 group-data-[collapsible=icon]:flex-col"
+        className="flex items-center justify-between gap-0.5"
       >
         {tabs}
       </nav>
-      <div className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
-        <div className="flex min-w-0 flex-1 items-center empty:hidden group-data-[collapsible=icon]:flex-none">
-          {profile}
-        </div>
-        {aside}
-      </div>
+      <div className="flex min-w-0 items-center empty:hidden">{profile}</div>
     </SidebarFooter>
   );
 }

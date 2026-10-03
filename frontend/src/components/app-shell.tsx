@@ -28,7 +28,6 @@ import { DiscordLink, SettingsButton } from "@/components/title-bar-utilities";
 import { RouteLoading } from "@/components/route-loading";
 import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
 import { SidebarShellFooter, SidebarShellHeader } from "@/components/sidebar-shell";
-import { SidebarCollapseButton } from "@/components/sidebar-controls";
 import { SectionContentRail } from "@/components/section-rail";
 import { SidebarNavigation, SidebarSectionTabs } from "@/components/sidebar-navigation";
 import { RoomRailSlotProvider } from "@/components/room-rail";
@@ -203,6 +202,10 @@ const MemoryView = lazy(() =>
 const FinanceSection = lazy(() =>
   import("@/views/finance/FinanceSection").then((m) => ({ default: m.FinanceSection })),
 );
+
+
+/** `SidebarProvider`'s `onOpenChange` while the column is held open. */
+const NO_OP = () => {};
 
 /**
  * The `h1` a cold visit to `#/finances/<sub>` announces before the chunk lands.
@@ -3373,7 +3376,16 @@ export function AppShell({
           provider stays the outermost box — the title row holds the profile
           control, which is inside this context — so the direction is flipped
           here rather than by wrapping the provider in another element. */}
-      <SidebarProvider className="h-svh flex-col overflow-hidden bg-background">
+      <SidebarProvider
+        // Always expanded on desktop: the floating sidebar has no collapse
+        // control any more, so a saved "collapsed" cookie (or the provider's
+        // keyboard shortcut) must not be able to strand it on the icon rail
+        // with no way back. Below `md` it is a sheet, whose open state is
+        // separate and still toggles.
+        open
+        onOpenChange={NO_OP}
+        className="h-svh flex-col overflow-hidden bg-background"
+      >
       {/* Room's channel list is rendered by `RoomView`, in the content column,
           and painted in the sidebar column. This provider is the slot the two
           agree on; `room-rail.tsx` explains why it is a portal rather than the
@@ -3410,9 +3422,6 @@ export function AppShell({
         className="sidebar-material z-30 overflow-hidden rounded-2xl border border-sidebar-border shadow-[2px_4px_10px_-4px_rgb(0_0_0/0.06),4px_14px_28px_-14px_rgb(0_0_0/0.10)] backdrop-blur-2xl"
       >
         <SidebarShellHeader
-          // Collapse/expand on the column; below `md` the column is a sheet
-          // with its own trigger in the content, so this one stands down there.
-          toggle={<SidebarCollapseButton />}
           search={<TitleBarSearch variant="sidebar" client={client} company={company} />}
         />
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
@@ -3446,6 +3455,7 @@ export function AppShell({
                 onNavigate={() => setView("notifications")}
               />
               <SettingsButton view={view} onNavigate={setView} />
+              <DiscordLink />
             </>
           }
           profile={
@@ -3457,7 +3467,6 @@ export function AppShell({
               onSignedOut={() => void forgetSession(scope.connection)}
             />
           }
-          aside={<DiscordLink />}
         />
         <SidebarRail />
       </Sidebar>
