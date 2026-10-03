@@ -492,6 +492,11 @@ mongodb = { version = "3", optional = true }
 # SSRF-pinned link fetcher, `tinymemory` the scrubber).
 tinymemory = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory", optional = true, default-features = false }
 
+# The TinyHumans backend's own SDK, for the hub calls this host makes directly
+# (feedback forwarding, the key exchange). Same byte-identical path openhuman's
+# `openhuman-tinyhumans` uses, without the Socket.IO default.
+tinyhumans-sdk = { path = "../../vendor/openhuman/vendor/tinyhumans-sdk", optional = true, default-features = false }
+
 # `sanitize_api_error` — scrubs bearer tokens and other secrets out of a raw
 # provider error string before it's logged or surfaced on the event bus. At
 # the 1ecf1b0 openhuman pin this moved out of `openhuman_core`'s own
@@ -679,7 +684,7 @@ github = ["dep:reqwest"]
 # instance records reports against its credential's owner. The
 # `TinyHumansClient` trait + offline mock + the whole routing decision compile
 # without this; only `HttpTinyHumansClient` is gated behind it.
-tinyhumans = ["dep:reqwest"]
+tinyhumans = ["dep:reqwest", "dep:tinyhumans-sdk"]
 # Real HTTP/Socket.IO transport to hosted Medulla. The wire types + offline
 # MockTransport compile without this; only the networked transport is gated.
 medulla = ["dep:reqwest"]
