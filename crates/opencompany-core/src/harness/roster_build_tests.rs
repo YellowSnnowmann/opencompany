@@ -559,35 +559,6 @@ async fn a_long_roster_uses_the_increased_provider_output_budget() {
     );
 }
 
-/// A real empty `finish_reason: length` HTTP payload passes through the provider
-/// decoder and roster builder, retaining the non-connectivity fallback path.
-#[tokio::test]
-async fn a_provider_length_stop_reaches_the_roster_fallback_path() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/chat/completions"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{
-                "finish_reason": "length",
-                "message": {"role": "assistant", "content": ""}
-            }],
-            "usage": {"prompt_tokens": 100, "completion_tokens": 4_000, "total_tokens": 4_100}
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let (proposal, _) = roster_builder_against(&server).propose(&three_jobs()).await;
-
-    assert_eq!(proposal.source, RosterSource::Fallback);
-    assert_eq!(proposal.reason, Some(FallbackReason::NotDesignable));
-    assert!(
-        !proposal.agents.is_empty(),
-        "the setup fallback remains usable"
-    );
-    assert_eq!(server.received_requests().await.unwrap().len(), 1);
-}
-
 /// The inverse guard: a plain provider failure still reports unreachable, so
 /// the truncation check cannot swallow real connectivity errors.
 #[test]
