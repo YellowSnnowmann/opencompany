@@ -44,7 +44,7 @@ const NO_MEMBERS: TeamMember[] = [];
  * way a contact photo does in a messaging list rather than floating on the
  * sidebar. Overrides `TeammateAvatar`'s rounded-square tile.
  */
-const ROUND = "rounded-full bg-muted";
+const ROUND = "rounded-full bg-avatar-disc";
 
 interface Props {
   sections: ChannelSection[];
@@ -302,9 +302,9 @@ function CompactChannelRow({
         "relative flex size-9 shrink-0 items-center justify-center rounded-md transition-colors",
         active
           ? onPage
-            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            ? "bg-rail-selected text-rail-selected-foreground"
             : "text-foreground"
-          : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
+          : "text-muted-foreground hover:bg-rail-hover hover:text-foreground",
       )}
     >
       <ChannelIcon channel={channel} />
@@ -390,9 +390,9 @@ function ChannelRow({
         "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
         active
           ? onPage
-            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            ? "bg-rail-selected text-rail-selected-foreground"
             : "text-foreground"
-          : "text-foreground/90 hover:bg-sidebar-accent/50",
+          : "text-foreground/90 hover:bg-rail-hover",
       )}
     >
       <RowAvatar channel={channel} members={members} chatId={chatId} />

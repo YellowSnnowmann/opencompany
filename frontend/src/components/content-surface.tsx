@@ -80,7 +80,7 @@ const FRAME = "relative flex min-h-0 min-w-0 flex-1";
  * `z-index: -1` against this same frame, and an auto-positioned card would let
  * a blurred lobe wash over the page's own content at the corners.
  */
-const CARD = "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background";
+const CARD = "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-page";
 
 export function ContentSurface({ children }: { children: ReactNode }) {
   return (

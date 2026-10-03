@@ -36,7 +36,7 @@ export function SidebarShellFooter({
   return (
     <SidebarFooter
       data-testid="sidebar-shell-footer"
-      className="gap-1 border-t border-sidebar-border px-2 py-2"
+      className="gap-1 border-t border-sidebar-float-border px-2 py-2"
     >
       <nav
         aria-label="Sections"

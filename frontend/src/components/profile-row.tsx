@@ -213,7 +213,7 @@ export function ProfileRow({
         <DropdownMenuTrigger
           data-testid="profile-row"
           title={name}
-          className="flex h-9 w-full min-w-0 items-center gap-2 rounded-lg px-1.5 text-left text-sm transition hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-[popup-open]:bg-sidebar-accent group-data-[collapsible=icon]:w-auto group-data-[collapsible=icon]:px-0.5"
+          className="flex h-9 w-full min-w-0 items-center gap-2 rounded-lg px-1.5 text-left text-sm transition hover:bg-rail-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-[popup-open]:bg-rail-selected group-data-[collapsible=icon]:w-auto group-data-[collapsible=icon]:px-0.5"
         >
           {face}
           <span className="truncate group-data-[collapsible=icon]:hidden">{name}</span>

@@ -3383,7 +3383,7 @@ export function AppShell({
         // separate and still toggles.
         open
         onOpenChange={NO_OP}
-        className="h-svh flex-col overflow-hidden bg-background"
+        className="h-svh flex-col overflow-hidden bg-page"
       >
       {/* Room's channel list is rendered by `RoomView`, in the content column,
           and painted in the sidebar column. This provider is the slot the two
@@ -3418,7 +3418,7 @@ export function AppShell({
         // stylesheet order. `.sidebar-material` (index.css) is the
         // translucent fill the blur reads through.
         style={{ top: 8, bottom: 8, left: 8, height: "auto" }}
-        className="sidebar-material z-30 overflow-hidden rounded-2xl border border-sidebar-border shadow-[2px_4px_10px_-4px_rgb(0_0_0/0.06),4px_14px_28px_-14px_rgb(0_0_0/0.10)] backdrop-blur-2xl"
+        className="sidebar-material z-30 overflow-hidden rounded-2xl border border-sidebar-float-border shadow-[2px_4px_10px_-4px_rgb(0_0_0/0.06),4px_14px_28px_-14px_rgb(0_0_0/0.10)] backdrop-blur-2xl"
       >
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
           <SidebarContent data-tour="sidebar" className="min-h-0 flex-1 pt-0">
@@ -3480,7 +3480,7 @@ export function AppShell({
         // starts the content at the card's right edge. Pages bring their own
         // gutter from there; the composer's 8px then matches the 8px the card
         // keeps from the window on every side.
-        className="min-h-0 min-w-0 bg-background md:ml-2"
+        className="min-h-0 min-w-0 bg-page md:ml-2"
       >
         {/* Below `md` the sidebar is a sheet, and the way to open it was a
             glyph in the window's title row. That row is gone, so the sheet's

@@ -23,9 +23,9 @@ import { cn } from "@/lib/utils";
 export const TITLE_BAR_ICON_BUTTON = cn(
   "relative inline-flex size-8 flex-none items-center justify-center rounded-lg",
   "text-muted-foreground transition",
-  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+  "hover:bg-rail-hover hover:text-foreground",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
   // The view you are already on. Keyed off `aria-current` so the appearance and
   // the announced state cannot disagree.
-  "aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-sidebar-accent-foreground",
+  "aria-[current=page]:bg-rail-selected aria-[current=page]:text-rail-selected-foreground",
 );
