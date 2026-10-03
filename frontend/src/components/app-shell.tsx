@@ -24,13 +24,13 @@ import { HostSwitcher } from "@/components/host-switcher";
 import { NotificationsButton } from "@/components/notifications-button";
 import { OverviewButton } from "@/components/overview-button";
 import { TitleBarSearch } from "@/components/title-bar-search";
-import { TitleBarUtilities } from "@/components/title-bar-utilities";
+import { DiscordLink, SettingsButton } from "@/components/title-bar-utilities";
 import { RouteLoading } from "@/components/route-loading";
 import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
 import { SidebarShellFooter, SidebarShellHeader } from "@/components/sidebar-shell";
 import { SidebarCollapseButton } from "@/components/sidebar-controls";
 import { SectionContentRail } from "@/components/section-rail";
-import { SidebarNavigation } from "@/components/sidebar-navigation";
+import { SidebarNavigation, SidebarSectionTabs } from "@/components/sidebar-navigation";
 import { RoomRailSlotProvider } from "@/components/room-rail";
 import { SetupController } from "@/setup/SetupController";
 import {
@@ -3410,23 +3410,6 @@ export function AppShell({
         className="sidebar-material z-30 overflow-hidden rounded-2xl border border-sidebar-border shadow-[2px_4px_10px_-4px_rgb(0_0_0/0.06),4px_14px_28px_-14px_rgb(0_0_0/0.10)] backdrop-blur-2xl"
       >
         <SidebarShellHeader
-          switcher={
-            <HostSwitcher
-              variant="titlebar"
-              companyName={feed.status.name}
-              // The company's lifecycle, and every company on this host: both
-              // are facts about *which company you are in* — which is what this
-              // control is. See `HostSwitcher`'s `companyState` for why the
-              // lifecycle is not folded into the connection dot.
-              companyState={lifecycle(feed.status.lifecycle, feed.status.emergency_paused)}
-              companies={companies}
-              activeCompany={company}
-              onSwitchCompany={onSwitchCompany}
-              onBackToPicker={onBackToPicker}
-              onCreateCompany={onCreateCompany}
-              canCreateCompany={offersCompanyCreation(client)}
-            />
-          }
           // Collapse/expand on the column; below `md` the column is a sheet
           // with its own trigger in the content, so this one stands down there.
           toggle={<SidebarCollapseButton />}
@@ -3434,7 +3417,7 @@ export function AppShell({
         />
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
           <SidebarContent data-tour="sidebar" className="min-h-0 flex-1">
-          <SidebarNavigation view={view} onNavigate={setView} />
+          <SidebarNavigation />
         </SidebarContent>
         {/* The console's own utilities sit at the FOOT of the column, under the
             destinations rather than over them. They act on the console, not on
@@ -3450,17 +3433,9 @@ export function AppShell({
             width now, so the destination is still on screen exactly once. */}
         </nav>
         <SidebarShellFooter
-          profile={
-            // Who you are signed in as. Renders nothing where there is nobody
-            // to name — a host with no sign-in — and the foot closes up.
-            <ProfileRow
-              client={client}
-              company={company}
-              onSignedOut={() => void forgetSession(scope.connection)}
-            />
-          }
-          actions={
+          tabs={
             <>
+              <SidebarSectionTabs view={view} onNavigate={setView} />
               <OverviewButton
                 active={isNavigationActive("overview", view)}
                 onNavigate={() => setView("overview")}
@@ -3470,9 +3445,19 @@ export function AppShell({
                 active={view === "notifications" || view === "approvals"}
                 onNavigate={() => setView("notifications")}
               />
-              <TitleBarUtilities view={view} onNavigate={setView} />
+              <SettingsButton view={view} onNavigate={setView} />
             </>
           }
+          profile={
+            // Who you are signed in as. Renders nothing where there is nobody
+            // to name — a host with no sign-in — and the row closes up.
+            <ProfileRow
+              client={client}
+              company={company}
+              onSignedOut={() => void forgetSession(scope.connection)}
+            />
+          }
+          aside={<DiscordLink />}
         />
         <SidebarRail />
       </Sidebar>
