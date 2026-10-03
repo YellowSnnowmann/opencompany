@@ -3374,7 +3374,7 @@ export function AppShell({
           provider stays the outermost box — the title row holds the profile
           control, which is inside this context — so the direction is flipped
           here rather than by wrapping the provider in another element. */}
-      <SidebarProvider className="h-svh flex-col overflow-hidden">
+      <SidebarProvider className="h-svh flex-col overflow-hidden bg-background">
       {/* Room's channel list is rendered by `RoomView`, in the content column,
           and painted in the sidebar column. This provider is the slot the two
           agree on; `room-rail.tsx` explains why it is a portal rather than the
@@ -3496,7 +3496,7 @@ export function AppShell({
         // collapsed rail's width too.
         className="min-h-0 min-w-0 bg-background md:ml-4"
       >
-        {/* Below \`md\` the sidebar is a sheet, and the way to open it was a
+        {/* Below `md` the sidebar is a sheet, and the way to open it was a
             glyph in the window's title row. That row is gone, so the sheet's
             trigger heads the content instead — in flow, never floating over the
             page (issue #1265). */}
