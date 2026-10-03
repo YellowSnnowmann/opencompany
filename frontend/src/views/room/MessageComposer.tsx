@@ -934,12 +934,10 @@ export function MessageComposer({
           </Button>
         </div>
       </div>
-      {!compact && (
-        <p className="mt-1.5 px-1 text-2xs text-muted-foreground">
-          <kbd className="font-sans font-medium">Enter</kbd> to send ·{" "}
-          <kbd className="font-sans font-medium">Shift+Enter</kbd> for a new line
-        </p>
-      )}
+      {/* No "Enter to send · Shift+Enter for a new line" line under the box: it
+          cost a row of height under every transcript to restate the one
+          convention every chat input shares. The textarea's `aria-keyshortcuts`
+          is untouched. */}
     </div>
   );
 }
