@@ -121,7 +121,7 @@ describe("the channel info panel", () => {
     // A DM is managed on the teammate's own page.
     expect(
       container.querySelector('[data-testid="channel-info-manage-agent"]')?.getAttribute("href"),
-    ).toBe("#/team/ada");
+    ).toBe("#/company/agent/ada");
     expect(toggle().getAttribute("aria-pressed")).toBe("false");
     act(() => toggle().click());
     expect(onToggle).toHaveBeenCalledOnce();

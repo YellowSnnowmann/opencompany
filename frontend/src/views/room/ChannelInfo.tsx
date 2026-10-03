@@ -16,6 +16,7 @@ import { AgentAvatarButton } from "@/components/agent-profile-sheet";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { PresenceStatus } from "@/lib/awareness";
+import { consoleHref } from "@/lib/console-paths";
 import { roleSubtitle, type TeamMember } from "@/lib/team";
 import { cn } from "@/lib/utils";
 import { ChannelFace, memberFace } from "./ChannelRail";
@@ -129,15 +130,13 @@ export function ChannelInfoPanel({
     : channelMembers
       ? `${inside.length} in this channel · ${total} in the company`
       : `${inside.length} ${inside.length === 1 ? "agent" : "agents"}`;
-  // Where this conversation is managed: a desk on the org chart
-  // (`#/company/<deskId>`), a DM's teammate on their own profile page
-  // (`#/team/<agentId>` — persona, tools, model, schedule).
+  // Where this conversation is managed: a desk on the org chart, a DM's
+  // teammate on their own page (persona, tools, model, schedule). Canonical
+  // addresses from `consoleHref`, so following one never bounces through a
+  // rewrite.
   const manageHref =
-    channel.kind === "channel" && channel.memberIds
-      ? `#/company/${encodeURIComponent(channel.id)}`
-      : undefined;
-  const manageAgentHref =
-    isDm && channel.member ? `#/team/${encodeURIComponent(channel.member.id)}` : undefined;
+    channel.kind === "channel" && channel.memberIds ? consoleHref("company", channel.id) : undefined;
+  const manageAgentHref = isDm && channel.member ? consoleHref("team", channel.member.id) : undefined;
 
   return (
     <aside
