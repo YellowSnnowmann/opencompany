@@ -62,6 +62,7 @@ import { useAskerNames } from "@/components/approval-card";
 import { useRoomRailSlot } from "@/components/room-rail";
 import { AddMemberDialog, type NewMemberFields } from "./room/AddMemberDialog";
 import { ChannelRail } from "./room/ChannelRail";
+import { ChannelInfoPanel, ChannelPill } from "./room/ChannelInfo";
 import { dmRawTurns } from "./room/rawTurnScope";
 import { TypingLine } from "./room/TypingLine";
 import { InflightRunBar } from "./room/InflightRunBar";
@@ -584,6 +585,9 @@ export function RoomView({
     null,
   );
   const [addOpen, setAddOpen] = useState(false);
+  // The details panel the channel pill opens (`ChannelInfo.tsx`). Held across
+  // channel switches, the way a side panel stays open while you browse.
+  const [infoOpen, setInfoOpen] = useState(false);
   // The rail's "+" (issue #1835) — chat's own door for creating a channel.
   // The channel list is a section of the app sidebar now, so the sidebar owns
   // where it is, how dense it is, and whether it is covering the transcript.
@@ -2675,13 +2679,19 @@ export function RoomView({
           open from Company and Flows as readily as from Room. */}
       {routeOpen && (
         <div className="flex min-h-0 flex-1">
-          <div className="flex min-w-0 flex-1 flex-col">
-            {/* No channel header. The name, member count, members toggle and
-                raw-turns toggle that sat here were removed: the sidebar row
-                already names the open conversation, and the page keeps its
-                name for assistive tech through this hidden heading. Raw turns
-                stays reachable at the `?raw` address. */}
+          <div className="relative flex min-w-0 flex-1 flex-col">
+            {/* No channel header bar: the page keeps its name for assistive
+                tech through this hidden heading, and the pill below carries
+                the name, the faces, and the way to details and members. */}
             <PageHeader title={channelTitle(channel)} hidden />
+            {/* Who this is with, as a pill floating over the transcript; it
+                opens the details panel on the right (`ChannelInfo.tsx`). */}
+            <ChannelPill
+              channel={channel}
+              members={members}
+              open={infoOpen}
+              onToggle={() => setInfoOpen((o) => !o)}
+            />
 
             <div className="flex min-h-0 flex-1">
               <div className="flex min-w-0 flex-1 flex-col">
@@ -3062,6 +3072,16 @@ export function RoomView({
 
             </div>
           </div>
+          {infoOpen && (
+            <ChannelInfoPanel
+              channel={channel}
+              members={members}
+              channelMembers={inChannel}
+              onClose={() => setInfoOpen(false)}
+              onMessage={selectChannel}
+              rawHref={rawAgentId ? `#/chat/${encodeURIComponent(channel.id)}?raw` : undefined}
+            />
+          )}
         </div>
       )}
 
