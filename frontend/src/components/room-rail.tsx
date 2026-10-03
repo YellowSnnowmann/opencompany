@@ -15,10 +15,10 @@ import { useSidebar } from "@/components/ui/sidebar";
  *
  * This is the second. `RoomView` stays the one owner of the chat model (it is
  * 2,400 lines of it), the rail keeps rendering from that state on the same
- * render pass, and `NewMessageDialog` and `ChannelCreateDialog` keep opening
- * from inside `RoomView`'s React tree even though their triggers are painted in
- * the sidebar — a portal moves the DOM node, not the component tree, so context,
- * events and focus management all still resolve against Chat.
+ * render pass, and anything the rail opens still mounts inside `RoomView`'s
+ * React tree even though the rail is painted in the sidebar — a portal moves
+ * the DOM node, not the component tree, so context, events and focus
+ * management all still resolve against Chat.
  *
  * Lifting the state instead would have meant an effect in `RoomView` writing the
  * model up to the shell and a second render of the whole console every time an
