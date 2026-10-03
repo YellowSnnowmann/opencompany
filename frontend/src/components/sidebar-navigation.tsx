@@ -500,11 +500,12 @@ export function SidebarNavigation() {
           // is on the scroller below instead, where it scrolls with the rows
           // and the list fades under the edges rather than being sliced.
           "py-0",
-          // 4px a side rather than the group's `pl-3` + scrollbar gutter: the
-          // rows carry their own `px-2`, and stacked on the group's gutter the
-          // list sat 20px in from the card's edge — visibly narrower than the
-          // search field and the tab row, which are 8px in.
-          "px-1",
+          // No horizontal padding on the group; the scroller below sets it.
+          // The scroller always reserves the scrollbar's gutter on its right
+          // (`.scrollbar-on-hover` keeps the width and hides only the ink), so
+          // any fixed left padding left a hovered row's pill lopsided — 4px from
+          // the card's left edge, 14px from its right.
+          "px-0",
           // On the 3rem rail this group's own `px-2` is the difference between
           // fitting and not. The rail is 48px; the gutter leaves a 32px content
           // box, and `ChannelRail`'s compact rows are `size-9` (36px) with their
@@ -535,7 +536,7 @@ export function SidebarNavigation() {
           // The one scroller in the column. `SidebarContent` is `flex-1
           // min-h-0` for this, so a list at its cap scrolls here rather than
           // pushing the two rows below it out of reach.
-          className="scrollbar-on-hover flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto py-2 [mask-image:linear-gradient(to_bottom,transparent,black_10px,black_calc(100%-10px),transparent)]"
+          className="scrollbar-on-hover flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto py-2 pl-(--scrollbar-size) pr-0 [mask-image:linear-gradient(to_bottom,transparent,black_10px,black_calc(100%-10px),transparent)]"
         />
       </SidebarGroup>
 
