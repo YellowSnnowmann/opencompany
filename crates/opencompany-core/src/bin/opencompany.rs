@@ -2393,10 +2393,9 @@ async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) 
                     .refresh_health(std::time::Duration::from_secs(5))
                     .await;
                 state = state.with_memory_overlay(overlay);
-                // `as_str`, not `{:?}`: the enum's Debug name is `Tinycortex`
-                // while `/spec` and the docs call that engine `embedded`. An
-                // operator comparing a boot log against a status response should
-                // not have to work out that those are the same thing.
+                // `as_str`, not `{:?}`: the wire spelling is what `/spec` and
+                // the docs use. An operator comparing a boot log against a
+                // status response should not have to map one onto the other.
                 println!(
                     "memory backend: {}",
                     storage_settings.memory_backend.as_str()

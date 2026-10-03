@@ -140,7 +140,7 @@ impl Namespace {
 /// company ids can be chosen by a caller.
 ///
 /// This mirrors the removed in-pod engine's `workspace_name` (deleted with
-/// the `tinycortex` backend in #1568), which solved the same problem for
+/// the in-pod backend in #1568), which solved the same problem for
 /// on-disk workspace directories. The two are intentionally separate —
 /// that one named a filesystem path, this one names a namespace inside a
 /// possibly-remote engine — but the collision argument is identical, and a

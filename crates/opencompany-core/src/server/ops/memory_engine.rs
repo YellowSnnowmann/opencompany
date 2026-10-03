@@ -134,7 +134,7 @@ struct EngineDto {
     /// from the file, so a saved-but-unapplied change is visible as a
     /// difference between this and [`Self::selected`].
     active: String,
-    /// The capability families the live engine negotiated at bind time.
+    /// The retrieval modes the live engine serves (`keyword`, `vector`, `hybrid`).
     capabilities: Vec<String>,
     /// The last probe's verdict; absent when the engine was never probed.
     #[serde(skip_serializing_if = "Option::is_none")]

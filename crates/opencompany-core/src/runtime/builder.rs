@@ -1019,10 +1019,10 @@ impl RuntimeBuilder {
     /// backend keeps every other durable port.
     ///
     /// Memory and context always come from the overlay. `FactStore` comes from
-    /// it only when the engine serves facts as well — the embedded engine
-    /// implements memory + context alone and leaves facts on the base backend,
-    /// while an engine bound through the `MemoryProvider` contract covers all
-    /// three ports. Taking whichever the overlay offers is what keeps one
+    /// it only when the engine serves facts as well — a hypothetical engine
+    /// serving memory + context alone would leave facts on the base backend,
+    /// while every engine bound through `store::memory::BoundMemory` today
+    /// covers all three ports. Taking whichever the overlay offers is what keeps one
     /// company's memory on one engine instead of split across two (issue #914).
     pub fn with_memory_overlay(mut self, overlay: &crate::store::MemoryOverlay) -> Self {
         // The engine selection is explicit here: on a live rebuild the overlay's

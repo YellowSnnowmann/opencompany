@@ -45,7 +45,7 @@ use crate::ports::workspace::WorkspaceStore;
 
 /// Safe access to the provider-only context partitions.
 ///
-/// This is deliberately a facade, not the underlying `MemoryProvider`: every
+/// This is deliberately a facade, not the underlying `MemoryEngine`: every
 /// method still derives the company namespace from a [`CompanyId`], so wiring
 /// it onto a runtime cannot reopen the raw-namespace escape hatch.
 #[async_trait]
