@@ -4008,6 +4008,23 @@ export function AppShell({
               eventTick={workflowRunTick + backgroundTurnTick}
               onFlag={() => setFeedbackOpen(true)}
               onResetCompany={onResetCompany}
+              switcher={
+                <HostSwitcher
+                  variant="titlebar"
+                  companyName={feed.status.name}
+                  // The company's lifecycle, and every company on this host:
+                  // both are facts about *which company you are in* — which is
+                  // what this control is. See `HostSwitcher`'s `companyState`
+                  // for why the lifecycle is not folded into the connection dot.
+                  companyState={lifecycle(feed.status.lifecycle, feed.status.emergency_paused)}
+                  companies={companies}
+                  activeCompany={company}
+                  onSwitchCompany={onSwitchCompany}
+                  onBackToPicker={onBackToPicker}
+                  onCreateCompany={onCreateCompany}
+                  canCreateCompany={offersCompanyCreation(client)}
+                />
+              }
             />
           )}
           {view === "feedback" && <FeedbackView client={client} company={company} />}
