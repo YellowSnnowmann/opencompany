@@ -489,7 +489,7 @@ mongodb = { version = "3", optional = true }
 # `publish = false`. The path is byte-identical to the one
 # `vendor/openhuman/crates/openhuman-core/Cargo.toml` declares, which is
 # load-bearing — Cargo unifies two path deps only when they resolve to the same
-# directory, and two copies of `tinymemory-api` would mean two nominally
+# directory, and two copies of `tinymemory` would mean two nominally
 # distinct `MemoryEngine` traits in one process. Features are added by the
 # host features that need them (`documents` pulls the converters and the
 # SSRF-pinned link fetcher, `tinymemory` the scrubber).
@@ -743,7 +743,7 @@ mongodb = ["dep:mongodb"]
 tinymemory = [
     "dep:tinymemory",
     # Secret/PII scrubbing applied before anything an agent writes reaches
-    # memory (`harness::built_in::memory::redact_secrets`).
+    # memory (`harness::built_in::redact::redact_secrets`).
     "tinymemory/safety",
 ]
 # Node sidecar brain for self-hosters (bring-your-own-inference). Adds
