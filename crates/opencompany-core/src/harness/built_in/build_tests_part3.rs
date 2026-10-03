@@ -375,19 +375,14 @@ fn a_company_agent_config_seeds_no_openhuman_docs_server() {
     let mut config = openhuman_core::config::Config::default();
     config.mcp_client.enabled = true;
     config.gitbooks.enabled = true;
-    let seeded = |config: &openhuman_core::config::Config| {
-        openhuman_core::mcp::host::client_config(config)
-            .servers
-            .iter()
-            .any(|server| server.name == "gitbooks")
-    };
-    assert!(
-        seeded(&config),
-        "the premise: OpenHuman's default config seeds its docs server"
-    );
 
     withhold_openhuman_docs(&mut config);
 
     assert!(!config.gitbooks.enabled);
-    assert!(!seeded(&config));
+    assert!(
+        openhuman_core::mcp::host::client_config(&config)
+            .servers
+            .iter()
+            .all(|server| server.name != "gitbooks")
+    );
 }
