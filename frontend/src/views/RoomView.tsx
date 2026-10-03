@@ -62,8 +62,6 @@ import { useAskerNames } from "@/components/approval-card";
 import { useRoomRailSlot } from "@/components/room-rail";
 import { AddMemberDialog, type NewMemberFields } from "./room/AddMemberDialog";
 import { ChannelRail } from "./room/ChannelRail";
-import { ChatHeader } from "./room/ChatHeader";
-import { MembersPane } from "./room/MembersPane";
 import { dmRawTurns } from "./room/rawTurnScope";
 import { TypingLine } from "./room/TypingLine";
 import { InflightRunBar } from "./room/InflightRunBar";
@@ -1049,7 +1047,7 @@ export function RoomView({
    * from `?` onward before it resolves a segment, so this rides the chat route
    * without the router ever seeing it.
    */
-  const [rawRequested, setRawRequested] = useHashFlag("raw");
+  const [rawRequested] = useHashFlag("raw");
   const showRaw = rawRequested && !!rawAgentId;
   const [rawRows, setRawRows] = useState<AgentSessionMessageDto[]>([]);
   const [rawLoad, setRawLoad] = useState<RawLoad>("loading");
@@ -1271,12 +1269,6 @@ export function RoomView({
         : entry,
     );
   }, [directory, inChannel]);
-
-  const outsideChannel = useMemo(() => {
-    if (!inChannel) return members;
-    const inside = new Set(inChannel.map((m) => m.id));
-    return members.filter((m) => !inside.has(m.id));
-  }, [inChannel, members]);
 
   const transcript = useMemo(
     () => (channel ? (transcripts[channel.id] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES),
@@ -1938,16 +1930,6 @@ export function RoomView({
     // over live work (Codex review on #2042).
     return candidates.find((t) => !t.queued) ?? candidates[0];
   })();
-  /**
-   * The count beside the channel title.
-   *
-   * A DM is stated as 2 rather than derived: it is a two-person conversation,
-   * but the operator has no roster row, so counting rows would say 1 and
-   * inventing a "You" row to make the arithmetic work would be worse. A desk
-   * counts its own members; a channel with no membership of its own still
-   * counts the company, which is all it can honestly claim.
-   */
-  const headerCount = active.kind === "dm" ? 2 : (inChannel?.length ?? members.length);
   /**
    * The teammate on the other end of this DM exists only in the console (issue
    * #364) — a starter-roster row, or one added while the host had no team write
@@ -2631,61 +2613,6 @@ export function RoomView({
     // is no detail page for a teammate the host has never heard of.
     if (fields.landOnProfile && created) onOpenAgent?.(created.id, { edit: true });
     return true;
-  }
-
-  /**
-   * Put an agent already on the roster onto this channel's desk (issue
-   * #2224) — not a variant of `addMember`, which creates a brand-new
-   * teammate. Dropping one from the roster entirely is a Team-page action;
-   * `MembersPane` no longer offers it here. `activeIsMutableDesk` gates
-   * `MembersPane`'s own "add existing" affordance, so `active.id` is a real
-   * desk id by the time this runs; the check here is defensive, not load
-   * bearing.
-   *
-   * `reloadDirectory` alone does not move the added agent into "In this
-   * channel": it only refetches the `@mention` picker's directory.
-   * `channelMembers`/`others` come from `inChannel`/`outsideChannel`, which
-   * are derived from `desks` — so this also calls `loadDesks`, the same
-   * function every desk-membership mutation on the org chart already
-   * refetches through after `addDeskMember`/`removeDeskMember`. Confirmed
-   * safe to call on a plain revisit, not just a scope change: `loadDesks`'s
-   * own comment says it blanks the list only when the client or company
-   * changed, never on a revisit — so this does not flash the pane empty.
-   */
-  async function addExistingMember(agentId: string) {
-    if (!activeIsMutableDesk) return;
-    // Same rule `send` above follows: if the operator switches company or
-    // connection while the POST is in flight, every UI-visible effect of it —
-    // refresh or toast — belongs to a scope nobody is looking at anymore, so
-    // it is dropped rather than landing on whatever they switched to.
-    const scopeAtAdd = { connection: scope.connection, company: scope.company, client };
-    const stale = () => {
-      const latestScope = scopeRef.current;
-      return (
-        latestScope !== null &&
-        (scopeAtAdd.connection !== latestScope.connection ||
-          scopeAtAdd.company !== latestScope.company ||
-          scopeAtAdd.client !== latestScope.client)
-      );
-    };
-    try {
-      await client.addDeskMember(active.id, agentId, company);
-      if (stale()) return;
-      void reloadDirectory();
-      void loadDesks();
-    } catch (error) {
-      if (stale()) return;
-      if (error instanceof ApiError && error.status === 409) {
-        // The one 409 this route answers: already a member. Reached only by
-        // a race with another tab or operator — refresh now so the row
-        // leaves "Everyone else" immediately rather than on an unrelated
-        // reload.
-        void loadDesks();
-        toast.error("Already on this channel.");
-      } else {
-        toast.error(error instanceof Error ? error.message : "Couldn't add agent.");
-      }
-    }
   }
 
   function selectChannel(id: string) {
