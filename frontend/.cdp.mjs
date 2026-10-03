@@ -1,0 +1,10 @@
+import { chromium } from "playwright";
+const [out, js] = process.argv.slice(2);
+const b = await chromium.connectOverCDP("http://localhost:9333");
+const p = b.contexts()[0].pages().find((x) => x.url().includes("5179")) ?? b.contexts()[0].pages()[0];
+p.on("console", (m) => m.type() === "error" && console.log("console.error", m.text().slice(0, 200)));
+await p.waitForTimeout(2000);
+if (js) console.log(await p.evaluate(js));
+await p.screenshot({ path: out });
+console.log(p.url());
+await b.close();
