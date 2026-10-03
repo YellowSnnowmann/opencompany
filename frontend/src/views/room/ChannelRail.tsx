@@ -622,22 +622,12 @@ function memberFace(m: TeamMember) {
   };
 }
 
-function ChannelIcon({ channel, withStatus = false }: { channel: Channel; withStatus?: boolean }) {
+/** The compact (3rem rail) row's glyph: a DM's face, or `#` / a lock. */
+function ChannelIcon({ channel }: { channel: Channel }) {
   if (channel.kind === "dm") {
     const face = dmFace(channel);
     return face ? (
-      // The live state badge rides the expanded row only: the compact rail's
-      // 36px tiles are measured to fit its 48px width and stay as they were.
-      // Scoped to this DM's own thread, so a teammate busy in a channel does
-      // not light every row that names them.
-      <AgentFace
-        agentId={withStatus ? channel.member?.id : undefined}
-        chatId={channel.member ? dmThreadId(channel.member) : undefined}
-        surface="chrome"
-        decorative
-      >
-        <TeammateAvatar {...face} className="size-6 text-2xs" />
-      </AgentFace>
+      <TeammateAvatar {...face} className="size-6 text-2xs" />
     ) : (
       <CircleDot className="size-4 shrink-0" aria-hidden />
     );
