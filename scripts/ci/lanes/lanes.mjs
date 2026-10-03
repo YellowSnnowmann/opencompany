@@ -111,7 +111,7 @@ export function orderProblems(plan) {
   const problems = [];
   plan.lanes.forEach((lane, i) => {
     for (const c of lane.checks) {
-      for (const need of [...c.needs, ...c.after]) {
+      for (const need of [...(c.needs ?? []), ...(c.after ?? [])]) {
         if (!need.includes(":")) continue;
         const provider = need.split(":")[0];
         if (!index.has(provider))
@@ -496,13 +496,13 @@ export class Runner {
         continue;
       }
       // `after`: ordering only. Wait for these to finish, whatever they did.
-      const after = check.after.map((n) =>
+      const after = (check.after ?? []).map((n) =>
         n.includes(":") ? n : `${lane.name}:${n}`,
       );
       await Promise.all(
         after.map((n) => this.done.get(n) ?? Promise.resolve("missing")),
       );
-      const needs = check.needs.map((n) =>
+      const needs = (check.needs ?? []).map((n) =>
         n.includes(":") ? n : `${lane.name}:${n}`,
       );
       const needStatuses = await Promise.all(
