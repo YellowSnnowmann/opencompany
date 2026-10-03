@@ -40,7 +40,7 @@ Three properties are load-bearing everywhere below:
 ## Variants
 
 `CompanyEvent` variants: `OperatorMessage`, `WebhookReceived`,
-`ScheduleFired`, `A2aTaskReceived`, `ApprovalParked` (issue #379 — an effect
+`ScheduleFired`, `ApprovalParked` (issue #379 — an effect
 is now waiting on the operator; see [In-conversation
 approvals](events-approvals.md#in-conversation-approvals-issue-379)),
 `ApprovalResolved`,
