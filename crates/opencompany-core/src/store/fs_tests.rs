@@ -570,3 +570,51 @@ async fn durable_append_reports_an_unwritable_path() {
         "an unwritable durable append must report a store IO error, got {err:?}"
     );
 }
+
+/* ---- retired event kinds (tiny.place removal) ---- */
+
+/// An `events.jsonl` written before tiny.place was removed holds
+/// `A2aTaskReceived` rows. The log must still read — the row surfaces as
+/// [`CompanyEvent::Unknown`] — and the next append must not reuse its
+/// sequence number, which it would if the row were skipped as unparseable.
+#[tokio::test]
+async fn an_events_log_with_a_retired_a2a_row_still_reads() {
+    let root = tmp_root();
+    let id = CompanyId::new("acme");
+    let bundle = Bundle::new(root.path().to_path_buf(), &id);
+    bundle.ensure_dirs().await.expect("dirs");
+    let legacy = concat!(
+        r#"{"seq":0,"company":"acme","event":{"kind":"ScheduleFired","cron":"0 9 * * *","prompt":"standup"},"at_millis":1}"#,
+        "\n",
+        r#"{"seq":1,"company":"acme","event":{"kind":"A2aTaskReceived","from":"@peer","task":{"skill":"seo.audit"}},"at_millis":2}"#,
+        "\n",
+    );
+    tokio::fs::write(bundle.events_jsonl(), legacy)
+        .await
+        .expect("write");
+
+    let log = FsEventLog::new(root.path());
+    let events = log
+        .read_from(&id, EventSeq::new(0), usize::MAX)
+        .await
+        .expect("a log holding a retired kind still reads");
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[1].event, CompanyEvent::Unknown);
+
+    let tail = log
+        .read_before(&id, None, 10)
+        .await
+        .expect("the tail walk reads it too");
+    assert_eq!(tail.len(), 2);
+
+    let next = log
+        .append(
+            &id,
+            CompanyEvent::FeedbackFiled {
+                note: "after".into(),
+            },
+        )
+        .await
+        .expect("append");
+    assert_eq!(next, EventSeq::new(2), "the retired row's seq is not reused");
+}
