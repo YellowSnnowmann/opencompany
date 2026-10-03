@@ -39,7 +39,6 @@ pub mod crypto;
 /// it deliberately does not pull OpenHuman's local-AI configuration into the
 /// OpenCompany product.
 pub mod desktop;
-pub mod economy;
 pub mod error;
 pub mod feedback;
 /// The global baseline every company gets, whichever vertical it started from:
@@ -119,7 +118,6 @@ pub mod workflows;
 pub use app::{AppConfig, AppState};
 pub use brain::EchoBrain;
 pub use company::{CompanyManifest, run_company};
-pub use economy::{build_agent_card, render_skill_md};
 pub use error::{OpenCompanyError, Result};
 pub use feedback::{
     ConsentMode, FeedbackCategory, FeedbackInput, FeedbackItem, FeedbackResponse, FeedbackStore,
