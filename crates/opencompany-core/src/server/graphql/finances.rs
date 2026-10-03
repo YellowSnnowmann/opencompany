@@ -132,9 +132,6 @@ pub(crate) async fn resolve(runtime: &Arc<CompanyRuntime>) -> async_graphql::Res
         Some(record) => (record.ledger.clone(), record.manifest.budget.clone()),
         None => (Vec::new(), crate::company::Budget::default()),
     };
-    // The economy wallet balance is not surfaced through a read accessor, so the
-    // projection runs ledger-only; `has_economy` gates whether one exists.
-    let economy_balance = None;
-    let finances = finances_from(&ledger, &budget, economy_balance, now_millis());
+    let finances = finances_from(&ledger, &budget, now_millis());
     Ok(FinancesGql { inner: finances })
 }
