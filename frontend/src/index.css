@@ -396,12 +396,12 @@
     --page: var(--surface-light-1);
     --sidebar-float: oklch(0.982 0.0016 286);
     --sidebar-float-border: oklch(0 0 0 / 0.08);
-    /* Selection carries the accent: a soft wash of `--primary` under the
-       brand ink, so the open conversation and the open settings page read in
-       the company's colour rather than as one more grey. Hover stays neutral
-       ink, so only the chosen row is coloured. */
-    --rail-selected: color-mix(in oklab, var(--primary) 13%, transparent);
-    --rail-selected-foreground: var(--sidebar-accent-foreground);
+    /* Selection is the accent, solid: the open conversation, the open settings
+       page and the active tab read in the company's colour with white ink on
+       it, not as one more grey or a tint you have to look for. Hover stays
+       neutral ink, so only the chosen row is coloured. */
+    --rail-selected: var(--primary);
+    --rail-selected-foreground: var(--primary-foreground);
     --rail-hover: oklch(0 0 0 / 0.04);
     --avatar-disc: var(--surface-light-1);
 
@@ -624,13 +624,14 @@
     --sidebar-border: var(--surface-dark-4);
     --sidebar-ring: var(--brand-400);
 
-    /* The floating-sidebar shell, dark: every token resolves to what the shell
+    /* The floating-sidebar shell, dark: the surfaces resolve to what the shell
        already drew here, so dark mode is unchanged by the light-mode retune. */
     --page: var(--background);
     --sidebar-float: var(--sidebar);
     --sidebar-float-border: var(--sidebar-border);
-    --rail-selected: var(--sidebar-accent);
-    --rail-selected-foreground: var(--sidebar-accent-foreground);
+    /* Solid accent in dark mode too — the same rule as light. */
+    --rail-selected: var(--primary);
+    --rail-selected-foreground: var(--primary-foreground);
     --rail-hover: color-mix(in oklab, var(--sidebar-accent) 50%, transparent);
     --avatar-disc: var(--muted);
 
