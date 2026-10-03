@@ -26,8 +26,8 @@ import { OverviewButton } from "@/components/overview-button";
 import { TitleBarSearch } from "@/components/title-bar-search";
 import { TitleBarUtilities } from "@/components/title-bar-utilities";
 import { RouteLoading } from "@/components/route-loading";
-import { WINDOW_TITLE_BAR_HEIGHT } from "@/components/window-chrome";
-import { TITLE_BAR_ICON_BUTTON, WindowTitleBar } from "@/components/window-title-bar";
+import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
+import { SidebarShellFooter, SidebarShellHeader } from "@/components/sidebar-shell";
 import { cn } from "@/lib/utils";
 import { SidebarCollapseButton } from "@/components/sidebar-controls";
 import { SectionContentRail } from "@/components/section-rail";
@@ -3486,7 +3486,23 @@ export function AppShell({
           wrapper that clips and cannot scroll. On the task board that clipped
           strip held the "Done" column, which is why a card could not be dragged
           into it (issue #334); every view was losing the same strip. */}
-      <SidebarInset id={MAIN_CONTENT_ID} tabIndex={-1} className="min-h-0 min-w-0">
+      <SidebarInset
+        id={MAIN_CONTENT_ID}
+        tabIndex={-1}
+        // `md:ml-4`: the sidebar's in-flow gap is exactly its width, and the
+        // floating card sits 8px in from the window's left edge — so 16px here
+        // puts the content 8px clear of the card's right edge, the same gap the
+        // card keeps from the window. At every density: the gap tracks the
+        // collapsed rail's width too.
+        className="min-h-0 min-w-0 bg-background md:ml-4"
+      >
+        {/* Below \`md\` the sidebar is a sheet, and the way to open it was a
+            glyph in the window's title row. That row is gone, so the sheet's
+            trigger heads the content instead — in flow, never floating over the
+            page (issue #1265). */}
+        <div className="flex h-12 shrink-0 items-center px-3 md:hidden">
+          <SidebarTrigger aria-label="Toggle sidebar" className={TITLE_BAR_ICON_BUTTON} />
+        </div>
           {/* The sidebar toggle was here — absolutely positioned over this
               inset, straddling the content card's leading edge. It is a glyph
               in the window's title row now, beside the switcher whose column it
