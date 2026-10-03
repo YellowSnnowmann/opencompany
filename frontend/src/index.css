@@ -1474,3 +1474,15 @@
 .dark .sidebar-material {
   background: color-mix(in oklab, var(--sidebar-float) 85%, transparent);
 }
+
+/*
+ * The avatar shape (`lib/avatar-shape.ts`, Settings → Appearance). Every
+ * teammate face draws its corners from `--avatar-radius`: round by default,
+ * the console's earlier rounded square when the operator picks it.
+ */
+:root {
+  --avatar-radius: 9999px;
+}
+:root[data-avatar-shape="rounded"] {
+  --avatar-radius: calc(var(--radius) - 2px);
+}

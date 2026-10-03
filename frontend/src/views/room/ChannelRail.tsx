@@ -40,11 +40,12 @@ const UNREAD_IS_LOCAL = "Estimated in this browser — unread is not tracked on 
 const NO_MEMBERS: TeamMember[] = [];
 
 /**
- * Every face on this rail is a filled circle, so a mascot sits on a disc the
- * way a contact photo does in a messaging list rather than floating on the
- * sidebar. Overrides `TeammateAvatar`'s rounded-square tile.
+ * Every face on this rail sits on a filled disc, the way a contact photo does
+ * in a messaging list, rather than floating on the sidebar. Its corners are
+ * `TeammateAvatar`'s own — round by default, the Appearance setting otherwise
+ * (`lib/avatar-shape.ts`).
  */
-const ROUND = "rounded-full bg-avatar-disc";
+const ROUND = "bg-avatar-disc";
 
 interface Props {
   sections: ChannelSection[];

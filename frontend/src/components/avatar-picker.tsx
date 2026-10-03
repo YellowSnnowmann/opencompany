@@ -292,7 +292,7 @@ export function AvatarPicker({
               <TeammateAvatar
                 name={name}
                 avatar={ref}
-                className="size-9 rounded-md text-xs"
+                className="size-9 text-xs"
               />
             </button>
           );

@@ -134,7 +134,7 @@ export function TeammateAvatar({
     return (
       <span
         className={cn(
-          "flex shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground",
+          "flex shrink-0 items-center justify-center rounded-(--avatar-radius) bg-primary text-primary-foreground",
           className,
         )}
         aria-hidden
@@ -153,7 +153,7 @@ export function TeammateAvatar({
     return (
       <span
         className={cn(
-          "flex shrink-0 items-center justify-center rounded-md text-xs font-semibold",
+          "flex shrink-0 items-center justify-center rounded-(--avatar-radius) text-xs font-semibold",
           toneClass(tone),
           className,
         )}
@@ -228,7 +228,7 @@ function AvatarTile({
   return (
     <span
       className={cn(
-        "relative flex shrink-0 items-center justify-center overflow-hidden rounded-md text-xs font-semibold",
+        "relative flex shrink-0 items-center justify-center overflow-hidden rounded-(--avatar-radius) text-xs font-semibold",
         toneClass(tone),
         className,
       )}
