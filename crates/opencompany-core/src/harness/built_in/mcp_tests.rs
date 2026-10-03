@@ -122,11 +122,13 @@ fn auth_material_maps_onto_transport_config() {
 }
 
 #[tokio::test]
-async fn list_servers_tool_never_emits_a_credential() {
+async fn upstream_list_servers_tool_never_emits_a_credential() {
     let mut d = decl("notion", "https://notion.example/mcp");
     d.auth = AuthMaterial::Bearer("sk-super-secret-token".into());
     let reg = registry_for_agent(&[d], &grants(&["mcp:*"])).expect("registry");
-    let tool = OcMcpListServersTool::new(reg);
+    // Upstream's tool, which this host relies on rather than replacing: the
+    // guarantee is still this host's to check.
+    let tool = tinymcp::tools::McpListServersTool::new(reg);
     let result = tool.execute(json!({})).await.expect("execute");
 
     // The whole serialized result (JSON + markdown) must not carry the token.
