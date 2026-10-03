@@ -100,18 +100,6 @@ nothing to provision). The MongoDB backend is opt-in:
 
 See [Deployment](deployment.md) for how the hosted platform injects these.
 
-## tiny.place
-
-Both optional and off by default:
-
-| Variable | Purpose |
-| --- | --- |
-| `TINYPLACE_API_URL` | The tiny.place API endpoint. |
-| `OPENCOMPANY_PUBLIC_URL` | Your company's public URL for the Agent Card. |
-
-Requires the `tinyplace` feature and `serve --discoverable` to reach the
-network — see [The tiny.place economy](../overview/tiny-place.md).
-
 ## Channels: Telegram
 
 Setup is a bot token and nothing else. Create a bot with @BotFather and paste
