@@ -418,9 +418,6 @@ interface Props {
   episodeFrames?: EpisodeFrames;
 }
 
-const FIRST_TEAM_BRIEF =
-  "Help us get started: propose the first three priorities for our company and who should own each one.";
-
 /**
  * The chat workspace.
  *
@@ -598,10 +595,6 @@ export function RoomView({
   /** Set when `/desks` failed for a reason that isn't "this host has none". */
   const [desksError, setDesksError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const [composerPrefill, setComposerPrefill] = useState<{
-    text: string;
-    revision: number;
-  } | null>(null);
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
   const [dismissingCardId, setDismissingCardId] = useState<string | null>(null);
   /** Every card whose review verdict is currently in flight — one entry per
@@ -3079,7 +3072,6 @@ export function RoomView({
                   // Opening a conversation lands the cursor in its composer.
                   focusKey={channel.id}
                   disabled={sending}
-                  prefill={composerPrefill ?? undefined}
                   // Not voided (unlike the thread composer below): the composer
                   // awaits this to know whether an attachment it carried actually
                   // journaled, so it can clean up one that did not (codex review

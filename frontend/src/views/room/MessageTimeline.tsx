@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Bot, CircleDot, Hash, Lock, Send, UserPlus } from "lucide-react";
+import { CircleDot, Hash, Lock } from "lucide-react";
 
 import type { ApprovalSummary, CognitionState, DecideApproval, TurnStep, Verdict } from "@/api/types";
 import type { TaskStatus } from "@/api/tasks";
