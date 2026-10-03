@@ -126,16 +126,6 @@ interface Props {
   taskStatusByTaskId?: Readonly<Record<string, TaskStatus>>;
   /** Sends a line whose POST never completed again (B-099), by its id. */
   onRetrySend?: (messageId: string) => void;
-  /**
-   * Places a first brief into the composer on an empty channel.
-   * Optional so the thread panel — which renders no intro — need not pass it.
-   */
-  onStartBrief?: () => void;
-  /**
-   * Opens the members pane, for the "Add people" card on an empty channel.
-   * Optional so the thread panel — which renders no intro — need not pass it.
-   */
-  onAddPeople?: () => void;
   /** Now, for the cards' "waiting N minutes" line. Owned by the shell's feed. */
   now?: number;
   /** Agent id → display name, for a card's "Asked by" line. */
@@ -218,8 +208,6 @@ export function MessageTimeline({
   resolveAttachmentUrl,
   taskStatusByTaskId,
   onRetrySend,
-  onStartBrief,
-  onAddPeople,
   now,
   askerNames,
   chatChannelByThread,
@@ -412,8 +400,6 @@ export function MessageTimeline({
             channel={channel}
             empty={empty}
             loading={loading}
-            onStartBrief={onStartBrief}
-            onAddPeople={onAddPeople}
           />
           {loading && <HistorySkeleton />}
           {items.map(renderRow)}
@@ -507,14 +493,10 @@ function ChannelIntro({
   channel,
   empty,
   loading,
-  onStartBrief,
-  onAddPeople,
 }: {
   channel: Channel;
   empty: boolean;
   loading: boolean;
-  onStartBrief?: () => void;
-  onAddPeople?: () => void;
 }) {
   return (
     // `pt-8` on an empty channel, not `pt-16`. The taller lead-in was there to
@@ -535,13 +517,9 @@ function ChannelIntro({
       <p className="mt-1 max-w-prose text-sm text-muted-foreground">
         {channelIntroSentence(channel, loading)}
       </p>
-      {/* The two openings a new channel actually has. Held back until the
-          history has answered, for the same reason the sentence above is:
-          offering "add an agent here" over a channel that turns out to be full
-          of conversation reads as data loss. */}
-      {empty && !loading && channel.kind === "channel" && (
-        <ActionCards onStartBrief={onStartBrief} onAddPeople={onAddPeople} />
-      )}
+      {/* No "Give the team a brief" / "Add people" cards under it any more:
+          the composer is focused the moment a channel opens, which is the
+          brief, and people are added on Company > Agents. */}
     </div>
   );
 }
@@ -609,88 +587,6 @@ function MarkTile({ icon: Icon, className }: { icon: typeof Hash; className?: st
     >
       <Icon className="size-5" />
     </span>
-  );
-}
-
-/**
- * The pair of starting moves on an empty channel.
- *
- * Cards rather than buttons in a row: an empty channel is mostly empty space,
- * and the two things worth doing there deserve to be the largest objects on
- * it. The icon sits on `--surface-icon` — the rung the brand guide names for
- * exactly this, an icon circle — rather than on `muted`, which is the ground
- * for recessed *fills*.
- */
-function ActionCards({
-  onStartBrief,
-  onAddPeople,
-}: {
-  onStartBrief?: () => void;
-  onAddPeople?: () => void;
-}) {
-  return (
-    <div className="mt-5 flex flex-wrap gap-4">
-      <ActionCard
-        icon={Send}
-        title="Give the team a brief"
-        hint="Start with a first request."
-        onClick={onStartBrief}
-      />
-      <ActionCard
-        icon={UserPlus}
-        title="Add people"
-        hint="Invite members."
-        onClick={onAddPeople}
-      />
-    </div>
-  );
-}
-
-function ActionCard({
-  icon: Icon,
-  title,
-  hint,
-  href,
-  onClick,
-}: {
-  icon: typeof Bot;
-  title: string;
-  hint: string;
-  href?: string;
-  onClick?: () => void;
-}) {
-  const body = (
-    <>
-      <span className="flex size-9 items-center justify-center rounded-lg bg-surface-icon text-muted-foreground">
-        <Icon className="size-4.5" aria-hidden />
-      </span>
-      <span className="mt-4 block">
-        <span className="block text-lg font-semibold tracking-tight">{title}</span>
-        <span className="mt-0.5 block text-2xs text-muted-foreground">{hint}</span>
-      </span>
-    </>
-  );
-  // `bg-glow-brand-card` is a background *image* and `bg-card` a background
-  // *colour*, so the two compose rather than collide: the glow sits over the
-  // card's fill and under its content, and `hover:bg-accent` still swaps the
-  // fill beneath it. See `--glow-brand-card` in `index.css` for why the tint is
-  // a token.
-  const cls =
-    "flex h-33 w-60 flex-col items-start rounded-xl border bg-card bg-glow-brand-card p-4 text-left transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none";
-
-  // A navigation is an anchor and an in-page action is a button, so the card
-  // keeps the affordance its behaviour actually has.
-  if (href) {
-    return (
-      <a href={href} className={cls}>
-        {body}
-      </a>
-    );
-  }
-  return (
-    <button type="button" onClick={onClick} className={cls} disabled={!onClick}>
-      {body}
-    </button>
   );
 }
 

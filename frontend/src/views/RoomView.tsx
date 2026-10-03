@@ -2879,13 +2879,6 @@ export function RoomView({
                   resolveAttachmentUrl={resolveAttachmentUrl}
                   taskStatusByTaskId={taskStatusByTaskId}
                   onRetrySend={retrySend}
-                  onStartBrief={() =>
-                    setComposerPrefill((current) => ({
-                      text: FIRST_TEAM_BRIEF,
-                      revision: (current?.revision ?? 0) + 1,
-                    }))
-                  }
-                  onAddPeople={() => setMembersOpen(true)}
                   now={now}
                   askerNames={askerNames}
                   decidingApprovals={decidingApprovals}
