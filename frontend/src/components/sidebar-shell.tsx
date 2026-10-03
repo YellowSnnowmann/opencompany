@@ -9,37 +9,17 @@
 // title bar (with the traffic lights) sits above it on the desktop, so the page
 // started two bars down. Following OpenHuman's shell, the content now runs the
 // full height of the window and the sidebar floats over its left edge as a
-// card — so those controls move into the card: search at its head, and the
-// places you jump to from anywhere, then who you are, at its foot.
+// card — so those controls move into the card's foot: search and the places
+// you jump to from anywhere as one row of glyphs, then who you are.
 
 import type { ReactNode } from "react";
 
-import { SidebarFooter, SidebarHeader } from "@/components/ui/sidebar";
+import { SidebarFooter } from "@/components/ui/sidebar";
 
 /**
- * The card's head: the search field, alone.
- *
- * The company switcher sat here first and lives on the Settings rail now: which
- * company a window is pointed at is set once and rarely, and the head of the
- * column is where you go many times a minute. The collapse toggle beside it is
- * gone too — the column is held open (`app-shell.tsx`).
- */
-export function SidebarShellHeader({ search }: { search: ReactNode }) {
-  return (
-    // A hairline under it, the mirror of the foot's `border-t`, and the same
-    // 8px all round: the list scrolls between two ruled edges.
-    <SidebarHeader
-      data-testid="sidebar-shell-header"
-      className="border-b border-sidebar-border p-2"
-    >
-      {search}
-    </SidebarHeader>
-  );
-}
-
-/**
- * The card's foot: one row of icon tabs — Company, Connections, Overview,
- * Notifications, Settings, Discord — over you.
+ * The card's foot: one row of icon tabs — Search, Company, Connections,
+ * Notifications, Settings, Discord — over you. The card has no head: search
+ * was its last occupant, and it is a glyph here now.
  *
  * The tabs replaced two labelled rows (Company, Connections) above the foot
  * and a separate cluster of utility glyphs beside the profile: the

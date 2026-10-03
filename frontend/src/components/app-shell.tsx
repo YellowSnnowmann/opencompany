@@ -26,7 +26,7 @@ import { TitleBarSearch } from "@/components/title-bar-search";
 import { DiscordLink, SettingsButton } from "@/components/title-bar-utilities";
 import { RouteLoading } from "@/components/route-loading";
 import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
-import { SidebarShellFooter, SidebarShellHeader } from "@/components/sidebar-shell";
+import { SidebarShellFooter } from "@/components/sidebar-shell";
 import { SectionContentRail } from "@/components/section-rail";
 import { SidebarNavigation, SidebarSectionTabs } from "@/components/sidebar-navigation";
 import { RoomRailSlotProvider } from "@/components/room-rail";
@@ -3420,9 +3420,6 @@ export function AppShell({
         style={{ top: 8, bottom: 8, left: 8, height: "auto" }}
         className="sidebar-material z-30 overflow-hidden rounded-2xl border border-sidebar-border shadow-[2px_4px_10px_-4px_rgb(0_0_0/0.06),4px_14px_28px_-14px_rgb(0_0_0/0.10)] backdrop-blur-2xl"
       >
-        <SidebarShellHeader
-          search={<TitleBarSearch variant="sidebar" client={client} company={company} />}
-        />
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
           <SidebarContent data-tour="sidebar" className="min-h-0 flex-1 pt-0">
           <SidebarNavigation />
@@ -3443,6 +3440,7 @@ export function AppShell({
         <SidebarShellFooter
           tabs={
             <>
+              <TitleBarSearch client={client} company={company} />
               <SidebarSectionTabs view={view} onNavigate={setView} />
               <NotificationsButton
                 pending={pending}
