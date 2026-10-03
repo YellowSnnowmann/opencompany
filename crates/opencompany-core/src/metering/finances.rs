@@ -22,11 +22,7 @@ use super::types::{CategorySpend, Direction, Finances, Transaction};
 /// - `ledger`: the company's append-only ledger (any order; sorted here).
 /// - `budget`: the manifest's `[budget]` (`monthly_usd` is the cap).
 /// - `now_millis`: "now", used to find the current-month boundary (UTC).
-pub fn finances_from(
-    ledger: &[LedgerEntry],
-    budget: &Budget,
-    now_millis: u64,
-) -> Finances {
+pub fn finances_from(ledger: &[LedgerEntry], budget: &Budget, now_millis: u64) -> Finances {
     let month_start = month_start_millis(now_millis);
 
     let mut spent_usd = 0.0;

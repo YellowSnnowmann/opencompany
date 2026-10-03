@@ -476,13 +476,8 @@ async fn register_company(
     // in one logical database. A no-op when `tenant_namespace` is unset.
     let derived = opencompany::runtime::company_id_from_name(&name);
     let company_id = state.config().namespaced_company_id(derived);
-    let mut builder = company_builder(
-        state,
-        home,
-        manifest,
-        &company_id,
-        Some(source_dir.clone()),
-    )?;
+    let mut builder =
+        company_builder(state, home, manifest, &company_id, Some(source_dir.clone()))?;
     if let Some(provenance) = provenance {
         builder = builder.with_template_provenance(provenance);
     }
@@ -2454,8 +2449,7 @@ async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) 
             let shutdown = Arc::new(Notify::new());
             let mut scheduler_handles = Vec::new();
             for dir in &companies {
-                let (id, name, schedules) =
-                    register_company(&state, &home, dir).await?;
+                let (id, name, schedules) = register_company(&state, &home, dir).await?;
                 if let Some(handle) = spawn_scheduler(&state, &id, &schedules, &shutdown) {
                     scheduler_handles.push(handle);
                     println!(
@@ -2464,10 +2458,7 @@ async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) 
                         schedules.len()
                     );
                 } else {
-                    println!(
-                        "registered company `{id}` ({name}) from {}",
-                        dir.display()
-                    );
+                    println!("registered company `{id}` ({name}) from {}", dir.display());
                 }
                 spawn_mailbox_poller(&state, &id, &shutdown, &mut scheduler_handles);
             }

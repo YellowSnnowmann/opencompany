@@ -33,10 +33,10 @@ use crate::ports::types::{
     Actor, ActorKind, ApprovalId, CompanyEvent, CompanyId, EventSeq, Mention, Verdict,
 };
 use crate::ports::{
-    ApprovalGate, ArtifactStore, Brain, ChannelAdapter, CompanyStore, ContextStore,
-    EventLog, FactStore, InboxStore, LoginCodeStore, MemoryStore, NotificationStore,
-    ReadStateStore, RunStore, SecretStore, SessionStore, SkillStateStore, TaskRecord, TaskStore,
-    ToolProvider, UsageMeter, UserStore, WorkflowRevisionStore, WorkspaceStore,
+    ApprovalGate, ArtifactStore, Brain, ChannelAdapter, CompanyStore, ContextStore, EventLog,
+    FactStore, InboxStore, LoginCodeStore, MemoryStore, NotificationStore, ReadStateStore,
+    RunStore, SecretStore, SessionStore, SkillStateStore, TaskRecord, TaskStore, ToolProvider,
+    UsageMeter, UserStore, WorkflowRevisionStore, WorkspaceStore,
 };
 // Separate line (#241) so this addition is a pure append, not a reflow of the
 // grouped import that sibling store-seam branches (#274, #596) also edit.

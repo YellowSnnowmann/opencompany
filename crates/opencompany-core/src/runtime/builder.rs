@@ -48,10 +48,9 @@ use crate::ports::types::{
     SecretValue, TemplateProvenance, ToolGrantsOverride, effective_policy, effective_tool_allow,
 };
 use crate::ports::{
-    ArtifactStore, Brain, ChannelAdapter, CompanyStore, ContextStore, EventLog,
-    FactStore, InboxStore, LoginCodeStore, MemoryStore, RunStore, SecretStore, SessionStore,
-    SkillStateStore, TaskStore, ToolProvider, UsageMeter, UserStore, WorkflowRevisionStore,
-    WorkspaceStore,
+    ArtifactStore, Brain, ChannelAdapter, CompanyStore, ContextStore, EventLog, FactStore,
+    InboxStore, LoginCodeStore, MemoryStore, RunStore, SecretStore, SessionStore, SkillStateStore,
+    TaskStore, ToolProvider, UsageMeter, UserStore, WorkflowRevisionStore, WorkspaceStore,
 };
 #[cfg(feature = "openhuman")]
 use crate::runtime::delegation::RunTurn;
