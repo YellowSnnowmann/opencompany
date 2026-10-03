@@ -2783,14 +2783,7 @@ export function RoomView({
             onSelect={selectChannel}
             openSections={railOpenSections}
             onToggleSection={toggleRailSection}
-            directMessages={directMessageChannels(members)}
             members={members}
-            onStartDirectMessage={selectChannel}
-            onAddChannel={onAddChannel}
-            // The same `AddMemberDialog` and `addMember` the empty pane and the
-            // Company > Agents "Add agent" button use — mounted below, open
-            // state `addOpen`.
-            onAddAgent={() => setAddOpen(true)}
             collapsed={channelsCollapsed}
             onExpand={toggleChannels}
             // Off Room the marked channel is where Room will take you back to,
