@@ -378,6 +378,9 @@ function ChannelRow({
         .join(": ")
     : null;
   const line = activity ?? preview?.text ?? channelSubtitle(channel) ?? "No messages yet";
+  // On the solid accent of the selected row, the muted and primary inks of the
+  // secondary text would vanish; there they are the row's own ink, dimmed.
+  const selected = active && onPage;
 
   return (
     <button
@@ -412,7 +415,12 @@ function ChannelRow({
             {channelTitle(channel)}
           </span>
           {preview && (
-            <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
+            <span
+              className={cn(
+                "shrink-0 text-2xs tabular-nums",
+                selected ? "text-rail-selected-foreground/75" : "text-muted-foreground",
+              )}
+            >
               {railTime(preview.at)}
             </span>
           )}
@@ -422,11 +430,13 @@ function ChannelRow({
             data-testid="channel-preview"
             className={cn(
               "min-w-0 flex-1 truncate text-xs",
-              activity
-                ? "text-primary"
-                : hasUnread
-                  ? "text-foreground"
-                  : "text-muted-foreground",
+              selected
+                ? "text-rail-selected-foreground/80"
+                : activity
+                  ? "text-primary"
+                  : hasUnread
+                    ? "text-foreground"
+                    : "text-muted-foreground",
             )}
           >
             {line}
