@@ -93,7 +93,6 @@ import {
   channelMembers,
   channelTitle,
   deskFromDto,
-  dmChannelId,
   dmThreadId,
   findChannel,
   firstChannel,
@@ -216,25 +215,12 @@ interface Props {
    */
   onSendStart?: (threadId: string) => number | undefined;
   /**
-   * Who is present right now, keyed by user id. Empty when the host has no
-   * presence route, or when nobody else is connected to this replica.
-   */
-  presence?: ReadonlyMap<string, { status: "online" | "away" | "offline" }>;
-  /**
    * The autonomy control, rendered on the composer's toolbar row.
    *
    * A node, not the policy: `AppShell` owns the tier and the admin check, and
    * handing the rendered pill down keeps every fact about policy in one place.
    */
   autonomy?: ReactNode;
-  /**
-   * The company's people, for the members pane's People section.
-   *
-   * Separate from `members` (teammates) on purpose: desk membership is a
-   * teammate concept, and every signed-in person can already see every desk,
-   * so people are never "in" or "outside" a channel.
-   */
-  companyPeople?: Array<{ id: string; label: string }>;
   /**
    * Display names for the typing line, in a stable order — resolved on
    * demand rather than a single precomputed array, because this view needs
@@ -456,8 +442,6 @@ export function RoomView({
   setTranscripts,
   hydration = HISTORY_UNTRACKED,
   onSendStart,
-  presence,
-  companyPeople,
   resolveTypingNames,
   onTyping,
   onSendEnd,
@@ -1853,11 +1837,8 @@ export function RoomView({
   // function declarations, so the guard above does not narrow inside them.
   const active = channel;
   // Whether the open channel is a real, host-backed desk — as opposed to a DM
-  // or a fallback desk (`lib/desks.ts`, used before `/desks`
-  // answers) — and, for the membership controls, one whose membership the
-  // operator can change: `#general`'s is the roster, kept by the host.
+  // or a fallback desk (`lib/desks.ts`, used before `/desks` answers).
   const activeIsDesk = active.kind === "channel" && (desks ?? []).some((d) => d.id === active.id);
-  const activeIsMutableDesk = activeIsDesk && active.mutable !== false;
   // The host thread this channel is addressed on. A real desk channel's id
   // doubles as its thread id (`deskFromDto`), so addressing by it routes to
   // that desk's lead. A DM's id is console-local (`dmChannelId`), not a host

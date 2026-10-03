@@ -3613,8 +3613,6 @@ export function AppShell({
               // The chat segment, not the current view's — see `chatSub`.
               sub={view === "chat" ? sub : chatSub}
               routeOpen={view === "chat"}
-              presence={presence.peers}
-              companyPeople={companyPeople}
               resolveTypingNames={resolveTypingNames}
               onTyping={typing.announce}
               onNavigate={(channelId) => navigate("chat", channelId)}
