@@ -112,29 +112,18 @@ describe("the channel intro's mark", () => {
     expect(img!.getAttribute("src")).toBe(staticAvatarSrc(avatarFor("agent_ada")));
   });
 
-  it("draws no face for a channel — there is no one person behind it", () => {
-    render({ id: "engineering", name: "engineering", kind: "channel", purpose: "" });
-
-    expect(mark().querySelector("img")).toBeNull();
-    // The kind mark instead, on the icon ground the action cards below it use.
-    expect(mark().className).toContain("bg-surface-icon");
-    expect(mark().querySelector("svg")).not.toBeNull();
-  });
-
-  it("draws no face for a private channel either — the lock speaks for it", () => {
-    render({ id: "ops", name: "ops", kind: "channel", purpose: "", private: true });
-
-    expect(mark().querySelector("img")).toBeNull();
-    expect(mark().className).toContain("bg-surface-icon");
-  });
-
-  it("keeps the company's own brand mark on #general", () => {
-    // `#general` is the one channel that legitimately has a voice behind it, and
-    // it wears the company mark rather than a mascot or a hash.
-    render({ id: "general", name: "general", voice: "Acme", kind: "channel", purpose: "" });
-
-    expect(mark().querySelector("img")).toBeNull();
-    expect(mark().className).toContain("bg-primary");
+  it("draws no mark at all for a desk — the title leads", () => {
+    // A desk wore `#` (a lock when private) and `#general` the company brand
+    // tile. The sidebar row already pictures a desk as its members' faces, so
+    // the intro drops the glyph and starts with the channel's name.
+    for (const channel of [
+      { id: "engineering", name: "engineering", kind: "channel" as const, purpose: "" },
+      { id: "ops", name: "ops", kind: "channel" as const, purpose: "", private: true },
+      { id: "general", name: "general", voice: "Acme", kind: "channel" as const, purpose: "" },
+    ]) {
+      render(channel);
+      expect(mark().tagName, channel.id).toBe("H2");
+    }
   });
 
   it("falls back to a glyph for a DM the roster cannot name", () => {
