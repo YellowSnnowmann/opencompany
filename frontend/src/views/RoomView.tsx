@@ -103,7 +103,6 @@ import {
   historyReady,
   HISTORY_UNTRACKED,
   clearTaskCardEverywhere,
-  directMessageChannels,
   directMessageForId,
   inlineReplyIds,
   latestBudgetPauseMessageIdByAgent,
@@ -621,7 +620,6 @@ export function RoomView({
   const [membersOpen, setMembersOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   // The rail's "+" (issue #1835) — chat's own door for creating a channel.
-  const [channelCreateOpen, setChannelCreateOpen] = useState(false);
   // The channel list is a section of the app sidebar now, so the sidebar owns
   // where it is, how dense it is, and whether it is covering the transcript.
   // See `components/room-rail.tsx`.
@@ -2715,15 +2713,6 @@ export function RoomView({
     }
   }
 
-  /**
-   * The rail's create affordance (issue #1835) — or `undefined`, which is the
-   * rule this codebase follows for a control that would be refused: absent,
-   * not disabled. A starter roster (`!fromHost`) has no saved teammates to
-   * staff a channel with, and an empty roster has nobody at all.
-   */
-  const onAddChannel =
-    fromHost && members.length > 0 ? () => setChannelCreateOpen(true) : undefined;
-
   function selectChannel(id: string) {
     onNavigate(id);
     // On a phone the rail is painted inside the sidebar's sheet, which covers
@@ -3273,28 +3262,6 @@ export function RoomView({
         onAdd={addMember}
         client={client}
         company={company}
-      />
-      <ChannelCreateDialog
-        client={client}
-        company={company}
-        members={members}
-        open={channelCreateOpen}
-        onOpenChange={setChannelCreateOpen}
-        onCreated={(dto) => {
-          // Fold the new channel into the rail and land the operator in it —
-          // the same deskFromDto every fetched desk goes through, so a
-          // just-created channel is indistinguishable from a reloaded one.
-          //
-          // REPLACING the fallback set, not appending to it, when the rail was
-          // showing `defaultDesks()`: the company's first real channel is the
-          // event that ends the fallback's mandate, and appending beside it
-          // would keep fabricated rows in the rail — one of which could share
-          // the new channel's very id — until a reload (codex on #1872).
-          const desk = deskFromDto(dto);
-          setDesks((prev) => (desksAreFallback.current ? [desk] : [...(prev ?? []), desk]));
-          desksAreFallback.current = false;
-          selectChannel(desk.id);
-        }}
       />
     </>
   );
