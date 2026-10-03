@@ -129,6 +129,22 @@ describe("the channel info panel", () => {
     expect(toggle().getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("links #general nowhere: it mirrors the roster and refuses membership writes", () => {
+    act(() =>
+      root.render(
+        createElement(ChannelInfoPanel, {
+          channel: { ...DESK, id: "general", name: "general", mutable: false },
+          members: [ADA, BO],
+          channelMembers: [ADA, BO],
+          onClose: () => {},
+          onMessage: vi.fn(),
+        }),
+      ),
+    );
+    expect(container.textContent).not.toContain("Manage desk");
+    expect(container.querySelector('a[href^="#/company/"]')).toBeNull();
+  });
+
   it("offers no raw toggle on a desk", () => {
     renderPanel();
     expect(container.querySelector('[data-testid="channel-info-raw-toggle"]')).toBeNull();
