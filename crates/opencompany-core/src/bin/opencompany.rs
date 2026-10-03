@@ -46,12 +46,6 @@ enum Command {
         /// `$HOME/.opencompany`, with bundles under `companies/<slug>`.
         #[arg(long)]
         home: Option<PathBuf>,
-        /// Opt every loaded company into going public on tiny.place, regardless
-        /// of each manifest's `[place].discoverable`. Requires the `tinyplace`
-        /// feature to actually reach the network; without it the flag only marks
-        /// companies discoverable for the local A2A routes.
-        #[arg(long)]
-        discoverable: bool,
     },
     /// Print a JSON runtime specification.
     Spec {
@@ -449,21 +443,8 @@ async fn register_company(
     state: &AppState,
     home: &std::path::Path,
     dir: &std::path::Path,
-    discoverable: bool,
 ) -> Result<(String, String, Vec<Schedule>)> {
-    let mut manifest = CompanyManifest::from_path_for_reload(dir)?;
-    // `serve --discoverable` opts this company into going public regardless of
-    // its manifest: mark it discoverable and synthesize a @handle when absent so
-    // Agent Card generation and validation succeed.
-    if discoverable {
-        manifest.place.discoverable = true;
-        if manifest.company.handle.is_none() {
-            let handle = opencompany::runtime::company_id_from_name(&manifest.company.name)
-                .as_ref()
-                .to_string();
-            manifest.company.handle = Some(handle);
-        }
-    }
+    let manifest = CompanyManifest::from_path_for_reload(dir)?;
     let name = manifest.company.name.clone();
     // Capture the schedules before the manifest is moved into the builder; boot
     // uses them to start this company's cron scheduler (lifecycle step 4).
@@ -501,7 +482,6 @@ async fn register_company(
         manifest,
         &company_id,
         Some(source_dir.clone()),
-        discoverable,
     )?;
     if let Some(provenance) = provenance {
         builder = builder.with_template_provenance(provenance);
@@ -539,13 +519,11 @@ async fn register_company(
         }
     }
     // Issue #290: stash what a later in-place rebuild cannot recover any other
-    // way. `--discoverable` is the case that forces this to exist: it lives only
-    // in the `serve` stack frame and mutates the manifest before the build.
+    // way: the source directory lives only in the `serve` stack frame.
     state.set_boot_inputs(
         company_id.clone(),
         opencompany::runtime::BootInputs {
             source_dir: Some(source_dir),
-            discoverable,
         },
     );
     state.registry().insert(company_id, Arc::new(runtime));
@@ -583,7 +561,6 @@ fn company_builder(
     manifest: CompanyManifest,
     company_id: &CompanyId,
     source_dir: Option<PathBuf>,
-    discoverable: bool,
 ) -> Result<RuntimeBuilder> {
     let mut builder = attach_tinyhumans_feedback(
         attach_harness(
@@ -592,7 +569,6 @@ fn company_builder(
         ),
         state.config(),
     )
-    .with_tinyplace_api_url(state.config().tinyplace_api_url.clone())
     // Install-wide MCP defaults (issue #527): every company built on this
     // instance gets them, which is what makes a fresh install useful with no
     // per-company setup. Already normalized when the config resolved.
@@ -665,9 +641,6 @@ fn company_builder(
             });
         }
     }
-    if discoverable {
-        builder = builder.with_discoverable(true);
-    }
     Ok(builder)
 }
 
@@ -692,7 +665,6 @@ impl opencompany::runtime::RuntimeRebuilder for BootRebuilder {
             request.manifest,
             &request.id,
             request.boot.source_dir,
-            request.boot.discoverable,
         )?
         // The whole point: the successor adopts the live journal, approval gate,
         // grant set, stores, harness pool, MCP runtime and serialising mutexes
