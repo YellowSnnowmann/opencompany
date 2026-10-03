@@ -1769,8 +1769,8 @@ async fn run_memory_cmd(cmd: MemoryCmd) -> Result<()> {
                 .unwrap_or_else(|| "the beginning (the first page failed)".into());
             Err(opencompany::error::OpenCompanyError::Store(format!(
                 "migration stopped after {} imported / {} skipped of {} exported; fix the \
-                 target and re-run with {resume} — import is idempotent by (namespace, key), \
-                 so re-running the failed page cannot duplicate.",
+                 target and re-run with {resume} — a store is idempotent by content \
+                 fingerprint, so re-running the failed page cannot duplicate.",
                 stopped.summary.imported, stopped.summary.skipped, stopped.summary.exported
             )))
         }
