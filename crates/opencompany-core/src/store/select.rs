@@ -541,7 +541,7 @@ impl std::fmt::Debug for MemoryOverlay {
 /// which is unauthenticated.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemoryDescriptor {
-    /// The selected mode (`store`, `embedded`, `remote`, `null`).
+    /// The selected mode (`store`, `remote`, `null`).
     pub backend: MemoryBackend,
     /// The bound engine's own name, when one is bound.
     pub driver_id: String,
@@ -670,7 +670,7 @@ pub struct StorageSettings {
     /// in-memory engine — the shape tests and no-data-dir callers get.
     pub data_dir: Option<PathBuf>,
     /// Operator's explicit durability assertion for the data dir
-    /// (`OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL`). Retained from the embedded-engine
+    /// (`OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL`). Retained from the removed embedded-engine
     /// era, when the in-pod engine was refused by default under
     /// `OPENCOMPANY_STORAGE=mongodb` because the hosted model treats `/data` as
     /// ephemeral scratch. The in-pod engine is gone, so the flag is currently a
