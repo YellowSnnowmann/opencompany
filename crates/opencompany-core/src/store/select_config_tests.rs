@@ -134,7 +134,7 @@ fn remote_without_a_key_refuses_at_open() {
 fn a_retired_engine_refuses_at_open_by_name() {
     let settings = StorageSettings {
         memory_backend: MemoryBackend::Remote,
-        memory_driver: Some("cortexdb".into()),
+        memory_driver: Some("supermemory".into()),
         memory_api_key: Some("k".into()),
         ..StorageSettings::default()
     };
