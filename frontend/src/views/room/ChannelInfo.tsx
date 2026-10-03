@@ -11,7 +11,7 @@
 import { ExternalLink, FileCode2, X } from "lucide-react";
 
 import { TeammateAvatar } from "@/components/teammate-avatar";
-import type { TeamMember } from "@/lib/team";
+import { roleSubtitle, type TeamMember } from "@/lib/team";
 import { cn } from "@/lib/utils";
 import { ChannelFace, memberFace } from "./ChannelRail";
 import { channelSubtitle, channelTitle, dmChannelId, type Channel } from "./model";
@@ -139,8 +139,12 @@ export function ChannelInfoPanel({
                 <TeammateAvatar {...memberFace(m)} className="size-8 bg-avatar-disc text-2xs" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{m.name}</span>
-                  {m.role && (
-                    <span className="block truncate text-xs text-muted-foreground">{m.role}</span>
+                  {/* The role only where it says something the name does not —
+                      a teammate called "QA Engineer" with that role is one fact. */}
+                  {roleSubtitle(m.name, m.role) && (
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {roleSubtitle(m.name, m.role)}
+                    </span>
                   )}
                 </span>
                 {channel.kind === "channel" && i === 0 && !channel.leadless && channel.memberIds && (
