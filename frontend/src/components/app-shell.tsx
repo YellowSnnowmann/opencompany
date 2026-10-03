@@ -1,4 +1,14 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import type { OpenCompanyClient } from "@/api/client";
 import {
   ApiError,
@@ -536,6 +546,10 @@ export function AppShell({
   // event for either (see the hook's own doc comment).
   const ledgerNav = useLedgerNav(client, company);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  // The floating sidebar's width, dragged by its right edge and remembered
+  // per browser (`lib/sidebar-width.ts`).
+  const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
+  const [sidebarResizing, setSidebarResizing] = useState(false);
   /**
    * Whether the product tour should hold — first-run setup is on screen, or the
    * company still has nobody on it (`docs/spec/runtime/company-setup.md`).
