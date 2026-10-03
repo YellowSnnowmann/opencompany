@@ -8,7 +8,7 @@
 // name), and a panel that slides in on the right when the pill is pressed
 // (details and members).
 
-import { ExternalLink, FileCode2, X } from "lucide-react";
+import { ChevronRight, ExternalLink, FileCode2, X } from "lucide-react";
 
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { roleSubtitle, type TeamMember } from "@/lib/team";
@@ -43,13 +43,20 @@ export function ChannelPill({
       title={open ? "Hide details" : "Show details"}
       data-testid="channel-pill"
       className={cn(
-        "absolute top-2 left-1/2 z-20 flex max-w-[60%] -translate-x-1/2 items-center gap-2 rounded-full border border-foreground/10 bg-page/80 py-1 pr-3 pl-1 text-sm font-medium shadow-sm backdrop-blur-md transition-colors",
+        "group/pill absolute top-2 left-1/2 z-20 flex max-w-[60%] -translate-x-1/2 items-center gap-2 rounded-full border border-foreground/10 bg-page/80 py-1 pr-3 pl-1 text-sm font-medium shadow-sm backdrop-blur-md transition-colors",
         "hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         open && "bg-muted",
       )}
     >
       <ChannelFace channel={channel} members={members} size="pill" />
       <span className="min-w-0 truncate">{channelTitle(channel)}</span>
+      {/* On hover (or keyboard focus), a right arrow slides in: the panel
+          this opens is on the right. Zero width at rest, so the label stays
+          centred and quiet until the pointer asks. */}
+      <ChevronRight
+        aria-hidden
+        className="-ml-2 size-3.5 w-0 shrink-0 text-muted-foreground opacity-0 transition-all group-hover/pill:ml-0 group-hover/pill:w-3.5 group-hover/pill:opacity-100 group-focus-visible/pill:ml-0 group-focus-visible/pill:w-3.5 group-focus-visible/pill:opacity-100"
+      />
     </button>
   );
 }
