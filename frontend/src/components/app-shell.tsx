@@ -3393,131 +3393,46 @@ export function AppShell({
         >
           Skip to content
         </a>
-      {/* The window's one title row, above the sidebar and above the content
-          and spanning the full width of the window. It carries the two controls
-          that are about the *console* rather than about the page: which company
-          you are in, and who you are signed in as. Both used to sit in the
-          sidebar column — the switcher at its head under a reserved strip for
-          the traffic lights, the profile row in its footer — which put them at
-          opposite ends of a 15rem column and left the lights overlapping a
-          narrow column instead of insetting a bar. See `window-title-bar.tsx`,
-          which owns the geometry including the traffic-light inset. */}
-      <WindowTitleBar
-        switcher={
-          <HostSwitcher
-            variant="titlebar"
-            companyName={feed.status.name}
-            // The company's lifecycle, and every company on this host: both
-            // were rows in the sidebar footer, and both are facts about *which
-            // company you are in* — which is what this control is. See
-            // `HostSwitcher`'s `companyState` for why the lifecycle is not
-            // folded into the connection dot.
-            companyState={lifecycle(feed.status.lifecycle, feed.status.emergency_paused)}
-            companies={companies}
-            activeCompany={company}
-            onSwitchCompany={onSwitchCompany}
-            onBackToPicker={onBackToPicker}
-            onCreateCompany={onCreateCompany}
-            canCreateCompany={offersCompanyCreation(client)}
-          />
-        }
-        sidebarToggle={
-          // Two controls, one slot, exact complements — so the way to the
-          // navigation is in the same corner at every width and is never in
-          // both places or neither.
-          //
-          // `md` and up is the column, which collapses: `SidebarCollapseButton`
-          // says "Collapse"/"Expand", and `md` is the width `useIsMobile` flips
-          // at, so its own mobile guard and this gate agree by construction.
-          //
-          // Below `md` the sidebar is a sheet, which opens: those two labels are
-          // both wrong for one, so the sheet's own trigger takes the slot. It
-          // used to be a reserved row at the FOOT of the inset (issue #1265,
-          // which was about a `fixed` trigger floating over the content and
-          // winning every hit-test in the bottom-left corner). A row of its own
-          // solved that and put the way back to navigation at the bottom of the
-          // screen, furthest from the header it belongs to. In the title row it
-          // is neither floating nor buried.
-          <>
-            <span className="hidden md:inline-flex">
-              <SidebarCollapseButton />
-            </span>
-            <SidebarTrigger
-              aria-label="Toggle sidebar"
-              // The row's shared glyph shape, so it sits with its neighbours
-              // rather than reading as a `ghost` Button that wandered in.
-              className={cn(TITLE_BAR_ICON_BUTTON, "md:hidden")}
-            />
-          </>
-        }
-        search={<TitleBarSearch client={client} company={company} />}
-        utilities={
-          // The three that were the sidebar's footer, beside Overview in the
-          // same group: all four are about the console rather than the page.
-          <TitleBarUtilities view={view} onNavigate={setView} />
-        }
-        overview={
-          // The console's front page, as a glyph. `NAV` still carries the
-          // labelled row and will until the sidebar restructure removes it; in a
-          // chrome band a labelled button reads as content, so the name moves
-          // here to `aria-label` and `title`. First thing the row drops as the
-          // window narrows — see `TITLE_BAR_LADDER`.
-          <OverviewButton
-            active={isNavigationActive("overview", view)}
-            onNavigate={() => setView("overview")}
-          />
-        }
-        approvals={
-          // The bell, beside Overview and Settings in the same group: all
-          // three are about the console rather than about the page. It is a
-          // page now rather than a bare queue — Approvals and the activity
-          // feed, as two tabs — which is what answers the objection that sent
-          // the old shield glyph back to the sidebar (one unlabelled square
-          // could not say it was a destination; a bell says exactly what this
-          // one is). The count it carries is `pending_approvals`, unchanged,
-          // and the sidebar draws no second copy of it any more.
-          <NotificationsButton
-            pending={pending}
-            active={view === "notifications" || view === "approvals"}
-            onNavigate={() => setView("notifications")}
-          />
-        }
-        // No `autonomy` slot. The tier is a control on the composer's
-        // toolbar row now (`views/chat/MessageComposer.tsx`): it is a fact
-        // about what happens when you press Send, so it belongs beside Send
-        // rather than in the band that holds facts about the console.
-        profile={
-          // Who you are signed in as, and nothing else. It renders nothing
-          // where there is nobody to name — a host with no sign-in, or a
-          // session that has just gone — and the row simply closes up.
-          <ProfileRow
-            variant="titlebar"
-            client={client}
-            company={company}
-            onSignedOut={() => void forgetSession(scope.connection)}
-          />
-        }
-      />
-
       {/* The shell proper, below the title row: the sidebar column and the
           content column, still flex siblings so the sidebar's `peer` selectors
           and its in-flow width gap keep working. */}
       <div className="flex w-full min-h-0 flex-1">
       <Sidebar
         collapsible="icon"
-        // The sidebar's container is `fixed inset-y-0 h-svh` — it positions
-        // against the VIEWPORT, so a title row placed above it in the flow does
-        // not push it down and the column would slide underneath the bar. This
-        // is the offset that puts it back, as inline style rather than a class
-        // because `top-*` and `h-*` would be fighting `inset-y-0` and `h-svh`
-        // on the same element and the winner would come down to stylesheet
-        // order.
-        style={{
-          top: WINDOW_TITLE_BAR_HEIGHT,
-          height: `calc(100svh - ${WINDOW_TITLE_BAR_HEIGHT}px)`,
-        }}
+        // Floating, after OpenHuman's shell: a card 8px in from the window's
+        // top, bottom and left edges, over a content area that runs the full
+        // height of the window. The container is `fixed inset-y-0 h-svh
+        // left-0`, so the inset is inline style rather than classes — `top-*`
+        // and `left-*` would be fighting `inset-y-0` and `data-[side=left]:
+        // left-0` on the same element and the winner would come down to
+        // stylesheet order. `.sidebar-material` (index.css) is the
+        // translucent fill the blur reads through.
+        style={{ top: 8, bottom: 8, left: 8, height: "auto" }}
+        className="sidebar-material z-30 overflow-hidden rounded-2xl border border-sidebar-border shadow-[2px_4px_10px_-4px_rgb(0_0_0/0.06),4px_14px_28px_-14px_rgb(0_0_0/0.10)] backdrop-blur-2xl"
       >
-
+        <SidebarShellHeader
+          switcher={
+            <HostSwitcher
+              variant="titlebar"
+              companyName={feed.status.name}
+              // The company's lifecycle, and every company on this host: both
+              // are facts about *which company you are in* — which is what this
+              // control is. See `HostSwitcher`'s `companyState` for why the
+              // lifecycle is not folded into the connection dot.
+              companyState={lifecycle(feed.status.lifecycle, feed.status.emergency_paused)}
+              companies={companies}
+              activeCompany={company}
+              onSwitchCompany={onSwitchCompany}
+              onBackToPicker={onBackToPicker}
+              onCreateCompany={onCreateCompany}
+              canCreateCompany={offersCompanyCreation(client)}
+            />
+          }
+          // Collapse/expand on the column; below `md` the column is a sheet
+          // with its own trigger in the content, so this one stands down there.
+          toggle={<SidebarCollapseButton />}
+          search={<TitleBarSearch variant="sidebar" client={client} company={company} />}
+        />
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
           <SidebarContent data-tour="sidebar" className="min-h-0 flex-1">
           <SidebarNavigation view={view} onNavigate={setView} />
@@ -3535,6 +3450,31 @@ export function AppShell({
             md:inline-flex`, went with them — the glyph up there is on at every
             width now, so the destination is still on screen exactly once. */}
         </nav>
+        <SidebarShellFooter
+          profile={
+            // Who you are signed in as. Renders nothing where there is nobody
+            // to name — a host with no sign-in — and the foot closes up.
+            <ProfileRow
+              client={client}
+              company={company}
+              onSignedOut={() => void forgetSession(scope.connection)}
+            />
+          }
+          actions={
+            <>
+              <OverviewButton
+                active={isNavigationActive("overview", view)}
+                onNavigate={() => setView("overview")}
+              />
+              <NotificationsButton
+                pending={pending}
+                active={view === "notifications" || view === "approvals"}
+                onNavigate={() => setView("notifications")}
+              />
+              <TitleBarUtilities view={view} onNavigate={setView} />
+            </>
+          }
+        />
         <SidebarRail />
       </Sidebar>
 
