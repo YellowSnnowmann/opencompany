@@ -52,16 +52,15 @@
 //!
 //! ## Who may call it
 //!
-//! Loopback-only throughout — nothing here is ever open to a routable host. On
-//! top of that, the call is open without a session in exactly two situations,
-//! both meaning "there is nobody who could authorize it": setup has never
-//! completed, or the host has no companies and therefore no roster to hold an
-//! admin.
+//! The call is open without a session only on a verified loopback request when
+//! setup has never completed or the host has no companies. A routable empty
+//! host instead requires the short-lived SSO bootstrap session for its
+//! platform-designated owner; every other request needs a company admin.
 //!
-//! Both conditions being loopback-gated is the point. Openness on a routable
-//! host would let whoever reached a fresh deployment first configure it;
-//! openness on a *configured* laptop would let any page in the browser rewrite
-//! its settings. The no-companies case is not a nicety either: setup can
+//! The unauthenticated cases being loopback-gated is the point. Openness on a
+//! routable host would let whoever reached a fresh deployment first configure
+//! it; openness on a *configured* laptop would let any page in the browser
+//! rewrite its settings. The no-companies case is not a nicety either: setup can
 //! complete without seeding a company, and gating that host behind an admin
 //! check would leave it with no company to sign in to and no way back into
 //! setup to make one — the dead end this flow exists to remove, one step later.
@@ -625,9 +624,8 @@ fn spec_for(key: &str) -> Option<&'static FieldSpec> {
 
 /// Authorizes a setup call.
 ///
-/// Loopback-only is necessary throughout: nothing here is ever open to a
-/// routable host. On top of that, the call is open without a session in exactly
-/// two situations, both of which are "there is nobody who could authorize it":
+/// A verified loopback request is open without a session in exactly two
+/// situations, both of which are "there is nobody who could authorize it":
 ///
 ///   - setup has never completed, or
 ///   - the host has no companies, so there is no roster to hold an admin.
@@ -646,7 +644,9 @@ fn spec_for(key: &str) -> Option<&'static FieldSpec> {
 /// same two-gate check `none`-mode login uses for the same reason (see
 /// [`crate::server::graphql::auth::local_owner`]).
 ///
-/// Otherwise the ordinary admin check applies, resolved through the sole
+/// On a routable empty host, the platform's short-lived SSO bootstrap session
+/// authorizes only the owner named by the per-tenant token. Otherwise the
+/// ordinary admin check applies, resolved through the sole
 /// company: setup is host-level but authority is per company, and a host
 /// serving several has no single roster that could speak for the instance.
 async fn authorize(
@@ -654,6 +654,12 @@ async fn authorize(
     headers: &HeaderMap,
     peer: Option<std::net::SocketAddr>,
 ) -> Result<(), crate::server::Rejection> {
+    if state.registry().is_empty()
+        && let Some((company, token)) = crate::server::users::cookie::session_from_header(headers)
+        && crate::server::sso::bootstrap_session_is_valid(state, &company, &token).await?
+    {
+        return Ok(());
+    }
     if state.config().is_local_only()
         && (!state.setup_complete() || state.registry().is_empty())
         && crate::server::graphql::auth::request_looks_local(peer, headers)

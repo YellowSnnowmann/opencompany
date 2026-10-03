@@ -5,11 +5,12 @@ runs is a single switch — `OPENCOMPANY_COMPANY`** — an example directory nam
 (`venture_capital`, `marketing_agency`, …) or an alias (`fund`,
 `marketing`, `software`, `studio`, `law`, `accelerator`, `signals`, …).
 
-Leave `OPENCOMPANY_COMPANY` **blank or unset** to boot **unconfigured**: the
-host starts with no company on an empty data root, and the console opens the
-first-run **setup wizard** where the operator builds the company. This is what
-the hosting platform launches so a fresh instance is configured by its owner
-rather than pre-seeded from a template.
+The self-hosted image defaults to `marketing_agency`. Set
+`OPENCOMPANY_COMPANY` **explicitly blank** to boot unconfigured: the host starts
+with no company on an empty data root, and the console opens the first-run
+**setup wizard**. A routable unconfigured host requires the platform SSO
+bootstrap credential; anonymous requests cannot claim it. The hosting platform
+injects the blank value and that credential for each new tenant.
 
 The same two images deploy everywhere below; only the wiring differs.
 

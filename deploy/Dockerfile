@@ -242,15 +242,13 @@ ENV OPENCOMPANY_TINYSEARCH_MODULE=/app/modules/libtinysearch.so
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh && mkdir -p /data
 
-# The switch: which example company this container runs. Left BLANK on purpose so
-# a platform-launched (or otherwise unconfigured) container boots into the
-# first-run setup wizard (WS-A onboarding) rather than a pre-picked template;
-# override at deploy time (compose/.env, task def, or `-e`) to boot a specific
-# baked company. A baked image that hardcoded a company would defeat the
-# unconfigured launch the manager relies on.
+# Self-hosted containers default to the marketing-agency example. The platform
+# explicitly injects an empty value for a new tenant so it reaches the
+# first-run setup wizard; that routable path is authorized by its SSO bootstrap
+# token, not opened to anonymous visitors.
 # `OPENCOMPANY_CONSOLE_DIR` points the host at the baked console bundle so a
 # hosted tenant serves its own UI at `/` instead of 404ing.
-ENV OPENCOMPANY_COMPANY="" \
+ENV OPENCOMPANY_COMPANY="marketing_agency" \
     OPENCOMPANY_BIND=0.0.0.0:8080 \
     OPENCOMPANY_DATA_DIR=/data \
     OPENCOMPANY_DISCOVERABLE=false \

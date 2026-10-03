@@ -113,6 +113,17 @@ async fn enabled_state(home: &std::path::Path) -> AppState {
     .await
 }
 
+fn empty_routable_state(home: &std::path::Path) -> AppState {
+    AppState::new(AppConfig {
+        bind: "0.0.0.0:8080".to_string(),
+        admin_email: Some(ADMIN.to_string()),
+        sso_secret: Some(SecretValue(SSO_SECRET.to_string())),
+        ..AppConfig::default()
+    })
+    .with_home(home.to_path_buf())
+    .with_connections(ConnectionsRuntime::new())
+}
+
 /// Signs a JWT with `secret` over the given claims.
 fn sign(secret: &str, claims: &serde_json::Value) -> String {
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -131,21 +142,37 @@ fn valid_token() -> String {
 }
 
 fn token_with(secret: &str, slug: &str, sub: &str, jti: &str, exp: u64) -> String {
+    // A realistic 5-minute token ending at `exp` (iat = exp - 300). Keeping the
+    // lifetime within the contract means a token built to be refused for some
+    // *other* reason (wrong slug, wrong subject, expired, replayed) still passes
+    // the lifetime cap and is refused only for the reason under test.
+    token_with_iat(secret, slug, sub, jti, exp.saturating_sub(300), exp)
+}
+
+/// Like [`token_with`] but with an explicit `iat`, so a test can mint a token
+/// whose declared lifetime (`exp - iat`) exceeds the 5-minute contract.
+fn token_with_iat(secret: &str, slug: &str, sub: &str, jti: &str, iat: u64, exp: u64) -> String {
     sign(
         secret,
         &serde_json::json!({
             "sub": sub,
             "slug": slug,
             "jti": jti,
-            "iat": 1_700_000_000u64,
+            "iat": iat,
             "exp": exp,
         }),
     )
 }
 
 fn far_future() -> u64 {
-    // ~2050, comfortably beyond any test run.
-    2_524_608_000
+    now_secs() + 300
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock is after the Unix epoch")
+        .as_secs()
 }
 
 fn post(uri: &str, body: serde_json::Value) -> Request<Body> {
@@ -205,6 +232,62 @@ async fn a_valid_token_signs_the_admin_in_and_sets_a_cookie() {
     assert_eq!(json["email"], "ada@example.com");
     assert_eq!(json["role"], "admin");
     assert_eq!(json["company"], "acme");
+}
+
+#[tokio::test]
+async fn the_platform_owner_can_redeem_into_setup_on_a_routable_empty_host() {
+    let home = home();
+    let state = empty_routable_state(home.path());
+    assert!(state.registry().is_empty());
+
+    let raw_token = valid_token();
+    let before_redeem = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/setup")
+                .header(SESSION_HEADER, format!("acme.{raw_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(before_redeem.status(), StatusCode::CONFLICT);
+
+    let response = router(state.clone())
+        .oneshot(post(
+            "/api/v1/sso/redeem",
+            serde_json::json!({ "token": valid_token() }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let sign_in = body_json(response).await;
+    assert_eq!(sign_in["email"], "ada@example.com");
+    assert_eq!(sign_in["company"], "acme");
+    let session = sign_in["session"].as_str().expect("bootstrap session");
+
+    let setup = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/setup")
+                .header(SESSION_HEADER, session)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(setup.status(), StatusCode::OK);
+
+    let anonymous = router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/setup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), StatusCode::CONFLICT);
 }
 
 #[tokio::test]
@@ -316,6 +399,61 @@ async fn an_expired_token_is_refused() {
     // 2001-09-09 — in the past whenever this runs.
     let expired = token_with(SSO_SECRET, "acme", ADMIN, "jti-1", 1_000_000_000);
     assert_rejected(&state, &expired, "an expired token").await;
+}
+
+#[tokio::test]
+async fn a_token_claiming_a_longer_life_than_the_contract_is_refused() {
+    let home = home();
+    let state = enabled_state(home.path()).await;
+    // Unexpired but minted an hour before exp — a declared lifetime far beyond
+    // the 5-minute contract. The expiry check passes, so the lifetime cap refuses it.
+    let now = now_secs();
+    let over_long = token_with_iat(
+        SSO_SECRET,
+        "acme",
+        ADMIN,
+        "jti-cap",
+        now.saturating_sub(400),
+        now + 120,
+    );
+    assert_rejected(
+        &state,
+        &over_long,
+        "a token with an over-long declared lifetime",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_future_issued_at_is_refused() {
+    let home = home();
+    let state = enabled_state(home.path()).await;
+    let issued_at = now_secs() + 600;
+    let future = token_with_iat(
+        SSO_SECRET,
+        "acme",
+        ADMIN,
+        "jti-future-iat",
+        issued_at,
+        issued_at + 120,
+    );
+    assert_rejected(&state, &future, "a future issued-at timestamp").await;
+}
+
+#[tokio::test]
+async fn an_expiration_before_issuance_is_refused() {
+    let home = home();
+    let state = enabled_state(home.path()).await;
+    let now = now_secs();
+    let reversed = token_with_iat(
+        SSO_SECRET,
+        "acme",
+        ADMIN,
+        "jti-reversed-times",
+        now + 20,
+        now + 10,
+    );
+    assert_rejected(&state, &reversed, "expiration before issuance").await;
 }
 
 #[tokio::test]
