@@ -91,6 +91,14 @@ and the desk-episode trail — `EpisodeOpened`, `RoundStarted`, `RoundCommitted`
 `BroadcastRouted`, `DmDelivered`, `EpisodeCompleted` (see
 [Hive episodes and rounds](#hive-episodes-and-rounds)).
 
+`Unknown` is the fallback for a retired or unrecognised `kind`, kept so old
+journals still load (`#[serde(other)]`). Its motivating case is
+`A2aTaskReceived`, the inbound tiny.place A2A task, retired with tiny.place:
+logs written before then still hold it. The row's fields are not kept, every
+consumer treats it as a no-op, retention never prunes it (a pass cannot judge
+what it cannot read), and the fs backend's prune rewrites a kept row byte for
+byte rather than re-serializing it as a bare `Unknown`.
+
 ### Per-task event correlation (issue #185)
 
 The journal is company-scoped, so the events a dispatch *produces* cannot be
