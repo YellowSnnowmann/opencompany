@@ -185,11 +185,13 @@ way with its own module name.
 
 A new file under `tests/` is not covered until a CI job both selects it and
 enables the features its crate-level `cfg` needs (issue #475). A target missing
-either builds, runs and reports zero without failing anything. The gated `Rust
-(openhuman, tinycortex)` job runs `--tests` and then asserts a non-zero count
-per target via `scripts/ci/assert-integration-targets-run.sh`; if your target
-needs a feature set no lane builds, add the lane and run that script there too
-rather than loosening the `cfg`.
+either builds, runs and reports zero without failing anything. The `gated`
+CI lane runs `--tests` and then asserts a non-zero count per target via
+`scripts/ci/assert-integration-targets-run.sh`; if your target needs a feature
+set no lane builds, add the lane and run that script there too rather than
+loosening the `cfg`. Lanes live in `scripts/ci/lanes/lanes-plan.mjs`; how CI
+runs them (one required `PR CI Gate`, org members on the Hetzner EX63) is in
+`docs/ci.md`.
 
 A feature-gated test has the same problem one level up (issue #770). Cargo
 features are additive and every CI lane pins an explicit feature set, so a test
