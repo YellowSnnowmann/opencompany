@@ -55,8 +55,6 @@ export const HOSTED_GROUPS = [
   { group: "desktop", lanes: ["desktop"], maxParallel: 1 },
 ];
 
-const SCOPED = "scripts/ci/run-scoped-suite.sh";
-
 /**
  * Build the lane plan.
  *
@@ -267,54 +265,54 @@ export function buildPlan({ profile, areas, env = {} }) {
         {
           name: "runner",
           when: rust,
-          run: `${SCOPED} "runner" acp,runner,tinymemory runner`,
+          run: `scripts/ci/run-scoped-suite.sh "runner" acp,runner,tinymemory runner`,
         },
         // Four invocations, not one: run-scoped-suite.sh takes exactly one
         // filter (a second positional is libtest's, not a second filter).
         {
           name: "acp-server",
           when: rust,
-          run: `${SCOPED} "acp server" acp,runner,tinymemory server::acp`,
+          run: `scripts/ci/run-scoped-suite.sh "acp server" acp,runner,tinymemory server::acp`,
         },
         {
           name: "acp-run-turn",
           when: rust,
-          run: `${SCOPED} "acp run turn" acp,runner,tinymemory harness::acp::run_turn`,
+          run: `scripts/ci/run-scoped-suite.sh "acp run turn" acp,runner,tinymemory harness::acp::run_turn`,
         },
         {
           name: "acp-routes",
           when: rust,
-          run: `${SCOPED} "acp routes" acp,runner,tinymemory server::routes`,
+          run: `scripts/ci/run-scoped-suite.sh "acp routes" acp,runner,tinymemory server::routes`,
         },
         {
           name: "acp-lanes",
           when: rust,
-          run: `${SCOPED} "acp lanes" acp,runner,tinymemory harness::lanes`,
+          run: `scripts/ci/run-scoped-suite.sh "acp lanes" acp,runner,tinymemory harness::lanes`,
         },
         {
           name: "routes-no-acp",
           when: rust,
-          run: `${SCOPED} "routes no-acp" oauth,platform-jwt,documents,tinymemory console_does_not_shadow_unmatched_reserved_paths`,
+          run: `scripts/ci/run-scoped-suite.sh "routes no-acp" oauth,platform-jwt,documents,tinymemory console_does_not_shadow_unmatched_reserved_paths`,
         },
         {
           name: "chargebee",
           when: rust,
-          run: `${SCOPED} "chargebee" openhuman,chargebee,paypal,composio chargebee`,
+          run: `scripts/ci/run-scoped-suite.sh "chargebee" openhuman,chargebee,paypal,composio chargebee`,
         },
         {
           name: "finance-read-plane",
           when: rust,
-          run: `${SCOPED} "finance read plane" openhuman,chargebee,paypal,composio server::ops::finance`,
+          run: `scripts/ci/run-scoped-suite.sh "finance read plane" openhuman,chargebee,paypal,composio server::ops::finance`,
         },
         {
           name: "paypal",
           when: rust,
-          run: `${SCOPED} "paypal" openhuman,chargebee,paypal,composio paypal`,
+          run: `scripts/ci/run-scoped-suite.sh "paypal" openhuman,chargebee,paypal,composio paypal`,
         },
         {
           name: "composio",
           when: rust,
-          run: `${SCOPED} "composio" openhuman,chargebee,paypal,composio composio`,
+          run: `scripts/ci/run-scoped-suite.sh "composio" openhuman,chargebee,paypal,composio composio`,
         },
         {
           name: "integration-targets-run",
@@ -344,37 +342,37 @@ export function buildPlan({ profile, areas, env = {} }) {
         {
           name: "tool-belt-contract",
           when: rust,
-          run: `${SCOPED} "tool-belt contract" openhuman,mcp,media harness::built_in::build::tests`,
+          run: `scripts/ci/run-scoped-suite.sh "tool-belt contract" openhuman,mcp,media harness::built_in::build::tests`,
         },
         {
           name: "media-toolbelt",
           when: rust,
-          run: `${SCOPED} "media toolbelt" openhuman,mcp,media harness::built_in::toolbelt`,
+          run: `scripts/ci/run-scoped-suite.sh "media toolbelt" openhuman,mcp,media harness::built_in::toolbelt`,
         },
         {
           name: "mcp-oauth-state",
           when: rust,
-          run: `${SCOPED} "mcp oauth state" openhuman,mcp,media app::types`,
+          run: `scripts/ci/run-scoped-suite.sh "mcp oauth state" openhuman,mcp,media app::types`,
         },
         {
           name: "hive-mcp-server",
           when: rust,
-          run: `${SCOPED} "hive mcp server" openhuman,mcp,media hive::mcp_server`,
+          run: `scripts/ci/run-scoped-suite.sh "hive mcp server" openhuman,mcp,media hive::mcp_server`,
         },
         {
           name: "hive-mcp-tools",
           when: rust,
-          run: `${SCOPED} "hive mcp tools" openhuman,mcp,media hive::tools`,
+          run: `scripts/ci/run-scoped-suite.sh "hive mcp tools" openhuman,mcp,media hive::tools`,
         },
         {
           name: "tinymemory-contract",
           when: rust,
-          run: `${SCOPED} "tinymemory contract" acp,runner,tinymemory store::memory`,
+          run: `scripts/ci/run-scoped-suite.sh "tinymemory contract" acp,runner,tinymemory store::memory`,
         },
         {
           name: "tinymemory-selection",
           when: rust,
-          run: `${SCOPED} "tinymemory selection" acp,runner,tinymemory store::select`,
+          run: `scripts/ci/run-scoped-suite.sh "tinymemory selection" acp,runner,tinymemory store::select`,
         },
         {
           name: "bin-tests-tinymemory",
@@ -384,12 +382,12 @@ export function buildPlan({ profile, areas, env = {} }) {
         {
           name: "memory-provider-contract",
           when: rust,
-          run: `${SCOPED} "memory provider contract" tinymemory store::memory`,
+          run: `scripts/ci/run-scoped-suite.sh "memory provider contract" tinymemory store::memory`,
         },
         {
           name: "memory-selection",
           when: rust,
-          run: `${SCOPED} "memory selection" tinymemory store::select`,
+          run: `scripts/ci/run-scoped-suite.sh "memory selection" tinymemory store::select`,
         },
         {
           name: "tinyplace",
@@ -432,27 +430,27 @@ export function buildPlan({ profile, areas, env = {} }) {
         {
           name: "export-bundle",
           when: rust,
-          run: `${SCOPED} "export bundle" export store::export`,
+          run: `scripts/ci/run-scoped-suite.sh "export bundle" export store::export`,
         },
         {
           name: "mail-imap",
           when: rust,
-          run: `${SCOPED} "mail (imap)" imap,smtp server::ops::imap`,
+          run: `scripts/ci/run-scoped-suite.sh "mail (imap)" imap,smtp server::ops::imap`,
         },
         {
           name: "sidecar-brain",
           when: rust,
-          run: `${SCOPED} "sidecar brain" sidecar brain::sidecar`,
+          run: `scripts/ci/run-scoped-suite.sh "sidecar brain" sidecar brain::sidecar`,
         },
         {
           name: "analytics",
           when: rust,
-          run: `${SCOPED} "analytics" analytics analytics`,
+          run: `scripts/ci/run-scoped-suite.sh "analytics" analytics analytics`,
         },
         {
           name: "crash-reporting",
           when: rust,
-          run: `${SCOPED} "crash reporting" crash-reporting observability`,
+          run: `scripts/ci/run-scoped-suite.sh "crash reporting" crash-reporting observability`,
         },
         {
           name: "tui-build",

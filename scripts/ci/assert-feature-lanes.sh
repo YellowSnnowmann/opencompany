@@ -6,7 +6,7 @@
 #
 # The failure this exists to catch is not a red test. It is a feature-gated test
 # that NOTHING SELECTS. Cargo features are additive and every test lane in
-# ci.yml pins an explicit feature set, so the default fate of a gated test is
+# the CI lane plan pins an explicit feature set, so the default fate of a gated test is
 # "compiled by `Check (--all-features)`, executed by nothing" — `cargo test`
 # prints no mention of it, no lane reports zero, and a suite everybody reads as
 # coverage guards nothing. Six features had accumulated never-executed tests
@@ -28,7 +28,7 @@
 #     because a table that describes a tree that no longer exists is worse than
 #     no table);
 #   * `tested` / `partial` rows name a feature set that some `cargo test` line in
-#     ci.yml actually enables, and `partial` rows additionally name filters that
+#     the lane plan actually enables, and `partial` rows additionally name filters that
 #     appear there;
 #   * `compile-only` rows carry a reason AND have no feature-gated test anywhere
 #     under src/ or tests/. This is the load-bearing one: it is what makes
@@ -38,7 +38,7 @@
 # there. For a `partial` row it cannot prove the filters SELECT every gated test
 # the feature owns — a filter that misses one is invisible here. Two other
 # things cover that from the runtime side: the per-step count assertions in
-# ci.yml (a filter that selects nothing exits 0, which is why every lane's count
+# the lane plan (a filter that selects nothing exits 0, which is why every lane's count
 # is asserted non-zero) and scripts/ci/assert-integration-targets-run.sh. This
 # script is the STATIC half — it proves a lane was declared, not that the lane
 # is exhaustive. Keep the filters honest by hand.
@@ -302,7 +302,7 @@ while IFS='|' read -r feature status features detail; do
       #     compile-only with a reason, so `owed` cannot be used to skip the
       #     harder question of why a feature has no tests at all.
       #
-      # What it does NOT do is let a red lane sit in ci.yml. There is no lane —
+      # What it does NOT do is let a red lane sit in the lane plan. There is no lane —
       # that is the point. A lane permitted to be red is the state #428 was filed
       # about, at more expense.
       case "${detail}" in
