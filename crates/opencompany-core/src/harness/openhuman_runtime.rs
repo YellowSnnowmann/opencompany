@@ -215,14 +215,15 @@ pub fn existing() -> Option<Arc<Runtime>> {
 
 async fn build(boot: RuntimeBoot) -> crate::Result<Arc<Runtime>> {
     let boot = boot.resolved();
-    // Every tool group's schema on the wire. The runtime's default withholds
-    // each group behind OpenHuman's `use_skill` envelope (its desktop
-    // posture), which would turn a company agent's `file_read` into an
-    // unknown tool; this host routes and scopes tools itself, per agent, and
-    // wants native function calling on exactly the names the spec grants.
+    // Advertise every OpenHuman tool group except its Composio pack. The
+    // runtime's default withholds groups behind OpenHuman's `use_skill`
+    // envelope (its desktop posture), which would turn a company agent's
+    // `file_read` into an unknown tool. Composio is disabled because this host
+    // provides the same names through its own per-company tool belt; registering
+    // both sources leaves resumed session snapshots with stale declarations.
     let mut builder = Runtime::builder()
         .workspace(boot.workspace())
-        .tool_groups(openhuman_embed::ToolGroups::advertised());
+        .tool_groups(crate::harness::built_in::tool_posture::host_tool_groups());
     if let Some(transport) = crate::harness::backend_transport::ensure_installed() {
         builder = builder.backend_transport(transport);
     }

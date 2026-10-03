@@ -231,7 +231,7 @@ tinyinference = { package = "tinyinference-llm", path = "../../vendor/openhuman/
 # behind them (`openhuman::hosting`), which is what lets a company put its
 # workspace on a real hosting provider. Taken without OpenHuman's TinyBus
 # module: `tinyhosts` is linked as a library, so nothing here loads a cdylib.
-openhuman_core = { package = "openhuman", path = "../../vendor/openhuman/crates/openhuman-core", optional = true, default-features = false, features = ["skills", "mcp", "hosting"] }
+openhuman_core = { package = "openhuman", path = "../../vendor/openhuman/crates/openhuman-core", optional = true, default-features = false, features = ["skills", "mcp", "hosting", "modules"] }
 
 # The host-facing embedding facade over the same core: ONE process-wide
 # `Runtime` and one `Agent` per company agent (plan "hive-desks", Phase 2).
@@ -292,6 +292,18 @@ tinytools = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/tinytools/
 # result. An episode seat is built with a native belt, so it asks the
 # structured way; the spec path leaves this to the runtime.
 tinytools-agent = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/tinytools/crates/tinytools-agent", optional = true }
+# The filesystem tools, which OpenHuman v0.64.10 moved out of `openhuman-core`
+# into their own crate. Same vendored copy `openhuman-core` itself depends on,
+# so the belt holds one `FileReadTool` type rather than two.
+tinytools-std = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/tinytools/crates/tinytools-std", optional = true }
+tinyconnectors = { path = "../../vendor/openhuman/vendor/tinyconnectors/crates/tinyconnectors", optional = true, default-features = false }
+# The TinySearch *wire contract* only: the tool catalogue, the private
+# configuration a host delivers, and the two bus payloads. Not the `tinysearch`
+# crate itself -- the provider implementations run inside the loaded module, and
+# `search_byo` reaches them over the bus rather than linking them. This is the
+# same vendored copy `openhuman-core` compiles against, so the `SearchConfig` we
+# send and the one the module reads are the same type.
+tinysearch-bus = { path = "../../vendor/openhuman/vendor/tinysearch/crates/tinysearch-bus", optional = true }
 # The openhuman `Provider`/`Memory` traits return `anyhow::Result` and log via
 # the `log` facade; both only link under the `openhuman` feature.
 anyhow = { version = "1", optional = true }
@@ -630,7 +642,7 @@ tiny = ["tinyagents-harness", "tinyinference"]
 # Enables `tiny` so the `tinyagents` crate is in scope: the harness's inference
 # models implement its `ChatModel<()>` trait (openhuman's old `Provider` trait
 # was deleted upstream); it is the same vendored crate `openhuman_core` uses.
-openhuman = ["tiny", "dep:openhuman_core", "dep:openhuman-embed", "dep:openhuman-tinyhumans", "dep:tinyhivemind-openhuman", "dep:tinymcp", "dep:tinytools", "dep:tinytools-agent", "dep:tinyinference-core", "dep:reqwest", "dep:anyhow", "dep:log", "dep:tinyflows", "dep:regex", "dep:uuid", "dep:swc_core"]
+openhuman = ["tiny", "dep:openhuman_core", "dep:openhuman-embed", "dep:openhuman-tinyhumans", "dep:tinyhivemind-openhuman", "dep:tinymcp", "dep:tinytools", "dep:tinytools-agent", "dep:tinytools-std", "dep:tinyconnectors", "dep:tinysearch-bus", "dep:tinyinference-core", "dep:reqwest", "dep:anyhow", "dep:log", "dep:tinyflows", "dep:regex", "dep:uuid", "dep:swc_core"]
 # MCP server management and agent tools share OpenHuman's in-process registry.
 # Enabling it necessarily enables the embedded harness and OpenHuman MCP
 # domain, while the default build remains unchanged.

@@ -1871,12 +1871,28 @@ const DEFAULT_LOG_FILTER: &str =
     "error,tinyagents::observability=warn,policy::shadow_floor=info,opencompany::analytics=warn";
 
 fn main() -> Result<()> {
+    // The SSO auto-login signing secret (`OPENCOMPANY_SSO_SECRET`). Read and
+    // remove it BEFORE the Tokio runtime is created, to ensure this is a
+    // single-threaded operation. `std::env::remove_var` is not thread-safe on
+    // non-Windows platforms when other threads are running (CodeGhost21, #2537).
+    let sso_secret = std::env::var("OPENCOMPANY_SSO_SECRET")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(opencompany::ports::types::SecretValue);
+    // Scrub the secret from the environment now that it is captured. A tenant
+    // runs agents with shell/MCP tools that inherit this process's environment;
+    // the injected per-tenant SSO key must not be readable by them. AppConfig
+    // holds the only copy from here on.
+    if sso_secret.is_some() {
+        // SAFETY: this is single-threaded startup, before any thread is spawned.
+        unsafe { std::env::remove_var("OPENCOMPANY_SSO_SECRET") };
+    }
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_stack_size(WORKER_STACK_BYTES)
         .max_blocking_threads(MAX_BLOCKING_THREADS)
         .build()?
-        .block_on(async_main())
+        .block_on(async_main(sso_secret))
 }
 
 /// The filter to install, given whatever `RUST_LOG` holds.
@@ -1950,7 +1966,7 @@ fn resolve_serve_base_url(
     Ok(default_val)
 }
 
-async fn async_main() -> Result<()> {
+async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) -> Result<()> {
     // Crash reporting first, before the subscriber and before any other work.
     // The panic hook is installed inside `init`, so anything that panics ahead
     // of this panics unobserved — and the two things most likely to panic early
@@ -2168,17 +2184,6 @@ async fn async_main() -> Result<()> {
             let admin_email = std::env::var("OPENCOMPANY_ADMIN_EMAIL")
                 .ok()
                 .filter(|value| !value.trim().is_empty());
-            // The SSO auto-login signing secret (`OPENCOMPANY_SSO_SECRET`). The
-            // platform signs a short-lived, single-use token per "Open company"
-            // deep-link with it; this workload verifies it offline at
-            // `POST /api/v1/sso/redeem`. Blank or unset disables the endpoint
-            // entirely (`server::sso`), so a self-hosted `serve` exposes no SSO
-            // surface until a secret is configured — the same off-by-default
-            // shape the platform credentials take.
-            let sso_secret = std::env::var("OPENCOMPANY_SSO_SECRET")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .map(opencompany::ports::types::SecretValue);
             // Hosted-brain credential, resolved with the same precedence the
             // harness uses (`harness_inference_from_env`) so `/spec`'s
             // `cycles_available` reflects whether cognition can actually run.

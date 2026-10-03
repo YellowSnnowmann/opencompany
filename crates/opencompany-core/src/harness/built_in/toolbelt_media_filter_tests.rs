@@ -103,7 +103,9 @@ fn filter_deny_drops_mapped_but_keeps_intrinsic() {
     tools.extend(code_tools(security.clone(), ws));
     tools.extend(web_tools(security.clone(), Vec::new(), ws));
     // `file_read` has no mapped namespace → intrinsic → always kept.
-    tools.push(Box::new(oh::tools::FileReadTool::new(security)));
+    tools.push(Box::new(tinytools_std::filesystem::FileReadTool::new(
+        security,
+    )));
 
     let deny: HashSet<&'static str> = ["shell", "code", "web"].into_iter().collect();
     let kept = filter_by_capabilities(tools, &CapabilityFilter::DenyNamespaces(deny));

@@ -310,23 +310,79 @@ fn an_agent_granted_no_mcp_server_gets_no_server_family_section() {
     );
 }
 
+/// Two registrations answering to one tool name is not shadowing, it is a
+/// contradiction: the driver refuses the turn with "tool snapshot has conflicting
+/// declarations for `composio_list_toolkits`", which is how
+/// `composio-account-choice.spec.ts` caught it.
+///
+/// v0.64.10 widened the gate that registers upstream's five Composio tools —
+/// `user_is_signed_in_to_composio` kept its name and changed its body, from
+/// needing a Composio-specific backend client to needing any integration client
+/// — so they began registering on every OpenCompany instance, because the key
+/// that satisfies it is the one inference runs on. Every one of the five names it
+/// claims is a name OpenCompany serves itself.
+///
+/// The failure is attributed, not merely observed: asserting the error names the
+/// *mode* is what keeps this honest on a host that does hold Composio
+/// credentials. A bare `is_err()` would also pass on a laptop with no key, and
+/// would then be proving nothing about the withholding.
+#[cfg(feature = "composio")]
+#[test]
+fn a_company_agent_runtime_registers_no_upstream_composio_tools() {
+    use openhuman_core::config::schema::{COMPOSIO_MODE_BACKEND, COMPOSIO_MODE_DIRECT};
+
+    let mut config = openhuman_core::config::Config::default();
+    config.composio.pin_host_credential(
+        openhuman_core::config::schema::ComposioHostCredential::direct("test-host-credential"),
+    );
+    withhold_openhuman_composio(&mut config);
+
+    assert!(
+        config.composio.host_credential.is_none(),
+        "a pinned credential takes precedence over the mode and must also be removed"
+    );
+
+    assert_ne!(config.composio.mode, COMPOSIO_MODE_BACKEND);
+    assert_ne!(config.composio.mode, COMPOSIO_MODE_DIRECT);
+
+    // `ComposioRoute` holds a live client and carries no `Debug`, so the error is
+    // taken by match rather than `expect_err`.
+    let refusal =
+        match openhuman_core::integrations::composio::client::resolve_composio_route(&config) {
+            Ok(_) => panic!("the route must not resolve, or upstream's tools register beside ours"),
+            Err(refusal) => format!("{refusal:#}"),
+        };
+    assert!(
+        refusal.contains("unknown composio mode"),
+        "the route must fail *because of the mode*, on every host, credentials or \
+         not: {refusal}"
+    );
+
+    let registered = openhuman_core::integrations::composio::all_composio_agent_tools(&config);
+    assert!(
+        registered.is_empty(),
+        "upstream registered {} Composio tools: {:?}",
+        registered.len(),
+        registered
+            .iter()
+            .map(|tool| tool.name())
+            .collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn a_company_agent_config_seeds_no_openhuman_docs_server() {
     let mut config = openhuman_core::config::Config::default();
     config.mcp_client.enabled = true;
-    let seeded = |config: &openhuman_core::config::Config| {
-        openhuman_core::mcp::host::client_config(config)
-            .servers
-            .iter()
-            .any(|server| server.name == openhuman_core::mcp::host::GITBOOKS_SERVER_NAME)
-    };
-    assert!(
-        seeded(&config),
-        "the premise: OpenHuman's default config seeds its docs server"
-    );
+    config.gitbooks.enabled = true;
 
     withhold_openhuman_docs(&mut config);
 
     assert!(!config.gitbooks.enabled);
-    assert!(!seeded(&config));
+    assert!(
+        openhuman_core::mcp::host::client_config(&config)
+            .servers
+            .iter()
+            .all(|server| server.name != "gitbooks")
+    );
 }

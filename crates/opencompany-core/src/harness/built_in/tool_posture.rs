@@ -8,11 +8,10 @@
 //!
 //! **OpenCompany does its own routing.** A tool's reach is decided by
 //! [`policy::consequence`](crate::policy::consequence) and the approval gate,
-//! not by whether OpenHuman put its schema on the wire. Withholding therefore
-//! buys this host nothing and costs it the capability, which is exactly the
-//! audience `ToolGroups::advertised` names: "a host that does not pay the
-//! orchestrator's per-turn schema budget — a short-lived harness run, or an
-//! embedder doing its own routing".
+//! not by whether OpenHuman put its schema on the wire. Every pack is therefore
+//! advertised except OpenHuman's Composio pack: OpenCompany supplies its own
+//! company-scoped Composio tools, and registering both implementations leaves
+//! session snapshots with declarations that have no matching executor.
 //!
 //! # Why this exists at all
 //!
@@ -52,12 +51,71 @@
 
 use openhuman_core as oh;
 
-/// Declare this host's posture: every pack advertised.
+/// Tool names that older OpenHuman session snapshots may still declare.
+///
+/// They stay executable only as inert compatibility entries: the host's own
+/// company-scoped tools remain the only Composio implementation, and these
+/// entries are never added to a turn's visible names.
+pub(crate) const RETIRED_COMPOSIO_TOOL_NAMES: [&str; 5] = [
+    "composio_authorize",
+    "composio_execute",
+    "composio_list_connections",
+    "composio_list_toolkits",
+    "composio_list_tools",
+];
+
+pub(crate) fn retired_composio_tools() -> Vec<Box<dyn tinytools::Tool>> {
+    RETIRED_COMPOSIO_TOOL_NAMES
+        .iter()
+        .map(|name| Box::new(RetiredComposioTool(name)) as Box<dyn tinytools::Tool>)
+        .collect()
+}
+
+struct RetiredComposioTool(&'static str);
+
+#[async_trait::async_trait]
+impl tinytools::Tool for RetiredComposioTool {
+    fn name(&self) -> &str {
+        self.0
+    }
+
+    fn description(&self) -> &str {
+        "Retired OpenHuman Composio tool. Use the company-scoped Composio integration instead."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "additionalProperties": true})
+    }
+
+    async fn execute(&self, _args: serde_json::Value) -> anyhow::Result<tinytools::ToolResult> {
+        Ok(tinytools::ToolResult::error(
+            "This legacy OpenHuman Composio tool is disabled; use the company-scoped Composio integration.",
+        ))
+    }
+}
+
+/// Groups this host lets OpenHuman supply alongside its own tools.
+///
+/// OpenCompany wires Composio itself, using company-scoped credentials. The
+/// OpenHuman Composio pack has the same provider-visible names, so registering
+/// it as well can leave persisted session snapshots with declarations that no
+/// longer have an executable source. Keep every other pack advertised while
+/// turning that upstream pack off at registration time.
+pub(crate) fn host_tool_groups() -> oh::tools::toolpacks::ToolGroups {
+    oh::tools::toolpacks::ToolGroups::advertised()
+        .with("composio", oh::tools::toolpacks::GroupMode::Off)
+}
+
+/// Declare this host's posture: advertise every pack except upstream Composio.
 ///
 /// Idempotent and cheap — `set_process_default` is `OnceLock`-backed upstream
 /// and the first call wins, so every agent-build entry point calls it rather
 /// than relying on one of them running first. Ordering between them is not
 /// something this crate should have to reason about.
 pub(crate) fn declare() {
-    oh::tools::toolpacks::set_process_default(oh::tools::toolpacks::ToolGroups::advertised());
+    oh::tools::toolpacks::set_process_default(host_tool_groups());
 }
+
+#[cfg(test)]
+#[path = "tool_posture_tests.rs"]
+mod tests;

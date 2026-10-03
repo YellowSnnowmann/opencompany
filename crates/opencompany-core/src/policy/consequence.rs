@@ -390,6 +390,14 @@ const DECLARED: &[Declared] = &[
     d("add_agent", EffectGroup::Other, Reach::Nothing),
     d("create_workflow", EffectGroup::Other, Reach::Nothing),
     d("assign_task", EffectGroup::Other, Reach::Nothing),
+    // `start_task` moves a card into Working, which dispatches it. Declared here
+    // rather than left to `undeclared()`'s name heuristics, because "start" says
+    // nothing about reach and the guess would be load-bearing: this begins real
+    // work. Same class as its neighbours — it runs a turn inside this company and
+    // nothing leaves it. It is more consequential than `assign_task`, which only
+    // records ownership, and that difference is a matter for the approval policy
+    // rather than for reach.
+    d("start_task", EffectGroup::Other, Reach::Nothing),
     d("review_task", EffectGroup::Other, Reach::Nothing),
     // Issue #1861: `escalate_to_human` stages a question on this company's own
     // approval queue and nothing leaves the company — the same class as

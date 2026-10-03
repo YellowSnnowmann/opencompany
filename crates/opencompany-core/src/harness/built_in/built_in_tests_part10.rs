@@ -615,3 +615,50 @@ async fn a_paypal_grant_with_no_credential_wires_nothing_rather_than_failing() {
             .is_none()
     );
 }
+
+/// The withheld list is matched against `tool.name()`, so it must hold the tool
+/// name CONSTANTS and not literals of its own.
+///
+/// `build_episode_seat` strips a seat's belt with
+/// `retain(|tool| !EPISODE_WITHHELD_TOOLS.contains(&tool.name()))`. A literal
+/// that drifts from the tool it names fails open — the tool stays on the belt and
+/// nothing says so — which is the same half-cut failure the persona strip is
+/// written to avoid. Asserting against the constants makes a rename break here
+/// instead.
+///
+/// The two workflow verbs are on that list because both stage a
+/// `TaskOutputWorkflow` on the shared `WorkflowRefQueue` for the brain to drain
+/// into the card it holds, and no brain drains inside an episode. Left on the
+/// belt, a seat's push could land inside a concurrent pooled chat turn's
+/// `clear()`..`drain()` window and be stamped on that turn's card.
+#[test]
+fn the_withheld_list_names_tools_by_their_own_constants() {
+    use crate::harness::built_in::EPISODE_WITHHELD_TOOLS;
+    use crate::harness::orchestrator::{
+        ASSIGN_TASK_TOOL, CREATE_WORKFLOW_TOOL, REVIEW_TASK_TOOL, RUN_WORKFLOW_TOOL,
+    };
+    use crate::runtime::delegation_tools::{
+        DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL, SPAWN_TASK_TOOL,
+    };
+
+    for withheld in [
+        DELEGATE_TO_DESK_TOOL,
+        DELEGATE_TO_TEAMMATE_TOOL,
+        ASSIGN_TASK_TOOL,
+        REVIEW_TASK_TOOL,
+        CREATE_WORKFLOW_TOOL,
+        RUN_WORKFLOW_TOOL,
+    ] {
+        assert!(
+            EPISODE_WITHHELD_TOOLS.contains(&withheld),
+            "`{withheld}` must be withheld from an episode seat"
+        );
+    }
+
+    // And the one that is deliberately NOT withheld: #2546 gave `spawn_task` a
+    // per-seat drain, which is the whole reason it came off this list.
+    assert!(
+        !EPISODE_WITHHELD_TOOLS.contains(&SPAWN_TASK_TOOL),
+        "a seat opens cards with `spawn_task`; withholding it would undo #2546"
+    );
+}

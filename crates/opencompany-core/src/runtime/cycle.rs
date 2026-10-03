@@ -3584,12 +3584,24 @@ impl<'a> CycleHostImpl<'a> {
             priority: "medium".to_string(),
             assignee: parsed.assignee.unwrap_or_default(),
             updated_at_millis: now_millis(),
-            // No conversation at all (#1890 B, step 5): this tool surface never
-            // recorded the channel, so there is no thread inside one to narrow
-            // either. The desk and the thread are one value now, so "absent
-            // together" is the only state this can be in rather than an
-            // invariant a reader has to trust.
-            origin: TaskOrigin::new(None, None),
+            // The conversation this card answers back into, on the same terms
+            // the harness path already stamps it (`runtime::delegation`'s
+            // `SpawnTask` arm). Read off the cycle, which computed the channel
+            // and the thread root inside it in one pass, so the two can never
+            // describe different messages.
+            //
+            // This used to be `None, None`, justified as "this tool surface
+            // never recorded the channel". It is the surface a hosted company's
+            // orchestrator spawns every card through, and `run_task` returns
+            // early when `origin_chat_id()` is absent -- so a hosted card could
+            // never report back anywhere, while the same card opened on the
+            // harness path could. The values were in scope the whole time.
+            //
+            // `None` is still the right answer for a cycle with no conversation
+            // behind it (a scheduler tick, a dispatch): `TaskOrigin::new` maps
+            // an absent channel to an absent origin, and the card then behaves
+            // exactly as every card raised straight on the board does.
+            origin: TaskOrigin::new(self.thread_id.clone(), self.thread_parent),
             // No parent (#185), for the same reason as the harness path: this
             // is a chat-turn delegation, so no task is in scope to be the
             // parent. Lineage is set through the task API's `parentTaskId`.
@@ -3714,12 +3726,24 @@ impl<'a> CycleHostImpl<'a> {
             priority: "medium".to_string(),
             assignee: desk_id.clone(),
             updated_at_millis: now_millis(),
-            // No conversation at all (#1890 B, step 5): this tool surface never
-            // recorded the channel, so there is no thread inside one to narrow
-            // either. The desk and the thread are one value now, so "absent
-            // together" is the only state this can be in rather than an
-            // invariant a reader has to trust.
-            origin: TaskOrigin::new(None, None),
+            // The conversation this card answers back into, on the same terms
+            // the harness path already stamps it (`runtime::delegation`'s
+            // `SpawnTask` arm). Read off the cycle, which computed the channel
+            // and the thread root inside it in one pass, so the two can never
+            // describe different messages.
+            //
+            // This used to be `None, None`, justified as "this tool surface
+            // never recorded the channel". It is the surface a hosted company's
+            // orchestrator spawns every card through, and `run_task` returns
+            // early when `origin_chat_id()` is absent -- so a hosted card could
+            // never report back anywhere, while the same card opened on the
+            // harness path could. The values were in scope the whole time.
+            //
+            // `None` is still the right answer for a cycle with no conversation
+            // behind it (a scheduler tick, a dispatch): `TaskOrigin::new` maps
+            // an absent channel to an absent origin, and the card then behaves
+            // exactly as every card raised straight on the board does.
+            origin: TaskOrigin::new(self.thread_id.clone(), self.thread_parent),
             // No parent (#185), for the same reason as the harness path: this
             // is a chat-turn delegation, so no task is in scope to be the
             // parent. Lineage is set through the task API's `parentTaskId`.

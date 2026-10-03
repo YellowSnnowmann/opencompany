@@ -1,5 +1,44 @@
 use super::*;
 
+#[test]
+fn a_room_dispatch_settles_operator_steering_and_keeps_redirect_in_the_brief() {
+    let mut cancelled = card("cancelled", "ceo");
+    let (end, result) = room_outcome_after_steer(
+        &mut cancelled,
+        Some(SteerAction::Cancel),
+        TaskRunEnd::Completed,
+        "room completed".into(),
+    );
+    assert_eq!(end, TaskRunEnd::Cancelled);
+    assert_eq!(result, "cancelled while in flight");
+    settle(&mut cancelled, end, "ceo", &result);
+    assert_eq!(cancelled.column, crate::ports::tasks::COLUMN_TODO);
+    assert!(cancelled.note.as_deref().unwrap().contains(&result));
+
+    let mut paused = card("paused", "ceo");
+    let (end, result) = room_outcome_after_steer(
+        &mut paused,
+        Some(SteerAction::Pause),
+        TaskRunEnd::Completed,
+        "room completed".into(),
+    );
+    assert_eq!(end, TaskRunEnd::Paused);
+    assert!(result.contains("[paused] room completed"));
+
+    let mut redirected = card("redirected", "ceo");
+    let (end, result) = room_outcome_after_steer(
+        &mut redirected,
+        Some(SteerAction::Redirect {
+            instruction: "Use the new research scope".into(),
+        }),
+        TaskRunEnd::Completed,
+        "room completed".into(),
+    );
+    assert_eq!(end, TaskRunEnd::Paused);
+    assert!(result.contains("Use the new research scope"));
+    assert!(task_instruction(&redirected).contains("Use the new research scope"));
+}
+
 /// Issue #1846 review (Codex #3869277640) — **the regression.** A budget
 /// pause from a confined workflow-copilot turn must NOT read as the
 /// copilot's own answer.

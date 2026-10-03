@@ -270,6 +270,9 @@ jobs:
               # Same reasoning for the release-notes generator and its test,
               # which also run in `Console`.
               - 'scripts/release/**'
+              # The deploy entrypoint's blank-company branch is exercised with
+              # a stubbed host binary in the Console job.
+              - 'deploy/**'
             desktop:
               - '.github/workflows/ci.yml'
               - 'crates/opencompany-app/**'
@@ -1799,6 +1802,11 @@ jobs:
       # this step — without it a PR editing only the generator skips `Console`,
       # and the test is the one thing its own diff cannot run.
       - run: node --test scripts/release/generate-release-notes.test.mjs
+
+      # The entrypoint chooses whether the shipped host gets a company bundle;
+      # exercise the explicit unconfigured branch without building or mutating
+      # a container image.
+      - run: node --test deploy/entrypoint.test.mjs
 
       # The version bump the release workflows run, exercised on a copy of the
       # real version files — so a file growing a shape the script no longer
