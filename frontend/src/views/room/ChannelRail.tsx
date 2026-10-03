@@ -47,6 +47,13 @@ const UNREAD_IS_LOCAL = "Estimated in this browser — unread is not tracked on 
 
 const NO_MEMBERS: TeamMember[] = [];
 
+/**
+ * Every face on this rail is a filled circle, so a mascot sits on a disc the
+ * way a contact photo does in a messaging list rather than floating on the
+ * sidebar. Overrides `TeammateAvatar`'s rounded-square tile.
+ */
+const ROUND = "rounded-full bg-muted";
+
 /** The two icon buttons above the list — same size, hit area and hover. */
 const DOOR =
   "rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground";
@@ -569,7 +576,7 @@ function RowAvatar({
         surface="chrome"
         decorative
       >
-        <TeammateAvatar {...face} className="size-10 text-sm" />
+        <TeammateAvatar {...face} className={cn(ROUND, "size-10 text-sm")} />
       </AgentFace>
     ) : (
       <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -587,7 +594,7 @@ function RowAvatar({
     );
   }
   if (group.length === 1) {
-    return <TeammateAvatar {...memberFace(group[0])} className="size-10 text-sm" />;
+    return <TeammateAvatar {...memberFace(group[0])} className={cn(ROUND, "size-10 text-sm")} />;
   }
   // Two faces sit on a diagonal; a third tucks in bottom-left. Each wears a
   // ring in the sidebar's own colour so the overlap reads as a cut, not a smear.
@@ -602,7 +609,7 @@ function RowAvatar({
           <TeammateAvatar
             key={member.id}
             {...memberFace(member)}
-            className={cn("absolute size-6 text-3xs ring-2 ring-sidebar", slots[i])}
+            className={cn(ROUND, "absolute size-6 text-3xs ring-2 ring-sidebar", slots[i])}
           />
         ))
         // Lead drawn last, so it is in front.
@@ -640,7 +647,7 @@ function ChannelIcon({ channel }: { channel: Channel }) {
   if (channel.kind === "dm") {
     const face = dmFace(channel);
     return face ? (
-      <TeammateAvatar {...face} className="size-6 text-2xs" />
+      <TeammateAvatar {...face} className={cn(ROUND, "size-6 text-2xs")} />
     ) : (
       <CircleDot className="size-4 shrink-0" aria-hidden />
     );
