@@ -168,7 +168,9 @@ describe("a channel renders the whole composer", () => {
     for (const label of ["Mention someone", "Formatting"]) {
       expect(container.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
     }
-    expect(container.textContent).toContain("to send");
+    // The "Enter to send · Shift+Enter for a new line" hint was removed: it
+    // cost a row under every transcript.
+    expect(container.textContent).not.toContain("to send");
     expect(container.textContent).not.toContain("There is nothing to reply to here");
   });
 
