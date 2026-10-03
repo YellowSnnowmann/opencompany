@@ -58,6 +58,7 @@ carries a `README.md` describing what lives there, file by file.
 - `cargo run --bin opencompany`: run the CLI.
 - `cargo run --bin opencompany -- serve`: run the Axum HTTP server on `127.0.0.1:8080`.
 - `cargo run -p opencompany-tui`: run the terminal client over the default data root.
+- `scripts/dev-web.sh --no-browser`: run the console in Chrome against a fresh host, signed in, for a CDP client (see below).
 - `./scripts/dump-prompt.sh --company companies/<name>`: print the system prompt each agent in that bundle is built with (`docs/spec/runtime/agents.md`).
 - `git submodule update --init vendor/openhuman`: initialize OpenHuman.
 - `scripts/ci/init-vendored-submodules.sh`: initialize its vendored crates.
@@ -101,6 +102,45 @@ and moved it by nothing. Full evidence is in `.cargo/config.toml`.
 If you change the value, say what you measured; an unexplained ceiling is the
 ratchet #895 exists to complain about. Export `RUST_MIN_STACK` yourself to
 override it — the file does not use `force`.
+
+### Debugging the console in a real browser (Chrome DevTools MCP)
+
+The desktop shell renders through Tauri's default Wry webview (WKWebView /
+WebView2 / WebKitGTK), which does not speak CDP, so no DevTools client can
+attach to the desktop window. Run the same console in Chrome instead:
+
+- `scripts/dev-web.sh --no-browser` (or `pnpm dev:web -- --no-browser` from
+  `frontend/`) builds `opencompany`, serves `companies/e2e_harness` on a
+  loopback port with its own data root under `target/dev-web/<company>`, starts
+  Vite proxying to it, and prints a ready URL: `http://localhost:<vite>/?code=…`.
+  Open it with the `chrome-devtools` MCP (`new_page` / `navigate_page`) and the
+  console comes up signed in as an admin, with nothing pasted.
+- The sign-in uses no dev-only route. The host starts with
+  `OPENCOMPANY_ADMIN_EMAIL=dev@opencompany.localhost`, and a loopback host with
+  no mail transport echoes the magic-link code from `POST …/auth/request` as
+  `dev_code`. The URL is the console's ordinary magic-link landing. A code is
+  single-use and lasts 15 minutes. The MCP browser runs `--isolated`, so each
+  new MCP session needs a new link: `scripts/dev-web.sh --link` prints one for
+  the running stack without restarting it.
+- `--company <name|dir>` serves another bundle, `--fresh` wipes that company's
+  dev data root first, and `--host-url <url>` skips the host and signs in
+  against one you already run. `--host-url` needs `OC_DEV_EMAIL` set to an address
+  that host accepts, and the host must be on a loopback bind with no mail.
+- Busy ports are fine: the host (default `8090`) and Vite (default `5180`, kept
+  off the desktop shell's `5173`) each move to the next free port, and the
+  printed URL always has the real one.
+- Inspect with `take_snapshot`, `list_console_messages`,
+  `list_network_requests` (check the `/api/v1/...` calls), `evaluate_script`,
+  and `take_screenshot`. The `playwright` MCP in `.mcp.json` drives the same
+  URL if you prefer its tools.
+- The `chrome-devtools` MCP runs Playwright's Chromium through
+  `frontend/test/tools/chrome-devtools-mcp.sh`, so it needs `frontend/node_modules`
+  and `npx playwright install chromium`. If the MCP reports "Connection
+  closed", run that script by hand. It prints the reason, which the MCP client
+  does not show.
+- Env: `OC_DEV_PORT`, `OC_DEV_HOST_PORT`, `OC_DEV_EMAIL`, `OC_DEV_FEATURES`
+  (cargo features for the host build, e.g. `openhuman,mcp` for real agents),
+  `OC_DEV_SKIP_BUILD=1`, and `OPENCOMPANY_DATA_DIR`.
 
 ## Coding Style & Naming Conventions
 

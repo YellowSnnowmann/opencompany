@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:web": "../scripts/dev-web.sh",
     "build": "tsc -b && vite build",
     "build:pages-sdk": "tsc -p tsconfig.pages-sdk.json && vite build --config pages-sdk/vite.config.ts && vite build --config pages-sdk/vite.react.config.ts",
     "preview": "vite preview",
