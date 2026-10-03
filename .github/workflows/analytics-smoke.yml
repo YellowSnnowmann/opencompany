@@ -14,7 +14,7 @@
 # secret exists the scheduled run is red, which is the correct signal.
 #
 # Every `uses:` is a full commit SHA with the resolved version in a trailing
-# comment (issue #590, enforced by the `Actions pinned` job in ci.yml).
+# comment (issue #590, enforced by scripts/ci/assert-actions-pinned.sh).
 name: Analytics smoke
 
 on:

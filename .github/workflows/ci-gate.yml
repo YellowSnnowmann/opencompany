@@ -1,0 +1,61 @@
+---
+# PR CI Gate: the single check the branch ruleset requires.
+#
+# CI Fast (EX63, org members) and CI Fast (hosted, everyone and everything
+# else) can both run on a commit. This workflow posts one commit status,
+# "PR CI Gate", on it: success as soon as either flow's `Lanes / Gate` job
+# passes, pending while either is still running, failure once both have
+# finished without a pass. A skipped Gate is never a pass. On success it
+# cancels the GitHub-hosted run still working on that commit. The decision is
+# scripts/ci/ci-gate.mjs; docs/ci.md has the whole picture.
+#
+# The name is the one the old monolithic ci.yml's aggregate job had, so the
+# ruleset needed no edit when the lanes moved. It is posted on merge-queue
+# commits too.
+#
+# Why workflow_run: it runs from the default branch with a write token for
+# every PR, forks included, and never runs PR code. The checkout below is the
+# default branch (the event's own ref), sparse to the one script. Like
+# pull_request_target, it only exists once this file is on the default branch.
+name: CI Gate
+
+on:
+  workflow_run:
+    workflows: ["CI Fast", "CI Fast (hosted)"]
+    types: [requested, completed]
+
+permissions:
+  actions: write # cancel the superseded GitHub-hosted run
+  contents: read
+  statuses: write # post the "PR CI Gate" commit status
+
+# One evaluation per commit at a time. Every run re-reads the live state, so a
+# newer queued run replacing an older queued one loses nothing.
+concurrency:
+  group: ci-gate-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Update PR CI Gate status
+    # Pushes to main and dispatches gate nothing.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' ||
+      github.event.workflow_run.event == 'pull_request_target' ||
+      github.event.workflow_run.event == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the gate script (default branch)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci/ci-gate.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Decide and post PR CI Gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: node scripts/ci/ci-gate.mjs

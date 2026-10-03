@@ -62,7 +62,7 @@ path = "src/main.rs"
 # shipped application: `DESKTOP_RELEASE_FEATURES` in
 # `.github/workflows/build-desktop.yml` passes
 # `opencompany-core/acp,opencompany-core/composio` on the `tauri build` command line, and
-# `ci.yml`'s `Desktop` lane compiles and tests that same string. Both are
+# The CI lane plan's desktop lane compiles and tests that same string. Both are
 # `= ["openhuman"]` in the root manifest — pure `cfg` switches that pull no
 # `dep:` entry, and `mcp` above already enables `openhuman` — so turning them
 # on adds no package and leaves this crate's `Cargo.lock` byte-identical, and
@@ -90,7 +90,7 @@ path = "src/main.rs"
 # #1823 closed that half, and closed it better than a copy would have: the
 # script *parses* `DESKTOP_RELEASE_FEATURES` out of the release workflow, so the
 # launcher cannot drift from what ships. `scripts/ci/assert-desktop-features.sh`
-# guards the copies that remain — the two `ci.yml` steps, `tauri:build` and the
+# guards the copies that remain — the two desktop-lane steps in `scripts/ci/lanes/lanes-plan.mjs`, `tauri:build` and the
 # command `docs/spec/runtime/desktop.md` documents — and asserts the launcher
 # still derives rather than duplicates.
 #

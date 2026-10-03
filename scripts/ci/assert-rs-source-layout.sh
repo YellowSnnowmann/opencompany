@@ -34,7 +34,7 @@
 # USAGE: assert-rs-source-layout.sh [tests|lines|all]   (default: all)
 #
 # The two halves landed in separate PRs — the test-file convention first, the
-# line cap once the splits that satisfy it had merged — so `ci.yml` names the
+# line cap once the splits that satisfy it had merged — so the CI lane plan names the
 # half it is entitled to enforce. Once both are green in CI the argument is
 # `all`; the modes stay because a local run of one half is useful on its own.
 set -uo pipefail

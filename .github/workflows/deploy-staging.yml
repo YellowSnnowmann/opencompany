@@ -34,7 +34,7 @@
 #
 # Issue #590. Every `uses:` below is a full commit SHA with the resolved version
 # in a trailing comment — `actions/*` included, no exemptions. The rationale is
-# at the top of `ci.yml`; the `Actions pinned` job there enforces it. Bumps
+# at the top of `ci-lanes.yml`; scripts/ci/assert-actions-pinned.sh enforces it. Bumps
 # arrive as Dependabot PRs; re-resolve any hand edit with
 # `gh api repos/<owner>/<action>/commits/<tag> --jq .sha`.
 name: Publish staging tenant image
@@ -148,7 +148,7 @@ jobs:
       # `tinyhivemind-hive` is an unconditional path dependency in `Cargo.toml`
       # (`vendor/tinyhivemind/crates/tinyhivemind-hive`), so Cargo must read its
       # manifest to resolve the dependency graph on every build, feature-gated
-      # or not. `ci.yml`'s jobs get this for free from `submodules: true` on
+      # or not. The CI lane jobs get this for free from `submodules: true` on
       # their checkout; this job uses `submodules: false` and fetches
       # everything it needs explicitly, so it must fetch this one too.
       - name: Fetch build vendor submodules

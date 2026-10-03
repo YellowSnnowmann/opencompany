@@ -1,0 +1,77 @@
+---
+# CI Fast (hosted): the lane flow (ci-lanes.yml) on GitHub-hosted runners, for
+# every PR ci-fast.yml did not take onto the EX63 (outsiders, or everyone while
+# the CI_EX63 switch is off), and for every commit that is not a PR at all:
+# merge-queue entries, pushes to main and release, and manual dispatches. The
+# EX63 never runs this code: its runner group admits only ci-fast.yml and
+# ci-lanes.yml at refs/heads/main.
+#
+# Triggers. `push` is scoped to main and release: unscoped, it fired alongside
+# `pull_request` on every push to a PR branch and ran everything twice in two
+# concurrency groups that never cancelled each other. Pushes to main are the
+# post-merge verification, and they are also what warms the Actions cache every
+# PR restores from (a PR's own cache entries are visible to that PR only).
+# `merge_group` (issue #793) validates the synthetic commit a merge queue would
+# land; `workflow_dispatch` exists for promote-main-to-release.yml, whose
+# GITHUB_TOKEN-made merge commit fires no `push` workflow.
+name: CI Fast (hosted)
+
+on:
+  push:
+    branches: [main, release]
+  pull_request:
+    branches: [main, release]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch: {}
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+# Issue #770. Cancel superseded runs on PR refs, never on the default branch:
+# there a new merge makes the previous run's answer the ONLY evidence that the
+# merge before it was safe. (Of fourteen main runs before this rule, twelve had
+# been cancelled by the next merge.) `format(...)` rather than a literal
+# 'refs/heads/main', so a default-branch rename cannot silently revert it.
+concurrency:
+  group: ci-fast-hosted-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
+
+jobs:
+  route:
+    name: Route (outsiders → GitHub-hosted)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    outputs:
+      outsider: ${{ steps.route.outputs.outsider }}
+    steps:
+      - name: Checkout the routing script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci/ci-fast-route.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Follow ci-fast.yml's routing decision
+        id: route
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          ACTOR: ${{ github.actor }}
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+        run: bash scripts/ci/ci-fast-route.sh
+
+  lanes:
+    name: Lanes
+    needs: route
+    if: needs.route.outputs.outsider == 'true'
+    uses: ./.github/workflows/ci-lanes.yml
+    with:
+      profile: hosted
+      ref: ""

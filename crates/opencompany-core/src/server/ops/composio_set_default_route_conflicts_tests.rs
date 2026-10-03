@@ -14,7 +14,7 @@ use serde_json::json;
 /// feature on, `an_admin_is_unaffected` dials `api.tinyhumans.ai` for real
 /// (issue #801). One filter on this module runs every gated test here and
 /// none of that, and a gated test added later is picked up by joining the
-/// module rather than by remembering to edit `ci.yml`.
+/// module rather than by remembering to edit the CI lane plan.
 #[cfg(feature = "composio")]
 mod gated_tests {
     use super::*;

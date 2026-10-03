@@ -31,7 +31,7 @@
 #                   image is built.
 #
 # There is deliberately NO separate build-and-test job. Everything on `release`
-# arrived through a PR that ran `ci.yml`, and the promotion dispatches `ci.yml`
+# arrived through a PR that ran the CI lanes, and the promotion runs `ci-fast-hosted.yml`
 # on the snapshot; the desktop and Docker builds below compile the tag with
 # `--locked` anyway. A third compile of the same tree added ~30 minutes to
 # every cut and found nothing the other two would not.
@@ -57,9 +57,9 @@
 # is a rehearsal; the version still moves.
 #
 # Issue #590. Every `uses:` below is a full commit SHA with the resolved version
-# in a trailing comment; the rationale is at the top of `ci.yml`. Local
+# in a trailing comment; the rationale is at the top of `ci-lanes.yml`. Local
 # reusable workflows (`./.github/workflows/...`) carry no SHA because they run
-# at this workflow's own commit — the pin check in `ci.yml` exempts them. It
+# at this workflow's own commit — the pin check (`scripts/ci/assert-actions-pinned.sh`) exempts them. It
 # matters most here: this workflow holds `contents: write` and publishes what
 # users download.
 name: Release Production
@@ -186,7 +186,7 @@ jobs:
 
       # `[skip ci]` does real work here: a push made as the App DOES fire `push`
       # workflows (unlike one made with GITHUB_TOKEN), and the commit changes
-      # version numbers only, so there is nothing for `ci.yml` to learn.
+      # version numbers only, so there is nothing for the CI lanes to learn.
       #
       # The files staged are the ones the bump script reports it wrote, so the
       # commit can never miss a file the registry gained. Branch and tag go in
