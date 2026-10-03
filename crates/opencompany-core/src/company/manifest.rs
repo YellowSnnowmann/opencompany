@@ -1411,14 +1411,6 @@ fn ledger_grant_problems(
     problems
 }
 
-/// Parses a decimal USD string, rejecting anything non-numeric or negative.
-fn parse_usd(value: &str) -> Option<f64> {
-    match value.trim().parse::<f64>() {
-        Ok(amount) if amount >= 0.0 && amount.is_finite() => Some(amount),
-        _ => None,
-    }
-}
-
 /// Builds a "must be one of … — you wrote `x`" message.
 fn one_of(field: &str, allowed: &[&str], actual: &str) -> String {
     format!(
