@@ -117,7 +117,7 @@ pub fn verify_hello(hello: &RunnerHello, now: i64) -> Result<()> {
         hello.timestamp,
         &hello.capabilities_hash,
     );
-    crate::economy::signer::verify_b58(&hello.runner_id, &runner_bytes, &hello.signature)
+    crate::crypto::ed25519::verify_b58(&hello.runner_id, &runner_bytes, &hello.signature)
         .map_err(|_| OpenCompanyError::InvalidRequest("runner signature does not verify".into()))?;
 
     // Authentic is not the same as authorised. A runner that passes the check
@@ -127,7 +127,7 @@ pub fn verify_hello(hello: &RunnerHello, now: i64) -> Result<()> {
         &hello.runner_id,
         &hello.attestation.conditions,
     );
-    crate::economy::signer::verify_b58(
+    crate::crypto::ed25519::verify_b58(
         &hello.attestation.owner,
         &owner_bytes,
         &hello.attestation.signature,

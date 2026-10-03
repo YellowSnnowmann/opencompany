@@ -31,6 +31,9 @@ mod build_stamp;
 #[cfg(feature = "chargebee")]
 pub mod chargebee;
 pub mod company;
+/// Offline cryptographic primitives: base58 Ed25519 signature verification
+/// shared by wallet sign-in and the runner handshake.
+pub mod crypto;
 /// Local-only runtime host used by the packaged Tauri desktop application.
 /// It embeds the existing operator API and ships the curated company presets;
 /// it deliberately does not pull OpenHuman's local-AI configuration into the
