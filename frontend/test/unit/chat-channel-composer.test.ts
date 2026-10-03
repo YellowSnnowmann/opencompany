@@ -165,8 +165,11 @@ describe("a channel renders the whole composer", () => {
     // `product-scope-hidden-surfaces.test.ts` uses: a hidden surface coming
     // back by accident is the failure, and it looks like a feature.
     expect(container.querySelector('[aria-label="What this message is for"]')).toBeNull();
+    // One line: the `+` menu (attach, mention) beside the input and Send. The
+    // formatting toggle and the separate `@` glyph were folded away.
+    expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
     for (const label of ["Mention someone", "Formatting"]) {
-      expect(container.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
+      expect(container.querySelector(`[aria-label="${label}"]`)).toBeNull();
     }
     // The "Enter to send · Shift+Enter for a new line" hint was removed: it
     // cost a row under every transcript.

@@ -41,14 +41,19 @@ describe("chat only renders controls it can perform (issue #1336)", () => {
       }),
     );
 
-    expect(action("Mention someone")).not.toBeNull();
-    expect(action("Formatting")).not.toBeNull();
-    expect(action("Attach a file")).toBeNull();
+    // The one-line composer: a `+` menu, the input, Send.
+    expect(action("Add to message")).not.toBeNull();
+    expect(action("Send")).not.toBeNull();
+    act(() => (action("Add to message") as HTMLButtonElement).click());
+    const items = [...document.querySelectorAll('[role="menuitem"]')].map((el) =>
+      el.textContent?.trim(),
+    );
+    // Mentioning is always on offer; attaching only with an upload handler,
+    // which this composer was not given.
+    expect(items).toEqual(["Mention someone"]);
+    // No formatting row and no emoji: neither has a control here at all.
+    expect(action("Formatting")).toBeNull();
+    expect(action("Bold")).toBeNull();
     expect(action("Add an emoji")).toBeNull();
-
-    act(() => (action("Formatting") as HTMLButtonElement).click());
-    expect(action("Bold")).not.toBeNull();
-    expect(action("Bulleted list")).toBeNull();
-    expect(action("Link")).toBeNull();
   });
 });

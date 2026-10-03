@@ -138,21 +138,22 @@ describe("every content rail collapses to chips below lg (issue #1383)", () => {
 describe("composer keeps Send in-flow in a narrow pane (issue #1383)", () => {
   const composer = read("views/room/MessageComposer.tsx");
 
-  it("lets the action row wrap instead of overflowing", () => {
-    expect(composer).toContain('className="flex flex-wrap items-center gap-0.5 px-2 pb-1.5"');
-    // Regression guard: the non-wrapping row pushed Send off-screen.
-    expect(composer).not.toContain('className="flex items-center gap-0.5 px-2 pb-1.5"');
+  it("keeps the one-line row shrinkable around a fixed Send", () => {
+    // The composer is one row now: `+`, the input, Send. The input is the
+    // row's only elastic member (`flex-1`) and Send never shrinks, so a narrow
+    // pane squeezes the text field, not the button.
+    expect(composer).toContain('<div className="flex items-end gap-1.5 p-1.5">');
+    expect(composer).toContain("max-h-48 min-h-9 flex-1 resize-none");
   });
 
-  it("keeps Send in normal flow (ml-auto), never absolutely positioned", () => {
+  it("keeps Send in normal flow, never absolutely positioned", () => {
     // Anchor on the Send button and read the className just above its
-    // `aria-label`: it must right-align with `ml-auto` and carry no out-of-flow
-    // escape. If Send were pulled from the flow it could clip again exactly the
-    // way #1383 describes.
+    // `aria-label`: no out-of-flow escape. If Send were pulled from the flow it
+    // could clip again exactly the way #1383 describes.
     const idx = composer.indexOf('aria-label="Send"');
     expect(idx).toBeGreaterThan(-1);
     const sendButton = composer.slice(Math.max(0, idx - 300), idx);
-    expect(sendButton).toContain("ml-auto");
+    expect(sendButton).toContain("shrink-0");
     expect(sendButton).not.toMatch(/\babsolute\b|\bfixed\b/);
   });
 });
