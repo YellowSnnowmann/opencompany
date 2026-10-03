@@ -996,6 +996,7 @@ pub fn media_tools(backend: &MediaBackend, workspace: &Path) -> Vec<Box<dyn Tool
         generators,
         workspace,
         workspace,
+        workspace,
         WaitPolicy::new(
             std::time::Duration::from_secs(5),
             std::time::Duration::from_secs(600),
