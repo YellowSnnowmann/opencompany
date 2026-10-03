@@ -458,7 +458,7 @@ function ChannelRow({
   );
 
   const busyName = busy && !isDm ? members.find((m) => m.id === busy.agentId)?.name : undefined;
-  const runningStep = busy ? steps.findLast((step) => step.status === "running") : undefined;
+  const runningStep = busy ? [...steps].reverse().find((step) => step.status === "running") : undefined;
   const activity = busy
     ? [busyName?.split(/\s+/)[0], runningStep?.label ?? agentPresenceLabel(busy.state)]
         .filter(Boolean)
