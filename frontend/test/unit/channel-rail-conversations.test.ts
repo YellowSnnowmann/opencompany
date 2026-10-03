@@ -12,8 +12,7 @@ import { ChannelRail } from "@/views/room/ChannelRail";
 import type { Channel, ChannelSection } from "@/views/room/model";
 
 /**
- * The channel list is ONE flat list, with no caption and no doors
- * on the same row.
+ * The channel list is ONE flat list, with no caption and no doors.
  *
  * Channels and Direct messages used to be two captioned, collapsible sections
  * with a door each. They are merged: no headings, no folds, channels first and
