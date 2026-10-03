@@ -215,6 +215,9 @@ async fn console_does_not_shadow_unmatched_reserved_paths() {
     // which depends on whether a route is mounted at all.
     for path in [
         "/api/v1/does-not-exist",
+        // The retired tiny.place surfaces: no route serves them any more, and
+        // a peer still probing one must see that rather than a 200 shell.
+        "/a2a/acme",
         "/.well-known/agent-card.json",
         "/companies/acme/.well-known/agent-card.json",
     ] {
