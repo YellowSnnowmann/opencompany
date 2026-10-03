@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { CircleDot, Hash, Lock } from "lucide-react";
+import { CircleDot, type LucideIcon } from "lucide-react";
 
 import type { ApprovalSummary, CognitionState, DecideApproval, TurnStep, Verdict } from "@/api/types";
 import type { TaskStatus } from "@/api/tasks";
@@ -556,11 +556,10 @@ function IntroMark({ channel }: { channel: Channel }) {
 }
 
 /**
- * A channel's kind on a tile, matching the treatment `ActionCard` gives its own
- * icon — `--surface-icon`, the rung the brand guide names for an icon ground —
- * so the two blocks on an empty channel read as one system rather than two.
+ * A glyph on a tile, on `--surface-icon` — the rung the brand guide names for
+ * an icon ground. Only a DM with no roster entry draws one now.
  */
-function MarkTile({ icon: Icon, className }: { icon: typeof Hash; className?: string }) {
+function MarkTile({ icon: Icon, className }: { icon: LucideIcon; className?: string }) {
   return (
     <span
       className={cn(
