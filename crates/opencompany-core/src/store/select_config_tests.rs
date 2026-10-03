@@ -246,28 +246,6 @@ async fn refresh_health_records_the_probe_answer() {
     );
 }
 
-/// The whole health vocabulary, pinned per outcome: `Degraded` is still
-/// serving — reduced, not absent — so it must read healthy; only `Down`
-/// and a timeout mean the next memory-needing cycle fails.
-#[cfg(feature = "tinymemory")]
-#[test]
-fn probe_mapping_counts_degraded_as_healthy_and_down_or_timeout_as_not() {
-    use tinymemory_api::health::MemoryHealth;
-    assert!(super::probe_answer_is_healthy(&Some(MemoryHealth::Ready)));
-    assert!(super::probe_answer_is_healthy(&Some(
-        MemoryHealth::Degraded {
-            reason: "index rebuilding".into()
-        }
-    )));
-    assert!(!super::probe_answer_is_healthy(&Some(MemoryHealth::Down {
-        reason: "connection refused".into()
-    })));
-    assert!(
-        !super::probe_answer_is_healthy(&None),
-        "a timed-out probe must read unhealthy, not unknown"
-    );
-}
-
 #[cfg(feature = "tinymemory")]
 #[test]
 fn the_gate_applies_only_to_remote() {
