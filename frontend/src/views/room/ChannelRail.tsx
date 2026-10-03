@@ -18,6 +18,7 @@ import { useBusiestPresence, useLiveSteps, useTranscript } from "@/room/store";
 import {
   channelMembers,
   channelSubtitle,
+  channelTitle,
   dmFace,
   dmThreadId,
   type Channel,
@@ -523,15 +524,14 @@ function RowAvatar({
 }
 
 /**
- * The name on a row. A desk channel goes by its desk name ("Engineering")
- * rather than its slug, since the row no longer wears a `#`; `#general` keeps
- * its `#` because its `voice` is whoever answers there (the orchestrator), and
- * titling the whole company's line with one agent's name misnames it.
+ * The name on a row: a DM is the teammate's name, and every channel is its
+ * `#slug` — `#general`, `#engineering`, `#product-design` — the same title the
+ * channel header and the composer's placeholder use. Desk channels briefly
+ * showed their desk name ("Engineering") while `#general` kept its hash, which
+ * put two naming schemes in one list.
  */
 function rowTitle(channel: Channel): string {
-  if (channel.kind === "dm") return channel.name;
-  if (channel.mutable === false) return `#${channel.name}`;
-  return channel.voice ?? channel.name;
+  return channelTitle(channel);
 }
 
 function memberFace(m: TeamMember) {
