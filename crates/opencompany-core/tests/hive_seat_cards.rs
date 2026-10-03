@@ -555,7 +555,7 @@ async fn start_task_dispatches_a_desk_card_through_the_live_room_path() {
         let (status, body) = room.get(&format!("/tasks/{id}")).await;
         assert_eq!(status, 200, "{body}");
         let finished = body["runs"].as_array().is_some_and(|runs| !runs.is_empty())
-            && body["task"]["column"] != "in_progress";
+            && body["task"]["stage"] != "in_progress";
         if finished {
             break body;
         }
