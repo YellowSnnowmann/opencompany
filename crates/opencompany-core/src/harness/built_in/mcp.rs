@@ -523,8 +523,9 @@ impl Tool for OcMcpCallTool {
                 // A successful response can still reflect the server's own
                 // credential (an echoed header, a URL with its query-string
                 // key); scrub it the same way a failure is scrubbed.
-                let mut result = tinymcp::tools::SecretScrubber::for_server(&self.registry, &server)
-                    .scrub_result(result);
+                let mut result =
+                    tinymcp::tools::SecretScrubber::for_server(&self.registry, &server)
+                        .scrub_result(result);
                 if options.prefer_markdown && result.markdown_formatted.is_none() {
                     result.markdown_formatted = Some(result.output());
                 }

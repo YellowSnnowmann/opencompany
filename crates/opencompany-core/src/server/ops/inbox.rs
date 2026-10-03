@@ -202,4 +202,3 @@ async fn ingest_single(State(state): State<AppState>, headers: HeaderMap, raw: B
         Err(err) => err.into_response(),
     }
 }
-

@@ -419,8 +419,14 @@ async fn oc_call_tool_scrubs_a_credential_reflected_in_a_successful_result() {
         .expect("mcp_call_tool");
     assert!(!result.is_error, "the call succeeded");
     let out = serde_json::to_string(&result).unwrap();
-    assert!(out.contains("ok — you sent"), "the result still carries the reply: {out}");
-    assert!(!out.contains(CANARY), "a successful result leaked the credential: {out}");
+    assert!(
+        out.contains("ok — you sent"),
+        "the result still carries the reply: {out}"
+    );
+    assert!(
+        !out.contains(CANARY),
+        "a successful result leaked the credential: {out}"
+    );
 }
 
 /// A completed MCP call is counted, and a failed one is not (issue #698).
