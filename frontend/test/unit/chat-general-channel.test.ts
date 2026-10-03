@@ -1,12 +1,8 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { OpenCompanyClient } from "@/api/client";
 import type { DeskDto, NotificationDto, ReadMarker } from "@/api/types";
-import { ConnectionScopeProvider } from "@/connections/ConnectionContext";
 import { GENERAL_CHANNEL_ID, isGeneralChannel, migrateLegacyGeneralId } from "@/lib/chat";
 import { defaultDesks, isGeneralDesk, type Desk } from "@/lib/desks";
 import { readLastChannel, writeLastChannel } from "@/lib/last-channel";
@@ -19,7 +15,6 @@ import {
   deskFromDto,
   dmThreadId,
 } from "@/views/room/model";
-import { RoomView } from "@/views/RoomView";
 
 /**
  * `#general` is a real channel: the host lists it first in `GET .../desks` as

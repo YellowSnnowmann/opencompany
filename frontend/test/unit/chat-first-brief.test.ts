@@ -18,13 +18,6 @@ import type { Channel } from "@/views/room/model";
  * where the copy survives but the affordance no longer does anything.
  */
 
-const CHANNEL: Channel = {
-  id: "general",
-  name: "general",
-  kind: "channel",
-  purpose: "",
-};
-
 let container: HTMLDivElement;
 let root: Root;
 
