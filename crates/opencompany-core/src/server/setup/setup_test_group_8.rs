@@ -12,7 +12,7 @@ async fn a_length_stopped_provider_reply_is_reported_to_setup_as_not_designable(
     let home = home();
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/chat/completions"))
+        .and(path("/v1/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "choices": [{
                 "finish_reason": "length",
