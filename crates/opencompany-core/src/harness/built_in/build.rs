@@ -131,6 +131,60 @@ use crate::ports::skills_state::SkillState;
 use crate::ports::types::CompanyId;
 use crate::runtime::tools::{NAMESPACE_SEPARATORS, extends_on_boundary};
 
+/// Episode seats cannot advertise or call tools whose work only the company
+/// harness can drain after the episode finishes. The static agent scope still
+/// contains those tools for ordinary turns, so the per-turn host policy must
+/// refuse them while preserving the company's policy for every other call.
+struct EpisodeSeatToolPolicy {
+    company: Option<Arc<dyn oh::agent::tool_policy::ToolPolicy>>,
+    episode_tools: std::collections::HashSet<String>,
+    allowed_tools: Option<std::collections::HashSet<String>>,
+}
+
+#[async_trait::async_trait]
+impl oh::agent::tool_policy::ToolPolicy for EpisodeSeatToolPolicy {
+    fn name(&self) -> &str {
+        "opencompany_episode_seat"
+    }
+
+    async fn check(
+        &self,
+        request: &oh::agent::tool_policy::ToolPolicyRequest,
+    ) -> oh::agent::tool_policy::ToolPolicyDecision {
+        if self
+            .allowed_tools
+            .as_ref()
+            .is_some_and(|allowed| !allowed.contains(&request.tool_name))
+        {
+            return oh::agent::tool_policy::ToolPolicyDecision::deny(
+                "this tool is unavailable on the narrowed episode turn",
+            );
+        }
+
+        let withheld = crate::harness::built_in::EPISODE_WITHHELD_TOOLS
+            .contains(&request.tool_name.as_str())
+            || request.tool_name == crate::hive::tools::READ_TOOL;
+        if withheld {
+            return oh::agent::tool_policy::ToolPolicyDecision::deny(
+                "this tool is unavailable while participating in an episode",
+            );
+        }
+
+        if self.episode_tools.contains(&request.tool_name) {
+            return oh::agent::tool_policy::ToolPolicyDecision::Allow;
+        }
+
+        match &self.company {
+            Some(company) => {
+                oh::agent::tool_policy::ToolPolicy::check(company.as_ref(), request).await
+            }
+            None => oh::agent::tool_policy::ToolPolicyDecision::deny(
+                "this tool is not part of the episode seat's borrowed belt",
+            ),
+        }
+    }
+}
+
 /// The per-tool-result byte budget every OpenCompany agent runs under.
 ///
 /// The harness cuts **every** tool result to this many bytes on its way into
@@ -1638,6 +1692,7 @@ pub fn agent_spec_for(
     // an episode seat answers with, and any server an operator connected to
     // this company. A company with neither carries no bridge tools at all.
     let tool_names = scope_tool_names(blueprint, belt, mcp.is_some());
+    let turn_scope_names = tool_names.clone();
     let mut system_prompt = blueprint.system_prompt.clone();
     if let Some(mcp) = mcp {
         system_prompt.push_str(&opencompany_mcp_brief(&mcp.allow_tools));
@@ -1713,6 +1768,7 @@ pub fn agent_spec_for(
                 let belt = openhuman_embed::HostTurnTools {
                     tools,
                     visible,
+                    withheld: std::collections::HashSet::new(),
                     policy: None,
                 };
                 return match &gate {
@@ -1730,14 +1786,19 @@ pub fn agent_spec_for(
             // workflow verb can leak back in through the loan. The persona has
             // their prose cut to match (`seat_persona`), so the seat is neither
             // told about them nor handed them.
-            let episode_withheld = |name: &str| {
-                crate::harness::built_in::EPISODE_WITHHELD_TOOLS.contains(&name)
-                    || name == crate::hive::tools::READ_TOOL
-            };
+            let withheld: std::collections::HashSet<String> = crate::harness::built_in::
+                EPISODE_WITHHELD_TOOLS
+                .iter()
+                .map(|name| (*name).to_owned())
+                .chain(std::iter::once(crate::hive::tools::READ_TOOL.to_owned()))
+                .collect();
+            let episode_withheld = |name: &str| withheld.contains(name);
             tools.retain(|tool| {
                 !episode_withheld(tool.name())
             });
             let episode = loan.source.belt();
+            let episode_names: std::collections::HashSet<String> =
+                episode.names().iter().cloned().collect();
             // **`broadcast` is withheld in two places.**
             //
             // In an operator's direct line there is no room to broadcast to:
@@ -1822,25 +1883,38 @@ pub fn agent_spec_for(
             //
             // An empty narrowing never reaches here (`narrowed_to` filters it):
             // a belt of nothing refuses the call outright.
-            if let Some(only) = seating.narrowed_to(turn.session_id()) {
+            let allowed_tools = seating.narrowed_to(turn.session_id());
+            if let Some(only) = &allowed_tools {
                 tools.retain(|tool| only.iter().any(|name| name == tool.name()));
                 visible.retain(|name| only.contains(name));
+                withheld.extend(
+                    turn_scope_names
+                        .iter()
+                        .filter(|name| !only.contains(*name))
+                        .cloned(),
+                );
             }
-            // **The gate is the episode's, over this company's.**
+            // **The seat gate narrows both visibility and execution.**
             //
-            // `with_policy` *replaces* the session's policy rather than
-            // sitting in front of it, so composition is ours to do:
-            // `admit` answers for the episode's own names and defers every
-            // other call to the company gate. Passing `None` would deny the
-            // teammate every tool it otherwise has.
-            let admit = loan.source.belt().admit(
-                gate.as_ref()
-                    .map(|gate| Arc::clone(gate) as Arc<dyn oh::agent::tool_policy::ToolPolicy>),
+            // The static config scope still contains the teammate's ordinary
+            // tools, and the episode source contains every room verb. Apply
+            // the same withheld/narrowed sets to provider specs and execution;
+            // only then defer calls outside the episode belt to the company's
+            // existing approval policy.
+            let seat_gate: Arc<dyn oh::agent::tool_policy::ToolPolicy> = Arc::new(
+                EpisodeSeatToolPolicy {
+                    company: gate.as_ref().map(|gate| {
+                        Arc::clone(gate) as Arc<dyn oh::agent::tool_policy::ToolPolicy>
+                    }),
+                    episode_tools: episode_names,
+                    allowed_tools,
+                },
             );
             openhuman_embed::HostTurnTools {
                 tools,
                 visible,
-                policy: Some(admit),
+                withheld,
+                policy: Some(seat_gate),
             }
         });
     }
