@@ -630,6 +630,7 @@ fn family_leg<'a>(
             .map(|f| Box::pin(async move { f.embedder_slug().await.is_ok() }) as ProbeLeg),
         // Deliberately unprobed — see this function's docs for each.
         Capability::Portability
+        | Capability::EpisodicPortability
         | Capability::Ingest
         | Capability::Sources
         | Capability::Maintenance

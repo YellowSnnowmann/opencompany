@@ -1786,16 +1786,12 @@ pub fn agent_spec_for(
             // workflow verb can leak back in through the loan. The persona has
             // their prose cut to match (`seat_persona`), so the seat is neither
             // told about them nor handed them.
-            let withheld: std::collections::HashSet<String> = crate::harness::built_in::
+            let mut withheld: std::collections::HashSet<String> = crate::harness::built_in::
                 EPISODE_WITHHELD_TOOLS
                 .iter()
                 .map(|name| (*name).to_owned())
                 .chain(std::iter::once(crate::hive::tools::READ_TOOL.to_owned()))
                 .collect();
-            let episode_withheld = |name: &str| withheld.contains(name);
-            tools.retain(|tool| {
-                !episode_withheld(tool.name())
-            });
             let episode = loan.source.belt();
             let episode_names: std::collections::HashSet<String> =
                 episode.names().iter().cloned().collect();
@@ -1807,11 +1803,16 @@ pub fn agent_spec_for(
             // seat is assembling what the others produced, and a hand-off
             // would reopen the room instead of closing it. See
             // `seating::broadcast_withheld_in` for what live runs cost in both.
-            let withheld = crate::hive::seating::broadcast_withheld_in(
+            let broadcast_withheld = crate::hive::seating::broadcast_withheld_in(
                 loan.dm || loan.concluding,
                 crate::hive::host::TOOL_PREFIX,
             );
-            let kept = |name: &str| withheld.as_deref() != Some(name);
+            if let Some(name) = &broadcast_withheld {
+                withheld.insert(name.clone());
+            }
+            let episode_withheld = |name: &str| withheld.contains(name);
+            tools.retain(|tool| !episode_withheld(tool.name()));
+            let kept = |name: &str| broadcast_withheld.as_deref() != Some(name);
             let mut visible: std::collections::HashSet<String> = tools
                 .iter()
                 .map(|tool| tool.name().to_owned())
@@ -1883,7 +1884,9 @@ pub fn agent_spec_for(
             //
             // An empty narrowing never reaches here (`narrowed_to` filters it):
             // a belt of nothing refuses the call outright.
-            let allowed_tools = seating.narrowed_to(turn.session_id());
+            let allowed_tools = seating
+                .narrowed_to(turn.session_id())
+                .map(|names| names.into_iter().collect::<std::collections::HashSet<_>>());
             if let Some(only) = &allowed_tools {
                 tools.retain(|tool| only.iter().any(|name| name == tool.name()));
                 visible.retain(|name| only.contains(name));

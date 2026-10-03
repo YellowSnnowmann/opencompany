@@ -91,7 +91,8 @@ use oh::config::{AuditConfig, HttpRequestConfig};
 use oh::security::{
     AuditLogger, AutonomyLevel, SecurityPolicy, get_or_create_workspace_audit_logger,
 };
-use oh::tools::{CurlTool, HttpRequestTool, ImageInfoTool, WebFetchTool, WorkspaceStateTool};
+use tinytools_std::filesystem::{ImageInfoTool, WorkspaceStateTool};
+use tinytools_std::network::CurlTool;
 // Moved out of `openhuman-core` by OpenHuman v0.64.10.
 use tinytools::Tool;
 use tinytools_std::filesystem::{ApplyPatchTool, GitOperationsTool};
@@ -852,13 +853,13 @@ pub fn web_tools(
     // source of truth (and no `0 → coerced-with-warning` noise on each build).
     let http_defaults = HttpRequestConfig::default();
     vec![
-        Box::new(WebFetchTool::new(
+        Box::new(oh::tools::web_fetch_tool(
             security.clone(),
             allowed_domains.clone(),
             None,
             None,
         )),
-        Box::new(HttpRequestTool::new(
+        Box::new(oh::tools::http_request_tool(
             security.clone(),
             allowed_domains.clone(),
             http_defaults.max_response_size,
