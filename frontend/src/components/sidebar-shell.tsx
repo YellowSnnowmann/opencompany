@@ -9,8 +9,8 @@
 // title bar (with the traffic lights) sits above it on the desktop, so the page
 // started two bars down. Following OpenHuman's shell, the content now runs the
 // full height of the window and the sidebar floats over its left edge as a
-// card — so those controls move into the card: what you are in and where you
-// can jump at its head, who you are and the console's utilities at its foot.
+// card — so those controls move into the card: search at its head, and the
+// places you jump to from anywhere, then who you are, at its foot.
 
 import type { ReactNode } from "react";
 
