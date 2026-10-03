@@ -520,9 +520,8 @@ function ChannelIntro({
 /**
  * What the intro draws above the channel's name (issue #1327).
  *
- * The same rule the header settled in #1170, at the intro's larger size: a DM
- * has exactly one person on the other end and wears their face; a channel has
- * nobody behind it and wears its kind.
+ * A DM has exactly one person on the other end and wears their face; a desk
+ * draws nothing (see the last branch).
  *
  * Before this, every channel but `main` fell through to `TeammateAvatar` seeded
  * on the channel *name*, so `#engineering` grew an arbitrary mascot — a face
@@ -534,8 +533,8 @@ function ChannelIntro({
  * cannot drift about who a DM is with.
  */
 function IntroMark({ channel }: { channel: Channel }) {
-  // The geometry is fixed across all three branches so the copy beneath never
-  // shifts with the kind of channel being opened.
+  // The face's own size and gap; a desk draws nothing, so its title sits at
+  // the top of the intro.
   const box = "mb-3 size-12";
 
   if (channel.kind === "dm") {
@@ -549,19 +548,11 @@ function IntroMark({ channel }: { channel: Channel }) {
     );
   }
 
-  // `#general` wears the company brand mark.
-  if (channel.id === GENERAL_CHANNEL_ID) {
-    return (
-      <TeammateAvatar
-        name={channel.voice ?? channel.name}
-        tone={channel.tone}
-        company
-        className={cn(box, "text-base")}
-      />
-    );
-  }
-
-  return <MarkTile icon={channel.private ? Lock : Hash} className={box} />;
+  // A desk draws no mark. It wore `#` (a lock when private) or, for
+  // `#general`, the company brand tile — a glyph standing in for a group the
+  // sidebar row already pictures as its members' faces. The title under it is
+  // the channel's name, and that is enough.
+  return null;
 }
 
 /**
