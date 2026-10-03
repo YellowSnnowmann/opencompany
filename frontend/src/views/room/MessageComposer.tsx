@@ -186,10 +186,10 @@ function activeMentionEnd(
 /**
  * The composer dock.
  *
- * A bordered box that owns its own toolbar rather than a bare input: the
- * formatting buttons wrap the current selection in markdown, and the box grows
- * with the draft up to a cap before scrolling. Enter sends; Shift+Enter breaks
- * the line, which is the convention every chat client shares.
+ * One line: a `+` menu (attach files, mention someone), the input, and Send.
+ * The input grows with a multi-line draft up to a cap before scrolling. Enter
+ * sends; Shift+Enter breaks the line, which is the convention every chat
+ * client shares.
  */
 export function MessageComposer({
   placeholder,
