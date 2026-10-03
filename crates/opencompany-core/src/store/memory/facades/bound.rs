@@ -380,6 +380,11 @@ impl Bound {
     /// `fetch`, not `recall`: recall synthesises an answer over the engine's
     /// whole scope (derived facts included) and only filters its citations,
     /// while fetch returns the stored items themselves, ranked.
+    ///
+    /// `Keyword` first when the engine offers it: `ContextStore::search` is a
+    /// lexical contract on every other backend (fs, sqlite, mongodb), and a
+    /// vector-ranked mode returns the nearest items whether or not they match.
+    /// Engines that serve only `Hybrid` (CortexDB) get that.
     pub(super) async fn search(
         &self,
         company: &CompanyId,
@@ -388,7 +393,7 @@ impl Bound {
     ) -> Result<(Namespace, Vec<Hit>)> {
         let namespace = self.namespace(company);
         let descriptor = self.engine.descriptor();
-        let Some(mode) = [FetchMode::Hybrid, FetchMode::Keyword, FetchMode::Vector]
+        let Some(mode) = [FetchMode::Keyword, FetchMode::Hybrid, FetchMode::Vector]
             .into_iter()
             .find(|mode| descriptor.supports(*mode))
         else {

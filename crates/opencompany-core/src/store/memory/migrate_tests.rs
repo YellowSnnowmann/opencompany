@@ -107,11 +107,19 @@ fn resolve_refuses_null_retired_and_same_targets() {
 }
 
 #[test]
-fn resolve_requires_an_endpoint_only_where_the_engine_has_no_default() {
+fn resolve_takes_the_engines_default_endpoint_when_none_is_given() {
+    // Both registry engines carry a default endpoint, so `--to-url` is
+    // optional; a given one is carried through for a self-run instance.
     let settings = remote_settings();
-    let refused = resolve_migrate_configs(&settings, "cortexdb", None, Some("k".into()));
-    assert!(refused.unwrap_err().to_string().contains("--to-url"));
-    let (_, to) =
-        resolve_migrate_configs(&settings, "tinyhumans", None, Some("k".into())).unwrap();
+    let (_, to) = resolve_migrate_configs(&settings, "tinyhumans", None, Some("k".into())).unwrap();
     assert_eq!(to.driver_id.as_deref(), Some("tinyhumans"));
+    assert_eq!(to.url, None);
+    let (_, to) = resolve_migrate_configs(
+        &settings,
+        "cortexdb",
+        Some("https://to.example".into()),
+        Some("k".into()),
+    )
+    .unwrap();
+    assert_eq!(to.url.as_deref(), Some("https://to.example"));
 }

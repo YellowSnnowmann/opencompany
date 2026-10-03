@@ -234,12 +234,11 @@ fn an_engine_this_build_cannot_bind_is_refused_by_availability() {
     );
 }
 
-/// A hosted engine with no endpoint is refused before anything is written,
-/// with a message naming the field rather than an environment variable the
-/// operator never set.
+/// A hosted engine with a default endpoint binds with the URL left blank —
+/// the console shows the field as optional — but still refuses a missing key.
 #[test]
-fn a_hosted_engine_without_an_endpoint_is_refused() {
-    let error = selection_from(
+fn a_hosted_engine_takes_its_default_endpoint_but_needs_a_key() {
+    let selection = selection_from(
         &EngineRequest {
             engine: "cortexdb".to_string(),
             url: None,
@@ -247,11 +246,18 @@ fn a_hosted_engine_without_an_endpoint_is_refused() {
         },
         &MemorySelection::default(),
     )
+    .unwrap();
+    assert_eq!(selection.url, None);
+    let error = selection_from(
+        &EngineRequest {
+            engine: "cortexdb".to_string(),
+            url: None,
+            api_key: None,
+        },
+        &MemorySelection::default(),
+    )
     .unwrap_err();
-    assert!(
-        error.to_string().contains("endpoint"),
-        "unexpected message: {error}"
-    );
+    assert!(error.to_string().contains("API key"), "unexpected: {error}");
 }
 
 /// An omitted key keeps the stored one. A console showing a redacted key must

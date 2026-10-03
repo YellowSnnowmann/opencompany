@@ -117,18 +117,31 @@ fn settings_debug_never_renders_a_credential() {
 
 #[cfg(feature = "tinymemory")]
 #[test]
-fn remote_without_a_url_or_key_refuses_at_open() {
+fn remote_without_a_key_refuses_at_open() {
     let settings = StorageSettings {
         memory_backend: MemoryBackend::Remote,
-        memory_driver: Some("supermemory".into()),
-        // Past the confidence gate, so this asserts the *configuration*
-        // refusal rather than tripping over the one before it.
+        memory_driver: Some("cortexdb".into()),
         ..StorageSettings::default()
     };
     let error = open_memory_overlay(&settings)
-        .expect_err("remote without an endpoint must refuse")
+        .expect_err("remote without a credential must refuse")
         .to_string();
-    assert!(error.contains("OPENCOMPANY_MEMORY_URL"), "{error}");
+    assert!(error.contains("OPENCOMPANY_MEMORY_API_KEY"), "{error}");
+}
+
+#[cfg(feature = "tinymemory")]
+#[test]
+fn a_retired_engine_refuses_at_open_by_name() {
+    let settings = StorageSettings {
+        memory_backend: MemoryBackend::Remote,
+        memory_driver: Some("supermemory".into()),
+        memory_api_key: Some("k".into()),
+        ..StorageSettings::default()
+    };
+    let error = open_memory_overlay(&settings)
+        .expect_err("a v1-only engine must refuse")
+        .to_string();
+    assert!(error.contains("no longer supported"), "{error}");
 }
 
 #[cfg(feature = "tinymemory")]
@@ -142,7 +155,7 @@ fn remote_with_full_config_proceeds_to_the_driver_without_an_acceptance_flag() {
     // admission refusal, never a demand for a deleted knob.
     let settings = StorageSettings {
         memory_backend: MemoryBackend::Remote,
-        memory_driver: Some("supermemory".into()),
+        memory_driver: Some("cortexdb".into()),
         memory_url: Some("https://memory.invalid".into()),
         memory_api_key: Some("k".into()),
         ..StorageSettings::default()
@@ -174,7 +187,7 @@ fn remote_binds_and_reports_its_driver() {
     // knob is retired.
     let settings = StorageSettings {
         memory_backend: MemoryBackend::Remote,
-        memory_driver: Some("supermemory".into()),
+        memory_driver: Some("cortexdb".into()),
         memory_url: Some("https://memory.example".into()),
         memory_api_key: Some("k".into()),
         ..StorageSettings::default()
@@ -183,7 +196,7 @@ fn remote_binds_and_reports_its_driver() {
         .expect("a fully configured remote engine binds")
         .expect("remote yields an overlay");
     assert_eq!(overlay.descriptor.backend, MemoryBackend::Remote);
-    assert_eq!(overlay.descriptor.driver_id, "supermemory");
+    assert_eq!(overlay.descriptor.driver_id, "cortexdb");
     // Binding is offline: nothing has probed yet, and claiming health
     // before a probe would be the same lie in the other direction.
     assert_eq!(
