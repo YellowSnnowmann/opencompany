@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import { act, createElement } from "react";
+
+import { menuItemEnabled, openAttachItem } from "./support/composer-menu";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -90,7 +92,7 @@ describe("a file the host refuses as too large", () => {
     await render(upload);
     await pick(bigFile());
 
-    const paperclip = container.querySelector('[aria-label="Attach a file"]') as HTMLButtonElement;
-    expect(paperclip.disabled).toBe(false);
+    const paperclip = openAttachItem(container)!;
+    expect(menuItemEnabled(paperclip)).toBe(true);
   });
 });

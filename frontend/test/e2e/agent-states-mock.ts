@@ -54,6 +54,12 @@ export interface MockOptions {
   runs?: () => unknown[];
   /** `chat/history` rows for one desk. */
   history?: (desk: string) => unknown[];
+  /**
+   * Desks the host lists beside any created here, read on every `GET …/desks`
+   * — so a spec can make a channel appear the way another session's would,
+   * then push the frame that tells the console to re-read.
+   */
+  desks?: () => unknown[];
 }
 
 export async function mockCompany(page: Page, opts: MockOptions = {}): Promise<Sse> {
@@ -114,7 +120,7 @@ export async function mockCompany(page: Page, opts: MockOptions = {}): Promise<S
         createdDesks.push(created);
         return json(created, 201);
       }
-      return json(createdDesks);
+      return json([...(opts.desks?.() ?? []), ...createdDesks]);
     }
     if (path.endsWith("/team")) return json(ROSTER);
     if (path.endsWith("/chat/mentionables")) {

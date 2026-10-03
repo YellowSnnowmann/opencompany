@@ -69,7 +69,7 @@ test("the task dialog is modal and restores keyboard focus for every close path"
 
 test("the mobile sidebar sheet is modal", async ({ page }) => {
   await page.setViewportSize({ width: 700, height: 800 });
-  await page.goto("/#/overview");
+  await page.goto("/#/chat");
   await dismissTour(page);
 
   await page.getByRole("button", { name: "Toggle sidebar" }).click();
@@ -87,7 +87,7 @@ test("the mobile sidebar sheet returns focus to its toggle, not to an earlier co
   // an earlier rerender — the tour's dismiss button, which by then no longer
   // exists — rather than the toggle the operator actually pressed.
   await page.setViewportSize({ width: 700, height: 800 });
-  await page.goto("/#/overview");
+  await page.goto("/#/chat");
   await dismissTour(page);
 
   const toggle = page.getByRole("button", { name: "Toggle sidebar" });

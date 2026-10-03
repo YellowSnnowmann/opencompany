@@ -165,18 +165,23 @@ describe("a channel renders the whole composer", () => {
     // `product-scope-hidden-surfaces.test.ts` uses: a hidden surface coming
     // back by accident is the failure, and it looks like a feature.
     expect(container.querySelector('[aria-label="What this message is for"]')).toBeNull();
+    // One line: the `+` menu (attach, mention) beside the input and Send. The
+    // formatting toggle and the separate `@` glyph were folded away.
+    expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
     for (const label of ["Mention someone", "Formatting"]) {
-      expect(container.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
+      expect(container.querySelector(`[aria-label="${label}"]`)).toBeNull();
     }
-    expect(container.textContent).toContain("to send");
+    // The "Enter to send · Shift+Enter for a new line" hint was removed: it
+    // cost a row under every transcript.
+    expect(container.textContent).not.toContain("to send");
     expect(container.textContent).not.toContain("There is nothing to reply to here");
   });
 
-  it("still offers the empty-state cards", async () => {
+  it("draws no empty-state cards: the focused composer is the first move", async () => {
     await mount("general");
 
-    expect(container.textContent).toContain("Give the team a brief");
-    expect(container.textContent).toContain("Add people");
+    expect(container.textContent).not.toContain("Give the team a brief");
+    expect(container.textContent).not.toContain("Add people");
   });
 });
 

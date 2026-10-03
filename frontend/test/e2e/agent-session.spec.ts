@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openChannelInfo } from "./chat-helpers";
 
 /**
  * Proof for the one-agent-one-session change: a teammate's session is reachable
@@ -176,7 +177,7 @@ test("a teammate's raw turns open from their own address", async ({ page }) => {
  * asked.
  *
  * `#/chat/dm:<id>?raw` is an address for the same reason the tab's is, so the
- * walk is a deep link rather than a click on the header control. What it proves
+ * walk is a deep link rather than a click on the details panel's toggle. What it proves
  * that a unit render cannot: the flag survives the chat router (which strips
  * everything from `?` onward before resolving a segment), and the host answers
  * the per-agent route for a teammate reached this way.
@@ -190,8 +191,10 @@ test("a DM opens on the teammate's raw turns when the address asks", async ({
   await openDeepLink(page, "/#/chat/dm:engineer?raw");
 
   // The control is present at all — which is the half of this the operator
-  // complained about. It exists only in a DM; the channel case is below.
-  const toggle = page.getByTestId("chat-raw-toggle");
+  // complained about. It lives in the DM's details panel, which the raw view
+  // keeps open so the way back is on screen; it exists only in a DM, and the
+  // channel case is below.
+  const toggle = page.getByTestId("channel-info-raw-toggle");
   await expect(toggle).toBeVisible({ timeout: 30_000 });
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
 
@@ -202,16 +205,17 @@ test("a DM opens on the teammate's raw turns when the address asks", async ({
     .or(page.getByText(/does not keep a per-agent session yet/));
   await expect(settled.first()).toBeVisible({ timeout: 30_000 });
 
-  // The composer stays. The toggle changes how the conversation is drawn, not
-  // whether you can still talk in it. Asserted against the composer itself,
-  // not a second look at the toggle already checked above (coderabbit
-  // review) — this is the actual claim the comment makes.
-  await expect(page.getByPlaceholder(/^Message /)).toBeVisible();
+  // A read-only view: the composer and the pill step aside while the raw
+  // turns are up, so nothing typed here could be mistaken for a reply to a
+  // single turn of the session.
+  await expect(page.getByPlaceholder(/^Message /)).toHaveCount(0);
+  await expect(page.getByTestId("channel-pill")).toHaveCount(0);
 
-  // And it goes back without a reload, dropping the flag from the address.
+  // And it goes back without a reload, dropping the flag from the address and
+  // bringing the composer back.
   await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
   await expect(stream).toHaveCount(0);
+  await expect(page.getByPlaceholder(/^Message /)).toBeVisible();
   expect(await page.evaluate(() => window.location.hash)).not.toContain("raw");
 });
 
@@ -225,10 +229,11 @@ test("a channel offers no raw-turns toggle", async ({ page }) => {
 
   await openDeepLink(page, "/#/chat/general");
 
-  // Wait for the header to exist before asserting a control is absent from it,
-  // or this passes against a page that simply had not rendered yet.
+  // Open the details panel before asserting a control is absent from it, or
+  // this passes against a page that simply had not rendered yet.
   await expect(
     page.getByRole("heading", { level: 1, name: "general" }),
   ).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("chat-raw-toggle")).toHaveCount(0);
+  await openChannelInfo(page);
+  await expect(page.getByTestId("channel-info-raw-toggle")).toHaveCount(0);
 });

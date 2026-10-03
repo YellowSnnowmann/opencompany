@@ -1,4 +1,5 @@
-// Light, dark, or follow the system — and, since issue #2493, the accent.
+// Light, dark, or follow the system — and, since issue #2493, the accent, and
+// the avatar shape (`lib/avatar-shape.ts`).
 //
 // A row on the rail rather than a card most of the way down General, and the
 // reason is what it belongs to. Every other thing on General is a fact about
@@ -18,6 +19,7 @@
 import { PageHeader } from "@/components/page-header";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AccentPresetPicker } from "@/components/accent-preset-picker";
+import { AvatarShapePicker } from "@/components/avatar-shape-picker";
 import {
   Card,
   CardAction,
@@ -57,6 +59,18 @@ export function AppearanceView() {
           </CardHeader>
           <CardContent>
             <AccentPresetPicker />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Avatars</CardTitle>
+            <CardDescription>
+              The shape of every teammate's face — in conversations, the roster, and profiles.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AvatarShapePicker />
           </CardContent>
         </Card>
       </div>

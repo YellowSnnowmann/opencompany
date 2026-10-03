@@ -114,6 +114,15 @@ async function rightmostNode(page: Page) {
  * rest of the case could pass on a graph that never reproduced the bug.
  */
 async function setup(page: Page, width: number, height = 900) {
+  // The sidebar at its narrowest (240px, the width this fixture was laid out
+  // against), through the operator's own resize preference. At its 288px
+  // default the 1024px canvas is narrower than the inspector's strip plus this
+  // fixture's node, and `revealViewport` then clamps on purpose — keeping the
+  // node's left edge on screen — which is a different case from the pan this
+  // spec is about. The 1440px case is unaffected either way.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("oc.appearance.sidebarWidth", "240");
+  });
   await page.setViewportSize({ width, height });
   await page.goto("/#/workflows");
   await dismissTour(page);

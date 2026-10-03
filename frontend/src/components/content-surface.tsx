@@ -1,6 +1,14 @@
 import type { ReactNode } from "react";
 
 /**
+ * **Unframed since the floating sidebar.** The content now runs the full
+ * height and width of the window, and the sidebar floats over its left edge as
+ * a card of its own (`app-shell.tsx`, after OpenHuman's shell). The margins,
+ * rounded corners, border and orbiting halo below described a card sitting on
+ * window chrome; with no title row and no chrome strip left around it, that
+ * frame was a second card beside the sidebar's, so it is gone. The notes below
+ * are the history of the framed shell.
+ *
  * The console's single content sheet — the "card" half of the two-layer shell
  * (issue #1178).
  *
@@ -50,8 +58,7 @@ import type { ReactNode } from "react";
  *   - **Top edge.** The title row has its own bottom padding, so a full inset
  *     there reads as a gap twice the size of the others.
  */
-const FRAME =
-  "relative mr-(--frame-inset) mb-(--frame-inset) mt-0.5 ml-0 flex min-h-0 min-w-0 flex-1";
+const FRAME = "relative flex min-h-0 min-w-0 flex-1";
 
 /**
  * `min-h-0` is what lets a view's own `overflow-y-auto` actually scroll: a flex
@@ -73,18 +80,11 @@ const FRAME =
  * `z-index: -1` against this same frame, and an auto-positioned card would let
  * a blurred lobe wash over the page's own content at the corners.
  */
-const CARD =
-  "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden " +
-  "rounded-2xl border border-chrome-border bg-background shadow-sm";
+const CARD = "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-page";
 
 export function ContentSurface({ children }: { children: ReactNode }) {
   return (
     <div className={FRAME}>
-      {/* The orbiting halo. Purely decorative — `aria-hidden`, no pointer
-          events — and defined in `index.css` as `.content-orbit`, where the
-          angle animation, the single-lobe gradient and the reduced-motion
-          behaviour are argued in one place. */}
-      <div aria-hidden="true" className="content-orbit" />
       <div className={CARD} data-testid="content-surface">
         {/* No drag band here any more.
 

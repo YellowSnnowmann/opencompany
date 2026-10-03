@@ -337,7 +337,10 @@ test("a settled turn keeps its raw tool rows out of the channel", async ({ page 
     });
   });
   await openChannel(page, ENGINEERING.id);
-  await expect(page.getByText("I checked the workspace.")).toBeVisible({ timeout: 30_000 });
+  // In the transcript — the rail's preview repeats the channel's latest line.
+  await expect(
+    page.getByTestId("channel-transcript").getByText("I checked the workspace."),
+  ).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("workspace_list")).toHaveCount(0);
   await expect(page.getByText("workspace_read")).toHaveCount(0);
   await openChannel(page, CONTENT.id);

@@ -382,3 +382,45 @@ export function useAgentPresence(agentId: string | null | undefined, chatId?: st
   };
   return useSyncExternalStore(subscribe, read, read);
 }
+
+/** Presence states, strongest first — the order `lib/agent-presence.ts` ranks them in. */
+const PRESENCE_RANK: readonly AgentPresenceState[] = [
+  "approval",
+  "working",
+  "typing",
+  "thinking",
+  "queued",
+  "inactive",
+];
+
+/**
+ * The busiest of several agents in one chat, for a row that stands for a group
+ * (a channel in the sidebar): who is doing the most there, and what.
+ *
+ * `null` when every one of them is inactive. The snapshot is a string
+ * (`"<agentId>\u0000<state>"`) so it keeps a stable identity across store
+ * changes that move nothing, and is split back apart here.
+ */
+export function useBusiestPresence(
+  agentIds: readonly string[] | undefined,
+  chatId: string | null,
+): { agentId: string; state: AgentPresenceState } | null {
+  const read = (): string => {
+    if (!agentIds?.length || !chatId) return "";
+    const index = presenceIndex();
+    let best = "";
+    let bestRank = PRESENCE_RANK.length - 1;
+    for (const id of agentIds) {
+      const rank = PRESENCE_RANK.indexOf(presenceIn(index, id, chatId));
+      if (rank < bestRank) {
+        bestRank = rank;
+        best = `${id}\u0000${PRESENCE_RANK[rank]}`;
+      }
+    }
+    return best;
+  };
+  const snapshot = useSyncExternalStore(subscribe, read, read);
+  if (!snapshot) return null;
+  const [agentId, state] = snapshot.split("\u0000");
+  return { agentId, state: state as AgentPresenceState };
+}

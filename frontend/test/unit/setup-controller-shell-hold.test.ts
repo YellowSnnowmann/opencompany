@@ -126,7 +126,7 @@ beforeEach(() => {
     removeListener: () => {},
     dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia;
-  window.location.hash = "#/overview";
+  window.location.hash = "#/chat";
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -203,21 +203,18 @@ describe("AppShell keeps SetupController mounted across its branch transition", 
     // Same position in both branches, so the controller was never torn down and
     // never re-read the roster.
     //
-    // The ordinary branch paints `#/overview`, which is the company graph, and
-    // the graph's snapshot takes one roster read of its own on mount. That read
-    // belongs to the graph, not to a re-mounted controller, so it is accounted
-    // for exactly rather than folded into a `>=` that would let a genuine
-    // re-read through unnoticed.
-    const GRAPH_ROSTER_READS = 1;
+    // The ordinary branch used to paint `#/overview`, whose knowledge graph
+    // took a roster read of its own; that page is gone, and `#/chat` adds none
+    // beyond the rail's below. Every read is accounted for exactly rather than
+    // folded into a `>=` that would let a genuine re-read through unnoticed.
     // `RoomView` is mounted on every route since #2130, not only on `#/chat`:
     // the sidebar's channel rail is portalled out of it and is pinned there on
     // every section, so the view that feeds it has to outlive the route that
     // used to own it. It takes one roster read of its own on mount, for the
-    // rail's direct-message rows. Accounted for by name for the same reason the
-    // graph's is.
+    // rail's direct-message rows, accounted for by name.
     const CHAT_RAIL_ROSTER_READS = 1;
     expect(listTeam.mock.calls.length).toBe(
-      readsWhilePending + GRAPH_ROSTER_READS + CHAT_RAIL_ROSTER_READS,
+      readsWhilePending + CHAT_RAIL_ROSTER_READS,
     );
   });
 });

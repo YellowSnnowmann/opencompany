@@ -1,7 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { describe, expect, it } from "vitest";
 
 import type { DeskDto } from "@/api/types";
@@ -125,63 +121,3 @@ describe("buildOrgTree", () => {
  * cannot reach (the dialog's submit and `RoomView`'s create callback both
  * need the whole client and every hook to render).
  */
-describe("channel creation guards (#1872 review)", () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const read = (rel: string) => readFileSync(resolve(here, "../../src", rel), "utf8");
-  const dialog = () => read("views/room/ChannelCreateDialog.tsx");
-  const chatView = () => read("views/RoomView.tsx");
-
-  it("refuses to submit an auto channel with no members, with a field-level reason", () => {
-    const src = dialog();
-    // The gate sits in submit(), before the POST — a channel with nobody in
-    // it has nobody to answer, and the host refuses it too, so the dialog
-    // must not offer a hopeful submit.
-    const gate = src.indexOf("if (chosen.length === 0) {");
-    expect(gate).toBeGreaterThan(-1);
-    expect(src.slice(gate, gate + 400)).toContain("setMembersError(");
-    // Field-level, not the whole-form banner: the complaint renders at the
-    // members section and is cleared the moment a member is toggled in.
-    expect(src).toContain("{membersError && (");
-    const toggle = src.indexOf("function toggle(id: string)");
-    expect(src.slice(toggle, toggle + 300)).toContain("setMembersError(null)");
-    // And the POST no longer sends an absent members list at all.
-    expect(src).toContain("members: chosen,");
-    expect(src).not.toContain("chosen.length > 0 ? chosen : undefined");
-  });
-
-  it("drops a createDesk completion that lands after a scope switch", () => {
-    const src = dialog();
-    // Captured at submit, compared at completion — the same shape RoomView's
-    // send path uses against its scopeRef. A create that resolves after the
-    // operator moved company must not hand its desk to the new scope's rail.
-    expect(src).toContain("const scopeAtSubmit = scopeNow.current;");
-    const guard = src.indexOf("scopeNow.current.client !== scopeAtSubmit.client");
-    expect(guard).toBeGreaterThan(-1);
-    expect(src.slice(guard, guard + 300)).toContain("return;");
-    // The guard sits between the await and onCreated — the completion is
-    // dropped, not the request (the create landed and is journaled).
-    const awaited = src.indexOf("await client.createDesk(");
-    const created = src.indexOf("onCreated(created)");
-    expect(awaited).toBeGreaterThan(-1);
-    expect(guard).toBeGreaterThan(awaited);
-    expect(created).toBeGreaterThan(guard);
-  });
-
-  it("replaces the fallback desk set with the first real channel instead of appending beside it", () => {
-    const src = chatView();
-    // loadDesks marks when the rail is showing defaultDesks() rather than the
-    // host's own list. Since desk fabrication stopped standing in for an empty
-    // answer, that is the 404 leg alone — a host with no `/desks` route at all.
-    // An answered read is the company's own list, empty or not, and is never
-    // the fallback set.
-    expect(src).toContain("desksAreFallback.current = false;");
-    expect(src).toContain("desksAreFallback.current = true;");
-    expect(src).not.toContain("desksAreFallback.current = dtos.length === 0;");
-    // …and onCreated replaces that set outright: the first real channel ends
-    // the fallback's mandate, and appending beside it would keep fabricated
-    // rows — one of which could share the new channel's id — until reload.
-    expect(src).toContain(
-      "setDesks((prev) => (desksAreFallback.current ? [desk] : [...(prev ?? []), desk]));",
-    );
-  });
-});

@@ -81,31 +81,38 @@ for (const scheme of ["light", "dark"] as const) {
         .toBeLessThan(before!.y);
       await page.screenshot({ path: test.info().outputPath(`rail-15-after-${scheme}.png`) });
 
-      // The longest name is clipped to one row, not wrapped onto a second.
-      const box = await dmRow(page, NAMES[NAMES.length - 1]).boundingBox();
-      expect(box!.height).toBeLessThan(48);
+      // The longest name is clipped to one line, not wrapped onto a second
+      // (the row itself is two lines: the name, then the latest message).
+      const name = dmRow(page, NAMES[NAMES.length - 1]).getByTestId("channel-name");
+      const nameBox = await name.boundingBox();
+      const lineHeight = await name.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+      expect(nameBox!.height).toBeLessThanOrEqual(Math.ceil(lineHeight) + 1);
     });
 
     test("a channel appearing above does not slide the DM rows; a re-sort still does", async ({ page }) => {
       // The height above the DM rows changes without anything re-sorting. This
-      // used to be collapsing the Channels section; the sections are gone, and a
-      // channel created through the rail's own "+" menu is the change that is
-      // left — it lands above every DM and pushes them down by one row.
-      const sse = await mockCompany(page);
+      // used to be collapsing the Channels section, then creating a channel from
+      // the rail's own "+" menu; both are gone (desks are made on the org chart
+      // now), so the channel arrives the way one made elsewhere does — the host
+      // lists it and a membership frame tells the console to re-read. It lands
+      // above every DM and pushes them down by one row.
+      let desks: unknown[] = [];
+      const sse = await mockCompany(page, { desks: () => desks });
       await open(page);
       await page.mouse.move(700, 400);
       const started = await countRailAnimations(page);
       const before = (await dmRow(page, LAST.name).boundingBox())!.y;
 
-      await page.getByRole("button", { name: "New", exact: true }).click();
-      await page.getByRole("menuitem", { name: "Create a new channel" }).click();
-      const form = page.getByRole("dialog");
-      await form.getByPlaceholder("e.g. Launch week").fill("Launch week");
-      // The first teammate in the Members list.
-      await form.locator("li button").first().click();
-      await form.getByRole("button", { name: "Create channel" }).click();
-      await expect(form).toHaveCount(0);
-      await page.mouse.move(700, 400);
+      desks = [{ id: "launch-week", name: "Launch week", kind: "desk", members: [ROSTER[0].id] }];
+      sse.push({
+        type: "desk_members_changed",
+        seq: 1,
+        atMillis: Date.now(),
+        deskId: "launch-week",
+        added: [ROSTER[0].id],
+        removed: [],
+      });
+      await expect(railRows(page).first()).toHaveAccessibleName(/^launch-week/);
 
       // The whole DM list moved DOWN, and moving is all it did: nothing re-sorted.
       await expect
@@ -115,7 +122,7 @@ for (const scheme of ["light", "dark"] as const) {
       await page.screenshot({ path: test.info().outputPath(`rail-15-channel-added-${scheme}.png`) });
 
       // The new channel is the first row now, so the DM that spoke lands second.
-      sse.push(reply(LAST, 1));
+      sse.push(reply(LAST, 2));
       await expect
         .poll(async () =>
           (await railRows(page).nth(1).locator("span.truncate").first().innerText()).trim(),
@@ -142,11 +149,12 @@ for (const scheme of ["light", "dark"] as const) {
 test("a clicked row's focus does not freeze the order once the pointer leaves", async ({ page }) => {
   const sse = await mockCompany(page);
   await open(page);
-  // A mouse click focuses the row's button, and the button keeps focus after
-  // the pointer moves away. Only keyboard focus may hold the order on its own.
+  // A mouse click opens the conversation and hands focus to its composer, so
+  // you can type straight away — the row does not keep it. Either way only
+  // keyboard focus in the rail may hold the order on its own.
   await dmRow(page, NAMES[3]).click();
   await page.mouse.move(700, 400);
-  await expect(dmRow(page, NAMES[3])).toBeFocused();
+  await expect(page.getByPlaceholder(`Message ${NAMES[3]}`)).toBeFocused();
   sse.push(reply(LAST, 1));
   await expect.poll(() => firstRowName(page)).toBe(LAST.name);
 });

@@ -8,6 +8,7 @@ import { CrashFallback } from "@/components/crash-fallback";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { applyStoredAccentPreset } from "@/lib/accent-presets";
+import { applyStoredAvatarShape } from "@/lib/avatar-shape";
 import { purgeStoredSmtpPasswords } from "@/lib/domain";
 import { installExternalLinkOpener } from "@/lib/external-links";
 import { startScrollActivity } from "@/lib/scroll-activity";
@@ -106,5 +107,8 @@ purgeStoredSmtpPasswords();
 // commit later — a pre-existing flash this call does not fix (issue #2493,
 // `docs/issues/accent-theme-presets/open-questions.md` Q8).
 applyStoredAccentPreset();
+// The avatar shape, for the same reason and at the same moment: before first
+// paint, so faces never flash from one shape to the other.
+applyStoredAvatarShape();
 
 mount();

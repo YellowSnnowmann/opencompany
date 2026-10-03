@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * The host switcher, in the sidebar header, on a console holding two hosts.
+ * The host switcher, on the Settings rail, on a console holding two hosts.
  *
  * This spec used to guard the opposite arrangement: an icon rail down the left
  * edge, and a `position: fixed` sidebar that had to be offset by 56px or it
@@ -9,6 +9,8 @@ import { expect, test } from "@playwright/test";
  * Issue #1142 removed the rail and moved the choice into the sidebar's own
  * header, so the offset is gone and the assertion inverts: the sidebar now
  * starts at the left edge of the window, and nothing stands in front of it.
+ * The switcher has since moved again, out of the sidebar (which lost its
+ * header) to the top of the Settings rail, beside the pages that manage hosts.
  *
  * What carries over is why the spec exists at all. The broken state needed two
  * connections, and nothing else in the suite creates them — a design-system
@@ -34,7 +36,7 @@ test.beforeEach(async ({ page }) => {
 /** Must match `companies/e2e_harness/company.toml`'s `[users] admins`. */
 const ADMIN_EMAIL = "harness-e2e@tinyhumans.ai";
 
-test("the sidebar owns the left edge, and its header names the company", async ({
+test("the sidebar owns the left edge, and Settings carries the host switcher", async ({
   page,
   baseURL,
 }) => {
@@ -79,7 +81,7 @@ test("the sidebar owns the left edge, and its header names the company", async (
     );
   }, base);
 
-  await page.goto("/#/company");
+  await page.goto("/#/settings/general");
 
   // Nothing stands to the left of the sidebar any more.
   await expect(page.getByTestId("connection-rail")).toHaveCount(0);
@@ -94,23 +96,25 @@ test("the sidebar owns the left edge, and its header names the company", async (
   // reader would report, asserted separately from the cause so a future change
   // that moves the sidebar for some other reason still fails here rather than
   // passing on a technicality.
-  // A nav row is a button, not a link — the shell routes on the hash rather
-  // than navigating. `exact` keeps this off the page's own "Company" heading.
+  // The section tabs are buttons, not links — the shell routes on the hash
+  // rather than navigating.
   const label = page.getByRole("button", { name: "Company", exact: true });
   const labelBox = await label.boundingBox();
-  expect(labelBox, "the Company nav row should have a box").not.toBeNull();
+  expect(labelBox, "the Company tab should have a box").not.toBeNull();
   expect(labelBox!.x).toBeGreaterThanOrEqual(0);
 
-  // The switcher took the rail's place, inside the sidebar rather than beside
-  // it, and it holds both hosts.
-  const switcher = page.getByTestId("host-switcher");
+  // The switcher heads the Settings rail, right of the sidebar rather than a
+  // column of its own to the left of it, and it holds both hosts.
+  // Settings mounts it twice (atop the rail, and above the chip row below
+  // `lg`) with CSS showing one; this is the one on screen.
+  const switcher = page.locator('[data-testid="host-switcher"]:visible');
   await expect(switcher).toBeVisible();
   const switcherBox = await switcher.boundingBox();
   expect(switcherBox, "the switcher should have a box").not.toBeNull();
   expect(
     switcherBox!.x,
-    "the switcher is inside the sidebar, not a column of its own to the left of it",
-  ).toBeGreaterThanOrEqual(sidebarBox!.x);
+    "the switcher is on the Settings rail, past the sidebar's right edge",
+  ).toBeGreaterThanOrEqual(sidebarBox!.x + sidebarBox!.width);
 
   // And it is a real control, not a nameplate: `HOSTS_HIDDEN`
   // (`product-scope.ts`) is `false`, and two hosts are seeded above, so this

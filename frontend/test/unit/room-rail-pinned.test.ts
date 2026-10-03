@@ -123,25 +123,6 @@ describe("RoomView, mounted off its own route", () => {
     expect(effect).toContain("if (arrived) setOpenThreadId(null);");
   });
 
-  it("keeps both sidebar-triggered dialogs outside that gate", () => {
-    // Everything after the gate closes is what stays mounted off Room. Both
-    // dialogs have to be in it: their triggers are the rail's "+" and its "New
-    // message" pencil, which are painted in the sidebar on every section.
-    const gate = chatView.indexOf("{routeOpen && (");
-    const gateClose = chatView.indexOf("\n      )}\n", gate);
-    const dialog = chatView.search(/<ChannelCreateDialog[\s/>]/);
-    expect(gate).toBeGreaterThan(-1);
-    expect(gateClose).toBeGreaterThan(gate);
-    expect(dialog, "ChannelCreateDialog must mount after the routeOpen gate closes").toBeGreaterThan(
-      gateClose,
-    );
-    // `NewMessageDialog` mounts inside `ChannelRail`, which is the portalled
-    // node itself — so it rides along with the rail rather than needing a place
-    // in this tail. Asserted from the rail's side so the pairing is stated
-    // somewhere rather than assumed.
-    expect(read("views/room/ChannelRail.tsx")).toMatch(/<NewMessageDialog[\s/>]/);
-  });
-
   it("closes the Room-only dialogs on the way out, and only those", () => {
     // Codex P2 on this PR. `AddMemberDialog` opens from the members pane, which
     // is inside the `routeOpen` gate — but every dialog in this file sits

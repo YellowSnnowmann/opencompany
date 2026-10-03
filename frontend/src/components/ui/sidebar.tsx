@@ -27,9 +27,11 @@ import { PanelLeftIcon } from "lucide-react"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-// Narrower than the shadcn default (16rem), but wide enough for the 15px DM
-// rows and 24px avatars of the rail that Chat and Settings dock beside it.
-const SIDEBAR_WIDTH = "15rem"
+// Wider than the shadcn default (16rem): the conversation rail docked here is
+// two-line rows — a 40px face, the name with its timestamp, and a preview line
+// under it — and at 15rem the name truncated after ten characters. Matches the
+// mobile sheet's width so both densities read the same.
+const SIDEBAR_WIDTH = "18rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"

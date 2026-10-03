@@ -161,10 +161,8 @@ function isJsx(block: string): boolean {
  * half-enforced in two places.
  *
  * `carriers` is what makes a multi-component file checkable. `RoomView`'s
- * loaded return draws no heading of its own — its title is `ChatHeader`'s
- * channel name, the `handRolled` leaf enumerated under `chat` — and its three
- * channel-less returns hand the screen to `LoadingPane` and `EmptyPane`, two
- * helpers in the same file that each draw a `hidden` header. All four states
+ * three channel-less returns hand the screen to `LoadingPane` and `EmptyPane`,
+ * two helpers in the same file that each draw a `hidden` header. All four states
  * are named; none of them says so in its own block. A component that is
  * *itself* guarded, or that carries a header in its own body, is therefore a
  * name as much as a literal tag is.

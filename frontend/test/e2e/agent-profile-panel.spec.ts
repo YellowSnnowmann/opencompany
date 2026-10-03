@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { openChannelInfo } from "./chat-helpers";
+
 /**
  * Proof for issue #1653: a teammate's face is a way into who they are.
  *
@@ -9,7 +11,8 @@ import { expect, test, type Page } from "@playwright/test";
  * the conversation for `#/company/agent/<id>` and navigating back.
  *
  * So the evidence is the click that used to do nothing: open a DM, click the
- * teammate's face in the header, and read their persona, tier, desks and
+ * teammate's face in its details panel (the pill over the transcript opens
+ * it; the header bar it used to sit in is gone), and read their persona, tier, desks and
  * resolved tool grants **over the transcript**. Then take the panel's own
  * offer — Edit agent — and land on their page with the form already open,
  * because a summary that cannot hand off to the real controls is a dead end of
@@ -30,10 +33,11 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-/** The DM with one teammate, open and rendered. */
+/** The DM with one teammate, open and rendered, with its details panel showing. */
 async function openDm(page: Page, agentId: string) {
   await page.goto(`/#/chat/dm:${agentId}`);
   await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: 30_000 });
+  await openChannelInfo(page);
 }
 
 test("an agent's face opens who they are, without leaving the channel", async ({ page }) => {

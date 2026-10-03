@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import { act, createElement } from "react";
+
+import { menuItemEnabled, openAttachItem } from "./support/composer-menu";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -58,7 +60,7 @@ async function render(withUpload = true) {
 }
 
 function paperclip() {
-  return container.querySelector('[aria-label="Attach a file"]') as HTMLButtonElement | null;
+  return openAttachItem(container);
 }
 
 async function pick(file: File) {
@@ -109,7 +111,7 @@ describe("composer paperclip (issue #1682)", () => {
     await render();
     const button = paperclip();
     expect(button).not.toBeNull();
-    expect(button!.disabled).toBe(false);
+    expect(menuItemEnabled(button!)).toBe(true);
   });
 
   it("omits the paperclip entirely when no upload handler is given", async () => {

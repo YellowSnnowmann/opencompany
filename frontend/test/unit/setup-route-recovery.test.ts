@@ -26,9 +26,9 @@ describe("first-run setup recovery (issue #1417)", () => {
     );
   });
 
-  it("keeps the not-found page's Overview anchor on the active host", () => {
+  it("keeps the not-found page's Room anchor on the active host", () => {
     const unknown = read("views/UnknownRouteView.tsx");
 
-    expect(unknown).toContain('withHostParam("overview")');
+    expect(unknown).toContain('withHostParam("chat")');
   });
 });

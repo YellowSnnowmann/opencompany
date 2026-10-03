@@ -122,7 +122,7 @@ function AgentAvatar({
       name={name}
       tone={tone}
       avatar={avatar}
-      className="size-12 rounded-xl text-sm"
+      className="size-12 text-sm"
       data-testid="agent-profile-avatar"
     />
   );

@@ -54,12 +54,6 @@ const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "../../src");
  * by this scan, which is why each row says where the name comes from.
  */
 const WIDGET_SUSPENSE: Record<string, string> = {
-  "views/Overview.tsx:KnowledgeGraph": [
-    "One panel of the company overview, not the page. `Overview.tsx` renders",
-    "`<PageHeader hidden title=\"Company overview\" />` above this boundary and",
-    "outside it, so the page keeps its name for the whole time the graph's",
-    "physics chunk is in flight.",
-  ].join(" "),
   "tour/TourController.tsx:Joyride": [
     "The product tour is an overlay drawn over whatever page is mounted, and",
     "its fallback paints nothing. The page underneath is unchanged and keeps",

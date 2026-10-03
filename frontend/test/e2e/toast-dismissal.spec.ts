@@ -90,7 +90,7 @@ test("a toast does not follow the operator across views", async ({ page }) => {
   // mounted at the app root, outside the routed tree, so nothing about changing
   // view clears a toast — the ceiling is the only reason this ends.
   await page.mouse.move(20, 20);
-  await page.goto("/#/overview");
+  await page.goto("/#/chat");
   await page.goto("/#/approvals");
 
   await expect(page.locator(TOAST)).toHaveCount(0, { timeout: 20_000 });

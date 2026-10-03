@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { channelInfo, openChannelInfo } from "./chat-helpers";
 
 /**
  * End-to-end proof for issue #311 — the company's structure is editable from
@@ -387,21 +388,15 @@ async function openChart(page: Page) {
  * The chat member pane — the channel rail is the other `complementary` on
  * screen, so the pane is always the last one.
  */
-const memberPane = (page: Page) => page.getByRole("complementary").last();
-
 /**
- * Open the chat member pane if it is shut.
- *
- * Its open state lives in `RoomView`, which unmounts when the operator steps
- * into another view — so this has to be re-run after a round trip through the
- * chart, and a blind click would close what a previous call opened.
+ * The chat's details panel — who is on the desk — opened from the pill over
+ * the transcript. Its open state lives in `RoomView`, which unmounts when the
+ * operator steps into another view, so it is re-opened after a round trip
+ * through the chart; `openChannelInfo` checks before clicking, so a second
+ * call never closes what a first one opened.
  */
-async function openMemberPane(page: Page) {
-  const toggle = page.getByRole("button", { name: /agents$/i });
-  if ((await toggle.getAttribute("aria-pressed")) !== "true")
-    await toggle.click();
-  await expect(page.getByRole("heading", { name: "Team" })).toBeVisible();
-}
+const memberPane = channelInfo;
+const openMemberPane = openChannelInfo;
 
 test.beforeEach(reset);
 
@@ -1145,9 +1140,7 @@ test("#485 a membership edit on the chart is there when you get back to chat", a
     "Turing",
   );
 
-  await memberPane(page)
-    .getByRole("button", { name: "Manage on the org chart" })
-    .click();
+  await memberPane(page).getByRole("link", { name: "Manage desk" }).click();
   await expect(chart(page)).toBeVisible({ timeout: 30_000 });
 
   const engineering = deskNode(page, "Engineering");
@@ -1167,7 +1160,7 @@ test("#485 a membership edit on the chart is there when you get back to chat", a
   // Chat re-reads the desks when it remounts, so no reload is needed for the
   // edit to show. The two surfaces stay separate reads of one host list —
   // there is no shared client cache to keep in step, and adding one would put
-  // the pane's drop rule and the chart's badge rule on the same data path.
+  // the panel's drop rule and the chart's badge rule on the same data path.
   await expect(memberPane(page).locator("ul").first()).toContainText("Turing");
 });
 

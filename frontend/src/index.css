@@ -226,9 +226,13 @@
      * ---------------------------------------------------------------- */
 
     /* Surfaces, from furthest back to closest to the operator. The canvas
-       is a hair off white and cards are pure white, so a card lifts off the
-       page by lightness alone — before any shadow is applied. */
-    --background: var(--canvas-tint-light);
+       is white, the same as the page the floating-sidebar shell draws
+       (`--page`): it was a hair off white (`--canvas-tint-light`) so a card
+       lifted off it by lightness alone, but once the page itself went white
+       every `bg-background` surface — a focus ring's offset gap, a sticky
+       header, an input — showed up as a lavender patch on it. Cards now
+       separate from the page by their border, as they already did in dark. */
+    --background: var(--surface-light-1);
     --foreground: var(--ink-light-primary);
     --card: var(--surface-light-1);
     --card-foreground: var(--ink-light-primary);
@@ -386,6 +390,29 @@
     --sidebar-accent-foreground: var(--brand-700);
     --sidebar-border: var(--surface-light-4);
     --sidebar-ring: var(--brand-500);
+
+    /* The floating-sidebar shell (`app-shell.tsx`). In light mode the page is
+       plain white and the sidebar a near-white NEUTRAL grey card, ruled off by
+       a hairline of ink rather than the lavender-grey surface border: on the
+       canvas tint the page read as a purple wash with white boxes on it, and
+       the brand-100 selected row was the loudest thing on screen. Selection
+       and hover are ink at low alpha, so they sit on any of these fills. */
+    --page: var(--background);
+    --sidebar-float: oklch(0.982 0.0016 286);
+    --sidebar-float-border: oklch(0 0 0 / 0.08);
+    /* Selection is the accent, solid: the open conversation, the open settings
+       page and the active tab read in the company's colour with white ink on
+       it, not as one more grey or a tint you have to look for. Hover stays
+       neutral ink, so only the chosen row is coloured. */
+    --rail-selected: var(--primary);
+    --rail-selected-foreground: var(--primary-foreground);
+    /* The conversation list is the exception: a soft wash of the accent under
+       brand ink. It is the list you live in, and a solid block on the open
+       chat outweighed every conversation around it. */
+    --chat-selected: color-mix(in oklab, var(--primary) 13%, transparent);
+    --chat-selected-foreground: var(--sidebar-accent-foreground);
+    --rail-hover: oklch(0 0 0 / 0.04);
+    --avatar-disc: var(--surface-light-1);
 
     /* Corner radius. 10px at `lg` — the whole scale derives from it, so a
        single edit re-rounds the app. */
@@ -606,6 +633,19 @@
     --sidebar-border: var(--surface-dark-4);
     --sidebar-ring: var(--brand-400);
 
+    /* The floating-sidebar shell, dark: the surfaces resolve to what the shell
+       already drew here, so dark mode is unchanged by the light-mode retune. */
+    --page: var(--background);
+    --sidebar-float: var(--sidebar);
+    --sidebar-float-border: var(--sidebar-border);
+    /* Solid accent in dark mode too — the same rule as light. */
+    --rail-selected: var(--primary);
+    --rail-selected-foreground: var(--primary-foreground);
+    --chat-selected: var(--sidebar-accent);
+    --chat-selected-foreground: var(--sidebar-accent-foreground);
+    --rail-hover: color-mix(in oklab, var(--sidebar-accent) 50%, transparent);
+    --avatar-disc: var(--muted);
+
     /* Shadow alone cannot separate two near-black surfaces — there is no
        light for it to occlude. Dark mode adds a 1px inset top highlight
        instead, which is what actually reads as "this edge is raised". */
@@ -732,6 +772,15 @@
     --color-chart-5: var(--chart-5);
 
     --color-sidebar: var(--sidebar);
+    --color-page: var(--page);
+    --color-sidebar-float: var(--sidebar-float);
+    --color-sidebar-float-border: var(--sidebar-float-border);
+    --color-rail-selected: var(--rail-selected);
+    --color-rail-selected-foreground: var(--rail-selected-foreground);
+    --color-rail-hover: var(--rail-hover);
+    --color-chat-selected: var(--chat-selected);
+    --color-chat-selected-foreground: var(--chat-selected-foreground);
+    --color-avatar-disc: var(--avatar-disc);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
@@ -845,101 +894,6 @@
     --duration-fast: 120ms;
     --duration-base: 180ms;
     --duration-slow: 260ms;
-}
-
-/* ============================================================================
- * Knowledge-graph bridge.
- *
- * The Overview's graph was ported with its own palette vocabulary. Rather
- * than rename ~2000 lines of it, its names are re-pointed at the semantic
- * layer here. Two consequences worth knowing:
- *
- *   - The graph now themes for free. It used to carry its own hardcoded
- *     light/dark hex pairs; those are gone.
- *   - The mapping is one-way. Nothing outside `.oc-kg` may use these names.
- *
- * The hues stay at `:root` rather than moving inside `.oc-kg`, because a
- * `@theme` entry pointing at a variable that only exists deeper in the tree
- * does not register at build time — the utility silently falls back to
- * `currentColor`, which paints every frame stark white.
- * ========================================================================== */
-
-:root {
-    --kg-accent: var(--signature-500);
-    --kg-ok: var(--status-done);
-    --kg-warn: var(--status-blocked);
-    /* The two brain hues stay deliberately outside the status vocabulary:
-       they identify *which* store a node came from, and colouring them with
-       status hues would imply a health that they do not carry. */
-    --kg-brain-1: var(--pink-mark);
-    --kg-brain-2: var(--cyan-mark);
-    /* A workflow stage is declared structure, not a finished run, so it takes
-       an identity hue rather than a status one — the palette contract in
-       docs/brand/README.md keeps amber, green and red for the five run states.
-       tone-2 blue sits clear of the graph's cyan workflows and violet
-       AI teammates in both themes. */
-    --kg-stage: var(--tone-2);
-    /* The travelling spark that fires along a memory link. A lightened
-       brain-1 rather than its own hue, so the constellation stays one
-       colour family however brain-1 is retuned. */
-    --kg-spark: color-mix(in oklab, var(--kg-brain-1) 55%, white);
-}
-
-.dark {
-    --kg-accent: var(--signature-400);
-    --kg-ok: var(--status-done);
-    --kg-warn: var(--status-blocked);
-    --kg-brain-1: var(--pink-bright);
-    --kg-brain-2: var(--cyan-bright);
-    --kg-stage: var(--tone-2);
-    --kg-spark: color-mix(in oklab, var(--kg-brain-1) 65%, white);
-}
-
-@theme inline {
-    --color-os-bg: var(--background);
-    --color-os-surface: var(--card);
-    --color-os-border: var(--border);
-    --color-os-border-strong: var(--input);
-    --color-os-text: var(--foreground);
-    --color-os-muted: var(--muted-foreground);
-    --color-os-dim: var(--muted-foreground);
-    --color-os-accent: var(--kg-accent);
-    --color-os-ok: var(--kg-ok);
-    --color-os-warn: var(--kg-warn);
-    --color-os-err: var(--destructive);
-    /* The graph's own corner scale: barely rounded, so the diagram chrome
-       stays distinct from the console's rounded cards. */
-    --radius-sm-t: 2px;
-    --radius-md-t: 4px;
-    --radius-lg-t: 6px;
-}
-
-/*
- * The unprefixed names the ported graph writes inline as `var(--…)`. Scoped to
- * the graph so a second set of colour names never leaks into the rest of the
- * app. `--border` is deliberately absent: the console already defines it, and
- * aliasing it to its own `--color-border` alias would be a cycle.
- */
-.oc-kg {
-    --ease: var(--ease-emphasized);
-    --bg: var(--background);
-    --surface: var(--card);
-    --border-strong: var(--input);
-    --text: var(--foreground);
-    --text-2: var(--muted-foreground);
-    --text-3: var(--muted-foreground);
-    --muted: var(--muted-foreground);
-    --dim: var(--muted-foreground);
-    --accent: var(--kg-accent);
-    --accent-soft: color-mix(in oklab, var(--kg-accent) 12%, transparent);
-    --accent-line: color-mix(in oklab, var(--kg-accent) 30%, transparent);
-    --ok: var(--kg-ok);
-    --warn: var(--kg-warn);
-    --err: var(--destructive);
-    --brain-1: var(--kg-brain-1);
-    --brain-2: var(--kg-brain-2);
-    --stage: var(--kg-stage);
-    --kg-tool: var(--kg-brain-2);
 }
 
 /* ============================================================================
@@ -1524,4 +1478,46 @@
     --brand-700: oklch(0.1450 0 0); /* #0a0a0a */
     --brand-800: oklch(0.1050 0 0); /* #040404 */
     --brand-900: oklch(0.0700 0 0); /* #010101 */
+}
+
+/*
+ * The floating sidebar's fill (`app-shell.tsx`): `--sidebar-float`, just
+ * translucent enough that the card's `backdrop-blur` reads the page scrolling
+ * beneath it. OpenHuman's `.sidebar-material` also lays a primary wash from the
+ * top-left corner; it read as a shade on the card's head, so it is left out.
+ */
+.sidebar-material {
+  background: color-mix(in oklab, var(--sidebar-float) 92%, transparent);
+}
+.dark .sidebar-material {
+  background: color-mix(in oklab, var(--sidebar-float) 85%, transparent);
+}
+
+/*
+ * The avatar shape (`lib/avatar-shape.ts`, Settings → Appearance). Every
+ * teammate face draws its corners from `--avatar-radius`: round by default,
+ * the console's earlier rounded square when the operator picks it.
+ */
+:root {
+  --avatar-radius: 9999px;
+}
+:root[data-avatar-shape="rounded"] {
+  --avatar-radius: calc(var(--radius) - 2px);
+}
+
+/*
+ * Mascot faces in light mode get an edge. The Rive mascot renders onto its own
+ * pale disc — baked into the artboard, which exposes only skin and hand colour
+ * — so on the white page and the near-white sidebar a face had no boundary at
+ * all. A hairline of ink drawn OVER the tile (an `::after`, because the
+ * rendered image covers anything painted beneath it) gives every face the edge
+ * it already has in dark mode, where the disc sits on near-black.
+ */
+:root:not(.dark) .avatar-mascot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px oklch(0.2 0.02 286 / 0.14);
+  pointer-events: none;
 }

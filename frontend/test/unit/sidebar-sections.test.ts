@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   NAV_SECTIONS,
   SidebarNavigation,
+  SidebarSectionTabs,
   childActive,
   childAnchor,
   sectionOwning,
@@ -41,25 +42,25 @@ function render(view: View) {
         null,
         // No `pending` to pass: the approvals count is the title row's bell's
         // now, and `title-bar-jumps.test.ts` owns it.
-        createElement(SidebarNavigation, { view, onNavigate: () => {} }),
+        // The column (now only the conversation list's slot) and the foot's
+        // section tabs, which are what Company and Connections became.
+        createElement(SidebarNavigation),
+        createElement(SidebarSectionTabs, { view, onNavigate: () => {} }),
       ),
     ),
   );
 }
 
-/** Every row label the sidebar actually paints, in document order. */
-function renderedRows(): string[] {
-  return [...container.querySelectorAll("[data-sidebar='menu-button']")].map(
-    (el) => el.textContent?.trim() ?? "",
-  );
+/** The section tabs, by accessible name, in document order. */
+function tabs(): HTMLButtonElement[] {
+  return [...container.querySelectorAll<HTMLButtonElement>("button[data-tour^='nav-']")];
 }
 
-/** The two fixed rows, read from the bottom group that never changes. */
-function fixedRows(): string[] {
-  const group = container.querySelectorAll("[data-sidebar='group']")[1];
-  return [...group.querySelectorAll("[data-sidebar='menu-button']")].map(
-    (el) => el.textContent?.trim() ?? "",
-  );
+/** The names of the tabs marked as the current page. */
+function litTabs(): string[] {
+  return tabs()
+    .filter((el) => el.getAttribute("aria-current") === "page")
+    .map((el) => el.getAttribute("aria-label") ?? "");
 }
 
 beforeEach(() => {
@@ -267,98 +268,50 @@ describe("which child row is open", () => {
 });
 
 describe("the rendered sidebar", () => {
-  it("is the two bottom rows and the conversation list's slot, on every section", () => {
-    // The middle region stopped swapping with the section you are in (issue
-    // #2130). It is the conversation list, always, and Company and Connections
-    // are the only rows this column paints, whichever address is open — a
-    // section's own pages are rows on its content rail instead
-    // (`section-rail-layout.test.ts`).
-    const rows = ["Company", "Connections"];
+  it("is the conversation list's slot and nothing else, on every section", () => {
+    // The two labelled rows (Company, Connections) that sat under the list are
+    // icon tabs on the floating sidebar's foot now (`SidebarSectionTabs`), so
+    // the column paints no menu rows at all — only the list.
     for (const view of ["chat", "company", "connections", "workflows"] as View[]) {
       render(view);
-      expect(fixedRows(), view).toEqual(rows);
-      expect(renderedRows(), view).toEqual(rows);
-      expect(
-        container.querySelectorAll("[data-testid='room-rail-slot']"),
-        view,
-      ).toHaveLength(1);
+      expect(container.querySelectorAll("[data-sidebar='menu-button']"), view).toHaveLength(0);
+      expect(container.querySelectorAll("[data-testid='room-rail-slot']"), view).toHaveLength(1);
     }
   });
 
-  it("puts the conversation list first and the two rows last, so they stay pinned", () => {
+  it("lets the list take the column's height and scroll inside itself", () => {
     render("company");
     const groups = [...container.querySelectorAll("[data-sidebar='group']")];
-    expect(groups).toHaveLength(2);
-    expect(groups[0].querySelector("[data-testid='room-rail-slot']")).not.toBeNull();
-    expect(groups[1].querySelector("[data-tour='nav-company']")).not.toBeNull();
-    expect(groups[1].querySelector("[data-tour='nav-connections']")).not.toBeNull();
-    // The list takes the leftover height and scrolls inside itself; the rows do
-    // neither, so a list at its cap cannot push them out of reach.
+    expect(groups).toHaveLength(1);
     expect(groups[0].className).toContain("min-h-0");
     expect(groups[0].className).toContain("flex-1");
     const slot = groups[0].querySelector("[data-testid='room-rail-slot']")!;
     expect(slot.className).toContain("overflow-y-auto");
-    expect(groups[1].className).toContain("shrink-0");
-    expect(groups[1].className).not.toContain("flex-1");
+    // Vertical padding on the scroller, not the group: padding outside it
+    // clipped the scrolled rows against a hard edge.
+    expect(groups[0].className).toContain("py-0");
+    expect(slot.className).toContain("py-2");
   });
 
-  it("separates the list from the two rows with a border and no top padding", () => {
-    render("company");
-    expect(container.querySelectorAll("[data-sidebar='separator']")).toHaveLength(0);
-
-    const groups = [...container.querySelectorAll("[data-sidebar='group']")];
-    // The seam is the group's own border, the idiom the title row uses. No
-    // `pt-` on either group, so neither can drift back to the 24px gap that
-    // read as the list coming loose from the rows.
-    expect(groups[1].className).toContain("border-t");
-    expect(groups[0].className).not.toContain("pt-");
-    expect(groups[1].className).not.toContain("pt-");
-    // The bottom padding is the shell's own frame gap, the same token the
-    // content card keeps under it, so Connections' bottom edge lines up with
-    // the card's. Reused, not a new number.
-    expect(groups[1].className).toContain("pb-(--frame-inset)");
-  });
-
-  it("keeps the rail on the 3rem icon rail rather than hiding it there", () => {
-    // `ChannelRail` has a compact variant built for exactly this width, and
-    // dropping it would make collapsing the sidebar silently lose the channel
-    // list — the regression issue #1018 filed about the approvals badge.
-    render("company");
-    const rail = [...container.querySelectorAll("[data-sidebar='group']")][0];
-    expect(rail.className).not.toContain("group-data-[collapsible=icon]:hidden");
-    // And the gutter goes, so the compact rows' unread dots do not land in
-    // horizontal overflow (measured: slot clientWidth 32 against scrollWidth 34).
-    expect(rail.className).toContain("group-data-[collapsible=icon]:px-0");
+  it("draws one tab per section, Company then Connections", () => {
+    render("chat");
+    expect(tabs().map((el) => el.getAttribute("aria-label"))).toEqual(["Company", "Connections"]);
+    expect(tabs().map((el) => el.dataset.tour)).toEqual(["nav-company", "nav-connections"]);
   });
 
   it("marks the section an address is in, and only that", () => {
     render("workspace");
-    // Which of the two you are in. Which of its PAGES is open is said on the
-    // content rail now, so nothing in this column claims to say it twice.
-    expect(fixedRows().filter((_, i) =>
-      [...container.querySelectorAll("[data-sidebar='group']")[1]
-        .querySelectorAll("[data-sidebar='menu-button']")][i].hasAttribute("data-active"),
-    )).toEqual(["Company"]);
-    expect(container.querySelectorAll('[aria-current="page"]')).toHaveLength(0);
-  });
-
-  it("lights a section's own row when nothing under it is open", () => {
-    render("company");
-    const row = [...container.querySelectorAll("[data-sidebar='menu-button']")].find(
-      (el) => el.textContent?.trim() === "Company",
-    )!;
-    expect(row.hasAttribute("data-active")).toBe(true);
+    expect(litTabs()).toEqual(["Company"]);
+    render("connections");
+    expect(litTabs()).toEqual(["Connections"]);
   });
 
   it("lights Company, and nothing on Room, for the Automations address", () => {
     render("workflows");
-    const lit = [...container.querySelectorAll("[data-sidebar='menu-button']")]
-      .filter((el) => el.hasAttribute("data-active"))
-      .map((el) => el.textContent?.trim());
-    expect(lit).toEqual(["Company"]);
-    // And on the Room route no row is lit: the list is not a section.
+    expect(litTabs()).toEqual(["Company"]);
+    // And on the Room route no tab is lit: the list is not a section.
     render("chat");
-    expect(container.querySelectorAll("[data-sidebar='menu-button'][data-active]")).toHaveLength(0);
+    expect(litTabs()).toEqual([]);
   });
 
   it("renders one node per tour anchor, whichever section is open", () => {

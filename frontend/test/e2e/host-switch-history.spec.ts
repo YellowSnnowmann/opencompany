@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { hostSwitcher } from "./host-switcher";
 
 /**
  * Switching hosts is a navigation, and how that reads with exactly one host.
@@ -31,9 +32,9 @@ test.beforeEach(async ({ page }) => {
 test("with one host, its own row is already the selection, so opening the menu changes nothing", async ({
   page,
 }) => {
-  await page.goto("/#/company/work/tasks");
+  await page.goto("/#/settings/general");
 
-  const trigger = page.getByTestId("host-switcher");
+  const trigger = await hostSwitcher(page);
   await expect(trigger).toBeVisible({ timeout: 30_000 });
   await trigger.click();
 
@@ -47,5 +48,5 @@ test("with one host, its own row is already the selection, so opening the menu c
   // Selecting the row you are already on is a no-op: no navigation follows,
   // so there is nothing for Back to undo.
   await rows.first().click();
-  await expect(page).toHaveURL(/#\/company\/work\/tasks/);
+  await expect(page).toHaveURL(/#\/settings\/general/);
 });

@@ -16,7 +16,6 @@ import { describe, expect, it } from "vitest";
 
 const raw = readFileSync("src/views/room/RawTurns.tsx", "utf8");
 const session = readFileSync("src/views/team/AgentSession.tsx", "utf8");
-const header = readFileSync("src/views/room/ChatHeader.tsx", "utf8");
 const room = readFileSync("src/views/RoomView.tsx", "utf8");
 const scope = readFileSync("src/views/room/rawTurnScope.ts", "utf8");
 const types = readFileSync("src/api/types.ts", "utf8");
@@ -225,18 +224,8 @@ describe("the openhuman session key in the raw view", () => {
 });
 
 describe("the raw-turns toggle in a DM", () => {
-  /**
-   * The control is in the chat header, because that is where you are when the
-   * question occurs to you. "Why did it answer that" is asked mid-conversation,
-   * and a control for it that lives two navigations away is one nobody finds.
-   */
-  it("is a control on the chat header", () => {
-    expect(header).toContain('data-testid="chat-raw-toggle"');
-    expect(header).toContain("aria-pressed={raw}");
-    expect(header).toContain("<span>Raw turns</span>");
-    expect(room).toContain("rawAvailable={!!rawAgentId}");
-    expect(room).toContain("onToggleRaw={() => setRawRequested(!showRaw)}");
-  });
+  // The toggle was a button on the chat header; that bar was removed, so the
+  // raw view is reached by its address alone (`?raw`, below).
 
   /**
    * Only in a DM. A `#channel` has several agents, so "the raw turns" would
@@ -246,7 +235,7 @@ describe("the raw-turns toggle in a DM", () => {
     expect(room).toContain(
       'const rawAgentId = channel?.kind === "dm" ? (channel.member?.id ?? null) : null;',
     );
-    expect(header).toContain("rawAvailable && onToggleRaw");
+    expect(room).toContain("const showRaw = rawRequested && !!rawAgentId;");
   });
 
   /**

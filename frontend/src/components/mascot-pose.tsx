@@ -260,7 +260,7 @@ export function PoseMascot({
   return (
     <div
       ref={rootRef}
-      className={cn("relative overflow-hidden rounded-xl", className)}
+      className={cn("relative overflow-hidden rounded-(--avatar-radius)", className)}
       data-testid={testId}
       data-mascot-trigger={trigger}
       data-mascot-replying={working ? "true" : "false"}
