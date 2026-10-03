@@ -398,7 +398,6 @@ export function MessageTimeline({
               back down the moment the rows land. */}
           <ChannelIntro
             channel={channel}
-            empty={empty}
             loading={loading}
           />
           {loading && <HistorySkeleton />}
@@ -491,11 +490,9 @@ function DayDivider({ label }: { label: string }) {
  */
 function ChannelIntro({
   channel,
-  empty,
   loading,
 }: {
   channel: Channel;
-  empty: boolean;
   loading: boolean;
 }) {
   return (
