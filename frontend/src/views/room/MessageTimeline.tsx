@@ -16,7 +16,6 @@ import { MessageRow } from "./MessageRow";
 import { StepTimeline } from "./StepTimeline";
 import { WorkingIndicator } from "./WorkingIndicator";
 import {
-  channelIntroSentence,
   channelTitle,
   dmFace,
   type Channel,
@@ -393,19 +392,17 @@ export function MessageTimeline({
         <div
           ref={content}
           className={cn(
-            "mx-auto flex min-h-full w-full max-w-4xl flex-col pb-4",
+            // `pt-14` clears the channel pill floating over the top, so the
+            // first message is never under it when scrolled to the start.
+            "mx-auto flex min-h-full w-full max-w-4xl flex-col pt-14 pb-4",
             empty ? "justify-start" : "justify-end",
           )}
         >
-          {/* The skeleton fills the same space real rows will — so a loading
-              channel is spaced like a full one and the intro does not jump down
-              and back up. That is also why `loading` keeps the *bottom* anchor
-              above: flipping to the top while history is in flight would move
-              the intro up and then drop it back down the moment the rows land. */}
-          <ChannelIntro
-            channel={channel}
-            loading={loading}
-          />
+          {/* No intro block ("This is the very beginning of #…") at the top:
+              the pill over the transcript names the conversation and opens its
+              details, so the welcome card restated it. The skeleton fills the
+              space real rows will, so a loading channel is spaced like a full
+              one. */}
           {loading && <HistorySkeleton />}
           {items.map(renderRow)}
           {receipt ? (
@@ -486,97 +483,6 @@ function DayDivider({ label }: { label: string }) {
       </p>
       <span className="h-px flex-1 bg-border" aria-hidden />
     </div>
-  );
-}
-
-/**
- * The block at the very top of a channel, explaining what it is for. It stays
- * above the first message rather than only showing when the channel is empty —
- * scrolling to the beginning of a channel should tell you where you are.
- */
-function ChannelIntro({
-  channel,
-  loading,
-}: {
-  channel: Channel;
-  loading: boolean;
-}) {
-  return (
-    // `pt-5`, empty or not: with no channel bar above it, the intro's mark
-    // starts on the same line as the sidebar's first conversation row (the card
-    // sits 8px down and pads its list another 12px), so the page and the column
-    // beside it begin together rather than the page starting a step lower.
-    <div className="px-4 pt-5 pb-3">
-      <IntroMark channel={channel} />
-      <h2 className="text-xl font-semibold tracking-tight">{channelTitle(channel)}</h2>
-      {/* Both of these sentences are positive claims that the channel has no
-          history — "the start of", "the very beginning of". Neither may render
-          until the host has answered, or a reload of a busy DM reads as lost
-          conversation (issue #934). The identity block above is not a claim
-          and stays either way, so the pane still says where you are. */}
-      <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-        {channelIntroSentence(channel, loading)}
-      </p>
-      {/* No "Give the team a brief" / "Add people" cards under it any more:
-          the composer is focused the moment a channel opens, which is the
-          brief, and people are added on Company > Agents. */}
-    </div>
-  );
-}
-
-/**
- * What the intro draws above the channel's name (issue #1327).
- *
- * A DM has exactly one person on the other end and wears their face; a desk
- * draws nothing (see the last branch).
- *
- * Before this, every channel but `main` fell through to `TeammateAvatar` seeded
- * on the channel *name*, so `#engineering` grew an arbitrary mascot — a face
- * belonging to no one, at the largest avatar size on the surface, as the first
- * thing in the pane — while the header eighteen pixels above drew `#` for the
- * same channel. Two marks for one thing, disagreeing on screen.
- *
- * `dmFace` is the shared seed, so the mark here and the rail row and the header
- * cannot drift about who a DM is with.
- */
-function IntroMark({ channel }: { channel: Channel }) {
-  // The face's own size and gap; a desk draws nothing, so its title sits at
-  // the top of the intro.
-  const box = "mb-3 size-12";
-
-  if (channel.kind === "dm") {
-    const face = dmFace(channel);
-    // A DM with no roster entry has nobody to draw. The header falls back to a
-    // glyph rather than inventing a mascot for a stranger; so does this.
-    return face ? (
-      <TeammateAvatar {...face} className={cn(box, "text-base")} />
-    ) : (
-      <MarkTile icon={CircleDot} className={box} />
-    );
-  }
-
-  // A desk draws no mark. It wore `#` (a lock when private) or, for
-  // `#general`, the company brand tile — a glyph standing in for a group the
-  // sidebar row already pictures as its members' faces. The title under it is
-  // the channel's name, and that is enough.
-  return null;
-}
-
-/**
- * A glyph on a tile, on `--surface-icon` — the rung the brand guide names for
- * an icon ground. Only a DM with no roster entry draws one now.
- */
-function MarkTile({ icon: Icon, className }: { icon: LucideIcon; className?: string }) {
-  return (
-    <span
-      className={cn(
-        "flex items-center justify-center bg-surface-icon text-muted-foreground",
-        className,
-      )}
-      aria-hidden
-    >
-      <Icon className="size-5" />
-    </span>
   );
 }
 
