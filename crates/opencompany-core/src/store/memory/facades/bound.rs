@@ -207,7 +207,11 @@ pub(in crate::store::memory) struct Bound {
 }
 
 impl Bound {
-    pub(in crate::store::memory) fn new(engine: Arc<dyn MemoryEngine>, scope: Scope, provenance: Provenance) -> Self {
+    pub(in crate::store::memory) fn new(
+        engine: Arc<dyn MemoryEngine>,
+        scope: Scope,
+        provenance: Provenance,
+    ) -> Self {
         Self {
             engine,
             scope,
@@ -325,7 +329,11 @@ impl Bound {
     }
 
     /// Fetches one typed record by key.
-    pub(super) async fn get<T: DeserializeOwned>(&self, company: &CompanyId, key: &str) -> Result<Option<T>> {
+    pub(super) async fn get<T: DeserializeOwned>(
+        &self,
+        company: &CompanyId,
+        key: &str,
+    ) -> Result<Option<T>> {
         let namespace = self.namespace(company);
         Ok(self
             .current(&namespace, key)
@@ -416,4 +424,3 @@ impl Bound {
         Ok((namespace, hits))
     }
 }
-

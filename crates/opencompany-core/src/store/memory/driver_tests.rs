@@ -37,7 +37,12 @@ fn the_supported_set_is_upstreams_registry() {
 
 #[test]
 fn cortexdb_binds_with_an_https_endpoint_and_a_key() {
-    let engine = open_driver(&remote("cortexdb", Some("https://cortex.example"), Some("k"))).unwrap();
+    let engine = open_driver(&remote(
+        "cortexdb",
+        Some("https://cortex.example"),
+        Some("k"),
+    ))
+    .unwrap();
     assert_eq!(engine.descriptor().id, "cortexdb");
 }
 
@@ -74,9 +79,20 @@ fn remote_mode_requires_a_driver_and_a_key() {
 
 #[test]
 fn a_credentialed_plain_http_endpoint_is_refused_unless_loopback() {
-    let why = refusal(&remote("cortexdb", Some("http://cortex.example"), Some("k")));
+    let why = refusal(&remote(
+        "cortexdb",
+        Some("http://cortex.example"),
+        Some("k"),
+    ));
     assert!(why.contains("https"), "{why}");
-    assert!(open_driver(&remote("cortexdb", Some("http://127.0.0.1:9000"), Some("k"))).is_ok());
+    assert!(
+        open_driver(&remote(
+            "cortexdb",
+            Some("http://127.0.0.1:9000"),
+            Some("k")
+        ))
+        .is_ok()
+    );
 }
 
 #[test]

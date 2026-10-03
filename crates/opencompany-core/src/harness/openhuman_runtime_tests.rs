@@ -35,7 +35,13 @@ fn the_shared_runtime_never_registers_openhumans_memory_domain() {
     // One runtime serves every company; its memory domain would ingest every
     // company's turns into one engine under one credential.
     let domains = super::host_domains();
-    assert!(!domains.memory, "memory must stay off on the shared runtime");
-    assert!(domains.agent, "the agent domain is what a company turn runs on");
+    assert!(
+        !domains.memory,
+        "memory must stay off on the shared runtime"
+    );
+    assert!(
+        domains.agent,
+        "the agent domain is what a company turn runs on"
+    );
     assert!(domains.mcp && domains.skills);
 }

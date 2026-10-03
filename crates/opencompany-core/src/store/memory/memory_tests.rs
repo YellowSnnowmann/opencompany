@@ -294,7 +294,10 @@ async fn every_write_lands_in_its_own_companys_workspace() {
         } else {
             "globex"
         };
-        assert!(workspace.starts_with(&format!("oc/{company}-")), "{workspace}");
+        assert!(
+            workspace.starts_with(&format!("oc/{company}-")),
+            "{workspace}"
+        );
     }
 }
 

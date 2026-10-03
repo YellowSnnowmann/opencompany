@@ -22,9 +22,7 @@
 
 use std::sync::Arc;
 
-use tinymemory::{
-    DocumentBody, Hit, ItemKind, ListRequest, MemoryEngine, MetaFilter, StoreItem,
-};
+use tinymemory::{DocumentBody, Hit, ItemKind, ListRequest, MemoryEngine, MetaFilter, StoreItem};
 
 use super::driver::{MemoryDriverConfig, MemoryMode};
 use super::facades::ENVELOPE_MIME;

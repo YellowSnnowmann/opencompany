@@ -122,8 +122,13 @@ async fn the_http_client_posts_the_hub_shape_and_maps_a_rate_limit() {
         format!("http://{addr}/"),
         crate::ports::types::SecretValue("sk-test".to_string()),
     );
-    let outcome = client.ingest(&request(FeedbackCategory::Bug)).await.unwrap();
-    assert!(matches!(outcome, IngestOutcome::Accepted { remote_id: Some(ref id) } if id == "hub-1"));
+    let outcome = client
+        .ingest(&request(FeedbackCategory::Bug))
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, IngestOutcome::Accepted { remote_id: Some(ref id) } if id == "hub-1")
+    );
 
     let (headers, body) = seen.lock().unwrap()[0].clone();
     assert_eq!(headers["authorization"], "Bearer sk-test");
@@ -135,7 +140,10 @@ async fn the_http_client_posts_the_hub_shape_and_maps_a_rate_limit() {
     assert_eq!(body["origin"], "acme");
 
     limited.store(true, std::sync::atomic::Ordering::SeqCst);
-    let outcome = client.ingest(&request(FeedbackCategory::Bug)).await.unwrap();
+    let outcome = client
+        .ingest(&request(FeedbackCategory::Bug))
+        .await
+        .unwrap();
     assert!(
         matches!(outcome, IngestOutcome::RateLimited { ref reason } if reason == "slow down"),
         "{outcome:?}"

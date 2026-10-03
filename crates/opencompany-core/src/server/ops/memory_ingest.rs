@@ -63,7 +63,6 @@ const INGEST_BODY_LIMIT: usize = 8 * MAX_DOCUMENT_BYTES;
 #[cfg(feature = "documents")]
 const MAX_LINK_BYTES: usize = 4 * 1024 * 1024;
 
-
 /// Builds the ingest route fragment.
 pub fn router() -> Router<AppState> {
     scoped("/memory/ingest", post(ingest))

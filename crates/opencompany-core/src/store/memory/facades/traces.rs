@@ -8,7 +8,6 @@ use crate::error::OpenCompanyError;
 use crate::ports::{CompanyId, CompressedTrace, EvictionPolicy, MemoryStore, TaskResult};
 use crate::runtime::maintenance::TRACE_RETENTION_LIMIT;
 
-
 /// The brain's compressed traces and task results.
 ///
 /// The spec sequences this port last, and says it may reasonably never move:
@@ -26,7 +25,11 @@ pub struct ProviderMemoryStore {
 }
 
 impl ProviderMemoryStore {
-    pub(in crate::store::memory) fn new(traces: Bound, archive: Bound, task_results: Bound) -> Self {
+    pub(in crate::store::memory) fn new(
+        traces: Bound,
+        archive: Bound,
+        task_results: Bound,
+    ) -> Self {
         Self {
             traces,
             archive,
@@ -231,4 +234,3 @@ impl MemoryStore for ProviderMemoryStore {
         Ok(evicted)
     }
 }
-

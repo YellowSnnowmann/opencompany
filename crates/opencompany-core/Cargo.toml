@@ -452,6 +452,9 @@ quick-xml = { version = "0.41", optional = true }
 zip = { version = "7", default-features = false, features = ["deflate"] }
 
 sha2 = "0.10"
+# Constant-time secret comparison for bearer / webhook / ingest credentials,
+# instead of a hand-rolled XOR fold per call site.
+subtle = "2.6"
 getrandom = "0.4"
 
 # Argon2id password hashing. Unconditional for the same reason as sha2: a build

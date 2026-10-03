@@ -349,7 +349,10 @@ fn link_ingestion_refuses_this_deployments_own_network() {
         "ftp://example.com/x",
         "not a url",
     ] {
-        assert!(super::link_refusal(refused).is_err(), "{refused} must be refused");
+        assert!(
+            super::link_refusal(refused).is_err(),
+            "{refused} must be refused"
+        );
     }
     assert!(super::link_refusal("https://93.184.216.34/pricing").is_ok());
     assert!(super::link_refusal("https://example.com/pricing").is_ok());

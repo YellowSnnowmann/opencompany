@@ -323,23 +323,26 @@ fn remote_options() -> Vec<EngineOption> {
 /// the feature rather than concluding the product has no hosted engines.
 #[cfg(not(feature = "tinymemory"))]
 fn remote_options() -> Vec<EngineOption> {
-    [("cortexdb", "CortexDB"), ("tinyhumans", "TinyHumans memory")]
-        .into_iter()
-        .map(|(id, label)| EngineOption {
-            id,
-            label,
-            description: "A hosted memory engine.",
-            available: false,
-            unavailable_reason: Some(
-                "this build was compiled without the `tinymemory` feature".to_string(),
-            ),
-            requires_url: false,
-            accepts_url: true,
-            default_url: None,
-            requires_key: true,
-            durable: true,
-        })
-        .collect()
+    [
+        ("cortexdb", "CortexDB"),
+        ("tinyhumans", "TinyHumans memory"),
+    ]
+    .into_iter()
+    .map(|(id, label)| EngineOption {
+        id,
+        label,
+        description: "A hosted memory engine.",
+        available: false,
+        unavailable_reason: Some(
+            "this build was compiled without the `tinymemory` feature".to_string(),
+        ),
+        requires_url: false,
+        accepts_url: true,
+        default_url: None,
+        requires_key: true,
+        durable: true,
+    })
+    .collect()
 }
 
 /// Looks an engine id up in the catalog.

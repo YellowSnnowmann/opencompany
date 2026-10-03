@@ -123,7 +123,6 @@ pub mod mcp;
 pub mod mcp_probe;
 pub mod memory_loop;
 pub mod memory_tools;
-pub mod redact;
 /// Recovering a tool call that a model on the **native** transport wrote into
 /// its message body as prose instead of emitting it through the structured
 /// channel. Validated against the tools the turn itself offered — the marker a
@@ -177,6 +176,7 @@ mod publish_turn_dispatch_tests;
 mod publish_turn_helpers_tests;
 #[cfg(test)]
 mod publish_turn_link_tests;
+pub mod redact;
 pub mod run_origin;
 pub mod run_trace;
 pub mod run_turn;

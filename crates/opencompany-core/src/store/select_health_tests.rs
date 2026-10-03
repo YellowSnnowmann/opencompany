@@ -111,7 +111,10 @@ async fn a_slow_engine_is_slow_not_refused() {
     let mut engine = Scripted::new(EngineHealth::Ok, false);
     engine.sleep = Some(std::time::Duration::from_secs(60));
     let outcome = probe_engine(&engine, std::time::Duration::from_millis(50)).await;
-    assert!(!outcome.healthy, "a timed-out health check is not a healthy one");
+    assert!(
+        !outcome.healthy,
+        "a timed-out health check is not a healthy one"
+    );
     assert_eq!(outcome.slow, vec!["health", "list"]);
     assert!(outcome.unreachable.is_empty());
 }

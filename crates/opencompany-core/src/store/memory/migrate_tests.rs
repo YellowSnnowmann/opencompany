@@ -25,7 +25,11 @@ async fn seeded() -> Arc<dyn MemoryEngine> {
     for company in ["acme", "globex"] {
         let id = CompanyId::new(company);
         for n in 0..3 {
-            bound.facts().upsert(&id, &fact(&format!("f{n}"))).await.unwrap();
+            bound
+                .facts()
+                .upsert(&id, &fact(&format!("f{n}")))
+                .await
+                .unwrap();
         }
     }
     engine
@@ -101,8 +105,13 @@ fn resolve_refuses_null_retired_and_same_targets() {
     assert!(resolve_migrate_configs(&settings, "null", None, None).is_err());
     assert!(resolve_migrate_configs(&settings, "mem0", Some("https://x".into()), None).is_err());
     assert!(
-        resolve_migrate_configs(&settings, "cortexdb", Some("https://from.example/".into()), None)
-            .is_err()
+        resolve_migrate_configs(
+            &settings,
+            "cortexdb",
+            Some("https://from.example/".into()),
+            None
+        )
+        .is_err()
     );
 }
 

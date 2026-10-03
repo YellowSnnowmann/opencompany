@@ -45,8 +45,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub use bound::EXTERNAL_TAG;
-pub(super) use bound::{Bound, ENVELOPE_MIME, Provenance};
 use bound::decode;
+pub(super) use bound::{Bound, ENVELOPE_MIME, Provenance};
 pub use traces::ProviderMemoryStore;
 
 use crate::error::OpenCompanyError;

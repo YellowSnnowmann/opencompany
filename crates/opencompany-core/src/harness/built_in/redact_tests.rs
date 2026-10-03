@@ -1,6 +1,5 @@
 use super::*;
 
-
 #[test]
 fn redact_secrets_removes_the_value_but_keeps_the_prose() {
     // A one-time-secret link: the key is stripped, the surrounding sentence

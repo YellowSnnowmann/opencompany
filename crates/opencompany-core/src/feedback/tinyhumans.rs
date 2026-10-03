@@ -377,12 +377,10 @@ mod http {
             headers.insert(name, reqwest::header::HeaderValue::from_static(value));
             Self {
                 // Trailing slashes would produce `//feedback/ingest`.
-                sdk: tinyhumans_sdk::TinyHumansClient::new(
-                    api_url.into().trim_end_matches('/'),
-                )
-                // The credential rides the header and only the header.
-                .with_token(Some(credential.expose().to_string()))
-                .with_default_headers(headers),
+                sdk: tinyhumans_sdk::TinyHumansClient::new(api_url.into().trim_end_matches('/'))
+                    // The credential rides the header and only the header.
+                    .with_token(Some(credential.expose().to_string()))
+                    .with_default_headers(headers),
             }
         }
 
@@ -539,7 +537,10 @@ mod http {
                 ("page", Some(query.page.to_string())),
                 ("limit", Some(query.limit.to_string())),
                 ("type", query.kind.map(|kind| kind.as_str().to_string())),
-                ("status", query.status.map(|status| status.as_str().to_string())),
+                (
+                    "status",
+                    query.status.map(|status| status.as_str().to_string()),
+                ),
             ];
             let data = self
                 .sdk

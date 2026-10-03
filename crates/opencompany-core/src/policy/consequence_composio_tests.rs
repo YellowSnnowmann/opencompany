@@ -589,7 +589,9 @@ pub(super) fn we_do_not_fall_back_to_the_upstream_read_default() {
 #[cfg(feature = "openhuman")]
 pub(super) fn the_fallback_never_calls_a_curated_write_a_read() {
     use openhuman_core::integrations::composio::contract::catalogs::catalog_for_toolkit;
-    use openhuman_core::integrations::composio::contract::scopes::{ToolScope, agent_ready_toolkits};
+    use openhuman_core::integrations::composio::contract::scopes::{
+        ToolScope, agent_ready_toolkits,
+    };
 
     let entries: Vec<_> = agent_ready_toolkits()
         .into_iter()

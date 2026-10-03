@@ -78,7 +78,9 @@ async fn the_http_exchange_redeems_then_reads_the_summary() {
             get({
                 let seen = seen.clone();
                 move |headers: HeaderMap| async move {
-                    seen.lock().unwrap().push(("summary".into(), headers, serde_json::Value::Null));
+                    seen.lock()
+                        .unwrap()
+                        .push(("summary".into(), headers, serde_json::Value::Null));
                     Json(serde_json::json!({
                         "success": true,
                         "data": {
@@ -95,7 +97,10 @@ async fn the_http_exchange_redeems_then_reads_the_summary() {
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let exchange = HttpHubIdentityExchange::new(format!("http://{addr}/"));
-    let key = exchange.redeem_key_grant("code-1", "verifier-1").await.unwrap();
+    let key = exchange
+        .redeem_key_grant("code-1", "verifier-1")
+        .await
+        .unwrap();
     assert_eq!(key, "sk-minted");
     let summary = exchange.billing_summary(&key).await.unwrap();
     assert_eq!(summary.balance_usd, 12.5);
@@ -104,7 +109,10 @@ async fn the_http_exchange_redeems_then_reads_the_summary() {
     let seen = seen.lock().unwrap();
     let (name, value) = crate::product::product_identity_header();
     let (_, redeem_headers, redeem_body) = &seen[0];
-    assert!(redeem_headers.get("authorization").is_none(), "redemption is unauthenticated");
+    assert!(
+        redeem_headers.get("authorization").is_none(),
+        "redemption is unauthenticated"
+    );
     assert_eq!(redeem_headers[name], value);
     assert_eq!(redeem_body["code"], "code-1");
     assert_eq!(redeem_body["code_verifier"], "verifier-1");
