@@ -1891,7 +1891,7 @@ fn log_filter(rust_log: Option<&str>) -> tracing_subscriber::EnvFilter {
     }
 }
 
-/// Resolves a base-URL env var (`TINYHUMANS_API_URL`, `TINYHUMANS_WEB_URL`)
+/// Resolves a base-URL env var (`TINYHUMANS_API_URL`)
 /// for `serve`'s manual `AppConfig` build. Mirrors
 /// `opencompany::app::config::resolve_base_url`'s precedence — kept as a
 /// small local twin because `serve` builds `AppConfig` field-by-field rather
