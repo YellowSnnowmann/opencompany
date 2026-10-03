@@ -192,7 +192,7 @@ test("Manage lists opens from the switcher, in Work — not Company", async ({ p
   // The Company page never gets a Manage Lists button of its own (issue
   // #1284) — the switcher is the only way in.
   await page.getByTestId("lists-back").click();
-  await page.locator('[data-tour="nav-company"]').getByRole("button").click();
+  await page.locator('[data-tour="nav-company"]').click();
   await expect(page.getByTestId("company-manage-lists")).toHaveCount(0);
 });
 
