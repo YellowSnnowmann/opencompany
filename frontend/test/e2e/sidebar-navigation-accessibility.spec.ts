@@ -100,6 +100,11 @@ for (const width of [480, 390]) {
     await trigger.click();
     const sheet = page.getByRole("dialog", { name: "Sidebar" });
     await expect(sheet).toBeVisible();
+    // The sheet slides in from the left edge, so its contents start off
+    // screen; wait for it to land before measuring what it holds.
+    await expect
+      .poll(async () => (await sheet.boundingBox())?.x, { message: "the sheet settles at the edge" })
+      .toBe(0);
     for (const id of ["title-bar-search", "title-bar-notifications", "title-bar-settings", "profile-row"]) {
       const box = await sheet.getByTestId(id).first().boundingBox();
       expect(box, `${id} should have a box`).not.toBeNull();

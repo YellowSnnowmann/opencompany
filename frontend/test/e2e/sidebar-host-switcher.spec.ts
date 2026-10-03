@@ -105,7 +105,9 @@ test("the sidebar owns the left edge, and Settings carries the host switcher", a
 
   // The switcher heads the Settings rail, right of the sidebar rather than a
   // column of its own to the left of it, and it holds both hosts.
-  const switcher = page.getByTestId("host-switcher");
+  // Settings mounts it twice (atop the rail, and above the chip row below
+  // `lg`) with CSS showing one; this is the one on screen.
+  const switcher = page.locator('[data-testid="host-switcher"]:visible');
   await expect(switcher).toBeVisible();
   const switcherBox = await switcher.boundingBox();
   expect(switcherBox, "the switcher should have a box").not.toBeNull();
