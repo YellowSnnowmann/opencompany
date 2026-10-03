@@ -1529,6 +1529,9 @@ mod setup_test_group_6;
 #[path = "setup/setup_test_group_7.rs"]
 mod setup_test_group_7;
 #[cfg(test)]
+#[path = "setup/setup_test_group_8.rs"]
+mod setup_test_group_8;
+#[cfg(test)]
 #[path = "setup/setup_test_support_1.rs"]
 mod setup_test_support_1;
 
