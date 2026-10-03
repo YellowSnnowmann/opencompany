@@ -374,6 +374,7 @@ fn a_company_agent_runtime_registers_no_upstream_composio_tools() {
 fn a_company_agent_config_seeds_no_openhuman_docs_server() {
     let mut config = openhuman_core::config::Config::default();
     config.mcp_client.enabled = true;
+    config.gitbooks.enabled = true;
     let seeded = |config: &openhuman_core::config::Config| {
         openhuman_core::mcp::host::client_config(config)
             .servers
