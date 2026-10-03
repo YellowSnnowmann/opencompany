@@ -2765,6 +2765,8 @@ pub enum CompanyEvent {
         /// Epoch-millis the funnel completed.
         at_millis: u64,
     },
+    /// A retired or unrecognised event kind, kept so old journals still load.
+    Unknown,
 }
 
 impl CompanyEvent {
@@ -2834,6 +2836,7 @@ impl CompanyEvent {
             Self::WorkflowNodeFinished { .. } => "WorkflowNodeFinished",
             Self::OnboardingStepCompleted { .. } => "OnboardingStepCompleted",
             Self::OnboardingCompleted { .. } => "OnboardingCompleted",
+            Self::Unknown => "Unknown",
         }
     }
 
