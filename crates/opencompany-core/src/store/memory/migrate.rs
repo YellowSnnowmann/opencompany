@@ -262,11 +262,15 @@ pub fn resolve_migrate_configs(
         }
         requested => {
             let to = super::driver::canonical_engine_id(requested)?;
-            if to_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|u| !u.is_empty())
-                .is_none()
+            let needs_endpoint = tinymemory::list_engines()
+                .into_iter()
+                .any(|engine| engine.id == to && engine.needs_endpoint);
+            if needs_endpoint
+                && to_url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|u| !u.is_empty())
+                    .is_none()
             {
                 return Err(OpenCompanyError::Config(format!(
                     "--to {to} is a hosted engine and needs --to-url (the target's endpoint). \
