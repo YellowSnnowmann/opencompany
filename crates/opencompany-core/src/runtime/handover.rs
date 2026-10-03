@@ -68,7 +68,7 @@ use crate::runtime::workflow_gates::WorkflowGateQueue;
 ///
 /// Its presence is also what tells `build()` it is rebuilding rather than
 /// booting, which suppresses the boot-only side effects (journal replay, orphan
-/// run reaping, going-public, MCP re-boot) that must not fire a second time.
+/// run reaping, MCP re-boot) that must not fire a second time.
 #[derive(Clone)]
 pub struct RuntimeHandover {
     pub(crate) store: Arc<dyn CompanyStore>,

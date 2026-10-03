@@ -746,7 +746,7 @@ pub struct RuntimeBuilder {
     /// runtime must never duplicate (see [`RuntimeHandover`]), and its presence
     /// is also the "this is a rebuild" signal that suppresses the boot-only side
     /// effects below: journal replay, orphan-run reaping, workspace seeding,
-    /// going-public, and the MCP re-boot.
+    /// and the MCP re-boot.
     handover: Option<RuntimeHandover>,
 }
 
