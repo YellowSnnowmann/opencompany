@@ -2708,12 +2708,16 @@ export function RoomView({
                   </p>
                 )}
                 {showRaw && rawAgentId ? (
-                  <RawTranscript
-                    load={rawLoad}
-                    rows={rawRows}
-                    agentId={rawAgentId}
-                    agentName={channelTitle(channel)}
-                  />
+                  // `pt-12` clears the channel pill floating over the top, the
+                  // same clearance the transcript keeps.
+                  <div className="flex min-h-0 flex-1 flex-col pt-12">
+                    <RawTranscript
+                      load={rawLoad}
+                      rows={rawRows}
+                      agentId={rawAgentId}
+                      agentName={channelTitle(channel)}
+                    />
+                  </div>
                 ) : (
                 <MessageTimeline
                   channel={channel}
