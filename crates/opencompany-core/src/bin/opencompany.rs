@@ -275,7 +275,7 @@ enum MemoryCmd {
     /// flipping the environment: migrate, then set the variables, restart,
     /// and verify `/spec`.
     Migrate {
-        /// Target driver: `namespace`, `supermemory`, `mem0`, or `cognee`.
+        /// Target engine: `cortexdb` or `tinyhumans`.
         #[arg(long)]
         to: String,
         /// Target endpoint (hosted engines only).
