@@ -185,7 +185,7 @@ pub enum MemoryBackend {
     #[default]
     Store,
     /// A hosted memory service behind a URL and a credential, bound through the
-    /// `MemoryProvider` contract (`tinymemory` feature).
+    /// `MemoryEngine` contract (`tinymemory` feature).
     ///
     /// Missing credentials refuse at boot: a company that believes it is writing
     /// to hosted memory and is not is worse off than one that fails to start.
@@ -643,41 +643,6 @@ impl std::fmt::Debug for StorageHandles {
     }
 }
 
-/// Which deployment of a hosted engine the credential belongs to.
-///
-/// Not cosmetic, and not inferable from the URL. Mem0 and Cognee each expose
-/// two products that speak *different protocols* under the same driver id:
-/// Mem0's platform authenticates with `Authorization: Token` and serves v3/v1
-/// paths while its open-source server uses `X-API-Key` and un-prefixed ones;
-/// Cognee Cloud uses `X-Api-Key` where an authenticated self-hosted instance
-/// takes a bearer token. Pointing the wrong one at a live service fails at the
-/// first request — a 404 on paths that do not exist there, or a 401 whose body
-/// says `Invalid header` — and neither error names the real cause.
-///
-/// Supermemory is the exception that made this easy to miss: it serves the
-/// same API with the same bearer credential either way, so the single
-/// constructor OpenCompany used worked against it and against nothing else.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RemoteDeployment {
-    /// The vendor's managed platform. The default, because that is what
-    /// `remote` mode is for; a self-hosted engine is the deliberate case.
-    #[default]
-    Managed,
-    /// An instance the operator runs themselves.
-    SelfHosted,
-}
-
-impl RemoteDeployment {
-    /// Parses the wire value, or `None` when it names neither deployment.
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw.trim().to_ascii_lowercase().replace('_', "-").as_str() {
-            "managed" | "cloud" | "hosted" | "platform" => Some(Self::Managed),
-            "self-hosted" | "selfhosted" | "self" => Some(Self::SelfHosted),
-            _ => None,
-        }
-    }
-}
-
 /// Connection settings for [`open_storage`]. `fs` needs nothing beyond the
 /// runtime's home directory (handled by the builder's defaults), so it yields
 /// `None` handles.
@@ -713,8 +678,7 @@ pub struct StorageSettings {
     /// the safe default.
     pub allow_ephemeral_memory: bool,
     /// Which engine to bind for `OPENCOMPANY_MEMORY=remote`
-    /// (`OPENCOMPANY_MEMORY_DRIVER`): `supermemory`, `mem0`, `cognee`,
-    /// `cortexdb`.
+    /// (`OPENCOMPANY_MEMORY_DRIVER`): `cortexdb` or `tinyhumans`.
     ///
     /// Instance-level, never per-company: one engine per instance, like
     /// `OPENCOMPANY_STORAGE`, while manifests are per-company — a
@@ -741,14 +705,6 @@ pub struct StorageSettings {
     /// The hosted manager injects environment rather than manifests, which is
     /// what makes env sufficient.
     pub memory_api_key: Option<String>,
-    /// Which deployment of the named remote engine the credential belongs to
-    /// (`OPENCOMPANY_MEMORY_DEPLOYMENT`: `managed` or `self-hosted`).
-    ///
-    /// Defaults to managed. Mem0 and Cognee serve different protocols to their
-    /// platform and their self-hosted server under one driver id, so this is
-    /// not inferable from the URL, and getting it wrong fails at the first
-    /// request with an error that names neither the cause nor this setting.
-    pub memory_deployment: RemoteDeployment,
 }
 
 impl std::fmt::Debug for StorageSettings {
@@ -833,10 +789,6 @@ impl StorageSettings {
             memory_driver: non_empty("OPENCOMPANY_MEMORY_DRIVER"),
             memory_url: non_empty("OPENCOMPANY_MEMORY_URL"),
             memory_api_key: non_empty("OPENCOMPANY_MEMORY_API_KEY"),
-            memory_deployment: non_empty("OPENCOMPANY_MEMORY_DEPLOYMENT")
-                .as_deref()
-                .and_then(RemoteDeployment::parse)
-                .unwrap_or_default(),
         })
     }
 
@@ -1033,18 +985,13 @@ pub fn open_memory_overlay(settings: &StorageSettings) -> Result<Option<MemoryOv
     }
 }
 
-/// Opens a [`MemoryProvider`](tinymemory_api::provider::MemoryProvider)-backed
-/// overlay: the `remote` and `null` modes. The provider contract covers all
-/// three memory ports, so a company never splits its memory across engines.
+/// Opens a [`MemoryEngine`](tinymemory::MemoryEngine)-backed overlay: the
+/// `remote` and `null` modes. One engine covers all three memory ports, so a
+/// company never splits its memory across engines.
 #[cfg(feature = "tinymemory")]
 fn open_provider(settings: &StorageSettings) -> Result<Option<MemoryOverlay>> {
     use crate::store::memory::{BoundMemory, MemoryDriverConfig, MemoryMode, open_driver};
 
-    // The unproven-remote acceptance flag retired here: its premise — "no
-    // driver conformance suite (tinymemory#18 §E1)" — stopped being true when
-    // the vendored tinymemory gained one (a shared suite run against all four
-    // drivers, plus failure-path tests on the remote adapters). The bind-time
-    // capability audit below is the live safeguard.
     let mode = match settings.memory_backend {
         MemoryBackend::Remote => MemoryMode::Remote,
         MemoryBackend::Null => MemoryMode::Null,
@@ -1057,26 +1004,18 @@ fn open_provider(settings: &StorageSettings) -> Result<Option<MemoryOverlay>> {
         url: settings.memory_url.clone(),
         api_key: settings.memory_api_key.clone(),
         data_dir: settings.data_dir.clone(),
-        deployment: settings.memory_deployment,
     };
-    let Some((provider, class)) = open_driver(&config)? else {
-        return Err(OpenCompanyError::Config(
-            "the selected memory mode did not bind a provider".into(),
-        ));
-    };
-    // Kept aside for the boot-time health probe; `bind` consumes its argument
-    // and deliberately exposes no provider accessor (the ports are the only
-    // data path). Clone is an `Arc` bump.
-    let probe = provider.clone();
-    let bound = BoundMemory::bind(provider, class)?;
-    // Announce the bind: which engine, and — the part an operator cannot infer —
-    // the class the *host* assigned it, since that is what decides whether the
-    // egress and external-trust checks apply. Names the engine and its
-    // capabilities, never the endpoint or the credential.
+    let engine = open_driver(&config)?;
+    // Kept aside for the boot-time health probe; `BoundMemory` deliberately
+    // exposes no engine accessor (the ports are the only data path). Clone is
+    // an `Arc` bump.
+    let probe = engine.clone();
+    let bound = BoundMemory::bind(engine);
+    // Announce the bind: which engine and how it ranks — never the endpoint or
+    // the credential.
     tracing::info!(
-        driver_id = bound.driver_id(),
-        class = bound.class().as_str(),
-        capabilities = ?bound.capability_names(),
+        engine_id = bound.engine_id(),
+        fetch_modes = ?bound.capability_names(),
         "memory engine bound"
     );
     if settings.memory_backend == MemoryBackend::Null {
@@ -1098,7 +1037,7 @@ fn open_provider(settings: &StorageSettings) -> Result<Option<MemoryOverlay>> {
         scopes: Some(Arc::new(bound.clone())),
         descriptor: MemoryDescriptor {
             backend: settings.memory_backend,
-            driver_id: bound.driver_id().to_string(),
+            driver_id: bound.engine_id().to_string(),
             capabilities: bound
                 .capability_names()
                 .into_iter()
@@ -1116,7 +1055,7 @@ fn open_provider(settings: &StorageSettings) -> Result<Option<MemoryOverlay>> {
     }))
 }
 
-/// Without the `tinymemory` feature the two provider-backed modes cannot be
+/// Without the `tinymemory` feature the two engine-backed modes cannot be
 /// served, so they refuse rather than silently resolving to something else.
 #[cfg(not(feature = "tinymemory"))]
 fn open_provider(settings: &StorageSettings) -> Result<Option<MemoryOverlay>> {
