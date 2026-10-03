@@ -378,7 +378,7 @@ fn a_company_agent_config_seeds_no_openhuman_docs_server() {
         openhuman_core::mcp::host::client_config(config)
             .servers
             .iter()
-            .any(|server| server.name == openhuman_core::mcp::host::GITBOOKS_SERVER_NAME)
+            .any(|server| server.name == "gitbooks")
     };
     assert!(
         seeded(&config),

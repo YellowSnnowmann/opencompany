@@ -907,9 +907,8 @@ mod live {
         enforce_egress(&egress)?;
         emit_external_transfer(egress);
 
-        let arguments =
-            oh::integrations::composio::execute_prepare::prepare_execute_arguments(tool, arguments)
-                .map_err(anyhow::Error::msg)?;
+        let arguments = tinyconnectors::execute::prepare_execute_arguments(tool, arguments)
+            .map_err(anyhow::Error::msg)?;
         let mut body = json!({
             "tool": tool,
             "arguments": arguments,
@@ -935,8 +934,7 @@ mod live {
         if !resp.successful
             && let Some(ref err) = resp.error
         {
-            resp.error =
-                Some(oh::integrations::composio::error_mapping::format_provider_error(tool, err));
+            resp.error = Some(tinyconnectors::execute::format_provider_error(tool, err));
         }
         Ok(resp)
     }

@@ -767,7 +767,10 @@ async fn workflow_tool_survives_single_call_deadline_and_stages_result() {
         None,
     );
     let args = json!({"id": "demo"});
-    let (deadline, _) = oh::tools::timeout::resolve_tool_deadline(tool.timeout_policy(&args));
+    let resolved =
+        tinyagents_harness::tool::ToolTimeoutSettings::new(120_000, 1_000, 3_600_000, 5_000)
+            .resolve(tool.timeout_policy(&args));
+    let deadline = resolved.deadline;
     assert!(
         deadline.is_none(),
         "the harness must not truncate a supervised workflow"

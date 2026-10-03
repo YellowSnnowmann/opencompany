@@ -154,7 +154,6 @@ async fn call_tool_through_agent_path_never_leaks_bearer() {
     use axum::routing::post;
     use axum::{Json, Router};
     use oh::security::SecurityPolicy;
-    use oh::tools::McpCallTool;
 
     #[derive(Default)]
     struct Seen {
@@ -208,7 +207,14 @@ async fn call_tool_through_agent_path_never_leaks_bearer() {
     let mut d = decl("fixture", &endpoint);
     d.auth = AuthMaterial::Bearer("sk-super-secret-xyz".into());
     let registry = registry_for_agent(&[d], &grants(&["mcp:*"])).expect("registry");
-    let tool = McpCallTool::new(registry, Arc::new(SecurityPolicy::default()));
+    let tool = OcMcpCallTool::new(
+        registry,
+        Arc::new(SecurityPolicy::default()),
+        vec!["sk-super-secret-xyz".into()],
+        McpFailureQueue::default(),
+        McpMetering::off(),
+        Default::default(),
+    );
 
     let result = tool
         .execute(json!({ "server": "fixture", "tool": "echo", "arguments": {} }))

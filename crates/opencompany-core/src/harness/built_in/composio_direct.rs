@@ -45,15 +45,12 @@
 //! execute discloses (and under `LocalOnly` refuses) the transfer before the
 //! round-trip, so choosing BYOK is not a way around the gate.
 
-use std::sync::Arc;
-
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
 
 use openhuman_core as oh;
 
-use oh::integrations::composio::client::direct_list_connections;
 use oh::integrations::composio::types::{
     ComposioAuthorizeRequest, ComposioAuthorizeResponse, ComposioConnectionsResponse,
     ComposioDeleteResponse, ComposioExecuteRequest, ComposioExecuteResponse, ComposioToolFunction,
@@ -138,7 +135,6 @@ pub(crate) struct Paged<T> {
 /// credential, and this type exists on the request path.
 #[derive(Clone)]
 pub(crate) struct DirectComposio {
-    tool: Arc<oh::tools::DirectComposioClient>,
     api_key: String,
     /// The v3 root the two listings below are addressed to.
     ///
@@ -153,19 +149,11 @@ pub(crate) struct DirectComposio {
 impl DirectComposio {
     /// A client over this company's API key.
     ///
-    /// Holds [`oh::tools::DirectComposioClient`] for the one operation still
-    /// served by a client — the connection listing, whose reshaper carries the
-    /// invalid-key backoff gate. It takes only the key: the entity id and the
-    /// security policy the removed `ComposioTool` wanted are gone with it, the
-    /// first because the module takes it per route and the second because
-    /// nothing here ever went through `Tool::execute` gating (the harness's own
-    /// approval policy and grant gate are what admit a Composio call in this
-    /// repo).
+    /// Stores only the company's credential. The direct connector route owns
+    /// transport and response reshaping.
     pub(crate) fn new(api_key: &str) -> Self {
         let api_key = api_key.trim().to_string();
-        let tool = oh::tools::DirectComposioClient::new(&api_key);
         Self {
-            tool: Arc::new(tool),
             api_key,
             v3_base: v3_base(),
         }
@@ -185,7 +173,18 @@ impl DirectComposio {
     /// the invalid-key backoff gate — an `ak_` that Composio has revoked stops
     /// being re-presented on every poll.
     pub(crate) async fn list_connections(&self) -> Result<ComposioConnectionsResponse> {
-        direct_list_connections(&self.tool).await
+        let transport =
+            tinyconnectors::client::HttpTransport::api_key(&self.v3_base, self.api_key.clone())
+                .map_err(|error| anyhow::anyhow!(error))?;
+        let transport: std::sync::Arc<dyn tinyconnectors::client::Transport> =
+            std::sync::Arc::new(transport);
+        let route: std::sync::Arc<dyn tinyconnectors::client::Route> = std::sync::Arc::new(
+            tinyconnectors::client::DirectRoute::new(transport, &self.api_key, DIRECT_ENTITY_ID),
+        );
+        tinyconnectors::client::ComposioClient::new(route)
+            .list_connections()
+            .await
+            .map_err(|error| anyhow::anyhow!(error))
     }
 
     /// Begin an OAuth handoff and return Composio's hosted connect URL.
