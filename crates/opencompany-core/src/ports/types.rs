@@ -173,7 +173,7 @@ pub const SECRET_REDACTED: &str = "[redacted]";
 /// accident rather than by mistake. The `Debug` half was patched five separate
 /// times on *enclosing* structs — [`RuntimeConfig`](crate::app::config::RuntimeConfig),
 /// [`AppConfig`](crate::app::AppConfig), `ChargebeeConfig`, `MailCredentials`,
-/// `HttpTinyplaceClient` — each time after somebody noticed a live key in a log
+/// and a since-removed HTTP client — each time after somebody noticed a live key in a log
 /// line. That is the failure mode of guarding the container instead of the
 /// contents: it protects the structs that exist and none of the ones written
 /// next.
