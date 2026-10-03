@@ -10,13 +10,7 @@ import {
   Workflow,
 } from "lucide-react";
 
-import {
-  SidebarGroup,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  useSidebar,
-} from "@/components/ui/sidebar";
+import { SidebarGroup, useSidebar } from "@/components/ui/sidebar";
 import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
 import { useRoomRailSlot } from "@/components/room-rail";
 import { isNavigationActive, type View } from "@/lib/console-routes";
@@ -486,28 +480,11 @@ export function childAnchor(section: NavSection, child: NavChild): string | unde
  * badge. Nothing else is in this region to hide any more; the fixed lists of
  * child rows that used to be hidden here at 3rem are content-rail rows now.
  */
-export function SidebarNavigation({
-  view,
-  onNavigate,
-}: {
-  view: View;
-  onNavigate: (view: View, sub?: string) => void;
-  // No `pending`. The approvals count is drawn once, by the title row's bell
-  // (`components/notifications-button.tsx`), and this column no longer carries
-  // a copy of it — see the note beside `NAV_SECTIONS` above.
-}) {
-  const { isMobile, setOpenMobile } = useSidebar();
+export function SidebarNavigation() {
+  // No props any more. The section rows that navigated from here are the
+  // foot's icon tabs (`SidebarSectionTabs`), so this column draws only the
+  // conversation list's mount point.
   const { setElement } = useRoomRailSlot();
-
-  const navigate = useCallback(
-    (next: View, nextSub?: string) => {
-      onNavigate(next, nextSub);
-      if (isMobile) setOpenMobile(false);
-    },
-    [isMobile, onNavigate, setOpenMobile],
-  );
-
-  const active = sectionOwning(view);
 
   return (
     <>
