@@ -112,8 +112,6 @@ import {
   operationalNotificationsToAnnounce,
 } from "@/lib/operational-notifications";
 import { usePresence } from "@/hooks/use-presence";
-import { useAutonomy } from "@/hooks/use-autonomy";
-import { AutonomyPill } from "@/components/autonomy-pill";
 import { useTyping } from "@/hooks/use-typing";
 import { typersIn } from "@/lib/awareness";
 import type { WorkspaceEvent } from "@/views/WorkspaceView";
@@ -2736,11 +2734,6 @@ export function AppShell({
   // the state they feed has to live where that stream is read.
   const presence = usePresence(client, company);
   const typing = useTyping(client, company);
-  // The standing autonomy tier, for the title row. Shell-owned because the row
-  // is: it outlives every view, so the read has to sit above all of them. It is
-  // the same `GET {scope}/policy` the settings page makes, so the pill and the
-  // page that changes it cannot disagree about which tier is in force.
-  const autonomy = useAutonomy(client, company);
   /**
    * The coarse "near your credit limit" warning (issue #1846), off the live
    * `budget_proximity` frame. Shell-owned for the same reason presence/typing
@@ -3633,20 +3626,6 @@ export function AppShell({
               client={client}
               company={company}
               rosterRevision={rosterTick}
-              // What the agents in this company are allowed to do without
-              // asking, rendered on the composer's toolbar row. Nothing renders
-              // until the host has said what the tier is, rather than guessing
-              // one — see `useAutonomy`.
-              //
-              // `canManage` is the role this shell already knows. Both write
-              // routes behind the pill call `require_admin`
-              // (`src/server/ops/policy.rs:309,427`), so without it a member was
-              // offered a menu whose every selection ends in a 403. The pill
-              // still STATES the tier for them — standing policy is a fact about
-              // what the agents around you may do, not an admin setting — it
-              // simply stops pretending to be a control. `null` while `fetchMe`
-              // is in flight reads as read-only, which is the safe direction.
-              autonomy={<AutonomyPill status={autonomy} canManage={isCompanyAdmin} />}
               // The chat segment, not the current view's — see `chatSub`.
               sub={view === "chat" ? sub : chatSub}
               routeOpen={view === "chat"}
