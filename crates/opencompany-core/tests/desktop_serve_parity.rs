@@ -123,11 +123,6 @@ const DELIBERATE_DIFFERENCES: &[(&str, &str)] = &[
          values; there is no such directory to name",
     ),
     (
-        "builder.with_discoverable",
-        "`serve --discoverable` publishes a company to tiny.place; a loopback \
-         host has no reachable address to publish",
-    ),
-    (
         "builder.with_bootstrap_admin",
         "pairs with config.admin_email — a platform-injected standing invite",
     ),
@@ -186,17 +181,6 @@ const DELIBERATE_DIFFERENCES: &[(&str, &str)] = &[
         "the desktop compiles neither `dns` nor `smtp`, so the injected seams \
          would carry only the OPENCOMPANY_MAIL_* credentials, and no desktop \
          surface sets those",
-    ),
-    (
-        "builder.with_host_base_url",
-        "a design question, not a deferred copy. The desktop's config.bind is \
-         the literal `127.0.0.1:0`, so wiring this call as serve writes it \
-         would publish `http://127.0.0.1:0` — a port nothing listens on — in \
-         every Agent Card. The address that would be correct is only known \
-         after `server::bind` returns, which is after every company is \
-         registered. The credential-link flow reaches the same fallback and \
-         escapes it only because `callback_origin` prefers the browser's own \
-         loopback Origin",
     ),
 ];
 
