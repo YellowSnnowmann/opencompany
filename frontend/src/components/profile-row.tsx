@@ -33,7 +33,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { uploadAvatar } from "@/lib/avatar";
 import { pictureAsFile, readDeviceIdentity, type DeviceIdentity } from "@/lib/device-identity";
 import { guessName, personAvatar, personName } from "@/lib/person";
