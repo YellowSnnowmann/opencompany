@@ -226,9 +226,13 @@
      * ---------------------------------------------------------------- */
 
     /* Surfaces, from furthest back to closest to the operator. The canvas
-       is a hair off white and cards are pure white, so a card lifts off the
-       page by lightness alone — before any shadow is applied. */
-    --background: var(--canvas-tint-light);
+       is white, the same as the page the floating-sidebar shell draws
+       (`--page`): it was a hair off white (`--canvas-tint-light`) so a card
+       lifted off it by lightness alone, but once the page itself went white
+       every `bg-background` surface — a focus ring's offset gap, a sticky
+       header, an input — showed up as a lavender patch on it. Cards now
+       separate from the page by their border, as they already did in dark. */
+    --background: var(--surface-light-1);
     --foreground: var(--ink-light-primary);
     --card: var(--surface-light-1);
     --card-foreground: var(--ink-light-primary);
@@ -393,7 +397,7 @@
        canvas tint the page read as a purple wash with white boxes on it, and
        the brand-100 selected row was the loudest thing on screen. Selection
        and hover are ink at low alpha, so they sit on any of these fills. */
-    --page: var(--surface-light-1);
+    --page: var(--background);
     --sidebar-float: oklch(0.982 0.0016 286);
     --sidebar-float-border: oklch(0 0 0 / 0.08);
     /* Selection is the accent, solid: the open conversation, the open settings
