@@ -22,7 +22,7 @@ import { useFlipList } from "@/hooks/use-flip-list";
 import { useStableList } from "@/hooks/use-stable-list";
 import { cn } from "@/lib/utils";
 import type { TeamMember } from "@/lib/team";
-import { useAgentPresence, useBusiestPresence, useLiveSteps, useTranscript } from "@/room/store";
+import { useBusiestPresence, useLiveSteps, useTranscript } from "@/room/store";
 import { NewMessageDialog } from "./NewMessageDialog";
 import {
   channelMembers,
