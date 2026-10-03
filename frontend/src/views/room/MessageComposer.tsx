@@ -784,7 +784,7 @@ export function MessageComposer({
             <DropdownMenuTrigger
               aria-label="Add to message"
               title="Add to message"
-              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none aria-expanded:bg-accent aria-expanded:text-foreground"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-background text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none aria-expanded:bg-accent aria-expanded:text-foreground"
             >
               {uploading ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
             </DropdownMenuTrigger>
