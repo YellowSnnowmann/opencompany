@@ -565,7 +565,7 @@ function ChannelIntro({
 function IntroMark({ channel }: { channel: Channel }) {
   // The geometry is fixed across all three branches so the copy beneath never
   // shifts with the kind of channel being opened.
-  const box = "mb-3 size-12 rounded-lg";
+  const box = "mb-3 size-12";
 
   if (channel.kind === "dm") {
     const face = dmFace(channel);
