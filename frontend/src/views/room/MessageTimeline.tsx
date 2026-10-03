@@ -499,14 +499,11 @@ function ChannelIntro({
   loading: boolean;
 }) {
   return (
-    // `pt-8` on an empty channel, not `pt-16`. The taller lead-in was there to
-    // push the intro down into a pane with nothing under it — but the
-    // transcript grows from the bottom, so the moment a channel has one message
-    // the intro is pushed up by the message anyway, and on a brand new one 64px
-    // of nothing above the title read as the pane failing to load rather than
-    // as breathing room. Still more than the `pt-6` a channel with history
-    // gets, because on an empty channel the intro IS the content.
-    <div className={cn("px-4 pb-3", empty ? "pt-8" : "pt-6")}>
+    // `pt-5`, empty or not: with no channel bar above it, the intro's mark
+    // starts on the same line as the sidebar's first conversation row (the card
+    // sits 8px down and pads its list another 12px), so the page and the column
+    // beside it begin together rather than the page starting a step lower.
+    <div className="px-4 pt-5 pb-3">
       <IntroMark channel={channel} />
       <h2 className="text-xl font-semibold tracking-tight">{channelTitle(channel)}</h2>
       {/* Both of these sentences are positive claims that the channel has no
