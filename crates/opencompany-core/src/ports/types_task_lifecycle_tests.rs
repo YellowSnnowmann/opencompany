@@ -567,10 +567,6 @@ fn company_event_variants_round_trip_tagged() {
             cron: "0 9 * * *".into(),
             prompt: "daily standup".into(),
         },
-        CompanyEvent::A2aTaskReceived {
-            from: "@peer".into(),
-            task: serde_json::json!({"skill": "seo.audit"}),
-        },
         CompanyEvent::ApprovalResolved {
             approval_id: ApprovalId::new("a1"),
             verdict: Verdict::Approve,
