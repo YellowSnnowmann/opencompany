@@ -17,7 +17,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { RESTING_ROW } from "@/components/sidebar-controls";
+import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
 import { useRoomRailSlot } from "@/components/room-rail";
 import { isNavigationActive, type View } from "@/lib/console-routes";
 import { CONNECTION_PAGE_GROUPS, connectionPagesIn } from "@/views/connection-pages";
@@ -552,32 +552,53 @@ export function SidebarNavigation({
         />
       </SidebarGroup>
 
-      {/* The two. Fixed at the foot: this group never grows, never shrinks
-          and never scrolls, so Company and Connections are always on screen
-          under the conversation list. The seam above it is a border, the way
-          the title row separates from the page — no `pt-`, which the sidebar
-          tests forbid on either group. `pb-(--frame-inset)` is the gap the
-          content card keeps (`mb-(--frame-inset)`) between its bottom edge and
-          the window's, so Connections' bottom lands on the card's bottom edge
-          and the strip under it is the column's own (transparent) fill. */}
-      <SidebarGroup className="shrink-0 border-t border-sidebar-border pb-(--frame-inset)">
-        <SidebarMenu>
-          {NAV_SECTIONS.map((section) => (
-            <SidebarMenuItem key={section.view} data-tour={`nav-${section.view}`}>
-              <SidebarMenuButton
-                isActive={section === active}
-                tooltip={section.label}
-                onClick={() => navigate(section.view, section.sub)}
-                className={RESTING_ROW}
-              >
-                <section.icon />
-                <span>{section.label}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
-      </SidebarGroup>
+      {/* The two section rows (Company, Connections) that were fixed here
+          are icon tabs on the floating sidebar's foot now — see
+          `SidebarSectionTabs` below and `sidebar-shell.tsx`. */}
+    </>
+  );
+}
 
+/**
+ * The sections as icon tabs: Company and Connections, the first two of the
+ * floating sidebar's foot (`sidebar-shell.tsx`), beside Overview,
+ * Notifications and Settings.
+ *
+ * They were two labelled rows pinned under the conversation list. The foot
+ * carries every destination an operator reaches from anywhere as one strip of
+ * glyphs, and these two are exactly that — so they read as tabs alongside the
+ * other three rather than as a second list in a second style. Same table, same
+ * active rule (`sectionOwning`) and the same `data-tour` anchors as the rows,
+ * so the guided tour and the specs that find `nav-company` still do.
+ */
+export function SidebarSectionTabs({
+  view,
+  onNavigate,
+}: {
+  view: View;
+  onNavigate: (view: View, sub?: string) => void;
+}) {
+  const { isMobile, setOpenMobile } = useSidebar();
+  const active = sectionOwning(view);
+  return (
+    <>
+      {NAV_SECTIONS.map((section) => (
+        <button
+          key={section.view}
+          type="button"
+          data-tour={`nav-${section.view}`}
+          aria-current={section === active ? "page" : undefined}
+          aria-label={section.label}
+          title={section.label}
+          onClick={() => {
+            onNavigate(section.view, section.sub);
+            if (isMobile) setOpenMobile(false);
+          }}
+          className={TITLE_BAR_ICON_BUTTON}
+        >
+          <section.icon aria-hidden="true" className="size-4" />
+        </button>
+      ))}
     </>
   );
 }
