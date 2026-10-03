@@ -540,8 +540,7 @@ fn paused_card(id: &str) -> crate::ports::TaskRecord {
 
 /// Gated with the tests below: parking a blocker needs
 /// `CompanyRuntime::park_blocker`, which only the (openhuman-only)
-/// planning pass calls in production. The `Rust (openhuman, tinymemory)`
-/// lane runs these.
+/// planning pass calls in production. The `gated` CI lane runs these.
 #[cfg(feature = "openhuman")]
 fn blocker_payload(task_id: &str) -> crate::ports::blockers::BlockerPayload {
     crate::ports::blockers::BlockerPayload {
