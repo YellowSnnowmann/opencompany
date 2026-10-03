@@ -624,7 +624,17 @@ default = ["oauth", "platform-jwt", "documents", "tinymemory"]
 # "remember this file" from the operator's side, and a build that reads a
 # dropped PDF but cannot fetch a URL would be a distinction nobody asked for.
 # It is already in the default set via `oauth`, so this adds nothing there.
-documents = ["dep:pdf-extract", "dep:calamine", "dep:quick-xml", "dep:reqwest"]
+documents = [
+    "dep:pdf-extract",
+    "dep:calamine",
+    "dep:quick-xml",
+    "dep:reqwest",
+    # Link fetches go through TinyMemory's SSRF-pinned fetcher (a public-only
+    # resolver the connection is pinned to, redirect hops re-checked) rather
+    # than a host-side resolve-then-connect guard that DNS rebinding defeats.
+    "dep:tinymemory",
+    "tinymemory/sources-network",
+]
 
 tiny = ["tinyagents-harness", "tinyinference"]
 # WS4: embed `vendor/openhuman` (`openhuman_core`) directly as the tenant agent
