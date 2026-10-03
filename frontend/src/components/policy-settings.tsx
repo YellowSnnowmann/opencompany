@@ -1017,7 +1017,6 @@ export function PolicySettings({ client, company, canManage }: Props) {
               </div>
               {status.tiers.map((tier, index) => {
                 const active = tier.value === status.mode;
-                const looser = tier.value === "auto" || tier.value === "full";
                 return (
                   <button
                     key={tier.value}
