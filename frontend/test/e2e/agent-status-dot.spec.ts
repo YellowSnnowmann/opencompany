@@ -86,7 +86,7 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(dotOf(page, RAE.name)).toHaveCount(0);
     });
 
-    test("a hive seat's dm:<id> bracket lights the bare-id DM row and its header", async ({ page }) => {
+    test("a hive seat's dm:<id> bracket lights the bare-id DM row and its pill", async ({ page }) => {
       // The shape a real DM turn has: the console addresses Rae's DM by the
       // bare id, and the hive seat that answers it brackets its turn under its
       // desk id, `dm:<id>`, streaming no frames. Every other case in this file
@@ -94,13 +94,17 @@ for (const scheme of ["light", "dark"] as const) {
       const sse = await mockCompany(page);
       await page.goto(`/#/chat/dm:${RAE.id}`);
       await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: 30_000 });
-      const header = page.locator("header").getByTestId("agent-status-dot");
+      // The pill over the transcript is where the header's dot went.
+      const pill = page.getByTestId("channel-pill");
+      const header = pill.getByTestId("agent-status-dot");
       const seat = { chatId: `dm:${RAE.id}`, turnId: "seat-turn-1", agentId: RAE.id, episodeId: "ep-1", roundRevision: 1 };
       sse.push({ type: "turn_started", seq: 1, atMillis: Date.now(), ...seat });
       await expect(dotOf(page, RAE.name)).toHaveAttribute("data-state", "working");
       await expect(header).toHaveAttribute("data-state", "working");
-      // Where the dot stands alone it keeps its own label, naming who.
-      await expect(header).toHaveAccessibleName(`${RAE.name}: Working`);
+      // Decorative there, as on the row: the pill is the control, named for
+      // the conversation, and the dot is not announced a second time.
+      await expect(header).toHaveAttribute("aria-hidden", "true");
+      await expect(pill).toHaveAccessibleName(RAE.name);
       await page.screenshot({ path: test.info().outputPath(`dot-seat-working-${scheme}.png`) });
       sse.push({ type: "turn_settled", seq: 2, atMillis: Date.now(), outcome: "committed", ...seat });
       await expect(dotOf(page, RAE.name)).toHaveCount(0);
