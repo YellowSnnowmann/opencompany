@@ -394,7 +394,10 @@ impl RosterBuilder {
                 if is_output_budget_exhausted(&err) {
                     tracing::warn!(
                         error = %err,
-                        "[setup] the model ran out of output tokens before it answered"
+                        max_output_tokens = MAX_OUTPUT_TOKENS,
+                        "[setup] the model ran out of output tokens before it answered; \
+                         setup caps its reply at max_output_tokens, so retry or pick a \
+                         model with more output headroom in Settings"
                     );
                     return Attempt {
                         roster: None,
