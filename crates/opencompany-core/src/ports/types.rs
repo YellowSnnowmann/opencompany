@@ -1205,13 +1205,6 @@ pub enum CompanyEvent {
         /// The prompt delivered to the company.
         prompt: String,
     },
-    /// An A2A task was received from another agent.
-    A2aTaskReceived {
-        /// The sending agent's address.
-        from: String,
-        /// The task payload.
-        task: serde_json::Value,
-    },
     /// An effect was parked for the operator's sign-off (issue #379).
     ///
     /// The counterpart to [`ApprovalResolved`](Self::ApprovalResolved), and the
@@ -2766,6 +2759,16 @@ pub enum CompanyEvent {
         at_millis: u64,
     },
     /// A retired or unrecognised event kind, kept so old journals still load.
+    ///
+    /// The journal is append-only and every store reads it strictly, so a row
+    /// whose `kind` this build does not know would otherwise fail the whole
+    /// read. The motivating case is `A2aTaskReceived`, the inbound tiny.place
+    /// A2A task retired with tiny.place: logs written before then still hold
+    /// it. A newer host's kind read by an older build lands here too.
+    ///
+    /// Carries nothing — the row's fields are not kept — and every consumer
+    /// treats it as a no-op.
+    #[serde(other)]
     Unknown,
 }
 
@@ -2786,7 +2789,6 @@ impl CompanyEvent {
             Self::RunStatusChanged { .. } => "RunStatusChanged",
             Self::WebhookReceived { .. } => "WebhookReceived",
             Self::ScheduleFired { .. } => "ScheduleFired",
-            Self::A2aTaskReceived { .. } => "A2aTaskReceived",
             Self::ApprovalParked { .. } => "ApprovalParked",
             Self::ApprovalResolved { .. } => "ApprovalResolved",
             Self::ApprovalExtended { .. } => "ApprovalExtended",
@@ -2954,7 +2956,6 @@ impl CompanyEvent {
             | Self::TurnFailed { .. }
             | Self::WebhookReceived { .. }
             | Self::ScheduleFired { .. }
-            | Self::A2aTaskReceived { .. }
             | Self::ApprovalParked { .. }
             | Self::ApprovalResolved { .. }
             | Self::ApprovalExtended { .. }

@@ -216,12 +216,6 @@ pub(crate) fn wire_event(seq: u64, event: &CompanyEvent) -> WireEvent {
             format!("[{cron}] {prompt}"),
             "schedule.fired",
         ),
-        CompanyEvent::A2aTaskReceived { from, task } => (
-            Role::User,
-            from.clone(),
-            task.to_string(),
-            "a2a.task_received",
-        ),
         // A retired or unrecognised kind read back from an old journal. There
         // is nothing in it this build understands, so the brain hears only
         // that something was skipped.
