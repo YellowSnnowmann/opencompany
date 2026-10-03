@@ -1,9 +1,9 @@
 /// A real empty `finish_reason: length` response crosses the HTTP provider
 /// adapter and setup route, so the first-run wizard receives its curated team
-/// with the non-connectivity fallback reason.
+/// with the output-budget fallback reason.
 #[cfg(feature = "openhuman")]
 #[tokio::test]
-async fn a_length_stopped_provider_reply_is_reported_to_setup_as_not_designable() {
+async fn a_length_stopped_provider_reply_is_reported_to_setup_as_output_budget_exhausted() {
     use super::setup_test_support_1::*;
     use axum::http::StatusCode;
     use wiremock::matchers::{method, path};
@@ -38,7 +38,7 @@ async fn a_length_stopped_provider_reply_is_reported_to_setup_as_not_designable(
 
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["source"], "fallback", "{body}");
-    assert_eq!(body["reason"], "not_designable", "{body}");
+    assert_eq!(body["reason"], "output_budget_exhausted", "{body}");
     assert!(
         body["agents"]
             .as_array()

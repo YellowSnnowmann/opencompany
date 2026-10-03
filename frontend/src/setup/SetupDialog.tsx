@@ -876,6 +876,8 @@ function fallbackExplanation(fallback: NonNullable<Fallback>): string {
       return "A general starting team for your industry — a model is connected, but we couldn't reach it just now to tailor one to your answers. Rename, retire, or add anyone from the Company page, try again, or check the connection in Settings.";
     case "not_designable":
       return "A general starting team for your industry — we reached a model, but there wasn't enough in your answers to tailor one to them. Rename, retire, or add anyone from the Company page, or try again with more about what your business does.";
+    case "output_budget_exhausted":
+      return "A general starting team for your industry — we reached a model, but it ran out of output room before it finished tailoring one. Rename, retire, or add anyone from the Company page, try again, or pick a model with a larger output limit in Settings.";
     case "unspecified":
       return "A general starting team for your industry, rather than one tailored to your answers. Rename, retire, or add anyone from the Company page.";
   }
@@ -923,7 +925,8 @@ function BuildOut({
    * redesigned on their return rather than stacked over.
    */
   onRedesign: () => void;
-  /** "Try again" for a fallback that a retry could fix — `model_unreachable`. */
+  /** "Try again" for a fallback that a retry could fix — `model_unreachable` or
+   * `output_budget_exhausted`. */
   onTryAgain: () => void;
 }) {
   return (
@@ -1012,6 +1015,16 @@ function BuildOut({
             >
               Ask an admin to add a model, or carry on with the standard team.
             </span>
+          )}
+          {fallback === "output_budget_exhausted" && (
+            <Button
+              variant="outline"
+              onClick={onTryAgain}
+              data-testid="setup-try-redesign"
+            >
+              <RotateCcw className="size-4" />
+              Try again
+            </Button>
           )}
           {fallback === "not_designable" && (
             <Button

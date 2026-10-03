@@ -2126,6 +2126,8 @@ function ReviewStep({
                 "The team this template ships with, exactly as it comes. You can rename or drop anyone once you're inside."
               : roster.reason === "not_designable"
               ? "A standard team for your industry — there wasn't enough in your answers to design one around. Go back and say more about the business, or rename and drop anyone here."
+              : roster.reason === "output_budget_exhausted"
+                ? "A standard team for your industry — the model ran out of output room before it finished tailoring one. Try again, or pick a model with a larger output limit in Settings, or rename and drop anyone here."
               : roster.reason === "model_unreachable"
                 ? "A standard team for your industry — we couldn't reach the model to tailor it right now. Check the connection, or rename and drop anyone here."
                 : "A solid standard team for your industry — we couldn't reach a model to tailor it. Rename or drop anyone, and add a key later to redesign."}

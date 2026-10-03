@@ -1266,8 +1266,9 @@ pub enum RosterSource {
 ///
 /// It matters because the **action differs**. No model means "add a key". An
 /// unreachable model means "check the provider or retry". An unusable answer
-/// means "you told us very little; go back and say more". A single sentence
-/// covering all three can only be vague enough to be useless.
+/// means "you told us very little; go back and say more". A response cut off by
+/// the output-token limit means "retry, or use a model with more output room".
+/// A single sentence covering all four can only be vague enough to be useless.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FallbackReason {
     /// No credential was reachable, so no design pass ran at all.
@@ -1281,6 +1282,12 @@ pub enum FallbackReason {
     /// to be a company, or the reference team handed back unchanged. Almost
     /// always means the operator's answers were too sparse to design from.
     NotDesignable,
+    /// A model answered, but the response stopped on its output-token limit
+    /// before it wrote anything usable — typically a reasoning model that spent
+    /// the whole budget deliberating. The call landed and was billed, so this is
+    /// neither a connectivity problem nor sparse answers: the operator's next
+    /// move is to retry or pick a model with more output headroom.
+    OutputBudgetExhausted,
 }
 
 impl FallbackReason {
@@ -1290,6 +1297,7 @@ impl FallbackReason {
             Self::NoModel => "no_model",
             Self::ModelUnreachable => "model_unreachable",
             Self::NotDesignable => "not_designable",
+            Self::OutputBudgetExhausted => "output_budget_exhausted",
         }
     }
 }

@@ -450,6 +450,19 @@ describe("the finished build-out points at what would actually help", () => {
     expect(find("setup-redesign-notice")).toBeTruthy();
   });
 
+  it("offers a retry, not the credential CTA, when the model ran out of output budget", async () => {
+    await show(clientWith({ source: "fallback", reason: "output_budget_exhausted" }));
+    await runFlow();
+    // The key worked and the answers were fine; neither "add a model" nor "say
+    // more" is the fix.
+    expect(find("setup-add-model"), "sent to fix a credential that worked").toBeNull();
+    expect(find("setup-try-redesign"), "no way to retry").toBeTruthy();
+    const text = find("setup-buildout-title")?.parentElement?.textContent ?? "";
+    expect(text).toContain("ran out of output room");
+    expect(text).not.toContain("enough in your answers");
+    expect(text).not.toContain("couldn't reach");
+  });
+
   it("withholds the credential CTA when the host did not say why", async () => {
     await show(clientWith({ source: "fallback", reason: null }));
     await runFlow();
