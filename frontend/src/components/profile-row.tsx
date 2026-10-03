@@ -203,22 +203,26 @@ export function ProfileRow({
     );
   }
 
+  // The floating sidebar's foot (`sidebar-shell.tsx`): your face and name as
+  // one plain button. A native `button` rather than `render={<SidebarMenuButton
+  // />}`, which is a function component that cannot take the ref the menu
+  // anchors to — React warned on every render and the popup had nothing to
+  // measure. On the collapsed rail the name goes and the face stays.
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={<SidebarMenuButton tooltip={name} />}
-            data-testid="profile-row"
-          >
-            {face}
-            <span className="truncate">{name}</span>
-          </DropdownMenuTrigger>
-          {menu}
-        </DropdownMenu>
-      </SidebarMenuItem>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          data-testid="profile-row"
+          title={name}
+          className="flex h-9 w-full min-w-0 items-center gap-2 rounded-lg px-1.5 text-left text-sm transition hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-[popup-open]:bg-sidebar-accent group-data-[collapsible=icon]:w-auto group-data-[collapsible=icon]:px-0.5"
+        >
+          {face}
+          <span className="truncate group-data-[collapsible=icon]:hidden">{name}</span>
+        </DropdownMenuTrigger>
+        {menu}
+      </DropdownMenu>
       {dialog}
-    </SidebarMenu>
+    </>
   );
 }
 
