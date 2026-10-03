@@ -530,7 +530,7 @@ export function SidebarNavigation() {
           // The one scroller in the column. `SidebarContent` is `flex-1
           // min-h-0` for this, so a list at its cap scrolls here rather than
           // pushing the two rows below it out of reach.
-          className="scrollbar-on-hover flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto py-2"
+          className="scrollbar-on-hover flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto py-2 [mask-image:linear-gradient(to_bottom,transparent,black_10px,black_calc(100%-10px),transparent)]"
         />
       </SidebarGroup>
 
