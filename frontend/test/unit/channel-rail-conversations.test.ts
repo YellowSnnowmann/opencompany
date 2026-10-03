@@ -12,7 +12,7 @@ import { ChannelRail } from "@/views/room/ChannelRail";
 import type { Channel, ChannelSection } from "@/views/room/model";
 
 /**
- * The channel list is ONE flat list headed "Conversations", with two icon doors
+ * The channel list is ONE flat list, with no caption and no doors
  * on the same row.
  *
  * Channels and Direct messages used to be two captioned, collapsible sections
