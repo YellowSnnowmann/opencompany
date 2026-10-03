@@ -534,18 +534,13 @@ mod http {
 
         async fn list_board(&self, query: BoardQuery) -> Result<BoardPage> {
             let query = query.clamped();
-            let mut params: Vec<(String, String)> = vec![
-                ("sort".into(), query.sort.as_str().into()),
-                ("page".into(), query.page.to_string()),
-                ("limit".into(), query.limit.to_string()),
+            let params: Vec<tinyhumans_sdk::QueryParam> = vec![
+                ("sort", Some(query.sort.as_str().to_string())),
+                ("page", Some(query.page.to_string())),
+                ("limit", Some(query.limit.to_string())),
+                ("type", query.kind.map(|kind| kind.as_str().to_string())),
+                ("status", query.status.map(|status| status.as_str().to_string())),
             ];
-            if let Some(kind) = query.kind {
-                params.push(("type".into(), kind.as_str().into()));
-            }
-            if let Some(status) = query.status {
-                params.push(("status".into(), status.as_str().into()));
-            }
-            let params: Vec<tinyhumans_sdk::QueryParam> = params.into_iter().map(Into::into).collect();
             let data = self
                 .sdk
                 .feedback()

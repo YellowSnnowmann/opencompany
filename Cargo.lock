@@ -4084,6 +4084,7 @@ dependencies = [
  "tinyhivemind-openhuman",
  "tinyhivemind-tools",
  "tinyhivemind-typesafe",
+ "tinyhumans-sdk",
  "tinyinference-core",
  "tinyinference-llm",
  "tinymcp",
