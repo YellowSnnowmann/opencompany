@@ -14,6 +14,7 @@ fn fact(id: &str) -> FactRecord {
         kind: FactKind::Fact,
         title: format!("title {id}"),
         body: format!("body {id}"),
+        source: "cto".into(),
         updated_at_millis: 1,
     }
 }
