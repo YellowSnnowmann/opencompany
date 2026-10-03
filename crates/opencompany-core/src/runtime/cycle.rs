@@ -3003,6 +3003,10 @@ fn cycle_task_id(
             // and asks nothing of anyone, so it starts no cycle. Neutral for the
             // same reason the run bracket above is.
             | CompanyEvent::WorkflowChildCallNotOffered { .. }
+            // A retired or unrecognised kind read back from an old journal.
+            // It carries nothing this build can act on, so it names no card,
+            // no thread, and rivals neither.
+            | CompanyEvent::Unknown
             | CompanyEvent::TaskSteered { .. }
             | CompanyEvent::TaskDiscussionPosted { .. }
             // A withdrawal (#358) is a record about a record: it starts no
@@ -3252,6 +3256,10 @@ fn cycle_conversation(
             // Issue #617: likewise a record, not a message. It belongs to no
             // conversation and rivals none.
             | CompanyEvent::WorkflowChildCallNotOffered { .. }
+            // A retired or unrecognised kind read back from an old journal.
+            // It carries nothing this build can act on, so it names no card,
+            // no thread, and rivals neither.
+            | CompanyEvent::Unknown
             | CompanyEvent::TaskSteered { .. }
             | CompanyEvent::TaskDiscussionPosted { .. }
             // A withdrawal (#358) is a record about a record: it starts no

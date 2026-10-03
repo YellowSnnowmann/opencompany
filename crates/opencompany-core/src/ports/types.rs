@@ -3033,6 +3033,11 @@ impl CompanyEvent {
             // retention pass must not be allowed to quietly erase.
             | Self::OnboardingStepCompleted { .. }
             | Self::OnboardingCompleted { .. } => Permanent,
+            // A retired or unrecognised kind. A retention pass cannot judge
+            // what it cannot read, so it keeps it: the row may be a newer
+            // host's evidence, and discarding it would be the one irreversible
+            // answer to a question this build cannot ask.
+            Self::Unknown => Permanent,
             // Issue #617: permanent, and it is the clearest kind of evidence
             // this enum carries — the record that a consequential call ran
             // WITHOUT the operator being asked. Pruning it would delete the only
