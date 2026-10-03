@@ -68,7 +68,11 @@ const SETUP_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Output-token ceiling. A roster is six short rows; this stops a model that has
 /// decided to write prose from spending a new company's budget on its first act.
-const MAX_OUTPUT_TOKENS: u32 = 1_500;
+///
+/// Sized for reasoning models, which spend part of the budget on deliberation
+/// before the first visible token. At 1,500 a reasoning model could exhaust it
+/// on reasoning alone and return nothing usable (#2533).
+const MAX_OUTPUT_TOKENS: u32 = 4_000;
 
 /// Rewrites a curated roster in the operator's terms. One model call, no tools,
 /// no retry.
@@ -382,6 +386,22 @@ impl RosterBuilder {
         let response = match tokio::time::timeout(budget, self.model.invoke(&(), request)).await {
             Ok(Ok(response)) => response,
             Ok(Err(err)) => {
+                // A response that stopped on `finish_reason: length` with no
+                // visible content was a real, billed round trip: the model
+                // answered, it just ran out of output budget. That is not a
+                // connectivity failure, and the operator's next move is not to
+                // check the network or the key (#2533).
+                if is_output_budget_exhausted(&err) {
+                    tracing::warn!(
+                        error = %err,
+                        "[setup] the model ran out of output tokens before it answered"
+                    );
+                    return Attempt {
+                        roster: None,
+                        usage: TokenUsage::default(),
+                        reason: FallbackReason::NotDesignable,
+                    };
+                }
                 tracing::info!(error = %err, "[setup] the model could not be reached");
                 return Attempt::unreachable();
             }
@@ -412,6 +432,17 @@ impl RosterBuilder {
             reason: FallbackReason::NotDesignable,
         }
     }
+}
+
+/// Whether a model error is an empty turn that stopped on the output-token
+/// limit, as opposed to a transport or provider failure.
+///
+/// The provider layer folds the stop reason into the error text
+/// (`... (finish_reason: length; ...)`) and does not expose it structurally, so
+/// this matches on both halves: the empty-turn message and the `length` stop.
+fn is_output_budget_exhausted(err: &tinyinference::Error) -> bool {
+    let text = err.to_string();
+    text.contains("carried neither") && text.contains("finish_reason: length")
 }
 
 /// What one call produced. `usage` is reported whether or not a roster came

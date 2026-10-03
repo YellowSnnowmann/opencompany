@@ -169,6 +169,29 @@ impl HarnessModel for UnreachableModel {
     }
 }
 
+/// A model whose call errors the way the provider layer reports an empty turn
+/// that hit the output-token limit (#2533): the endpoint answered and was
+/// billed, but the whole budget went to reasoning.
+struct TruncatedModel;
+
+#[async_trait]
+impl ChatModel<()> for TruncatedModel {
+    async fn invoke(&self, _state: &(), _request: ModelRequest) -> TaResult<ModelResponse> {
+        Err(tinyinference::Error::Model(
+            "inference response carried neither choices[0].message.content nor tool_calls \
+             (finish_reason: length; choices: 1; usage: in=1024 out=1500 total=2524; \
+             refusal_present: false)"
+                .to_string(),
+        ))
+    }
+}
+
+impl HarnessModel for TruncatedModel {
+    fn telemetry_provider_id(&self) -> String {
+        "managed".to_string()
+    }
+}
+
 /// Three jobs, so a gap is expressible.
 fn three_jobs() -> SetupAnswers {
     SetupAnswers {
@@ -455,4 +478,40 @@ async fn a_designed_roster_carries_no_fallback_reason() {
     let (proposal, _) = builder(model).propose(&three_jobs()).await;
     assert_eq!(proposal.source, RosterSource::Model);
     assert_eq!(proposal.reason, None);
+}
+
+/// A response that stopped on `finish_reason: length` reached the model and was
+/// billed. It must not be reported as "model unreachable", which sends the
+/// operator to check the network and key when the output budget is the fault.
+#[tokio::test]
+async fn an_output_budget_stop_is_not_reported_as_unreachable() {
+    let (proposal, _) = RosterBuilder::new(Arc::new(TruncatedModel), "test-model")
+        .propose(&three_jobs())
+        .await;
+    assert_eq!(proposal.source, RosterSource::Fallback);
+    assert_eq!(
+        proposal.reason,
+        Some(FallbackReason::NotDesignable),
+        "a length-truncated answer must not be reported as model_unreachable"
+    );
+}
+
+/// The inverse guard: a plain provider failure still reports unreachable, so
+/// the truncation check cannot swallow real connectivity errors.
+#[test]
+fn only_a_length_stop_counts_as_output_budget_exhausted() {
+    let length = tinyinference::Error::Model(
+        "inference response carried neither choices[0].message.content nor tool_calls \
+         (finish_reason: length; choices: 1)"
+            .to_string(),
+    );
+    let filtered = tinyinference::Error::Model(
+        "inference response carried neither choices[0].message.content nor tool_calls \
+         (finish_reason: content_filter; choices: 1)"
+            .to_string(),
+    );
+    let down = tinyinference::Error::Model("provider refused the call".to_string());
+    assert!(is_output_budget_exhausted(&length));
+    assert!(!is_output_budget_exhausted(&filtered));
+    assert!(!is_output_budget_exhausted(&down));
 }
