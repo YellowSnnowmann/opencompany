@@ -17,64 +17,68 @@ import type { ReactNode } from "react";
 import { SidebarFooter, SidebarHeader } from "@/components/ui/sidebar";
 
 /**
- * The card's head: the company switcher beside the collapse toggle, then the
- * search field.
+ * The card's head: the search field beside the collapse toggle.
  *
- * On the collapsed icon rail the switcher has no room to name a company, so it
- * is hidden and the toggle and the search glyph stack in its place — the same
- * width rule the channel list's compact rows follow.
+ * The company switcher sat here first and lives on the Settings rail now: which
+ * company a window is pointed at is set once and rarely, and the head of the
+ * column is where you go many times a minute. On the collapsed icon rail the
+ * two stack, the same width rule the channel list's compact rows follow.
  */
 export function SidebarShellHeader({
-  switcher,
   toggle,
   search,
 }: {
-  switcher: ReactNode;
   toggle: ReactNode;
   search: ReactNode;
 }) {
   return (
     <SidebarHeader
       data-testid="sidebar-shell-header"
-      className="gap-2 px-2 pt-2 pb-1 group-data-[collapsible=icon]:items-center"
+      className="flex-row items-center gap-1 px-2 pt-2 pb-1 group-data-[collapsible=icon]:flex-col"
     >
-      <div className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
-        <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">{switcher}</div>
-        {toggle}
-      </div>
-      {search}
+      <div className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">{search}</div>
+      {toggle}
     </SidebarHeader>
   );
 }
 
 /**
- * The card's foot: you, then the console's own destinations — Overview, the
- * notifications bell, Settings and Discord — as one row of glyphs.
+ * The card's foot: one row of icon tabs — Company, Connections, Overview,
+ * Notifications, Settings — over you.
  *
- * These are about the console rather than the company the list above
- * enumerates, which is why they sit under it rather than among it. On the
- * collapsed rail the row turns into a column so every glyph keeps its 32px.
+ * The tabs replaced two labelled rows (Company, Connections) above the foot
+ * and a separate cluster of utility glyphs beside the profile: five
+ * destinations an operator reaches from anywhere, read as one strip rather
+ * than two lists in two styles. You and the Discord link sit under them. On
+ * the collapsed rail both rows turn into columns so every glyph keeps its 32px.
  */
 export function SidebarShellFooter({
+  tabs,
   profile,
-  actions,
+  aside,
 }: {
+  tabs: ReactNode;
   profile: ReactNode;
-  actions: ReactNode;
+  /** Trailing the profile row: the Discord link. */
+  aside?: ReactNode;
 }) {
   return (
     <SidebarFooter
       data-testid="sidebar-shell-footer"
-      className="flex-row items-center gap-1 border-t border-sidebar-border px-2 py-2 group-data-[collapsible=icon]:flex-col"
+      className="gap-1 border-t border-sidebar-border px-2 py-2"
     >
-      <div className="flex min-w-0 flex-1 items-center empty:hidden group-data-[collapsible=icon]:flex-none">
-        {profile}
-      </div>
-      <div
-        data-testid="sidebar-shell-actions"
-        className="flex items-center gap-0.5 group-data-[collapsible=icon]:flex-col"
+      <nav
+        aria-label="Sections"
+        data-testid="sidebar-shell-tabs"
+        className="flex items-center justify-between gap-0.5 group-data-[collapsible=icon]:flex-col"
       >
-        {actions}
+        {tabs}
+      </nav>
+      <div className="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
+        <div className="flex min-w-0 flex-1 items-center empty:hidden group-data-[collapsible=icon]:flex-none">
+          {profile}
+        </div>
+        {aside}
       </div>
     </SidebarFooter>
   );
