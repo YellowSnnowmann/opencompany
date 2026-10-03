@@ -90,4 +90,35 @@ describe("the channel info panel", () => {
     act(() => container.querySelector<HTMLButtonElement>("li button")!.click());
     expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("ada"));
   });
+
+  it("offers raw turns as a toggle on a DM, pressed while it is on", () => {
+    const onToggle = vi.fn();
+    const dm: Channel = { id: "dm:ada", name: "Ada", kind: "dm", purpose: "", member: ADA };
+    const draw = (on: boolean) =>
+      act(() =>
+        root.render(
+          createElement(ChannelInfoPanel, {
+            channel: dm,
+            members: [ADA],
+            channelMembers: null,
+            onClose: () => {},
+            onMessage: () => {},
+            raw: { on, onToggle },
+          }),
+        ),
+      );
+    const toggle = () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="channel-info-raw-toggle"]')!;
+    draw(false);
+    expect(toggle().getAttribute("aria-pressed")).toBe("false");
+    act(() => toggle().click());
+    expect(onToggle).toHaveBeenCalledOnce();
+    draw(true);
+    expect(toggle().getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("offers no raw toggle on a desk", () => {
+    renderPanel();
+    expect(container.querySelector('[data-testid="channel-info-raw-toggle"]')).toBeNull();
+  });
 });
