@@ -1527,18 +1527,15 @@
 }
 
 /*
- * The floating sidebar's fill (`app-shell.tsx`): mostly opaque sidebar colour
- * with a faint primary wash from the top-left corner, translucent enough that
- * the `backdrop-blur` on the card reads the page scrolling beneath it. Adapted
- * from OpenHuman's `.sidebar-material`, onto this console's own tokens.
+ * The floating sidebar's fill (`app-shell.tsx`): the sidebar colour, just
+ * translucent enough that the `backdrop-blur` on the card reads the page
+ * scrolling beneath it. OpenHuman's `.sidebar-material` also lays a primary
+ * wash from the top-left corner; with the search field ruled off by a border
+ * that wash read as a shade on the card's head, so it is left out.
  */
 .sidebar-material {
-  background:
-    linear-gradient(145deg, color-mix(in oklab, var(--primary) 4%, transparent), transparent 46%),
-    color-mix(in oklab, var(--sidebar) 90%, transparent);
+  background: color-mix(in oklab, var(--sidebar) 90%, transparent);
 }
 .dark .sidebar-material {
-  background:
-    linear-gradient(145deg, color-mix(in oklab, var(--primary) 3%, transparent), transparent 46%),
-    color-mix(in oklab, var(--sidebar) 85%, transparent);
+  background: color-mix(in oklab, var(--sidebar) 85%, transparent);
 }
