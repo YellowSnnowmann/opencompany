@@ -89,3 +89,38 @@ async fn a_traversal_jti_stays_inside_the_marker_dir() {
         "a traversal jti must not escape the data root"
     );
 }
+
+#[tokio::test]
+async fn pruning_removes_expired_markers_and_keeps_unreadable_stamps() {
+    let home = temp_home();
+    let markers = ConsumedJtis::new(&home, &CompanyId::new("acme"));
+    tokio::fs::create_dir_all(&markers.dir)
+        .await
+        .expect("marker directory");
+
+    let expired = markers
+        .dir
+        .join(crate::server::users::token::sha256_hex("expired"));
+    let live = markers
+        .dir
+        .join(crate::server::users::token::sha256_hex("live"));
+    let unreadable = markers
+        .dir
+        .join(crate::server::users::token::sha256_hex("unreadable"));
+    tokio::fs::write(&expired, "100")
+        .await
+        .expect("expired stamp");
+    tokio::fs::write(&live, "950").await.expect("live stamp");
+    tokio::fs::write(&unreadable, "not an expiry")
+        .await
+        .expect("unreadable stamp");
+
+    markers.prune_expired_at(1_000).await.expect("prune");
+
+    assert!(!expired.exists(), "expired marker should be removed");
+    assert!(live.exists(), "marker within verifier leeway should remain");
+    assert!(
+        unreadable.exists(),
+        "unreadable marker must remain consumed"
+    );
+}

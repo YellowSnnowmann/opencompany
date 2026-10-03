@@ -67,14 +67,6 @@ fn carry_steps(
     }
 }
 
-/// How many progress events a seat's turn may run ahead of the reader.
-///
-/// Backpressure, not a buffer: the core awaits each send, so this is the number
-/// of frames that may be in flight before the turn itself waits. Deep enough
-/// that a burst of tool calls never blocks, small enough that a reader which
-/// stops shows up as a stalled turn rather than as unbounded memory.
-const PROGRESS_DEPTH: usize = 256;
-
 /// The most steps one row may carry, across every attempt behind it.
 ///
 /// `fold_steps` already caps a single turn; this bounds their join, because a
@@ -1376,7 +1368,7 @@ impl EpisodeHost for DeskHost {
     /// [`Self::wrap_turn`] joins it once the turn is over, which is also the
     /// only moment the fold is complete.
     fn progress(&self, seat: &str) -> Option<tinyhivemind_openhuman::TurnProgressSink> {
-        let (sink, mut arriving) = tokio::sync::mpsc::channel(PROGRESS_DEPTH);
+        let (sink, mut arriving) = tokio::sync::mpsc::channel(64);
         let reader = tokio::spawn(async move {
             let mut seen = Vec::new();
             while let Some(event) = arriving.recv().await {
@@ -1400,8 +1392,6 @@ impl EpisodeHost for DeskHost {
             .unwrap_or_else(PoisonError::into_inner)
             .get(seat)
             .cloned();
-        #[cfg(test)]
-        eprintln!("narrow turn: seat={seat} held={}", held.is_some());
         let Some(agent) = held else {
             return tinyhivemind_openhuman::Narrowing::none();
         };
@@ -1412,13 +1402,11 @@ impl EpisodeHost for DeskHost {
             .map(|verb| format!("{}{verb}", crate::hive::host::TOOL_PREFIX))
             .collect();
         seating.narrow(key.clone(), prefixed);
-        #[cfg(test)]
-        eprintln!("narrow turn: key={key} stored={:?}", seating.narrowed_to(Some(&key)));
         tinyhivemind_openhuman::Narrowing::until(move || seating.widen(&key))
     }
 
     fn seat_session(&self, seat: &str) -> String {
-        format!("episode-{}:{seat}", self.episode_id)
+        format!("episode:{}:{}", self.episode_id, seat)
     }
 
     fn persona(&self, seat: &str) -> Option<String> {
