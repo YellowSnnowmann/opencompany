@@ -344,7 +344,7 @@ fn a_bare_no_argument_call_is_recovered() {
 
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].name, "list_desks");
-    assert_eq!(calls[0].arguments, empty_object());
+    assert_eq!(calls[0].arguments, json!({}));
     assert!(text.is_empty(), "the whole message was the call: {text:?}");
 }
 
