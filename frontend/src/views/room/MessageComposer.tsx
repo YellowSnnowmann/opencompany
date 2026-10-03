@@ -638,7 +638,10 @@ export function MessageComposer({
 
   return (
     <div
-      className={cn("shrink-0 px-4", compact ? "pb-3" : "pb-4")}
+      // 8px from the bottom and sides in the channel pane: the floating
+      // sidebar card keeps 8px from the window's edges, and the composer is
+      // the one box that runs along the same bottom edge, so the two share it.
+      className={cn("shrink-0", compact ? "px-4 pb-3" : "px-2 pb-2")}
       // The guided tour spotlights the channel composer. The thread panel's
       // compact copy stays unlabelled so the tour can't anchor on the wrong one.
       data-tour={compact ? undefined : "chat-composer"}

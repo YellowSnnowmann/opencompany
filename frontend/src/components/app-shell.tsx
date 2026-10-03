@@ -3482,12 +3482,12 @@ export function AppShell({
       <SidebarInset
         id={MAIN_CONTENT_ID}
         tabIndex={-1}
-        // `md:ml-4`: the sidebar's in-flow gap is exactly its width, and the
-        // floating card sits 8px in from the window's left edge — so 16px here
-        // puts the content 8px clear of the card's right edge, the same gap the
-        // card keeps from the window. At every density: the gap tracks the
-        // collapsed rail's width too.
-        className="min-h-0 min-w-0 bg-background md:ml-4"
+        // `md:ml-2`: the sidebar's in-flow gap is exactly its width, and the
+        // floating card sits 8px in from the window's left edge — so 8px here
+        // starts the content at the card's right edge. Pages bring their own
+        // gutter from there; the composer's 8px then matches the 8px the card
+        // keeps from the window on every side.
+        className="min-h-0 min-w-0 bg-background md:ml-2"
       >
         {/* Below `md` the sidebar is a sheet, and the way to open it was a
             glyph in the window's title row. That row is gone, so the sheet's
