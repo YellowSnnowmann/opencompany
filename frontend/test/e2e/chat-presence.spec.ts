@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { channelInfo, openChannelInfo } from "./chat-helpers";
+
 /**
  * End-to-end proof for presence and typing indicators.
  *
@@ -87,14 +89,9 @@ async function openChannel(page: Page, channelId: string) {
   await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: 30_000 });
 }
 
-/** The member pane; the channel rail is the other `complementary` on screen. */
-const pane = (page: Page) => page.getByRole("complementary").last();
-
-async function openPane(page: Page) {
-  const toggle = page.getByRole("button", { name: /agents$/i });
-  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
-  await expect(page.getByRole("heading", { name: "Team" })).toBeVisible();
-}
+/** The channel's details panel — its People section carries the dots. */
+const pane = channelInfo;
+const openPane = openChannelInfo;
 
 /** One person's row in the People section. */
 function personRow(page: Page, label: string) {
