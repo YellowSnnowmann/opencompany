@@ -54,10 +54,11 @@ pub fn read_preference(
         Decision::Silent(Silence::OptedOut | Silence::Unreadable)
     );
     let reporting = status.as_ref().is_some_and(|s| s.decision == "reporting");
+    let would_report = decision.reports();
     AnalyticsPreference {
         enabled,
         source: preference_source(saved, env),
-        restart_required: enabled && status.is_some() && !reporting,
+        restart_required: would_report && status.is_some() && !reporting,
         status,
     }
 }

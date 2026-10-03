@@ -88,8 +88,9 @@ pub struct AnalyticsStatus {
     pub last_at: Option<String>,
     /// Events the collector accepted since boot.
     pub accepted: u64,
-    /// Events lost since boot: refused, abandoned with a drain, shed from a full
-    /// queue, or cut off by a cancelled drain.
+    /// Events counted as dropped since boot: refused, abandoned with a drain,
+    /// shed from a full queue, or cut off by a cancelled drain. Events removed
+    /// by `Tracker::discard_pending()` are excluded.
     pub dropped: u64,
 }
 

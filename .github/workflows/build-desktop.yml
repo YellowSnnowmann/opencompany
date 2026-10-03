@@ -583,7 +583,7 @@ jobs:
       # below, so this is checked once, before notarization spends minutes.
       # docs/spec/runtime/analytics-smoke.md.
       - name: Assert desktop analytics wire contract
-        if: matrix.target == 'aarch64-apple-darwin'
+        if: matrix.settings.target == 'aarch64-apple-darwin'
         run: scripts/ci/assert-desktop-analytics.sh "${{ steps.locate.outputs.app_path }}"
 
       # `bundle.targets` is "all", which on Windows is NSIS and MSI. Both are

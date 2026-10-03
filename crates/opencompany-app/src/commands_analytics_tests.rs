@@ -70,3 +70,16 @@ fn an_opt_in_from_a_silent_launch_asks_for_a_restart() {
     status.decision = "reporting";
     assert!(!read_preference(dir.path(), &no_env(), Some(status)).restart_required);
 }
+
+#[test]
+fn an_invalid_endpoint_does_not_claim_a_restart_will_enable_analytics() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = MapEnv::new([("OPENCOMPANY_ANALYTICS_ENDPOINT", "http://collector.example")]);
+    let mut status = AnalyticsStatus::not_wired();
+    status.decision = "off";
+
+    let view = read_preference(dir.path(), &env, Some(status));
+
+    assert!(view.enabled);
+    assert!(!view.restart_required);
+}

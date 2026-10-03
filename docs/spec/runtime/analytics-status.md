@@ -25,7 +25,7 @@ things that close that gap. Neither changes **what is sent**.
 | `last_status` | The HTTP status of that send; `null` for `never` and `unreachable`. |
 | `last_at` | RFC-3339 UTC when it ended, `null` until one has. |
 | `accepted` | Events the collector accepted since boot. |
-| `dropped` | Events lost since boot: refused, abandoned with a drain, shed from a full queue, or cut off by a cancelled drain. |
+| `dropped` | Events counted as dropped since boot: refused, abandoned with a drain, shed from a full queue, or cut off by a cancelled drain. Events removed by `Tracker::discard_pending()` are excluded. |
 
 **The client id is never in it.** `/spec` is unauthenticated, so the endpoint is
 redacted by the one helper the boot line and the send path already share, and the
