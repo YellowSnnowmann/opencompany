@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 
 import type { OpenCompanyClient } from "@/api/client";
 import { RouteLoading } from "@/components/route-loading";
@@ -50,6 +50,12 @@ interface Props {
   onFlag: () => void;
   /** Start the reset (archive + start clean) flow for the active company (#1807). */
   onResetCompany?: (id: string, name: string) => void;
+  /**
+   * The company/host switcher, heading the rail. It headed the floating
+   * sidebar first; which company a window points at is set once and rarely,
+   * which is what this page is for, so it moved here.
+   */
+  switcher?: ReactNode;
 }
 
 /**
@@ -76,6 +82,7 @@ export function SettingsSection({
   eventTick,
   onFlag,
   onResetCompany,
+  switcher,
 }: Props) {
   const page = resolveSettingsPage(sub);
   const activePage = SETTINGS_PAGES.find((item) => item.id === page)!;
@@ -94,6 +101,11 @@ export function SettingsSection({
             reader either — the caption was deliberately a `div` rather than an
             `h2` (issue #1392), so it was never in the document outline, and
             the `nav`'s own `aria-label` still names this landmark. */}
+        {switcher && (
+          <div data-testid="settings-switcher" className="pb-2">
+            {switcher}
+          </div>
+        )}
         {SETTINGS_PAGE_GROUPS.map((group) => (
           <section key={group.id} aria-labelledby={`settings-group-${group.id}`}>
             {/* Named by `aria-labelledby`, which resolves against any element,
@@ -160,6 +172,7 @@ export function SettingsSection({
             page rather than repeating itself under every one of them. Neither
             is a second line per row, which is the thing that was removed. */}
         <div className="relative z-30 border-b lg:hidden">
+          {switcher && <div className="px-2 pt-2">{switcher}</div>}
           <div className="flex gap-1 overflow-x-auto p-2">
             {SETTINGS_PAGES.map((item) => (
               <a
