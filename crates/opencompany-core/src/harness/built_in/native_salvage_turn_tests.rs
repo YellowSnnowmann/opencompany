@@ -46,6 +46,7 @@ use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::search::SearchBackend;
 use crate::harness::{HarnessDeps, HarnessPool};
 use crate::ports::types::{CompanyId, CompanyRecord};
+use crate::ports::types::{TurnStep, TurnStepFailure, TurnStepStatus};
 use crate::ports::usage::{SampleKind, UsageMeter, UsageSample};
 use crate::store::{FsCompanyStore, FsContextStore};
 
@@ -248,6 +249,7 @@ async fn harness(
 ) -> (HarnessPool, HarnessDeps, CompanyRecord, Arc<RecordingMeter>) {
     let meter = Arc::new(RecordingMeter::default());
     let deps = HarnessDeps {
+        takeovers: Default::default(),
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -285,6 +287,7 @@ async fn harness(
         run_output_store: None,
         workflow_revisions: None,
         approval_requests: ApprovalRequestQueue::default(),
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities: crate::harness::toolbelt::CapabilityFilter::AllowAll,
@@ -312,10 +315,11 @@ async fn harness(
     };
 
     let record = CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
-        id: CompanyId::new("acme"),
+        id: crate::test_support::per_test_company_id("acme"),
         manifest: manifest(),
         ledger: Vec::new(),
         lifecycle: "running".to_string(),
@@ -454,11 +458,125 @@ async fn a_text_shaped_call_to_a_tool_the_agent_does_not_have_is_not_dispatched(
         "an unknown tool name must never reach a backend"
     );
     assert_eq!(search_samples(&meter), 0, "and must never be metered");
-    // Nothing was recovered, so the text stands as the model's answer rather
-    // than being silently swallowed.
+    // Nothing was recovered, and the attempt is not silently swallowed — but
+    // where it stays visible moved in OpenHuman v0.64.10. The text used to
+    // stand as the model's answer, so the assertion read `outcome.reply`.
+    // The loop now continues past an unrecovered call to another model
+    // request, and the attempt is recorded as a step instead: by tool name,
+    // with the arguments it carried, classified `NotFound`.
+    //
+    // That is a better place for it than the reply — an operator reading the
+    // timeline sees what the model tried, and the raw `function_call:{...}`
+    // prose never surfaces as an answer (the assertion below). So this asserts
+    // the property where it now lives rather than where it used to.
+    let attempted: Vec<&TurnStep> = outcome
+        .steps
+        .iter()
+        .filter(|step| step.label.starts_with("Delete Production Db"))
+        .collect();
     assert!(
-        outcome.reply.contains("delete_production_db"),
-        "an unrecovered call must stay visible, not vanish: {}",
+        !attempted.is_empty(),
+        "an unrecovered call must stay visible, not vanish: reply {:?}, steps {:?}",
+        outcome.reply,
+        outcome.steps,
+    );
+    assert!(
+        attempted
+            .iter()
+            .all(|step| step.status == TurnStepStatus::Error),
+        "an undispatched call must not read as having run: {attempted:?}",
+    );
+    assert!(
+        attempted
+            .iter()
+            .any(|step| step.failure == Some(TurnStepFailure::NotFound)),
+        "the operator is not told the tool does not exist: {attempted:?}",
+    );
+    assert!(
+        attempted
+            .iter()
+            .any(|step| step.detail.as_deref() == Some("confirm=true")),
+        "the arguments the model sent are not recorded: {attempted:?}",
+    );
+    // And the raw call never surfaced as something the operator reads, which is
+    // what the old reply-shaped assertion could not check.
+    assert!(
+        !outcome.reply.contains("function_call"),
+        "the raw call leaked into the reply: {}",
         outcome.reply
     );
+}
+
+/// The protocol pin, observed on the wire rather than read off a config field.
+///
+/// `agent_spec_for` sets `config.agent.tool_dispatcher = "native"` in a
+/// `spec.config(..)` hook, and that one line is the whole of this host's choice
+/// of tool protocol. OpenHuman's schema default for the field is `"python"`
+/// (`default_agent_tool_dispatcher`), which `resolve_dispatcher_kind` maps to
+/// `DispatcherKind::Code(CodeStyle::Python)` *before* the native-support arm is
+/// consulted — so losing the line does not fall back to native, it falls
+/// forward to Python, where `should_send_tool_specs()` is `false` and the
+/// catalogue reaches the model as prose in the system prompt.
+///
+/// Nothing could catch that. The hook is a boxed `FnOnce` behind a private
+/// field, so no test can invoke it and read the config back; and every
+/// behavioural test in this crate keeps passing on the Python dispatcher,
+/// because `native_salvage` exists precisely to parse calls back out of prose.
+/// A green suite is not evidence either way.
+///
+/// What *is* evidence is the request: a native dispatcher advertises the belt in
+/// a `tools` array, and a code dispatcher sends none. So this reads the shape
+/// off the wire, which is the same thing tinyhivemind's offline harness does in
+/// `the_dialect_is_read_from_the_tools_the_request_advertises`.
+#[tokio::test]
+async fn the_belt_reaches_the_model_as_native_tool_specs_and_not_as_prose() {
+    let (model_url, script) = spawn_script(vec![Turn::Text("done")]).await;
+    let (search_url, _backend) = spawn_search_backend().await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, deps, record, _meter) = harness(model_url, search_url, dir.path()).await;
+    pool.run(
+        &record.id,
+        "ceo",
+        "What is on my plate?",
+        &deps,
+        crate::runtime::delegation::ChatTarget::default(),
+    )
+    .await
+    .expect("turn runs");
+
+    let seen = script.seen.lock().unwrap();
+    let first = seen.first().expect("the model was asked at least once");
+    let tools = first
+        .get("tools")
+        .and_then(Value::as_array)
+        .unwrap_or_else(|| {
+            panic!(
+                "the request advertised no `tools` array, which is the Python/code \
+                 dispatcher's shape — `agent.tool_dispatcher` is no longer pinned to \
+                 \"native\", or an agent path was added that skips `agent_spec_for`. \
+                 Request keys: {:?}",
+                first.as_object().map(|o| o.keys().collect::<Vec<_>>())
+            )
+        });
+    assert!(
+        !tools.is_empty(),
+        "a native request with an empty belt tells the model it has no tools",
+    );
+    // And each entry is a structured declaration with a schema a provider can
+    // validate, not a name in a sentence.
+    for tool in tools {
+        let function = tool
+            .get("function")
+            .unwrap_or_else(|| panic!("a tool entry is not provider-native: {tool}"));
+        assert!(
+            function.get("name").and_then(Value::as_str).is_some(),
+            "a tool entry carries no name: {tool}",
+        );
+        assert!(
+            function.get("parameters").is_some(),
+            "a tool entry carries no parameter schema, so the provider cannot \
+             validate a call against it: {tool}",
+        );
+    }
 }

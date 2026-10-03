@@ -22,6 +22,7 @@ async fn workspace_git_enabled_checkpoints_a_tool_write() {
         tier: None,
         harness: None,
         tools: None,
+        skills: None,
         delegates_to: Vec::new(),
         context: None,
         budget_usd_daily: None,
@@ -46,14 +47,13 @@ async fn workspace_git_enabled_checkpoints_a_tool_write() {
         &company,
         "Acme",
         &manifest_agent,
-        policy,
+        std::sync::Arc::new(policy),
         &deps,
         &grants,
         &[],
         &[],
         None,
         false,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
 
@@ -160,6 +160,7 @@ fn the_tool_iteration_cap_is_uniform_and_not_manifest_configurable() {
             tier: tier.map(str::to_string),
             harness: None,
             tools: None,
+            skills: None,
             delegates_to: Vec::new(),
             context: None,
             budget_usd_daily: budget,
@@ -175,18 +176,16 @@ fn the_tool_iteration_cap_is_uniform_and_not_manifest_configurable() {
             &CompanyId::new("acme"),
             "Acme",
             &manifest_agent,
-            ApprovalPolicy::new(&Policy::default(), None),
+            std::sync::Arc::new(ApprovalPolicy::new(&Policy::default(), None)),
             &deps,
             &["*".to_string()],
             &[],
             &[],
             None,
             is_orchestrator,
-            /* speech_enabled */ false,
         )
         .expect("agent builds")
-        .agent_config()
-        .max_tool_iterations
+        .max_tool_iterations()
     };
 
     for (label, got) in [
@@ -201,4 +200,189 @@ fn the_tool_iteration_cap_is_uniform_and_not_manifest_configurable() {
             "`{label}` must run on the one stated ceiling, not its own"
         );
     }
+}
+
+#[cfg(feature = "mcp")]
+#[test]
+fn an_agent_granted_a_company_server_is_never_scoped_to_list_servers() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut deps = pin_deps(dir.path().to_path_buf());
+    deps.mcp_servers = vec![crate::company::mcp::McpServerDecl {
+        name: "notes".to_string(),
+        endpoint: "https://mcp.example.test/notes".to_string(),
+        description: None,
+        allowed_tools: Vec::new(),
+        disallowed_tools: Vec::new(),
+        read_only_tools: Vec::new(),
+        timeout_secs: 30,
+        enabled: true,
+        source: crate::company::mcp::McpSource::Runtime,
+        auth: crate::company::mcp::AuthMaterial::Bearer("sk-notes-secret".to_string()),
+        tool_policies: Default::default(),
+        tool_inventory: Default::default(),
+    }];
+    let policy = ApprovalPolicy::new(&Policy::default(), None);
+    let blueprint = build_agent(
+        &CompanyId::new("acme"),
+        "Acme",
+        &manifest_agent("Desk Lead", None),
+        std::sync::Arc::new(policy),
+        &deps,
+        &["mcp:notes".to_string()],
+        &[],
+        &[],
+        None,
+        false,
+    )
+    .expect("agent builds");
+
+    for attached in [false, true] {
+        let scope = scope_tool_names(&blueprint, None, attached);
+        assert!(
+            scope.iter().any(|name| name == "mcp_list_tools"),
+            "a granted server must still be reachable: {scope:?}"
+        );
+        assert!(
+            !scope.iter().any(|name| name == "mcp_list_servers"),
+            "`mcp_list_servers` answers with each server's credentials: {scope:?}"
+        );
+    }
+    assert!(
+        !blueprint
+            .tool_names()
+            .iter()
+            .any(|name| name == "mcp_list_servers"),
+        "{:?}",
+        blueprint.tool_names()
+    );
+    assert!(
+        blueprint
+            .system_prompt
+            .contains("- `notes` — `mcp_call_tool` with `\"server\": \"notes\"`"),
+        "the family brief must reach the prompt naming the server, the tool that \
+         dispatches to it and the key it is addressed by: {}",
+        blueprint.system_prompt
+    );
+    assert!(
+        blueprint.system_prompt.contains("mcp_list_tools"),
+        "a declared server is inspected by name, so the brief has to say so"
+    );
+    assert!(!blueprint.system_prompt.contains("mcp_list_servers"));
+    assert!(!blueprint.system_prompt.contains("mcp.example.test"));
+    assert!(!blueprint.system_prompt.contains("sk-notes-secret"));
+}
+
+/// The wiring gate, from the prompt's side: an agent granted no MCP server must
+/// not be handed a section naming servers, nor told to enumerate through tools it
+/// does not hold. Asserted on the built prompt rather than on the renderer, so a
+/// call site that appended the brief unconditionally would fail here even with
+/// every renderer test green.
+#[test]
+fn an_agent_granted_no_mcp_server_gets_no_server_family_section() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let deps = pin_deps(dir.path().to_path_buf());
+    let policy = ApprovalPolicy::new(&Policy::default(), None);
+    let blueprint = build_agent(
+        &CompanyId::new("acme"),
+        "Acme",
+        &manifest_agent("Desk Lead", None),
+        std::sync::Arc::new(policy),
+        &deps,
+        &["file_read".to_string()],
+        &[],
+        &[],
+        None,
+        false,
+    )
+    .expect("agent builds");
+
+    assert!(
+        !blueprint
+            .system_prompt
+            .contains("MCP servers connected to this company"),
+        "{}",
+        blueprint.system_prompt
+    );
+    assert!(
+        !blueprint.system_prompt.contains("mcp_call_tool"),
+        "{}",
+        blueprint.system_prompt
+    );
+}
+
+/// Two registrations answering to one tool name is not shadowing, it is a
+/// contradiction: the driver refuses the turn with "tool snapshot has conflicting
+/// declarations for `composio_list_toolkits`", which is how
+/// `composio-account-choice.spec.ts` caught it.
+///
+/// v0.64.10 widened the gate that registers upstream's five Composio tools —
+/// `user_is_signed_in_to_composio` kept its name and changed its body, from
+/// needing a Composio-specific backend client to needing any integration client
+/// — so they began registering on every OpenCompany instance, because the key
+/// that satisfies it is the one inference runs on. Every one of the five names it
+/// claims is a name OpenCompany serves itself.
+///
+/// The failure is attributed, not merely observed: asserting the error names the
+/// *mode* is what keeps this honest on a host that does hold Composio
+/// credentials. A bare `is_err()` would also pass on a laptop with no key, and
+/// would then be proving nothing about the withholding.
+#[cfg(feature = "composio")]
+#[test]
+fn a_company_agent_runtime_registers_no_upstream_composio_tools() {
+    use openhuman_core::config::schema::{COMPOSIO_MODE_BACKEND, COMPOSIO_MODE_DIRECT};
+
+    let mut config = openhuman_core::config::Config::default();
+    config.composio.pin_host_credential(
+        openhuman_core::config::schema::ComposioHostCredential::direct("test-host-credential"),
+    );
+    withhold_openhuman_composio(&mut config);
+
+    assert!(
+        config.composio.host_credential.is_none(),
+        "a pinned credential takes precedence over the mode and must also be removed"
+    );
+
+    assert_ne!(config.composio.mode, COMPOSIO_MODE_BACKEND);
+    assert_ne!(config.composio.mode, COMPOSIO_MODE_DIRECT);
+
+    // `ComposioRoute` holds a live client and carries no `Debug`, so the error is
+    // taken by match rather than `expect_err`.
+    let refusal =
+        match openhuman_core::integrations::composio::client::resolve_composio_route(&config) {
+            Ok(_) => panic!("the route must not resolve, or upstream's tools register beside ours"),
+            Err(refusal) => format!("{refusal:#}"),
+        };
+    assert!(
+        refusal.contains("unknown composio mode"),
+        "the route must fail *because of the mode*, on every host, credentials or \
+         not: {refusal}"
+    );
+
+    let registered = openhuman_core::integrations::composio::all_composio_agent_tools(&config);
+    assert!(
+        registered.is_empty(),
+        "upstream registered {} Composio tools: {:?}",
+        registered.len(),
+        registered
+            .iter()
+            .map(|tool| tool.name())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_company_agent_config_seeds_no_openhuman_docs_server() {
+    let mut config = openhuman_core::config::Config::default();
+    config.mcp_client.enabled = true;
+    config.gitbooks.enabled = true;
+
+    withhold_openhuman_docs(&mut config);
+
+    assert!(!config.gitbooks.enabled);
+    assert!(
+        openhuman_core::mcp::host::client_config(&config)
+            .servers
+            .iter()
+            .all(|server| server.name != "gitbooks")
+    );
 }

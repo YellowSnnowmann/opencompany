@@ -1,5 +1,6 @@
 use super::*;
 use crate::company::steer::InflightRegistry;
+use crate::ports::tasks::COLUMN_IN_REVIEW;
 use crate::ports::tasks::TaskTitle;
 use std::collections::VecDeque;
 use std::sync::Mutex as StdMutex;
@@ -56,6 +57,7 @@ pub(super) fn brain_with_queue_and_events(
     events: Arc<dyn crate::ports::EventLog>,
 ) -> HarnessBrain {
     let deps = HarnessDeps {
+        takeovers: Default::default(),
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -89,6 +91,7 @@ pub(super) fn brain_with_queue_and_events(
         run_output_store: None,
         workflow_revisions: None,
         approval_requests: requests,
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities: crate::harness::toolbelt::CapabilityFilter::AllowAll,
@@ -124,6 +127,7 @@ pub(super) fn brain_with_queue_and_events_and_budget_exhausted_provider(
     events: Arc<dyn crate::ports::EventLog>,
 ) -> HarnessBrain {
     let deps = HarnessDeps {
+        takeovers: Default::default(),
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -157,6 +161,7 @@ pub(super) fn brain_with_queue_and_events_and_budget_exhausted_provider(
         run_output_store: None,
         workflow_revisions: None,
         approval_requests: requests,
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities: crate::harness::toolbelt::CapabilityFilter::AllowAll,
@@ -307,15 +312,20 @@ pub(super) async fn spawn_model_script(turns: Vec<ScriptTurn>) -> String {
                     ScriptTurn::Say(text) => {
                         serde_json::json!({ "role": "assistant", "content": text })
                     }
-                    ScriptTurn::Call { tool, args } => serde_json::json!({
-                        "role": "assistant",
-                        "content": null,
-                        "tool_calls": [{
-                            "id": format!("call-{tool}"),
-                            "type": "function",
-                            "function": { "name": tool, "arguments": args.to_string() }
-                        }]
-                    }),
+                    ScriptTurn::Call { tool, args } => {
+                        // Plan hive-desks Phase 3: a company tool is reached
+                        // through `mcp_call_tool` on the `opencompany` server.
+                        let (name, args) = crate::hive::tools::via_opencompany_mcp(tool, args);
+                        serde_json::json!({
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "id": format!("call-{tool}"),
+                                "type": "function",
+                                "function": { "name": name, "arguments": args.to_string() }
+                            }]
+                        })
+                    }
                 };
                 Json(serde_json::json!({
                     "choices": [{ "index": 0, "message": message }],
@@ -343,6 +353,7 @@ pub(super) fn brain_over_script(
     use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 
     let deps = HarnessDeps {
+        takeovers: Default::default(),
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -380,6 +391,7 @@ pub(super) fn brain_over_script(
         run_output_store: None,
         workflow_revisions: None,
         approval_requests: requests,
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities: crate::harness::toolbelt::CapabilityFilter::AllowAll,
@@ -407,6 +419,7 @@ pub(super) fn brain_over_script(
 /// A card sitting in review, waiting on the verdict the operator approved.
 pub(super) fn card_in_review(id: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored(&format!("Work item {id}")),
         note: None,

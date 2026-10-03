@@ -13,6 +13,7 @@ pub(super) fn agent(id: &str, tier: Option<&str>) -> ManifestAgent {
         tier: tier.map(str::to_string),
         harness: None,
         tools: None,
+        skills: None,
         delegates_to: Vec::new(),
         context: None,
         budget_usd_daily: None,
@@ -276,6 +277,7 @@ pub(super) fn empty_manifest() -> crate::company::CompanyManifest {
 
 pub(super) fn seeded_record(id: &CompanyId) -> CompanyRecord {
     CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
@@ -427,6 +429,7 @@ pub(super) fn record_with_assistant(company: &CompanyId) -> CompanyRecord {
     )
     .expect("valid manifest");
     CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),

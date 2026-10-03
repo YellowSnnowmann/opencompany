@@ -208,19 +208,15 @@ async fn console_does_not_shadow_unmatched_reserved_paths() {
     let (_guard, dir) = console_fixture();
     let app = router_with_console(AppState::new(AppConfig::default()), Some(dir));
 
-    // An unmatched path under a reserved API/discovery prefix (e.g. a
-    // feature-gated route in a build without that feature) must 404, not
-    // fall through to the SPA shell, so callers can still detect the
-    // surface as unwired.
+    // Paths under reserved API/discovery prefixes must never fall through
+    // to the SPA shell, so API and protocol clients can distinguish "this
+    // surface is absent" from "here is your JSON response". The invariant
+    // is on the *property* — no HTML shell — not on the specific 4xx code,
+    // which depends on whether a route is mounted at all.
     for path in [
         "/api/v1/does-not-exist",
         "/.well-known/agent-card.json",
         "/companies/acme/.well-known/agent-card.json",
-        // The ACP endpoint in a build that does not mount it. An ACP client
-        // probing a host cannot distinguish "no ACP here" from "here is
-        // your JSON-RPC" if both answer `200` with an HTML body — it would
-        // try to parse the console shell as a protocol response.
-        "/acp",
     ] {
         let response = app
             .clone()
@@ -228,9 +224,57 @@ async fn console_does_not_shadow_unmatched_reserved_paths() {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::NOT_FOUND, "path: {path}");
-        assert!(!body_text(response).await.contains("<title>console</title>"));
+        let status = response.status();
+        let body = body_text(response).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "reserved path {path} must 404 when unmatched; got {status}, body starts: {:?}",
+            body.chars().take(120).collect::<String>(),
+        );
+        assert!(
+            !body.contains("<title>console</title>"),
+            "reserved path {path} must not fall through to the SPA shell; body starts: {:?}",
+            body.chars().take(120).collect::<String>(),
+        );
     }
+
+    // `/acp` is a reserved prefix in both feature states (see `RESERVED_PREFIXES`
+    // in routes.rs), so the console shell must never answer it. The specific
+    // status code is feature-dependent:
+    //
+    // - Without `acp`: no route is mounted; the fallback sees the reserved
+    //   prefix and returns 404 — the honest "no ACP here" signal.
+    // - With    `acp`: the route is mounted as POST-only; a GET receives 405 —
+    //   the correct method-level rejection from the mounted handler.
+    //
+    // A 405 is still proof the console did not shadow the path, so both codes
+    // satisfy the invariant (issue #1979). CI covers both arms: the default
+    // `cargo test --locked` lane (no `acp`) and the ACP lane (`--features acp,…`).
+    let acp_response = app
+        .oneshot(Request::builder().uri("/acp").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let expected_acp_status = if cfg!(feature = "acp") {
+        StatusCode::METHOD_NOT_ALLOWED
+    } else {
+        StatusCode::NOT_FOUND
+    };
+    let acp_status = acp_response.status();
+    let acp_body = body_text(acp_response).await;
+    assert_eq!(
+        acp_status,
+        expected_acp_status,
+        "GET /acp with feature acp={} must be {expected_acp_status}; got {acp_status}, body starts: {:?}",
+        cfg!(feature = "acp"),
+        acp_body.chars().take(120).collect::<String>(),
+    );
+    assert!(
+        !acp_body.contains("<title>console</title>"),
+        "GET /acp must not fall through to the SPA shell (feature acp={}); body starts: {:?}",
+        cfg!(feature = "acp"),
+        acp_body.chars().take(120).collect::<String>(),
+    );
 }
 
 #[test]
@@ -254,6 +298,260 @@ fn reserved_path_matches_prefixes_and_subpaths_only() {
     assert!(!is_reserved_path("/companies/acme"));
     assert!(!is_reserved_path("/"));
     assert!(!is_reserved_path("/some/spa/route"));
+}
+
+#[test]
+fn browser_analytics_config_accepts_only_plain_collector_urls() {
+    assert_eq!(
+        public_browser_endpoint("https://collector.example/api/track").as_deref(),
+        Some("https://collector.example/api")
+    );
+    assert_eq!(
+        public_browser_endpoint("https://collector.example/api/track/").as_deref(),
+        Some("https://collector.example/api")
+    );
+    // The TinyHumans self-hosted collector: the host posts to `…/api/track`,
+    // and the browser SDK (`openpanel-init.js`) must get the `…/api` base.
+    assert_eq!(
+        public_browser_endpoint("https://panel.tinyhumans.ai/api/track").as_deref(),
+        Some("https://panel.tinyhumans.ai/api")
+    );
+    assert_eq!(
+        public_browser_endpoint("http://localhost:3000/track").as_deref(),
+        Some("http://localhost:3000/")
+    );
+    // A path that is not the ingestion route is never echoed to the browser.
+    assert_eq!(
+        public_browser_endpoint("https://collector.example/private/ingest").as_deref(),
+        Some("https://collector.example/")
+    );
+    assert!(public_browser_endpoint("http://127.0.0.1:3000/track").is_some());
+    assert!(public_browser_endpoint("http://[::1]:3000/track").is_some());
+    assert!(public_browser_endpoint("http://collector.example/api/track").is_none());
+    assert!(public_browser_endpoint("http://collector.internal/api/track").is_none());
+    assert!(public_browser_endpoint("https://user:secret@collector.example/api/track").is_none());
+    assert!(public_browser_endpoint("https://collector.example/api/track?token=secret").is_none());
+    assert!(public_browser_endpoint("not a URL").is_none());
+}
+
+#[test]
+fn hosted_console_config_enables_openpanel_without_exposing_credentials() {
+    let script = render_console_config(Some("https://collector.example/api/track"), true, true);
+    assert_eq!(
+        script,
+        "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},\
+{analytics:true,analyticsEndpoint:\"https://collector.example/api\"});\n"
+    );
+
+    for endpoint in [
+        "https://user:secret@collector.example/api/track",
+        "https://collector.example/api/track?token=secret",
+    ] {
+        let script = render_console_config(Some(endpoint), true, true);
+        assert!(!script.contains("analytics:true"), "{script}");
+        assert!(!script.contains("secret"), "{script}");
+    }
+
+    assert!(
+        !render_console_config(Some("https://collector.example/api/track"), false, true)
+            .contains("analytics:true")
+    );
+    assert!(
+        !render_console_config(Some("https://collector.example/api/track"), true, false)
+            .contains("analytics:true")
+    );
+}
+
+#[test]
+fn hosted_deployment_accepts_either_hosted_signal() {
+    assert!(hosted_deployment_from_values(Some("hosted-tenant"), None));
+    assert!(hosted_deployment_from_values(None, Some("tenant-a")));
+    assert!(hosted_deployment_from_values(Some("  "), Some("tenant-a")));
+    assert!(hosted_deployment_from_values(
+        Some("self-hosted"),
+        Some("tenant-a")
+    ));
+    assert!(hosted_deployment_from_values(
+        Some("other"),
+        Some("tenant-a")
+    ));
+    assert!(!hosted_deployment_from_values(None, Some("  ")));
+    assert!(!hosted_deployment_from_values(None, None));
+}
+
+#[test]
+fn browser_analytics_switch_fails_closed_on_unrecognised_values() {
+    for value in [Some("on"), Some(" ON ")] {
+        assert!(browser_analytics_enabled_from_value(value), "{value:?}");
+    }
+    for value in [
+        None,
+        Some(""),
+        Some("  "),
+        Some("YES"),
+        Some("true"),
+        Some("1"),
+        Some("off"),
+        Some("FALSE"),
+        Some("0"),
+        Some("no"),
+        Some("of"),
+    ] {
+        assert!(!browser_analytics_enabled_from_value(value), "{value:?}");
+    }
+}
+
+#[tokio::test]
+async fn console_config_route_returns_uncached_javascript() {
+    let env = crate::test_support::EnvVarGuard::capture(&[
+        "OPENCOMPANY_DEPLOYMENT",
+        "OPENCOMPANY_TENANT_ID",
+        "OPENCOMPANY_ANALYTICS",
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+    ]);
+    env.remove("OPENCOMPANY_DEPLOYMENT");
+    env.remove("OPENCOMPANY_TENANT_ID");
+    env.remove("OPENCOMPANY_ANALYTICS");
+    env.remove("OPENCOMPANY_ANALYTICS_ENDPOINT");
+
+    let app = router_with_console(AppState::new(AppConfig::default()), None);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/opencompany-config.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .unwrap(),
+        "application/javascript; charset=utf-8"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::CACHE_CONTROL)
+            .unwrap(),
+        "no-store"
+    );
+    assert_eq!(
+        body_text(response).await,
+        "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n"
+    );
+}
+
+#[tokio::test]
+async fn console_config_route_serves_only_safe_hosted_configuration() {
+    let env = crate::test_support::EnvVarGuard::capture(&[
+        "OPENCOMPANY_DEPLOYMENT",
+        "OPENCOMPANY_TENANT_ID",
+        "OPENCOMPANY_ANALYTICS",
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+    ]);
+    env.set("OPENCOMPANY_DEPLOYMENT", "hosted-tenant");
+    env.remove("OPENCOMPANY_TENANT_ID");
+    env.set("OPENCOMPANY_ANALYTICS", "on");
+    env.set(
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+        "https://collector.example/api/track",
+    );
+
+    let app = router_with_console(AppState::new(AppConfig::default()), None);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/opencompany-config.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        body_text(response).await,
+        "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},\
+{analytics:true,analyticsEndpoint:\"https://collector.example/api\"});\n"
+    );
+
+    env.set(
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+        "http://collector.example/api/track",
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/opencompany-config.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        body_text(response).await,
+        "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n"
+    );
+}
+
+/// **A configured-but-unreadable endpoint must not fall back to the hosted
+/// default.**
+///
+/// `std::env::var` maps a non-Unicode value to the same `Err` as an unset
+/// one, so reading through it treated an operator's mistyped
+/// `OPENCOMPANY_ANALYTICS_ENDPOINT` as absent and published the TinyHumans
+/// collector to the browser anyway — the same failure
+/// `analytics::config::resolve` avoids for the host tracker by reading
+/// through `get_os` and reporting `Silence::UnusableEndpoint` instead.
+#[cfg(unix)]
+#[tokio::test]
+async fn console_config_route_does_not_default_an_unreadable_endpoint() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let env = crate::test_support::EnvVarGuard::capture(&[
+        "OPENCOMPANY_DEPLOYMENT",
+        "OPENCOMPANY_TENANT_ID",
+        "OPENCOMPANY_ANALYTICS",
+        "OPENCOMPANY_ANALYTICS_ENDPOINT",
+    ]);
+    env.set("OPENCOMPANY_DEPLOYMENT", "hosted-tenant");
+    env.remove("OPENCOMPANY_TENANT_ID");
+    env.set("OPENCOMPANY_ANALYTICS", "on");
+    // SAFETY: single-threaded under the guard's `ENV_LOCK`, like every other
+    // write it makes. Bytes this process cannot decode as UTF-8 are the
+    // premise under test; `EnvVarGuard::set` only accepts `&str`, so this
+    // bypasses it directly. The guard's `Drop` restores from its captured
+    // snapshot regardless of what a test wrote afterward, so this is still
+    // sound to leave unset on the way out.
+    unsafe {
+        std::env::set_var(
+            "OPENCOMPANY_ANALYTICS_ENDPOINT",
+            OsStr::from_bytes(&[0xff, 0xfe]),
+        )
+    };
+
+    let app = router_with_console(AppState::new(AppConfig::default()), None);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/opencompany-config.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        body_text(response).await,
+        "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n",
+        "an unreadable configured endpoint must not publish the hosted default"
+    );
 }
 
 #[tokio::test]

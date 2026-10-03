@@ -288,7 +288,7 @@ async fn shell_factory_blocks_high_risk_commands_on_every_execution_path() {
     assert_eq!(tool.max_result_size_chars(), Some(30_000));
     assert_eq!(
         tool.timeout_policy(&json!({ "timeout_secs": 17 })),
-        ToolTimeout::Secs(17)
+        ToolTimeout::Millis(17_000)
     );
 
     let audit_dir = tempfile::tempdir().unwrap();
@@ -329,7 +329,7 @@ fn high_risk_guard_respects_the_flag_without_blocking_ordinary_commands() {
 
 #[test]
 fn shell_timeout_policy_honors_its_schema_fallback_claim() {
-    use oh::tools::traits::ToolTimeout;
+    use tinytools::ToolTimeout;
 
     let ws = std::env::temp_dir();
     let security = test_security(&ws, PolicyMode::Full);
@@ -381,8 +381,11 @@ fn shell_factory_preserves_explicit_deadlines_and_inherits_for_invalid_values() 
             ToolTimeout::Inherit,
             "invalid or absent deadline must inherit: {args}"
         );
-        let (deadline, seconds) =
-            oh::tools::timeout::resolve_tool_deadline(shell.timeout_policy(&args));
+        let resolved =
+            tinyagents_harness::tool::ToolTimeoutSettings::new(120_000, 1_000, 3_600_000, 5_000)
+                .resolve(shell.timeout_policy(&args));
+        let deadline = resolved.deadline;
+        let seconds = resolved.budget_ms / 1000;
         assert_eq!(
             deadline,
             Some(std::time::Duration::from_secs(seconds)),
@@ -393,7 +396,7 @@ fn shell_factory_preserves_explicit_deadlines_and_inherits_for_invalid_values() 
     for secs in [1, 17, 3600] {
         assert_eq!(
             shell.timeout_policy(&json!({"timeout_secs": secs})),
-            ToolTimeout::Secs(secs),
+            ToolTimeout::Millis(secs * 1000),
             "valid explicit deadline must survive the audit wrapper"
         );
     }

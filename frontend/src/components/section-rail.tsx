@@ -284,10 +284,11 @@ function RailRow({
  * table, read from both ends, so a row added to a section appears here without
  * anyone remembering to add it twice.
  *
- * Room and Flows have no children, so they render their page with no rail at
- * all: Room's sub-navigation is the channel list, which is pinned in the
- * sidebar, and Flows has none to move. Settings is not in this table (it is a
- * footer utility, not one of the four) and keeps drawing its own rail.
+ * The table is two sections, Company and Connections, and both have children,
+ * so both draw a rail. Room is not a section at all — its sub-navigation is the
+ * channel list, pinned at the top of the sidebar — and Automations is a row on
+ * Company's rail. Settings is not in this table (it is a footer utility, not a
+ * section) and keeps drawing its own rail.
  *
  * ## The Finance question
  *

@@ -1,7 +1,8 @@
 # Cut a STAGING build: bump the patch version, tag it `v<version>-staging`,
-# and build everything a tester needs — signed macOS DMGs as Actions artifacts
-# and a smoke build of the tenant Docker image — WITHOUT creating a GitHub
-# Release. Nothing a user can install from the repository's front page moves.
+# and build everything a tester needs — signed macOS DMGs and the Windows x64
+# installers as Actions artifacts, and a smoke build of the tenant Docker
+# image — WITHOUT creating a GitHub Release. Nothing a user can install from
+# the repository's front page moves.
 #
 # Step two of the release flow (docs/spec/runtime/releases.md):
 #
@@ -220,20 +221,30 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/build-desktop.yml
+    # Each signing name must be passed for the called workflow to see it; the
+    # value here is empty and the called job's `Production` environment
+    # supplies the real one. See build-desktop.yml's `secrets:` note.
     secrets:
       APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SM_HOST: ${{ secrets.SM_HOST }}
+      SM_API_KEY: ${{ secrets.SM_API_KEY }}
+      SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+      SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+      KEYPAIR_ALIAS: ${{ secrets.KEYPAIR_ALIAS }}
     with:
       build_ref: ${{ needs.prepare-build.outputs.build_ref }}
       tag: ${{ needs.prepare-build.outputs.tag }}
+      macos: true
+      windows: true
       sign: true
       with_updater: false
       with_release_upload: false
@@ -286,7 +297,7 @@ jobs:
           file: deploy/Dockerfile
           push: false
           platforms: linux/amd64
-          tags: opencompany-tenant:${{ needs.prepare-build.outputs.tag }}
+          tags: opencompany:${{ needs.prepare-build.outputs.tag }}
           build-args: |
             FEATURES=${{ steps.features.outputs.value }}
             OPENCOMPANY_BUILD_COMMIT=${{ needs.prepare-build.outputs.sha }}

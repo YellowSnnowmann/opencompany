@@ -106,6 +106,7 @@ async fn a_teammate_named_by_display_name_is_queued_under_its_id() {
         role: "Designer".to_string(),
         description: None,
         tools: None,
+        skills: None,
         model: None,
         harness: None,
     });
@@ -150,6 +151,7 @@ async fn a_display_name_two_teammates_share_is_refused_with_their_ids() {
             role: "Designer".to_string(),
             description: None,
             tools: None,
+            skills: None,
             model: None,
             harness: None,
         });
@@ -266,6 +268,20 @@ async fn delegate_to_desk_tool_queues_ungrounded_when_no_record_is_readable() {
         .await
         .expect("execute");
     assert!(!result.is_error);
+    let text = result.text();
+    assert!(text.contains("Queued for the whatever desk."), "{text}");
+    assert!(
+        text.contains("AFTER you finish your current turn"),
+        "{text}"
+    );
+    assert!(
+        text.contains("do not poll for its result before returning"),
+        "{text}"
+    );
+    assert!(
+        text.contains("this transfers ownership of the card"),
+        "{text}"
+    );
     assert_eq!(queue.queued(), 1);
 }
 

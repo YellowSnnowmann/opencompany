@@ -65,6 +65,12 @@ impl CompanyRegistry {
         map.insert(id, runtime.clone());
         drop(map);
         if !shutting_down {
+            // Issue: nothing but a human could start a card. The board-start
+            // capability needs an `Arc` of the runtime, which first exists here —
+            // and this is the choke point every way a company becomes addressable
+            // passes through, so no registration path can forget it.
+            #[cfg(feature = "openhuman")]
+            runtime.wire_board_starter();
             runtime.schedule_replayed_continuations();
             // Handles dropped for the same reason a replayed continuation's is:
             // registration must not wait on a resume, and dropping a handle

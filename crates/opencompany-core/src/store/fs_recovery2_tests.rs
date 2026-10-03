@@ -21,6 +21,7 @@ async fn a_failed_meta_commit_rolls_the_published_manifest_back() {
     let bundle = Bundle::new(root.clone(), &id);
 
     let record_named = |name: &str| CompanyRecord {
+        general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
         overlay_desk_hive: Vec::new(),
@@ -107,6 +108,7 @@ async fn aborting_during_the_error_path_cleanup_still_reclaims_the_staged_temp_f
     let bundle = Bundle::new(root.clone(), &id);
 
     let record = CompanyRecord {
+        general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
         overlay_desk_hive: Vec::new(),
@@ -137,11 +139,11 @@ async fn aborting_during_the_error_path_cleanup_still_reclaims_the_staged_temp_f
     // Fail the *second* stage so `save` takes its error path, and park
     // the cleanup that path awaits.
     fault_probe::fail_next_write(&bundle.company_toml());
-    cleanup_probe::arm(&bundle_dir);
+    let cleanup_gate = cleanup_probe::arm(&bundle_dir);
 
     let handle = tokio::spawn(async move { store.save(&record).await });
 
-    cleanup_probe::wait_blocked().await;
+    cleanup_gate.wait().await;
     handle.abort();
     let joined = handle.await;
     assert!(
@@ -196,6 +198,7 @@ async fn dropping_save_between_its_two_stages_does_not_strand_the_first_temp_fil
     let bundle = Bundle::new(root.clone(), &id);
 
     let record = CompanyRecord {
+        general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
         overlay_desk_hive: Vec::new(),
@@ -222,11 +225,11 @@ async fn dropping_save_between_its_two_stages_does_not_strand_the_first_temp_fil
 
     // Park the *second* stage, so the abort below lands squarely in the
     // window where `meta.json` is staged and `company.toml` is not.
-    let release = stall_probe::arm(&bundle.company_toml());
+    let gate = stall_probe::arm_scoped(&bundle.company_toml());
 
     let handle = tokio::spawn(async move { store.save(&record).await });
 
-    stall_probe::wait_blocked().await;
+    gate.wait().await;
     handle.abort();
     let joined = handle.await;
     assert!(
@@ -236,7 +239,7 @@ async fn dropping_save_between_its_two_stages_does_not_strand_the_first_temp_fil
     );
 
     // Let the parked second stage finish; it reclaims its own temp.
-    release.send(()).expect("stall gate still open");
+    gate.release().expect("stall gate still open");
 
     let bundle_dir = bundle.company_toml().parent().unwrap().to_path_buf();
     let cleaned_up = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -276,6 +279,7 @@ async fn a_failed_second_stage_write_does_not_strand_the_first_staged_temp_file(
     let bundle = Bundle::new(root.clone(), &id);
 
     let record = || CompanyRecord {
+        general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
         overlay_desk_hive: Vec::new(),
@@ -384,7 +388,7 @@ async fn cancelling_the_caller_does_not_strand_the_staged_temp_file() {
     let root_dir = tmp_root();
     let target = root_dir.path().join("bundle").join("company.toml");
 
-    let release = stall_probe::arm(&target);
+    let gate = stall_probe::arm_scoped(&target);
 
     let awaited_target = target.clone();
     let handle = tokio::spawn(async move { stage_atomic_bytes(&awaited_target, b"hello").await });
@@ -392,7 +396,7 @@ async fn cancelling_the_caller_does_not_strand_the_staged_temp_file() {
     // Deterministic rendezvous: the write closure has reached the gate
     // and parked, so aborting now is guaranteed to land on the await
     // this test is exercising, not before or after it.
-    stall_probe::wait_blocked().await;
+    gate.wait().await;
 
     handle.abort();
     let joined = handle.await;
@@ -405,7 +409,7 @@ async fn cancelling_the_caller_does_not_strand_the_staged_temp_file() {
     // Let the parked write proceed. Nothing above the blocking pool is
     // watching it anymore — this is the crux of the hazard: the write
     // was never cancellable, only the caller's ability to hear about it.
-    release.send(()).expect("stall gate still open");
+    gate.release().expect("stall gate still open");
 
     // Poll for the temp file's fate instead of a fixed sleep: the
     // detached cleanup task needs a moment to resume after the blocking
@@ -602,6 +606,7 @@ async fn a_failed_existence_probe_during_an_update_does_not_misfire_the_first_pu
     let bundle = Bundle::new(root.clone(), &id);
 
     let record = |lifecycle: &str| CompanyRecord {
+        general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
         overlay_desk_hive: Vec::new(),

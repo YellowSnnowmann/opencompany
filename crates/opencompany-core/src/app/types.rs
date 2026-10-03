@@ -124,6 +124,22 @@ pub struct AppConfig {
     /// [`RuntimeBuilder::with_auth_mode_override`](crate::runtime::RuntimeBuilder::with_auth_mode_override),
     /// which is where it beats the manifest.
     pub auth_mode_override: Option<AuthMode>,
+    /// The HS256 secret that verifies SSO auto-login tokens
+    /// (`OPENCOMPANY_SSO_SECRET`), redacted in `Debug`.
+    ///
+    /// The platform mints a short-lived, single-use token per "Open company"
+    /// deep-link and signs it with this secret; the company app verifies it
+    /// **offline** at `POST /api/v1/sso/redeem` and, on first use, claims the
+    /// standing admin for the token's `sub` and establishes a session. See
+    /// [`server::sso`](crate::server::sso) and the WS-A design
+    /// (`opencompany-sso-onboarding-design.md`, Part 2).
+    ///
+    /// `None` — and an empty or whitespace-only value — disables the endpoint
+    /// entirely: `sso/redeem` answers `404` until a secret is configured, so a
+    /// self-hosted deployment that never sets one exposes no SSO surface. It is a
+    /// clean no-op, matching the shape [`Self::platform_auth`] uses for the
+    /// machine credentials.
+    pub sso_secret: Option<SecretValue>,
 }
 
 impl Default for AppConfig {
@@ -148,6 +164,7 @@ impl Default for AppConfig {
             tenant_namespace: None,
             admin_email: None,
             auth_mode_override: None,
+            sso_secret: None,
         }
     }
 }
@@ -402,6 +419,20 @@ impl AppConfig {
             .filter(|email| !email.is_empty())
     }
 
+    /// The configured SSO signing secret, or `None` when SSO auto-login is off.
+    ///
+    /// A blank or whitespace-only value reads as `None` — the same rule
+    /// [`server::platform_auth::configure`](crate::server::platform_auth::configure)
+    /// applies to the machine credentials, so an empty injected variable can
+    /// never become an accepted signing key. [`server::sso`](crate::server::sso)
+    /// treats `None` as "endpoint disabled" and answers `404`.
+    pub fn sso_secret(&self) -> Option<&str> {
+        self.sso_secret
+            .as_ref()
+            .map(|secret| secret.0.trim())
+            .filter(|secret| !secret.is_empty())
+    }
+
     /// Namespaces a company id for shared-single-DB mode.
     ///
     /// Returns `<tenant>--<id>` when [`Self::tenant_namespace`] is set and `id`
@@ -507,6 +538,7 @@ impl std::fmt::Debug for AppConfig {
                 &redacted(&self.tinyhumans_credential),
             )
             .field("platform_auth", &self.platform_auth)
+            .field("sso_secret", &redacted(&self.sso_secret))
             .field("max_companies", &self.max_companies)
             .field("max_companies_per_tenant", &self.max_companies_per_tenant)
             .field("webhook", &self.webhook)
@@ -577,9 +609,10 @@ pub struct AppState {
     /// Injected network seams for the credential surfaces (DNS resolver, mail
     /// sender). Empty by default so the build stays offline.
     connections: crate::server::ops::ConnectionsRuntime,
-    /// The hub exchange backing `…/auth/hub`. `None` (the default, and every
-    /// self-hosted host) means the console offers no ecosystem sign-in at all,
-    /// rather than offering a button that leads nowhere.
+    /// The hub exchange backing the TinyHumans key grant and billing read.
+    /// `None` (the default, and every self-hosted host) means the console
+    /// offers no "Connect TinyHumans" button at all, rather than one that leads
+    /// nowhere.
     hub_identity: Option<Arc<dyn crate::server::hub_identity::HubIdentityExchange>>,
     /// Key-grant flows started and not yet finished, keyed by the opaque
     /// `state` the browser carries. Holds the PKCE verifier, which is why it is
@@ -1089,11 +1122,10 @@ impl AppState {
         &self.connections
     }
 
-    /// Installs the hub identity exchange backing `…/auth/hub`.
+    /// Installs the hub exchange backing the TinyHumans key grant and billing read.
     ///
     /// An injected seam rather than a client built per request, so the route's
-    /// refusals — rejected token, unreachable hub, address not on this
-    /// company's roster — are testable offline against
+    /// refusals — rejected code, unreachable hub — are testable offline against
     /// [`MockHubIdentityExchange`](crate::server::hub_identity::MockHubIdentityExchange)
     /// in a build that links no HTTP crate at all.
     pub fn with_hub_identity(
@@ -1104,12 +1136,10 @@ impl AppState {
         self
     }
 
-    /// The hub identity exchange, when one is wired.
+    /// The hub exchange, when one is wired.
     ///
-    /// `None` means this host has no ecosystem to sign in against, which is the
-    /// correct default: a host that cannot ask the hub whose token it is
-    /// holding has no way to check one, and accepting it on trust would make an
-    /// unverifiable JWT a bearer credential for this company.
+    /// `None` means this host has no hub to redeem a key grant against, which
+    /// is the correct default for a self-hosted instance.
     pub fn hub_identity(
         &self,
     ) -> Option<&Arc<dyn crate::server::hub_identity::HubIdentityExchange>> {
@@ -1398,6 +1428,10 @@ impl AppState {
         // lowered two-way form asks an unaware host for a different action.
         #[cfg(feature = "openhuman")]
         out.push("blocker-verdict");
+        // Kept under its historical name: it once meant "hub sign-in is
+        // offered" and now means "a TinyHumans key grant can be completed",
+        // which is the only thing the exchange still does. A client reading
+        // it decides whether to draw the Connect button, nothing about login.
         if self.hub_identity.is_some() {
             out.push("hub-identity");
         }

@@ -20,6 +20,7 @@ role = "Chief Executive"
     )
     .expect("manifest parses");
     CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
@@ -56,6 +57,7 @@ fn teammate(id: &str, tools: Vec<&str>) -> OverlayAgent {
         role: "Growth".to_string(),
         description: None,
         tools: (!tools.is_empty()).then_some(tools),
+        skills: None,
         model: None,
         harness: None,
     }

@@ -408,6 +408,26 @@ pub fn settled_run_status_with_blockers(
     }
 }
 
+/// Whether this ending closes the card's timeline, and so earns the
+/// `DeskTaskCompleted` anchor that `chat_history` renders into the card's origin
+/// as `finished → <column>`.
+///
+/// # The status answers this and the column cannot
+///
+/// `column_for_settled_run` maps both [`RunStatus::WaitingApproval`] and
+/// [`RunStatus::Paused`] to `COLUMN_PAUSED`. Only one of them is an ending: an
+/// operator who paused a card has finished with it for now, while a run parked on
+/// an approval is mid-attempt and will resume. Reading the column therefore cannot
+/// tell them apart, and reading it is what announced a card as finished while it
+/// was waiting on a person.
+///
+/// So this defers to [`RunStatus::is_terminal`] rather than restating it: a
+/// terminal attempt is over for good, and nothing else is over at all.
+#[must_use]
+pub fn anchors_timeline(settled: RunStatus) -> bool {
+    settled.is_terminal()
+}
+
 /// Who the note block for this ending is attributed to.
 ///
 /// A cancellation is the operator's act, not the assignee's, so it is recorded

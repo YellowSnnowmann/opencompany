@@ -444,6 +444,7 @@ async fn reactions_refuse_a_target_that_is_an_admin_only_report() {
                 agent_id: crate::runtime::OWNER_FALLBACK_REPORT_AUTHOR.to_string(),
                 text: "no admin has a mailbox".into(),
                 steps: Vec::new(),
+                episode: None,
             },
         )
         .await
@@ -559,6 +560,7 @@ async fn a_dm_answer_to_a_task_backed_blocker_completes() {
     let app = router(state);
 
     let mut card = crate::ports::tasks::TaskRecord {
+        opened_by: None,
         id: "t-9".to_string(),
         title: crate::ports::tasks::TaskTitle::authored("Draft the launch note"),
         note: None,

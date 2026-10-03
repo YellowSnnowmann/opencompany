@@ -25,6 +25,7 @@
 // round-trip and rebuild preservation — the data change #311 rules out.
 
 import type { DeskDto, TeamMemberDto } from "@/api/types";
+import { isGeneralDesk } from "@/lib/desks";
 import { avatarFor, fromDto, type TeamMember } from "@/lib/team";
 
 /**
@@ -62,6 +63,21 @@ export interface OrgSeat {
    * face would be the one surface still showing the old one.
    */
   avatar: string;
+  /**
+   * The mascot's chosen costume and colors, carried through from
+   * `TeamMember` for the same reason `avatar` is: a chart that resolved a
+   * seat's face but not its look would draw the file's default mascot for
+   * every wearer instead of what they actually chose. Undefined for a seat
+   * the roster cannot resolve, same as `avatar` falls back to the hashed
+   * default there.
+   */
+  mascotCostume?: string;
+  /** See {@link mascotCostume}. */
+  mascotSkinColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotHandColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotMode?: string;
   /**
    * Whether this seat leads the desk. True for exactly one seat per non-empty
    * desk — `DeskDto.members[0]`, which is the host's routing target.
@@ -147,7 +163,8 @@ export function buildOrgTree(
   const members = roster.map(fromDto);
   const byId = new Map(members.map((m) => [m.id, m]));
 
-  const orgDesks: OrgDesk[] = desks.map((desk) => {
+  // `#general` is the whole roster, not a desk in the hierarchy.
+  const orgDesks: OrgDesk[] = desks.filter((d) => !isGeneralDesk(d)).map((desk) => {
     // `overlayMembers` is omitted rather than empty when there are none, which
     // is why this reads through `?? []` instead of trusting the field.
     const overlay = new Set(desk.overlayMembers ?? []);
@@ -167,6 +184,13 @@ export function buildOrgTree(
           // reads as a rendering bug rather than as the missing teammate the
           // flag is there to report.
           avatar: member?.avatar ?? avatarFor(id),
+          // An unresolved seat has no chosen look to carry either — it is
+          // already drawing the hashed default above, which has no costume or
+          // color of its own.
+          mascotCostume: member?.mascotCostume,
+          mascotSkinColor: member?.mascotSkinColor,
+          mascotHandColor: member?.mascotHandColor,
+          mascotMode: member?.mascotMode,
           // The host's order carries the hierarchy: index 0 is the lead. Read
           // the position, never re-derive the lead by sorting or by name.
           // Unless the desk is an `auto` channel (issue #1835): there

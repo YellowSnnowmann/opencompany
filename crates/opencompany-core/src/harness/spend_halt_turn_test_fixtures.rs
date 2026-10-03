@@ -200,8 +200,27 @@ impl CycleHost for NoopHost {
     }
 }
 
+thread_local! {
+    // One id per test function, not the literal `"acme"` every other test
+    // file in this crate also uses. A chat turn with no addressed desk
+    // shares its openhuman session by company+agent
+    // (`session_key::openhuman_session_key`), so two tests both naming
+    // `"acme"`/`"ceo"` dispatch onto the *same* session on the one
+    // process-wide OpenHuman runtime. Run concurrently — the ordinary case
+    // under `cargo test`'s default parallelism — one test's tool-call
+    // history lands in the session the other reads, and a turn that made
+    // three calls can see the iteration count of whichever turn shared its
+    // session, including one that ran to the real cap. That is what made
+    // `a_turn_inside_its_budget_says_nothing_extra` CI-flaky: passing alone,
+    // failing beside the rest of the suite. `#[test]`/`#[tokio::test]`
+    // each get their own OS thread, so a thread-local generated on first use
+    // is stable for every call within one test and distinct from every
+    // other test's, in this file and every other.
+    static TEST_COMPANY_ID: CompanyId = CompanyId::generate();
+}
+
 pub(super) fn company() -> CompanyId {
-    CompanyId::new("acme")
+    TEST_COMPANY_ID.with(|id| id.clone())
 }
 
 /// A one-agent company on `full` policy, so an ordinary turn is not parked for
@@ -239,6 +258,7 @@ tier = "orchestrator"
 
 pub(super) fn record(budget: Option<f64>) -> CompanyRecord {
     CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
@@ -275,6 +295,7 @@ pub(super) fn record(budget: Option<f64>) -> CompanyRecord {
 pub(super) fn deps_for(base_url: String, dir: &std::path::Path) -> (HarnessDeps, Arc<FsOps>) {
     let ops = Arc::new(FsOps::new(dir));
     let deps = HarnessDeps {
+        takeovers: Default::default(),
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -318,6 +339,7 @@ pub(super) fn deps_for(base_url: String, dir: &std::path::Path) -> (HarnessDeps,
         run_output_store: None,
         workflow_revisions: None,
         approval_requests: ApprovalRequestQueue::default(),
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities: crate::harness::toolbelt::CapabilityFilter::AllowAll,

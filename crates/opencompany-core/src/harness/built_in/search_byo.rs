@@ -217,23 +217,34 @@ impl TenantSearch {
     }
 }
 
+mod declaration;
+mod module;
+
+#[cfg(test)]
+pub(crate) async fn set_module_test_response(response: tinysearch_bus::ExecuteToolResponse) {
+    module::set_test_response(response).await;
+}
+
+#[cfg(test)]
+pub(crate) async fn take_module_test_call() -> Option<(String, Option<String>, String)> {
+    module::take_test_call().await
+}
+
 pub use live::{BYO_SEARCH_TOOLS, byo_search_tools};
 
 mod live {
-    use super::{DEFAULT_MAX_RESULTS, SEARXNG_LANGUAGE, TIMEOUT_SECS, TenantSearch};
+    use super::{DEFAULT_MAX_RESULTS, TIMEOUT_SECS, TenantSearch};
 
     use async_trait::async_trait;
     use serde_json::Value;
 
-    use oh::search::tools::{
-        BraveImageSearchTool, BraveNewsSearchTool, BraveVideoSearchTool, BraveWebSearchTool,
-        ExaFindSimilarTool, ExaGetContentsTool, ExaSearchTool, QueritSearchTool, SearxngSearchTool,
-    };
-    use oh::tools::traits::{
+    use openhuman_core as oh;
+    use tinysearch_bus::{ExecuteToolRequest, ToolSpec, provider_tool_specs};
+    use tinytools::{
         PermissionLevel, Tool, ToolCallOptions, ToolCategory, ToolResult, ToolScope, ToolTimeout,
     };
-    use openhuman_core as oh;
 
+    use super::{declaration, module};
     use crate::harness::search::WEB_SEARCH_TOOL;
 
     /// Every tool name a BYO provider can put on a belt, across all providers.
@@ -252,6 +263,44 @@ mod live {
         WEB_SEARCH_TOOL,
     ];
 
+    /// The one catalogue tool per provider that answers "search the web", and
+    /// so wears OpenCompany's [`WEB_SEARCH_TOOL`] name, with the operator-facing
+    /// label for its engine.
+    ///
+    /// The label is fixed rather than read from the response: a BYO tool's
+    /// engine is settled when the company stored its key, unlike the managed
+    /// surface where only the response says which engine answered.
+    fn canonical(provider: &str) -> Option<(&'static str, &'static str)> {
+        match provider {
+            "brave" => Some(("brave_web_search", "Brave web search")),
+            "exa" => Some(("exa_search", "Exa web search")),
+            "querit" => Some(("querit_search", "Querit web search")),
+            "searxng" => Some(("searxng_search", "SearXNG web search")),
+            _ => None,
+        }
+    }
+
+    /// The provider's extra affordances, kept under their upstream names
+    /// because they are genuinely different tools and a borrowed name is one an
+    /// operator can look up.
+    ///
+    /// Deliberately a fixed list rather than "whatever the catalogue holds":
+    /// [`BYO_SEARCH_TOOLS`] is the closed set the capability gate is checked
+    /// against, so a tool upstream adds must be added here *and* there in one
+    /// change. `exa_answer` is the one such addition pending — see the test that
+    /// pins it.
+    fn extras(provider: &str) -> &'static [&'static str] {
+        match provider {
+            "brave" => &[
+                "brave_news_search",
+                "brave_image_search",
+                "brave_video_search",
+            ],
+            "exa" => &["exa_find_similar", "exa_get_contents"],
+            _ => &[],
+        }
+    }
+
     /// The search tools for one company's own provider connection.
     ///
     /// An unknown provider slug wires nothing and warns rather than failing the
@@ -260,127 +309,179 @@ mod live {
     /// and again by [`TenantSearch::resolve`], so reaching the warn arm means
     /// somebody wrote the secret store directly.
     pub fn byo_search_tools(config: &TenantSearch) -> Vec<Box<dyn Tool>> {
-        let key = config.api_key.clone();
-        match config.provider.as_str() {
-            "brave" => vec![
-                alias(
-                    BraveWebSearchTool::new(key.clone(), DEFAULT_MAX_RESULTS, TIMEOUT_SECS),
-                    "Brave web search",
+        let Some((canonical_name, label)) = canonical(&config.provider) else {
+            tracing::warn!(
+                provider = %config.provider,
+                "[search] unknown BYO search provider stored; no search tools wired"
+            );
+            return Vec::new();
+        };
+        let catalogue = provider_tool_specs();
+        let Some(specs) = catalogue.get(&config.provider) else {
+            // The slug is one this host knows but the vendored catalogue does
+            // not publish — an upstream removal. Reported rather than
+            // papered over: the company's key is configured and its agents are
+            // about to search through the platform's account instead.
+            tracing::warn!(
+                provider = %config.provider,
+                "[search] the vendored TinySearch catalogue publishes no tools for this provider"
+            );
+            return Vec::new();
+        };
+        let spec_for = |name: &str| specs.iter().find(|spec| spec.name == name).cloned();
+
+        let mut tools: Vec<Box<dyn Tool>> = Vec::new();
+        match spec_for(canonical_name) {
+            Some(spec) => tools.push(Box::new(ModuleSearchTool::aliased(
+                config.clone(),
+                declaration::documented(spec, true),
+                WEB_SEARCH_TOOL,
+                label,
+            ))),
+            None => tracing::warn!(
+                provider = %config.provider,
+                tool = canonical_name,
+                "[search] the catalogue no longer publishes this provider's web search tool"
+            ),
+        }
+        for name in extras(&config.provider) {
+            match spec_for(name) {
+                Some(spec) => {
+                    tools.push(Box::new(ModuleSearchTool::upstream(
+                        config.clone(),
+                        declaration::documented(spec, false),
+                        label,
+                    )));
+                }
+                None => tracing::warn!(
+                    provider = %config.provider,
+                    tool = %name,
+                    "[search] the catalogue no longer publishes this provider extra"
                 ),
-                Box::new(BraveNewsSearchTool::new(
-                    key.clone(),
-                    DEFAULT_MAX_RESULTS,
-                    TIMEOUT_SECS,
-                )),
-                Box::new(BraveImageSearchTool::new(
-                    key.clone(),
-                    DEFAULT_MAX_RESULTS,
-                    TIMEOUT_SECS,
-                )),
-                Box::new(BraveVideoSearchTool::new(
-                    key,
-                    DEFAULT_MAX_RESULTS,
-                    TIMEOUT_SECS,
-                )),
-            ],
-            "exa" => vec![
-                alias(
-                    ExaSearchTool::new(key.clone(), None, DEFAULT_MAX_RESULTS, TIMEOUT_SECS),
-                    "Exa web search",
-                ),
-                Box::new(ExaFindSimilarTool::new(
-                    key.clone(),
-                    None,
-                    DEFAULT_MAX_RESULTS,
-                    TIMEOUT_SECS,
-                )),
-                Box::new(ExaGetContentsTool::new(
-                    key,
-                    None,
-                    DEFAULT_MAX_RESULTS,
-                    TIMEOUT_SECS,
-                )),
-            ],
-            "querit" => vec![alias(
-                QueritSearchTool::new(key, None, DEFAULT_MAX_RESULTS, TIMEOUT_SECS),
-                "Querit web search",
-            )],
-            "searxng" => {
-                // Resolution guarantees the endpoint for this provider; the
-                // `unwrap_or_default` is the belt to that braces, and an empty
-                // base URL makes the tool report an unreachable instance rather
-                // than panic.
-                let base_url = config.endpoint.clone().unwrap_or_default();
-                vec![alias(
-                    SearxngSearchTool::new(
-                        base_url,
-                        DEFAULT_MAX_RESULTS,
-                        SEARXNG_LANGUAGE.to_string(),
-                        TIMEOUT_SECS,
-                    ),
-                    "SearXNG web search",
-                )]
-            }
-            other => {
-                tracing::warn!(
-                    provider = %other,
-                    "[search] unknown BYO search provider stored; no search tools wired"
-                );
-                Vec::new()
             }
         }
+        tools
     }
 
-    /// Present `tool` to the model under OpenCompany's canonical
-    /// [`WEB_SEARCH_TOOL`] name, with `label` as its operator-facing step
-    /// label — the provider's name, since a BYO tool's engine is fixed at
-    /// construction ("Exa web search"), matching the managed tool's branded
-    /// label rather than the humanized alias name.
-    fn alias(tool: impl Tool + 'static, label: &'static str) -> Box<dyn Tool> {
-        Box::new(AliasedTool {
-            inner: Box::new(tool),
-            name: WEB_SEARCH_TOOL,
-            label,
-        })
-    }
-
-    /// One tool wearing a different name.
+    /// One catalogue tool, executed by the loaded TinySearch module against the
+    /// company's own credential.
     ///
-    /// Every other method delegates, so the aliased tool behaves exactly like
-    /// the upstream one — including its schema, its permission level and its
-    /// timeout policy. A method added to [`Tool`] upstream after this was
-    /// written falls back to the trait default rather than the inner tool's
-    /// override; the delegation list below is the thing to extend when that
-    /// happens.
-    struct AliasedTool {
-        inner: Box<dyn Tool>,
-        name: &'static str,
+    /// Declaration and rendering both come from upstream — the schema is the
+    /// catalogue's [`ToolSpec`], and the result is `oh::search::render::render`
+    /// — so a Brave result an OpenCompany agent reads is the same text OpenHuman
+    /// renders. What this type adds is the name the belt uses, the company whose
+    /// key the call carries, and the policy the harness expects.
+    struct ModuleSearchTool {
+        tenant: TenantSearch,
+        spec: ToolSpec,
+        /// The name presented to the model. `None` keeps the catalogue's own.
+        alias: Option<&'static str>,
         label: &'static str,
     }
 
-    #[async_trait]
-    impl Tool for AliasedTool {
-        fn name(&self) -> &str {
-            self.name
+    impl ModuleSearchTool {
+        fn aliased(
+            tenant: TenantSearch,
+            spec: ToolSpec,
+            alias: &'static str,
+            label: &'static str,
+        ) -> Self {
+            Self {
+                tenant,
+                spec,
+                alias: Some(alias),
+                label,
+            }
         }
 
-        // Not delegated: the inner tool's label names the upstream tool, and
-        // the default would humanize the alias into a provider-less
-        // "Web search".
+        fn upstream(tenant: TenantSearch, spec: ToolSpec, label: &'static str) -> Self {
+            Self {
+                tenant,
+                spec,
+                alias: None,
+                label,
+            }
+        }
+
+        /// How many results to render. The module is configured with the
+        /// company's default; an explicit argument narrows the rendering the
+        /// same way upstream's own tool does.
+        ///
+        /// Both spellings are read because the catalogue uses two: `count` is
+        /// Brave's and `max_results` is everyone else's. Reading only one meant
+        /// an agent asking Brave for twenty results got twenty from the
+        /// provider, on the company's bill, and was shown five. No catalogue
+        /// tool declares both, so the order between them never decides
+        /// anything — the test walks every wired tool to keep that true.
+        fn max_results(&self, args: &Value) -> usize {
+            ["max_results", "count"]
+                .iter()
+                .find_map(|key| args.get(*key).and_then(Value::as_u64))
+                .map_or(DEFAULT_MAX_RESULTS, |count| (count as usize).clamp(1, 20))
+        }
+    }
+
+    #[async_trait]
+    impl Tool for ModuleSearchTool {
+        fn name(&self) -> &str {
+            self.alias.unwrap_or(&self.spec.name)
+        }
+
+        fn description(&self) -> &str {
+            &self.spec.description
+        }
+
+        fn parameters_schema(&self) -> Value {
+            self.spec.parameters.clone()
+        }
+
+        /// Not the default: it would humanize the alias into a provider-less
+        /// "Web search", and which engine the company is paying for is the one
+        /// thing an operator reading the step timeline wants to see.
         fn display_label(&self, _args: &Value) -> Option<String> {
             Some(self.label.to_string())
         }
 
-        fn description(&self) -> &str {
-            self.inner.description()
+        /// Advisory only, and matched to the managed tool so the two
+        /// `web_search` tools present identically. What actually decides whether
+        /// a call parks or is denied is the name-based classification in
+        /// [`crate::harness::policy`].
+        fn permission_level(&self) -> PermissionLevel {
+            PermissionLevel::ReadOnly
         }
 
-        fn parameters_schema(&self) -> Value {
-            self.inner.parameters_schema()
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Workflow
+        }
+
+        fn scope(&self) -> ToolScope {
+            ToolScope::All
+        }
+
+        fn supports_markdown(&self) -> bool {
+            true
+        }
+
+        /// A search spends the company's own provider quota and changes nothing
+        /// a later call could observe, so concurrent calls are safe — the module
+        /// lock serializes them regardless.
+        fn is_concurrency_safe(&self, _args: &Value) -> bool {
+            true
+        }
+
+        fn external_effect(&self) -> bool {
+            false
+        }
+
+        fn timeout_policy(&self, _args: &Value) -> ToolTimeout {
+            // The module is configured with the same ceiling; this is the
+            // host-side bound on a module that stopped answering at all.
+            ToolTimeout::Millis(TIMEOUT_SECS * 1_000)
         }
 
         async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
-            self.inner.execute(args).await
+            self.execute_with_options(args, ToolCallOptions::default())
+                .await
         }
 
         async fn execute_with_options(
@@ -388,51 +489,33 @@ mod live {
             args: Value,
             options: ToolCallOptions,
         ) -> anyhow::Result<ToolResult> {
-            self.inner.execute_with_options(args, options).await
-        }
-
-        fn supports_markdown(&self) -> bool {
-            self.inner.supports_markdown()
-        }
-
-        fn permission_level(&self) -> PermissionLevel {
-            self.inner.permission_level()
-        }
-
-        fn permission_level_with_args(&self, args: &Value) -> PermissionLevel {
-            self.inner.permission_level_with_args(args)
-        }
-
-        fn scope(&self) -> ToolScope {
-            self.inner.scope()
-        }
-
-        fn category(&self) -> ToolCategory {
-            self.inner.category()
-        }
-
-        fn is_concurrency_safe(&self, args: &Value) -> bool {
-            self.inner.is_concurrency_safe(args)
-        }
-
-        fn external_effect(&self) -> bool {
-            self.inner.external_effect()
-        }
-
-        fn external_effect_with_args(&self, args: &Value) -> bool {
-            self.inner.external_effect_with_args(args)
-        }
-
-        fn max_result_size_chars(&self) -> Option<usize> {
-            self.inner.max_result_size_chars()
-        }
-
-        fn timeout_policy(&self, args: &Value) -> ToolTimeout {
-            self.inner.timeout_policy(args)
-        }
-
-        fn display_detail(&self, args: &Value) -> Option<String> {
-            self.inner.display_detail(args)
+            let subject = oh::search::render::subject(&args);
+            let max_results = self.max_results(&args);
+            let request = ExecuteToolRequest {
+                name: self.spec.name.clone(),
+                arguments: args,
+            };
+            match module::execute(&self.tenant, request).await {
+                Ok(response) => Ok(oh::search::render::render(
+                    &response,
+                    &subject,
+                    max_results,
+                    options.prefer_markdown,
+                )),
+                Err(error) => {
+                    // The query may be echoed in a provider's error detail, so
+                    // the classified code is logged and the detail is not.
+                    tracing::warn!(
+                        tool = %self.spec.name,
+                        provider = %self.tenant.provider,
+                        code = oh::search::tools::error_code(&error).unwrap_or("unclassified"),
+                        "[search] a BYO search failed"
+                    );
+                    Ok(ToolResult::error(oh::search::tools::user_facing_error(
+                        &error,
+                    )))
+                }
+            }
         }
     }
 }

@@ -46,6 +46,7 @@ pub(super) fn stage(queue: &DelegationQueue, d: Delegation) -> Staged {
 /// `card` — that name is already the `Delegation` fixture above.
 pub(super) fn task_card(id: &str, title: &str, column: &str, assignee: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored(title),
         note: None,
@@ -320,6 +321,8 @@ pub(super) fn tenant_run(company: &str, id: &str) -> RunRecord {
         step_count: 0,
         workflow_run_id: None,
         node_id: None,
+        episode_id: None,
+        round_revision: None,
     }
 }
 

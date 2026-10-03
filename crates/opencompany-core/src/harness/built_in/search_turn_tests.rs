@@ -71,6 +71,12 @@ struct Script {
 /// One assistant message carrying a native `tool_calls` array — the shape the
 /// provider's `tool_calling: true` profile puts the turn loop on.
 fn tool_call_message(tool: &str, args: &Value) -> Value {
+    // Plan hive-desks Phase 3: this crate's tools are served over the
+    // `opencompany` MCP server, so a scripted model reaches one exactly as a
+    // real one does — through `mcp_call_tool`. A native tool is unchanged.
+    let (tool, args) = crate::hive::tools::via_opencompany_mcp(tool, args.clone());
+    let tool = tool.as_str();
+    let args = &args;
     json!({
         "role": "assistant",
         "content": null,
@@ -257,8 +263,21 @@ async fn harness(
     daily_calls: u32,
     dir: &std::path::Path,
 ) -> (HarnessPool, HarnessDeps, CompanyRecord, Arc<RecordingMeter>) {
+    harness_with_tenant_search(model_url, search_url, grants, mode, daily_calls, dir, None).await
+}
+
+async fn harness_with_tenant_search(
+    model_url: String,
+    search_url: String,
+    grants: &str,
+    mode: &str,
+    daily_calls: u32,
+    dir: &std::path::Path,
+    tenant_search: Option<crate::harness::built_in::search_byo::TenantSearch>,
+) -> (HarnessPool, HarnessDeps, CompanyRecord, Arc<RecordingMeter>) {
     let meter = Arc::new(RecordingMeter::default());
     let deps = HarnessDeps {
+        takeovers: Default::default(),
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -299,6 +318,7 @@ async fn harness(
         run_output_store: None,
         workflow_revisions: None,
         approval_requests: ApprovalRequestQueue::default(),
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities: crate::harness::toolbelt::CapabilityFilter::AllowAll,
@@ -321,7 +341,7 @@ async fn harness(
             Credential::from_value("stub-platform-token"),
             daily_calls,
         )),
-        tenant_search: None,
+        tenant_search,
         // Issue #237's workspace tools are off in this fixture: the turn under
         // test exercises the #238 search path only, and an unwired store is the
         // fail-closed default everywhere but the runtime builder.
@@ -331,10 +351,11 @@ async fn harness(
     };
 
     let record = CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
-        id: CompanyId::new("acme"),
+        id: crate::test_support::per_test_company_id("acme"),
         manifest: manifest(grants, mode, daily_calls),
         ledger: Vec::new(),
         lifecycle: "running".to_string(),
@@ -376,6 +397,26 @@ fn advertised_tools(script: &Script) -> Vec<String> {
                 .map(str::to_string)
         })
         .collect();
+    // Plan hive-desks Phase 3: this crate's own tools reach the model as the
+    // `opencompany` MCP catalogue, named in the system prompt and called
+    // through `mcp_call_tool`, so "advertised" reads both halves.
+    names.extend(
+        script
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|body| body.get("messages").and_then(Value::as_array).cloned())
+            .flatten()
+            .filter(|message| message.get("role").and_then(Value::as_str) == Some("system"))
+            .filter_map(|message| {
+                message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .flat_map(|prompt| crate::harness::build::tools_named_in_mcp_brief(&prompt)),
+    );
     names.sort();
     names.dedup();
     names
@@ -530,6 +571,94 @@ async fn a_real_supervised_turn_searches_and_meters_exactly_one_priced_call() {
         searches[0].input_tokens + searches[0].output_tokens,
         0,
         "a search carries no tokens"
+    );
+}
+
+/// A company's saved provider reaches the supervised turn as the canonical
+/// tool, and its rendered citations return to the model. The dynamic module is
+/// replaced at its one narrow boundary so this covers the harness wiring in CI
+/// without a platform-specific module artifact or a third-party API key.
+#[tokio::test]
+async fn a_supervised_turn_runs_company_owned_search_and_returns_its_results() {
+    let (model_url, script) = spawn_script(vec![
+        Turn::Call {
+            tool: "web_search",
+            args: json!({ "query": "competitor pricing", "max_results": 3 }),
+        },
+        Turn::Say("The competitor plan is $29 per seat."),
+    ])
+    .await;
+    let (search_url, backend) = spawn_search_backend(0.013).await;
+    crate::harness::built_in::search_byo::set_module_test_response(
+        tinysearch_bus::ExecuteToolResponse {
+            provider: "exa".into(),
+            results: vec![tinysearch_bus::SearchResult {
+                title: "Competitor pricing".into(),
+                url: "https://competitor.test/pricing".into(),
+                snippet: Some("$29 per seat".into()),
+                published: None,
+            }],
+            citations: vec![],
+            answer: None,
+            status: tinysearch_bus::SearchStatus::Ok,
+            provider_data: None,
+            role: None,
+            fallback_from: vec![],
+        },
+    )
+    .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, deps, record, _) = harness_with_tenant_search(
+        model_url,
+        search_url,
+        "\"search\"",
+        "supervised",
+        50,
+        dir.path(),
+        Some(
+            crate::harness::built_in::search_byo::TenantSearch::for_test(
+                "exa",
+                Some("test-company-key"),
+                None,
+            ),
+        ),
+    )
+    .await;
+
+    let outcome = pool
+        .run(
+            &record.id,
+            "ceo",
+            "What does our competitor charge?",
+            &deps,
+            crate::runtime::delegation::ChatTarget::default(),
+        )
+        .await
+        .expect("turn runs");
+    assert!(outcome.reply.contains("$29 per seat"), "{}", outcome.reply);
+    assert!(
+        advertised_tools(&script).contains(&"web_search".to_string()),
+        "the BYO provider must be exposed under the stable tool name"
+    );
+    let result = tool_results(&script).join("\n");
+    assert!(
+        result.contains("https://competitor.test/pricing"),
+        "the company's result must reach the model: {result}"
+    );
+    assert_eq!(
+        crate::harness::built_in::search_byo::take_module_test_call().await,
+        Some((
+            "exa".into(),
+            Some("test-company-key".into()),
+            "exa_search".into(),
+        )),
+        "the harness must execute the catalogue tool with the company's own provider key"
+    );
+    assert_eq!(
+        backend.calls.load(Ordering::SeqCst),
+        0,
+        "company-owned search must not reach the managed backend"
     );
 }
 

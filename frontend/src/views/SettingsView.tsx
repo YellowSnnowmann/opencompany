@@ -40,7 +40,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { DomainSettings } from "@/components/domain-settings";
-import { ExternalHarnesses } from "@/components/external-harnesses";
 import { StatusPill } from "@/components/status-pill";
 import type { CompanyFeed } from "@/hooks/use-company";
 import { withHostParam } from "@/hooks/use-host-route";
@@ -109,11 +108,6 @@ export function SettingsView({ client, company, feed, onFlag, onResetCompany }: 
         {/* Device pairing was here. Sessions are the frontend client's own
             business now — the desktop app holds its session the same way the
             browser does — so there is no machine for this page to pair. */}
-
-        {/* Every coding engine an agent can be bound to, joined against
-            whether it can actually run on this machine (issue #1245). Works in
-            a browser; the installed-here half only fills in on the desktop. */}
-        <ExternalHarnesses client={client} company={company} />
 
         {/* Approvals was here — the autonomy tier and the always-ask list
             (issue #562), kept high in the page because an operator who comes to
@@ -533,7 +527,7 @@ function ConfirmAction({
  *
  * Exported for the same reason `LifecycleControls` is: rendering the whole
  * `SettingsView` to assert on one card would drag in
- * `ExternalHarnesses`/`PolicySettings`/`DomainSettings` and every route they
+ * `PolicySettings`/`DomainSettings` and every route they
  * fetch, none of which this behaviour touches (`settings-sign-out.test.ts`).
  */
 export function AccountCard({
@@ -749,6 +743,21 @@ function MemoryEngineCard({
                 : `${engine.unreachableFamilies.join(", ")} — reads against these will fail`}
           </span>
         </InfoRow>
+        {/*
+          The optional half of the same observation, shown only when there is
+          something to show: an engine serving everything it advertises would
+          otherwise carry a permanent "none" row for a check most operators
+          never think about. A refusal here is not a reason to replace the
+          engine — every cycle still runs — but it is the reason a tool will
+          fail, which is worth having on the page before it does.
+        */}
+        {engine.degradedFamilies !== undefined && engine.degradedFamilies.length > 0 && (
+          <InfoRow label="Optional families refused">
+            <span className="text-sm">
+              {`${engine.degradedFamilies.join(", ")} — advertised, but the engine refused a read; the tools these back will fail`}
+            </span>
+          </InfoRow>
+        )}
         {engine.slowFamilies !== undefined && engine.slowFamilies.length > 0 && (
           <InfoRow label="Slow at probe">
             <span className="text-sm">

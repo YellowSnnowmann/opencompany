@@ -101,7 +101,10 @@ async fn schedule_fired_journals_an_agent_reply_on_the_general_desk() {
     // destination and author stay separate.
     assert_eq!(result.channel_responses.len(), 1);
     let bubble = &result.channel_responses[0];
-    assert_eq!(bubble.channel, crate::server::ops::language::DEFAULT_DESK);
+    assert_eq!(
+        bubble.channel,
+        crate::server::ops::language::GENERAL_CHANNEL_ID
+    );
     assert_eq!(bubble.agent.as_deref(), Some("ceo"));
 
     // The journal holds one AgentReply, on the General desk, attributed to
@@ -121,7 +124,7 @@ async fn schedule_fired_journals_an_agent_reply_on_the_general_desk() {
             text,
             ..
         } => {
-            assert_eq!(chat_id, crate::server::ops::language::DEFAULT_DESK);
+            assert_eq!(chat_id, crate::server::ops::language::GENERAL_CHANNEL_ID);
             assert_eq!(agent_id, "ceo");
             assert!(text.contains("daily standup"), "{text}");
         }
@@ -155,6 +158,7 @@ async fn schedule_fired_journals_halt_notices() {
         // This fixture scripts a SPEND halt; a budget pause is the separate
         // signal added in issue #1846 and is not what it exercises.
         budget_paused: None,
+        ceiling_paused: None,
     };
     let brain = brain_with_queue_and_events(dir.path(), Default::default(), log.clone())
         .with_default_engine(Some(Arc::new(FixedOutcomeTurn {
@@ -218,6 +222,7 @@ async fn schedule_fired_journals_a_budget_pause_notice() {
             agent: "ceo".to_string(),
             summary: "the provider is exhausted".to_string(),
         }),
+        ceiling_paused: None,
     };
     let brain = brain_with_queue_and_events(dir.path(), Default::default(), log.clone())
         .with_default_engine(Some(Arc::new(FixedOutcomeTurn {
@@ -290,6 +295,7 @@ async fn schedule_fired_journals_approval_overflow_notice() {
                 halted_for_spend: None,
                 // Added by #1846 after these fixtures were written.
                 budget_paused: None,
+                ceiling_paused: None,
             },
             approval_requests: Some(requests.clone()),
         })));
@@ -655,5 +661,84 @@ async fn a_publish_lands_in_the_shared_workspace_and_the_version_names_the_node(
             id: "maya".to_string()
         },
         "the tree must say which teammate produced this"
+    );
+}
+
+/// Issue #1680: the scheduled-tick sibling of
+/// `schedule_fired_journals_a_budget_pause_notice`.
+///
+/// This is the shape #1680 was actually filed on — a scheduled run whose turn
+/// ran out of time — and it pins both halves of the fix end to end through
+/// `run_cycle`: the primary bubble carries the unauthored placeholder rather
+/// than `wall_clock_ceiling_message` under the teammate's name, and the notice
+/// follows it as a system message. A scheduled turn's journal is its only
+/// durable record, so getting the author wrong here would be permanent.
+#[tokio::test]
+async fn schedule_fired_journals_a_ceiling_pause_notice() {
+    use crate::ports::EventLog;
+    use crate::store::FsEventLog;
+
+    let dir = tempfile::tempdir().unwrap();
+    let log: Arc<dyn EventLog> = Arc::new(FsEventLog::new(dir.path()));
+    let outcome = crate::harness::built_in::TurnOutcome {
+        // What the ceiling arm really leaves in `reply` — host-authored copy,
+        // which is exactly what must not be journaled under "ceo".
+        reply: "turn for 'ceo' hit the harness's per-turn wall-clock ceiling after 10m 01s."
+            .to_string(),
+        steps: Vec::new(),
+        hit_iteration_cap: false,
+        abnormal_stop: None,
+        halted_for_spend: None,
+        budget_paused: None,
+        ceiling_paused: Some(crate::harness::CeilingPause {
+            agent: "ceo".to_string(),
+            elapsed: std::time::Duration::from_millis(601_000),
+            summary: "hit the per-turn wall-clock ceiling after 10m 01s".to_string(),
+        }),
+    };
+    let brain = brain_with_queue_and_events(dir.path(), Default::default(), log.clone())
+        .with_default_engine(Some(Arc::new(FixedOutcomeTurn {
+            outcome,
+            approval_requests: None,
+        })));
+    let result = brain
+        .run_cycle(
+            request(vec![CompanyEvent::ScheduleFired {
+                cron: "0 9 * * *".into(),
+                prompt: "24hr closed issues status".into(),
+            }]),
+            &NoopHost,
+        )
+        .await
+        .expect("cycle runs");
+
+    assert_eq!(result.channel_responses.len(), 2);
+    assert_eq!(
+        result.channel_responses[0].text, CEILING_PAUSED_PLACEHOLDER_REPLY,
+        "the authored bubble must not claim host-authored runtime copy"
+    );
+    assert_ne!(
+        result.channel_responses[0].text, BUDGET_PAUSED_PLACEHOLDER_REPLY,
+        "and must not say the account ran dry when the clock did — the operator would \
+         go looking for the wrong lever"
+    );
+    assert_eq!(
+        result.channel_responses[1].agent.as_deref(),
+        Some(crate::ports::SYSTEM_AUTHOR),
+        "the notice is unauthored"
+    );
+    assert!(
+        result.channel_responses[1].text.contains("ceo")
+            && result.channel_responses[1].text.contains("10m 01s"),
+        "and names the teammate and what its turn spent: {}",
+        result.channel_responses[1].text
+    );
+    assert!(
+        !result.channel_responses[1]
+            .text
+            .to_ascii_lowercase()
+            .contains("continue"),
+        "there is no checkpoint to continue from: {}",
+        result.channel_responses[1].text
     );
 }

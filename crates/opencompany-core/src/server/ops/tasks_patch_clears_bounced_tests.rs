@@ -22,6 +22,7 @@ async fn state(home: &std::path::Path) -> AppState {
     let id = CompanyId::new("acme");
     FsCompanyStore::new(home.to_path_buf())
         .save(&CompanyRecord {
+            general_channel: Default::default(),
             overlay_desk_hive: Vec::new(),
             overlay_retired_agents: Vec::new(),
             overlay_agent_edits: Vec::new(),
@@ -69,6 +70,7 @@ async fn seed_bounced_card(state: &AppState, id: &str) {
         .upsert(
             &company,
             &crate::ports::tasks::TaskRecord {
+                opened_by: None,
                 id: id.to_string(),
                 title: crate::ports::tasks::TaskTitle::authored("Draft the launch note"),
                 note: None,

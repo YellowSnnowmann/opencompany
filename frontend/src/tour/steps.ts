@@ -1,7 +1,7 @@
 import type { Step } from "react-joyride";
 
 import type { View } from "@/components/app-shell";
-import { MAIN_THREAD_ID } from "@/lib/chat";
+import { GENERAL_CHANNEL_ID } from "@/lib/chat";
 
 /**
  * One stop on the guided tour: a spotlight target plus the console view it
@@ -16,11 +16,7 @@ import { MAIN_THREAD_ID } from "@/lib/chat";
  * A content anchor has to be **addressed**, not just navigated to: a stop that
  * names only its view inherits whatever sub-page was last open there, and a
  * content anchor the remembered sub-page does not render is skipped in silence.
- * Both chat composer stops therefore carry an explicit `sub`. That matters more
- * since #1984, which stopped rendering a composer at all on the read-only
- * Operator feed — with Room remembering the last channel, an operator whose last
- * visit was `#Operator` would otherwise have had BOTH composer stops skip, and
- * a seven-stop tour would have silently taught five.
+ * Both chat composer stops therefore carry an explicit `sub`.
  *
  * Each nav stop therefore has to name a row that EXISTS. The anchor is
  * `nav-<view>`, not `nav-<label>`, because the two are deliberately allowed to
@@ -61,28 +57,13 @@ export const TOUR: TourStop[] = [
     target: '[data-tour="sidebar"]',
     placement: "right",
     title: "Welcome to your company",
-    body: "Four places: the Room you talk in, your Company, what it's Connected to, and the Automations it repeats. Open one and what's inside it appears underneath.",
+    body: "Your conversations are on top; Company and Connections are pinned at the bottom. Open one and what's inside it appears beside the page.",
   },
   {
-    // `sub` is not optional here, and neither composer stop below may drop it.
-    //
-    // A bare `setView("chat")` restores whichever channel the operator was last
-    // on — `app-shell`'s `lastSubByViewRef`, and `RoomView`'s own
-    // `readLastChannel` for a cold start. That can be the read-only `#Operator`
-    // feed, which renders no composer at all since PR #1984. The stop would then
-    // wait out `targetWaitTimeout` and be **skipped** — silently, because a
-    // missing anchor degrades rather than errors (see `waitForTarget`), so the
-    // tour would simply teach less and say nothing about it. The last stop below
-    // is "You're all set", so the tour would end by vanishing.
-    //
-    // `main` is the built-in company-wide channel, present in every company from
-    // first boot (issue #1743) and always writable. A blueprint that
-    // grandfathers a desk onto that line renders it under the desk's own id
-    // instead; `RoomView` folds every General spelling onto whichever channel
-    // actually holds the line (`generalChannelId`), so this address resolves
-    // either way rather than raising issue #370's unknown-channel notice.
+    // Addressed rather than inheriting the last channel: `#general` is present
+    // in every company and always writable.
     view: "chat",
-    sub: MAIN_THREAD_ID,
+    sub: GENERAL_CHANNEL_ID,
     target: '[data-tour="chat-composer"]',
     placement: "top",
     title: "Talk to your company",
@@ -90,20 +71,23 @@ export const TOUR: TourStop[] = [
   },
   {
     view: "chat",
-    target: '[data-tour="nav-chat"]',
+    // The conversation list itself — the Room nav row it used to spotlight is
+    // gone, and the list is on every route now.
+    target: '[data-tour="conversations"]',
     placement: "right",
     title: "Your AI staff",
-    body: "Every channel and direct message is listed here while you're in the Room. The agents that do the work each have one.",
+    body: "Every channel and direct message is listed here, on every page. The agents that do the work each have one.",
   },
   {
     view: "company",
     target: '[data-tour="nav-company"]',
     placement: "right",
     title: "Your company",
-    body: "Who's on it, what they're working on, the files they keep, what they remember, and what it all costs — five pages under one row.",
+    body: "Who's on it, what they're working on, the files they keep, what they remember, and what it all costs, and the automations it runs — six pages under one row.",
   },
   {
     view: "workflows",
+    // A row on Company's rail now, not a sidebar row of its own.
     target: '[data-tour="nav-workflows"]',
     placement: "right",
     title: "Automations",
@@ -120,9 +104,9 @@ export const TOUR: TourStop[] = [
     body: "Plug in the tools your company already uses — Gmail, Slack, Notion — so your agents can act for real.",
   },
   {
-    // Addressed, for the reason the first composer stop above gives at length.
+    // Addressed, for the reason the first composer stop above gives.
     view: "chat",
-    sub: MAIN_THREAD_ID,
+    sub: GENERAL_CHANNEL_ID,
     target: '[data-tour="chat-composer"]',
     placement: "top",
     title: "You're all set",

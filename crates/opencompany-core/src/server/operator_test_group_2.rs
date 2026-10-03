@@ -162,7 +162,7 @@ async fn only_a_person_gets_a_self_promoting_card() {
             &message,
             by.as_ref(),
             None,
-            crate::server::ops::language::DEFAULT_DESK,
+            crate::server::ops::language::GENERAL_CHANNEL_ID,
         )
         .await
         .expect("the turn is accepted");
@@ -194,7 +194,20 @@ async fn chat_routes_through_the_harness_brain() {
 
     let home_dir = home();
     let home = home_dir.path().to_path_buf();
-    let id = CompanyId::new("acme");
+    // A company id of this test's own, not the shared `acme`, for the reason
+    // `a_broken_workspace_root_reports_once_across_repeated_dispatches`
+    // records: the OpenHuman transcript root is process-wide (one
+    // `OPENHUMAN_WORKSPACE` per test binary) while a session's durable
+    // identity is derived from the company and agent ids, so every test that
+    // runs `ceo` on the bare `acme` reads and writes *one* transcript —
+    // including its `{"kind":"tools"}` record. These deps carry no board, so
+    // `start_task` is absent from this agent's belt; when the agent resumed a
+    // transcript a board-carrying test had already stamped with it, the driver
+    // refused the turn ("session tool snapshot declares non-executable tools:
+    // start_task"). It only bites when the other test wins the race, which is
+    // why this passed alone and failed under the suite's parallelism.
+    let slug = format!("acme-harness-brain-{}", uuid::Uuid::new_v4().simple());
+    let id = CompanyId::new(&slug);
     let manifest: CompanyManifest = toml::from_str(
         "[company]\nname = \"Acme\"\n[policy]\nmode = \"full\"\n\
          [[agent]]\nid = \"ceo\"\nrole = \"Chief Executive\"\n",
@@ -202,6 +215,7 @@ async fn chat_routes_through_the_harness_brain() {
     .unwrap();
 
     let record = CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
@@ -231,6 +245,7 @@ async fn chat_routes_through_the_harness_brain() {
         .unwrap();
 
     let deps = HarnessDeps {
+        takeovers: Default::default(),
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -265,6 +280,7 @@ async fn chat_routes_through_the_harness_brain() {
         run_output_store: None,
         workflow_revisions: None,
         approval_requests: crate::harness::policy::ApprovalRequestQueue::default(),
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities: crate::harness::toolbelt::CapabilityFilter::AllowAll,
@@ -295,7 +311,7 @@ async fn chat_routes_through_the_harness_brain() {
         .unwrap();
     let state = AppState::new(AppConfig::default());
     state.registry().insert(id, Arc::new(runtime));
-    crate::server::test_support::seed_fixed_admin(&state, "acme").await;
+    crate::server::test_support::seed_fixed_admin(&state, &slug).await;
     let app = router(state);
 
     let response = app
@@ -303,7 +319,7 @@ async fn chat_routes_through_the_harness_brain() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/company/chat")
-                .header("cookie", crate::server::test_support::fixed_cookie("acme"))
+                .header("cookie", crate::server::test_support::fixed_cookie(&slug))
                 .header("content-type", "application/json")
                 // Issue #1725: not "hi". A bare pleasantry is answered by
                 // the runtime without a turn, so it would reach no brain at
@@ -313,9 +329,14 @@ async fn chat_routes_through_the_harness_brain() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-
+    let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "body: {}",
+        String::from_utf8_lossy(&bytes)
+    );
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     let text = value["responses"][0]["text"].as_str().unwrap();
     // The mock provider's `mock: ` prefix proves the message went through an

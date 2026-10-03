@@ -67,7 +67,7 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 127
 fi
 
-project=$(demo_project_name "$company")
+project=${OPENCOMPANY_PROJECT_NAME:-$(demo_project_name "$company")}
 compose_file="${REPO_ROOT}/deploy/docker-compose.yml"
 dev_compose_file="${REPO_ROOT}/deploy/docker-compose.dev.yml"
 
@@ -79,6 +79,12 @@ echo "opencompany: ${action} '${company}' (Compose project: ${project})"
 cd "${REPO_ROOT}/deploy"
 
 if [ "$action" = "up" ]; then
+    ensure_demo_cache_volumes
+    console_port=${CONSOLE_PORT:-}
+    if [ -z "$console_port" ] && [ -f .env ]; then
+        console_port=$(sed -n 's/^[[:space:]]*CONSOLE_PORT[[:space:]]*=[[:space:]]*//p' .env | tail -n 1)
+    fi
+    echo "Console: http://localhost:${console_port:-5173}"
     # Intentionally attached: Ctrl-C stops the stack and returns to the shell.
     OPENCOMPANY_COMPANY="$company" docker compose \
         --project-name "$project" \

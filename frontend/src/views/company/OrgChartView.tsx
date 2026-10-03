@@ -64,6 +64,7 @@ import {
   type AddMemberOutcome,
   type MissedStep,
 } from "@/lib/member-feedback";
+import { birthLook, writeUnechoedLook } from "@/lib/new-member-look";
 import {
   addableTo,
   buildOrgTree,
@@ -79,6 +80,7 @@ import {
 } from "@/lib/org";
 import { cn } from "@/lib/utils";
 import { DeskCreateDialog } from "@/views/company/DeskCreateDialog";
+import { DeskRoutingPanel } from "@/views/company/routing/DeskRoutingPanel";
 import {
   AddMemberDialog,
   type NewMemberFields,
@@ -188,11 +190,23 @@ interface Props {
    * nowhere, so `CompanyView` always passes it.
    */
   onOpenAgent?: (agentId: string, options?: { edit?: boolean }) => void;
+  /**
+   * Bumped by the shell on `desk_routing_configured`, so the routing editor
+   * below a focused desk re-reads a block another session installed or reset.
+   */
+  deskRoutingTick?: number;
 }
 
 type Load = "loading" | "ready" | "error";
 
-export function OrgChartView({ client, company, focusDeskId, onBack, onOpenAgent }: Props) {
+export function OrgChartView({
+  client,
+  company,
+  focusDeskId,
+  onBack,
+  onOpenAgent,
+  deskRoutingTick,
+}: Props) {
   const [load, setLoad] = useState<Load>("loading");
   const [tree, setTree] = useState<OrgTree | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -424,6 +438,10 @@ export function OrgChartView({ client, company, focusDeskId, onBack, onOpenAgent
             // produce, and the reason an E2E test asserts the wire body rather
             // than the screen.
             instructions: fields.instructions?.trim() || undefined,
+            // The look rides the create, like the persona above — and for the
+            // same reason: this surface used to drop it, so the same dialog
+            // opened from the roster kept what this one lost.
+            ...birthLook(fields),
           },
           company,
         );
@@ -438,6 +456,13 @@ export function OrgChartView({ client, company, focusDeskId, onBack, onOpenAgent
           );
         }
         throw e;
+      }
+      // Only what a host that predates the look did not echo is written now.
+      if (!(await writeUnechoedLook(client, company, created, fields))) {
+        missed.push({
+          what: "their icon couldn't be set",
+          fix: "Pick one again from their profile.",
+        });
       }
       if (deskId) {
         try {
@@ -654,6 +679,23 @@ export function OrgChartView({ client, company, focusDeskId, onBack, onOpenAgent
                 }
               />
               <Unplaced tree={tree} />
+              {/* The routing editor for the desk this address asked for —
+                  `#/company/<deskId>`, which the room's members pane links
+                  to. Only for an id the chart actually draws: a stale link
+                  is a silent no-op above, and stays one here. */}
+              {focusDeskId && tree.desks.some((desk) => desk.id === focusDeskId) && (
+                <div className="mt-6" data-testid="org-chart-routing">
+                  <h2 className="mb-2 text-sm font-semibold">
+                    Routing for {tree.desks.find((desk) => desk.id === focusDeskId)?.name ?? focusDeskId}
+                  </h2>
+                  <DeskRoutingPanel
+                    client={client}
+                    company={company}
+                    deskId={focusDeskId}
+                    refreshKey={deskRoutingTick}
+                  />
+                </div>
+              )}
             </>
           )
         )}
@@ -1057,6 +1099,10 @@ function DeskNode({
                         <TeammateAvatar
                           name={member.name}
                           avatar={member.avatar}
+                          mascotCostume={member.mascotCostume}
+                          mascotSkinColor={member.mascotSkinColor}
+                          mascotHandColor={member.mascotHandColor}
+                          mascotMode={member.mascotMode}
                           tone={member.tone}
                           className="size-5 shrink-0"
                         />
@@ -1195,6 +1241,10 @@ function Seat({
       <TeammateAvatar
         name={seat.name}
         avatar={seat.avatar}
+        mascotCostume={seat.mascotCostume}
+        mascotSkinColor={seat.mascotSkinColor}
+        mascotHandColor={seat.mascotHandColor}
+        mascotMode={seat.mascotMode}
         tone={toneFor(seat.id)}
         className="size-5 shrink-0"
       />
@@ -1350,6 +1400,10 @@ function Unplaced({ tree }: { tree: OrgTree }) {
                       <TeammateAvatar
                         name={member.name}
                         avatar={member.avatar}
+                        mascotCostume={member.mascotCostume}
+                        mascotSkinColor={member.mascotSkinColor}
+                        mascotHandColor={member.mascotHandColor}
+                        mascotMode={member.mascotMode}
                         tone={member.tone}
                         className="size-5 shrink-0"
                       />
@@ -1364,6 +1418,10 @@ function Unplaced({ tree }: { tree: OrgTree }) {
                       <TeammateAvatar
                         name={member.name}
                         avatar={member.avatar}
+                        mascotCostume={member.mascotCostume}
+                        mascotSkinColor={member.mascotSkinColor}
+                        mascotHandColor={member.mascotHandColor}
+                        mascotMode={member.mascotMode}
                         tone={member.tone}
                         className="size-5 shrink-0"
                       />

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Cpu,
   MessageSquare,
   MoreHorizontal,
   Network,
@@ -14,6 +15,7 @@ import type { OpenCompanyClient } from "@/api/client";
 import { listTasks } from "@/api/tasks";
 import { ApiError, type TeamMemberDto } from "@/api/types";
 import { PageHeader } from "@/components/page-header";
+import { AgentFace } from "@/components/agent-face";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -38,7 +40,8 @@ import {
   reportAddMember,
   type MissedStep,
 } from "@/lib/member-feedback";
-import { fromDto, newMember, roleSubtitle, type TeamMember } from "@/lib/team";
+import { birthLook, writeUnechoedLook } from "@/lib/new-member-look";
+import { fromDto, modelSummary, newMember, roleSubtitle, type TeamMember } from "@/lib/team";
 import { workloadByAssignee, type Workload } from "@/lib/team-workload";
 import { usd } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -55,6 +58,8 @@ interface Props {
    * agent, refresh onto it, and use Back (issue #264).
    */
   sub: string | null;
+  /** Roster id to display name, for the teammates an agent's session mentions. */
+  agentNames?: Readonly<Record<string, string>>;
   /**
    * Open an agent, or return to the roster with `null`.
    *
@@ -100,6 +105,7 @@ export function TeamView({
   client,
   company,
   sub,
+  agentNames,
   onOpenAgent,
   refreshKey,
   onRunSetup,
@@ -124,6 +130,33 @@ export function TeamView({
    */
   const [hostEmpty, setHostEmpty] = useState(false);
   const [members, setMembers] = useState<TeamMember[]>([]);
+  /**
+   * `agentNames` is the shell's roster snapshot, re-fetched on company switch
+   * rather than on every rename — so a save on the detail page below would
+   * otherwise show the old name in every chip that resolves through it until
+   * the operator changes company. Overlaid with this view's own `members`,
+   * which {@link onAgentNameChange} keeps current the moment a save lands,
+   * and then with `nameOverrides` for a rename on an agent `members` doesn't
+   * hold: `#/team/<agentId>` is unvalidated (the detail page resolves it
+   * against the host directly), so an operator can rename an agent this
+   * view's own roster read omitted or hasn't returned yet, and a `members`-only
+   * update would silently no-op.
+   */
+  const [nameOverrides, setNameOverrides] = useState<Readonly<Record<string, string>>>({});
+  const currentAgentNames = useMemo(
+    () => ({
+      ...agentNames,
+      ...Object.fromEntries(members.map((member) => [member.id, member.name])),
+      ...nameOverrides,
+    }),
+    [agentNames, members, nameOverrides],
+  );
+  const onAgentNameChange = useCallback((agentId: string, name: string) => {
+    setMembers((current) =>
+      current.map((member) => (member.id === agentId ? { ...member, name } : member)),
+    );
+    setNameOverrides((current) => ({ ...current, [agentId]: name }));
+  }, []);
   /**
    * Ids of rows this console appended itself, because the host has no team
    * write plane (`addMember`'s 404 branch below).
@@ -246,6 +279,10 @@ export function TeamView({
   }, [client, company]);
 
   useEffect(() => {
+    setNameOverrides({});
+  }, [company]);
+
+  useEffect(() => {
     setLoad("loading");
     // Drop the previous read's workload before the new reads start. A stale
     // non-null map must never filter a roster it does not describe: on a
@@ -330,6 +367,8 @@ export function TeamView({
           // Blank stays off the wire: at creation there is no blueprint to
           // override, so an empty box means "no persona", not "an empty one".
           instructions: fields.instructions || undefined,
+          // The look rides the create, so the teammate is born wearing it.
+          ...birthLook(fields),
         },
         company,
       );
@@ -354,17 +393,14 @@ export function TeamView({
     }
 
     const missed: MissedStep[] = [];
-    // The face, against the host's real agent id — `addTeamMember` takes none.
-    // Before the redirect, so the page the operator lands on already wears it.
-    if (fields.avatar) {
-      try {
-        await client.updateAgent(created.id, { avatar: fields.avatar }, company);
-      } catch {
-        missed.push({
-          what: "their icon couldn't be set",
-          fix: "Pick one again from their profile.",
-        });
-      }
+    // The look rode the create request; only what the host did not echo back (a
+    // host that predates it) is written now, against its real agent id. Before
+    // the redirect, so the page the operator lands on already wears it.
+    if (!(await writeUnechoedLook(client, company, created, fields))) {
+      missed.push({
+        what: "their icon couldn't be set",
+        fix: "Pick one again from their profile.",
+      });
     }
     // The dialog's write is only half of its flow. It collects a name, a face
     // and a post, so the description and the persona are still to be written —
@@ -430,6 +466,8 @@ export function TeamView({
         client={client}
         company={company}
         agentId={sub}
+        agentNames={currentAgentNames}
+        onAgentNameChange={onAgentNameChange}
         onBack={() => onOpenAgent(null)}
       />
     );
@@ -567,6 +605,11 @@ export function TeamView({
                   // record behind it would 404 on its id, and the detail view
                   // would report a teammate that was never removed.
                   onOpen={hostBackedCard(m, fromHost, consoleOnly) ? () => onOpenAgent(m.id) : undefined}
+                  // The same gate again: only a row the host holds has a
+                  // binding to report. A console-only placeholder runs on
+                  // nothing yet, and "Company default" over it would describe a
+                  // teammate that does not exist.
+                  hostBacked={hostBackedCard(m, fromHost, consoleOnly)}
                   // The same gate, because it is the same question: a row no
                   // host holds has no DM either, and the room would answer with
                   // its unknown-channel fallback rather than a conversation.
@@ -705,6 +748,7 @@ function MemberCard({
   messageHref,
   workload,
   onNavigateToDesk,
+  hostBacked,
 }: {
   member: TeamMember;
   onRemove: () => void;
@@ -726,6 +770,11 @@ function MemberCard({
    * does not offer desk navigation; the chips then render as plain text.
    */
   onNavigateToDesk?: (deskId: string) => void;
+  /**
+   * Whether the host holds this row, and so whether it has a harness and model
+   * binding to report at all.
+   */
+  hostBacked?: boolean;
 }) {
   // Issue #1208: the role only earns its line when it is not the name again.
   // Every manifest-declared agent in the shipped companies resolves both to one
@@ -735,6 +784,7 @@ function MemberCard({
   return (
     <Card
       data-testid="team-card"
+      data-avatar-hover-scope
       className={cn(
         "relative transition-colors",
         onOpen && "cursor-pointer hover:border-primary/40 hover:shadow-sm",
@@ -751,7 +801,18 @@ function MemberCard({
             44px, comfortably above the ~24px floor under which a mascot is a
             smudge and the bare tone tile is the honest fallback.
           */}
-          <TeammateAvatar name={member.name} tone={member.tone} avatar={member.avatar} className="size-11 rounded-xl text-sm" />
+          <AgentFace agentId={member.id} size="md" surface="card" name={member.name}>
+            <TeammateAvatar
+              name={member.name}
+              tone={member.tone}
+              avatar={member.avatar}
+              mascotCostume={member.mascotCostume}
+              mascotSkinColor={member.mascotSkinColor}
+              mascotHandColor={member.mascotHandColor}
+              mascotMode={member.mascotMode}
+              className="size-11 rounded-xl text-sm"
+            />
+          </AgentFace>
           {onOpen ? (
             <button
               type="button"
@@ -956,6 +1017,7 @@ function MemberCard({
           shapes of card disagree again.
         */}
         <div className="mt-auto space-y-1.5 empty:hidden">
+          {hostBacked && <ModelLine member={member} />}
           {workload && <WorkloadLine workload={workload} />}
           {member.budgetUsdDaily !== undefined && (
             <DailyBudgetLine
@@ -982,6 +1044,41 @@ function MemberCard({
         */}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Which model this teammate runs on, and the harness it runs it through.
+ *
+ * Read-only here like the desk chips and the budget line: the picker lives on
+ * the teammate's own page. The label comes from {@link modelSummary}, which
+ * never names a model the roster read did not send — an unpinned teammate
+ * inherits, and saying so is the honest answer a resolved-looking name would
+ * not be.
+ *
+ * The harness rides along as a chip rather than another `·` segment: it is a
+ * different kind of fact from the model, it is what tells an operator a
+ * teammate runs through their own CLI rather than the built-in harness, and a
+ * chip keeps its width off the model text, which is what truncates.
+ */
+function ModelLine({ member }: { member: TeamMember }) {
+  const summary = modelSummary(member);
+  return (
+    <p className="flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="team-card-model">
+      <Cpu className="size-3 shrink-0" aria-hidden />
+      <span
+        className={cn("min-w-0 truncate", summary.inherited && "italic")}
+        title={summary.label}
+        data-testid="team-card-model-label"
+      >
+        {summary.label}
+      </span>
+      {summary.harness && (
+        <Badge variant="outline" className="text-3xs" data-testid="team-card-harness">
+          {summary.harness}
+        </Badge>
+      )}
+    </p>
   );
 }
 

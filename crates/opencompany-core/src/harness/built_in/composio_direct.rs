@@ -45,21 +45,20 @@
 //! execute discloses (and under `LocalOnly` refuses) the transfer before the
 //! round-trip, so choosing BYOK is not a way around the gate.
 
-use std::sync::Arc;
-
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
 
 use openhuman_core as oh;
 
-use oh::integrations::composio::client::{direct_execute, direct_list_connections};
 use oh::integrations::composio::types::{
-    ComposioAuthorizeResponse, ComposioConnectionsResponse, ComposioDeleteResponse,
-    ComposioExecuteResponse, ComposioToolFunction, ComposioToolSchema, ComposioToolkitCatalogEntry,
-    ComposioToolkitsResponse, ComposioToolsResponse,
+    ComposioAuthorizeRequest, ComposioAuthorizeResponse, ComposioConnectionsResponse,
+    ComposioDeleteResponse, ComposioExecuteRequest, ComposioExecuteResponse, ComposioToolFunction,
+    ComposioToolSchema, ComposioToolkitCatalogEntry, ComposioToolkitsResponse,
+    ComposioToolsResponse,
 };
 
+use super::composio_module::{self, Route};
 use crate::company::composio::{DIRECT_BASE_URL, DIRECT_ENTITY_ID};
 
 /// Composio's v3 API root, derived from the non-secret base the console reports
@@ -136,7 +135,6 @@ pub(crate) struct Paged<T> {
 /// credential, and this type exists on the request path.
 #[derive(Clone)]
 pub(crate) struct DirectComposio {
-    tool: Arc<oh::tools::ComposioTool>,
     api_key: String,
     /// The v3 root the two listings below are addressed to.
     ///
@@ -151,22 +149,11 @@ pub(crate) struct DirectComposio {
 impl DirectComposio {
     /// A client over this company's API key.
     ///
-    /// The vendored [`oh::tools::ComposioTool`] takes a [`SecurityPolicy`] for
-    /// its own `Tool::execute` gating; nothing here goes through that surface —
-    /// the harness's own approval policy and grant gate are what admit a
-    /// Composio call in this repo — so the default policy is what it is handed,
-    /// exactly as OpenHuman's own factory does.
-    ///
-    /// [`SecurityPolicy`]: oh::security::SecurityPolicy
+    /// Stores only the company's credential. The direct connector route owns
+    /// transport and response reshaping.
     pub(crate) fn new(api_key: &str) -> Self {
         let api_key = api_key.trim().to_string();
-        let tool = oh::tools::ComposioTool::new(
-            &api_key,
-            Some(DIRECT_ENTITY_ID),
-            Arc::new(oh::security::SecurityPolicy::default()),
-        );
         Self {
-            tool: Arc::new(tool),
             api_key,
             v3_base: v3_base(),
         }
@@ -186,30 +173,56 @@ impl DirectComposio {
     /// the invalid-key backoff gate — an `ak_` that Composio has revoked stops
     /// being re-presented on every poll.
     pub(crate) async fn list_connections(&self) -> Result<ComposioConnectionsResponse> {
-        direct_list_connections(&self.tool).await
+        let transport =
+            tinyconnectors::client::HttpTransport::api_key(&self.v3_base, self.api_key.clone())
+                .map_err(|error| anyhow::anyhow!(error))?;
+        let transport: std::sync::Arc<dyn tinyconnectors::client::Transport> =
+            std::sync::Arc::new(transport);
+        let route: std::sync::Arc<dyn tinyconnectors::client::Route> = std::sync::Arc::new(
+            tinyconnectors::client::DirectRoute::new(transport, &self.api_key, DIRECT_ENTITY_ID),
+        );
+        tinyconnectors::client::ComposioClient::new(route)
+            .list_connections()
+            .await
+            .map_err(|error| anyhow::anyhow!(error))
     }
 
     /// Begin an OAuth handoff and return Composio's hosted connect URL.
     ///
-    /// The v3 link response carries no stable connection id — the row is
-    /// created when the operator finishes OAuth on Composio's page — so the id
-    /// is reported empty and the console's existing connection poll is what
-    /// surfaces the result. Same answer OpenHuman's `direct_authorize` gives;
-    /// it is `pub(super)` upstream, so the four lines are re-stated rather than
-    /// called.
+    /// Through the module, which owns the whole handoff since v0.64.10: the
+    /// auth-config lookup that turns a toolkit slug into an `auth_config_id`,
+    /// the `/connected_accounts/link` call, the Meta pre-clean, and the 429
+    /// backoff with the guidance message that replaces an unhelpful rate-limit
+    /// error. The client method this used to call (`get_connection_url`) went
+    /// with `tools/direct/connections.rs`'s removal.
+    ///
+    /// The response's connection id may be empty, and that is not a failure: the
+    /// v3 link response carries no stable id — the row is created when the
+    /// operator finishes OAuth on Composio's page — so the console's existing
+    /// connection poll is what surfaces the result.
     pub(crate) async fn authorize(&self, toolkit: &str) -> Result<ComposioAuthorizeResponse> {
         let toolkit = toolkit.trim();
         if toolkit.is_empty() {
             anyhow::bail!("composio authorize: toolkit must not be empty");
         }
-        let connect_url = self
-            .tool
-            .get_connection_url(Some(toolkit), None, DIRECT_ENTITY_ID)
-            .await?;
-        Ok(ComposioAuthorizeResponse {
-            connect_url,
-            connection_id: String::new(),
-        })
+        composio_module::call(
+            &self.route(),
+            oh::modules::connectors::methods::AUTHORIZE,
+            ComposioAuthorizeRequest {
+                toolkit: toolkit.to_string(),
+                extra_params: None,
+            },
+        )
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"))
+    }
+
+    /// This company's own Composio account, as the module's route.
+    fn route(&self) -> Route {
+        Route::Direct {
+            api_key: self.api_key.clone(),
+            entity_id: DIRECT_ENTITY_ID.to_string(),
+        }
     }
 
     /// Run one Composio action as this company's own account.
@@ -230,7 +243,24 @@ impl DirectComposio {
         enforce_egress(&egress)?;
         emit_external_transfer(egress);
 
-        direct_execute(&self.tool, tool, arguments, DIRECT_ENTITY_ID, connection_id).await
+        // Both of those stay here on purpose. The module's own documentation is
+        // explicit that egress policy did not move with the transport — "Apply
+        // it before calling `methods::EXECUTE`" — because it cannot see the
+        // reasons behind a local-only refusal.
+        composio_module::call(
+            &self.route(),
+            oh::modules::connectors::methods::EXECUTE,
+            ComposioExecuteRequest {
+                tool: tool.to_string(),
+                arguments,
+                connection_id: connection_id
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_string),
+            },
+        )
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"))
     }
 
     /// Composio v3 `GET /tools`, in the managed route's [`ComposioToolsResponse`]

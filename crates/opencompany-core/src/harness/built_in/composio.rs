@@ -584,14 +584,14 @@ mod live {
     use crate::ports::UsageMeter;
     use crate::ports::now_millis;
 
+    use crate::harness::built_in::composio_module::ManagedComposio;
     use oh::integrations::IntegrationClient;
-    use oh::integrations::composio::ComposioClient;
     use oh::integrations::composio::types::{
         ComposioAuthorizeResponse, ComposioConnectionsResponse, ComposioDeleteResponse,
         ComposioExecuteResponse, ComposioToolkitsResponse, ComposioToolsResponse,
     };
-    use oh::tools::traits::{PermissionLevel, Tool, ToolResult};
     use openhuman_core as oh;
+    use tinytools::{PermissionLevel, Tool, ToolResult};
 
     use crate::harness::built_in::composio_direct::DirectComposio;
 
@@ -615,7 +615,7 @@ mod live {
     /// Build the five per-tenant Composio tools over the tenant's credential.
     ///
     /// Each tool holds the shared [`TenantComposio`] and the toolkit allowlist,
-    /// and builds its [`ComposioClient`] **when it runs** via [`live_call`] — the
+    /// and builds its [`ManagedComposio`] **when it runs** via [`live_call`] — the
     /// bearer is resolved then, not now, so a platform token that rotated since
     /// the roster was built still authenticates. The read tools are `ReadOnly`;
     /// the `authorize` / `execute` tools are `Execute` and additionally park for
@@ -681,8 +681,9 @@ mod live {
             .map_err(|e| anyhow::anyhow!("resolving this company's Composio credential: {e}"))?
             .ok_or_else(|| anyhow::anyhow!("no Composio credential is configured"))?;
         let mut secrets = vec![secret.clone()];
+        crate::harness::backend_transport::ensure_installed();
         let client = match config.mode() {
-            ComposioMode::Managed => LiveClient::Managed(ComposioClient::new(Arc::new(
+            ComposioMode::Managed => LiveClient::Managed(ManagedComposio::new(Arc::new(
                 IntegrationClient::new(config.backend_url.clone(), secret.clone()),
             ))),
             ComposioMode::Byok => {
@@ -694,7 +695,7 @@ mod live {
                 let catalog = match config.catalog_token().await {
                     Ok(Some(token)) => {
                         secrets.push(token.clone());
-                        Some(ComposioClient::new(Arc::new(IntegrationClient::new(
+                        Some(ManagedComposio::new(Arc::new(IntegrationClient::new(
                             config.backend_url.clone(),
                             token,
                         ))))
@@ -730,7 +731,7 @@ mod live {
     /// only place that has to state what BYOK cannot do.
     enum LiveClient {
         /// Proxied through the OpenHuman backend — the default route.
-        Managed(ComposioClient),
+        Managed(ManagedComposio),
         /// Straight to the company's own Composio account.
         Byok {
             /// The company's own Composio account — every call but the toolkit
@@ -739,7 +740,7 @@ mod live {
             /// OpenHuman's curated toolkit list, when a managed tier resolved to
             /// fetch it with. `None` on a host with no TinyHumans identity at
             /// all, where the company's own directory is the only list there is.
-            catalog: Option<ComposioClient>,
+            catalog: Option<ManagedComposio>,
         },
     }
 
@@ -894,7 +895,7 @@ mod live {
 
     /// Identical normalized actions from one company agent share a backend key.
     async fn execute_managed(
-        client: &ComposioClient,
+        client: &ManagedComposio,
         tool: &str,
         arguments: Option<Value>,
         connection_id: Option<&str>,
@@ -906,9 +907,8 @@ mod live {
         enforce_egress(&egress)?;
         emit_external_transfer(egress);
 
-        let arguments =
-            oh::integrations::composio::execute_prepare::prepare_execute_arguments(tool, arguments)
-                .map_err(anyhow::Error::msg)?;
+        let arguments = tinyconnectors::execute::prepare_execute_arguments(tool, arguments)
+            .map_err(anyhow::Error::msg)?;
         let mut body = json!({
             "tool": tool,
             "arguments": arguments,
@@ -934,8 +934,7 @@ mod live {
         if !resp.successful
             && let Some(ref err) = resp.error
         {
-            resp.error =
-                Some(oh::integrations::composio::error_mapping::format_provider_error(tool, err));
+            resp.error = Some(tinyconnectors::execute::format_provider_error(tool, err));
         }
         Ok(resp)
     }
@@ -968,7 +967,7 @@ mod live {
                     .http1_only()
                     .timeout(std::time::Duration::from_secs(60))
                     .connect_timeout(std::time::Duration::from_secs(15))
-                    .default_headers(openhuman_core::api::product::product_identity_headers())
+                    .default_headers(openhuman_tinyhumans::backend::product_identity_headers())
                     .build()
                     .map_err(|error| format!("{error}"))
             })
@@ -985,7 +984,7 @@ mod live {
         use openhuman_core::core::observability::report_error_or_expected;
 
         const PATH: &str = "/agent-integrations/composio/execute";
-        let url = openhuman_core::api::config::api_url(&client.backend_url, PATH);
+        let url = openhuman_core::util::url::join_url(&client.backend_url, PATH);
         let response = http
             .post(&url)
             .bearer_auth(&client.auth_token)
@@ -1022,7 +1021,7 @@ mod live {
                 openhuman_core::core::bus::BUS.publish(
                     openhuman_core::core::events::DomainEvent::SessionExpired {
                         source: format!("integrations.POST:{PATH}"),
-                        reason: oh::inference::provider::ops::sanitize_api_error(&message),
+                        reason: tinyinference_core::sanitize::sanitize_api_error(&message),
                     },
                 );
                 message

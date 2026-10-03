@@ -20,7 +20,8 @@
 //!
 //! ## What is lost, said plainly
 //!
-//! `stream_event_from` returns `None` for `TextDelta`, so **there is no
+//! `stream_event_from` carries no text for `TextDelta` (its only frame is the
+//! text-free `replying` marker, which this mapping drops), so **there is no
 //! incremental assistant text on this host**. An ACP client receives one
 //! `agent_message_chunk` at the end of the turn, from the durable `AgentReply`.
 //! Clients that render token-by-token will look like they have stalled and then
@@ -90,6 +91,9 @@ pub fn from_turn_stream(event: &TurnStreamEvent) -> Option<SessionUpdate> {
         // Emitting an empty `agent_thought_chunk` would have a client render a
         // blank bubble on every turn, so it is dropped instead.
         "thinking" => None,
+        // `replying` says "this agent started writing its reply" and carries no
+        // text, so there is nothing an ACP client could render from it.
+        "replying" => None,
         _ => None,
     }
 }
@@ -132,7 +136,7 @@ pub fn from_company_event(event: &CompanyEvent, chat: &str) -> Option<SessionUpd
         // desk is bound to.
         CompanyEvent::OperatorMessage { chat: c, text, .. }
             if c.as_deref()
-                .unwrap_or(crate::server::ops::language::DEFAULT_DESK)
+                .unwrap_or(crate::server::ops::language::GENERAL_CHANNEL_ID)
                 == chat =>
         {
             Some(json!({

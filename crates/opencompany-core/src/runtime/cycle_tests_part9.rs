@@ -202,6 +202,7 @@ fn cycle_thread_id_reads_an_addressed_message_inherits_a_resolution_and_refuses_
             steps: Vec::new(),
             task_id: None,
             outputs: Vec::new(),
+            episode: None,
         },
         // Issue #327: appended by the workspace store after the write it
         // describes. An agent that answers a message and touches the tree
@@ -621,4 +622,83 @@ async fn spawn_task_arm_opens_a_board_card() {
         .unwrap();
     assert!(!bad.ok);
     assert_eq!(rt.tasks().list(rt.id()).await.unwrap().len(), 1);
+}
+
+/// A hosted card remembers the conversation that asked for it.
+///
+/// Both hosted tool arms used to stamp `TaskOrigin::new(None, None)`, justified
+/// as "this tool surface never recorded the channel". `run_task` returns early
+/// when `origin_chat_id()` is absent, so a hosted company's cards could never
+/// report their completion anywhere, while the identical card opened on the
+/// harness path could. The cycle had the channel and the thread root in scope
+/// the whole time.
+#[tokio::test]
+async fn a_hosted_spawn_remembers_the_conversation_that_asked() {
+    let home_dir = tmp_home();
+    let home = home_dir.path().to_path_buf();
+    let rt = RuntimeBuilder::new(home.clone(), manifest("full"))
+        .build()
+        .await
+        .unwrap();
+    let host = CycleHostImpl::new(
+        rt.id().clone(),
+        "cyc".into(),
+        &rt,
+        None,
+        false,
+        ApprovalConversation {
+            thread: Some("eng".to_string()),
+            parent: Some(crate::ports::types::EventSeq::new(7)),
+        },
+    );
+
+    let res = host
+        .spawn_task(serde_json::json!({ "title": "Ship it" }))
+        .await
+        .unwrap();
+    assert!(res.ok);
+
+    let cards = rt.tasks().list(rt.id()).await.unwrap();
+    assert_eq!(cards.len(), 1);
+    assert_eq!(
+        cards[0].origin_chat_id(),
+        Some("eng"),
+        "the card must carry the channel it was asked for in, or it can never report back"
+    );
+    assert_eq!(
+        cards[0].origin.as_ref().and_then(|o| o.origin_parent),
+        Some(crate::ports::types::EventSeq::new(7)),
+        "and the thread inside it, so a threaded ask is answered in its thread"
+    );
+}
+
+/// A cycle with no conversation behind it still opens an ordinary board card.
+///
+/// `TaskOrigin::new` maps an absent channel to an absent origin, so a scheduler
+/// tick or a dispatch keeps the pre-existing behaviour: a card with nowhere to
+/// report back to, exactly like one raised straight on the board.
+#[tokio::test]
+async fn a_hosted_spawn_with_no_conversation_opens_an_unlinked_card() {
+    let home_dir = tmp_home();
+    let home = home_dir.path().to_path_buf();
+    let rt = RuntimeBuilder::new(home.clone(), manifest("full"))
+        .build()
+        .await
+        .unwrap();
+    let host = CycleHostImpl::new(
+        rt.id().clone(),
+        "cyc".into(),
+        &rt,
+        None,
+        false,
+        ApprovalConversation::default(),
+    );
+
+    host.spawn_task(serde_json::json!({ "title": "Ship it" }))
+        .await
+        .unwrap();
+
+    let cards = rt.tasks().list(rt.id()).await.unwrap();
+    assert_eq!(cards.len(), 1);
+    assert!(cards[0].origin.is_none());
 }

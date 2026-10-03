@@ -79,16 +79,28 @@ test("at xl the run history is a left rail, and the canvas keeps its width", asy
   const rail = (await panel.boundingBox())!;
   const graph = (await flow.boundingBox())!;
 
-  // Left of the canvas, not under it.
-  expect(rail.x + rail.width, "the rail must sit left of the canvas").toBeLessThanOrEqual(
-    graph.x + 1,
+  // Over the canvas's left edge, not beside it: the rail floats, so it sits
+  // inside the canvas box and costs it no width. (It used to be in-flow; with
+  // the app sidebar and Company's section rail already beside the canvas, a
+  // 320px in-flow rail left it under the 640px floor below.)
+  expect(rail.x, "the rail floats over the canvas's left edge").toBeGreaterThanOrEqual(graph.x);
+  expect(rail.x + rail.width, "the rail stays inside the canvas").toBeLessThanOrEqual(
+    graph.x + graph.width,
   );
+  await page.getByTestId("workflow-history-toggle").click();
+  await expect(panel).toBeHidden();
+  const without = (await flow.boundingBox())!;
+  expect(graph.width, "opening the rail takes no width from the canvas").toBeCloseTo(
+    without.width,
+    0,
+  );
+  await page.getByTestId("workflow-history-toggle").click();
+  await expect(panel).toBeVisible();
   // Full height of the canvas region, which is what lets it show more than two
-  // runs. Compared with a tolerance because they are siblings in a flex row,
-  // not the same box.
+  // runs. Compared with a tolerance: the overlay is inset 12px top and bottom.
   expect(
-    Math.abs(rail.height - graph.height),
-    "the rail runs the full height of the canvas region",
+    Math.abs(graph.height - rail.height - 24),
+    "the rail runs the canvas's full height, less its 12px inset top and bottom",
   ).toBeLessThan(4);
   // A rail that costs the canvas more than it is worth is the failure mode this
   // whole change has to avoid. 640px is a floor, not a target: the graph must

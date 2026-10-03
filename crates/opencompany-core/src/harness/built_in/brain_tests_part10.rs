@@ -141,6 +141,17 @@ async fn a_later_answering_hand_off_takes_the_card_over_from_an_earlier_empty_on
     );
     dispatch_card(&brain, &provider.tasks.clone(), "t-two-handoffs").await;
 
+    {
+        let requests = provider.requests.lock().unwrap();
+        let first_request = requests.first().expect("the card reaches the model");
+        let instruction = first_request.join("\n");
+        assert!(
+            instruction.contains("Board-task coordination:")
+                && instruction.contains("Only one hand-off can run."),
+            "the dispatched card's prompt explains its one-handoff limit: {instruction}"
+        );
+    }
+
     let after = only_card(&provider.tasks).await;
     // The card settles from the ONE hand-off that owns it — cancelled here,
     // so To-do. A second hand-off in the same turn never ran.
@@ -515,6 +526,7 @@ agent = "claude"
     )
     .expect("valid manifest");
     let record = CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
@@ -606,6 +618,7 @@ fn a_copilot_turn_is_authored_by_the_copilot_not_the_operator_channel() {
         abnormal_stop: None,
         halted_for_spend: None,
         budget_paused: None,
+        ceiling_paused: None,
     });
     assert_eq!(bubble.channel, "operator", "the destination is unchanged");
     assert_eq!(

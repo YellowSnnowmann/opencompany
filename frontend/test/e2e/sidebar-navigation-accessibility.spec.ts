@@ -41,21 +41,22 @@ test("the skip link reaches main content and the sidebar is the primary navigati
 
   const navigation = page.getByRole("navigation", { name: "Main navigation", exact: true });
   await expect(navigation).toBeVisible();
-  // Four sections, and the four are the whole list. Asserted by count as well
-  // as by name: a fifth row creeping back in is the thing this restructure
-  // exists to stop, and four `toBeVisible` calls would not notice it.
-  for (const name of ["Room", "Company", "Connections", "Automations"]) {
+  // Two sections, and the two are the whole list: Room is the conversation list
+  // above them and Automations is a row on Company's rail. Asserted by count as
+  // well as by name below, so a row creeping back in is noticed.
+  for (const name of ["Company", "Connections"]) {
     await expect(navigation.getByRole("button", { name, exact: true })).toBeVisible();
   }
-  // Scoped to the FIRST group — the fixed four. The group after it holds the
-  // active section's contents, which is a different question and a different
-  // count. Asserted by count as well as by name: a fifth row creeping back in
-  // is the thing this restructure exists to stop, and four `toBeVisible` calls
-  // would not notice it.
+  // Scoped to the LAST group — the fixed two at the foot. The group before it is
+  // the conversation list, which is a different question and a different count.
   await expect(
-    page.locator("[data-slot=sidebar-content] [data-sidebar=group]").first()
+    page.locator("[data-slot=sidebar-content] [data-sidebar=group]").last()
       .locator("[data-sidebar=menu-button]"),
-  ).toHaveCount(4);
+  ).toHaveCount(2);
+  // And Room / Automations are not rows any more.
+  for (const name of ["Room", "Automations"]) {
+    await expect(navigation.getByRole("button", { name, exact: true })).toHaveCount(0);
+  }
   // Overview is not among them: it is chrome in the window's title row now,
   // not a destination in a list of destinations. Observatory never had a row
   // here — it is filed under Settings (`settings-pages.ts`). Approvals followed
@@ -81,7 +82,7 @@ test("the skip link reaches main content and the sidebar is the primary navigati
   // places inside this company, and none of the console's own chrome belongs
   // in it.
   const destinations = page.locator("[data-slot=sidebar-content]");
-  await expect(destinations.getByRole("button", { name: "Room", exact: true })).toBeVisible();
+  await expect(destinations.getByRole("button", { name: "Company", exact: true })).toBeVisible();
   await expect(destinations.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
   await expect(page.locator("[data-slot=sidebar-footer]")).toHaveCount(0);
 
@@ -119,38 +120,48 @@ test("the skip link reaches main content and the sidebar is the primary navigati
  *
  * `toBeInViewport` is not enough on its own either — a control one pixel inside
  * counts — so each box is compared against the viewport's right edge.
+ *
+ * And at **390px**, a phone. Widening the sidebar to 15rem pushed the profile
+ * group to 487px at 480 and Settings to 412px at 390, because the switcher is
+ * sized to the sidebar column. Below `md` there is no column (the sidebar is a
+ * sheet), so the switcher takes a fixed 8rem there; the desktop column is
+ * asserted at 240px so that fix cannot quietly give the width back.
  */
-test("the title row's trailing controls stay inside a 480px viewport", async ({ page }) => {
-  const width = 480;
-  await page.setViewportSize({ width, height: 800 });
-  await page.goto("/#/company");
+for (const width of [480, 390]) {
+  test(`the title row's trailing controls stay inside a ${width}px viewport`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto("/#/company");
 
-  const bell = page.getByTestId("title-bar-notifications");
-  await bell.waitFor();
+    const bell = page.getByTestId("title-bar-notifications");
+    await bell.waitFor();
 
-  // Discord is deliberately absent at this width and is not in this list. Every
-  // control that remains is console function rather than an outbound link, and
-  // each one has to be wholly on screen.
-  for (const id of [
-    "title-bar-notifications",
-    "title-bar-overview",
-    "title-bar-settings",
-    "title-bar-group-you",
-  ]) {
-    const box = await page.getByTestId(id).first().boundingBox();
-    expect(box, `${id} should have a box`).not.toBeNull();
-    expect(box!.x, `${id} starts inside the viewport`).toBeGreaterThanOrEqual(0);
-    expect(
-      Math.round(box!.x + box!.width),
-      `${id} ends inside the viewport, not under the shell's overflow-hidden`,
-    ).toBeLessThanOrEqual(width);
-  }
+    // Discord is deliberately absent at this width and is not in this list. Every
+    // control that remains is console function rather than an outbound link, and
+    // each one has to be wholly on screen.
+    for (const id of [
+      "title-bar-notifications",
+      "title-bar-overview",
+      "title-bar-settings",
+      "title-bar-group-you",
+    ]) {
+      const box = await page.getByTestId(id).first().boundingBox();
+      expect(box, `${id} should have a box`).not.toBeNull();
+      expect(box!.x, `${id} starts inside the viewport`).toBeGreaterThanOrEqual(0);
+      expect(
+        Math.round(box!.x + box!.width),
+        `${id} ends inside the viewport, not under the shell's overflow-hidden`,
+      ).toBeLessThanOrEqual(width);
+    }
 
-  // And the page does not solve it by growing a horizontal scrollbar instead.
-  const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
-  expect(scrollWidth, "the shell does not scroll horizontally").toBeLessThanOrEqual(width);
+    // And the page does not solve it by growing a horizontal scrollbar instead.
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(scrollWidth, "the shell does not scroll horizontally").toBeLessThanOrEqual(width);
 
-  // The glyph that yields the width is still there once there is width for it.
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await expect(page.getByTestId("title-bar-discord")).toBeVisible();
-});
+    // The glyph that yields the width is still there once there is width for it,
+    // and the desktop column is still the 15rem (240px) the DM rows are sized for.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(page.getByTestId("title-bar-discord")).toBeVisible();
+    const column = await page.locator('[data-slot="sidebar-container"]').boundingBox();
+    expect(Math.round(column!.width), "the desktop sidebar column").toBe(240);
+  });
+}

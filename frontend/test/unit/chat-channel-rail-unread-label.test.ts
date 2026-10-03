@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, Fragment, useState } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -122,177 +122,27 @@ describe("collapsed ChannelRail unread labels", () => {
   });
 });
 
-describe("section folds survive a rail collapse/expand (P2 review)", () => {
-  const sectionToggle = () =>
-    container.querySelector<HTMLButtonElement>('section button[aria-expanded]');
-
-  it("does not reopen a folded section when the rail is collapsed and expanded again", () => {
-    act(() =>
-      root.render(
-        createElement(ChannelRail, {
-          sections: SECTIONS,
-          activeId: null,
-          unread: {},
-          onSelect: () => {},
-        }),
-      ),
-    );
-
-    expect(sectionToggle()?.getAttribute("aria-expanded")).toBe("true");
-    act(() => {
-      sectionToggle()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(sectionToggle()?.getAttribute("aria-expanded")).toBe("false");
-
-    // Collapsing unmounts every `Section`; expanding must recreate them still
-    // folded rather than resetting the operator's organization.
-    act(() =>
-      root.render(
-        createElement(ChannelRail, {
-          sections: SECTIONS,
-          activeId: null,
-          unread: {},
-          onSelect: () => {},
-          collapsed: true,
-        }),
-      ),
-    );
-    act(() =>
-      root.render(
-        createElement(ChannelRail, {
-          sections: SECTIONS,
-          activeId: null,
-          unread: {},
-          onSelect: () => {},
-          collapsed: false,
-        }),
-      ),
-    );
-
-    expect(sectionToggle()?.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  it("shares one fold set across the desktop and sub-lg rail instances", () => {
-    // `RoomView` renders two `ChannelRail`s (sub-`lg` and desktop) and hands
-    // both the same controlled disclosure state so crossing the breakpoint
-    // keeps the operator's folds (codex P2 review). This harness mirrors that
-    // wiring; folding on one rail must fold the same section on the other.
-    const SharedRails = () => {
-      const [folds, setFolds] = useState<Record<string, boolean>>({});
-      const toggle = (id: string) =>
-        setFolds((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
-      return createElement(
-        Fragment,
-        null,
-        createElement(ChannelRail, {
-          sections: SECTIONS,
-          activeId: null,
-          unread: {},
-          onSelect: () => {},
-          openSections: folds,
-          onToggleSection: toggle,
-        }),
-        createElement(ChannelRail, {
-          sections: SECTIONS,
-          activeId: null,
-          unread: {},
-          onSelect: () => {},
-          openSections: folds,
-          onToggleSection: toggle,
-        }),
-      );
-    };
-
-    act(() => root.render(createElement(SharedRails)));
-    const toggles = () =>
-      [...container.querySelectorAll<HTMLButtonElement>("section button[aria-expanded]")];
-    expect(toggles()).toHaveLength(2);
-    expect(toggles()[0].getAttribute("aria-expanded")).toBe("true");
-    expect(toggles()[1].getAttribute("aria-expanded")).toBe("true");
-
-    act(() => {
-      toggles()[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(toggles()[0].getAttribute("aria-expanded")).toBe("false");
-    expect(toggles()[1].getAttribute("aria-expanded")).toBe("false");
-  });
-});
-
-/**
- * The pinned Operator row shows unread the same as any other channel
- * (PR #1781 review, Codex P2).
- *
- * A workflow report can land in the Operator feed while another channel is
- * open, same as any other channel — the collapsed rail's `CompactChannelRow`
- * already surfaced that (it flat-maps every section, this one included), but
- * `PinnedOperatorRow` in the expanded rail never received the `unread` map at
- * all, so folding the rail changed whether the pinned row could tell you
- * something was waiting.
- */
-const OPERATOR_SECTIONS: ChannelSection[] = [
-  {
-    id: "operator",
-    label: "Operator",
-    channels: [
-      {
-        id: "operator",
-        name: "Operator",
-        kind: "channel",
-        purpose: "Automation reports.",
-        system: true,
-      },
-    ],
-  },
-];
-
-describe("expanded ChannelRail pinned Operator row unread", () => {
-  const pinnedRow = () =>
-    container.querySelector<HTMLButtonElement>('aside button[aria-current], aside button');
-
-  it("shows the unread count on the pinned row when a report lands unseen", () => {
-    act(() =>
-      root.render(
-        createElement(ChannelRail, {
-          sections: OPERATOR_SECTIONS,
-          activeId: null,
-          unread: { operator: 2 },
-          onSelect: () => {},
-        }),
-      ),
-    );
-
-    const badge = container.querySelector('[data-testid="channel-unread"]');
-    expect(badge?.textContent).toBe("2");
-  });
-
-  it("renders no badge when the Operator feed has nothing unread", () => {
-    act(() =>
-      root.render(
-        createElement(ChannelRail, {
-          sections: OPERATOR_SECTIONS,
-          activeId: null,
-          unread: {},
-          onSelect: () => {},
-        }),
-      ),
-    );
-
-    expect(container.querySelector('[data-testid="channel-unread"]')).toBeNull();
-  });
-
-  it("suppresses the badge while the Operator feed is the active channel", () => {
-    act(() =>
-      root.render(
-        createElement(ChannelRail, {
-          sections: OPERATOR_SECTIONS,
-          activeId: "operator",
-          unread: { operator: 5 },
-          onSelect: () => {},
-        }),
-      ),
-    );
-
-    expect(container.querySelector('[data-testid="channel-unread"]')).toBeNull();
-    expect(pinnedRow()?.getAttribute("aria-current")).toBe("page");
+describe("the rail has no section folds", () => {
+  // Channels and Direct messages were collapsible sections; they are one flat
+  // list now, headed by a caption that is not a control. Nothing in it can be
+  // folded, so there is no fold state to survive a collapse and expand, and no
+  // `aria-expanded` toggle left among the list's own buttons.
+  it("renders no fold toggle, expanded or after a collapse and expand", () => {
+    const rail = (collapsed: boolean) =>
+      createElement(ChannelRail, {
+        sections: SECTIONS,
+        activeId: null,
+        unread: {},
+        onSelect: () => {},
+        collapsed,
+      });
+    act(() => root.render(rail(false)));
+    expect(container.querySelectorAll("section button[aria-expanded]")).toHaveLength(0);
+    act(() => root.render(rail(true)));
+    act(() => root.render(rail(false)));
+    expect(container.querySelectorAll("section button[aria-expanded]")).toHaveLength(0);
+    // Both rows are still listed.
+    expect(container.textContent).toContain("Front desk");
+    expect(container.textContent).toContain("Ops");
   });
 });

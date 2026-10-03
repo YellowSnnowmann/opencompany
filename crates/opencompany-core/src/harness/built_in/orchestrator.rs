@@ -76,9 +76,7 @@ use async_trait::async_trait;
 use futures::future::FutureExt;
 use serde_json::{Value, json};
 
-use openhuman_core as oh;
-
-use oh::tools::traits::{PermissionLevel, Tool, ToolResult};
+use tinytools::{PermissionLevel, Tool, ToolResult, ToolTimeout};
 
 use crate::company::{
     Agent as ManifestAgent, RawEdge, RawNode, RawWorkflow, WorkflowDestinationDef, WorkflowFile,
@@ -98,9 +96,13 @@ use crate::ports::tasks::{
     TaskStore, column_label, is_board_column,
 };
 use crate::ports::types::{
-    CompanyEvent, CompanyId, EventSeq, OnboardingStep, OverlayAgent, WorkflowNodeStatus,
+    CompanyEvent, CompanyId, EventSeq, OnboardingStep, OverlayAgent, SkillChange,
+    WorkflowNodeStatus,
 };
 use crate::ports::{CompanyStore, WorkflowRun, WorkflowRunner};
+
+mod insight_reads;
+mod run_output_items;
 
 /// The manifest cognition-tier that marks the orchestrator agent.
 ///
@@ -160,10 +162,16 @@ pub const QUERY_COMPANY_TOOL: &str = "query_company";
 // path share one definition and cannot drift.
 use crate::runtime::assignee;
 use crate::runtime::builder::agent_effective_grants;
+use crate::runtime::delegation::hand_off_target_of;
 use crate::runtime::delegation_tools;
-pub use crate::runtime::delegation_tools::{
+use crate::runtime::delegation_tools::{
     DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL, SPAWN_TASK_TOOL,
 };
+
+/// The exact failure-only promise returned when a seated teammate queues a card.
+/// Shared with the seat brief contract test so the brief cannot drift from what
+/// the tool actually tells the model.
+pub(crate) const SPAWN_TASK_FAILURE_ONLY_RECEIPT: &str = "you will be told here if it cannot be";
 /// The `run_workflow` tool name (issue #67).
 pub const RUN_WORKFLOW_TOOL: &str = "run_workflow";
 /// The `read_run_output` tool name (issue #418 — the `run_workflow` companion
@@ -302,12 +310,12 @@ MOST MESSAGES ARE QUESTIONS OR QUICK READS. Answer them from whole-company conte
 nothing else. A question about state — what is on the board, what workflows exist, who is on the \
 team, what happened — is NEVER a card. Use `query_company`: it is the source of truth for the \
 company's durable facts, recent activity, saved workflows, team roster and desks, so consult it \
-before answering rather than guessing, then answer directly and concisely. A board write is the \
+before answering rather than guessing, then answer directly. A board write is the \
 exception and needs a reason. \
 When there IS work, two decisions come up and they are INDEPENDENT — do not collapse them into \
 one. (1) WHO SHOULD DO THIS: when a request belongs to a specialist desk, hand it to that desk \
-with `delegate_to_desk`, naming a desk id from Your team above; when it names one PERSON, hand it \
-to them with `delegate_to_teammate`, naming a roster id from Your team — a desk is not a person, \
+with `delegate_to_desk`; when it names one PERSON, hand it to them with `delegate_to_teammate`; \
+either way pass the id listed beside the name under Your team — a desk is not a person, \
 so pick the tool that matches the target; when it is yours to answer, answer it. Your teammates \
 are one call away: never say you cannot reach one. (2) SHOULD THIS BE TRACKED: you do not have to decide this, and you must not pick a \
 tool in order to influence it. Anything substantial handed to a desk or a teammate is opened as a board card \
@@ -323,9 +331,9 @@ a trigger plus agent / tool / condition / output steps — and say it is ready; 
 immediately and runnable. `run_workflow` executes a saved workflow by id, including to advance a \
 task waiting on a run; you can run workflows yourself, so never claim that tool is unavailable. \
 `add_agent` brings on a new teammate when the company genuinely needs one. \
-You also own the board's lifecycle: `assign_task` sets who owns an existing card (ownership only — \
-moving it to In Progress is what starts the work), and `review_task` records `approve` or `revise` \
-on a card awaiting review."
+You also own the board's lifecycle: `assign_task` sets who owns an existing card (ownership only), \
+`start_task` moves a To-do card into Working, which is what begins the work, and `review_task` \
+records `approve` or `revise` on a card awaiting review."
         .to_string()
 }
 
@@ -374,17 +382,6 @@ pub enum Delegation {
         /// The instruction handed to that teammate.
         instruction: String,
     },
-    /// Deliver a committed chat message into one teammate's DM session and run
-    /// exactly one bounded reply turn. Unlike a work hand-off, this opens no
-    /// task card: conversation is not work merely because another agent speaks.
-    ConversationDispatch {
-        source: String,
-        target: String,
-        message: String,
-        chat_id: String,
-        trigger_sequence: u64,
-        child_hop: u32,
-    },
     /// Set (or change) who owns an existing board card (issue #186 part b).
     AssignTask {
         /// The card's id.
@@ -426,9 +423,7 @@ impl Delegation {
     pub fn answers(&self) -> bool {
         matches!(
             self,
-            Self::DelegateToDesk { .. }
-                | Self::DelegateToTeammate { .. }
-                | Self::ConversationDispatch { .. }
+            Self::DelegateToDesk { .. } | Self::DelegateToTeammate { .. }
         )
     }
 
@@ -484,10 +479,9 @@ pub enum DelegationScope {
     /// under the cycle lock, so one bucket is all they have ever needed and
     /// their behaviour is unchanged by this scoping.
     ///
-    /// Deliberately **not** an error, for the same reason
-    /// [`ApprovalScope::Unscoped`](crate::harness::policy::ApprovalScope)
-    /// is not: a claimant added later that forgets to name a scope degrades to
-    /// today's behaviour rather than to a silently dropped delegation.
+    /// Deliberately **not** an error: a claimant added later that forgets to
+    /// name a scope degrades to today's behaviour rather than to a silently
+    /// dropped delegation.
     #[default]
     Unscoped,
     /// One workflow run, keyed by its run id.
@@ -496,6 +490,15 @@ pub enum DelegationScope {
     /// several genuinely overlap, bounded only by the #401 in-flight cap. That
     /// is the concurrency this scoping exists for.
     Run(String),
+    /// One dispatched task card, keyed by its card id.
+    ///
+    /// Task turns can overlap hive seat turns. Keeping a task's one-handoff
+    /// rule in its own bucket prevents it from changing what those turns may
+    /// stage on the shared company queue.
+    Task(String),
+    /// One HiveMind seat turn, keyed by its episode-seat turn key
+    /// ([`turn_key`](crate::runtime::episode_resume::turn_key)).
+    Seat(String),
 }
 
 tokio::task_local! {
@@ -578,6 +581,8 @@ pub struct DelegationQueue {
     /// turn's [`drain_refusals`](Self::drain_refusals) would take it, record it
     /// on its own card, and clear it.
     refused: Arc<Mutex<BTreeMap<DelegationScope, Vec<String>>>>,
+    /// Targets refused because this dispatched task already queued its one hand-off.
+    task_handoff_refusals: Arc<Mutex<BTreeMap<DelegationScope, Vec<String>>>>,
     /// The **scope chain**: the resolved desk ids of the hand-offs currently
     /// being executed, outermost first (issue #176).
     ///
@@ -686,6 +691,15 @@ impl DelegationQueue {
         self.claim_as(Self::current_scope(), DrainClaim::Full)
     }
 
+    /// A dispatched card transfers ownership once; unlike chat it cannot collect replies.
+    #[must_use = "the claim releases on drop"]
+    pub fn claim_task(&self, task_id: impl Into<String>) -> DelegationClaim {
+        {
+            let _ = task_id.into();
+            self.claim_as(Self::current_scope(), DrainClaim::Task)
+        }
+    }
+
     /// Claims this queue for a turn whose operator message triaged as a
     /// question (issue #267).
     ///
@@ -712,9 +726,49 @@ impl DelegationQueue {
         self.claim_as(DelegationScope::Run(run_id.into()), DrainClaim::Board)
     }
 
+    /// Claims this queue for a turn whose operator message triaged as a
+    /// question (issue #267).
+    ///
+    /// Identical to [`claim`](Self::claim) in every way that matters to the
+    /// drain — it runs, and it runs the same code — but only delegations that
+    /// [`answer`](Delegation::answers) may be staged under it. The three pure
+    /// board writes are refused at the tool boundary in the model's own turn.
+    ///
+    /// This exists because withholding the claim outright was too blunt: it
+    /// took `delegate_to_desk` away too, and that tool is how a question the
+    /// orchestrator cannot answer alone gets routed to a desk that can.
     #[must_use = "the claim releases on drop; dropping it immediately un-claims the queue"]
     pub fn claim_answering(&self) -> DelegationClaim {
         self.claim_as(Self::current_scope(), DrainClaim::Answering)
+    }
+
+    /// Claims one HiveMind seat turn's bucket, keyed by its episode-seat turn
+    /// key.
+    ///
+    /// A seat may open cards and nothing else. When the operator's message
+    /// read as a question the claim answers instead, which refuses card
+    /// writes exactly as a pooled question turn does.
+    #[must_use = "the claim releases on drop; dropping it immediately un-claims the queue"]
+    pub fn claim_seat(&self, turn_key: impl Into<String>, answering: bool) -> DelegationClaim {
+        let state = if answering {
+            DrainClaim::Answering
+        } else {
+            DrainClaim::Seat
+        };
+        self.claim_as(DelegationScope::Seat(turn_key.into()), state)
+    }
+
+    /// Scopes a seat turn on a host with no board to write cards to.
+    ///
+    /// Nothing drains it, so every delegation refuses in the seat's own turn
+    /// as unwired; and because the scope is the seat's, none of them can land
+    /// in a pooled turn's bucket instead.
+    #[must_use = "the claim releases on drop; dropping it immediately un-claims the queue"]
+    pub fn claim_seat_unwired(&self, turn_key: impl Into<String>) -> DelegationClaim {
+        self.claim_as(
+            DelegationScope::Seat(turn_key.into()),
+            DrainClaim::Unclaimed,
+        )
     }
 
     /// The shared body of the claim constructors.
@@ -853,7 +907,8 @@ impl DelegationQueue {
     /// opposite of what the bound is for.
     #[must_use = "a refused delegation must be reported to the model, not dropped"]
     pub fn push_within_cap(&self, delegation: Delegation, cap: usize, max_depth: usize) -> Staged {
-        match self.claim_state() {
+        let claim = self.claim_state();
+        match claim {
             DrainClaim::Unclaimed => return Staged::NoDrain(NoDrainReason::Unwired),
             // Issue #267: the operator asked a question. A hand-off is how one
             // gets answered, so it stages; the pure board writes do not.
@@ -867,13 +922,20 @@ impl DelegationQueue {
             // something false about what it may do next.
             DrainClaim::Board if !delegation.writes_board_only() => {
                 return Staged::NoDrain(match delegation {
-                    Delegation::DelegateToDesk { .. }
-                    | Delegation::DelegateToTeammate { .. }
-                    | Delegation::ConversationDispatch { .. } => NoDrainReason::WorkflowHandOff,
+                    Delegation::DelegateToDesk { .. } | Delegation::DelegateToTeammate { .. } => {
+                        NoDrainReason::WorkflowHandOff
+                    }
                     _ => NoDrainReason::WorkflowLifecycle,
                 });
             }
-            DrainClaim::Answering | DrainClaim::Full | DrainClaim::Board => {}
+            DrainClaim::Seat if !matches!(delegation, Delegation::SpawnTask { .. }) => {
+                return Staged::NoDrain(NoDrainReason::Seat);
+            }
+            DrainClaim::Answering
+            | DrainClaim::Full
+            | DrainClaim::Board
+            | DrainClaim::Task
+            | DrainClaim::Seat => {}
         }
         // Issue #176: checked after the claim (a context that drains nothing is
         // still the only fact worth reporting) and before the queue lock, so the
@@ -894,6 +956,22 @@ impl DelegationQueue {
         }
         let mut guard = self.inner.lock().expect("delegation queue");
         let bucket = guard.entry(Self::current_scope()).or_default();
+        // Match the dispatched-card drain: a second hand-off would otherwise
+        // receive a success receipt and then be discarded without running.
+        if claim == DrainClaim::Task
+            && delegation.answers()
+            && bucket.iter().any(Delegation::answers)
+        {
+            if let Some(target) = hand_off_target_of(&delegation) {
+                self.task_handoff_refusals
+                    .lock()
+                    .expect("delegation queue")
+                    .entry(Self::current_scope())
+                    .or_default()
+                    .push(target.to_string());
+            }
+            return Staged::NoDrain(NoDrainReason::TaskHandoffAlreadyQueued);
+        }
         if bucket.len() >= cap {
             return Staged::OverCap;
         }
@@ -986,6 +1064,18 @@ impl DelegationQueue {
         drained
     }
 
+    /// Drains hand-off targets rejected by a dispatched task's one-transfer rule.
+    pub fn drain_task_handoff_refusals(&self, cap: usize) -> Vec<String> {
+        let mut guard = self.task_handoff_refusals.lock().expect("delegation queue");
+        let Some(bucket) = guard.get_mut(&Self::current_scope()) else {
+            return Vec::new();
+        };
+        let take = bucket.len().min(cap);
+        let drained = bucket.drain(..take).collect();
+        bucket.clear();
+        drained
+    }
+
     /// Empties the queue (called before an orchestrator turn so stale
     /// delegations from a prior turn never leak into this one).
     ///
@@ -1005,6 +1095,10 @@ impl DelegationQueue {
     fn clear_scope(&self, scope: &DelegationScope) {
         self.inner.lock().expect("delegation queue").remove(scope);
         self.refused.lock().expect("delegation queue").remove(scope);
+        self.task_handoff_refusals
+            .lock()
+            .expect("delegation queue")
+            .remove(scope);
     }
 
     /// Releases a claim: discards everything the claim's scope staged and
@@ -1034,8 +1128,13 @@ impl DelegationQueue {
     /// the cap means some caller bypassed that boundary and is quietly losing
     /// work the model already claimed it had done.
     pub fn drain(&self, cap: usize) -> Vec<Delegation> {
+        self.drain_scope(&Self::current_scope(), cap)
+    }
+
+    /// [`drain`](Self::drain) against an explicitly named scope.
+    fn drain_scope(&self, scope: &DelegationScope, cap: usize) -> Vec<Delegation> {
         let mut guard = self.inner.lock().expect("delegation queue");
-        let Some(bucket) = guard.get_mut(&Self::current_scope()) else {
+        let Some(bucket) = guard.get_mut(scope) else {
             return Vec::new();
         };
         let take = bucket.len().min(cap);
@@ -1147,6 +1246,11 @@ pub enum NoDrainReason {
     /// naming: open a card for the desk instead, which persists and is exactly
     /// what a run *can* do.
     WorkflowHandOff,
+    /// A dispatched card already has its one ownership transfer queued.
+    TaskHandoffAlreadyQueued,
+    /// The queue is claimed by a HiveMind seat turn ([`DrainClaim::Seat`]),
+    /// which may open cards and nothing else on the board.
+    Seat,
 }
 
 impl NoDrainReason {
@@ -1164,6 +1268,8 @@ impl NoDrainReason {
             Self::Depth => "depth_capped",
             Self::WorkflowLifecycle => "workflow_lifecycle_operator_only",
             Self::WorkflowHandOff => "workflow_handoff_no_reply_target",
+            Self::TaskHandoffAlreadyQueued => "task_handoff_already_queued",
+            Self::Seat => "seat_opens_cards_only",
         }
     }
 }
@@ -1189,6 +1295,8 @@ pub enum DrainClaim {
     Unclaimed,
     /// A drain site has claimed the queue and will execute anything staged.
     Full,
+    /// A dispatched board card permits one ownership transfer, not fan-out.
+    Task,
     /// A drain site has claimed the queue for a turn whose operator message
     /// triaged as [`MessageTriage::Answer`](crate::company::task_intent::MessageTriage)
     /// (issue #267). The drain runs exactly as under [`Full`](Self::Full); only
@@ -1213,6 +1321,10 @@ pub enum DrainClaim {
     /// → run cycles stay bounded precisely because every dispatch requires an
     /// operator act. Relaxing the column rule would take that bound with it.
     Board,
+    /// A HiveMind seat turn has claimed its own scope's bucket. Only
+    /// [`SpawnTask`](Delegation::SpawnTask) may be staged; the seat's settle
+    /// drains it.
+    Seat,
 }
 
 /// The live claim on a [`DelegationQueue`] — proof that some drain site is
@@ -1241,6 +1353,18 @@ impl DelegationClaim {
     /// The scope this claim owns.
     pub fn scope(&self) -> &DelegationScope {
         &self.scope
+    }
+
+    /// Clears only this claimant's bucket, wherever the caller is currently
+    /// executing.
+    pub fn clear(&self) {
+        self.queue.clear_scope(&self.scope);
+    }
+
+    /// Drains up to `cap` of this claim's own staged delegations, wherever
+    /// the caller is running.
+    pub fn drain(&self, cap: usize) -> Vec<Delegation> {
+        self.queue.drain_scope(&self.scope, cap)
     }
 
     /// Runs `fut` with this claim's scope installed, so every delegation call
@@ -1358,6 +1482,20 @@ impl QueryCompanyTool {
     }
 }
 
+/// What a person calls roster entry `id`: its display name, else its role,
+/// else the id itself when it is not on the roster.
+fn roster_name<'a>(roster: &'a [(String, Option<String>, String)], id: &'a str) -> &'a str {
+    roster
+        .iter()
+        .find(|(entry, _, _)| entry == id)
+        .map_or(id, |(_, name, role)| {
+            name.as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .unwrap_or(role.trim())
+        })
+}
+
 #[async_trait]
 impl Tool for QueryCompanyTool {
     fn name(&self) -> &str {
@@ -1393,11 +1531,14 @@ impl Tool for QueryCompanyTool {
         let query = args.get("query").and_then(Value::as_str).map(str::trim);
         let query = query.filter(|q| !q.is_empty());
 
+        let mut unreadable: Vec<&'static str> = Vec::new();
         let facts = match &self.facts {
-            Some(store) => store
-                .list(&self.company, query, None)
-                .await
-                .unwrap_or_default(),
+            Some(store) => insight_reads::section(
+                store.list(&self.company, query, None).await,
+                "facts",
+                &self.company,
+                &mut unreadable,
+            ),
             None => Vec::new(),
         };
 
@@ -1414,10 +1555,13 @@ impl Tool for QueryCompanyTool {
         // line instead: the orchestrator learns that people are talking on the
         // cards without losing what the company *did*.
         let stored = match &self.events {
-            Some(log) => log
-                .read_from(&self.company, EventSeq::new(0), usize::MAX)
-                .await
-                .unwrap_or_default(),
+            Some(log) => insight_reads::section(
+                log.read_from(&self.company, EventSeq::new(0), usize::MAX)
+                    .await,
+                "recent_activity",
+                &self.company,
+                &mut unreadable,
+            ),
             None => Vec::new(),
         };
         let mut recent: Vec<String> = Vec::new();
@@ -1466,7 +1610,9 @@ impl Tool for QueryCompanyTool {
 
         let mut md = String::from("# Company insight\n");
         md.push_str("\n## Facts\n");
-        if facts.is_empty() {
+        if unreadable.contains(&"facts") {
+            md.push_str(insight_reads::FACTS_UNREADABLE);
+        } else if facts.is_empty() {
             md.push_str("_No durable facts recorded._\n");
         } else {
             // Two bounds, so the facts section can never be the thing that
@@ -1511,7 +1657,9 @@ impl Tool for QueryCompanyTool {
             }
         }
         md.push_str("\n## Recent activity\n");
-        if recent.is_empty() {
+        if unreadable.contains(&"recent_activity") {
+            md.push_str(insight_reads::ACTIVITY_UNREADABLE);
+        } else if recent.is_empty() {
             md.push_str("_No recent activity._\n");
         } else {
             md.push_str(&recent.join("\n"));
@@ -1520,12 +1668,12 @@ impl Tool for QueryCompanyTool {
 
         // Load the persisted record once: it carries both the roster and the
         // manifest's enabled workflow ids (the seed workflows that have no file
-        // under `workflows/`). `None`/error → those sections read empty rather
-        // than failing the whole surface.
-        let record = match &self.store {
-            Some(store) => store.load(&self.company).await.ok().flatten(),
-            None => None,
-        };
+        // under `workflows/`).
+        let record_read = insight_reads::RecordRead::load(self.store.as_ref(), &self.company).await;
+        if record_read.failed() {
+            unreadable.extend(["saved_workflows", "team", "desks"]);
+        }
+        let record = record_read.record();
 
         // Saved workflows: the seed `workflows/*.toml` graphs unioned with the
         // record's runtime-authored bodies (what `create_workflow` persists and
@@ -1552,7 +1700,7 @@ impl Tool for QueryCompanyTool {
         .collect();
         let mut seen: std::collections::HashSet<String> =
             workflows.iter().map(|(id, _)| id.clone()).collect();
-        if let Some(record) = &record {
+        if let Some(record) = record {
             for id in &record.manifest.workflows.enabled {
                 if seen.insert(id.clone()) {
                     workflows.push((id.clone(), id.clone()));
@@ -1561,35 +1709,29 @@ impl Tool for QueryCompanyTool {
         }
         workflows.sort_by(|a, b| a.0.cmp(&b.0));
         md.push_str("\n## Saved workflows\n");
-        if workflows.is_empty() {
+        if workflows.is_empty() && !record_read.failed() {
             md.push_str("_No saved workflows. Author one with `create_workflow`._\n");
         } else {
             for (id, name) in &workflows {
                 md.push_str(&format!(
-                    "- **{}** (`{}`) — run with `run_workflow`\n",
+                    "- **{}** (id `{}` for tool calls) — run with `run_workflow`\n",
                     name.trim(),
                     id
                 ));
+            }
+            if record_read.failed() {
+                md.push_str(insight_reads::WORKFLOWS_PARTIAL);
             }
         }
 
         // Team roster: manifest agents plus operator-added overlay teammates
         // (the ones `add_agent` persists), so a freshly added teammate is
-        // visible on the next query instead of looking unpersisted.
-        //
-        // **Every row leads with the id**, because this column is the one the
-        // orchestrator's brief and `delegate_to_teammate`'s own description
-        // send the model to for a hand-off target. An overlay teammate used to
-        // be listed under `overlay.name` while a manifest agent was listed
-        // under `agent.id` — two namespaces rendered identically, and since
-        // `mint_agent_id` slugs the display name (`"Dana Designer"` →
-        // `dana_designer`) the name was a token the delegation tools could not
-        // ground. The model did exactly what it was told and was refused
-        // (issue #1162). The display name follows as a label, in the shape
-        // `workflow_build::roster_line` (#813) already uses for the roster it
-        // shows the same model, so the two surfaces cannot drift apart.
+        // visible on the next query instead of looking unpersisted. Each row
+        // leads with the name a person knows and carries the id the
+        // delegation tools ground, the shape `workflow_build::roster_line`
+        // also shows this model.
         let mut roster: Vec<(String, Option<String>, String)> = Vec::new();
-        if let Some(record) = &record {
+        if let Some(record) = record {
             // Resolved through the record: a teammate the operator removed is not
             // a delegation target, and one they renamed is named as it is now.
             for agent in record.effective_agents() {
@@ -1610,15 +1752,20 @@ impl Tool for QueryCompanyTool {
             }
         }
         md.push_str("\n## Team\n");
-        if roster.is_empty() {
+        if record_read.failed() {
+            md.push_str(insight_reads::ROSTER_UNREADABLE);
+        } else if roster.is_empty() && record.is_some() {
+            md.push_str(insight_reads::ROSTER_EMPTY);
+        } else if roster.is_empty() {
             md.push_str("_Roster unavailable._\n");
         } else {
-            for (id, name, role) in &roster {
-                md.push_str(&format!("- **{}** — {}", id, role.trim()));
-                if let Some(name) = name {
-                    md.push_str(&format!(" (known as {})", name.trim()));
+            for (id, _, role) in &roster {
+                let name = roster_name(&roster, id);
+                md.push_str(&format!("- **{name}**"));
+                if !name.eq_ignore_ascii_case(role.trim()) {
+                    md.push_str(&format!(", {}", role.trim()));
                 }
-                md.push('\n');
+                md.push_str(&format!(" (id `{id}` for tool calls)\n"));
             }
         }
 
@@ -1628,7 +1775,6 @@ impl Tool for QueryCompanyTool {
         // are exactly the ids `delegate_to_desk` accepts, with each desk's lead
         // named so the two are never confused for one another again.
         let desks: Vec<(String, Option<String>)> = record
-            .as_ref()
             .map(|record| {
                 delegation_tools::desk_ids(record)
                     .into_iter()
@@ -1640,30 +1786,28 @@ impl Tool for QueryCompanyTool {
             })
             .unwrap_or_default();
         md.push_str("\n## Desks\n");
-        if desks.is_empty() {
-            md.push_str("_No desks. Answer directly rather than delegating._\n");
+        if record_read.failed() {
+            md.push_str(insight_reads::DESKS_UNREADABLE);
+        } else if desks.is_empty() {
+            md.push_str("_No desks._\n");
         } else {
             for (id, lead) in &desks {
+                let label = record.map_or_else(
+                    || id.clone(),
+                    |r| crate::company::team_brief::desk_label(r, id),
+                );
+                md.push_str(&format!("- **{label}** (id `{id}` for tool calls) — "));
                 match lead {
-                    Some(lead) => md.push_str(&format!(
-                        "- **{id}** — lead: {lead} (delegate with `delegate_to_desk` desk=`{id}`)\n"
-                    )),
+                    Some(lead) => md.push_str(&format!("lead: {}\n", roster_name(&roster, lead))),
                     // A leadless answer is two different facts (issue #1835):
                     // an `auto` channel has members but no lead by design —
                     // "cannot be handed work" would be a lie about a staffed
                     // channel — while a desk with nobody on the roster really
                     // cannot take anything.
-                    None if record
-                        .as_ref()
-                        .is_some_and(|r| !r.desk_responder_mode(id).is_lead()) =>
-                    {
-                        md.push_str(&format!(
-                            "- **{id}** — channel without a lead; who answers is picked per message. `delegate_to_desk` cannot target it — use `delegate_to_teammate` with one of its members\n"
-                        ))
+                    None if record.is_some_and(|r| !r.desk_responder_mode(id).is_lead()) => {
+                        md.push_str("channel without a lead; who answers is picked per message\n")
                     }
-                    None => md.push_str(&format!(
-                        "- **{id}** — no member on the roster, so it cannot be handed work\n"
-                    )),
+                    None => md.push_str("no member on the roster, so it cannot be handed work\n"),
                 }
             }
         }
@@ -1731,11 +1875,12 @@ impl Tool for QueryCompanyTool {
                     board_open_count = total_open;
                 }
                 Err(err) => {
-                    tracing::debug!(company = %self.company, error = %err, "query_company: board read failed");
-                    md.push_str("_Board unavailable._\n");
+                    tracing::warn!(company = %self.company, error = %err, "query_company: board read failed");
+                    unreadable.push("board");
+                    md.push_str(insight_reads::BOARD_UNREADABLE);
                 }
             },
-            None => md.push_str("_Board unavailable._\n"),
+            None => md.push_str(insight_reads::BOARD_UNWIRED),
         }
 
         Ok(ToolResult::success_with_markdown(
@@ -1747,6 +1892,7 @@ impl Tool for QueryCompanyTool {
                 "team": roster.len(),
                 "desks": desks.len(),
                 "board_open": board_open_count,
+                "unreadable": unreadable,
             }),
             md,
         ))
@@ -2434,6 +2580,12 @@ fn summarize_event(event: &CompanyEvent) -> String {
         // carry.
         CompanyEvent::TurnStarted { turn_id, .. } => format!("turn accepted: {turn_id}"),
         CompanyEvent::TurnFailed { turn_id, .. } => format!("turn unanswered: {turn_id}"),
+        CompanyEvent::TurnSettled {
+            turn_id, agent_id, ..
+        } => match agent_id {
+            Some(agent) => format!("turn answered by {agent}: {turn_id}"),
+            None => format!("turn answered: {turn_id}"),
+        },
         // Issue #1015. Structural only: the minted id and the status word, a
         // fixed vocabulary. The failure reason is our own prose about the host
         // and is tenant-scoped, so it stays off this surface exactly as
@@ -2559,13 +2711,36 @@ fn summarize_event(event: &CompanyEvent) -> String {
             added.len(),
             removed.len()
         ),
-        CompanyEvent::DeskHiveConfigured { reset, .. } => {
+        CompanyEvent::DeskRoutingConfigured { reset, .. } => {
             if *reset {
-                "desk move grammar restored".into()
+                "desk routing restored".into()
             } else {
-                "desk move grammar installed".into()
+                "desk routing configured".into()
             }
         }
+        CompanyEvent::SkillChanged { slug, change, .. } => {
+            let what = match change {
+                SkillChange::Installed => "installed",
+                SkillChange::Updated => "updated",
+                SkillChange::Edited => "edited",
+                SkillChange::Removed => "removed",
+            };
+            format!("skill {what}: {slug}")
+        }
+        // Plan hive-desks: the episode ledger. Structural only — ids and
+        // counts, never an utterance — for the same reason every arm here is.
+        CompanyEvent::EpisodeOpened { .. } => "episode opened".into(),
+        CompanyEvent::RoundStarted { .. } => "episode round started".into(),
+        CompanyEvent::RoundCommitted { .. } => "episode round committed".into(),
+        CompanyEvent::BroadcastRouted { .. } => "episode broadcast routed".into(),
+        CompanyEvent::DmDelivered { .. } => "episode dm delivered".into(),
+        CompanyEvent::UtteranceRefused { .. } => "episode utterance refused".into(),
+        CompanyEvent::ConversationOpened { .. } => "episode conversation opened".into(),
+        CompanyEvent::ConversationConcluded { .. } => "episode conversation concluded".into(),
+        CompanyEvent::EpisodeSeatParked { .. } => "episode seat waiting on the operator".into(),
+        CompanyEvent::EpisodeSeatResumed { .. } => "episode seat resumed".into(),
+        CompanyEvent::EpisodeCompleted { .. } => "episode completed".into(),
+        CompanyEvent::EpisodeStateSaved { .. } => "episode state saved".into(),
         // Issue #276. This one-liner is folded into the orchestrator's
         // recent-activity context, so it is read by a model — and the arms
         // around it drop free text and actor ids for that reason. Name and id
@@ -2731,7 +2906,7 @@ impl Tool for SpawnTaskTool {
     }
 
     fn description(&self) -> &str {
-        "Open a task card on the company's board. Nothing said in chat is tracked unless an agent tracks it, so use this when an ask is real work that should be visible and followed up — something you are taking on that outlasts this reply, something for later, or something for somebody else. Provide a `title`, an optional `note` brief, and an optional `assignee` (a desk or teammate id). Do NOT use this to get a hand-off tracked: work you hand off with `delegate_to_desk` or `delegate_to_teammate` already opens its own card, and calling both for the same work opens two."
+        "Open a task card on the company's board. Nothing said in chat is tracked unless an agent tracks it, so use this when an ask is real work that should be visible and followed up — something you are taking on that outlasts this reply, something for later, or something for somebody else. Provide a `title`, an optional `note` brief, and an optional `assignee` (a desk or teammate id). Open one card per piece of work: work that already has a card does not need another."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -2768,6 +2943,7 @@ impl Tool for SpawnTaskTool {
         // a name that resolves to nobody is refused here, in the model's own
         // turn, rather than surviving as a queued card the drain silently
         // opens unowned with no signal anywhere that the assignee was bogus.
+        let mut unverified = None;
         let owner = match assignee.as_deref() {
             Some(name) => match self.store.load(&self.company).await {
                 Ok(Some(record)) => {
@@ -2795,11 +2971,26 @@ impl Tool for SpawnTaskTool {
                     Some(name.to_string())
                 }
                 Err(err) => {
+                    if matches!(DelegationQueue::current_scope(), DelegationScope::Seat(_)) {
+                        tracing::warn!(
+                            company = %self.company,
+                            error = %err,
+                            "[spawn_task] refused a seat's card: the roster could not be read to \
+                             check its assignee"
+                        );
+                        return Ok(ToolResult::error(format!(
+                            "Could not open the card \"{title}\": the roster could not be read \
+                             to check that \"{name}\" is on it. Nothing was queued; try again, \
+                             or leave `assignee` out."
+                        )));
+                    }
                     tracing::warn!(
                         company = %self.company,
                         error = %err,
-                        "[spawn_task] could not read the company record to ground the assignee"
+                        "[spawn_task] could not read the company record to ground the assignee; \
+                         queuing with it unverified"
                     );
+                    unverified = Some(name.to_string());
                     Some(name.to_string())
                 }
             },
@@ -2807,7 +2998,19 @@ impl Tool for SpawnTaskTool {
         };
 
         let effect = format!("the card \"{title}\" was NOT opened");
-        match self.queue.push_within_cap(
+        let seated = match super::card_budget::reserve(&title) {
+            None => false,
+            Some(Ok(())) => true,
+            Some(Err(refusal)) => {
+                tracing::info!(
+                    company = %self.company,
+                    ?refusal,
+                    "[spawn_task] refused a card the conversation's budget does not allow"
+                );
+                return Ok(ToolResult::error(card_refused(&effect, refusal)));
+            }
+        };
+        let staged = self.queue.push_within_cap(
             Delegation::SpawnTask {
                 title: title.clone(),
                 note,
@@ -2815,12 +3018,34 @@ impl Tool for SpawnTaskTool {
             },
             MAX_DELEGATIONS_PER_TURN,
             NO_DEPTH_BOUND,
-        ) {
+        );
+        if seated && staged != Staged::Queued {
+            super::card_budget::release(&title);
+        }
+        match staged {
             Staged::Queued => {}
             Staged::OverCap => return Ok(ToolResult::error(over_cap(&effect))),
             Staged::NoDrain(why) => {
                 return Ok(ToolResult::error(no_drain(SPAWN_TASK_TOOL, &effect, why)));
             }
+        }
+        tracing::debug!(
+            company = %self.company,
+            seated,
+            "[spawn_task] queued a card"
+        );
+        if seated {
+            return Ok(ToolResult::success(format!(
+                "Queued a task card: \"{title}\". It is written to the board when your turn \
+                 ends; {SPAWN_TASK_FAILURE_ONLY_RECEIPT}. Do not describe it as open yet."
+            )));
+        }
+        if let Some(name) = unverified {
+            return Ok(ToolResult::success(format!(
+                "Queued a task card: \"{title}\". It will be opened on the board this turn, but \
+                 its assignee \"{name}\" could not be checked against the roster; if it names \
+                 nobody, the card opens unassigned."
+            )));
         }
         Ok(ToolResult::success(format!(
             "Queued a task card: \"{title}\". It will be opened on the board this turn."
@@ -3039,7 +3264,7 @@ impl Tool for DelegateToDeskTool {
     }
 
     fn description(&self) -> &str {
-        "Hand a turn to a desk's lead member so a specialist answers, and get their reply back in this turn. Provide the `desk` (its id or name, as listed under Your team in your briefing) and the `instruction` to carry out. A substantial hand-off is opened as a tracked board card automatically, assigned to that lead — you do not need to call `spawn_task` as well."
+        "Hand a turn to a desk's lead member so a specialist answers, and get their reply back in this turn. Provide the `desk` (the id listed beside its name under Your team; its name also works) and the `instruction` to carry out. A substantial hand-off is opened as a tracked board card automatically, assigned to that lead — you do not need to call `spawn_task` as well."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -3104,7 +3329,7 @@ impl Tool for DelegateToDeskTool {
             }
         }
         Ok(ToolResult::success(format!(
-            "Delegated to the {desk} desk. Its lead will answer this turn."
+            "Queued for the {desk} desk. The lead runs AFTER you finish your current turn. Finish this turn after queuing the required work; do not poll for its result before returning. On a board task this transfers ownership of the card; on a chat turn the host collects the reply for your relay."
         )))
     }
 }
@@ -3261,7 +3486,7 @@ impl Tool for DelegateToTeammateTool {
     }
 
     fn description(&self) -> &str {
-        "Hand a turn to one named teammate so the person who actually owns that specialism answers — including somebody on your own desk. Provide the `teammate` (their roster id, exactly as listed under Your team in your briefing) and the `instruction` to carry out. Use this instead of `delegate_to_desk` whenever a specific person is wanted rather than whoever leads a desk. A substantial hand-off is opened as a tracked board card automatically, assigned to them — you do not need to call `spawn_task` as well."
+        "Hand a turn to one named teammate so the person who actually owns that specialism answers — including somebody on your own desk. Provide the `teammate` (the id listed beside their name under Your team, for this call only; call them by name when you write) and the `instruction` to carry out. Use this instead of `delegate_to_desk` whenever a specific person is wanted rather than whoever leads a desk. A substantial hand-off is opened as a tracked board card automatically, assigned to them — you do not need to call `spawn_task` as well."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -3323,9 +3548,13 @@ impl Tool for DelegateToTeammateTool {
         // name it read, and the id is the token it should write next time.
         Ok(ToolResult::success(
             if target.eq_ignore_ascii_case(&teammate) {
-                format!("Handed to {target}. They will answer this turn.")
+                format!(
+                    "Queued for {target}. They run AFTER you finish your current turn. Finish this turn after queuing the required work; do not poll for their result before returning. On a board task this transfers ownership of the card; on a chat turn the host collects the reply for your relay."
+                )
             } else {
-                format!("Handed to {teammate} (`{target}`). They will answer this turn.")
+                format!(
+                    "Queued for {teammate} (`{target}`). They run AFTER you finish your current turn. Finish this turn after queuing the required work; do not poll for their result before returning. On a board task this transfers ownership of the card; on a chat turn the host collects the reply for your relay."
+                )
             },
         ))
     }
@@ -3572,6 +3801,13 @@ fn no_drain(tool: &str, effect: &str, reason: NoDrainReason) -> String {
          model's own turn rather than queuing into a queue nothing will drain"
     );
     match reason {
+        NoDrainReason::TaskHandoffAlreadyQueued => format!(
+            "Refused: this board task already has an ownership transfer queued, so {effect}. \
+             Only the first colleague will run; a task hand-off does not return their answer \
+             to you. Do not claim this second colleague was assigned or reviewed the result. \
+             For a multi-colleague calculation and review, use a manual workflow with separate \
+             agent steps and explicit dependencies instead of multiple hand-offs on one card."
+        ),
         NoDrainReason::Unwired => format!(
             "Refused: nothing here can carry out board work, so {effect}. Board actions are \
              unavailable in this context. Do not retry — it will fail the same way — and do NOT \
@@ -3601,6 +3837,11 @@ fn no_drain(tool: &str, effect: &str, reason: NoDrainReason) -> String {
              this call; it will fail the same way, and do NOT report the card as reviewed, \
              approved or moved."
         ),
+        NoDrainReason::Seat => format!(
+            "Refused: in this room you can open a card and nothing else on the board, so {effect}. \
+             Ask the teammate concerned with `{prefix}ask` instead. Do NOT report it as done.",
+            prefix = crate::hive::host::TOOL_PREFIX
+        ),
         NoDrainReason::WorkflowHandOff => format!(
             "Refused: you are running inside a workflow, which has no conversation for a desk's \
              reply to come back to, so {effect}. A hand-off is only worth making when somebody is \
@@ -3608,6 +3849,22 @@ fn no_drain(tool: &str, effect: &str, reason: NoDrainReason) -> String {
              `spawn_task` — naming the desk as its assignee — which persists and reaches them. Do \
              not retry this call; it will fail the same way, and do NOT report the work as handed \
              over or the desk as having replied."
+        ),
+    }
+}
+
+/// The refusal `spawn_task` returns when the conversation's card budget does
+/// not allow another card.
+fn card_refused(effect: &str, refusal: super::card_budget::CardRefusal) -> String {
+    match refusal {
+        super::card_budget::CardRefusal::Duplicate => format!(
+            "Refused: a card with this title is already open or queued for this conversation, \
+             so {effect}. Do not open it twice; the existing card tracks it."
+        ),
+        super::card_budget::CardRefusal::Full { cap } => format!(
+            "Refused: this conversation has already opened {cap} cards, the most one message \
+             may, so {effect}. Fold the rest into the cards already open, or tell the operator \
+             plainly what is still untracked."
         ),
     }
 }
@@ -3750,23 +4007,18 @@ pub fn member_delegation_tools(
 pub fn member_delegation_brief() -> String {
     "\n\n## Handing work on, and tracking it\n\nDo what is yours yourself. When a slice of the ask \
 belongs to a teammate's specialism — a design question to the designer, a security check to the \
-security engineer, a question only the orchestrator can settle — hand that slice to them with \
-`delegate_to_teammate` (naming their roster id from Your team above), or to a whole desk with \
-`delegate_to_desk`, and fold their answer into yours. They run in this turn and their reply comes \
-back to you; the operator hears from you, so relay what they said rather than saying you asked. \
-Every hand-off costs another turn: hand on the part somebody else is genuinely better placed to \
-do, not the whole ask, and never decline something as \"not mine\" when a teammate who owns it is \
-one call away. The chain is bounded: if you are told the work has already been handed on as far \
-as this company allows, that is final, so do what you can and say plainly what is left rather \
-than calling the tool again. You cannot hand work back to where it came from, to yourself, or to \
-somebody it already passed through.\n\nNothing said to you in chat is on the board unless \
-somebody puts it there — a card exists because an agent or the operator opened one, never \
-because a message was sent. Answer questions, discussion and quick asks directly, with no card. \
-When an ask is real work that should be visible and followed up — something you are taking on \
-that outlasts this reply, something for later, or something for somebody else — open a card for \
-it with `spawn_task` (a title, a note with the brief, and the roster id of whoever will do it) \
-and say that you did. A hand-off you make with `delegate_to_teammate` or `delegate_to_desk` \
-opens its own card automatically, so never open a second one for the same work.\n"
+security engineer — and you are in a room with them, `ask` them for it. Asking ends your turn: \
+their answer reaches you in a later brief, not this one. So say you have asked and what you are \
+waiting on; never write as though you already had the answer. When it arrives, fold it in and \
+relay what they said rather than saying you asked. Ask for the part somebody else is genuinely \
+better placed to answer, not the whole ask, and never decline something as \"not mine\" when a \
+teammate who owns it is one question away.\n\nNothing said to you in chat is on \
+the board unless somebody puts it there — a card exists because an agent or the operator opened \
+one, never because a message was sent. Answer questions, discussion and quick asks directly, \
+with no card. When an ask is real work that should be visible and followed up — something you \
+are taking on that outlasts this reply, something for later, or something for somebody else — \
+open a card for it with `spawn_task` (a title, a note with the brief, and the roster id of \
+whoever will do it) and say that you did.\n"
         .to_string()
 }
 
@@ -4103,10 +4355,11 @@ impl Tool for AddAgentTool {
             role: role.clone(),
             description,
             tools: tools.clone(),
+            skills: None,
             model: None,
             harness: None,
         };
-        record.overlay_agents.push(agent);
+        let general_delta = record.hire_overlay_agent(agent);
         self.store.save(&record).await?;
 
         // The audit row for one agent creating another.
@@ -4134,6 +4387,12 @@ impl Tool for AddAgentTool {
                 .await
         {
             tracing::warn!(error = %err, "teammate-added audit row could not be journaled");
+        }
+        if let Some(events) = &self.events
+            && let Some(event) = general_delta.into_event(None)
+            && let Err(err) = events.append(&self.company, event).await
+        {
+            tracing::warn!(error = %err, "#general membership change could not be journaled");
         }
 
         // Issue #619: the mint is observable — the minter, the teammate, and
@@ -4214,6 +4473,7 @@ pub fn orchestrator_tools(
     queue: &DelegationQueue,
     workflow_source_dir: Option<PathBuf>,
     workflow_runner: WorkflowRunnerHandle,
+    board_starter: crate::harness::built_in::board_start::BoardStarterHandle,
     run_supervisor: crate::runtime::RunSupervisor,
     store: Arc<dyn CompanyStore>,
     // Issue #274's snapshot ring, for the #661 (M7) edit/delete tools. `None`
@@ -4250,7 +4510,7 @@ pub fn orchestrator_tools(
     )));
     tools.push(Box::new(ReadTaskTool::new(
         company.clone(),
-        tasks,
+        tasks.clone(),
         runs.clone(),
         artifacts,
     )));
@@ -4310,6 +4570,17 @@ pub fn orchestrator_tools(
     tools.push(Box::new(
         crate::harness::workflow_admin::DeleteWorkflowTool::new(workflow_admin),
     ));
+    // Only with a board to read: the tool needs the card before it can move it,
+    // and an unwired `tasks` means there is none. The starter handle may still be
+    // empty at this point — it is filled when the runtime is registered — so the
+    // tool checks it per call rather than at build.
+    if let Some(tasks) = tasks.clone() {
+        tools.push(Box::new(StartTaskTool::new(
+            company.clone(),
+            tasks,
+            board_starter,
+        )));
+    }
     tools.push(Box::new(
         AddAgentTool::new(company, store, minter, minter_tools, minter_grants)
             .with_events(events.clone()),
@@ -4320,6 +4591,139 @@ pub fn orchestrator_tools(
 // ---------------------------------------------------------------------------
 // run_workflow (issue #67)
 // ---------------------------------------------------------------------------
+
+/// The `start_task` tool name — move a To-do card into Working, which dispatches it.
+pub const START_TASK_TOOL: &str = "start_task";
+
+/// Starts a board card: moves it from To-do into Working, which fires dispatch.
+///
+/// # Why this tool has to exist
+///
+/// `spawn_task` opens a card and stops. Dispatch is edge-fired on the
+/// `todo → in_progress` transition inside `CompanyRuntime::upsert_task`, which was
+/// reachable only from the console's column drag — so **nothing but a human could
+/// start a card.** An agent could open one, assign it, and watch it sit there.
+/// `AssignTaskTool` says as much: *"It does not (re)dispatch."*
+///
+/// # Why a separate tool and not a flag on `assign_task`
+///
+/// Assignment and starting are one operator intent, so a `start: true` flag on
+/// `assign_task` reads better — and is unavailable. `assign_task` is in
+/// [`EPISODE_WITHHELD_TOOLS`](crate::harness::built_in::EPISODE_WITHHELD_TOOLS),
+/// so the flag would be unreachable from inside an episode and a seat could open a
+/// card it could never start. A separate verb stays reachable.
+///
+/// # Why it writes through a handle
+///
+/// Every in-process path writes cards through the plain
+/// [`TaskStore`](crate::ports::TaskStore) port, which deliberately cannot
+/// dispatch — `advance` and the planning settle rely on that to avoid re-firing
+/// the edge. Firing it needs the runtime, and the runtime is built from the deps
+/// this tool is built from, so it arrives as a fillable handle exactly as
+/// [`WorkflowRunnerHandle`] does.
+pub struct StartTaskTool {
+    company: CompanyId,
+    tasks: Arc<dyn TaskStore>,
+    starter: crate::harness::built_in::board_start::BoardStarterHandle,
+}
+
+impl StartTaskTool {
+    /// Builds the tool over the board it reads and the capability it starts with.
+    pub fn new(
+        company: CompanyId,
+        tasks: Arc<dyn TaskStore>,
+        starter: crate::harness::built_in::board_start::BoardStarterHandle,
+    ) -> Self {
+        Self {
+            company,
+            tasks,
+            starter,
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for StartTaskTool {
+    fn name(&self) -> &str {
+        START_TASK_TOOL
+    }
+
+    fn description(&self) -> &str {
+        "Start work on a card that is already on the board: moves it from To-do into Working, which hands it to its assignee. Provide the `task_id`. Use this when the work should begin now — a card you just opened with `spawn_task` sits in To-do until somebody starts it. A card that is already Working, or past it, is left alone and says so."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "task_id": { "type": "string", "description": "The id of the card to start." }
+            },
+            "required": ["task_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Write
+    }
+
+    async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
+        let task_id = args
+            .get("task_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("`task_id` is required"))?
+            .to_string();
+
+        // Refused in this turn rather than reported as started, on the same terms
+        // every unwired tool on this belt uses: a receipt for work that will not
+        // happen is worse than a refusal the model can act on.
+        let Some(starter) = self.starter.get() else {
+            return Ok(ToolResult::error(format!(
+                "Could not start \"{task_id}\": this deployment has no board dispatch wired, so \
+                 moving the card would not begin any work. Say so rather than reporting it started."
+            )));
+        };
+
+        let Some(mut card) = self
+            .tasks
+            .list(&self.company)
+            .await?
+            .into_iter()
+            .find(|card| card.id == task_id)
+        else {
+            return Ok(ToolResult::error(format!(
+                "No card with id \"{task_id}\" is on this board. Check `list_tasks` for its id."
+            )));
+        };
+
+        // Only from To-do, because the edge is a transition and not a state: a card
+        // already in Working is being worked, and re-writing its column would
+        // neither start a second attempt nor be honest about the first.
+        if card.column != crate::ports::tasks::COLUMN_TODO {
+            return Ok(ToolResult::error(format!(
+                "\"{}\" is already in {} — it is not waiting to be started.",
+                card.title,
+                crate::ports::tasks::column_label(&card.column)
+            )));
+        }
+
+        let title = card.title.to_string();
+        let observed = card.clone();
+        card.column = crate::ports::tasks::COLUMN_IN_PROGRESS.to_string();
+        card.updated_at_millis = crate::ports::now_millis();
+        if !starter.start(&observed, &card).await? {
+            return Ok(ToolResult::error(format!(
+                "Card \"{task_id}\" changed while it was being started; re-read it before trying again."
+            )));
+        }
+        Ok(ToolResult::success(format!(
+            "Started \"{title}\": it is in Working now and its assignee has been handed it. The \
+             work runs in the background — it is not finished because this call returned."
+        )))
+    }
+}
 
 /// A shared, fillable handle to the company's [`WorkflowRunner`].
 ///
@@ -4652,6 +5056,15 @@ impl Tool for RunWorkflowTool {
 
     fn supports_markdown(&self) -> bool {
         true
+    }
+
+    // A workflow is a supervised sequence of bounded agent/tool calls, not one
+    // ordinary tool operation. Inheriting the 120-second tool deadline drops
+    // the runner before it can journal its outcome and strands child work.
+    // Keep the runner's cancellation path and task-local nesting guard intact,
+    // matching OpenHuman's own supervised multi-agent orchestration tools.
+    fn timeout_policy(&self, _args: &Value) -> ToolTimeout {
+        ToolTimeout::Unbounded
     }
 
     async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
@@ -5506,14 +5919,7 @@ impl Tool for ReadRunOutputTool {
             // with a real node rather than guess.
             let mut valid: Vec<String> = nodes
                 .iter()
-                .map(|(id, st)| {
-                    let count = st
-                        .get("items")
-                        .and_then(Value::as_array)
-                        .map(Vec::len)
-                        .unwrap_or(0);
-                    format!("`{id}` ({count} item(s))")
-                })
+                .map(|(id, st)| format!("`{id}` ({})", run_output_items::listing_count(st)))
                 .collect();
             valid.sort();
             let list = if valid.is_empty() {
@@ -5527,18 +5933,19 @@ impl Tool for ReadRunOutputTool {
             )));
         };
 
-        let items = state
-            .get("items")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+        let Some(items) = run_output_items::node_items(state) else {
+            tracing::warn!(company = %self.company, run_id = %run_id, node = %node, "read_run_output: node output has no items list");
+            return Ok(ToolResult::error(run_output_items::unreadable_shape(
+                node, run_id,
+            )));
+        };
         if items.is_empty() {
             return Ok(ToolResult::success(format!(
                 "Node `{node}` of run `{run_id}` produced no items."
             )));
         }
 
-        let (full, n) = render_run_items(&items);
+        let (full, n) = render_run_items(items);
         let total = full.chars().count();
         let start = offset.min(total);
         let budget = crate::harness::build::TOOL_RESULT_BUDGET_BYTES
@@ -6086,3 +6493,7 @@ pub(crate) fn create_workflow_parameters_schema() -> Value {
 #[cfg(test)]
 #[path = "orchestrator_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "task_handoff_receipt_tests.rs"]
+mod task_handoff_receipt_tests;

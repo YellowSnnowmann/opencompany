@@ -2,9 +2,34 @@
 # Selects which example company this container runs, from $OPENCOMPANY_COMPANY.
 # The value may be an example directory name (e.g. venture_capital) or a
 # friendly alias (e.g. fund). This is the "which module spins up" switch.
+#
+# An explicitly blank $OPENCOMPANY_COMPANY means `serve` runs with **no**
+# `--company`, so an empty `/data` boots an empty registry and the console opens
+# first-run setup. A routable unconfigured launch is authorized by the
+# platform's per-tenant SSO bootstrap token. The image default is
+# `marketing_agency`; the platform overrides it with an explicit blank. A named
+# value selects a baked company as before.
 set -eu
 
-COMPANY="${OPENCOMPANY_COMPANY:-marketing_agency}"
+COMPANY="${OPENCOMPANY_COMPANY:-}"
+
+BIND="${OPENCOMPANY_BIND:-0.0.0.0:8080}"
+HOME_DIR="${OPENCOMPANY_DATA_DIR:-/data}"
+
+DISCOVER=""
+if [ "${OPENCOMPANY_DISCOVERABLE:-false}" = "true" ]; then
+  DISCOVER="--discoverable"
+fi
+
+if [ -z "${COMPANY}" ]; then
+  # Unconfigured launch: no company, empty registry, first-run wizard.
+  echo "opencompany: launching unconfigured (setup wizard) on ${BIND}"
+  # shellcheck disable=SC2086
+  exec opencompany serve \
+    --bind "${BIND}" \
+    --home "${HOME_DIR}" \
+    ${DISCOVER}
+fi
 
 # Friendly aliases → example directory names.
 case "$COMPANY" in
@@ -27,15 +52,10 @@ if [ ! -f "${DIR}/company.toml" ] && [ ! -f "${DIR}/agents.toml" ]; then
   exit 1
 fi
 
-DISCOVER=""
-if [ "${OPENCOMPANY_DISCOVERABLE:-false}" = "true" ]; then
-  DISCOVER="--discoverable"
-fi
-
-echo "opencompany: launching '${COMPANY}' on ${OPENCOMPANY_BIND:-0.0.0.0:8080}"
+echo "opencompany: launching '${COMPANY}' on ${BIND}"
 # shellcheck disable=SC2086
 exec opencompany serve \
   --company "${DIR}" \
-  --bind "${OPENCOMPANY_BIND:-0.0.0.0:8080}" \
-  --home "${OPENCOMPANY_DATA_DIR:-/data}" \
+  --bind "${BIND}" \
+  --home "${HOME_DIR}" \
   ${DISCOVER}

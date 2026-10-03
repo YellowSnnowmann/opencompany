@@ -1,13 +1,23 @@
 # Cognition and channel ports
 
 The two seams a cycle runs across: the `Brain` that does the thinking, and the
-`ChannelAdapter` that carries the conversation in and out. Part of the port
-contracts indexed by [ports.md](ports.md).
+`ChannelAdapter` — the outbound surface for conversation delivery. Part of the
+port contracts indexed by [ports.md](ports.md).
 
 ## Brain
 
 The cognition seam. The kernel never reimplements the cycle; it hands events
 to a `Brain` and services the brain's callbacks through a `CycleHost`.
+
+The `harness` path (`HarnessBrain`, feature `openhuman`) answers a chat cycle
+through `hive::dispatch`: a desk of two or more runs an episode of concurrent
+seat turns on its `OpenHumanHive`, and every other surface runs one turn on
+its one responder ([hive.md](hive.md#where-a-message-goes)). There is no
+company-wide serial lock on chat cycles and no per-chat slot; what serialises
+is one agent's own `turn_lock`, so cycles on different desks — and different
+agents in one round — run at the same time. A chat cycle's `CycleResult`
+carries no reply of its own: every utterance is journaled as it commits, so
+the console reads a round as it happens rather than when the cycle returns.
 
 ```rust
 // src/ports/brain.rs
@@ -208,14 +218,34 @@ construction, ≥1 response per cycle) are inherited, not re-verified.
 
 ## ChannelAdapter
 
-Inbound/outbound conversation surfaces. The built-in `"operator"` channel is
+Outbound conversation surfaces. The built-in `"operator"` channel is
 always present; others (email, tinyplace-dm, …) usually delegate to OpenHuman.
+
+Inbound messages do **not** flow through this trait (issue #1958). Ingress is
+route-specific:
+
+- **Operator chat** arrives as `CompanyEvent::OperatorMessage` via the HTTP chat
+  route and the ACP `session/prompt` route.
+- **Email / webhooks** are filed into `InboxStore` and drive
+  `CompanyEvent::WebhookReceived`; they do not become `OperatorMessage`.
+- Other integrations have their own runtime paths.
+
+Every implementation of the old `inbound()` stream returned `stream::empty()`;
+the method was dead. It remains only as a **deprecated default** that still
+returns an empty stream, so out-of-tree implementers keep compiling. Delivery
+mechanisms vary by implementation: `OperatorChannel` and `DeskChannel` both
+append to the event log.
+
+**API migration (issue #1958):** prefer removing any `inbound()` override and
+never call the method. The trait default preserves source compatibility; there
+is no replacement stream because ingress is route-specific (see above).
 
 ```rust
 // src/ports/channel.rs
 pub trait ChannelAdapter: Send + Sync {
     fn channel_id(&self) -> &str; // "operator", "email", "tinyplace-dm", ...
-    fn inbound(&self) -> BoxStream<'static, InboundMessage>;
+    #[deprecated] // empty default — do not call or override in new code
+    fn inbound(&self) -> BoxStream<'static, InboundMessage> { /* empty */ }
     async fn send(&self, msg: OutboundMessage) -> Result<()>;
 }
 ```
@@ -247,9 +277,10 @@ pub struct TurnStep {
 }
 ```
 
-Per-bubble ownership: the operator bubble carries the orchestrator's steps; a
-delegated desk bubble carries that desk lead's steps. **Zero steps is
-meaningful** — a memory-served or tool-less answer runs none, which is how the
+Per-bubble ownership: each seat's bubble carries that seat's own steps — on a
+desk, one bubble per committed utterance, each stamped with its `episode`
+([hive.md](hive.md#what-lands-in-the-journal)); off a desk, the one
+responder's. **Zero steps is meaningful** — a memory-served or tool-less answer runs none, which is how the
 console distinguishes it from a tool-backed one, and how a silently-failed MCP
 call becomes visible (surfaced as an `error` step on the operator bubble rather
 than a vague acknowledgement).

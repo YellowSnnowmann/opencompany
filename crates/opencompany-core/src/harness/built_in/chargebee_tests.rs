@@ -102,8 +102,8 @@ async fn a_complete_pair_resolves_and_never_exposes_the_key() {
 
 #[test]
 fn the_five_tools_split_reads_from_writes() {
-    use oh::tools::traits::PermissionLevel;
     use openhuman_core as oh;
+    use tinytools::PermissionLevel;
 
     let config = TenantChargebee {
         config: ChargebeeConfig {
@@ -127,4 +127,31 @@ fn the_five_tools_split_reads_from_writes() {
         };
         assert_eq!(level, expected, "{name} permission level");
     }
+}
+
+#[tokio::test]
+async fn a_failed_customer_lookup_says_not_to_create_one() {
+    let config = TenantChargebee {
+        config: ChargebeeConfig {
+            site: "127.0.0.1:9/".to_string(),
+            api_key: "cb_key".to_string(),
+        },
+    };
+    let tools = live::chargebee_tools(&config);
+    let lookup = tools
+        .iter()
+        .find(|t| t.name() == "chargebee_get_customer")
+        .expect("registered");
+    let result = lookup
+        .execute(serde_json::json!({ "email": "alan@tinyhumans.ai" }))
+        .await
+        .expect("execute");
+    assert!(result.is_error, "{result:?}");
+    let out = result.output();
+    assert!(
+        out.contains("Could not tell whether a Chargebee customer exists for alan@tinyhumans.ai"),
+        "{out}"
+    );
+    assert!(out.contains("Do not create one because of this"), "{out}");
+    assert!(!out.contains("No Chargebee customer matches"), "{out}");
 }

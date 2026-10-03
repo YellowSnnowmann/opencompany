@@ -1,4 +1,6 @@
 use super::*;
+use crate::ports::TaskOrigin;
+use crate::ports::tasks::COLUMN_IN_REVIEW;
 
 /// The "zero tool work" claim in #552, proven rather than asserted: a
 /// second agent reads the first agent's deliverable through the ordinary
@@ -245,6 +247,7 @@ async fn a_failed_node_write_still_records_the_artifact() {
 }
 fn card(id: &str, assignee: &str) -> TaskRecord {
     TaskRecord {
+        opened_by: None,
         id: id.to_string(),
         title: TaskTitle::authored("Ship the thing"),
         note: None,
@@ -416,6 +419,51 @@ async fn a_settled_channel_level_card_journals_no_thread() {
             } if origin_chat_id.as_deref() == Some("strategy")
         )),
         "an unthreaded settle names its channel and no thread: {logged:?}"
+    );
+}
+
+/// A parked attempt keeps its reply in the card timeline but emits no terminal
+/// marker into the conversation that raised it. `DeskTaskCompleted` is the
+/// timeline's `finished → <column>` anchor, so the absence is what keeps a card
+/// waiting on approval from telling its origin conversation that it finished.
+#[tokio::test]
+async fn a_parked_attempt_journals_its_reply_without_a_terminal_anchor() {
+    let dir = tempfile::tempdir().unwrap();
+    let (brain, _tasks, events) = brain_with_tasks_and_events(dir.path());
+    let mut c = card("t-parked", "engineer");
+    c.origin = TaskOrigin::new(Some("strategy".to_string()), None);
+    c.column = COLUMN_PAUSED.to_string();
+
+    brain
+        .journal_task_outcome(
+            &c,
+            "engineer",
+            "Waiting for approval.".to_string(),
+            Vec::new(),
+            RunStatus::WaitingApproval,
+        )
+        .await;
+
+    let logged = events
+        .read_from(
+            &CompanyId::new("acme"),
+            crate::ports::types::EventSeq::new(0),
+            usize::MAX,
+        )
+        .await
+        .expect("read events");
+    assert!(
+        logged.iter().any(|e| matches!(
+            &e.event,
+            CompanyEvent::AgentReply { task_id: Some(task), .. } if task == "t-parked"
+        )),
+        "the parked attempt still journals its timeline reply: {logged:?}"
+    );
+    assert!(
+        !logged
+            .iter()
+            .any(|e| matches!(&e.event, CompanyEvent::DeskTaskCompleted { task_id, .. } if task_id == "t-parked")),
+        "a waiting attempt must not announce a terminal anchor to the origin: {logged:?}"
     );
 }
 

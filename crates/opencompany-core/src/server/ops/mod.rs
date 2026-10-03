@@ -62,6 +62,7 @@ pub mod mailer;
 pub mod mcp;
 pub mod mcp_config;
 pub mod mcp_registry;
+pub mod mcp_tool_policy;
 pub mod memory;
 pub mod memory_engine;
 pub mod memory_ingest;
@@ -101,6 +102,11 @@ pub mod team;
 /// for the fields the console owns. Attached to [`team`]'s existing
 /// `/team/{agent_id}` route rather than merged as its own. See [`team_agent`].
 mod team_agent;
+/// One teammate's whole MCP picture — `GET
+/// {scope}/team/{agent_id}/mcp/permissions`. Every configured server, reached or
+/// not, with each tool's mode resolved for that teammate and the rule that
+/// decided it. See [`team_mcp`].
+pub mod team_mcp;
 /// The unified tool catalog read (`GET {scope}/tools/catalog`): everything this
 /// company can grant an agent — built-ins, MCP servers and Composio toolkits —
 /// in one vocabulary. Read-only and openhuman-free.
@@ -156,6 +162,11 @@ mod tests_mcp_default_server_can;
 #[cfg(test)]
 #[path = "write_mcp_manifest_tests.rs"]
 mod tests_mcp_manifest;
+/// Probed MCP identity. Gated on `mcp` as well as `test`: without the feature no
+/// probe runs.
+#[cfg(all(test, feature = "mcp"))]
+#[path = "write_mcp_probed_identity_tests.rs"]
+mod tests_mcp_probed_identity;
 #[cfg(test)]
 #[path = "write_memory_stats_last_updated_tests.rs"]
 mod tests_memory_stats_last_updated;
@@ -175,8 +186,17 @@ mod tests_put_smtp_without_a;
 #[path = "write_saving_an_unpublished_note_tests.rs"]
 mod tests_saving_an_unpublished_note;
 #[cfg(test)]
+#[path = "write_skills_drift_tests.rs"]
+mod tests_skills_drift;
+#[cfg(test)]
 #[path = "write_skills_install_persists_the_tests.rs"]
 mod tests_skills_install_persists_the;
+#[cfg(test)]
+#[path = "write_skills_install_pin_tests.rs"]
+mod tests_skills_install_pin;
+#[cfg(test)]
+#[path = "write_skills_journal_tests.rs"]
+mod tests_skills_journal;
 #[cfg(test)]
 #[path = "write_streamed_multipart_tests.rs"]
 mod tests_streamed_multipart;
@@ -313,6 +333,7 @@ pub fn router() -> Router<AppState> {
         .merge(pages::router())
         .merge(skills::router())
         .merge(mcp::router())
+        .merge(mcp_tool_policy::router())
         .merge(mcp_config::router())
         .merge(mcp_registry::router())
         .merge(read_state::router())
@@ -321,6 +342,7 @@ pub fn router() -> Router<AppState> {
         .merge(mentions::router())
         .merge(inference::router())
         .merge(team::router())
+        .merge(team_mcp::router())
         .merge(setup::router())
         .merge(activation::router())
         .merge(policy::router())

@@ -41,6 +41,7 @@ fn orchestrator_tools_includes_all_sixteen() {
         &queue,
         None,
         WorkflowRunnerHandle::default(),
+        crate::harness::built_in::board_start::BoardStarterHandle::default(),
         crate::runtime::RunSupervisor::default(),
         Arc::new(MemStore::default()),
         None,
@@ -647,5 +648,142 @@ async fn run_workflow_tool_separates_blocked_nodes_from_paused_gates() {
         payload.get("approvals_parked").and_then(Value::as_u64),
         Some(1),
         "approvals_parked must exclude the ParkFailed receipt: {payload}"
+    );
+}
+
+/// `start_task` joins the belt when a board is wired, and stays off it when none
+/// is.
+///
+/// The gate is the board, not the starter handle: the tool must read the card
+/// before it can move it, and an unwired `tasks` means there is none to read. The
+/// handle is checked per call instead, because it is filled when the runtime
+/// registers — after this belt is built.
+///
+/// Asserted because a tool that is granted but not wired, or wired but not
+/// granted, both fail silently. `orchestrator_tools_includes_all_sixteen` covers
+/// the boardless shape; this is the other half.
+#[test]
+fn start_task_joins_the_belt_only_with_a_board() {
+    use crate::ports::TaskStore;
+
+    #[derive(Default)]
+    struct NoBoard;
+    #[async_trait]
+    impl TaskStore for NoBoard {
+        async fn list(&self, _c: &CompanyId) -> crate::Result<Vec<crate::ports::TaskRecord>> {
+            Ok(Vec::new())
+        }
+        async fn upsert(&self, _c: &CompanyId, _t: &crate::ports::TaskRecord) -> crate::Result<()> {
+            Ok(())
+        }
+        async fn update_if_column(
+            &self,
+            _c: &CompanyId,
+            _t: &crate::ports::TaskRecord,
+            _o: &crate::ports::TaskRecord,
+            _e: &str,
+        ) -> crate::Result<bool> {
+            Ok(false)
+        }
+        async fn delete(&self, _c: &CompanyId, _id: &str) -> crate::Result<bool> {
+            Ok(false)
+        }
+    }
+
+    let belt = |tasks: Option<Arc<dyn TaskStore>>| {
+        let queue = DelegationQueue::default();
+        orchestrator_tools(
+            CompanyId::new("acme"),
+            None,
+            None,
+            tasks,
+            None,
+            None,
+            &queue,
+            None,
+            WorkflowRunnerHandle::default(),
+            crate::harness::built_in::board_start::BoardStarterHandle::default(),
+            crate::runtime::RunSupervisor::default(),
+            Arc::new(MemStore::default()),
+            None,
+            WorkflowRefQueue::default(),
+            RunOutputCache::default(),
+            "ceo".to_string(),
+            None,
+            vec!["fs:*".to_string()],
+            None,
+        )
+        .iter()
+        .map(|t| t.name().to_string())
+        .collect::<Vec<_>>()
+    };
+
+    let with_board = belt(Some(Arc::new(NoBoard) as Arc<dyn TaskStore>));
+    assert!(
+        with_board.contains(&START_TASK_TOOL.to_string()),
+        "a board means the card can be started: {with_board:?}"
+    );
+
+    let without = belt(None);
+    assert!(
+        !without.contains(&START_TASK_TOOL.to_string()),
+        "no board means no card to start: {without:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn workflow_tool_survives_single_call_deadline_and_stages_result() {
+    struct SlowRunner(Arc<tokio::sync::Notify>);
+    #[async_trait::async_trait]
+    impl WorkflowRunner for SlowRunner {
+        async fn run(
+            &self,
+            _company: &CompanyId,
+            _workflow: &WorkflowFile,
+            _input: Value,
+            _ctx: &crate::ports::WorkflowRunContext,
+        ) -> crate::Result<WorkflowRun> {
+            self.0.notify_one();
+            tokio::time::sleep(std::time::Duration::from_secs(121)).await;
+            Ok(StubRunner::empty().run)
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    seed_demo_workflow(dir.path());
+    let started = Arc::new(tokio::sync::Notify::new());
+    let runner: Arc<dyn WorkflowRunner> = Arc::new(SlowRunner(Arc::clone(&started)));
+    let handle = WorkflowRunnerHandle::default();
+    handle.set(&runner);
+    let refs = WorkflowRefQueue::default();
+    let tool = RunWorkflowTool::new(
+        CompanyId::new("acme"),
+        Some(dir.path().to_path_buf()),
+        Arc::new(MemStore::default()),
+        handle,
+        crate::runtime::RunSupervisor::default(),
+        None,
+        refs.clone(),
+        RunOutputCache::default(),
+        None,
+    );
+    let args = json!({"id": "demo"});
+    let resolved =
+        tinyagents_harness::tool::ToolTimeoutSettings::new(120_000, 1_000, 3_600_000, 5_000)
+            .resolve(tool.timeout_policy(&args));
+    let deadline = resolved.deadline;
+    assert!(
+        deadline.is_none(),
+        "the harness must not truncate a supervised workflow"
+    );
+    let started_turn = started.notified();
+    let execute = tokio::spawn(async move { tool.execute(args).await.unwrap() });
+    started_turn.await;
+    tokio::time::advance(std::time::Duration::from_secs(121)).await;
+    let result = execute.await.unwrap();
+    assert!(!result.is_error, "{result:?}");
+    assert_eq!(
+        refs.drain().len(),
+        1,
+        "completion still stages the real workflow result"
     );
 }

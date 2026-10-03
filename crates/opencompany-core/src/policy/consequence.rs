@@ -390,6 +390,14 @@ const DECLARED: &[Declared] = &[
     d("add_agent", EffectGroup::Other, Reach::Nothing),
     d("create_workflow", EffectGroup::Other, Reach::Nothing),
     d("assign_task", EffectGroup::Other, Reach::Nothing),
+    // `start_task` moves a card into Working, which dispatches it. Declared here
+    // rather than left to `undeclared()`'s name heuristics, because "start" says
+    // nothing about reach and the guess would be load-bearing: this begins real
+    // work. Same class as its neighbours — it runs a turn inside this company and
+    // nothing leaves it. It is more consequential than `assign_task`, which only
+    // records ownership, and that difference is a matter for the approval policy
+    // rather than for reach.
+    d("start_task", EffectGroup::Other, Reach::Nothing),
     d("review_task", EffectGroup::Other, Reach::Nothing),
     // Issue #1861: `escalate_to_human` stages a question on this company's own
     // approval queue and nothing leaves the company — the same class as
@@ -458,6 +466,8 @@ const DECLARED: &[Declared] = &[
     d("list_tasks", EffectGroup::Other, Reach::Nothing),
     d("read_task", EffectGroup::Other, Reach::Nothing),
     d("read_run", EffectGroup::Other, Reach::Nothing),
+    // A pooled turn reading its own conversation back from the journal.
+    d("read", EffectGroup::Other, Reach::Nothing),
     // ---- The agent's own sandboxed workspace: reads ------------------------
     // All six are pure reads inside the workspace the agent is pinned to.
     // `file_read`, `glob`, `grep` and `image_info` PARKED before this table
@@ -668,13 +678,13 @@ const DECLARED: &[Declared] = &[
     d("describe_skill", EffectGroup::Other, Reach::Nothing),
     d("read_skill_resource", EffectGroup::Other, Reach::Nothing),
     // ---- MCP ---------------------------------------------------------------
-    // The agent persona *instructs* every agent to call `mcp_list_servers` (and
-    // `mcp_list_tools` for a specific server) rather than answer a capability
-    // question from memory, so parking them made the guidance that exists to
-    // prevent stale answers cost an operator approval to follow (issue #443).
+    // The agent persona *instructs* every agent to call `mcp_list_tools` on a
+    // named server rather than answer a capability question from memory, so
+    // parking it made the guidance that exists to prevent stale answers cost
+    // an operator approval to follow (issue #443).
     //
-    // `mcp_list_servers` and `mcp_registry_list_tools` read process-local
-    // registration state, credentials already redacted. `mcp_list_tools` is
+    // `mcp_registry_list_tools` reads process-local registration state,
+    // credentials already redacted. `mcp_list_tools` is
     // NOT local — it is a `tools/list` round trip to the operator-configured
     // server. It is `Nothing` all the same: it changes nothing there or here
     // and is billed for nothing, and a desk that cannot ask a server what it
@@ -683,7 +693,6 @@ const DECLARED: &[Declared] = &[
     //
     // Calling *through* a server is a consequence and stays per-call: it can
     // perform any effect the third-party server advertises.
-    d("mcp_list_servers", EffectGroup::Other, Reach::Nothing),
     d("mcp_list_tools", EffectGroup::Other, Reach::Nothing),
     d(
         "mcp_registry_list_tools",

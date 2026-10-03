@@ -4,7 +4,6 @@ import {
   Brain,
   FolderClosed,
   type LucideIcon,
-  MessagesSquare,
   Network,
   Plug,
   Wallet,
@@ -154,16 +153,6 @@ export interface NavSection {
  * footer utility — and its rail *is* this pattern.
  */
 export const NAV_SECTIONS: NavSection[] = [
-  // The chat column, whole, and the console's default landing view
-  // (`app-shell.tsx`'s `useHashView` fallback). The room is where an operator
-  // says what they want and where their company answers — the thing they came
-  // to do — so it is what opens, and it is first.
-  //
-  // It has no `children`, and it needs none: its contents are the channel list
-  // `RoomView` renders, portalled into the sidebar's own middle region — which
-  // is now pinned there on every section rather than being Room's turn at it.
-  // See `room-rail.tsx`.
-  { view: "chat", label: "Room", icon: MessagesSquare },
   // The company itself: who is in it, what they are working on, what it keeps,
   // what it remembers, and what it spends. Five surfaces that were five
   // top-level rows and are one subject.
@@ -189,6 +178,17 @@ export const NAV_SECTIONS: NavSection[] = [
       // scarce rows. The addresses are unchanged — the row still opens
       // `#/company/brain`, and `#/company/brain/upload` still opens Upload.
       { view: "brain", label: "Brain", icon: Brain, hint: "What it remembers" },
+      // Was a fourth top-level row beside Company and Connections. It is a
+      // plain row here, not inside Finance's group: `sectionOwning` reads only a
+      // section's direct children, so a grandchild with its own view would not
+      // light Company, and a plain row after the Finance caption would read as
+      // one of its pages.
+      //
+      // No `children` of its own, so no second level on the rail: the canvas's
+      // Workflows/Runs toggle is a control on the page's title row whose state
+      // is persisted client-side (`WorkflowsView`'s `indexTab`), not a pair of
+      // routes. The address is unchanged — `#/workflows` still opens it.
+      { view: "workflows", label: "Automations", icon: Workflow, hint: "The routines it runs on its own" },
       // A row under Company, with sub-pages of its own — the table's one
       // grandchild list.
       //
@@ -266,14 +266,6 @@ export const NAV_SECTIONS: NavSection[] = [
       })),
     })),
   },
-  // Was "Workflows". One word, and the word an operator uses out loud.
-  //
-  // No `children`, and so no content rail — it has no sub-navigation to move.
-  // The canvas's own Workflows/Runs toggle is a control on the page's title row
-  // whose state is persisted client-side rather than carried by the address
-  // (`WorkflowsView`'s `indexTab`), so it is not a pair of routes and promoting
-  // it to a rail would be inventing sub-pages rather than relocating any.
-  { view: "workflows", label: "Automations", icon: Workflow },
   // Approvals is NOT here any more, and this is the third position it has held.
   //
   // It was a row with a `SidebarMenuBadge` and an icon-rail `SidebarMenuDot`;
@@ -519,9 +511,56 @@ export function SidebarNavigation({
 
   return (
     <>
-      {/* The four. Fixed: this group never grows, never shrinks and never
-          scrolls, so the rows stay where an operator left them. */}
-      <SidebarGroup className="shrink-0">
+      <SidebarGroup
+        className={cn(
+          // The conversation list is the front of the sidebar and takes the
+          // column's leftover height; `min-h-0` is what lets it shrink below its
+          // content so the list scrolls INSIDE itself (the slot below) and
+          // Company and Connections stay pinned under it.
+          "min-h-0 flex-1",
+          // On the 3rem rail this group's own `px-2` is the difference between
+          // fitting and not. The rail is 48px; the gutter leaves a 32px content
+          // box, and `ChannelRail`'s compact rows are `size-9` (36px) with their
+          // unread dots hung off the right edge — so the rows overhung the slot
+          // by 2px a side and the dots landed in horizontal overflow (codex P2
+          // review). Measured before this: slot `clientWidth` 32 against
+          // `scrollWidth` 34.
+          //
+          // The gutter goes rather than the rows shrinking: 36px is the compact
+          // rail's own avatar size, shared with the roster and the `#` glyphs,
+          // and re-sizing it for one container is how the two densities drift
+          // apart. Only in icon mode — the expanded column keeps the gutter
+          // every other group has.
+          "group-data-[collapsible=icon]:px-0",
+        )}
+      >
+        {/* The conversation list's mount point, on every section. What lands in it is
+            `RoomView`'s own `ChannelRail`, unchanged — see `room-rail.tsx`, and
+            `app-shell.tsx` for why `RoomView` stays mounted off Room to keep
+            feeding it. It scrolls rather than truncating behind a "show all": a
+            channel list is scanned for a name you already know, and hiding its
+            tail behind a control makes the one thing you came for the one thing
+            you cannot see. */}
+        <div
+          ref={setElement}
+          data-testid="room-rail-slot"
+          data-tour="conversations"
+          // The one scroller in the column. `SidebarContent` is `flex-1
+          // min-h-0` for this, so a list at its cap scrolls here rather than
+          // pushing the two rows below it out of reach.
+          className="scrollbar-on-hover flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto"
+        />
+      </SidebarGroup>
+
+      {/* The two. Fixed at the foot: this group never grows, never shrinks
+          and never scrolls, so Company and Connections are always on screen
+          under the conversation list. The seam above it is a border, the way
+          the title row separates from the page — no `pt-`, which the sidebar
+          tests forbid on either group. `pb-(--frame-inset)` is the gap the
+          content card keeps (`mb-(--frame-inset)`) between its bottom edge and
+          the window's, so Connections' bottom lands on the card's bottom edge
+          and the strip under it is the column's own (transparent) fill. */}
+      <SidebarGroup className="shrink-0 border-t border-sidebar-border pb-(--frame-inset)">
         <SidebarMenu>
           {NAV_SECTIONS.map((section) => (
             <SidebarMenuItem key={section.view} data-tour={`nav-${section.view}`}>
@@ -539,71 +578,6 @@ export function SidebarNavigation({
         </SidebarMenu>
       </SidebarGroup>
 
-      {/* Space, not a rule.
-
-          A horizontal line here was the reflex and it is the wrong mark: this
-          column is already quiet, and one more seam across 13.5rem reads as
-          hardware bolted on. The gap does the same work — above it, the four
-          places you can go; below it, the room you talk in — and it does it
-          without adding anything to look at. The console draws no rule above its
-          footer either, so a rule here would also have been the only one in the
-          column.
-
-          The gap is the column's own rhythm, and no more: the fixed block's
-          `pb-1` plus `SidebarContent`'s `gap-1` is 8px, which is the same step
-          between any two rows in the column. This carried a `pt-5` on top of
-          that — 24px against an 8px rhythm — on the argument that the break had
-          to be legible at a glance. It read instead as the channel list having
-          come loose from the four rows above it, which is the one thing this
-          column should never suggest: they are one navigation surface, and the
-          section caption below already names where the second half starts.
-
-          `min-h-0 flex-1`, so a long channel list scrolls INSIDE itself rather
-          than pushing the four rows or the footer off the column. A flex item's
-          default `min-height: auto` floors it at its content, which is why the
-          zero has to be said here as well as on the child that actually
-          scrolls. */}
-      <SidebarGroup
-        className={cn(
-          // No `min-h-0 flex-1` any more. It used to claim the column's
-          // leftover height so a long channel list scrolled INSIDE itself
-          // rather than pushing the rows above it away; the whole column is one
-          // scroller now (`sidebar-inner`), so the list grows to its content
-          // and the column scrolls past it.
-          "",
-          // On the 3rem rail this group's own `px-2` is the difference between
-          // fitting and not. The rail is 48px; the gutter leaves a 32px content
-          // box, and `ChannelRail`'s compact rows are `size-9` (36px) with their
-          // unread dots hung off the right edge — so the rows overhung the slot
-          // by 2px a side and the dots landed in horizontal overflow (codex P2
-          // review). Measured before this: slot `clientWidth` 32 against
-          // `scrollWidth` 34.
-          //
-          // The gutter goes rather than the rows shrinking: 36px is the compact
-          // rail's own avatar size, shared with the roster and the `#` glyphs,
-          // and re-sizing it for one container is how the two densities drift
-          // apart. Only in icon mode — the expanded column keeps the gutter
-          // every other group has.
-          "group-data-[collapsible=icon]:px-0",
-        )}
-      >
-        {/* The Room rail's mount point, on every section. What lands in it is
-            `RoomView`'s own `ChannelRail`, unchanged — see `room-rail.tsx`, and
-            `app-shell.tsx` for why `RoomView` stays mounted off Room to keep
-            feeding it. It scrolls rather than truncating behind a "show all": a
-            channel list is scanned for a name you already know, and hiding its
-            tail behind a control makes the one thing you came for the one thing
-            you cannot see. */}
-        <div
-          ref={setElement}
-          data-testid="room-rail-slot"
-          // Grows to the list it holds. It scrolled itself while the column
-          // had a fixed-height middle; with one scroller on `sidebar-inner`
-          // a second one here would trap the channel list in a box inside a
-          // page that also scrolls.
-          className="flex min-w-0 flex-col"
-        />
-      </SidebarGroup>
     </>
   );
 }

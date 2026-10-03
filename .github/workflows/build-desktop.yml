@@ -1,37 +1,51 @@
-# Build the OpenCompany Tauri desktop shell as a macOS DMG, for both
-# architectures. Reusable: called by `release-staging.yml` and
-# `release-production.yml`, never dispatched by hand. The dispatchable flow is
-# in docs/spec/runtime/releases.md.
+# Build the OpenCompany Tauri desktop shell: macOS DMGs for both architectures
+# and the Windows x64 installers (NSIS `-setup.exe` + MSI). Reusable: called by
+# `release-staging.yml`, `release-production.yml` and
+# `backfill-windows-desktop.yml`, never dispatched by hand. The dispatchable
+# flow is in docs/spec/runtime/releases.md.
 #
-# Issue #1732. Both legs of the `target` matrix run on `macos-latest` (Apple
-# Silicon); the Intel leg CROSS-COMPILES rather than booking an Intel runner.
-# `macos-13` is retired and the surviving Intel label has narrower
-# availability, so a native leg would make a release depend on a second,
-# scarcer runner pool for no gain a user can observe. Apple's clang
-# cross-compiles the C dependencies (bundled SQLite, SecurityFramework) from
-# the same SDK, and `hdiutil` does not care which architecture the .app inside
-# the image is. Nothing here EXECUTES the built binary, so the absence of
-# Rosetta on the runner does not bite. Tauri names the outputs per-arch
-# (`OpenCompany_<version>_aarch64.dmg` / `..._x64.dmg`), so both legs can
-# attach to one Release without colliding.
+# The `guard` job turns the `macos` / `windows` inputs into the build matrix,
+# so a caller builds exactly the legs it asks for.
 #
-# THREE THINGS a caller decides, each an input:
+# Both macOS legs run on `macos-latest` (Apple Silicon); the Intel leg
+# CROSS-COMPILES rather than booking an Intel runner. `macos-13` is retired and
+# the surviving Intel label has narrower availability, so a native leg would
+# make a release depend on a second, scarcer runner pool for no gain a user can
+# observe. Apple's clang cross-compiles the C dependencies (bundled SQLite,
+# SecurityFramework) from the same SDK, and `hdiutil` does not care which
+# architecture the .app inside the image is. Nothing here EXECUTES the built
+# binary, so the absence of Rosetta on the runner does not bite. Tauri names
+# the outputs per-arch (`OpenCompany_<version>_aarch64.dmg` / `..._x64.dmg`,
+# `..._x64-setup.exe` / `..._x64_en-US.msi`), so every leg can attach to one
+# Release without colliding.
 #
-#   `sign`                Developer-ID sign + Apple-notarize the .app and DMG.
-#                         Needs the six APPLE_* secrets; the `guard` job fails
-#                         in seconds if one is missing, before ~60 minutes of
-#                         compile. Both staging and production sign, so a
-#                         staging DMG opens on a tester's Mac the way a
-#                         production one does.
-#   `with_updater`        Also package and sign the auto-updater's
-#                         `.app.tar.gz` + `.sig`. Production only: the updater
+# WHAT A CALLER DECIDES, each an input:
+#
+#   `macos` / `windows`   Which legs to build.
+#   `sign`                Developer-ID sign + Apple-notarize the macOS .app and
+#                         DMG. Needs the four APPLE_* signing secrets and the
+#                         three APP_STORE_CONNECT_* notarization secrets; the
+#                         `guard` job fails in seconds if one is missing,
+#                         before ~60 minutes of compile. Both staging and
+#                         production sign, so a staging DMG opens on a tester's
+#                         Mac the way a production one does.
+#                         Windows signing is not an input: it happens when all
+#                         five DigiCert KeyLocker secrets (SM_HOST, SM_API_KEY,
+#                         SM_CLIENT_CERT_FILE_B64, SM_CLIENT_CERT_PASSWORD,
+#                         KEYPAIR_ALIAS) are present, never with only some of
+#                         them. With none the installers ship unsigned and the
+#                         run summary says so.
+#   `with_updater`        Also produce the auto-updater's signed artifacts:
+#                         the macOS `.app.tar.gz` + `.sig`, and a `.sig` beside
+#                         each Windows installer. Production only: the updater
 #                         resolves `latest.json` on the newest PUBLISHED
 #                         release, so a staging build's artifact is one nothing
 #                         can ever reach.
 #   `with_release_upload` Attach the outputs to the DRAFT GitHub Release named
 #                         by `tag`; otherwise upload them as Actions artifacts.
-#                         Requires `sign` — an unsigned DMG never goes to a
-#                         public Release — and the draft must already exist.
+#                         With the macOS legs it requires `sign` — an unsigned
+#                         DMG never goes to a public Release — and the draft
+#                         must already exist.
 #
 # THE RELEASE IS A DRAFT while this runs. This repository has immutable
 # releases: publishing freezes the asset list and nothing can be added
@@ -39,12 +53,15 @@
 # and the caller publishes once everything is attached — a release becomes
 # immutable and public in the same moment, already complete.
 #
-# THE UPDATER'S ARTIFACT IS BUILT AFTER NOTARIZATION, deliberately.
-# `bundle.createUpdaterArtifacts` would have the bundler emit it during `tauri
-# build` — from the unsigned `.app`, because signing happens in later steps —
-# so every client that took an update would end up with a bundle Gatekeeper
-# refuses to launch. Building it after `xcrun stapler validate` means the
-# updater installs byte-for-byte the bundle Apple approved.
+# THE macOS UPDATER ARTIFACT IS BUILT AFTER NOTARIZATION, deliberately.
+# `bundle.createUpdaterArtifacts` would have the bundler emit it during the
+# Tauri build — from the unsigned `.app`, because signing happens in later
+# steps — so every client that took an update would end up with a bundle
+# Gatekeeper refuses to launch. Building it after `xcrun stapler validate`
+# means the updater installs byte-for-byte the bundle Apple approved. Windows
+# has no such step: the installer is signed (or not) inside the Tauri build,
+# so the bundler's own `.sig` is taken there, via
+# `scripts/release/prepare-tauri-config.mjs`.
 # `docs/spec/runtime/desktop-updates.md` has the whole picture.
 #
 # FEATURES ARE PASSED AT BUILD TIME, not committed to
@@ -52,8 +69,8 @@
 # build job for the whole argument; `scripts/ci/assert-desktop-features.sh`
 # reads the value from THIS file and holds `ci.yml` and `desktop-dev.sh` to it.
 #
-# Issue #590. Every `uses:` below is a full commit SHA with the resolved version
-# in a trailing comment. The rationale is at the top of `ci.yml`.
+# Every `uses:` below is a full commit SHA with the resolved version in a
+# trailing comment. The rationale is at the top of `ci.yml`.
 # `dtolnay/rust-toolchain` additionally passes an explicit `toolchain:` matching
 # `rust-toolchain.toml`; `scripts/ci/assert-toolchain-pin.sh` enforces that.
 name: Build Desktop (reusable)
@@ -69,21 +86,39 @@ on:
         description: Release tag the outputs belong to (`v0.2.0`, `v0.2.0-staging`). Names the artifacts and the draft Release.
         type: string
         required: true
+      macos:
+        description: Build the two macOS DMG legs.
+        type: boolean
+        default: true
+      windows:
+        description: Build the Windows x64 leg (NSIS setup + MSI).
+        type: boolean
+        default: false
       sign:
-        description: Developer-ID sign and notarize. Requires the six APPLE_* secrets.
+        description: Developer-ID sign and notarize the macOS legs. Requires the APPLE_* signing and APP_STORE_CONNECT_* notarization secrets.
         type: boolean
         default: true
       with_updater:
-        description: Package and sign the `.app.tar.gz` + `.sig` the auto-updater installs from. Requires TAURI_SIGNING_PRIVATE_KEY.
+        description: Produce the signed updater artifacts (macOS `.app.tar.gz` + `.sig`, Windows installer `.sig`). Requires TAURI_SIGNING_PRIVATE_KEY.
         type: boolean
         default: false
       with_release_upload:
-        description: Attach outputs to the DRAFT GitHub Release named by `tag` instead of uploading Actions artifacts. Requires `sign`.
+        description: Attach outputs to the DRAFT GitHub Release named by `tag` instead of uploading Actions artifacts. With `macos`, requires `sign`.
         type: boolean
         default: false
-    # Named rather than `secrets: inherit`, so a caller hands over exactly the
-    # signing material and nothing else the repository holds (AWS, SSH, OpenAI).
-    # All optional: `guard` names the missing one when an input needs it.
+    outputs:
+      windows_signed:
+        description: "`true` when the Windows installers were Authenticode-signed through DigiCert KeyLocker."
+        value: ${{ jobs.guard.outputs.windows_signed }}
+    # THE CALLER MUST PASS EVERY SIGNING NAME. The APPLE_*, APP_STORE_CONNECT_*,
+    # TAURI_SIGNING_* and DigiCert SM_* / KEYPAIR_ALIAS secrets live only in the
+    # `Production` environment, which both jobs below declare. A reusable
+    # workflow sees an environment secret only when the caller passes that
+    # name: the caller's value is empty (it has no environment), and the job's
+    # `Production` value replaces it. Declared here but not passed, a name
+    # resolves empty and `guard` fails (or, for DigiCert, builds unsigned).
+    # Callers pass names one by one, never `secrets: inherit`, which would hand
+    # over every repository secret.
     secrets:
       APPLE_CERTIFICATE_BASE64:
         required: false
@@ -91,19 +126,33 @@ on:
         required: false
       APPLE_SIGNING_IDENTITY:
         required: false
-      APPLE_ID:
-        required: false
-      APPLE_PASSWORD:
-        required: false
-      APPLE_APP_SPECIFIC_PASSWORD:
-        required: false
       APPLE_TEAM_ID:
+        required: false
+      # Notarization authenticates with an App Store Connect API key (issuer +
+      # key id + the `.p8`, base64), not an Apple ID and app-specific password.
+      APP_STORE_CONNECT_API_KEY_ID:
+        required: false
+      APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64:
+        required: false
+      APP_STORE_CONNECT_ISSUER_ID:
         required: false
       TAURI_SIGNING_PRIVATE_KEY:
         required: false
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
         required: false
       SENTRY_AUTH_TOKEN:
+        required: false
+      # DigiCert KeyLocker (Software Trust Manager) for Windows Authenticode.
+      # All five or none; see `guard`.
+      SM_HOST:
+        required: false
+      SM_API_KEY:
+        required: false
+      SM_CLIENT_CERT_FILE_B64:
+        required: false
+      SM_CLIENT_CERT_PASSWORD:
+        required: false
+      KEYPAIR_ALIAS:
         required: false
 
 permissions:
@@ -114,6 +163,13 @@ jobs:
     name: Guard build inputs
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Where the signing secrets live; see the `secrets:` note above. The
+    # environment is branch-policied to `main` and `release`, the only refs
+    # any caller runs from, and admins cannot bypass it.
+    environment: Production
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      windows_signed: ${{ steps.windows-signing.outputs.signed || 'false' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -121,10 +177,36 @@ jobs:
           ref: ${{ inputs.build_ref }}
           persist-credentials: false
 
-      - name: A Release only ever carries a signed DMG
-        if: inputs.with_release_upload && !inputs.sign
+      - name: Select build legs
+        id: matrix
+        env:
+          MACOS: ${{ inputs.macos }}
+          WINDOWS: ${{ inputs.windows }}
         run: |
-          echo "::error::with_release_upload=true requires sign=true — an unsigned DMG must not be attached to a GitHub Release." >&2
+          set -euo pipefail
+          legs='[]'
+          if [ "$MACOS" = "true" ]; then
+            legs="$(jq -c '. + [
+              {platform: "macos-latest", target: "aarch64-apple-darwin", args: "--target aarch64-apple-darwin", artifact_suffix: "aarch64-apple-darwin"},
+              {platform: "macos-latest", target: "x86_64-apple-darwin", args: "--target x86_64-apple-darwin", artifact_suffix: "x86_64-apple-darwin"}
+            ]' <<< "$legs")"
+          fi
+          if [ "$WINDOWS" = "true" ]; then
+            legs="$(jq -c '. + [
+              {platform: "windows-latest", target: "x86_64-pc-windows-msvc", args: "--target x86_64-pc-windows-msvc", artifact_suffix: "windows"}
+            ]' <<< "$legs")"
+          fi
+          if [ "$(jq 'length' <<< "$legs")" -eq 0 ]; then
+            echo "::error::Neither macos nor windows was requested; there is nothing to build." >&2
+            exit 1
+          fi
+          echo "matrix=$(jq -c '{settings: .}' <<< "$legs")" >> "$GITHUB_OUTPUT"
+          jq -r '.[] | "  \(.target) on \(.platform)"' <<< "$legs"
+
+      - name: A Release only ever carries a signed DMG
+        if: inputs.with_release_upload && inputs.macos && !inputs.sign
+        run: |
+          echo "::error::with_release_upload=true with macos=true requires sign=true — an unsigned DMG must not be attached to a GitHub Release." >&2
           exit 1
 
       - name: Require an existing DRAFT Release to attach to
@@ -142,41 +224,92 @@ jobs:
             exit 1
           fi
 
-      - name: Validate signing prerequisites
-        if: inputs.sign
+      - name: Validate macOS signing prerequisites
+        if: inputs.macos && inputs.sign
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
         run: |
           missing=0
-          for var in APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+          for var in APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_TEAM_ID \
+                     APP_STORE_CONNECT_API_KEY_ID APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 APP_STORE_CONNECT_ISSUER_ID; do
             if [ -z "${!var}" ]; then
               echo "::error::sign=true but required macOS signing secret is missing: $var" >&2
               missing=1
             fi
           done
           [ "$missing" -eq 0 ] || exit 1
+          # The key id becomes a filename in the build job; refuse anything
+          # but Apple's alphanumeric form. The key must decode to a PKCS#8
+          # PEM — checked by grep on the decoded stream, never printed.
+          if ! [[ "$APP_STORE_CONNECT_API_KEY_ID" =~ ^[A-Z0-9]{8,20}$ ]]; then
+            echo "::error::APP_STORE_CONNECT_API_KEY_ID is not an App Store Connect key id (expected 8-20 uppercase alphanumerics)." >&2
+            exit 1
+          fi
+          if ! printf '%s' "$APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64" | base64 --decode 2>/dev/null | grep -q 'BEGIN PRIVATE KEY'; then
+            echo "::error::APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 does not decode to a .p8 private key (base64 of the whole AuthKey_<id>.p8 file)." >&2
+            exit 1
+          fi
 
+      # All five or none. Some-but-not-all is a half-configured signer that
+      # would fail forty minutes into the compile, so it fails here instead.
+      - name: Windows code-signing configuration
+        id: windows-signing
+        if: inputs.windows
+        env:
+          SM_HOST: ${{ secrets.SM_HOST }}
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+          KEYPAIR_ALIAS: ${{ secrets.KEYPAIR_ALIAS }}
+        run: |
+          set -euo pipefail
+          present=()
+          missing=()
+          for var in SM_HOST SM_API_KEY SM_CLIENT_CERT_FILE_B64 SM_CLIENT_CERT_PASSWORD KEYPAIR_ALIAS; do
+            if [ -n "${!var}" ]; then present+=("$var"); else missing+=("$var"); fi
+          done
+          if [ "${#present[@]}" -eq 0 ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No DigiCert KeyLocker secrets are configured; the Windows installers will be UNSIGNED."
+            {
+              echo "### Windows installers: UNSIGNED"
+              echo ""
+              echo "No DigiCert KeyLocker secrets are configured, so the \`-setup.exe\` and \`.msi\` carry no Authenticode signature — SmartScreen will warn on first run. See docs/spec/runtime/releases.md."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "::error::Windows signing is partially configured. Present: ${present[*]}. Missing: ${missing[*]}. Set all five DigiCert KeyLocker secrets in the Production environment, or none." >&2
+            exit 1
+          fi
+          if ! [[ "$KEYPAIR_ALIAS" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::KEYPAIR_ALIAS may contain only letters, digits, '.', '_' and '-'." >&2
+            exit 1
+          fi
+          if [ "$(printf '%s' "$SM_CLIENT_CERT_FILE_B64" | base64 --decode 2>/dev/null | head -c 1 | wc -c)" -eq 0 ]; then
+            echo "::error::SM_CLIENT_CERT_FILE_B64 does not decode to a client certificate (base64 of the whole .p12 file)." >&2
+            exit 1
+          fi
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "### Windows installers: signed through DigiCert KeyLocker" >> "$GITHUB_STEP_SUMMARY"
+
+      # Only the upload token is configuration. The DSNs are compiled in
+      # (`frontend/src/lib/crash-reporting.ts`, `crates/opencompany-app/src/crash.rs`)
+      # and the Sentry URL, org and project slugs are hardcoded below.
       - name: Validate Sentry artifact-upload settings
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_URL: ${{ vars.SENTRY_URL }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT_REACT: ${{ vars.SENTRY_PROJECT_REACT }}
-          SENTRY_PROJECT_RUST: ${{ vars.SENTRY_PROJECT_RUST }}
         run: |
-          missing=0
-          for var in SENTRY_AUTH_TOKEN SENTRY_URL SENTRY_ORG SENTRY_PROJECT_REACT SENTRY_PROJECT_RUST; do
-            if [ -z "${!var}" ]; then
-              echo "::error::Required Sentry artifact-upload setting is missing: $var" >&2
-              missing=1
-            fi
-          done
-          [ "$missing" -eq 0 ] || exit 1
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "::error::Required Sentry artifact-upload setting is missing: SENTRY_AUTH_TOKEN" >&2
+            exit 1
+          fi
 
       # A release nobody can update FROM is worse than no release: an installed
       # client polls `latest.json` on the newest published release forever, so a
@@ -193,19 +326,21 @@ jobs:
         run: bash scripts/release/assert-updater-configured.sh
 
   build:
-    name: "Desktop: ${{ matrix.target }}"
+    name: "Desktop: ${{ matrix.settings.target }}"
     needs: guard
-    runs-on: macos-latest
-    timeout-minutes: 90
+    runs-on: ${{ matrix.settings.platform }}
+    environment: Production
+    # A cold Windows leg takes ~40 minutes; the cap is a wedged-runner backstop.
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
     strategy:
-      # One arch failing must not cancel the other: a green arm64 DMG is worth
-      # having even while the Intel leg is being fixed, and the two failure
-      # modes are usually unrelated.
+      # One leg failing must not cancel the others: a green arm64 DMG is worth
+      # having even while another leg is being fixed, and the failure modes are
+      # usually unrelated.
       fail-fast: false
-      matrix:
-        target:
-          - aarch64-apple-darwin
-          - x86_64-apple-darwin
+      matrix: ${{ fromJSON(needs.guard.outputs.matrix) }}
     env:
       # The feature set the SHIPPED desktop build carries, over and above the
       # default set in `crates/opencompany-app/Cargo.toml`.
@@ -241,11 +376,12 @@ jobs:
       # otherwise the release would ship a feature combination nothing ever
       # compiled. `scripts/ci/assert-desktop-features.sh` keeps them in step.
       DESKTOP_RELEASE_FEATURES: opencompany-core/acp,opencompany-core/composio
+      WINDOWS_SIGNED: ${{ needs.guard.outputs.windows_signed }}
     steps:
       # The exact ref the caller resolved — the tag, or the bump commit's SHA
       # when no tag was cut. Never the dispatch branch: if it advanced since
       # the cut, an unpinned checkout would build newer source and attach it to
-      # the older release (the drift flagged on #1733).
+      # the older release.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -253,25 +389,33 @@ jobs:
           submodules: true
           persist-credentials: false
 
+      # The hosted Windows runner has little free space on C:, and the target
+      # directory is large; before/after makes a disk failure diagnosable.
+      - name: Disk before
+        if: runner.os == 'Windows'
+        run: df -h / /c /d 2>/dev/null || true
+
       # `submodules: true` is not recursive. The vendored openhuman crate's own
       # path-dependency crates must resolve for Cargo even on a default build.
-      # THE ONE PLACE this runs — see the script header (issue #592).
+      # THE ONE PLACE this runs — see the script header.
       - name: Init vendored openhuman crate submodules
         run: scripts/ci/init-vendored-submodules.sh
 
       # `toolchain:` must match rust-toolchain.toml (asserted by
-      # scripts/ci/assert-toolchain-pin.sh). Adds this leg's macOS target on
-      # the same toolchain — `x86_64-apple-darwin` is a cross target on this
-      # runner, `aarch64-apple-darwin` is native.
+      # scripts/ci/assert-toolchain-pin.sh). Adds this leg's target on the same
+      # toolchain — `x86_64-apple-darwin` is a cross target on the macOS
+      # runner; the others are native.
       - name: Install Rust (rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: "1.98.0"
           components: rustfmt, clippy
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.settings.target }}
 
-      - name: Ensure ${{ matrix.target }} target
-        run: rustup target add ${{ matrix.target }}
+      - name: Ensure ${{ matrix.settings.target }} target
+        env:
+          TARGET: ${{ matrix.settings.target }}
+        run: rustup target add "$TARGET"
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -294,50 +438,118 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         env:
-          VITE_SENTRY_DSN: ${{ vars.OPENCOMPANY_REACT_SENTRY_DSN }}
           VITE_SENTRY_ENVIRONMENT: ${{ vars.OPENCOMPANY_SENTRY_ENVIRONMENT || 'desktop' }}
           VITE_SENTRY_TRACES_SAMPLE_RATE: ${{ vars.OPENCOMPANY_SENTRY_TRACES_SAMPLE_RATE }}
           VITE_BUILD_COMMIT: ${{ steps.release-commit.outputs.sha }}
-          # The frontend bundle is architecture-independent. Upload its maps
-          # once from arm64; the Intel leg builds identical assets and would
-          # otherwise race a duplicate artifact-bundle upload.
-          SENTRY_AUTH_TOKEN: ${{ matrix.target == 'aarch64-apple-darwin' && secrets.SENTRY_AUTH_TOKEN || '' }}
-          SENTRY_URL: ${{ vars.SENTRY_URL }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT_REACT }}
+          # The frontend bundle is platform-independent. Upload its maps once —
+          # from arm64, or from Windows when no macOS leg runs — so the legs do
+          # not race duplicate artifact-bundle uploads.
+          SENTRY_AUTH_TOKEN: ${{ (matrix.settings.target == 'aarch64-apple-darwin' || (!inputs.macos && runner.os == 'Windows')) && secrets.SENTRY_AUTH_TOKEN || '' }}
+          SENTRY_URL: https://sentry.tinyhumans.ai
+          SENTRY_ORG: tinyhumans
+          SENTRY_PROJECT: opencompany-frontend
         run: npm run build
 
-      # The Tauri CLI compiles the Rust shell and packages the .app + unsigned
-      # .dmg. macOS signing is intentionally skipped here and handled by the
-      # dedicated sign + notarize step below (hardened runtime + entitlements
-      # are required for notarization). Path-qualified CLI so the project
-      # resolves to crates/opencompany-app/ (assert-single-tauri-app.sh).
-      - name: Build and package Tauri app (unsigned)
+      # From this workflow's own commit, not `build_ref`: a backfill builds an
+      # older tag that predates the script.
+      - name: Checkout release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          sparse-checkout: |
+            /scripts/release/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Define Tauri configuration overrides
+        id: tauri-config
+        env:
+          WITH_UPDATER: ${{ runner.os == 'Windows' && inputs.with_updater && 'true' || 'false' }}
+          KEYPAIR_ALIAS: ${{ runner.os == 'Windows' && needs.guard.outputs.windows_signed == 'true' && secrets.KEYPAIR_ALIAS || '' }}
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/tauri-config-override.json"
+          node .release-tools/scripts/release/prepare-tauri-config.mjs "$out"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+
+      # ---- DigiCert KeyLocker (Windows, all five secrets present) -----------
+      # The client certificate is written with a 077 umask to $RUNNER_TEMP,
+      # never echoed, and removed by the always-run step at the end of the job.
+      - name: Install DigiCert client certificate
+        if: runner.os == 'Windows' && env.WINDOWS_SIGNED == 'true'
+        env:
+          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          cert="$(cygpath -u "$RUNNER_TEMP")/sm-client-cert.p12"
+          printf '%s' "$SM_CLIENT_CERT_FILE_B64" | base64 --decode > "$cert"
+          echo "SM_CLIENT_CERT_FILE=$(cygpath -w "$cert")" >> "$GITHUB_ENV"
+
+      - name: Install DigiCert smctl and signtool on PATH
+        if: runner.os == 'Windows' && env.WINDOWS_SIGNED == 'true'
+        shell: pwsh
+        env:
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Join-Path $env:RUNNER_TEMP 'smtools-windows-x64.msi'
+          curl.exe --fail --silent --show-error --location `
+            -H "x-api-key:$env:SM_API_KEY" `
+            -o $msi `
+            'https://one.digicert.com/signingmanager/api-ui/v1/releases/smtools-windows-x64.msi/download'
+          if ($LASTEXITCODE -ne 0) { throw "smtools download failed ($LASTEXITCODE)" }
+          $install = Start-Process msiexec.exe -ArgumentList '/i', "`"$msi`"", '/quiet', '/qn' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "smtools install failed ($($install.ExitCode))" }
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\DigiCert\DigiCert One Signing Manager Tools'
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files (x86)\Windows Kits\10\App Certification Kit'
+
+      # Before the compile, so bad credentials cost seconds, not the build.
+      - name: Probe DigiCert KeyLocker
+        if: runner.os == 'Windows' && env.WINDOWS_SIGNED == 'true'
+        env:
+          SM_HOST: ${{ secrets.SM_HOST }}
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+          KEYPAIR_ALIAS: ${{ secrets.KEYPAIR_ALIAS }}
+        run: |
+          set -euo pipefail
+          smctl.exe healthcheck
+          smctl.exe windows certsync --keypair-alias="$KEYPAIR_ALIAS"
+
+      # Path-qualified CLI so the project resolves to crates/opencompany-app/
+      # (assert-single-tauri-app.sh). macOS signing is skipped here and handled
+      # by the dedicated sign + notarize steps below (hardened runtime +
+      # entitlements are required for notarization). On Windows, a configured
+      # signCommand signs the binaries and installers inside this step.
+      - name: Build and package Tauri app
         working-directory: crates/opencompany-app
         env:
           # Keep in sync with bundle.macOS.minimumSystemVersion in
           # crates/opencompany-app/tauri.conf.json — the Wry system-WebView floor.
-          MACOSX_DEPLOYMENT_TARGET: "12.0"
+          MACOSX_DEPLOYMENT_TARGET: ${{ runner.os == 'macOS' && '12.0' || '' }}
           OPENCOMPANY_BUILD_COMMIT: ${{ steps.release-commit.outputs.sha }}
+          TAURI_CONFIG_OVERRIDE: ${{ steps.tauri-config.outputs.path }}
+          MATRIX_ARGS: ${{ matrix.settings.args }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ runner.os == 'Windows' && inputs.with_updater && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ runner.os == 'Windows' && inputs.with_updater && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          SM_HOST: ${{ runner.os == 'Windows' && needs.guard.outputs.windows_signed == 'true' && secrets.SM_HOST || '' }}
+          SM_API_KEY: ${{ runner.os == 'Windows' && needs.guard.outputs.windows_signed == 'true' && secrets.SM_API_KEY || '' }}
+          SM_CLIENT_CERT_PASSWORD: ${{ runner.os == 'Windows' && needs.guard.outputs.windows_signed == 'true' && secrets.SM_CLIENT_CERT_PASSWORD || '' }}
         run: |
-          ../../frontend/node_modules/.bin/tauri build \
-            --target ${{ matrix.target }} \
-            -- --locked --features "$DESKTOP_RELEASE_FEATURES"
+          # shellcheck disable=SC2086 # MATRIX_ARGS is a flag list
+          ../../frontend/node_modules/.bin/tauri build -c "$TAURI_CONFIG_OVERRIDE" $MATRIX_ARGS -- --locked --features "$DESKTOP_RELEASE_FEATURES"
 
-      - name: Upload Rust debug symbols to Sentry
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_URL: ${{ vars.SENTRY_URL }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT_RUST }}
-          SENTRY_CLI: ${{ github.workspace }}/frontend/node_modules/.bin/sentry-cli
-          TARGET: ${{ matrix.target }}
-        run: scripts/upload-sentry-symbols.sh "crates/opencompany-app/target/${TARGET}/release"
+      - name: Disk after
+        if: always() && runner.os == 'Windows'
+        run: df -h / /c /d 2>/dev/null || true
 
       - name: Locate .app and .dmg bundles
         id: locate
+        if: runner.os == 'macOS'
         env:
-          TARGET: ${{ matrix.target }}
+          TARGET: ${{ matrix.settings.target }}
         run: |
           set -euo pipefail
           BUNDLE_DIR="crates/opencompany-app/target/${TARGET}/release/bundle"
@@ -361,60 +573,151 @@ jobs:
           echo "Found .app: $APP_PATH"
           echo "Found .dmg: $DMG_PATH"
 
-      # ---- Developer-ID sign + notarize (gated on `sign`) --------------------
-      # The six APPLE_* secrets were already proved present by `guard`.
+      # `bundle.targets` is "all", which on Windows is NSIS and MSI. Both are
+      # required, and with the updater on so is each installer's `.sig`.
+      - name: Locate Windows installers
+        id: locate-windows
+        if: runner.os == 'Windows'
+        env:
+          TARGET: ${{ matrix.settings.target }}
+          WITH_UPDATER: ${{ inputs.with_updater }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          BUNDLE_DIR="crates/opencompany-app/target/${TARGET}/release/bundle"
+          exes=("$BUNDLE_DIR"/nsis/*-setup.exe)
+          msis=("$BUNDLE_DIR"/msi/*.msi)
+          if [ "${#exes[@]}" -ne 1 ] || [ "${#msis[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one nsis/*-setup.exe and one msi/*.msi under $BUNDLE_DIR (found ${#exes[@]} and ${#msis[@]})." >&2
+            find "$BUNDLE_DIR" -type f 2>/dev/null || true
+            exit 1
+          fi
+          files=("${exes[0]}" "${msis[0]}")
+          if [ "$WITH_UPDATER" = "true" ]; then
+            for installer in "${exes[0]}" "${msis[0]}"; do
+              if [ ! -s "$installer.sig" ]; then
+                echo "::error::with_updater=true but $installer.sig is missing or empty." >&2
+                exit 1
+              fi
+              files+=("$installer.sig")
+            done
+          fi
+          {
+            echo "setup_exe=${exes[0]}"
+            echo "msi=${msis[0]}"
+            echo "files<<EOF_FILES"
+            printf '%s\n' "${files[@]}"
+            echo "EOF_FILES"
+          } >> "$GITHUB_OUTPUT"
+          printf 'Found: %s\n' "${files[@]}"
+
+      - name: Upload Rust debug symbols to Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_URL: https://sentry.tinyhumans.ai
+          SENTRY_ORG: tinyhumans
+          # The shell reports to the desktop project, so its symbols go there.
+          SENTRY_PROJECT: opencompany-tauri
+          SENTRY_CLI: frontend/node_modules/.bin/sentry-cli
+          TARGET: ${{ matrix.settings.target }}
+        run: scripts/upload-sentry-symbols.sh "crates/opencompany-app/target/${TARGET}/release"
+
+      - name: Verify Authenticode signatures
+        if: runner.os == 'Windows' && env.WINDOWS_SIGNED == 'true'
+        shell: pwsh
+        env:
+          SETUP_EXE: ${{ steps.locate-windows.outputs.setup_exe }}
+          MSI: ${{ steps.locate-windows.outputs.msi }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in @($env:SETUP_EXE, $env:MSI)) {
+            $signature = Get-AuthenticodeSignature -FilePath $file
+            if ($signature.Status -ne 'Valid') {
+              throw "$file is not validly signed: $($signature.Status) $($signature.StatusMessage)"
+            }
+            Write-Host "$file signed by $($signature.SignerCertificate.Subject)"
+          }
+
+      # ---- Developer-ID sign + notarize (macOS, gated on `sign`) -------------
+      # Every signing and notarization secret was already proved present (and
+      # the key proved to be a .p8) by `guard`.
+      #
+      # Notarization uses the App Store Connect API key. It is written to
+      # `$RUNNER_TEMP/AuthKey_<id>.p8` — the filename `notarytool` and Tauri
+      # both expect — with a 077 umask, never echoed, and removed by the
+      # always-run step at the end of this job. The names handed to the scripts
+      # are Tauri's own (`APPLE_API_KEY`, `APPLE_API_ISSUER`,
+      # `APPLE_API_KEY_PATH`, read by tauri-bundler's `notarize_auth`). They are
+      # deliberately NOT given to the Tauri build above: that step builds
+      # UNSIGNED (see its comment), and the bundler only notarizes what it
+      # signed, so they would do nothing there. The scripts below do the
+      # signing and notarizing.
+      - name: Install App Store Connect API key
+        id: asc-key
+        if: runner.os == 'macOS' && inputs.sign
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_path="${RUNNER_TEMP}/AuthKey_${KEY_ID}.p8"
+          printf '%s' "$KEY_B64" | base64 --decode > "$key_path"
+          echo "path=${key_path}" >> "$GITHUB_OUTPUT"
+
       - name: Sign and notarize .app
-        if: inputs.sign
+        if: runner.os == 'macOS' && inputs.sign
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APPLE_API_KEY_PATH: ${{ steps.asc-key.outputs.path }}
         run: |
           bash scripts/release/sign-and-notarize-macos.sh \
             "${{ steps.locate.outputs.app_path }}" \
             "crates/opencompany-app/entitlements.plist"
 
       - name: Re-package DMG after notarization
-        if: inputs.sign
+        if: runner.os == 'macOS' && inputs.sign
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APPLE_API_KEY_PATH: ${{ steps.asc-key.outputs.path }}
         run: |
           bash scripts/release/repackage-dmg.sh \
             "${{ steps.locate.outputs.app_path }}" \
             "${{ steps.locate.outputs.bundle_dir }}"
 
       - name: Verify notarization staple
-        if: inputs.sign
+        if: runner.os == 'macOS' && inputs.sign
         run: |
           xcrun stapler validate "${{ steps.locate.outputs.dmg_path }}"
 
-      # ---- The auto-updater's own artifact (gated on `with_updater`) ---------
+      # ---- The macOS auto-updater artifact (gated on `with_updater`) ---------
       # From the stapled bundle, so what an update installs is what Apple
       # approved; see the header. `guard` has proved the signing secret and a
       # real pubkey are present whenever this runs.
       - name: Package signed update artifact
         id: updater
-        if: inputs.with_updater
+        if: runner.os == 'macOS' && inputs.with_updater
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           bash scripts/release/package-updater-artifact.sh \
             "${{ steps.locate.outputs.app_path }}" \
-            "${{ matrix.target }}" \
+            "${{ matrix.settings.target }}" \
             "${{ steps.locate.outputs.bundle_dir }}/updater" >> "$GITHUB_OUTPUT"
 
       # ---- Deliver ------------------------------------------------------------
-      # Into the same DRAFT the DMG goes to, before it is published: immutable
-      # releases freeze the asset list at publish, so an archive that misses
-      # this window can never be added.
+      # Into the DRAFT, before it is published: immutable releases freeze the
+      # asset list at publish, so an asset that misses this window can never be
+      # added.
       - name: Attach update artifact to draft release
-        if: inputs.with_updater && inputs.with_release_upload
+        if: runner.os == 'macOS' && inputs.with_updater && inputs.with_release_upload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
@@ -430,10 +733,10 @@ jobs:
           done
           gh release upload "$TAG" "$ARCHIVE" "$SIGNATURE" -R "$GITHUB_REPOSITORY" --clobber
 
-      # BOTH matrix legs reach this step, each with its own per-arch filename,
+      # BOTH macOS legs reach this step, each with its own per-arch filename,
       # so the Release ends up carrying both DMGs.
       - name: Attach signed DMG to draft release
-        if: inputs.with_release_upload
+        if: runner.os == 'macOS' && inputs.with_release_upload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
@@ -441,9 +744,40 @@ jobs:
         run: gh release upload "$TAG" "$DMG_PATH" -R "$GITHUB_REPOSITORY" --clobber
 
       - name: Upload DMG as Actions artifact
-        if: "!inputs.with_release_upload"
+        if: runner.os == 'macOS' && !inputs.with_release_upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: opencompany-${{ inputs.tag }}-${{ matrix.target }}-dmg
+          name: opencompany-${{ inputs.tag }}-${{ matrix.settings.target }}-dmg
           path: ${{ steps.locate.outputs.dmg_path }}
           if-no-files-found: error
+
+      - name: Attach Windows installers to draft release
+        if: runner.os == 'Windows' && inputs.with_release_upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          FILES: ${{ steps.locate-windows.outputs.files }}
+        run: |
+          set -euo pipefail
+          mapfile -t files <<< "$FILES"
+          gh release upload "$TAG" "${files[@]}" -R "$GITHUB_REPOSITORY" --clobber
+
+      - name: Upload Windows installers as Actions artifact
+        if: runner.os == 'Windows' && !inputs.with_release_upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: opencompany-${{ inputs.tag }}-${{ matrix.settings.target }}-installers
+          path: ${{ steps.locate-windows.outputs.files }}
+          if-no-files-found: error
+
+      # Whatever happened above — including a failed or cancelled notarization
+      # — the private keys do not outlive the job on disk. Globs, not step
+      # outputs, so they also catch a key written before a failure left the
+      # output unset.
+      - name: Remove App Store Connect API key
+        if: always() && runner.os == 'macOS'
+        run: rm -f "${RUNNER_TEMP}"/AuthKey_*.p8
+
+      - name: Remove DigiCert client certificate
+        if: always() && runner.os == 'Windows'
+        run: rm -f "$(cygpath -u "$RUNNER_TEMP")"/sm-client-cert.p12

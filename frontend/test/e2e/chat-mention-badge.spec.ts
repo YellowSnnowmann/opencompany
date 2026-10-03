@@ -26,12 +26,17 @@ import { expect, test, type Page } from "@playwright/test";
 const COMPANY = "acme";
 
 const DESKS = [
-  // A third channel with no mentions of its own, so a test can open *somewhere*
-  // without the act of looking clearing a badge it is about to assert on. The
-  // console resolves an unknown channel id by falling back to the first desk,
-  // so a `general` that is not in this list would silently open Engineering —
-  // and clear exactly the badge under test.
-  { id: "general", name: "General", description: "The main line", members: ["ceo"] },
+  // `#general`, as the host lists it: first, the whole roster, immutable. It
+  // carries no mentions in the seed feed, so a test can open it without the
+  // act of looking clearing a badge it is about to assert on.
+  {
+    id: "general",
+    name: "General",
+    kind: "general",
+    mutable: false,
+    description: "The whole company",
+    members: ["ceo"],
+  },
   { id: "engineering", name: "Engineering", description: "Ships it", members: ["ceo"] },
   { id: "design", name: "Design", description: "Draws it", members: ["ceo"] },
 ];
@@ -181,6 +186,36 @@ test("a mention badge shows the count, per channel, and is not the unread badge"
     "title",
     /mentions of you here/i,
   );
+});
+
+test("a mention in #general badges #general and clears when it is opened", async ({ page }) => {
+  const feed: Note[] = [
+    {
+      id: "general-1",
+      kind: "mention",
+      subjectKind: "message",
+      subjectId: "20",
+      title: "Rae mentioned you in general",
+      createdAt: 4,
+      context: "general",
+    },
+    ...seedFeed(),
+  ];
+  await mockApi(page, feed, {
+    history: {
+      general: [
+        { id: "20", channel: "general", author: "ceo", text: "@you over here", atMillis: 4, mine: false },
+      ],
+    },
+  });
+  await openChannel(page, "design");
+  await expect(mentionBadge(page, "general")).toHaveText("@1");
+
+  await openChannel(page, "general");
+  await expect(mentionBadge(page, "general")).toHaveCount(0);
+  expect(marked.flatMap((m) => m.ids ?? [])).toContain("general-1");
+  expect(marked.flatMap((m) => m.ids ?? [])).not.toContain("eng-1");
+  await expect(mentionBadge(page, "Engineering")).toHaveText("@2");
 });
 
 test("opening a channel clears only its own mentions", async ({ page }) => {
@@ -393,31 +428,6 @@ test("a mention in an inline reply clears on channel open, with no thread to ope
   await expect
     .poll(() => marked.some((m) => m.ids?.includes("eng-inline-1")))
     .toBe(true);
-});
-
-test("a collapsed section aggregates its hidden mentions, same as unread", async ({ page }) => {
-  await mockApi(page, seedFeed());
-  await openChannel(page, "general");
-  await expect(mentionBadge(page, "Engineering")).toHaveText("@2");
-
-  // Engineering and Design both live in the "Channels" section. Collapsing it
-  // hides both rows, and with them the per-row badges under test above — the
-  // only place those three mentions can still be seen is the header. Exact, so
-  // the desktop rail's "Collapse channels" button (whose name contains the
-  // section's) is not mistaken for the section toggle.
-  await page.getByRole("button", { name: "Channels", exact: true }).click();
-
-  await expect(mentionBadge(page, "Engineering")).toHaveCount(0);
-  // Both rails (mobile, desktop) render the collapsed-section badge now, but
-  // only the `lg+` one is on screen at this viewport — and a CSS `section`
-  // locator matches hidden DOM, where the role-based locator above did not. So
-  // the section is narrowed to the visible rail before reading its badge.
-  const sectionMentions = page
-    .locator("section")
-    .filter({ hasText: "Channels" })
-    .filter({ visible: true })
-    .getByTestId("section-mentions");
-  await expect(sectionMentions).toHaveText("@3");
 });
 
 test("a host with no notification route simply shows no mention badges", async ({ page }) => {

@@ -29,13 +29,33 @@ pub(super) fn scripted_agent(
 /// As [`scripted_agent`], over an already-configured provider — the seam a
 /// case that needs the provider to *report usage* builds through.
 pub(super) fn scripted_agent_over(provider: ScriptedProvider) -> (Arc<CompanyAgent>, HarnessDeps) {
+    scripted_agent_over_arc(Arc::new(provider) as Arc<dyn HarnessModel>)
+}
+
+/// Build a [`CompanyAgent`] over a scripted provider and return a shared
+/// reference to the provider so tests can inspect per-call captures
+/// (`ScriptedProvider::captured`) after the run (issue #1871).
+pub(super) fn scripted_agent_with_capture(
+    outcomes: Vec<Result<String, String>>,
+) -> (Arc<CompanyAgent>, HarnessDeps, Arc<ScriptedProvider>) {
+    let provider = Arc::new(ScriptedProvider::new(outcomes));
+    let capture = Arc::clone(&provider);
+    let (agent, deps) = scripted_agent_over_arc(provider as Arc<dyn HarnessModel>);
+    (agent, deps, capture)
+}
+
+/// Internal: build a [`CompanyAgent`] with the given `Arc<dyn HarnessModel>`
+/// provider, shared by [`scripted_agent_over`] and [`scripted_agent_with_capture`]
+/// so both paths use exactly the same `HarnessDeps` structure.
+fn scripted_agent_over_arc(provider: Arc<dyn HarnessModel>) -> (Arc<CompanyAgent>, HarnessDeps) {
     let dir = tempfile::tempdir().expect("tempdir");
     let deps = HarnessDeps {
+        takeovers: Default::default(),
         emergency_gate: None,
         notifications: None,
         ledgers: None,
         ledger_registry: Default::default(),
-        provider: Arc::new(provider),
+        provider,
         provider_slug: "scripted".to_string(),
         serves: None,
         context: Arc::new(MockContext::default()),
@@ -66,6 +86,7 @@ pub(super) fn scripted_agent_over(provider: ScriptedProvider) -> (Arc<CompanyAge
         deep_trace: None,
         workflow_revisions: None,
         approval_requests: ApprovalRequestQueue::default(),
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities: crate::harness::toolbelt::CapabilityFilter::AllowAll,
@@ -85,7 +106,8 @@ pub(super) fn scripted_agent_over(provider: ScriptedProvider) -> (Arc<CompanyAge
         tenant_search: None,
         workspace: None,
     };
-    let roster = build_roster(&record(), &deps, &[], &HashMap::new()).expect("roster");
+    let roster =
+        build_roster(&test_runtime(), &record(), &deps, &[], &HashMap::new()).expect("roster");
     // Keep the tempdir alive for the agent's workspace by leaking it into the
     // test's lifetime — the process ends the test anyway.
     std::mem::forget(dir);
@@ -185,6 +207,8 @@ pub(super) fn custom_skill(slug: &str, enabled: bool, body: &str) -> SkillState 
         enabled,
         source: crate::ports::skills_state::SkillSource::Custom,
         custom_doc: Some(body.to_string()),
+        install: None,
+        updated_at_millis: None,
     }
 }
 
@@ -254,6 +278,7 @@ description = "Sets direction."
 
 pub(super) fn granting_record() -> CompanyRecord {
     CompanyRecord {
+        general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
         overlay_retired_agents: Vec::new(),
         overlay_agent_edits: Vec::new(),
@@ -288,8 +313,7 @@ pub(super) async fn ceo_tool_names(pool: &HarnessPool, id: &CompanyId) -> Vec<St
         .iter()
         .find(|a| a.agent_id == "ceo")
         .expect("ceo present");
-    let agent = ceo.agent.lock().await;
-    agent.tools().iter().map(|t| t.name().to_string()).collect()
+    ceo.tool_names()
 }
 
 /// Builds a `HarnessDeps` carrying the given plan + meter, for the total-
@@ -302,6 +326,7 @@ pub(super) fn deps_with_plan(
     plan: Option<crate::harness::capability_budget::CapabilityPlan>,
 ) -> HarnessDeps {
     HarnessDeps {
+        takeovers: Default::default(),
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -336,6 +361,7 @@ pub(super) fn deps_with_plan(
         deep_trace: None,
         workflow_revisions: None,
         approval_requests: ApprovalRequestQueue::default(),
+        approval_parker: None,
         secrets: None,
         web_allowed_domains: Vec::new(),
         capabilities: crate::harness::toolbelt::CapabilityFilter::AllowAll,
@@ -455,9 +481,8 @@ pub(super) fn belt(grants: &[&str], is_orchestrator: bool, wire_everything: bool
             crate::company::credentials::Credential::from_value("managed-platform-token"),
             crate::company::DEFAULT_SEARCH_DAILY_CALLS,
         ));
-        // A registered MCP server is what puts `mcp_list_servers`,
-        // `mcp_list_tools` and `mcp_call_tool` on the belt — the three
-        // tools issue #443 is about. Without one the coverage check would
+        // A registered MCP server is what puts `mcp_list_tools` and
+        // `mcp_call_tool` on the belt — the tools issue #443 is about. Without one the coverage check would
         // pass while never having looked at them.
         // A skills source dir is what puts `list_skills`, `describe_skill`
         // and `read_skill_resource` on the belt (named for skills since
@@ -483,6 +508,8 @@ pub(super) fn belt(grants: &[&str], is_orchestrator: bool, wire_everything: bool
             enabled: true,
             source: crate::company::mcp::McpSource::Runtime,
             auth: crate::company::mcp::AuthMaterial::None,
+            tool_policies: Default::default(),
+            tool_inventory: Default::default(),
         }];
     }
     let manifest_agent = ManifestAgent {
@@ -495,6 +522,7 @@ pub(super) fn belt(grants: &[&str], is_orchestrator: bool, wire_everything: bool
         tier: None,
         harness: None,
         tools: None,
+        skills: None,
         delegates_to: Vec::new(),
         context: None,
         budget_usd_daily: None,
@@ -512,14 +540,13 @@ pub(super) fn belt(grants: &[&str], is_orchestrator: bool, wire_everything: bool
         &CompanyId::new("acme"),
         "Acme",
         &manifest_agent,
-        policy,
+        std::sync::Arc::new(policy),
         &deps,
         &grants,
         &[],
         &[],
         None,
         is_orchestrator,
-        /* speech_enabled */ false,
     )
     .expect("agent builds");
     agent.tools().iter().map(|t| t.name().to_string()).collect()

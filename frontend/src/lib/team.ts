@@ -5,6 +5,7 @@
 
 import type { AgentDeskDto, TeamMemberDto } from "@/api/types";
 import { avatarRef, hashedFlavour } from "@/lib/avatar";
+import { birthLook, type NewMemberLook } from "@/lib/new-member-look";
 
 /** A desk a teammate sits on, as the roster read reports it. */
 export type TeamMemberDesk = AgentDeskDto;
@@ -22,6 +23,27 @@ export interface TeamMember {
    * resolvable reference, never absent — every teammate has a face.
    */
   avatar: string;
+  /**
+   * The mascot's chosen costume and colors, when `avatar` names a mascot and
+   * somebody has chosen a look. Undefined means the file's own default —
+   * exactly the `avatar`/no-choice rule, carried on three more fields instead
+   * of folded into one.
+   *
+   * Carried through untouched from `TeamMemberDto` so every mass-render
+   * surface built from a `TeamMember` — the roster grid, the org chart, the
+   * members pane, a DM sidebar row, a message row — draws the teammate's real
+   * look instead of the file's default, the same way the detail page already
+   * does. Before the host started sending these, `avatar` alone told this
+   * component "draw a mascot" without saying which one, and every one of
+   * those surfaces rendered the default costume for every mascot wearer.
+   */
+  mascotCostume?: string;
+  /** See {@link mascotCostume}. */
+  mascotSkinColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotHandColor?: string;
+  /** See {@link mascotCostume}. */
+  mascotMode?: string;
   /**
    * Whether this teammate has an inbox on the host. Read from `GET …/team` and
    * written by `PUT …/team/{id}/inbox` — never guessed client-side, so the Inbox
@@ -69,6 +91,22 @@ export interface TeamMember {
    * answer it.
    */
   isOrchestrator?: boolean;
+  /**
+   * Which declared harness this teammate runs on. Undefined means the one the
+   * company marks default — not "no harness".
+   */
+  harness?: string;
+  /**
+   * This teammate's own provider pin (a slug), set only alongside `model`.
+   * Undefined means the company default.
+   */
+  provider?: string;
+  /**
+   * This teammate's own model pin. Undefined means it declares none and
+   * inherits the company default — never "no model", and never a licence to
+   * name one the roster read did not send. See {@link modelSummary}.
+   */
+  model?: string;
   /**
    * The tool grants this teammate **actually holds** — its own `[[agent]].tools`
    * line narrowed by the company's `[tools].allow`, resolved by the host
@@ -149,6 +187,54 @@ export function roleSubtitle(name: string, role: string): string | null {
   return trimmed.toLowerCase() === name.trim().toLowerCase() ? null : trimmed;
 }
 
+/** A teammate's display name, falling back to its role and then to its id. */
+export function teammateName(id: string, team: TeamMemberDto[] | null): string {
+  const member = team?.find((candidate) => candidate.id === id);
+  return member?.name?.trim() || member?.role?.trim() || id;
+}
+
+/** What a roster card says a teammate thinks with. */
+export interface ModelSummary {
+  /** The one line the card draws. Never a fabricated model name. */
+  label: string;
+  /** Whether this teammate pins no model of its own. */
+  inherited: boolean;
+  /** The harness it is bound to, when it names one. */
+  harness?: string;
+}
+
+/**
+ * The card's answer to "which model does this teammate run on".
+ *
+ * An absent `model` means **the teammate declares none and inherits**, not
+ * that it has no model — every teammate resolves to one. The roster read
+ * carries no company default and no harness catalogue, so the inherited state
+ * is said in words: naming the inherited model here would mean either an extra
+ * fetch per card or an invented answer, and the wrong one of those is
+ * indistinguishable from a real pin once it is on screen.
+ *
+ * One inherited phrase covers every unpinned teammate, deliberately. The agent
+ * editor has two — "Company default" on a built-in harness, "Whatever the
+ * harness defaults to" on an ACP one — and picking between them needs the
+ * harness's `kind`, which comes from a catalogue this read does not carry and
+ * the grid does not fetch. Guessing from the harness id alone puts the ACP
+ * sentence on a teammate pinned to the built-in harness, which is a claim
+ * about where its model comes from that is simply false. "Inherits the
+ * default" is true either way, and the harness chip beside it says which
+ * default is in play.
+ */
+export function modelSummary(
+  member: Pick<TeamMember, "harness" | "provider" | "model">,
+): ModelSummary {
+  const { harness, provider, model } = member;
+  if (!model) {
+    return { label: "Inherits the default", inherited: true, harness };
+  }
+  // The provider is a slug rather than a label: the roster read carries no
+  // provider catalogue, and a guessed label would be a second invention.
+  return { label: provider ? `${provider} · ${model}` : model, inherited: false, harness };
+}
+
 /** Map a host roster entry into the console's team model. */
 export function fromDto(dto: TeamMemberDto): TeamMember {
   const name = dto.name?.trim() || dto.role;
@@ -163,6 +249,13 @@ export function fromDto(dto: TeamMemberDto): TeamMember {
     // needs "chosen" and "default" kept apart and reads the detail DTO, which
     // carries the raw field.
     avatar: avatarRef(dto.avatar, dto.id || name),
+    // Carried through as-is, same rule as `avatar` itself: `undefined` means
+    // "nobody has chosen" (or a host predating the field), and coalescing it
+    // to a picked look here would be a fabrication the picker never made.
+    mascotCostume: dto.mascotCostume,
+    mascotSkinColor: dto.mascotSkinColor,
+    mascotHandColor: dto.mascotHandColor,
+    mascotMode: dto.mascotMode,
     inboxEnabled: dto.inboxEnabled ?? false,
     global: dto.global,
     // Carried through as-is: `undefined` means uncapped and must stay
@@ -178,6 +271,12 @@ export function fromDto(dto: TeamMemberDto): TeamMember {
     // either into a tier string is the bug this closed.
     tier: dto.tier,
     isOrchestrator: dto.isOrchestrator,
+    // Carried through untouched for the same reason: undefined is "declares
+    // none and inherits", which the card renders in words rather than as a
+    // resolved name it was never given.
+    harness: dto.harness,
+    provider: dto.provider,
+    model: dto.model,
     // A host predating issue #601 sends neither, and an empty list is the
     // honest reading of that: it draws no tools and no desk rather than a
     // guess at either.
@@ -243,16 +342,25 @@ function roleHash(role: string): string {
  * The starter roster keys on role because that is what distinguishes its
  * fabricated rows.
  */
-export function newMember(fields: { name: string; role: string; description: string }): TeamMember {
+export function newMember(
+  fields: { name: string; role: string; description: string } & NewMemberLook,
+): TeamMember {
   const memberId = localMemberId(fields.name);
+  const look = birthLook(fields);
   return {
     id: memberId,
     name: fields.name.trim(),
     role: fields.role.trim(),
     description: fields.description.trim(),
     tone: toneFor(memberId),
-    // Nobody has chosen a face for a teammate that was created a moment ago.
-    avatar: avatarFor(memberId),
+    // The face the operator picked in the dialog, else the one hashed from the
+    // id. With no host to write it to, this row is the only place the look
+    // lives — for as long as the row does, which is until the next reload.
+    avatar: look.avatar ?? avatarFor(memberId),
+    mascotMode: look.mascotMode,
+    mascotCostume: look.mascotCostume,
+    mascotSkinColor: look.mascotSkinColor,
+    mascotHandColor: look.mascotHandColor,
     inboxEnabled: false,
     // Nothing on a host has granted this teammate anything or seated it
     // anywhere yet, so both are stated empty rather than guessed.

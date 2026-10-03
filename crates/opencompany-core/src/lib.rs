@@ -4,6 +4,16 @@
 //! TinyHumans Rust modules. The default build stays small; enable the `tiny`
 //! feature to compile against the sibling `tiny*` crates.
 
+// The default rustc recursion limit (128) is occasionally exhausted by the
+// deeply nested async generator types that arise when evaluating the `Send`
+// bound on the agent-turn future chain. The limit here was raised to 256 when
+// the empty-retry logic in `run_with_steer` (issue #1871) pushed the
+// evaluator over 128 (E0275 in the test binary). The generated async futures in
+// this crate embed OpenHuman's own generator types which already approach the
+// limit; this gives headroom for future growth without forcing `Box::pin`
+// workarounds on every new field.
+#![recursion_limit = "256"]
+
 pub mod analytics;
 pub mod app;
 pub mod brain;
@@ -40,11 +50,13 @@ pub mod globals;
 /// echo-brained, offline behaviour unchanged.
 #[cfg(feature = "openhuman")]
 pub mod harness;
-/// Hive-mind desks: a `[[group_chat]]` with two or more members answers an
-/// operator message as a bounded deliberation episode rather than as one
-/// teammate's turn. Ungated — the episode machine is pure and the routing
-/// decision is one the default build makes as readily as the harness one does.
-pub mod hivemind;
+/// Hive desks (plan `hive-desks`): tinyhivemind's completion-driven episodes
+/// hosted over the embedded OpenHuman runtime, and the MCP server through
+/// which the agents speak and reach OpenCompany's own tools. Ungated at the
+/// root because the routing block, the episode wire shapes and the journal
+/// folds are read by the default build (manifest, `ports::types`,
+/// `chat_history`); the modules that drive a runtime are gated inside it.
+pub mod hive;
 /// Turning dropped files and links into memory: extraction, then chunking.
 /// The console's Brain drop zone is the caller; the ports are unchanged.
 pub mod ingest;
@@ -63,7 +75,6 @@ pub mod metering;
 /// Only the bodies that name a `sentry::` type sit behind the
 /// `crash-reporting` feature.
 pub mod observability;
-pub mod openhuman;
 /// PayPal wallet + transaction visibility (issue #789).
 #[cfg(feature = "paypal")]
 pub mod paypal;

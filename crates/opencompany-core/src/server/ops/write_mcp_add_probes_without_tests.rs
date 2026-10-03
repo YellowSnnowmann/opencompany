@@ -208,6 +208,7 @@ async fn task_detail_assembles_timeline_and_lineage() {
     let runtime = state.registry().get(&company).unwrap();
 
     let card = |id: &str, title: &str, parent: Option<&str>| TaskRecord {
+        opened_by: None,
         id: id.into(),
         title: TaskTitle::authored(title),
         note: None,
@@ -253,6 +254,7 @@ async fn task_detail_assembles_timeline_and_lineage() {
             steps: Vec::new(),
             task_id: Some("t-1".into()),
             outputs: Vec::new(),
+            episode: None,
         },
         // An ordinary chat reply — excluded.
         CompanyEvent::AgentReply {
@@ -266,6 +268,7 @@ async fn task_detail_assembles_timeline_and_lineage() {
             steps: Vec::new(),
             task_id: None,
             outputs: Vec::new(),
+            episode: None,
         },
         // Tagged to a different task — excluded.
         CompanyEvent::AgentReply {
@@ -279,6 +282,7 @@ async fn task_detail_assembles_timeline_and_lineage() {
             steps: Vec::new(),
             task_id: Some("t-other".into()),
             outputs: Vec::new(),
+            episode: None,
         },
         CompanyEvent::DeskTaskCompleted {
             task_id: "t-1".into(),
@@ -305,7 +309,7 @@ async fn task_detail_assembles_timeline_and_lineage() {
         .iter()
         .map(|e| e["kind"].as_str().unwrap())
         .collect();
-    assert_eq!(kinds, vec!["dispatched", "reply", "completed"]);
+    assert_eq!(kinds, vec!["card", "dispatched", "reply", "completed"]);
 
     let raw = serde_json::to_string(&body["timeline"]).unwrap();
     assert!(

@@ -126,6 +126,32 @@ struct TeamMemberDto {
     /// the bug: it is indistinguishable from a declaration on the wire.
     #[serde(skip_serializing_if = "Option::is_none")]
     tier: Option<String>,
+    /// Which `[[harness]]` this teammate runs its turns on, by declared id —
+    /// the same field, from the same helper, as `GET …/team/{agent_id}`.
+    ///
+    /// Absent means the harness marked `default = true`, **not** "no harness":
+    /// every teammate resolves to one. Skipped rather than defaulted for
+    /// `tier`'s reason — a default is indistinguishable from a declaration on
+    /// the wire, and a roster card that named the default as though this
+    /// teammate had pinned it would be claiming something the record does not
+    /// say.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    harness: Option<String>,
+    /// This teammate's own model pin: the hint forwarded to an ACP harness, or
+    /// the model half of its `{provider, model}` pair on a built-in one.
+    ///
+    /// Absent means it declares none and inherits the company default. Carried
+    /// on the list for the reason `tier` and `desks` are: the roster grid draws
+    /// a card per teammate, and a field the list omitted was a field the card
+    /// had to invent or leave blank — with no way to resolve it short of an
+    /// N+1 over the detail read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    /// The provider half of this teammate's own `{provider, model}` pair, set
+    /// only together with [`model`](Self::model) and only meaningful on a
+    /// built-in harness. Absent means the company default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider: Option<String>,
     /// Whether this teammate is the company's orchestrator, resolved by the
     /// roster rule (tagged tier first, else the first declared agent) — the
     /// same field, from the same helper, as the detail read (issue #643).
@@ -154,6 +180,19 @@ struct TeamMemberDto {
     /// grant, `[globs]` = narrow), and a row that dropped the ceiling would leave
     /// a client no way to say which of the three it was looking at.
     tools: super::team_agent::AgentToolsDto,
+    /// This teammate's skill scope, in the **same shape and from the same
+    /// constructor** as `GET …/team/{agent_id}` — the three states the record
+    /// carries (`requested` / `companyAvailable` / `effective` / `overridden`).
+    ///
+    /// On the list for the reason `tools` is, and for one more: a skill's detail
+    /// panel scopes **one skill across many teammates**, and to tick teammate B
+    /// it has to send B's whole `skills` list. The next list is a function of
+    /// B's *stored* one — `["a","b"]` plus the slug is `["a","b",S]`, never
+    /// `[S]` — and a surface that did not hold B's stored list would strip every
+    /// other skill B has while reporting success. The per-skill `agents`
+    /// projection cannot carry it: that payload is O(skills × agents × slugs).
+    /// This one read carries it for the whole roster.
+    skills: super::team_agent::AgentSkillsDto,
     /// The desks this teammate sits on, resolved through the same helper the
     /// detail read uses (issue #601). Desks are the company's real grouping —
     /// the overview graph draws its department pillars from these.
@@ -216,6 +255,35 @@ struct TeamMemberDto {
     /// no way to offer "reset to the default face".
     #[serde(skip_serializing_if = "Option::is_none")]
     avatar: Option<String>,
+    /// The mascot costume this teammate wears, when somebody has chosen one —
+    /// the same field, from the same helper, as `GET …/team/{agent_id}`
+    /// (`docs/spec/runtime/avatars.md`).
+    ///
+    /// Absent means the file's own default costume. Carried on the roster read
+    /// for the reason `avatar` itself is: every mass-render surface built from
+    /// this list — the chat header, the DM sidebar, the org chart, the members
+    /// pane, a message row — drew the id-hashed default costume for *every*
+    /// mascot wearer until this shipped, because `avatar` alone told a caller
+    /// "this is a mascot" but not which one. Only `GET …/team/{agent_id}`
+    /// (opened by clicking that very avatar) carried the real look, so a
+    /// teammate's face changed the moment its own detail page opened — the gap
+    /// this field closes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_costume: Option<String>,
+    /// Whether the mascot moves (`"animated"`) or holds one pose (`"static"`),
+    /// when somebody has chosen one. See [`Self::mascot_costume`] for why this
+    /// is on the list read: a teammate set to `static` must hold still in a chat
+    /// gutter too, not only on its profile sheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_mode: Option<String>,
+    /// The mascot's skin (body) color, when somebody has chosen one. See
+    /// [`Self::mascot_costume`] for why this is on the list read at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_skin_color: Option<String>,
+    /// The mascot's hand/accent color, when somebody has chosen one. See
+    /// [`Self::mascot_costume`] for why this is on the list read at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mascot_hand_color: Option<String>,
     /// Whether this teammate came from the **global baseline**
     /// (`docs/spec/runtime/globals.md`) rather than from this company — the
     /// same `Agent::global` marker the merge itself sets (issue #1404).
@@ -261,6 +329,28 @@ struct AddMember {
     /// the hashed default.
     #[serde(default)]
     avatar: Option<String>,
+    /// The mascot's display mode, costume and two colors this teammate is born
+    /// wearing (`docs/spec/runtime/avatars.md`), so the create dialog's look is
+    /// one write rather than a create and a `PATCH`. Each is validated against
+    /// the same closed list the `PATCH` route uses
+    /// ([`crate::company::mascot::parse_choices`]); a plain `Option` for the same
+    /// reason `avatar` is one — at creation there is nothing to reset to, so
+    /// `null`, omitted and blank all mean the file's own default. Meaningful
+    /// only alongside a `mascot:` `avatar`, but not refused without one, the
+    /// same latitude the `PATCH` gives a picker previewing a look. Open to any
+    /// member, like `avatar`: they decide nothing about what the company can
+    /// reach.
+    #[serde(default)]
+    mascot_mode: Option<String>,
+    /// See [`Self::mascot_mode`].
+    #[serde(default)]
+    mascot_costume: Option<String>,
+    /// See [`Self::mascot_mode`].
+    #[serde(default)]
+    mascot_skin_color: Option<String>,
+    /// See [`Self::mascot_mode`].
+    #[serde(default)]
+    mascot_hand_color: Option<String>,
     /// The job shape that decides this teammate's tool belt, sent by the
     /// first-run setup build-out (issue #1674). When present it derives the
     /// grant list through
@@ -349,8 +439,14 @@ pub(super) struct AgentPath {
 /// rather than 404ing.
 ///
 /// [`InboxStore`]: crate::ports::InboxStore
-async fn list_team(company: ScopedCompany) -> Result<Json<Vec<TeamMemberDto>>, ApiError> {
+async fn list_team(
+    company: ScopedCompany,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<TeamMemberDto>>, ApiError> {
     let record = company.runtime.store().load(company.id()).await?;
+    // Resolved once for the roster, not once per row: the ceiling is the
+    // company's, so N reads of it would be N answers to the same question.
+    let company_skills = super::team_agent::company_enabled_skills(&state, &company).await?;
     // Inbox metadata is keyed by agent id, so the roster can be tagged without
     // a per-teammate read. An inbox that was never toggled is simply absent.
     let enabled_inboxes: std::collections::HashMap<String, bool> = company
@@ -384,11 +480,14 @@ async fn list_team(company: ScopedCompany) -> Result<Json<Vec<TeamMemberDto>>, A
                     member_row(
                         &record,
                         &agent.id,
-                        agent.name.clone(),
-                        agent.role.clone(),
-                        agent.description.clone(),
+                        MemberIdentity {
+                            name: agent.name.clone(),
+                            role: agent.role.clone(),
+                            description: agent.description.clone(),
+                        },
                         enabled(&agent.id),
                         &spent,
+                        &company_skills,
                     )
                 })
                 .collect();
@@ -396,17 +495,31 @@ async fn list_team(company: ScopedCompany) -> Result<Json<Vec<TeamMemberDto>>, A
                 member_row(
                     &record,
                     &agent.id,
-                    Some(agent.name.clone()),
-                    agent.role.clone(),
-                    agent.description.clone(),
+                    MemberIdentity {
+                        name: Some(agent.name.clone()),
+                        role: agent.role.clone(),
+                        description: agent.description.clone(),
+                    },
                     enabled(&agent.id),
                     &spent,
+                    &company_skills,
                 )
             }));
             members
         })
         .unwrap_or_default();
     Ok(Json(members))
+}
+
+/// The three fields a roster row is named by, resolved by the caller.
+///
+/// Carried together because they are resolved together — through the record, so
+/// a manifest teammate an operator has renamed from the console answers under
+/// the name it now has whichever route is asking.
+struct MemberIdentity {
+    name: Option<String>,
+    role: String,
+    description: Option<String>,
 }
 
 /// Builds one roster row, resolving the cap and its attribution through the
@@ -417,27 +530,33 @@ async fn list_team(company: ScopedCompany) -> Result<Json<Vec<TeamMemberDto>>, A
 fn member_row(
     record: &CompanyRecord,
     agent_id: &str,
-    name: Option<String>,
-    role: String,
-    description: Option<String>,
+    identity: MemberIdentity,
     inbox_enabled: bool,
     spent: &dyn Fn(&str) -> Option<f64>,
+    company_enabled_skills: &[String],
 ) -> TeamMemberDto {
     let cap = record.effective_budget(agent_id);
     let attribution = record.budget_override(agent_id);
     TeamMemberDto {
         id: agent_id.to_string(),
-        name,
-        role,
-        description,
-        // All four through `team_agent`'s helpers, never recomputed here: the
+        name: identity.name,
+        role: identity.role,
+        description: identity.description,
+        // Through `team_agent`'s helpers, never recomputed here: the
         // roster list and the detail read must not be able to disagree about
         // the same teammate (issues #264, #601, #643). A second copy of the
         // orchestrator rule in particular would be a copy of a rule that has
         // two arms, and the arm it dropped would be invisible on screen.
         tier: super::team_agent::declared_tier(record, agent_id),
+        harness: super::team_agent::declared_harness(record, agent_id),
+        model: super::team_agent::declared_model(record, agent_id),
+        provider: super::team_agent::declared_provider(record, agent_id),
         is_orchestrator: super::team_agent::is_orchestrator(record, agent_id),
         tools: super::team_agent::agent_tools(record, agent_id),
+        // Takes the ceiling as an argument because resolving a company's enabled
+        // set is I/O and this row is built synchronously — the same reason
+        // `agent_skills` itself takes it rather than reading the record.
+        skills: super::team_agent::agent_skills(record, agent_id, company_enabled_skills),
         desks: super::team_agent::desks_for(record, agent_id),
         // Read off the effective agent, so an overlay teammate and a manifest
         // one answer the same way.
@@ -458,6 +577,14 @@ fn member_row(
         // alike, so both arms of the list above get the chosen face with no
         // second lookup to keep in step.
         avatar: record.effective_avatar(agent_id),
+        // Same three helpers `GET …/team/{agent_id}` resolves its own
+        // mascot_costume/skin_color/hand_color from (issue: mass-render
+        // surfaces showed the default look while the detail page — reading
+        // these same helpers already — showed the real one).
+        mascot_costume: record.effective_mascot_costume(agent_id),
+        mascot_mode: record.effective_mascot_mode(agent_id),
+        mascot_skin_color: record.effective_mascot_skin_color(agent_id),
+        mascot_hand_color: record.effective_mascot_hand_color(agent_id),
         // Through the same helper as the four above, for the same reason: the
         // roster read is what the first-run gate is decided on, so a second
         // copy of the provenance rule here is a second thing to forget.
@@ -500,7 +627,7 @@ pub(super) async fn daily_spend_samples(
 /// Every roster teammate's id — manifest agents first, then overlay teammates,
 /// minus the ones the operator has removed. The same union
 /// `CompanyRecord::is_roster_agent` accepts.
-fn roster_ids(record: &CompanyRecord) -> impl Iterator<Item = &String> {
+pub(crate) fn roster_ids(record: &CompanyRecord) -> impl Iterator<Item = &String> {
     record
         .manifest
         .agents
@@ -591,6 +718,17 @@ async fn add_member(
         }
         None => None,
     };
+
+    // The mascot look needs no I/O to validate — four closed, in-memory lists —
+    // so it is checked here, before the lock and before anything is written: a
+    // refused value must not leave a teammate behind wearing none of it.
+    let mascot = crate::company::mascot::parse_choices(
+        body.mascot_mode.as_deref(),
+        body.mascot_costume.as_deref(),
+        body.mascot_skin_color.as_deref(),
+        body.mascot_hand_color.as_deref(),
+    )
+    .map_err(|e| ApiError(e).into_response())?;
 
     // Serialize per-company writes so concurrent console POST /team and
     // orchestrator add_agent calls can't clobber each other's overlay_agents.
@@ -684,10 +822,11 @@ async fn add_member(
         // "inherit" and "narrow"; the deny-all state is reachable by editing the
         // teammate afterwards (`PATCH …/team/{id}` with `tools: []`).
         tools: if tools.is_empty() { None } else { Some(tools) },
+        skills: None,
         model: None,
         harness: None,
     };
-    record.overlay_agents.push(agent.clone());
+    let general_delta = record.hire_overlay_agent(agent.clone());
     let attribution = author.map(|admin| BudgetOverride {
         agent_id: agent.id.clone(),
         budget_usd_daily: body.budget_usd_daily,
@@ -730,6 +869,19 @@ async fn add_member(
             ..Default::default()
         });
     }
+    // The look, in the same atomic save as the teammate and its face. Fields
+    // left `None` are left alone by the upsert, so a partial look writes only
+    // what was chosen.
+    if !mascot.is_empty() {
+        record.upsert_agent_override(AgentOverride {
+            agent_id: agent.id.clone(),
+            mascot_mode: mascot.mode.clone(),
+            mascot_costume: mascot.costume.clone(),
+            mascot_skin_color: mascot.skin_color.clone(),
+            mascot_hand_color: mascot.hand_color.clone(),
+            ..Default::default()
+        });
+    }
     company.runtime.store().save(&record).await?;
     // The audit row for a teammate coming into existence.
     //
@@ -756,14 +908,25 @@ async fn add_member(
     {
         tracing::warn!(error = %err, "teammate-added audit row could not be journaled");
     }
+    journal_general_membership(&company, general_delta).await;
     // A brand-new overlay teammate has no `[[agent]]` row at all, so it declares
     // no tier, holds the company's standard grant, and sits on no desk until
     // somebody adds it to one. Resolved through the shared helpers rather than
     // written out here, so this response cannot drift from the two reads
     // (issues #601, #643).
     let tier = super::team_agent::declared_tier(&record, &agent.id);
+    let harness = super::team_agent::declared_harness(&record, &agent.id);
+    let model = super::team_agent::declared_model(&record, &agent.id);
+    let provider = super::team_agent::declared_provider(&record, &agent.id);
     let is_orchestrator = super::team_agent::is_orchestrator(&record, &agent.id);
     let tools = super::team_agent::agent_tools(&record, &agent.id);
+    let skills = super::team_agent::agent_skills(
+        &record,
+        &agent.id,
+        &super::team_agent::company_enabled_skills(&state, &company)
+            .await
+            .map_err(|e| e.into_response())?,
+    );
     let desks = super::team_agent::desks_for(&record, &agent.id);
     Ok(Json(TeamMemberDto {
         id: agent.id,
@@ -771,8 +934,12 @@ async fn add_member(
         role: agent.role,
         description: agent.description,
         tier,
+        harness,
+        model,
+        provider,
         is_orchestrator,
         tools,
+        skills,
         desks,
         // A console-created teammate delegates nowhere until somebody says so:
         // `delegates_to` is a manifest field and the overlay carries none.
@@ -788,6 +955,13 @@ async fn add_member(
         budget_set_by: attribution.as_ref().map(|entry| entry.set_by.id.clone()),
         budget_set_at_millis: attribution.as_ref().map(|entry| entry.at_millis),
         avatar: resolved_avatar,
+        // What this request chose, echoed the way `avatar` is, so the console can
+        // tell the host took them (an older host echoes none, and the console
+        // then falls back to a `PATCH`) and draws the new card in its own look.
+        mascot_costume: mascot.costume,
+        mascot_mode: mascot.mode,
+        mascot_skin_color: mascot.skin_color,
+        mascot_hand_color: mascot.hand_color,
         // An operator just created this one, so it is by construction not from
         // the baseline — the merge only ever appends to the manifest roster.
         // It is also exactly the write that closes the first-run gate.
@@ -824,35 +998,14 @@ async fn remove_member(
         )));
     }
 
-    // Tombstone the operator-feed divert before it can be lost (issue #1781
-    // review, Codex P2 follow-up to the desk-deletion fix): a manifest
-    // teammate at the literal id `operator` is already covered below —
-    // `retire_agent` tombstones it under the same key
-    // `operator_feed_channel`'s own `is_retired` check reads — but an
-    // *overlay* teammate is deleted outright with no tombstone at all. If
-    // this removal is what's currently holding the divert (id or, via
-    // `is_roster_agent`, nothing else does for a teammate — desks are the
-    // only case matched by display name), the fallback address must stay
-    // fixed after the removal exactly as `delete_desk` already keeps it
-    // fixed after a colliding desk's removal — see
-    // `CompanyRecord::divert_operator_feed_permanently`'s doc.
-    if record.operator_feed_channel()
-        == crate::runtime::channel::OPERATOR_CHANNEL_COLLISION_FALLBACK
-    {
-        record.divert_operator_feed_permanently();
-    }
     let is_manifest = record.manifest.agents.iter().any(|a| a.id == agent_id);
-    if is_manifest {
-        // A tombstone, not a manifest rewrite: `company.toml` and the global
-        // baseline merged into it are re-read on every rebuild, so a teammate
-        // "removed" by editing the roster would simply come back. Recorded here
-        // and filtered out by `CompanyRecord::effective_agents`, which is what
-        // takes the teammate off the roster, off its desks and out of the
-        // harness build rather than merely off the Team page.
-        record.retire_agent(&agent_id);
+    // A manifest teammate is tombstoned rather than edited out of
+    // `company.toml`, which is re-read on every rebuild.
+    let general_delta = if is_manifest {
+        record.retire_agent(&agent_id)
     } else {
-        record.overlay_agents.retain(|a| a.id != agent_id);
-    }
+        record.remove_overlay_agent(&agent_id).1
+    };
     // Desk seats an operator added are dropped with the teammate either way. A
     // blueprint seat is left alone — `effective_desk_members` already filters a
     // retired teammate out of it, and the manifest is not rewritten.
@@ -878,7 +1031,22 @@ async fn remove_member(
     // for a typo'd name rather than a hazard to design around.
     record.overlay_budgets.retain(|b| b.agent_id != agent_id);
     company.runtime.store().save(&record).await?;
+    journal_general_membership(&company, general_delta).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Journals a `#general` membership change, best-effort: the roster write is
+/// already durable, so a refused row must not fail the request.
+async fn journal_general_membership(
+    company: &ScopedCompany,
+    delta: crate::ports::types::GeneralMembershipDelta,
+) {
+    let Some(event) = delta.into_event(company.actor.clone()) else {
+        return;
+    };
+    if let Err(err) = company.runtime.events().append(company.id(), event).await {
+        tracing::warn!(error = %err, "#general membership change could not be journaled");
+    }
 }
 
 /// `PUT {scope}/team/{agent_id}/budget` — set, change, or remove a teammate's
@@ -923,7 +1091,7 @@ async fn set_budget(
     record.upsert_budget_override(entry);
     company.runtime.store().save(&record).await?;
 
-    updated_row(&company, &record, &agent_id).await
+    updated_row(&company, &state, &record, &agent_id).await
 }
 
 /// `DELETE {scope}/team/{agent_id}/budget` — drop the override so the manifest
@@ -954,7 +1122,7 @@ async fn clear_budget(
     record.overlay_budgets.retain(|b| b.agent_id != agent_id);
     company.runtime.store().save(&record).await?;
 
-    updated_row(&company, &record, &agent_id).await
+    updated_row(&company, &state, &record, &agent_id).await
 }
 
 /// Rejects a cap that is not a spendable amount of money, mirroring the
@@ -1020,6 +1188,7 @@ fn require_roster_teammate(record: &CompanyRecord, agent_id: &str) -> Option<Res
 /// card from the response instead of refetching the whole team.
 async fn updated_row(
     company: &ScopedCompany,
+    state: &AppState,
     record: &CompanyRecord,
     agent_id: &str,
 ) -> Result<Json<TeamMemberDto>, crate::server::Rejection> {
@@ -1046,31 +1215,33 @@ async fn updated_row(
     // touched it — a rename would show on the roster and vanish the moment a cap
     // was set.
     let overlay = record.overlay_agents.iter().find(|a| a.id == agent_id);
-    let (name, role, description) = match overlay {
-        Some(agent) => (
-            Some(agent.name.clone()),
-            agent.role.clone(),
-            agent.description.clone(),
-        ),
+    let identity = match overlay {
+        Some(agent) => MemberIdentity {
+            name: Some(agent.name.clone()),
+            role: agent.role.clone(),
+            description: agent.description.clone(),
+        },
         None => {
             let agent = record
                 .effective_agent(agent_id)
                 .expect("roster membership was checked before the write");
-            (
-                agent.name.clone(),
-                agent.role.clone(),
-                agent.description.clone(),
-            )
+            MemberIdentity {
+                name: agent.name.clone(),
+                role: agent.role.clone(),
+                description: agent.description.clone(),
+            }
         }
     };
+    let company_skills = super::team_agent::company_enabled_skills(state, company)
+        .await
+        .map_err(|e| e.into_response())?;
     Ok(Json(member_row(
         record,
         agent_id,
-        name,
-        role,
-        description,
+        identity,
         inbox_enabled,
         &spent,
+        &company_skills,
     )))
 }
 
@@ -1161,3 +1332,6 @@ mod tests_an_admin_can_set;
 #[cfg(test)]
 #[path = "team_an_uncapped_company_is_tests.rs"]
 mod tests_an_uncapped_company_is;
+#[cfg(test)]
+#[path = "team_general_channel_tests.rs"]
+mod tests_general_channel;

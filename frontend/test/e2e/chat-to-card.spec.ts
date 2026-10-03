@@ -67,6 +67,7 @@ async function openThread(page: Page, channelId: string) {
 type Task = {
   id: string;
   title: string;
+  note?: string;
   originChatId?: string;
   originParent?: number;
 };
@@ -147,19 +148,45 @@ test("a card raised from a channel line links back to the channel", async ({
   // The Engineering desk's own channel, not merely some channel: a regression
   // that landed the jump on the wrong one would still match a bare `/.+/`.
   await expect(page).toHaveURL(/#\/chat\/engineering(?:[/?]|$)/);
-  // `data-active` is a boolean attribute the sidebar row renders empty when
-  // set and omits when not, so the assertion is on its presence.
+  // The conversation list marks the channel the jump landed on as the current
+  // page (Room is not a nav row any more; the list is the sidebar's front).
   await expect(
-    page
-      .locator("[data-slot=sidebar-content]")
-      .getByRole("button", { name: "Room", exact: true }),
-  ).toHaveAttribute("data-active", "");
+    page.locator('[data-testid="room-rail-slot"] [aria-current="page"]'),
+  ).toHaveCount(1);
 
   // And Back returns to the card, because the jump went through the address
   // rather than through shell state the history knows nothing about.
   await page.goBack();
   await expect(page).toHaveURL(/#\/company\/tasks\/.+/);
   await expect(origin).toBeVisible();
+});
+
+test("a card raised in #general has origin `general` and links back to #general", async ({
+  page,
+  request,
+}) => {
+  test.skip(!LIVE_BRAIN, LIVE_BRAIN_REASON);
+  const API = "/api/v1/company";
+  const before = await request.get(`${API}/tasks`);
+  expect(before.ok(), await before.text()).toBeTruthy();
+  const previousIds = new Set(((await before.json()) as Task[]).map((task) => task.id));
+  const marker = Date.now();
+  const posted = await request.post(`${API}/chat`, {
+    data: { text: `track the general launch SPAWNONE ${marker}`, chat: "general" },
+  });
+  expect(posted.ok(), await posted.text()).toBeTruthy();
+
+  const card = await taskMatching(
+    request,
+    (task) => task.originChatId === "general" && !previousIds.has(task.id),
+  );
+
+  await page.goto(`/#/company/tasks/${card.id}`);
+  await dismissWelcome(page);
+  const origin = page.getByRole("button", { name: /Opened from chat/ });
+  await expect(origin).toBeVisible({ timeout: 15_000 });
+  await origin.click();
+  await expect(page).toHaveURL(/#\/chat\/general(?:[/?]|$)/);
 });
 
 /**
@@ -230,32 +257,80 @@ test("a card raised inside a thread opens that thread on the jump back, not just
 
 test("a card the orchestrator opens is chipped in chat, and survives a reload", async ({
   page,
+  request,
 }) => {
   // Only THIS test needs the scripted backend — the one above it drives the
   // console's own "Add to board" action and passes against a default host, so
   // the skip is per-test rather than per-file.
   test.skip(!LIVE_BRAIN, LIVE_BRAIN_REASON);
 
-  await openThread(page, "");
+  await openThread(page, "general");
 
   // `SPAWNONE` is the scripted backend's cue to call `spawn_task` once.
-  const prompt = `please track this SPAWNONE ${Date.now()}`;
+  const before = await request.get("/api/v1/company/tasks");
+  expect(before.ok(), await before.text()).toBeTruthy();
+  const previousIds = new Set(((await before.json()) as Task[]).map((task) => task.id));
+  const marker = `${Date.now()}`;
+  const prompt = `please track this SPAWNONE ${marker}`;
   await page.getByPlaceholder(/^Message /).fill(prompt);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
+  const card = await taskMatching(
+    request,
+    (task) =>
+      task.originChatId === "general" &&
+      task.title.includes(marker) &&
+      !previousIds.has(task.id),
+  );
+  const href = `#/company/tasks/${card.id}`;
+
   // Live: the reply bubble says a card was opened.
-  const chip = page.getByRole("link", { name: /Card opened/ }).last();
+  const chip = page.locator(`a[href="${href}"]`, { hasText: "Card opened" });
   await expect(chip).toBeVisible({ timeout: 60_000 });
-  const href = await chip.getAttribute("href");
-  expect(href).toMatch(/^#\/company\/tasks\/.+/);
+  await expect(chip).toHaveAttribute("href", href);
 
   // After a reload the transcript is rehydrated from `chat/history`, so a chip
   // that only existed on the live POST response would vanish here.
   await page.reload();
-  await openThread(page, "");
-  const rehydrated = page.getByRole("link", { name: /Card opened/ }).last();
+  await openThread(page, "general");
+  const rehydrated = page.locator(`a[href="${href}"]`, { hasText: "Card opened" });
   await expect(rehydrated).toBeVisible({ timeout: 30_000 });
-  expect(await rehydrated.getAttribute("href")).toBe(href);
+  await expect(rehydrated).toHaveAttribute("href", href);
+});
+
+test("a persisted chat card is rendered and rehydrated on the default lane", async ({ page }) => {
+  test.skip(LIVE_BRAIN, "the live-brain lane covers the real spawn_task flow above");
+
+  const taskId = `default-lane-card-${Date.now()}`;
+  const href = `#/company/tasks/${taskId}`;
+  await page.route("**/chat/history?*", async (route) => {
+    const desk = new URL(route.request().url()).searchParams.get("desk");
+    if (desk !== "general") return route.continue();
+    return route.fulfill({
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([
+        {
+          id: "default-lane-card-message",
+          channel: "general",
+          author: "orchestrator",
+          text: "I opened a card for this request.",
+          atMillis: Date.now(),
+          mine: false,
+          taskId,
+        },
+      ]),
+    });
+  });
+
+  await openThread(page, "general");
+  const chip = page.locator(`a[href="${href}"]`, { hasText: "Card opened" });
+  await expect(chip).toBeVisible({ timeout: 30_000 });
+  await expect(chip).toHaveAttribute("href", href);
+
+  await page.reload();
+  await expect(chip).toBeVisible({ timeout: 30_000 });
+  await expect(chip).toHaveAttribute("href", href);
 });
 
 /**

@@ -117,8 +117,8 @@ mod live {
         CreateCustomerArgs, GetCustomerArgs, GetInvoiceArgs, ListInvoicesArgs, SendInvoiceArgs,
     };
 
-    use oh::tools::traits::{PermissionLevel, Tool, ToolResult};
     use openhuman_core as oh;
+    use tinytools::{PermissionLevel, Tool, ToolResult};
 
     /// Builds the five per-tenant Chargebee tools over a resolved connection.
     pub fn chargebee_tools(config: &TenantChargebee) -> Vec<Box<dyn Tool>> {
@@ -385,7 +385,12 @@ mod live {
                     "No Chargebee customer matches {}.",
                     args.email
                 ))),
-                other => Ok(render("chargebee_get_customer", other)),
+                Err(e) => Ok(ToolResult::error(format!(
+                    "Could not tell whether a Chargebee customer exists for {}: {e}. Do not \
+                     create one because of this — try the lookup again.",
+                    args.email
+                ))),
+                found => Ok(render("chargebee_get_customer", found)),
             }
         }
     }
