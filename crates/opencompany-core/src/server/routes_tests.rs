@@ -296,7 +296,7 @@ fn reserved_path_matches_prefixes_and_subpaths_only() {
     ));
     // A console route that merely shares a prefix substring is not reserved.
     assert!(!is_reserved_path("/apidocs"));
-    assert!(!is_reserved_path("/tinyplace-console"));
+    assert!(!is_reserved_path("/a2a-console"));
     // `/companies/{handle}` client-side console routes still fall through.
     assert!(!is_reserved_path("/companies/acme"));
     assert!(!is_reserved_path("/"));

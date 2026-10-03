@@ -444,8 +444,8 @@ impl AppConfig {
     /// is one — otherwise `None`.
     ///
     /// Distinct from [`Self::host_base_url`], which always answers *something*
-    /// (falling back to `http://{bind}`) because an Agent Card must carry an
-    /// endpoint. A webhook URL has no such fallback: a provider that cannot
+    /// (falling back to `http://{bind}`) for callers that need an address of
+    /// some kind. A webhook URL has no such fallback: a provider that cannot
     /// reach the URL simply never delivers. So this is `Some` only when an
     /// explicit `public_url` is configured **and** it is `https` — Telegram
     /// (issue #203) refuses any other scheme for `setWebhook`, and the

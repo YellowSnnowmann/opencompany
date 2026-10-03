@@ -33,7 +33,7 @@
 //!
 //! What is deliberately **not** carried over:
 //!
-//! - **The brain, tools, channels, workflow runner and economy.** Replacing
+//! - **The brain, tools, channels and workflow runner.** Replacing
 //!   those is the entire point of a rebuild.
 //! - **The in-flight steer registry.** The successor's harness deps mint their
 //!   own, and the operator steer routes read whichever runtime is registered.

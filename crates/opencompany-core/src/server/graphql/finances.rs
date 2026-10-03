@@ -1,7 +1,7 @@
 //! The finances read: `Company.finances` over WS5's ledger projection.
 //!
-//! `finances_from` folds the company ledger, the manifest `[budget]`, and (when
-//! present) the economy wallet balance into the console's finance surface.
+//! `finances_from` folds the company ledger and the manifest `[budget]` into
+//! the console's finance surface.
 
 use std::sync::Arc;
 

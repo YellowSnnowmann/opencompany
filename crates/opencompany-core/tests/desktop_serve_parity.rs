@@ -54,14 +54,13 @@ use std::path::{Path, PathBuf};
 ///
 /// A row is a promise that somebody looked. Two kinds live here and they are
 /// not the same: a difference that is *correct* (a loopback host must not
-/// advertise a routable Agent Card) and one that is merely *not yet decided*,
+/// advertise a routable base URL) and one that is merely *not yet decided*,
 /// which names the issue tracking it rather than inventing a justification.
 const DELIBERATE_DIFFERENCES: &[(&str, &str)] = &[
     // ---- Correct: the desktop is one machine, one person, one loopback port.
     (
         "config.public_url",
-        "a loopback host must not advertise a routable base URL in a published \
-         Agent Card",
+        "a loopback host must not advertise a routable base URL",
     ),
     (
         "config.instance_name",
