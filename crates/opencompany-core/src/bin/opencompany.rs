@@ -1627,9 +1627,9 @@ async fn import_from_dir(dir: &std::path::Path, home: Option<PathBuf>) -> Result
 ///
 /// FROM is deliberately not a flag: it is the env-selected engine, exactly
 /// what a boot would bind — you migrate *before* flipping the environment, so
-/// the environment still names the source. Only provider-backed engines can
-/// migrate (the seam is what `export_page`/`import_records` live on); the
-/// `store` default is refused by name.
+/// the environment still names the source. Only engine-backed memory can
+/// migrate (`list` → `store` across two `MemoryEngine`s); the `store` default
+/// is refused by name.
 #[cfg(feature = "tinymemory")]
 async fn run_memory_cmd(cmd: MemoryCmd) -> Result<()> {
     use opencompany::store::StorageSettings;
@@ -1667,16 +1667,9 @@ async fn run_memory_cmd(cmd: MemoryCmd) -> Result<()> {
     // precondition printed below still applies to remote writers.
     let _home_lock: Option<()> = None;
 
-    let (from, _) = open_driver(&from_config)?.ok_or_else(|| {
-        opencompany::error::OpenCompanyError::Config(
-            "the source configuration bound no provider (host bug — the routing above should \
-             have refused)."
-                .into(),
-        )
-    })?;
-    // Dry run touches ONLY the source: opening the target would create its
-    // store (a namespace target mints the SQLite dir on open), and "without
-    // writing anything" must mean the filesystem too.
+    let from = open_driver(&from_config)?;
+    // Dry run touches ONLY the source: "without writing anything" means the
+    // target is not even opened.
     if dry_run {
         let resumed = resume_cursor.is_some();
         let total = opencompany::store::memory::migrate::count_records(
@@ -1689,32 +1682,26 @@ async fn run_memory_cmd(cmd: MemoryCmd) -> Result<()> {
             println!(
                 "dry run (from --resume-cursor): {} records remain to migrate {} -> {}",
                 total,
-                from.driver_id(),
+                from.descriptor().id,
                 to
             );
         } else {
             println!(
                 "dry run: {} records would migrate {} -> {}",
                 total,
-                from.driver_id(),
+                from.descriptor().id,
                 to
             );
         }
         return Ok(());
     }
 
-    let (target, target_class) = open_driver(&to_config)?.ok_or_else(|| {
-        opencompany::error::OpenCompanyError::Config(
-            "the target configuration bound no provider (host bug).".into(),
-        )
-    })?;
-
-    if matches!(target_class, tinymemory::registry::DriverClass::External) {
+    let target = open_driver(&to_config)?;
+    if target.descriptor().hosted {
         eprintln!(
-            "note: `{}` is a hosted engine — its exact-CRUD writes are enumeration-based, so a \
-             large import is slow and chatty. Prefer off-peak, and expect wall-clock to grow \
-             with store size.",
-            target.driver_id()
+            "note: `{}` is a hosted engine — every record is one write, so a large import is \
+             slow and chatty. Prefer off-peak, and expect wall-clock to grow with store size.",
+            target.descriptor().id
         );
     }
 
@@ -1728,8 +1715,8 @@ async fn run_memory_cmd(cmd: MemoryCmd) -> Result<()> {
     );
     println!(
         "migrating {} -> {} ({} records/page)…",
-        from.driver_id(),
-        target.driver_id(),
+        from.descriptor().id,
+        target.descriptor().id,
         page_size
     );
     let outcome = migrate(&from, &target, page_size, resume_cursor, |progress| {
