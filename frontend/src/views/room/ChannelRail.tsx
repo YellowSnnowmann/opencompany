@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import {
   CircleDot,
   Hash,
@@ -378,12 +378,26 @@ function ChannelRow({
         .join(": ")
     : null;
   const line = activity ?? preview?.text ?? channelSubtitle(channel) ?? "No messages yet";
+  const previewId = useId();
 
   return (
     <button
       type="button"
       onClick={() => onSelect(channel.id)}
       aria-current={active ? activeAria : undefined}
+      // Named like the compact row — the conversation, then its counts and
+      // live state — not by its whole text: the time and the preview are what
+      // the row *says*, not what it *is*, and a name that changes with every
+      // message is no name to find a row by. The preview is its description.
+      aria-label={[
+        channel.name,
+        hasMentions && `${mentions > 99 ? "99+" : mentions} mention${mentions === 1 ? "" : "s"}`,
+        hasUnread && `${unread > 99 ? "99+" : unread} unread`,
+        busy && agentPresenceLabel(busy.state),
+      ]
+        .filter(Boolean)
+        .join(", ")}
+      aria-describedby={previewId}
       // The second line is visible now, so the tooltip only earns its place
       // when the purpose says something the preview does not.
       title={channelSubtitle(channel) ?? undefined}
@@ -421,6 +435,7 @@ function ChannelRow({
         </span>
         <span className="flex items-center gap-2">
           <span
+            id={previewId}
             data-testid="channel-preview"
             className={cn(
               "min-w-0 flex-1 truncate text-xs",
@@ -457,7 +472,6 @@ function ChannelRow({
           )}
         </span>
       </span>
-      {busy && <span className="sr-only">, {agentPresenceLabel(busy.state)}</span>}
     </button>
   );
 }
