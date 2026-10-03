@@ -52,7 +52,7 @@ fn retired_tiny_place_keys_are_ignored_not_refused() {
         "#,
     );
     assert!(manifest.validate().is_empty(), "{:?}", manifest.validate());
-    assert!(!manifest.summary().contains("Discover:"));
+    assert!(!manifest.effective_summary().contains("Discover:"));
 
     let unhandled = parse("[company]\nname = \"X\"\n[place]\ndiscoverable = true\n");
     assert!(unhandled.validate().is_empty(), "{:?}", unhandled.validate());
