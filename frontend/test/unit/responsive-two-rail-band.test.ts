@@ -28,7 +28,7 @@ const read = (rel: string) => readFileSync(resolve(here, "../../src", rel), "utf
 
 describe("chat has no second rail left to band with (issues #1383, four-row sidebar)", () => {
   const chatView = read("views/RoomView.tsx");
-  const chatHeader = read("views/room/ChatHeader.tsx");
+  const shell = read("components/app-shell.tsx");
 
   it("renders exactly one channel rail, and renders it through the sidebar's slot", () => {
     // #1383 was two rails plus content in one viewport. There are not two rails
@@ -54,13 +54,10 @@ describe("chat has no second rail left to band with (issues #1383, four-row side
     // `useIsMobile` flips at exactly 768px, which is Tailwind's `md`. This
     // control acts on the sidebar, so it changes hands there and not at `lg` —
     // the two agree by construction rather than by coincidence.
-    expect(chatHeader).toContain("size-8 md:hidden");
-    // And the header's density toggle is GONE: collapsing the channel list is
-    // collapsing the sidebar now, and `SidebarCollapseButton` already does
-    // that, forty pixels to its left (issue #1177). `chat-rail-focus.test.ts`
-    // holds the focus hand-off that moved with it.
-    expect(chatHeader).not.toContain("Collapse channels");
-    expect(chatHeader).not.toContain("md:inline-flex");
+    // It lived in the chat header until that bar was removed; it heads the
+    // content in the shell now, for every section, not only Room.
+    expect(shell).toContain('<div className="flex h-12 shrink-0 items-center px-3 md:hidden">');
+    expect(shell).toContain("<SidebarTrigger");
   });
 });
 
