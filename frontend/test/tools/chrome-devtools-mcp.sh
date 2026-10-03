@@ -66,9 +66,14 @@ fi
 # that broke the CLI, or a compromised one, would become the repository's MCP
 # integration without any deliberate move. `@1.7.0` is the version these flags
 # were verified against; bump it on purpose, and re-verify.
+#
+# `${arr[@]+"${arr[@]}"}`, not `"${arr[@]}"`: macOS still ships bash 3.2, where
+# `set -u` reports an EMPTY array as unbound. On every Mac (where the AppArmor
+# block above never fires) the plain form killed this script before the server
+# started, and the MCP client reported only "Connection closed".
 exec npx -y chrome-devtools-mcp@1.7.0 \
   --executablePath "$executable" \
   --headless=true \
   --isolated=true \
-  "${sandbox_args[@]}" \
+  ${sandbox_args[@]+"${sandbox_args[@]}"} \
   "$@"
