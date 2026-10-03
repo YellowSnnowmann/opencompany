@@ -284,18 +284,20 @@ test("a remembered host does not take the launch just by being older", async ({
   }, DEAD_REMOTE);
   await page.goto("/#/company/work/tasks");
 
-  // Both hosts are registered, so the switcher offers a choice. Counted off the
-  // closed trigger, which carries the roster size so a count does not depend on
-  // a menu being open.
-  await expect(await hostSwitcher(page)).toHaveAttribute("data-host-count", "2", {
-    timeout: 30_000,
-  });
   // The console on screen is a working one — which it could not be if the
   // unreachable remote had been selected for sorting first.
   await expect(page.getByRole("button", { name: "Add task" })).toHaveCount(1, {
     timeout: 30_000,
   });
   await expect(page.getByTestId("connection-error")).toHaveCount(0);
+
+  // Both hosts are registered, so the switcher offers a choice — read after
+  // the console above, since reading it means going to Settings. Counted off the
+  // closed trigger, which carries the roster size so a count does not depend on
+  // a menu being open.
+  await expect(await hostSwitcher(page)).toHaveAttribute("data-host-count", "2", {
+    timeout: 30_000,
+  });
 
   // Said off the closed trigger. The per-row `aria-current` this used to read is
   // hidden with the roster (`src/product-scope.ts`), so what survives is the
