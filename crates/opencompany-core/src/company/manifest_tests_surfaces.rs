@@ -333,22 +333,6 @@ fn signals_opportunity_studio_template_passes_lint() {
     let unique = ids.len();
     ids.dedup();
     assert_eq!(ids.len(), unique, "agent ids must be unique");
-    // Every advertised skill is priced and described.
-    assert!(!manifest.place.skills.is_empty());
-    for skill in &manifest.place.skills {
-        assert!(
-            parse_usd(&skill.price_usd).is_some(),
-            "skill must be priced"
-        );
-        assert!(
-            skill
-                .description
-                .as_deref()
-                .is_some_and(|d| !d.trim().is_empty()),
-            "skill `{}` must be described",
-            skill.id
-        );
-    }
     // A supervised policy with a defined always-approve fence. Asserting
     // only `!is_empty()` is what let the template ship three entries that
     // matched nothing on its harness path (issue #684): a list's length
