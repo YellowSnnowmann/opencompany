@@ -73,7 +73,8 @@ export function ChannelPill({
  *
  * The head: the conversation's face, its name (with a copy control), its
  * purpose and a count of who is in it, then the actions — "Manage desk" on the
- * org chart for a desk, the raw-turns toggle for a DM. Below: the members (live
+ * org chart for a desk; "Manage agent" (their profile page) and the raw-turns
+ * toggle for a DM. Below: the members (live
  * status on each face, the face opens their profile, the row opens a DM, the
  * lead marked), everyone else in the company with a `+` to add them to this
  * desk, and the people signed in to it with their online dots.
@@ -128,10 +129,15 @@ export function ChannelInfoPanel({
     : channelMembers
       ? `${inside.length} in this channel · ${total} in the company`
       : `${inside.length} ${inside.length === 1 ? "agent" : "agents"}`;
+  // Where this conversation is managed: a desk on the org chart
+  // (`#/company/<deskId>`), a DM's teammate on their own profile page
+  // (`#/team/<agentId>` — persona, tools, model, schedule).
   const manageHref =
     channel.kind === "channel" && channel.memberIds
       ? `#/company/${encodeURIComponent(channel.id)}`
       : undefined;
+  const manageAgentHref =
+    isDm && channel.member ? `#/team/${encodeURIComponent(channel.member.id)}` : undefined;
 
   return (
     <aside
@@ -166,11 +172,16 @@ export function ChannelInfoPanel({
               {loading ? "Loading…" : summary}
             </p>
           </div>
-          {(manageHref || raw) && (
+          {(manageHref || manageAgentHref || raw) && (
             <div className="flex flex-wrap justify-center gap-2">
               {manageHref && (
                 <a href={manageHref} className={CHIP}>
                   <ExternalLink className="size-3.5" aria-hidden /> Manage desk
+                </a>
+              )}
+              {manageAgentHref && (
+                <a href={manageAgentHref} className={CHIP} data-testid="channel-info-manage-agent">
+                  <ExternalLink className="size-3.5" aria-hidden /> Manage agent
                 </a>
               )}
               {raw && (

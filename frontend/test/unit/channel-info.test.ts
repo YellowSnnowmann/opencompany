@@ -118,6 +118,10 @@ describe("the channel info panel", () => {
     const toggle = () =>
       container.querySelector<HTMLButtonElement>('[data-testid="channel-info-raw-toggle"]')!;
     draw(false);
+    // A DM is managed on the teammate's own page.
+    expect(
+      container.querySelector('[data-testid="channel-info-manage-agent"]')?.getAttribute("href"),
+    ).toBe("#/team/ada");
     expect(toggle().getAttribute("aria-pressed")).toBe("false");
     act(() => toggle().click());
     expect(onToggle).toHaveBeenCalledOnce();
