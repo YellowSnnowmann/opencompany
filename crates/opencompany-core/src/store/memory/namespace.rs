@@ -27,7 +27,7 @@ use crate::ports::CompanyId;
 /// Present so a hosted engine shared with other tenants of that engine — a
 /// Supermemory or Mem0 workspace that is not exclusively ours — cannot collide
 /// with namespaces some other product wrote into the same account.
-const ROOT: &str = "oc";
+pub(super) const ROOT: &str = "oc";
 
 /// The namespace segment holding provisional working-out.
 ///

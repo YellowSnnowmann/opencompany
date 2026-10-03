@@ -40,7 +40,7 @@ const MAX_LIST_PAGES: usize = 500;
 
 /// The MIME type stamped on every envelope, so an engine's own tooling (and an
 /// operator reading it) can tell these are structured records, not prose.
-const ENVELOPE_MIME: &str = "application/vnd.opencompany.memory+json";
+pub(in crate::store::memory) const ENVELOPE_MIME: &str = "application/vnd.opencompany.memory+json";
 
 /// The wire form of a typed port record inside an item's text.
 #[derive(Debug, Serialize, Deserialize)]
@@ -282,6 +282,10 @@ impl Bound {
         }
         let meta = MemoryMeta {
             workspace: Some(namespace.as_str().to_string()),
+            // The same namespace again, as a path: `workspace` matches exactly,
+            // `folder` by `/`-aware prefix, which is what lets `migrate` select
+            // every record this host wrote (`folder: "oc"`) and nothing else.
+            folder: Some(namespace.as_str().to_string()),
             source: SourceRef {
                 kind: self.provenance.source_kind(),
                 id: Some(key.to_string()),
