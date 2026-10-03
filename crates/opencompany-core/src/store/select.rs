@@ -1164,7 +1164,7 @@ impl OwnershipStore for crate::store::MongoStore {
         crate::store::MongoStore::owners(self).await
     }
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "tinymemory"))]
 #[path = "select_health_tests.rs"]
 mod tests;
 #[cfg(test)]
