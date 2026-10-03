@@ -210,7 +210,7 @@ export function AvatarPicker({
             name={name}
             tone={tone}
             avatar={current}
-            className="size-14 rounded-xl text-base"
+            className="size-14 text-base"
             data-testid="avatar-preview"
           />
         )}
