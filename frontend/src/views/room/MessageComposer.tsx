@@ -1,21 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  ArrowUp,
-  AtSign,
-  Bold,
-  CaseSensitive,
-  Code,
-  Italic,
-  Loader2,
-  Paperclip,
-  Strikethrough,
-  X,
-} from "lucide-react";
+import { ArrowUp, AtSign, Loader2, Paperclip, Plus, X } from "lucide-react";
 
 import type { MessageIntent } from "@/api/tasks";
 import type { AttachmentDto } from "@/api/types";
 import { formatBytes } from "@/api/workspace";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { COMPOSER_INTENT_HIDDEN } from "@/product-scope";
 import { cn } from "@/lib/utils";
 import { MentionPicker } from "@/views/room/MentionPicker";
@@ -147,14 +142,6 @@ interface PendingAttachment {
   delete?: (nodeId: string) => void;
 }
 
-/** The markdown a toolbar button wraps the selection in. */
-const WRAPS = [
-  { icon: Bold, label: "Bold", mark: "**" },
-  { icon: Italic, label: "Italic", mark: "_" },
-  { icon: Strikethrough, label: "Strikethrough", mark: "~~" },
-  { icon: Code, label: "Code", mark: "`" },
-] as const;
-
 /**
  * The end of the `@name` the caret sits inside, or `from` when nothing follows.
  *
@@ -278,10 +265,6 @@ export function MessageComposer({
   // reaches the host without an override and lets triage decide whether it is
   // work or conversation.
   const [intent, setIntent] = useState<MessageIntent>();
-  // The formatting row is opt-in, behind the `Aa` toggle in the icon row. It
-  // used to sit open above every composer, which spent the widest strip of the
-  // dock on four buttons most lines never use.
-  const [formatting, setFormatting] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
 
   // A first-run card lives above the timeline, outside this component. The
@@ -617,24 +600,30 @@ export function MessageComposer({
     }
   }
 
-  /** Wrap the selection (or the caret) in `mark`, keeping focus in the box. */
-  function wrap(mark: string) {
+  /**
+   * Types an `@` at the caret and lets the ordinary path take over, rather than
+   * opening the picker directly: one code path decides when a picker is open,
+   * so the `+` menu's "Mention someone" and the keyboard can never disagree.
+   */
+  function insertMention() {
     const el = input.current;
     if (!el) return;
-    const { selectionStart: start, selectionEnd: end } = el;
-    const next = `${draft.slice(0, start)}${mark}${draft.slice(start, end)}${mark}${draft.slice(end)}`;
+    const at = el.selectionStart ?? draft.length;
+    // A separator first when the caret is mid-word, or the `@` would land
+    // inside another token and open nothing.
+    const lead = at > 0 && !/[\s([{]/.test(draft[at - 1] ?? " ") ? " " : "";
+    const next = `${draft.slice(0, at)}${lead}@${draft.slice(at)}`;
+    const caret = at + lead.length + 1;
+    // The insertion shifts every recorded mention at/after it and breaks the
+    // literal of one it lands inside. Reconcile now, as `onChange` does for a
+    // keystroke, so the stale span cannot re-anchor onto a same-text duplicate
+    // at send time.
+    setMentions((current) => reconcileMentions(next, current, draft, caret));
     setDraft(next);
-    // The wrap edits the draft out from under the mention spans. A mention the
-    // wrap merely encloses keeps its literal (``**@Sam**`` still reads `@Sam`)
-    // and shifts; one whose span an insertion point falls inside is broken and
-    // must go — otherwise send-time reconciliation re-anchors it onto an
-    // unrelated same-text duplicate and pings the wrong person.
-    setMentions((current) => reconcileWrap(current, start, end, mark));
-    setOutsideWarning(null);
-    // Restore the selection around what was wrapped, after React repaints.
     requestAnimationFrame(() => {
       el.focus();
-      el.setSelectionRange(start + mark.length, end + mark.length);
+      el.setSelectionRange(caret, caret);
+      syncQuery(next, caret);
     });
   }
 
@@ -650,7 +639,9 @@ export function MessageComposer({
     >
       <div
         className={cn(
-          "relative rounded-xl border bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring/40",
+          // Rounded to a pill while it is one line; the radius holds as it
+          // grows, so a multi-line draft reads as the same control.
+          "relative overflow-hidden rounded-3xl border bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring/40",
           dragDepth > 0 && "border-primary ring-2 ring-primary/40",
         )}
         onDragEnter={(event) => {
@@ -675,7 +666,7 @@ export function MessageComposer({
         }}
       >
         {dragDepth > 0 && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-card/90 text-sm font-medium text-primary">
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-3xl border-2 border-dashed border-primary bg-card/90 text-sm font-medium text-primary">
             Drop files to attach them
           </div>
         )}
@@ -687,24 +678,6 @@ export function MessageComposer({
             onHover={setActiveRow}
           />
         )}
-        {!compact && formatting && (
-          <div className="flex items-center gap-0.5 border-b px-2 py-1">
-            {WRAPS.map((w) => (
-              <Button
-                key={w.label}
-                variant="ghost"
-                size="icon"
-                className="size-7 text-muted-foreground"
-                onClick={() => wrap(w.mark)}
-                aria-label={w.label}
-                title={w.label}
-              >
-                <w.icon className="size-3.5" />
-              </Button>
-            ))}
-          </div>
-        )}
-
         {/* The staged attachment (issue #1682), shown above the box the moment
             its upload lands and cleared on send or removal. One chip in v1. */}
         {pending.length > 0 && (
@@ -752,186 +725,113 @@ export function MessageComposer({
             </span>
           </p>
         )}
-        {/* A native textarea rather than the design-system one: the composer
-            needs a ref to wrap the selection, and `Textarea` is a plain
-            function component (React 18 — no ref forwarding). */}
-        <textarea
-          ref={input}
-          value={draft}
-          onChange={onChange}
-          onPaste={onPaste}
-          onKeyDown={onKeyDown}
-          // A click or an arrow can move the caret into (or out of) an existing
-          // `@name` without changing the text, so the query is re-read on
-          // selection changes too, not only on edits.
-          onSelect={(e) => {
-            const el = e.currentTarget;
-            syncQuery(el.value, el.selectionStart);
-          }}
-          onBlur={closePicker}
-          role="combobox"
-          aria-autocomplete="list"
-          aria-controls={pickerOpen ? "mention-picker" : undefined}
-          aria-activedescendant={pickerOpen ? `mention-option-${activeRow}` : undefined}
-          aria-expanded={pickerOpen}
-          aria-label={placeholder}
-          placeholder={placeholder}
-          rows={1}
-          className="field-sizing-content max-h-48 min-h-10 w-full resize-none bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
-        />
-
-        {/* `flex-wrap` keeps Send reachable in a narrow pane (issue #1383):
-            when the intent group and icon buttons can't share a line with it,
-            the row wraps and Send drops to its own line — still `ml-auto`, so
-            right-aligned and in-flow — rather than overflowing off-screen with
-            no way to scroll to it. On a roomy composer it stays a single row. */}
-        <div className="flex flex-wrap items-center gap-0.5 px-2 pb-1.5">
-          {/* What the agents may do without asking, at the point where you ask
-              them. It was a pill in the window's title row, which is where the
-              console keeps facts about itself — but this one is a fact about
-              what happens when you press Send, and it belongs beside Send. An
-              operator about to hand over a task can now read the tier and change
-              it without leaving the box they are typing in.
-              `mr-1` and then the icon buttons, so it reads as the row's leading
-              statement rather than as a fourth glyph. */}
-          {/* No autonomy pill here any more: the standing tier is set on
-              Settings → Approvals, beside the always-ask list it works with. */}
-          {deliverableChoice && !compact && !COMPOSER_INTENT_HIDDEN && (
-            <div
-              className="mr-1 flex items-center gap-0.5 rounded-lg border p-0.5"
-              role="group"
-              // Issue #1152: the group no longer only asks what the message
-              // should *produce* — "Just chatting" produces nothing — so it asks
-              // what the message is for.
-              aria-label="What this message is for"
-            >
-              {(
-                [
-                  // "Just chatting" leads, because it is the position that
-                  // withholds: the operator reaches for it to stop something
-                  // happening, and a control you press to prevent an action
-                  // belongs before the ones that cause it. None is pre-pressed:
-                  // an operator has to state which outcome they want.
-                  {
-                    value: "chat",
-                    label: "Just chatting",
-                    title: "Chat without automatically creating a task.",
-                  },
-                  {
-                    value: "once",
-                    label: "Do it once",
-                    title: "Ask the team to do this once.",
-                  },
-                  {
-                    value: "workflow",
-                    label: "Build me the automation",
-                    title: "Turn this into a repeating workflow.",
-                  },
-                ] as const
-              ).map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  aria-pressed={intent === option.value}
-                  onClick={() => setIntent(option.value)}
-                  data-testid={`composer-deliverable-${option.value}`}
-                  title={option.title}
-                  className={cn(
-                    "rounded-md px-2 py-1 text-2xs font-medium transition-colors",
-                    intent === option.value
-                      ? "bg-primary/10 text-brand-700 dark:text-brand-300"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7 text-muted-foreground"
-            aria-label="Mention someone"
-            title="Mention someone"
-            // Types the `@` and lets the ordinary path take over, rather than
-            // opening the picker directly: one code path decides when a picker
-            // is open, so the button and the keyboard can never disagree.
-            onClick={() => {
-              const el = input.current;
-              if (!el) return;
-              const at = el.selectionStart ?? draft.length;
-              // A separator first when the caret is mid-word, or the `@` would
-              // land inside another token and open nothing.
-              const lead = at > 0 && !/[\s([{]/.test(draft[at - 1] ?? " ") ? " " : "";
-              const next = `${draft.slice(0, at)}${lead}@${draft.slice(at)}`;
-              const caret = at + lead.length + 1;
-              // The insertion shifts every recorded mention at/after it and
-              // breaks the literal of one it lands inside. Reconcile now, as
-              // `onChange` does for a keystroke, so the stale span cannot
-              // re-anchor onto a same-text duplicate at send time.
-              setMentions((current) => reconcileMentions(next, current, draft, caret));
-              setDraft(next);
-              requestAnimationFrame(() => {
-                el.focus();
-                el.setSelectionRange(caret, caret);
-                syncQuery(next, caret);
-              });
-            }}
+        {deliverableChoice && !compact && !COMPOSER_INTENT_HIDDEN && (
+          <div
+            className="flex items-center gap-0.5 border-b px-2 py-1"
+            role="group"
+            // Issue #1152: the group asks what the message is for, not only
+            // what it should produce — "Just chatting" produces nothing.
+            aria-label="What this message is for"
           >
-            <AtSign className="size-4" />
-          </Button>
-          {/* The paperclip (issue #1682), present exactly where attaching makes
-              sense — a composer given an `uploadAttachment`. Born disabled and
-              wired to nothing in the #361 console rebuild; this is where it
-              starts working. */}
-          {uploadAttachment && (
-            <>
-              <input
-                ref={fileInput}
-                type="file"
-                multiple
-                className="hidden"
-                aria-hidden
-                tabIndex={-1}
-                onChange={(e) => void onPickFile(e)}
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 text-muted-foreground"
-                aria-label="Attach a file"
-                title="Attach a file"
-                disabled={disabled || uploading}
-                onClick={() => fileInput.current?.click()}
-              >
-                {uploading ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Paperclip className="size-4" />
+            {(
+              [
+                { value: "chat", label: "Just chatting", title: "Chat without automatically creating a task." },
+                { value: "once", label: "Do it once", title: "Ask the team to do this once." },
+                { value: "workflow", label: "Build me the automation", title: "Turn this into a repeating workflow." },
+              ] as const
+            ).map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={intent === option.value}
+                onClick={() => setIntent(option.value)}
+                data-testid={`composer-deliverable-${option.value}`}
+                title={option.title}
+                className={cn(
+                  "rounded-md px-2 py-1 text-2xs font-medium transition-colors",
+                  intent === option.value
+                    ? "bg-primary/10 text-brand-700 dark:text-brand-300"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
-              </Button>
-            </>
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* One line: a `+` for everything that is not typing, the input, and
+            Send. The formatting row, the `@` and paperclip glyphs and the
+            autonomy pill that shared a toolbar under a two-row box are gone or
+            folded into the `+` menu; Markdown still renders when typed, and
+            `@` still opens the picker. The input grows only when Shift+Enter
+            adds a line, up to `max-h-48`, then scrolls. */}
+        <div className="flex items-end gap-1.5 p-1.5">
+          {uploadAttachment && (
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              className="hidden"
+              aria-hidden
+              tabIndex={-1}
+              onChange={(e) => void onPickFile(e)}
+            />
           )}
-          {!compact && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "size-7 text-muted-foreground",
-                formatting && "bg-accent text-accent-foreground",
-              )}
-              aria-label="Formatting"
-              aria-pressed={formatting}
-              title="Formatting"
-              onClick={() => setFormatting((f) => !f)}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label="Add to message"
+              title="Add to message"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none aria-expanded:bg-accent aria-expanded:text-foreground"
             >
-              <CaseSensitive className="size-4" />
-            </Button>
-          )}
+              {uploading ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="w-auto min-w-44">
+              {/* Attaching (issue #1682) is offered exactly where it works —
+                  a composer given an `uploadAttachment`. */}
+              {uploadAttachment && (
+                <DropdownMenuItem
+                  disabled={disabled || uploading}
+                  onClick={() => fileInput.current?.click()}
+                >
+                  <Paperclip className="size-4" aria-hidden /> Attach files
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={insertMention}>
+                <AtSign className="size-4" aria-hidden /> Mention someone
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {/* A native textarea rather than the design-system one: the composer
+              needs a ref for the caret, and `Textarea` is a plain function
+              component (React 18 — no ref forwarding). */}
+          <textarea
+            ref={input}
+            value={draft}
+            onChange={onChange}
+            onPaste={onPaste}
+            onKeyDown={onKeyDown}
+            // A click or an arrow can move the caret into (or out of) an
+            // existing `@name` without changing the text, so the query is
+            // re-read on selection changes too, not only on edits.
+            onSelect={(e) => {
+              const el = e.currentTarget;
+              syncQuery(el.value, el.selectionStart);
+            }}
+            onBlur={closePicker}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-controls={pickerOpen ? "mention-picker" : undefined}
+            aria-activedescendant={pickerOpen ? `mention-option-${activeRow}` : undefined}
+            aria-expanded={pickerOpen}
+            aria-label={placeholder}
+            placeholder={placeholder}
+            rows={1}
+            className="field-sizing-content max-h-48 min-h-9 flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground"
+          />
           <Button
             size="icon"
-            className="ml-auto size-9 rounded-full"
+            className="size-9 shrink-0 rounded-full"
             onClick={send}
             disabled={disabled || !draft.trim()}
             aria-label="Send"
