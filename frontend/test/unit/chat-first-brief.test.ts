@@ -5,7 +5,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MessageComposer } from "@/views/room/MessageComposer";
-import { MessageTimeline } from "@/views/room/MessageTimeline";
 import type { MessageIntent } from "@/api/tasks";
 import type { Channel } from "@/views/room/model";
 
@@ -28,24 +27,6 @@ const CHANNEL: Channel = {
 
 let container: HTMLDivElement;
 let root: Root;
-
-function renderTimeline(onStartBrief: () => void) {
-  act(() => {
-    root.render(
-      createElement(MessageTimeline, {
-        channel: CHANNEL,
-        items: [],
-        openThreadId: null,
-        typing: false,
-        onOpenThread: () => {},
-        onReact: () => {},
-        onDismissCard: () => {},
-        dismissingCardId: null,
-        onStartBrief,
-      }),
-    );
-  });
-}
 
 function renderComposer(prefill?: { text: string; revision: number }) {
   act(() => {
@@ -89,20 +70,6 @@ afterEach(() => {
 });
 
 describe("the empty-channel first brief", () => {
-  it("offers a brief instead of agent creation and starts the composer action", () => {
-    const onStartBrief = vi.fn();
-    renderTimeline(onStartBrief);
-
-    const brief = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes("Give the team a brief"),
-    );
-    expect(brief).toBeDefined();
-    expect(container.textContent).not.toContain("Create agent");
-
-    act(() => brief!.click());
-    expect(onStartBrief).toHaveBeenCalledOnce();
-  });
-
   it("uses every new prefill revision", () => {
     renderComposer({ text: "Plan our first week.", revision: 1 });
     const textarea = container.querySelector("textarea");

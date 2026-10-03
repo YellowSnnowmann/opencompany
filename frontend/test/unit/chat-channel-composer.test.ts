@@ -174,11 +174,11 @@ describe("a channel renders the whole composer", () => {
     expect(container.textContent).not.toContain("There is nothing to reply to here");
   });
 
-  it("still offers the empty-state cards", async () => {
+  it("draws no empty-state cards: the focused composer is the first move", async () => {
     await mount("general");
 
-    expect(container.textContent).toContain("Give the team a brief");
-    expect(container.textContent).toContain("Add people");
+    expect(container.textContent).not.toContain("Give the team a brief");
+    expect(container.textContent).not.toContain("Add people");
   });
 });
 

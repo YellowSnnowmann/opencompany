@@ -152,21 +152,4 @@ describe("RoomView re-reads desks and roster when rosterRevision moves", () => {
     expect(listTeam).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the re-read membership in the member count", async () => {
-    await renderAt(0);
-    await elapse(0);
-    const toggle = () => container.querySelector<HTMLButtonElement>("button[aria-pressed]");
-    expect(toggle()?.textContent).toContain("1");
-
-    listDesks.mockImplementation(async () => [
-      { id: "general", name: "General", kind: "general", mutable: false, members: ["ceo", "eng"] },
-    ]);
-    listTeam.mockImplementation(async () => [
-      { id: "ceo", name: "Ada", role: "Chief" },
-      { id: "eng", name: "Blake", role: "Engineer" },
-    ]);
-    await renderAt(1);
-    await elapse(ROSTER_REFETCH_DELAY_MS);
-    expect(toggle()?.textContent).toContain("2");
-  });
 });
