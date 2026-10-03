@@ -76,7 +76,6 @@ use async_trait::async_trait;
 use futures::future::FutureExt;
 use serde_json::{Value, json};
 
-#[cfg(test)]
 use tinytools::{PermissionLevel, Tool, ToolResult, ToolTimeout};
 
 use crate::company::{
