@@ -48,6 +48,8 @@ pub mod approval_tool;
 /// [`toolbelt::shell_audit`] resolves. See [`audit`].
 pub mod audit;
 pub mod blockers;
+/// ran a workflow can link to it. See [`workflow_refs`].
+pub mod board_start;
 pub mod brain;
 pub mod build;
 pub mod capability_budget;
@@ -219,7 +221,6 @@ pub mod workflow_admin;
 /// but it mints an attempt row because building the workflow is the card's work.
 /// See [`workflow_build`].
 pub mod workflow_build;
-/// ran a workflow can link to it. See [`workflow_refs`].
 pub mod workflow_refs;
 /// End-to-end proof that an agent granted `files` and **not** `shell` can write
 /// a relative path on a company that has never run — the #409 provisioning gap,
@@ -6219,11 +6220,37 @@ pub(crate) fn seat_persona(
 /// A seat's delegation claim permits opening a card and nothing else, so each
 /// of these could only refuse there. See `seat_persona` for why they are
 /// withheld rather than left to refuse.
-pub(crate) const EPISODE_WITHHELD_TOOLS: [&str; 4] = [
+pub(crate) const EPISODE_WITHHELD_TOOLS: [&str; 6] = [
     "delegate_to_desk",
     "delegate_to_teammate",
     "assign_task",
     "review_task",
+    // The two workflow verbs, for the list's own reason rather than a new one.
+    //
+    // Both stage a `TaskOutputWorkflow` on the shared `WorkflowRefQueue` — one
+    // field on `HarnessDeps` — for the brain to drain into the card it is
+    // holding. Nothing drains it inside an episode, which is what puts them on
+    // this list; `spawn_task` left it only because #2546 built a drain for that
+    // one.
+    //
+    // Leaving them on the belt was not merely inert. A pooled chat turn brackets
+    // that queue with `clear()` and `drain()`, and an episode is spawned detached
+    // while a seat takes only its agent's turn lock — so a seat's push could land
+    // inside a concurrent chat turn's window and be stamped on THAT turn's card:
+    // a workflow authored in a room, credited to a card in a channel.
+    //
+    // Withheld rather than isolated per episode, because the capability is worth
+    // less than the machinery that would make it safe. The workflow itself is a
+    // standalone saved graph and was never bound to a card or a chat; only the
+    // provenance link is, and a room cannot write one. A seat that needs a
+    // repeatable process says so, and the work happens where there is an
+    // attempt behind it to attribute.
+    //
+    // No prose to cut for these two: the only brief that names them is
+    // `orchestrator_brief`, which `build_episode_seat` already strips from a seat
+    // whole, and no ledger's `writtenBy` mentions either.
+    "create_workflow",
+    "run_workflow",
 ];
 
 pub(crate) fn build_roster(

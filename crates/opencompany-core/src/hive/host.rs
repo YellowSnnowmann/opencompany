@@ -104,6 +104,12 @@ pub struct DeskHost {
     /// This episode's id, carried on every bracket so the console can draw
     /// one seat's lane within one meeting.
     episode_id: String,
+    /// The board card this room is working, when it is a card's room.
+    ///
+    /// Stamped onto the rows the room writes, because the card timeline reads by
+    /// `task_id` and an episode's rows carry none by default. `None` for a desk
+    /// or DM room, which belong to a conversation rather than to a card.
+    card: Option<String>,
     /// Which wave is running, for the same reason. Bumped as each wave
     /// settles, which is the one moment the loop tells a host a wave ended.
     wave: AtomicU64,
@@ -253,6 +259,7 @@ impl DeskHost {
             company,
             desk_id,
             thread_root: None,
+            card: None,
             events,
             log,
             roster: None,
@@ -642,6 +649,17 @@ impl DeskHost {
         }
     }
 
+    /// Names the board card this room is working, so its rows join that card's
+    /// timeline.
+    ///
+    /// Set only for a card's room. A desk or DM room answers a conversation and has
+    /// no card, so its rows stay unstamped exactly as before.
+    #[must_use]
+    pub fn for_card(mut self, card: impl Into<String>) -> Self {
+        self.card = Some(card.into());
+        self
+    }
+
     /// The wave `seat`'s current turn opened in, or the live counter for a
     /// seat this host never bracketed (see `turn_waves`).
     fn wave_of(&self, seat: &str) -> u64 {
@@ -686,6 +704,17 @@ impl DeskHost {
                 }
             }
         }
+        // Stamped only on a **desk-visible** row, and that is the whole care here.
+        //
+        // The card timeline matches `AgentReply { task_id: Some(id) }` and ignores
+        // `audience` entirely -- the word does not occur in `server/ops/tasks.rs`.
+        // So stamping an aside would publish, in full, a row the desk's own history
+        // shows only as "a private message happened": the card would become a way
+        // around the redaction rather than another reader of it.
+        //
+        // An empty audience is this journal's word for desk-visible, which is
+        // exactly the set a card may show.
+        let task_id = self.card.clone().filter(|_| audience.is_empty());
         CompanyEvent::AgentReply {
             chat_id: chat.to_owned(),
             agent_id: author.to_owned(),
@@ -701,7 +730,7 @@ impl DeskHost {
                 .remove(author)
                 .unwrap_or_default(),
             outputs: Vec::new(),
-            task_id: None,
+            task_id,
             episode: None,
             // A row of a conversation hangs off the ask that rooted it;
             // otherwise off the thread the episode itself was opened in.
@@ -1320,6 +1349,62 @@ impl EpisodeHost for DeskHost {
     ///
     /// The episode id is in it because a seat's belt is lent under this key:
     /// two episodes seating the same teammate must not read each other's.
+    /// Narrow one turn of `seat` to `only` — most of a seated turn's belt is
+    /// this host's own, so only this host can withhold it.
+    ///
+    /// Keyed by [`Self::seat_session`], the same key the loan is under, so the
+    /// belt factory finds the narrowing beside the loan it already looks up. The
+    /// guard lifts it however the turn ends.
+    /// Watch this turn, so the row it produces can say what it did.
+    ///
+    /// A seat's tool calls never reached this host: the runner metered a turn's
+    /// usage and reported nothing of its progress, so `reply` journaled every
+    /// row with an empty step list while a turn taken *outside* an episode
+    /// carried all of them. The console showed the difference and nothing
+    /// explained it.
+    ///
+    /// The reader is a task because the channel is backpressure: the core
+    /// awaits its sends, so a sink nobody drains stalls the seat mid-turn.
+    /// [`Self::wrap_turn`] joins it once the turn is over, which is also the
+    /// only moment the fold is complete.
+    fn progress(&self, seat: &str) -> Option<tinyhivemind_openhuman::TurnProgressSink> {
+        let (sink, mut arriving) = tokio::sync::mpsc::channel(64);
+        let reader = tokio::spawn(async move {
+            let mut seen = Vec::new();
+            while let Some(event) = arriving.recv().await {
+                seen.push(event);
+            }
+            seen
+        });
+        // A turn that somehow starts twice for one seat leaves the older
+        // reader without a sender, so it ends on its own.
+        self.watching
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(seat.to_owned(), reader);
+        Some(sink)
+    }
+
+    fn narrow_turn(&self, seat: &str, only: &[String]) -> tinyhivemind_openhuman::Narrowing {
+        let held = self
+            .seated
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(seat)
+            .cloned();
+        let Some(agent) = held else {
+            return tinyhivemind_openhuman::Narrowing::none();
+        };
+        let seating = agent.seating().clone();
+        let key = self.seat_session(seat);
+        let prefixed: Vec<String> = only
+            .iter()
+            .map(|verb| format!("{}{verb}", crate::hive::host::TOOL_PREFIX))
+            .collect();
+        seating.narrow(key.clone(), prefixed);
+        tinyhivemind_openhuman::Narrowing::until(move || seating.widen(&key))
+    }
+
     fn seat_session(&self, seat: &str) -> String {
         format!("episode:{}:{}", self.episode_id, seat)
     }

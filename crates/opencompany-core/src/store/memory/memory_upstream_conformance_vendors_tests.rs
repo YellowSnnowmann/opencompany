@@ -455,7 +455,38 @@ mod cortex {
             "content": { "text": body.pointer("/content/text").cloned().unwrap_or(Value::Null) },
             "context": { "recorded_at": "2026-09-04T00:00:00Z" },
         }));
-        Json(json!({ "event_id": id, "status": "captured" }))
+        Json(json!({
+            "event_id": id,
+            "status": "captured",
+            "replayed_from_idempotency": false,
+        }))
+    }
+
+    async fn cx_experience_bulk(State(log): State<Log>, Json(body): Json<Value>) -> Json<Value> {
+        let mut log = log.lock().expect("store lock");
+        let items = body
+            .get("items")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut results = Vec::with_capacity(items.len());
+        for (index, item) in items.into_iter().enumerate() {
+            let id = format!("evt_{}", log.len() + 1);
+            let offset = (log.len() as u64 + 1) * 2;
+            log.push(json!({
+                "id": id,
+                "scope": item.get("scope").cloned().unwrap_or(Value::Null),
+                "wal_offset": offset,
+                "content": { "text": item.pointer("/content/text").cloned().unwrap_or(Value::Null) },
+                "context": { "recorded_at": "2026-09-04T00:00:00Z" },
+            }));
+            results.push(json!({
+                "index": index,
+                "event_id": id,
+                "replayed_from_idempotency": false,
+            }));
+        }
+        Json(json!({ "accepted": results.len(), "results": results }))
     }
 
     async fn cx_events(
@@ -546,6 +577,7 @@ mod cortex {
         let log: Log = Arc::new(Mutex::new(Vec::new()));
         let app = Router::new()
             .route("/v1/experience", post(cx_experience))
+            .route("/v1/experience/bulk", post(cx_experience_bulk))
             .route("/v1/events", get(cx_events))
             .route("/v1/recall", post(cx_recall))
             .route("/v1/forget", post(cx_forget))

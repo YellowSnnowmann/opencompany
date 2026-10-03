@@ -468,6 +468,15 @@ pub struct CompanyRuntime {
     /// Set by a cold build when replay found explicit decision continuations;
     /// consumed once when the runtime enters the production registry.
     replay_continuations_on_register: AtomicBool,
+    /// The strong reference keeping this runtime's board-start shim alive.
+    ///
+    /// The handle itself lives in a per-company registry
+    /// (`board_start::for_company`) and holds only a `Weak`, which is what keeps
+    /// deps -> tool -> handle -> shim -> runtime from being a strong cycle. This
+    /// cell is the one owner.
+    #[cfg(feature = "openhuman")]
+    board_starter:
+        std::sync::OnceLock<Arc<dyn crate::harness::built_in::board_start::BoardStarter>>,
     /// The blocker twin of
     /// [`replay_continuations_on_register`](Self::replay_continuations_on_register):
     /// set when replay found a banked blocker answer whose approval is still
@@ -630,6 +639,8 @@ impl CompanyRuntime {
             blocker_resolutions: Arc::new(TokioMutex::new(())),
             quiesced: Arc::new(AtomicBool::new(false)),
             replay_continuations_on_register: AtomicBool::new(false),
+            #[cfg(feature = "openhuman")]
+            board_starter: std::sync::OnceLock::new(),
             replay_blockers_on_register: AtomicBool::new(false),
             #[cfg(feature = "openhuman")]
             harness: None,
@@ -728,6 +739,33 @@ impl CompanyRuntime {
     /// Issue #29: attach the workflow runner after construction. Wired by the
     /// [`RuntimeBuilder`](crate::runtime::RuntimeBuilder) under the `openhuman`
     /// feature; without it the run route reports "not wired".
+    /// Fills the board-start handle with a capability over this runtime.
+    ///
+    /// Called once the runtime is behind an `Arc` — the registry's `insert`, which
+    /// is the choke point every way a company becomes addressable passes through.
+    /// Before this, a `start_task` tool reads an empty handle and refuses in its
+    /// own turn; after it, the tool can fire the dispatch edge.
+    ///
+    /// Safe to call again: this runtime's own cell is write-once, while the
+    /// per-company handle is repointed every time — so a rebuild swap leaves the
+    /// handle naming the runtime that is actually serving the company.
+    #[cfg(feature = "openhuman")]
+    pub fn wire_board_starter(self: &Arc<Self>) {
+        let handle = crate::harness::built_in::board_start::for_company(&self.id);
+        let starter: Arc<dyn crate::harness::built_in::board_start::BoardStarter> =
+            Arc::new(RuntimeBoardStarter {
+                rt: Arc::downgrade(self),
+            });
+        // The strong reference lives here; the handle keeps only a `Weak`, so the
+        // shim's back-reference to this runtime cannot keep it alive.
+        //
+        // The handle is pointed at this runtime unconditionally, even when this
+        // runtime's own cell was already set: the per-company handle outlives a
+        // rebuild swap, and the newest registration is the one that must answer.
+        let _ = self.board_starter.set(Arc::clone(&starter));
+        handle.set(&starter);
+    }
+
     pub fn set_workflow_runner(&mut self, runner: Arc<dyn crate::ports::WorkflowRunner>) {
         self.workflow_runner = Some(runner);
     }
@@ -7745,6 +7783,46 @@ fn continuation_fallback_chat_id(
             origin.run_id.clone().unwrap_or_else(general)
         }
         None => general(),
+    }
+}
+
+/// A [`BoardStarter`](crate::harness::built_in::board_start::BoardStarter) over
+/// one runtime, holding it weakly.
+///
+/// Exists so a tool can reach exactly one capability instead of the whole
+/// runtime. The `Weak` is what makes the handle safe to hand out: the tool is
+/// captured into an agent that outlives individual cycles, and a strong reference
+/// there would keep a replaced runtime alive after a rebuild swap.
+#[cfg(feature = "openhuman")]
+struct RuntimeBoardStarter {
+    rt: std::sync::Weak<CompanyRuntime>,
+}
+
+#[cfg(feature = "openhuman")]
+#[async_trait::async_trait]
+impl crate::harness::built_in::board_start::BoardStarter for RuntimeBoardStarter {
+    async fn start(&self, observed: &TaskRecord, card: &TaskRecord) -> Result<bool> {
+        let rt = self.rt.upgrade().ok_or_else(|| {
+            OpenCompanyError::InvalidRequest(
+                "this company was replaced while the card was being started".to_string(),
+            )
+        })?;
+        // Compare-and-swap the observed To-do record so an operator edit between
+        // list and start cannot be overwritten by this stale copy.
+        if !rt
+            .ops
+            .tasks
+            .update_if_column(&rt.id, card, observed, crate::ports::tasks::COLUMN_TODO)
+            .await?
+        {
+            return Ok(false);
+        }
+        // Dispatch only after the conditional write succeeds. `dispatch_task`
+        // spawns the attempt detached, so this returns as soon as persisted —
+        // the turn that asked does not wait for the work it started, and the
+        // spawned cycle queues behind whatever lock the current one holds.
+        rt.dispatch_task(card).await;
+        Ok(true)
     }
 }
 

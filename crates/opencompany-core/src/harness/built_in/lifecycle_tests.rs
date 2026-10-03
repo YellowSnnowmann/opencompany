@@ -650,3 +650,46 @@ fn a_blocked_ending_lands_the_card_paused() {
     assert_eq!(landing_column(TaskRunEnd::Blocked), COLUMN_PAUSED);
     assert_eq!(run_status_for(TaskRunEnd::Blocked), RunStatus::Blocked);
 }
+
+/// Only an ending anchors the timeline — and the two states the column fuses
+/// must land on opposite sides of the rule.
+///
+/// `column_for_settled_run` sends both `WaitingApproval` and `Paused` to
+/// `COLUMN_PAUSED`. Reading that column is what told a card's origin it had
+/// finished while an approval was still waiting on a person, so this asserts the
+/// pair are judged differently here even though the board cannot tell them apart.
+#[test]
+fn only_a_terminal_ending_anchors_the_timeline() {
+    use crate::ports::runs::RunStatus;
+    use crate::ports::tasks::{COLUMN_PAUSED, column_for_settled_run};
+
+    for ending in [
+        RunStatus::Succeeded,
+        RunStatus::Failed,
+        RunStatus::Cancelled,
+        RunStatus::Declined,
+    ] {
+        assert!(anchors_timeline(ending), "{ending:?} is an ending");
+    }
+    for parked in [
+        RunStatus::WaitingApproval,
+        RunStatus::Paused,
+        RunStatus::Blocked,
+        RunStatus::Pending,
+        RunStatus::Running,
+    ] {
+        assert!(!anchors_timeline(parked), "{parked:?} is not an ending");
+    }
+
+    // The case the column cannot answer: same landing column, opposite verdicts.
+    assert_eq!(
+        column_for_settled_run(RunStatus::WaitingApproval),
+        Some(COLUMN_PAUSED)
+    );
+    assert_eq!(
+        column_for_settled_run(RunStatus::Paused),
+        Some(COLUMN_PAUSED)
+    );
+    assert!(!anchors_timeline(RunStatus::WaitingApproval));
+    assert!(!anchors_timeline(RunStatus::Paused));
+}

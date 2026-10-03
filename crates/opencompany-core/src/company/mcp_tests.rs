@@ -321,5 +321,5 @@ fn a_manifest_declaring_a_reserved_server_name_fails_validation() {
 #[test]
 fn the_reserved_names_are_the_servers_the_runtime_owns() {
     assert!(RESERVED_SERVER_NAMES.contains(&crate::hive::mcp_server::SERVER_SLUG));
-    assert!(RESERVED_SERVER_NAMES.contains(&openhuman_core::mcp::host::GITBOOKS_SERVER_NAME));
+    assert!(RESERVED_SERVER_NAMES.contains(&"gitbooks"));
 }
