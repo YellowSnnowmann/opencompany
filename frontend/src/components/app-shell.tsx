@@ -55,8 +55,6 @@ import {
 } from "@/setup/state";
 import { TourController } from "@/tour/TourController";
 import { shouldHoldShellPending } from "@/setup/hold-shell";
-import { resolveAdminCheckError } from "@/lib/admin-check";
-import { me as fetchMe } from "@/api/auth";
 import { useCompany } from "@/hooks/use-company";
 import { getRun, listRuns } from "@/api/runs";
 import {
@@ -67,7 +65,6 @@ import {
   type TaskStatus,
 } from "@/api/tasks";
 import { startVisiblePolling } from "@/lib/visible-poll";
-import { withReadTimeout } from "@/lib/read-timeout";
 import {
   hasOtherOpenTurns,
   isDuplicateLiveReply,
@@ -338,30 +335,6 @@ const WORKFLOW_EVENT_WINDOW = 300;
  * right when the frames were missed), not to drive the animation.
  */
 const TURN_POLL_MS = 4000;
-
-/**
- * How long the company's admin check waits before retrying a `fetchMe` failure
- * that was not a definitive `401` — a dropped connection or a proxy 5xx, not
- * "this user is not an admin". A few seconds is generous relative to how rarely
- * this fires (a fresh mount's first read, or a genuine network blip) and cheap
- * relative to the alternative: giving up and reading as non-admin leaves the
- * autonomy control read-only for the rest of the mount.
- */
-const ADMIN_CHECK_RETRY_MS = 3000;
-
-/**
- * How long a single `fetchMe` call is allowed to sit with no response at all
- * before it is treated as a failure.
- *
- * `resolveAdminCheckError` only ever runs once the call's promise settles.
- * `fetchMe` goes through `OpenCompanyClient`, whose request path has no timeout
- * of its own (`api/transport/browser.ts` calls bare `fetch`, no `AbortSignal`),
- * so a stalled proxy leaves that promise pending forever and the retry below
- * never gets its chance. `withReadTimeout` turns that silence into an ordinary
- * rejection, which `resolveAdminCheckError` classifies as non-terminal. Long
- * enough that a legitimately cold host is never mistaken for a hang.
- */
-const ADMIN_CHECK_TIMEOUT_MS = 20000;
 
 /**
  * Operator-facing copy for a legacy `connect_error` query from the former
