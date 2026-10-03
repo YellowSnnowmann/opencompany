@@ -936,8 +936,7 @@ export function MessageComposer({
       </div>
       {/* No "Enter to send · Shift+Enter for a new line" line under the box: it
           cost a row of height under every transcript to restate the one
-          convention every chat input shares. The textarea's `aria-keyshortcuts`
-          is untouched. */}
+          convention every chat input shares. */}
     </div>
   );
 }
