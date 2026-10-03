@@ -485,17 +485,6 @@ export function channelSubtitle(channel: Channel): string | null {
   return purpose;
 }
 
-/** Lowercases the first character only, for a clause continuing a sentence. */
-function lower(s: string): string {
-  return s.charAt(0).toLowerCase() + s.slice(1);
-}
-
-/** Terminates `s` with a full stop unless it already ends in punctuation. */
-function sentence(s: string): string {
-  const t = s.trim();
-  return /[.!?]$/.test(t) ? t : `${t}.`;
-}
-
 /**
  * The face a DM wears — the `TeammateAvatar` seed for the teammate on the
  * other end — or `null` for anything that has no face: a channel, and a DM
