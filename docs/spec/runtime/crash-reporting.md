@@ -160,7 +160,7 @@ fail the release rather than silently shipping unsymbolicated stack traces.
 ### The desktop shell
 
 A double-clicked `.app` has no environment, so the desktop shell carries a
-fallback: the `DESKTOP_DSN` constant in `crates/opencompany-app/src/crash.rs`.
+fallback (its product analytics work the same way: [analytics-desktop.md](analytics-desktop.md)): the `DESKTOP_DSN` constant in `crates/opencompany-app/src/crash.rs`.
 It names the **desktop's own** Sentry project (`opencompany-tauri`), never the
 host's, because anyone who unzips the `.dmg` can read it and a project that
 exists only for this binary is the only one it may write to.

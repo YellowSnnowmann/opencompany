@@ -573,6 +573,19 @@ jobs:
           echo "Found .app: $APP_PATH"
           echo "Found .dmg: $DMG_PATH"
 
+      # The built app's analytics, executed. `analytics-test` is a hidden argv
+      # mode that runs before Tauri starts, so it works headless on the runner.
+      # It is pointed at a LOOPBACK capture server and asserts the wire contract:
+      # exit 0, an `s_` profile id, `openpanel-client-id` and
+      # `openpanel-sdk-name: opencompany`, and no Origin/Authorization/Cookie.
+      # aarch64 only: the x86_64 leg is cross-compiled and the runner cannot
+      # execute it (see the header). The same binary runs unsigned here and signed
+      # below, so this is checked once, before notarization spends minutes.
+      # docs/spec/runtime/analytics-smoke.md.
+      - name: Assert desktop analytics wire contract
+        if: matrix.settings.target == 'aarch64-apple-darwin'
+        run: scripts/ci/assert-desktop-analytics.sh "${{ steps.locate.outputs.app_path }}"
+
       # `bundle.targets` is "all", which on Windows is NSIS and MSI. Both are
       # required, and with the updater on so is each installer's `.sig`.
       - name: Locate Windows installers

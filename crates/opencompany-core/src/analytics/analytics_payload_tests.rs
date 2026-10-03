@@ -97,6 +97,7 @@ fn hostile_events() -> Vec<Event> {
         Event::metered(&sample),
         Event::metered(&unknown_provider),
         Event::metered(&named_model),
+        Event::AnalyticsSelfTest {},
     ]
 }
 
@@ -331,4 +332,43 @@ fn collect_strings(value: &serde_json::Value, path: String, out: &mut Vec<(Strin
         }
         _ => {}
     }
+}
+
+/// **The smoke id is its own space and carries only hex.** `s_` can never equal
+/// an `i_` or `t_` id, and text passed as a "nonce" cannot ride through it.
+#[test]
+fn a_smoke_id_is_a_third_id_space_and_carries_only_hex() {
+    let smoke = OpaqueId::smoke("00112233445566778899aabbccddeeff");
+    assert_eq!(smoke.as_str(), "s_00112233445566778899aabbccddeeff");
+    assert_ne!(
+        smoke.as_str(),
+        OpaqueId::instance("00112233445566778899aabbccddeeff").as_str()
+    );
+
+    let hostile = OpaqueId::smoke("founder@acme.example /Users/someone");
+    assert!(
+        hostile.as_str()[2..].bytes().all(|b| b.is_ascii_hexdigit()),
+        "{hostile:?}"
+    );
+    assert!(!hostile.as_str().contains("acme"), "{hostile:?}");
+    assert!(OpaqueId::smoke(&"a".repeat(200)).as_str().len() <= 2 + 32);
+}
+
+/// **`shell_version` is emitted only when a shell named itself**, and it is a
+/// word like every other envelope property.
+#[test]
+fn shell_version_rides_the_envelope_only_when_set() {
+    let bare = payload_at(&envelope(), &Event::AnalyticsSelfTest {}, 0);
+    assert!(
+        bare["payload"]["properties"].get("shell_version").is_none(),
+        "{bare}"
+    );
+
+    let shelled = payload_at(
+        &envelope().with_shell_version("1.2.3"),
+        &Event::AnalyticsSelfTest {},
+        0,
+    );
+    assert_eq!(shelled["payload"]["properties"]["shell_version"], "1.2.3");
+    assert_eq!(shelled["payload"]["name"], "analytics_self_test");
 }

@@ -1,0 +1,131 @@
+# Daily proof that product analytics still works END TO END, for what users
+# actually run: the published hosted tenant image and the published desktop DMG.
+#
+# Each job sends ONE `analytics_self_test` event under a throwaway `s_` profile
+# (`opencompany analytics-test`) and then reads it BACK from OpenPanel's MCP
+# endpoint (`scripts/ci/verify-analytics-capture.sh`). A collector that answers
+# 2xx while discarding events fails here instead of being discovered on a
+# dashboard weeks later. Same idea as the Sentry gate in `release-production.yml`.
+#
+# `OPENPANEL_MCP_BEARER` is the base64(readClientId:readSecret) of a READ-mode
+# OpenPanel client; how to create it is in docs/spec/runtime/analytics-smoke.md.
+# Unlike the release gates this scheduled run sets `VERIFY_ANALYTICS_REQUIRED=1`:
+# a nightly check that silently skips is a check nobody is running. Until the
+# secret exists the scheduled run is red, which is the correct signal.
+#
+# Every `uses:` is a full commit SHA with the resolved version in a trailing
+# comment (issue #590, enforced by the `Actions pinned` job in ci.yml).
+name: Analytics smoke
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  hosted:
+    name: Hosted tenant image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read # pull the published tenant image
+    env:
+      IMAGE: ghcr.io/tinyhumansai/opencompany:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # `:latest` is what `release-production.yml` moves onto the newest release
+      # image. The image's entrypoint is the `serve` switch, hence `--entrypoint`.
+      - name: Send and read back (hosted-tenant)
+        env:
+          OPENPANEL_MCP_BEARER: ${{ secrets.OPENPANEL_MCP_BEARER }}
+          VERIFY_ANALYTICS_REQUIRED: '1'
+        run: |
+          set -euo pipefail
+          docker pull "$IMAGE"
+          rc=0
+          profile="$(docker run --rm \
+            --entrypoint opencompany \
+            -e OPENCOMPANY_DEPLOYMENT=hosted-tenant \
+            "$IMAGE" \
+            analytics-test)" || rc=$?
+          case "$rc" in
+            0) ;;
+            2) echo "::error::the published tenant image resolves to SILENT: it reports nothing. See docs/spec/runtime/analytics-status.md." >&2; exit 1 ;;
+            *) echo "::error::analytics-test exited ${rc}: the collector did not accept the event from the published tenant image." >&2; exit 1 ;;
+          esac
+          echo "analytics profile id: ${profile}"
+          scripts/ci/verify-analytics-capture.sh "$profile"
+
+  # The desktop leg CAN run headless: `opencompany-desktop analytics-test` is a
+  # hidden argv mode handled before Tauri starts, and `macos-latest` is Apple
+  # Silicon, the architecture of the published `aarch64` DMG. The DMG is
+  # downloaded through `gh` (no quarantine attribute, so Gatekeeper is not in the
+  # way) and attached read-only. The first release that carries the
+  # `analytics-test` mode is the first this job can pass; until then it is red. Only the aarch64 DMG is exercised: the x64 one
+  # cannot execute on this runner and is not faked.
+  desktop:
+    name: Desktop DMG (aarch64)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the latest desktop release DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dmg"
+          gh release download --repo "$GITHUB_REPOSITORY" \
+            --pattern '*_aarch64.dmg' --dir "$RUNNER_TEMP/dmg"
+          ls -l "$RUNNER_TEMP/dmg"
+
+      - name: Send and read back (desktop)
+        env:
+          OPENPANEL_MCP_BEARER: ${{ secrets.OPENPANEL_MCP_BEARER }}
+          VERIFY_ANALYTICS_REQUIRED: '1'
+        run: |
+          set -euo pipefail
+          dmg="$(find "$RUNNER_TEMP/dmg" -name '*_aarch64.dmg' -type f | head -1)"
+          mount="$RUNNER_TEMP/mnt"
+          mkdir -p "$mount"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg"
+          trap 'hdiutil detach "$mount" -force >/dev/null 2>&1 || true' EXIT
+          app="$(find "$mount" -maxdepth 1 -name '*.app' -type d | head -1)"
+          bin="$app/Contents/MacOS/opencompany-desktop"
+          # HOME is a scratch dir so the runner has no saved opt-out; the desktop
+          # reports by default.
+          rc=0
+          # A release older than the `analytics-test` mode would IGNORE the
+          # argument and open its window, so the run is bounded: perl's `alarm`
+          # kills it after 90s (macOS has no `timeout`), which reads as a failure.
+          profile="$(env HOME="$RUNNER_TEMP/home" perl -e 'alarm 90; exec @ARGV' "$bin" analytics-test)" || rc=$?
+          case "$rc" in
+            0) ;;
+            2) echo "::error::the published desktop app resolves to SILENT: it reports nothing. See docs/spec/runtime/analytics-desktop.md." >&2; exit 1 ;;
+            *) echo "::error::analytics-test exited ${rc}: the collector did not accept the event from the published desktop app." >&2; exit 1 ;;
+          esac
+          echo "analytics profile id: ${profile}"
+          scripts/ci/verify-analytics-capture.sh "$profile"

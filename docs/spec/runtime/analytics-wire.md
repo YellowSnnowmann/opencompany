@@ -52,6 +52,14 @@ payload, and `no_credential_reaches_the_request_body` asserts it on the wire.
 `z.record(z.string(), z.unknown())`; `profileId` is a string or a number.
 `groups` exists and is unused here.
 
+**Three id spaces** share `profileId`, told apart by prefix: `i_` (the random
+instance id; also every desktop), `t_` (a keyed tenant digest) and `s_` (a
+throwaway 128-bit nonce, used only by `analytics-test`). The self-test sends one
+event, `analytics_self_test`, with no properties of its own; it is constructed
+only by `analytics::selftest` and sits in the name-blocklist and no-PII tests
+like every other event name. The envelope may also carry `shell_version`, only
+when a shell names itself. See [analytics-desktop.md](analytics-desktop.md).
+
 **There is no batch endpoint and no array body.** `/track` takes one object. The
 only bulk path, `POST /import/events`, refuses a `write` client outright and
 inserts raw ClickHouse rows, bypassing sessions, geo and the queue — it is a
@@ -90,7 +98,11 @@ detection.
 
 `Tracker::track` is synchronous, infallible and returns nothing, so a call site
 cannot await a network or branch on a telemetry error. A dead collector drops
-events after one `debug!` line.
+events; the first outcome of the first drain is said once (an `info!` when
+accepted, a `warn!` otherwise) and later failures of a kind stay at `debug!`. Every
+arm of the drain also records into the counters `/spec` serves under `analytics`
+(see [analytics-status.md](analytics-status.md)), and one extra drain runs 5s
+after construction so those populate soon after boot.
 
 The queue is what makes that possible without batching. Losing the batch
 endpoint invites the obvious simplification — drop the queue and fire a request

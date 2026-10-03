@@ -695,6 +695,85 @@ export async function installAppUpdate(): Promise<void> {
   return desktop.invoke<void>("oc_app_update_install");
 }
 
+/**
+ * How the most recent analytics send ended. Mirrors `LastSend` in
+ * `crates/opencompany-core/src/analytics/status.rs`, which serializes kebab-case.
+ */
+export type AnalyticsLastSend =
+  | "never"
+  | "accepted"
+  | "refused-credential"
+  | "redirect"
+  | "collector-busy"
+  | "unreachable"
+  | "rejected-event";
+
+/**
+ * What the embedded host's analytics tracker is doing right now. Mirrors
+ * `AnalyticsStatus` in `status.rs` (the object `/spec` serves under
+ * `analytics`). It carries no client id and no payload, only counters and the
+ * outcome of the last send.
+ */
+export interface AnalyticsStatus {
+  decision: "reporting" | "off";
+  reason: string;
+  deployment: string;
+  endpoint: string | null;
+  in_build: boolean;
+  consent: boolean | null;
+  last_send: AnalyticsLastSend;
+  last_status: number | null;
+  last_at: string | null;
+  accepted: number;
+  dropped: number;
+}
+
+/**
+ * The user's analytics choice and what the tracker is doing about it. Mirrors
+ * `AnalyticsPreference` in `crates/opencompany-app/src/commands_analytics.rs`.
+ */
+export interface AnalyticsPreference {
+  /** On as far as the user and the operator have said. */
+  enabled: boolean;
+  /** `default`: never chosen. `setting`: the user chose. `env`: the environment decides. */
+  source: "default" | "setting" | "env";
+  /** The tracker's own account of itself; `null` when no host is running. */
+  status: AnalyticsStatus | null;
+  /** The user wants analytics on but this launch is not reporting; it starts next launch. */
+  restart_required: boolean;
+}
+
+/**
+ * Reads the analytics preference from the desktop shell.
+ *
+ * `null` outside the desktop shell, and for a shell built before the command
+ * existed. Callers treat `null` as "there is no such setting here", which is
+ * why the Privacy page is not rendered on any other transport.
+ */
+export async function analyticsPreference(): Promise<AnalyticsPreference | null> {
+  const desktop = tauriCore();
+  if (!desktop) return null;
+  try {
+    return (await desktop.invoke<AnalyticsPreference>("oc_analytics_preference")) ?? null;
+  } catch (error) {
+    console.debug("[desktop] this shell has no analytics preference", error);
+    return null;
+  }
+}
+
+/**
+ * Saves the user's analytics choice and returns the resulting state.
+ *
+ * **Rejects on failure** (for instance a full disk): the person pressed a
+ * switch and is owed an answer. An opt-out has already taken effect in the
+ * shell by then, which is why the page re-reads rather than assuming.
+ */
+export async function setAnalyticsPreference(enabled: boolean): Promise<AnalyticsPreference> {
+  const desktop = tauriCore();
+  if (!desktop) throw new Error("analytics settings need the desktop application");
+  return desktop.invoke<AnalyticsPreference>("oc_set_analytics_preference", { enabled });
+}
+
 /** Test seam: forget every registration. */
 export function resetDesktopRegistrations(): void {
   registrations.clear();

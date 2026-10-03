@@ -274,3 +274,31 @@ jobs:
             printf '%s\n' "${TAGS}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Product analytics, sent AND read back, against the image just pushed
+      # (pulled by its immutable `sha-<short>` tag, so a racing push cannot swap
+      # it). Same shape as the release gate in `release-production.yml`: the
+      # image sends one `analytics_self_test` as a hosted tenant and exits 0 only
+      # when the collector accepted it, then `verify-analytics-capture.sh` reads
+      # the profile back from OpenPanel. `VERIFY_ANALYTICS_REQUIRED` is unset, so
+      # a missing `OPENPANEL_MCP_BEARER` warns instead of failing the publish.
+      # docs/spec/runtime/analytics-smoke.md.
+      - name: Verify product analytics (analytics-test)
+        env:
+          OPENPANEL_MCP_BEARER: ${{ secrets.OPENPANEL_MCP_BEARER }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          rc=0
+          profile="$(docker run --rm \
+            --entrypoint opencompany \
+            -e OPENCOMPANY_DEPLOYMENT=hosted-tenant \
+            "${IMAGE}:sha-${SHA:0:12}" \
+            analytics-test)" || rc=$?
+          case "$rc" in
+            0) ;;
+            2) echo "::error::analytics-test says this image would be SILENT as a hosted tenant, so it reports nothing. Check TENANT_FEATURES and the OPENCOMPANY_ANALYTICS switch. See docs/spec/runtime/analytics-status.md." >&2; exit 1 ;;
+            *) echo "::error::analytics-test exited ${rc}: the collector did not accept the event (or the image has no analytics transport). See docs/spec/runtime/analytics-status.md." >&2; exit 1 ;;
+          esac
+          echo "analytics profile id: ${profile}"
+          scripts/ci/verify-analytics-capture.sh "$profile"

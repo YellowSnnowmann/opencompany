@@ -22,3 +22,11 @@ fn desktop_defaults_to_dot_opencompany_under_home() {
 
     assert!(status.success());
 }
+
+/// **B1: the desktop build compiles the analytics transport.** Without it every
+/// desktop would resolve to "reporting" and then install a no-op, which is the
+/// quietest possible way to ship no analytics at all.
+#[test]
+fn the_desktop_build_has_the_analytics_transport() {
+    assert!(opencompany::analytics::BuildFlags::of_this_build().analytics);
+}

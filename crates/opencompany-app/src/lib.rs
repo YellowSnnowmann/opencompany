@@ -19,16 +19,24 @@
 //!   bundle identifier, once.
 //! - **[`crash`]** — where the shell's crash reports go, including the
 //!   desktop project's compiled-in DSN and the hidden `sentry-test` check.
+//! - **[`analytics`]** — product analytics, on by default with a user opt-out,
+//!   reported from the Rust host (never the webview). See
+//!   `docs/spec/runtime/analytics-desktop.md`.
 //!
 //! The console itself is unchanged: it is the same `frontend/` bundle the web
 //! deployment serves, and it reaches all of the above through the `Transport`
 //! seam it already had.
 
 pub mod acp;
+/// Product analytics for the shell: the desktop's environment, the user's
+/// consent gate, and the hidden `analytics-test` check. See the module docs.
+pub mod analytics;
 /// State the OS filed under the pre-rename bundle identifier, carried over once
 /// before the webview starts. See the module docs.
 pub mod bundle_migration;
 pub mod commands;
+/// The Tauri commands over the user's analytics choice.
+pub mod commands_analytics;
 /// Where the shell's crash reports go: the operator's DSN, else the desktop
 /// project's compiled-in one. See the module docs.
 pub mod crash;
@@ -39,9 +47,14 @@ pub mod embedded;
 pub mod identity;
 pub mod keychain;
 pub mod local;
+/// The user's saved settings (`preferences.json`). See the module docs.
+pub mod preferences;
 pub mod proxy;
 pub mod ssh;
 pub mod update;
+
+#[cfg(test)]
+mod test_collector;
 
 use std::path::PathBuf;
 
@@ -133,7 +146,16 @@ pub fn run() {
     // starts later from a command — and commands run on Tauri's. Two runtimes
     // would mean a `start` awaited from a command while the boot-time hosts'
     // server tasks belong to a runtime nothing else holds a handle to.
-    let local = tauri::async_runtime::block_on(LocalHosts::load(data_dir.clone()));
+    //
+    // The consent gate comes from `preferences.json` before any host starts, so
+    // a user who opted out never has a tracker built for this launch. It is
+    // shared by every host and managed below for the Privacy commands.
+    let preferences = preferences::Preferences::load(&data_dir);
+    let consent = std::sync::Arc::new(analytics::ConsentGate::new(preferences.analytics_enabled()));
+    let setup =
+        analytics::AnalyticsSetup::for_preference(preferences.analytics_enabled(), consent.clone());
+    let local =
+        tauri::async_runtime::block_on(LocalHosts::load_with_analytics(data_dir.clone(), setup));
 
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -146,6 +168,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(proxy::SharedProxy::default())
         .manage(update::PendingUpdate::default())
+        .manage(consent)
         .manage(AppHandleState {
             data_dir,
             local: tokio::sync::Mutex::new(local),
@@ -178,8 +201,27 @@ pub fn run() {
             commands::oc_app_update_check,
             commands::oc_app_update_download,
             commands::oc_app_update_install,
+            commands_analytics::oc_analytics_preference,
+            commands_analytics::oc_set_analytics_preference,
         ])
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!());
+
+    // Flushed from the exit event rather than after `run`, which on some
+    // platforms never returns. Bounded, so a dead collector cannot hold the
+    // window open: the queue's own drain loop is gone with the process, and this
+    // is the last chance to send what the user did in their final seconds.
+    let result = result.map(|app| {
+        app.run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                use tauri::Manager as _;
+                let state = app.state::<AppHandleState>();
+                let _ = tauri::async_runtime::block_on(tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    async { state.local.lock().await.flush_analytics().await },
+                ));
+            }
+        });
+    });
 
     if !crash_guard.flush(opencompany::observability::FLUSH_TIMEOUT) {
         tracing::debug!("crash reporting: flush did not finish inside the shutdown budget");

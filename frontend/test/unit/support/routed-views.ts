@@ -218,6 +218,8 @@ export const SETTINGS_NAMED_BY: Record<SettingsPage, string> = {
   // entirely for `CONNECTIONS_NAMED_BY` below.
   approvals: "settings/ApprovalsSettingsView.tsx",
   appearance: "settings/AppearanceView.tsx",
+  // Desktop only: the analytics switch and what it sends.
+  privacy: "settings/PrivacyView.tsx",
   // The run index is a settings page now; the shell hands the pane in rather
   // than `SettingsSection` importing it, so the lazy boundary and its loading
   // title stay in one place. A single run keeps its own `#/observatory/<runId>`

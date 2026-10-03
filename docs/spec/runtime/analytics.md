@@ -6,15 +6,15 @@ and how to turn it off.
 
 The short version, and the only four sentences most readers need:
 
-- The **host process** in a desktop or self-hosted install sends nothing. Not
-  "sends nothing by default" in the sense of a flag someone could flip in a
-  config file — the network client is behind a cargo feature the shipped
-  default build does not compile. Getting one out of that state takes a
-  **recompile**: `--features analytics` *and* an explicit
-  `OPENCOMPANY_ANALYTICS=on`, both deliberate. The shared console separately
-  uses OpenPanel's public browser client to record UI navigation; see the
-  [console note](#console-browser-events). See [Configuration](#configuration)
-  for the seven host-side conditions in full.
+- The **host process** of a self-hosted install sends nothing: the network
+  client is behind a cargo feature the default build does not compile, and
+  getting one out of that state takes a **recompile** (`--features analytics`)
+  *and* an explicit `OPENCOMPANY_ANALYTICS=on`. The **desktop app** is the one
+  exception: it reports by default, with a user opt-out, from its Rust host —
+  see [analytics-desktop.md](analytics-desktop.md). The shared console
+  separately uses OpenPanel's public browser client for UI navigation; see the
+  [console note](#console-browser-events). [Configuration](#configuration)
+  has the seven host-side conditions in full.
 - A **hosted tenant** — a container the OpenCompany platform provisioned and
   operates — reports **shape and outcome only**, under an **opaque id**.
 - Nothing an operator or an agent wrote ever leaves the process this way. Not
@@ -41,7 +41,7 @@ OpenPanel is AGPL-3.0 and runs from a compose file. Collection now lands on infr
 
 ## Console browser events
 
-The shared React console loads `https://openpanel.dev/op1.js` for a hosted tenant when the host explicitly sets `OPENCOMPANY_ANALYTICS=on` and has a safe collector endpoint — either a configured `OPENCOMPANY_ANALYTICS_ENDPOINT` or, when that is unset or blank, the compiled-in hosted default: it serves the collector API base — the endpoint with its trailing `/track` removed, since the browser SDK appends that itself (any other path is never exposed; the bare origin is served instead) in its non-cacheable same-origin `/opencompany-config.js` before the loader runs. A console served from another origin cannot read that host-local script automatically; set `OPENCOMPANY_CONFIG.analytics: true` and `OPENCOMPANY_CONFIG.analyticsEndpoint` in that static console instead, and allow that console origin at the OpenPanel collector. Desktop and default self-hosted builds remain silent, including when the opt-in has no endpoint. URLs with userinfo, query parameters, or fragments are never put in the browser configuration. Automatic outgoing-link and attribute collection stay disabled; the React lifecycle records only allowlisted screen names and button control types. The browser's client id (`afe8ec4e-0a6a-427a-aa22-49cbbf137d0a`, hardcoded in `frontend/public/openpanel-init.js`) is public by design and is not the host transport's `OPENCOMPANY_ANALYTICS_CLIENT_ID`. With `OPENCOMPANY_ANALYTICS_ENDPOINT=https://panel.tinyhumans.ai/api/track` the browser's `apiUrl` is `https://panel.tinyhumans.ai/api`.
+The shared React console loads `https://openpanel.dev/op1.js` for a hosted tenant when the host explicitly sets `OPENCOMPANY_ANALYTICS=on` and has a safe collector endpoint — either a configured `OPENCOMPANY_ANALYTICS_ENDPOINT` or, when that is unset or blank, the compiled-in hosted default: it serves the collector API base — the endpoint with its trailing `/track` removed, since the browser SDK appends that itself (any other path is never exposed; the bare origin is served instead) in its non-cacheable same-origin `/opencompany-config.js` before the loader runs. A console served from another origin cannot read that host-local script automatically; set `OPENCOMPANY_CONFIG.analytics: true` and `OPENCOMPANY_CONFIG.analyticsEndpoint` in that static console instead, and allow that console origin at the OpenPanel collector. The desktop webview (CSP-blocked) and default self-hosted builds stay silent here, including when the opt-in has no endpoint. URLs with userinfo, query parameters, or fragments are never put in the browser configuration. Automatic outgoing-link and attribute collection stay disabled; the React lifecycle records only allowlisted screen names and button control types. The browser's client id (`afe8ec4e-0a6a-427a-aa22-49cbbf137d0a`, hardcoded in `frontend/public/openpanel-init.js`) is public by design and is not the host transport's `OPENCOMPANY_ANALYTICS_CLIENT_ID`. With `OPENCOMPANY_ANALYTICS_ENDPOINT=https://panel.tinyhumans.ai/api/track` the browser's `apiUrl` is `https://panel.tinyhumans.ai/api`.
 
 ## What is collected
 
@@ -82,7 +82,7 @@ Set once at boot, attached to every event:
 | Property | Value |
 |---|---|
 | `deployment` | `desktop` \| `self-hosted` \| `hosted-tenant` |
-| `app_version` | the crate version |
+| `app_version`, `shell_version` | the crate version; `shell_version` is the desktop app's, **only when a shell names itself** |
 | `os`, `arch` | `std::env::consts` |
 | `cognition_path` | `harness` \| `hosted` \| `echo` \| `sidecar` \| `custom` |
 | `cognition_provider` | `openrouter` \| `subscription` \| `managed` \| `ollama` \| `byok` \| … |
@@ -220,8 +220,9 @@ Reporting happens only when **all** of these hold:
 A hosted tenant is TinyHumans' own workload, and the TinyHumans collector is
 the right destination for it, so the tenant image needs no injected analytics
 configuration. The `analytics` feature is compiled only into that image
-(`TENANT_FEATURES` in `deploy-staging.yml`, read by `release-production.yml`) —
-not the desktop app, not a default build — but it is not impossible to compile
+(`TENANT_FEATURES` in `deploy-staging.yml`, read by `release-production.yml`)
+and the desktop app, which supplies its own endpoint (see
+[analytics-desktop.md](analytics-desktop.md)) — but it is not impossible to compile
 elsewhere: a self-hoster can add it through `OPENCOMPANY_FEATURES`. That
 self-hoster's `OPENCOMPANY_ANALYTICS=on` is consent to report to *their*
 collector, and the TinyHumans default would be somebody else's — a third party
@@ -295,10 +296,9 @@ then dropped every batch. Issue #673 had already settled this rule for a
 different call site: it must be *the same* parser `reqwest` uses, because a
 second hand-rolled reader is a bypass waiting to be found.
 
-Condition 1 is met in exactly one place in this repository: `TENANT_FEATURES` in
-`.github/workflows/deploy-staging.yml`, the hosted tenant image's feature set.
-Nothing else compiles the feature — not the desktop (`crates/opencompany-app/Cargo.toml`),
-not the default build, not any CI lane but the scoped analytics one. A hosted
+Condition 1 is met in two places: `TENANT_FEATURES` in
+`.github/workflows/deploy-staging.yml` (the hosted image) and the desktop
+manifest (`crates/opencompany-app/Cargo.toml`); not the default build, not any CI lane but the scoped analytics one. A hosted
 image whose feature list drops `analytics` reports nothing however the manager
 configures it, and says so at boot rather than failing quietly.
 
@@ -452,12 +452,12 @@ an overrun costs a half-finished turn.
 
 `Tracker::track` is synchronous, infallible and returns nothing, so a call site
 cannot await a network or branch on a telemetry error. A dead collector drops
-events after one `debug!` line, the queue is bounded at 500 events, and a drain
-that cannot reach the collector abandons the rest of itself rather than paying a
-5s timeout per queued event. Three status classes — `401`, `3xx`, `429`/`5xx` —
-abandon it too, none being an answer about the event posted. The full reasoning,
-and the one loss said out loud (the tail a cancelled shutdown flush drops), is in
-[analytics-wire.md](analytics-wire.md#failure-is-silent-and-the-drain-gives-up-early).
+events (the first failure is a `warn!`, the rest `debug!`), the queue is bounded
+at 500, and a drain that cannot reach the collector abandons the rest of itself
+rather than paying a 5s timeout per event; `401`, `3xx` and `429`/`5xx` abandon
+it too. Reasoning: [analytics-wire.md](analytics-wire.md#failure-is-silent-and-the-drain-gives-up-early).
+Visibility: `/spec` `analytics` and the first-send self-check, in
+[analytics-status.md](analytics-status.md).
 
 ## What is deliberately not instrumented yet
 

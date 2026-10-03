@@ -628,3 +628,97 @@ fn the_header_safety_check_is_a_subset_of_what_a_header_accepts() {
         candidates.len()
     );
 }
+
+/// **I1: the exact request a desktop sends.** A capture collector records the
+/// headers and body of the one `POST /track`, and the test pins every one of
+/// them: the three OpenPanel headers and the JSON content type are present, no
+/// `authorization`, `cookie` or `origin` goes out (this is a server-side
+/// client, not a browser), the body is exactly `{type, payload{name, profileId,
+/// properties}}`, and the client id appears nowhere but its header.
+#[tokio::test]
+async fn the_request_has_exactly_the_headers_and_body_the_collector_expects() {
+    let captured: Arc<std::sync::Mutex<Vec<(axum::http::HeaderMap, String, String)>>> =
+        Arc::default();
+    let sink = captured.clone();
+    let app = axum::Router::new().route(
+        "/track",
+        axum::routing::post(
+            move |uri: axum::http::Uri, headers: axum::http::HeaderMap, body: String| {
+                let sink = sink.clone();
+                async move {
+                    sink.lock().unwrap().push((headers, uri.to_string(), body));
+                    axum::http::StatusCode::OK
+                }
+            },
+        ),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/track", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let env = env(
+        &url,
+        &[(DEPLOYMENT_ENV, "desktop"), ("OPENCOMPANY_ANALYTICS", "on")],
+    );
+    let tracker = build(
+        &resolve(Deployment::from_env(&env), &env),
+        Envelope::new(
+            OpaqueId::instance("0123456789abcdef0123456789abcdef"),
+            Deployment::Desktop,
+            Cognition::default(),
+        ),
+    );
+    tracker.track(Event::InstanceStarted {
+        companies: 1,
+        storage: "sqlite",
+        setup_complete: false,
+    });
+    tracker.flush().await;
+
+    let captured = captured.lock().unwrap();
+    assert_eq!(captured.len(), 1, "exactly one request per event");
+    let (headers, uri, body) = &captured[0];
+
+    assert_eq!(headers["openpanel-client-id"], TEST_CLIENT_ID);
+    assert_eq!(headers["openpanel-sdk-name"], "opencompany");
+    assert!(!headers["openpanel-sdk-version"].is_empty());
+    assert_eq!(headers["content-type"], "application/json");
+    for forbidden in ["authorization", "cookie", "origin"] {
+        assert!(
+            headers.get(forbidden).is_none(),
+            "{forbidden} must not be sent: {headers:?}"
+        );
+    }
+
+    let json: serde_json::Value = serde_json::from_str(body).expect("a JSON body");
+    let mut top: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
+    top.sort();
+    assert_eq!(top, ["payload", "type"]);
+    assert_eq!(json["type"], "track");
+    let mut inner: Vec<_> = json["payload"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    inner.sort();
+    assert_eq!(inner, ["name", "profileId", "properties"]);
+    assert_eq!(json["payload"]["name"], "instance_started");
+    assert_eq!(
+        json["payload"]["profileId"],
+        "i_0123456789abcdef0123456789abcdef"
+    );
+    assert_eq!(json["payload"]["properties"]["deployment"], "desktop");
+
+    // The client id is a header and nothing else.
+    assert!(
+        !body.contains(TEST_CLIENT_ID),
+        "client id leaked into the body"
+    );
+    assert!(
+        !uri.contains(TEST_CLIENT_ID),
+        "client id leaked into the URL"
+    );
+}

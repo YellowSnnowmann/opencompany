@@ -6,7 +6,10 @@
 //! correct for one is wrong for another — most sharply for analytics
 //! (`docs/spec/runtime/analytics.md`), where a hosted tenant reporting to the
 //! platform that runs it is ordinary operations and a self-hosted GPL install
-//! doing the same thing is a betrayal.
+//! doing the same thing is a betrayal. The desktop is the third case: it reports
+//! by default with a user opt-out, but only because its shell says so through
+//! its own environment (`docs/spec/runtime/analytics-desktop.md`) — the kind
+//! alone never switches reporting on.
 //!
 //! ## Why this is declared, not sniffed
 //!

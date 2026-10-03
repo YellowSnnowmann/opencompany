@@ -128,6 +128,16 @@ enum Command {
         #[arg(long)]
         panic: bool,
     },
+    /// Send one deliberate `analytics_self_test` event, to prove product
+    /// analytics reaches the collector from this binary and environment.
+    ///
+    /// Resolves exactly as boot does. Prints the throwaway `s_…` profile id on
+    /// stdout and nothing else. Exits `0` only when the collector accepted the
+    /// event, `2` when analytics is off here (nothing to test), and `1` for
+    /// anything else — so a CI step that runs it proves something.
+    ///
+    /// See `docs/spec/runtime/analytics-desktop.md`.
+    AnalyticsTest,
     /// Issue a sign-in password for a company, from the host (#1718).
     ///
     /// The way in when a deployment cannot mail a sign-in link: the magic-link
@@ -1847,9 +1857,18 @@ const MAX_BLOCKING_THREADS: usize = 512;
 /// filter would run the whole staging measurement and record nothing — the same
 /// shape as the durable-append gap above, one level quieter.
 ///
+/// `opencompany::analytics` is the product-analytics transport. Its warnings are
+/// the only account of a collector that is refusing this instance's credential
+/// (`401`), redirecting, or rejecting events, and of the first send failing:
+/// every one is said once and bounded, and under a bare `error` filter every one
+/// was swallowed — "analytics: reporting to …" at boot and then silence, which
+/// is the failure the transport exists to refuse. The same answer is on `/spec`
+/// (`analytics`), but a log is where an operator looks first.
+///
 /// Setting `RUST_LOG` replaces this string wholesale — the operator keeps full
 /// control, and behaviour with `RUST_LOG` set is unchanged.
-const DEFAULT_LOG_FILTER: &str = "error,tinyagents::observability=warn,policy::shadow_floor=info";
+const DEFAULT_LOG_FILTER: &str =
+    "error,tinyagents::observability=warn,policy::shadow_floor=info,opencompany::analytics=warn";
 
 fn main() -> Result<()> {
     // The SSO auto-login signing secret (`OPENCOMPANY_SSO_SECRET`). Read and
@@ -2702,6 +2721,12 @@ async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) 
                 print!("{}", report.to_text());
             }
             Ok(())
+        }
+        Some(Command::AnalyticsTest) => {
+            let code =
+                opencompany::analytics::selftest::run_cli(&opencompany::app::config::ProcessEnv)
+                    .await;
+            std::process::exit(code);
         }
         Some(Command::SentryTest { message, panic }) => {
             // The client, if any, was installed at the top of `async_main`.

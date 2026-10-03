@@ -85,6 +85,7 @@ fn hostile_events() -> Vec<Event> {
         Event::metered(&sample),
         Event::metered(&unknown_provider),
         Event::metered(&named_model),
+        Event::AnalyticsSelfTest {},
     ]
 }
 

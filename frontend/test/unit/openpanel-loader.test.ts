@@ -13,7 +13,7 @@ const tauriConfig = readFileSync(
   "utf8",
 );
 const tauriManifest = JSON.parse(tauriConfig) as {
-  app: { security: { csp: string } };
+  app: { security: { csp: string; devCsp?: string } };
 };
 
 function cspSources(csp: string, directiveName: string): string[] {
@@ -136,5 +136,47 @@ describe("OpenPanel console analytics", () => {
     ]);
     expect(scriptSources.some((source) => sourceAllowsOrigin(source, openPanelOrigin))).toBe(false);
     expect(connectSources.some((source) => sourceAllowsOrigin(source, openPanelOrigin))).toBe(false);
+  });
+
+  it("allows no collector origin in connect-src, release or dev", () => {
+    // The Rust host sends analytics, never the webview, so neither policy may
+    // name the collector. Matched by hostname text as well as by origin
+    // semantics, so a wildcard or a differently-spelled entry cannot slip in.
+    const { csp, devCsp } = tauriManifest.app.security;
+    expect(devCsp, "devCsp must exist so this rule covers it").toBeTypeOf("string");
+    for (const [name, policy] of [["csp", csp], ["devCsp", devCsp as string]] as const) {
+      const connectSources = cspSources(policy, "connect-src");
+      expect(connectSources.length, `${name} connect-src`).toBeGreaterThan(0);
+      for (const source of connectSources) {
+        expect(source, `${name} connect-src ${source}`).not.toMatch(/panel\.tinyhumans\.ai|openpanel\.dev/i);
+      }
+      for (const origin of ["https://panel.tinyhumans.ai", "https://openpanel.dev"]) {
+        expect(
+          connectSources.some((source) => sourceAllowsOrigin(source, new URL(origin))),
+          `${name} connect-src must not allow ${origin}`,
+        ).toBe(false);
+      }
+      // No blanket scheme or wildcard that would allow it implicitly.
+      expect(connectSources).not.toContain("*");
+      expect(connectSources).not.toContain("https:");
+    }
+  });
+
+  it("keeps the dev policy to the release policy plus the Vite dev server", () => {
+    const { csp, devCsp } = tauriManifest.app.security;
+    const extra = cspSources(devCsp as string, "connect-src").filter(
+      (source) => !cspSources(csp, "connect-src").includes(source),
+    );
+    expect(extra).toEqual(["ws://localhost:5173", "http://localhost:5173"]);
+  });
+
+  it("makes the browser loader exit before doing anything under the Tauri webview", () => {
+    // Static pin beside the behavioural one above: the guard is the first
+    // statement, so no later edit can start loading the script ahead of it.
+    expect(loader).toContain("window.__TAURI_INTERNALS__");
+    const guard = loader.indexOf("window.__TAURI_INTERNALS__");
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(guard).toBeLessThan(loader.indexOf("openpanel.dev/op1.js"));
+    expect(guard).toBeLessThan(loader.indexOf('window.op("init"'));
   });
 });

@@ -8,10 +8,12 @@ import { FeedbackView } from "@/views/FeedbackView";
 import { PeopleView } from "@/views/PeopleView";
 import { AppearanceView } from "@/views/settings/AppearanceView";
 import { ApprovalsSettingsView } from "@/views/settings/ApprovalsSettingsView";
+import { PrivacyView } from "@/views/settings/PrivacyView";
 import { SettingsView } from "@/views/SettingsView";
 import {
   SETTINGS_PAGE_GROUPS,
   SETTINGS_PAGES,
+  availableSettingsPages,
   resolveSettingsPage,
   type SettingsPage,
 } from "@/views/settings-pages";
@@ -78,7 +80,11 @@ export function SettingsSection({
   onResetCompany,
 }: Props) {
   const page = resolveSettingsPage(sub);
-  const activePage = SETTINGS_PAGES.find((item) => item.id === page)!;
+  // The pages this runtime may show. `privacy` is desktop-only, so a browser
+  // console gets the table without it; `resolveSettingsPage` has already sent
+  // its address to General there.
+  const pages = availableSettingsPages();
+  const activePage = pages.find((item) => item.id === page)!;
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -105,7 +111,7 @@ export function SettingsSection({
             >
               {group.label}
             </div>
-            {SETTINGS_PAGES.filter((item) => item.group === group.id).map((item) => (
+            {pages.filter((item) => item.group === group.id).map((item) => (
               // One line per row, and the row's own `title` carries what the
               // second line used to say (issue #2131). The hint was rendered
               // under every label here, and at `w-60` most of them wrapped:
@@ -161,7 +167,7 @@ export function SettingsSection({
             is a second line per row, which is the thing that was removed. */}
         <div className="relative z-30 border-b lg:hidden">
           <div className="flex gap-1 overflow-x-auto p-2">
-            {SETTINGS_PAGES.map((item) => (
+            {pages.map((item) => (
               <a
                 key={item.id}
                 href={`#/settings/${item.id}`}
@@ -192,6 +198,9 @@ export function SettingsSection({
         {/* Both were cards on General. See their own files for why each left. */}
         {page === "approvals" && <ApprovalsSettingsView client={client} company={company} />}
         {page === "appearance" && <AppearanceView />}
+        {/* Desktop only: `page` can only be "privacy" there, because
+            `resolveSettingsPage` falls back to General in a browser. */}
+        {page === "privacy" && <PrivacyView />}
         {/* The same page `#/feedback` renders, re-parented rather than
             rewritten. That top-level address still resolves — the flag dialog
             and the board's own links point at it — so nothing that names it

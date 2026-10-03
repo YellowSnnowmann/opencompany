@@ -1462,6 +1462,39 @@ export interface AppSpec {
    * has no route for.
    */
   setup_complete?: boolean;
+  /**
+   * Whether this process is tracking, and whether that is working: the boot
+   * decision plus what the transport has actually sent. Optional: a host
+   * predating the field omits it. The endpoint is redacted and the collector
+   * client id is never present. Not rendered anywhere yet.
+   */
+  analytics?: AnalyticsStatus;
+}
+
+/** `AppSpec.analytics`: how the host's product-analytics reporting stands. */
+export interface AnalyticsStatus {
+  decision: 'reporting' | 'off';
+  /** Why — for `off`, the reason reporting is not happening. */
+  reason: string;
+  deployment: string;
+  endpoint: string | null;
+  /** Whether this build compiled the network transport at all. */
+  in_build: boolean;
+  /** The user's consent where a deployment asks for one; `null` otherwise. */
+  consent: boolean | null;
+  last_send:
+    | 'never'
+    | 'accepted'
+    | 'refused-credential'
+    | 'redirect'
+    | 'collector-busy'
+    | 'unreachable'
+    | 'rejected-event';
+  last_status: number | null;
+  /** RFC-3339 UTC; `null` until a send has ended. */
+  last_at: string | null;
+  accepted: number;
+  dropped: number;
 }
 
 /**

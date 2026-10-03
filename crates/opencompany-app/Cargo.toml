@@ -145,7 +145,16 @@ path = "src/main.rs"
 # `crash-reporting` gives the shell and every embedded host the same optional,
 # operator-configured Sentry client as the server binary. It remains inert
 # without `OPENCOMPANY_SENTRY_DSN`.
-opencompany-core = { path = "../opencompany-core", default-features = false, features = ["sqlite", "platform-jwt", "oauth", "mcp", "tinymemory", "tinyhumans", "crash-reporting"] }
+# `analytics` compiles the OpenPanel transport, so the desktop reports product
+# analytics from the Rust host (never the webview; the CSP is unchanged) — on by
+# default, off by the user's Settings -> Privacy choice or
+# `OPENCOMPANY_ANALYTICS=off`. It is `["dep:reqwest"]` and nothing else, and
+# `oauth` above already pulls reqwest, so it adds no package and leaves
+# `Cargo.lock` byte-identical. It lives on this line, like `tinyhumans` and
+# `crash-reporting`, so dev, CI and release share one source rather than a
+# fourth copy of the feature string. `src/analytics.rs` supplies the deployment,
+# switch, client id and endpoint a double-clicked app has no environment for.
+opencompany-core = { path = "../opencompany-core", default-features = false, features = ["sqlite", "platform-jwt", "oauth", "mcp", "tinymemory", "tinyhumans", "crash-reporting", "analytics"] }
 
 tauri = { version = "2", features = [] }
 # The OS credential store, so a device session token never has to live in the
@@ -155,7 +164,7 @@ tauri = { version = "2", features = [] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 tauri-plugin-shell = "2"
 
-tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "net"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "net", "time"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 futures-util = "0.3"
 async-trait = "0.1"

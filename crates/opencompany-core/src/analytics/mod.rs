@@ -33,13 +33,18 @@
 //! that fired at boot would turn the lane red and could not legitimately be
 //! fixed by giving the namespace a route.
 //!
-//! # The desktop sends nothing, and needs no transport
+//! # The desktop reports through this tracker, not the webview
 //!
-//! `src-tauri/tauri.conf.json` sets `connect-src 'self' ipc: http://ipc.localhost`,
-//! so the desktop webview makes no outbound request at all — deliberately, and
-//! documented in two places in the frontend. The desktop is
-//! [`Deployment::Desktop`], which is silent, so nothing here asks for that CSP
-//! to be widened and nothing here should ever be a reason to widen it.
+//! `crates/opencompany-app/tauri.conf.json` limits `connect-src` to `'self'`,
+//! `ipc:` and the crash-reporting host, so the desktop webview makes no
+//! analytics request, and nothing here asks for that CSP to be widened.
+//! The desktop *does* report product analytics, by default and with a user
+//! opt-out — but from the Rust host, through the same [`Tracker`] as a hosted
+//! tenant. The shell opts in by declaring [`Deployment::Desktop`] and an
+//! explicit `on` through its own environment (`opencompany-app`'s
+//! `analytics.rs`); the core resolver still treats a *bare* desktop as silent,
+//! so `serve` and the TUI send nothing. See
+//! `docs/spec/runtime/analytics-desktop.md`.
 //!
 //! # Failure is silent
 //!
@@ -67,16 +72,18 @@ pub mod boot;
 pub mod config;
 pub mod meter;
 pub mod openpanel;
+pub mod selftest;
+pub mod status;
 pub mod types;
 
-pub use boot::install as install_analytics;
+pub use boot::{install as install_analytics, install_for_shell as install_analytics_for_shell};
 pub use config::{Decision, resolve};
 pub use meter::TrackingUsageMeter;
+pub use status::{AnalyticsStatus, LastSend};
 pub use types::{
     BuildFlags, Envelope, Event, FailureCode, OpaqueId, Outcome, Prop, PropValue, Trigger,
 };
 
-#[cfg(doc)]
 use crate::app::deployment::Deployment;
 
 /// Where a batch of events is sent, and how they are named.
@@ -106,6 +113,24 @@ pub trait Tracker: Send + Sync {
     /// A default no-op, so a tracker that carries no envelope — and every
     /// embedder that implements this port — is unaffected.
     fn observe_cognition(&self, _cognition: crate::ports::brain::Cognition) {}
+
+    /// What this tracker is doing and whether it is working, for `/spec`
+    /// (`analytics`).
+    ///
+    /// `None` — the default — means "I carry no state worth reporting", which is
+    /// every tracker but the HTTP transport and the deferred handle in front of
+    /// it. `AppState::spec` turns `None` into an honest `off` rather than
+    /// omitting the field. Synchronous and cheap: it reads counters.
+    fn status(&self) -> Option<AnalyticsStatus> {
+        None
+    }
+
+    /// Throws away anything queued and not yet sent.
+    ///
+    /// For a consent withdrawal: events recorded before the user said no must
+    /// not be delivered after it. A default no-op, so a tracker with nothing
+    /// buffered is unaffected. Never blocks and never fails, like `track`.
+    fn discard_pending(&self) {}
 }
 
 /// The tracker that does nothing. **The default in every build**, and the only
@@ -217,6 +242,11 @@ impl Tracker for RecordingTracker {
 pub struct DeferredTracker {
     inner: std::sync::OnceLock<Arc<dyn Tracker>>,
     pending: Mutex<Vec<Event>>,
+    /// The boot decision, summarized, when installed through
+    /// [`install_with_decision`](Self::install_with_decision). `status` overlays
+    /// the inner tracker's send statistics onto it, because the transport knows
+    /// what it sent but not why a process is silent.
+    decision: std::sync::OnceLock<AnalyticsStatus>,
 }
 
 /// The most events held before installation before the oldest are dropped.
@@ -249,6 +279,27 @@ impl DeferredTracker {
             inner.track(event);
         }
         true
+    }
+
+    /// [`install`](Self::install), and remember what was decided so
+    /// [`Tracker::status`] can answer for a silent process too.
+    ///
+    /// `boot::install` uses this. A [`NullTracker`] behind the handle has no
+    /// opinion of its own, so without the stored summary the "off" reason —
+    /// the part an operator most wants — would be lost.
+    pub fn install_with_decision(
+        &self,
+        tracker: Arc<dyn Tracker>,
+        decision: &Decision,
+        deployment: Deployment,
+    ) -> bool {
+        let installed = self.install(tracker);
+        if installed {
+            let _ = self
+                .decision
+                .set(AnalyticsStatus::from_decision(decision, deployment));
+        }
+        installed
     }
 }
 
@@ -290,6 +341,27 @@ impl Tracker for DeferredTracker {
     async fn flush(&self) {
         if let Some(inner) = self.inner.get() {
             inner.flush().await;
+        }
+    }
+
+    /// The stored decision with the inner tracker's send statistics overlaid.
+    /// `None` until something is installed, so a host that never wired one says
+    /// "not wired" on `/spec`.
+    fn status(&self) -> Option<AnalyticsStatus> {
+        let inner = self.inner.get()?;
+        let sent = inner.status();
+        match (self.decision.get(), sent) {
+            (Some(decided), Some(sent)) => Some(decided.clone().with_send_stats(&sent)),
+            (Some(decided), None) => Some(decided.clone()),
+            (None, sent) => sent,
+        }
+    }
+
+    /// Clears the pre-install buffer, then forwards.
+    fn discard_pending(&self) {
+        self.pending.lock().expect("deferred tracker").clear();
+        if let Some(inner) = self.inner.get() {
+            inner.discard_pending();
         }
     }
 
@@ -390,3 +462,6 @@ mod tests_identity_tracker;
 #[cfg(test)]
 #[path = "analytics_payload_tests.rs"]
 mod tests_payload;
+#[cfg(test)]
+#[path = "analytics_pii_tests.rs"]
+mod tests_pii;
