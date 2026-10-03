@@ -1085,7 +1085,7 @@ impl RuntimeBuilder {
     /// `HarnessPool::ensure` compares fingerprints covering the MCP, overlay,
     /// capability, … families, but none of them cover the memory family — the
     /// `context`/`facts`/`scratch`/`scopes` handles `build_agent` folds into
-    /// every roster agent's `OcMemory`. A live engine swap replaces those
+    /// every roster agent's memory tools. A live engine swap replaces those
     /// handles, so the pool needs its own marker for them: this fingerprint.
     ///
     /// Port pointers (not just the descriptor) are included because they change
@@ -1665,7 +1665,7 @@ impl RuntimeBuilder {
         if let Some(pool) = handover.as_ref().and_then(|h| h.harness.clone()) {
             // Issue #1113: a live memory-engine swap replaces the memory-family
             // ports (context, facts, scratch, scopes) that `build_agent` folded
-            // into every roster agent's `OcMemory`, and none of the fingerprints
+            // into every roster agent's memory tools, and none of the fingerprints
             // `HarnessPool::ensure` compares cover that family. An inherited
             // pool would therefore keep serving agents that read and write the
             // engine the swap just deselected until a process restart. Drop the
