@@ -58,7 +58,7 @@ a teammate updates it server-side and journals a `DeskMembersChanged`, so the
 console refetches desks as for any membership change. The host refuses every
 membership, order and delete write on it with a `409`, so the console offers
 none (`mutable === false`): no "add existing", no org-chart link, and no lead
-badge (`leadless`). The org chart, the Overview graph, the Comms graph and the
+badge (`leadless`). The org chart, the Comms graph and the
 assignee picker leave it out — it is the whole roster, not a desk in the
 hierarchy.
 
@@ -257,9 +257,10 @@ underneath: the gutter is never empty while an image is in flight, and a face
 whose bytes were deleted degrades to a coloured tile rather than to a broken
 image.
 
-A DM is where seeding it wrong bites hardest: the rail row and `ChatHeader`
-sit on screen together, and seeding them differently would put two faces on
-one teammate — worse than the generic glyph the header drew before issue #1170.
+A DM is where seeding it wrong bites hardest: the rail row and the pill over
+the transcript (`ChannelPill`, `ChannelInfo.tsx`) sit on screen together, and
+seeding them differently would put two faces on one teammate — worse than the
+generic glyph the old header drew before issue #1170.
 Both go through `dmFace(channel)` in `channels.ts`, which reads
 `channel.member.avatar`; a channel and a DM with no roster entry get `null`
 there and wear a glyph (`#`, `Lock`, `CircleDot`) instead, because neither has

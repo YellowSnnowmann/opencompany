@@ -22,8 +22,7 @@ and survives a refresh.
 
 | View | What it does |
 |---|---|
-| **Overview** | The company's knowledge graph, full-bleed — see [`src/views/overview/README.md`](src/views/overview/README.md) |
-| **Room** | A channel-and-DM workspace: channel rail, threaded timeline, composer, thread panel, and the roster in a side pane — see [`src/views/room/README.md`](src/views/room/README.md) |
+| **Room** | A channel-and-DM workspace: the conversation list in the sidebar, a threaded timeline under a pill naming the conversation, a one-line composer, and a details panel (members, Manage desk/agent, raw turns) the pill opens — see [`src/views/room/README.md`](src/views/room/README.md) |
 | **Tasks** | A built-in Kanban board (drag cards between columns) |
 | **Approvals** | The inbox of things parked for your decision, with approve/decline |
 | **Workflows** | A read-only [React Flow](https://reactflow.dev) canvas of how work is routed (lazy-loaded) |
@@ -379,7 +378,7 @@ npm run e2e:visual                       # compare against the committed baselin
 npm run e2e:visual:update                # re-record them
 ```
 
-`visual.spec.ts` renders each top-level surface — Overview, Tasks, Workflows,
+`visual.spec.ts` renders each top-level surface — Tasks, Workflows,
 Company, Memory, Inbox, Approvals, Settings — full-page in both themes and
 compares it against a PNG in
 [`test/e2e/visual.spec.ts-snapshots/`](test/e2e/visual.spec.ts-snapshots/).
