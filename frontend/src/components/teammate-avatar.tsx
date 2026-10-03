@@ -230,9 +230,8 @@ function AvatarTile({
       className={cn(
         "relative flex shrink-0 items-center justify-center overflow-hidden rounded-(--avatar-radius) text-xs font-semibold",
         toneClass(tone),
-        // A mascot stands on a dark disc in light mode (`.avatar-mascot` in
-        // `index.css`): the pastel tone tile left a pale face on a white page
-        // with nothing to separate them.
+        // A mascot gets an ink hairline in light mode (`.avatar-mascot` in
+        // `index.css`): its own pale disc on a white page had no edge at all.
         mascot && "avatar-mascot",
         className,
       )}

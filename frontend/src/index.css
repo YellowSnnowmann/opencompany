@@ -1488,14 +1488,18 @@
 }
 
 /*
- * Mascot faces in light mode stand on a dark disc. On the white page and the
- * near-white sidebar the pastel tone tile gave a pale mascot on a pale ground
- * with no edge between them; a deep ink disc gives every face the contrast it
- * already has in dark mode, where the tile sits on near-black. Unlayered and
- * scoped to `:root:not(.dark)`, so it outranks the tile's tone utility (and the
- * rail's `bg-avatar-disc`) in light mode only.
+ * Mascot faces in light mode get an edge. The Rive mascot renders onto its own
+ * pale disc — baked into the artboard, which exposes only skin and hand colour
+ * — so on the white page and the near-white sidebar a face had no boundary at
+ * all. A hairline of ink drawn OVER the tile (an `::after`, because the
+ * rendered image covers anything painted beneath it) gives every face the edge
+ * it already has in dark mode, where the disc sits on near-black.
  */
-:root:not(.dark) .avatar-mascot {
-  background-color: oklch(0.27 0.018 286);
-  color: oklch(0.95 0.005 286);
+:root:not(.dark) .avatar-mascot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px oklch(0.2 0.02 286 / 0.14);
+  pointer-events: none;
 }
