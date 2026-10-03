@@ -49,3 +49,110 @@ export function SidebarShellFooter({
     </SidebarFooter>
   );
 }
+
+/**
+ * The floating sidebar's right edge, as a resize handle.
+ *
+ * Drag it to set the width, use ←/→ (16px a step, Home/End for the bounds)
+ * from the keyboard, double-click to reset. It is a `role="separator"` with the
+ * width as its value, which is the ARIA pattern for a splitter. The width
+ * itself is owned by the shell (`app-shell.tsx`), which feeds it to
+ * `SidebarProvider` as `--sidebar-width` and persists it on release
+ * (`lib/sidebar-width.ts`); this only reports where the edge was moved to.
+ *
+ * The card is `left: 8px`, so the width under a pointer at `clientX` is
+ * `clientX - 8`. `onResizing` lets the shell switch the sidebar's width
+ * transition off for the drag, so the edge tracks the pointer instead of
+ * easing behind it.
+ */
+export function SidebarResizeHandle({
+  width,
+  min,
+  max,
+  defaultWidth,
+  onWidthChange,
+  onCommit,
+  onResizing,
+}: {
+  width: number;
+  min: number;
+  max: number;
+  defaultWidth: number;
+  /** Every move, live. */
+  onWidthChange: (width: number) => void;
+  /** Once, when a drag or a key press settles — the moment to persist. */
+  onCommit: (width: number) => void;
+  onResizing: (resizing: boolean) => void;
+}) {
+  const clamp = (w: number) => Math.round(Math.min(max, Math.max(min, w)));
+
+  function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+    onResizing(true);
+    let latest = width;
+    const move = (e: PointerEvent) => {
+      latest = clamp(e.clientX - SIDEBAR_CARD_INSET);
+      onWidthChange(latest);
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      onResizing(false);
+      onCommit(latest);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  }
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const step = event.shiftKey ? 64 : 16;
+    const next =
+      event.key === "ArrowLeft"
+        ? width - step
+        : event.key === "ArrowRight"
+          ? width + step
+          : event.key === "Home"
+            ? min
+            : event.key === "End"
+              ? max
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    const w = clamp(next);
+    onWidthChange(w);
+    onCommit(w);
+  }
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar"
+      aria-valuenow={width}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      tabIndex={0}
+      title="Drag to resize · double-click to reset"
+      data-testid="sidebar-resize-handle"
+      onPointerDown={onPointerDown}
+      onKeyDown={onKeyDown}
+      onDoubleClick={() => {
+        onWidthChange(defaultWidth);
+        onCommit(defaultWidth);
+      }}
+      // Inside the card's right edge (the card clips its overflow for the
+      // rounded corners), 6px wide, invisible until hovered or focused.
+      className="group/resize absolute inset-y-3 right-0 z-20 w-1.5 cursor-col-resize touch-none outline-none"
+    >
+      <span className="absolute inset-y-0 right-0.5 w-0.5 rounded-full bg-transparent transition-colors group-hover/resize:bg-primary/40 group-focus-visible/resize:bg-primary/60 group-active/resize:bg-primary/60" />
+    </div>
+  );
+}
+
+/** How far the floating card sits from the window's left edge (`app-shell.tsx`). */
+const SIDEBAR_CARD_INSET = 8;
