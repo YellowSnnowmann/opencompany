@@ -54,7 +54,7 @@ describe("the channel pill", () => {
 });
 
 describe("the channel info panel", () => {
-  function renderPanel(onMessage = vi.fn(), onAddExisting: ((id: string) => void) | undefined = vi.fn()) {
+  function renderPanel(onMessage = vi.fn(), onAdd: ((id: string) => void) | null = vi.fn()) {
     act(() =>
       root.render(
         createElement(ChannelInfoPanel, {
@@ -64,7 +64,7 @@ describe("the channel info panel", () => {
           others: [CY],
           people: [{ id: "u1", label: "Sam" }],
           leadId: "ada",
-          onAddExisting,
+          onAddExisting: onAdd ?? undefined,
           onClose: () => {},
           onMessage,
         }),
@@ -139,7 +139,7 @@ describe("the channel info panel", () => {
   });
 
   it("offers no + where the desk's membership cannot change", () => {
-    renderPanel(vi.fn(), undefined);
+    renderPanel(vi.fn(), null);
     expect(container.querySelector('[aria-label="Add Cy to this channel"]')).toBeNull();
   });
 
