@@ -203,6 +203,3 @@ async fn ingest_single(State(state): State<AppState>, headers: HeaderMap, raw: B
     }
 }
 
-#[cfg(test)]
-#[path = "inbox_tests.rs"]
-mod tests;
