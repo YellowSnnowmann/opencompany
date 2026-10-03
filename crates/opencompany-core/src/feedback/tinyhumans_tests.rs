@@ -120,7 +120,7 @@ async fn the_http_client_posts_the_hub_shape_and_maps_a_rate_limit() {
 
     let client = HttpTinyHumansClient::new(
         format!("http://{addr}/"),
-        crate::ports::types::SecretValue::new("sk-test"),
+        crate::ports::types::SecretValue("sk-test".to_string()),
     );
     let outcome = client.ingest(&request(FeedbackCategory::Bug)).await.unwrap();
     assert!(matches!(outcome, IngestOutcome::Accepted { remote_id: Some(ref id) } if id == "hub-1"));
