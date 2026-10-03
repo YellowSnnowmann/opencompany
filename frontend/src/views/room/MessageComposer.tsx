@@ -22,7 +22,6 @@ import {
   mentionsOutsideRange,
   rankMentionables,
   reconcileMentions,
-  reconcileWrap,
   resolvableMentions,
   stripCodeRegions,
   type Mention,
@@ -605,7 +604,7 @@ export function MessageComposer({
    * opening the picker directly: one code path decides when a picker is open,
    * so the `+` menu's "Mention someone" and the keyboard can never disagree.
    */
-  function insertMention() {
+  function startMention() {
     const el = input.current;
     if (!el) return;
     const at = el.selectionStart ?? draft.length;
@@ -797,7 +796,7 @@ export function MessageComposer({
                   <Paperclip className="size-4" aria-hidden /> Attach files
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem onClick={insertMention}>
+              <DropdownMenuItem onClick={startMention}>
                 <AtSign className="size-4" aria-hidden /> Mention someone
               </DropdownMenuItem>
             </DropdownMenuContent>
