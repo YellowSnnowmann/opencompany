@@ -1,4 +1,5 @@
 use super::*;
+use crate::company::setup::{MAX_AGENTS, MAX_DESCRIPTION};
 
 fn answers() -> SetupAnswers {
     SetupAnswers {
