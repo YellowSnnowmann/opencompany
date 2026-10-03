@@ -1027,7 +1027,7 @@ export function RoomView({
    * from `?` onward before it resolves a segment, so this rides the chat route
    * without the router ever seeing it.
    */
-  const [rawRequested] = useHashFlag("raw");
+  const [rawRequested, setRawRequested] = useHashFlag("raw");
   const showRaw = rawRequested && !!rawAgentId;
   const [rawRows, setRawRows] = useState<AgentSessionMessageDto[]>([]);
   const [rawLoad, setRawLoad] = useState<RawLoad>("loading");
@@ -3079,7 +3079,8 @@ export function RoomView({
               channelMembers={inChannel}
               onClose={() => setInfoOpen(false)}
               onMessage={selectChannel}
-              rawHref={rawAgentId ? `#/chat/${encodeURIComponent(channel.id)}?raw` : undefined}
+              // Only a DM has one teammate whose raw turns there are to show.
+              raw={rawAgentId ? { on: showRaw, onToggle: () => setRawRequested(!showRaw) } : undefined}
             />
           )}
         </div>

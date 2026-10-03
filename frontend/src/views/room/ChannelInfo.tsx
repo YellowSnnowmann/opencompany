@@ -72,7 +72,7 @@ export function ChannelInfoPanel({
   channelMembers,
   onClose,
   onMessage,
-  rawHref,
+  raw,
 }: {
   channel: Channel;
   /** The whole roster, for the head's face. */
@@ -82,8 +82,12 @@ export function ChannelInfoPanel({
   onClose: () => void;
   /** Open a DM with a teammate. */
   onMessage: (channelId: string) => void;
-  /** The raw-turns view of this DM (`?raw`), or `undefined` where there is none. */
-  rawHref?: string;
+  /**
+   * The raw-turns view of this DM (`?raw`) as a toggle — whether it is on, and
+   * how to flip it — or `undefined` where there is none (a channel has several
+   * agents, so "the raw turns" would have to pick one).
+   */
+  raw?: { on: boolean; onToggle: () => void };
 }) {
   const purpose = channelSubtitle(channel);
   const list = channel.kind === "dm" ? (channel.member ? [channel.member] : []) : (channelMembers ?? members);
@@ -120,13 +124,24 @@ export function ChannelInfoPanel({
               <ExternalLink className="size-3.5" aria-hidden /> Manage desk
             </a>
           )}
-          {rawHref && (
-            <a
-              href={rawHref}
-              className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs text-muted-foreground transition hover:bg-rail-hover hover:text-foreground"
+          {raw && (
+            // A toggle, not a link: pressed while the transcript shows the
+            // raw turns, and pressing it again goes back to the conversation.
+            <button
+              type="button"
+              onClick={raw.onToggle}
+              aria-pressed={raw.on}
+              data-testid="channel-info-raw-toggle"
+              title={raw.on ? "Back to the conversation" : "Show the raw turns"}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition",
+                raw.on
+                  ? "border-primary bg-primary text-primary-foreground hover:bg-primary/90"
+                  : "text-muted-foreground hover:bg-rail-hover hover:text-foreground",
+              )}
             >
               <FileCode2 className="size-3.5" aria-hidden /> Raw turns
-            </a>
+            </button>
           )}
         </div>
       </div>
