@@ -270,15 +270,15 @@ enum Command {
 enum MemoryCmd {
     /// Copy every record from the env-selected memory engine (the FROM side —
     /// `OPENCOMPANY_MEMORY*`, exactly what a boot would bind today) into
-    /// another engine, over the contract's Portability family. Namespaces,
-    /// record kinds and provenance taint round-trip untouched. Run it BEFORE
+    /// another engine. Every company's records move with their workspace,
+    /// keys and provenance untouched. Run it BEFORE
     /// flipping the environment: migrate, then set the variables, restart,
     /// and verify `/spec`.
     Migrate {
         /// Target engine: `cortexdb` or `tinyhumans`.
         #[arg(long)]
         to: String,
-        /// Target endpoint (hosted engines only).
+        /// Target endpoint (required unless the engine has a default).
         #[arg(long)]
         to_url: Option<String>,
         /// Target credential (hosted engines only).
