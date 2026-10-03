@@ -108,7 +108,7 @@ The desktop shell renders through Tauri's default Wry webview (WKWebView /
 WebView2 / WebKitGTK), which does not speak CDP, so no DevTools client can
 attach to the desktop window. Run the same console in Chrome instead:
 
-- `scripts/dev-web.sh --no-browser` (or `pnpm dev:web -- --no-browser` from
+- `scripts/dev-web.sh --no-browser` (or `pnpm dev:web --no-browser` from
   `frontend/`) builds `opencompany`, serves `companies/e2e_harness` on a
   loopback port with its own data root under `target/dev-web/<company>`, starts
   Vite proxying to it, and prints a ready URL: `http://localhost:<vite>/?code=…`.
