@@ -7,8 +7,8 @@
  * `OPENCOMPANY_MEMORY*` and the host refuses a write that would be silently
  * ignored — and this section renders exactly the old read-only panel in that
  * case, saying who owns the choice. What changed is the self-hosted operator,
- * for whom "edit a unit file and restart" was the only way to try Supermemory
- * or mem0: the host now persists the choice to `config.toml` and rebinds it
+ * for whom "edit a unit file and restart" was the only way to try a hosted
+ * engine: the host now persists the choice to `config.toml` and rebinds it
  * live, so the picker below is the whole flow.
  *
  * ## What is asserted, and what is only saved
