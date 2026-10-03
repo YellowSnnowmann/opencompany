@@ -1734,6 +1734,18 @@ pub fn agent_spec_for(
         // turn was still offered both delegate verbs.
         let unadvertised = blueprint.unadvertised.clone();
         spec = spec.tools(move |turn| {
+            #[cfg(test)]
+            if turn
+                .session_id()
+                .is_some_and(|session| session.starts_with("episode-"))
+            {
+                eprintln!(
+                    "seat tools: session={:?} loan={} narrowed={:?}",
+                    turn.session_id(),
+                    seating.lent_to(turn.session_id()).is_some(),
+                    seating.narrowed_to(turn.session_id()),
+                );
+            }
             let mut tools = crate::hive::shared_tool::owned_belt(&belt);
             // Persisted OpenHuman sessions can retain the old upstream
             // Composio declarations in their tool snapshot. Keep inert,
