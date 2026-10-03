@@ -3083,6 +3083,8 @@ export function RoomView({
                   // policy; it only knows where the control goes.
                   autonomy={autonomy}
                   placeholder={`Message ${channelTitle(channel)}`}
+                  // Opening a conversation lands the cursor in its composer.
+                  focusKey={channel.id}
                   disabled={sending}
                   prefill={composerPrefill ?? undefined}
                   // Not voided (unlike the thread composer below): the composer

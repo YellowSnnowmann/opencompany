@@ -59,6 +59,13 @@ interface Props {
   /** A new revision replaces the draft and focuses the composer. */
   prefill?: { text: string; revision: number };
   /**
+   * Focus the input whenever this changes — the open channel's id, so picking
+   * a conversation in the sidebar puts the cursor in its composer and you can
+   * start typing without a second click. Fine pointers only: on a touch screen
+   * focusing an input raises the keyboard over the transcript you just opened.
+   */
+  focusKey?: string;
+  /**
    * Called as the box is typed in, so the company can show a typing
    * indicator.
    *
@@ -216,6 +223,7 @@ export function MessageComposer({
   disabled,
   onSend,
   prefill,
+  focusKey,
   compact,
   channelMemberIds,
   deliverableChoice,
@@ -302,6 +310,14 @@ export function MessageComposer({
     setIntent("once");
     input.current?.focus();
   }, [prefill]);
+
+  useEffect(() => {
+    if (focusKey === undefined) return;
+    if (typeof window.matchMedia === "function" && !window.matchMedia("(pointer: fine)").matches) {
+      return;
+    }
+    input.current?.focus({ preventScroll: true });
+  }, [focusKey]);
 
   function closePicker() {
     setQuery(null);
