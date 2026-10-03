@@ -139,26 +139,23 @@ struct EngineDto {
     /// The last probe's verdict; absent when the engine was never probed.
     #[serde(skip_serializing_if = "Option::is_none")]
     healthy: Option<bool>,
-    /// Advertised families the live engine did not answer when probed. Empty
-    /// is healthy; absent means the engine was never probed.
+    /// Operations (`"list"`) the live engine refused when probed. Empty is
+    /// healthy; absent means the engine was never probed. The wire name keeps
+    /// the v1 "families" spelling for console compatibility.
     ///
     /// Separate from [`Self::capabilities`] on purpose: that list is what the
-    /// driver *claims*, and the bind-time audit cannot contradict it for the
-    /// mandatory families. This is what the engine actually answered.
+    /// engine *serves* (retrieval modes), this is what it actually answered.
     #[serde(skip_serializing_if = "Option::is_none")]
     unreachable_families: Option<Vec<String>>,
-    /// Advertised **optional** families the live engine refused when probed.
+    /// The engine's own reason when it reported `Degraded` health.
     ///
-    /// Reported, never blocking: an engine that cannot serve `people` still
-    /// serves every cycle, and taking it away from an operator who has no
-    /// other one would be the worse failure. The harm it does name is real —
-    /// the agent tools and routes these families gate are offered and fail on
-    /// their first call — which is why it is on the page rather than only in a
-    /// log line.
+    /// Reported, never blocking: a degraded engine still serves, and taking it
+    /// away from an operator who has no other one would be the worse failure.
     #[serde(skip_serializing_if = "Option::is_none")]
     degraded_families: Option<Vec<String>>,
-    /// Families the engine did not answer inside the probe budget. Slow is not
-    /// the same verdict as refused, so it is reported separately.
+    /// Operations (`"health"`, `"list"`) that did not answer inside the probe
+    /// budget. Slow is not the same verdict as refused, so it is reported
+    /// separately.
     #[serde(skip_serializing_if = "Option::is_none")]
     slow_families: Option<Vec<String>>,
     /// The engine id the saved selection names (the file, or the environment
