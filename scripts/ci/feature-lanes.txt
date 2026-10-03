@@ -25,7 +25,7 @@
 #                         `features` is the exact `--features` string that lane
 #                         passes, which must appear on a `cargo test` line in
 #                         scripts/ci/lanes/lanes-plan.mjs. `(default)` means the default feature set,
-#                         covered by the bare `cargo test --locked` in `Rust`.
+#                         covered by the bare `cargo test --locked` in the `core` lane.
 #
 #   status = partial      a lane exists but is FILTERED, so it runs the named
 #                         modules and not necessarily every gated test.
@@ -44,11 +44,11 @@
 
 # --- Tested: a lane runs the gated tests unfiltered -------------------------
 
-default        | tested       | (default)                       | The `Rust` job's bare `cargo test --locked`.
+default        | tested       | (default)                       | The `core` lane's bare `cargo test --locked`.
 oauth          | tested       | (default)                       | In the default set, so the default lanes run it.
 platform-jwt   | tested       | (default)                       | In the default set (see Cargo.toml for why it ships by default).
 documents      | tested       | (default)                       | In the default set: the Brain drop zone is a console surface, so a shipped build must read a dropped PDF (see Cargo.toml).
-openhuman      | tested       | openhuman                       | `rust-gated` runs `--tests`, which selects lib+bin units and every tests/ target.
+openhuman      | tested       | openhuman                       | the `gated` lane runs `--tests`, which selects lib+bin units and every tests/ target.
 tinymemory     | tested       | (default)                       | In the default set, so the bare `cargo test --locked` runs its tests unfiltered (see Cargo.toml for why the memory-engine catalog must not ship half-disabled).
 tinyplace      | tested       | tinyplace                       | Runs the whole `--lib` deliberately (issue #477) — it gates code across the tree.
 
