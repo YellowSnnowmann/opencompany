@@ -19,9 +19,9 @@
 # only developers see and only users don't will keep producing.
 #
 # The CI copy (then in `ci.yml`, now in the lane plan) already had a comment
-# telling the next person to keep it in step with the release workflow. This is that instruction, enforced. The
-# release workflow is the source of truth: it is the one whose value reaches a
-# user.
+# telling the next person to keep it in step with the release workflow. This
+# is that instruction, enforced. The release workflow is the source of truth:
+# it is the one whose value reaches a user.
 #
 # To change the shipped set: edit `DESKTOP_RELEASE_FEATURES` in
 # `build-desktop.yml`, run this script, and fix whatever it names.
