@@ -609,7 +609,6 @@ export function RoomView({
   const [redeemingBudgetPauseAgent, setRedeemingBudgetPauseAgent] = useState<string | null>(
     null,
   );
-  const [membersOpen, setMembersOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   // The rail's "+" (issue #1835) — chat's own door for creating a channel.
   // The channel list is a section of the app sidebar now, so the sidebar owns
@@ -2780,16 +2779,12 @@ export function RoomView({
       {routeOpen && (
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            <ChatHeader
-              channel={channel}
-              memberCount={headerCount}
-              membersOpen={membersOpen}
-              onToggleMembers={() => setMembersOpen((o) => !o)}
-              onOpenRail={roomRail.reveal}
-              rawAvailable={!!rawAgentId}
-              raw={showRaw}
-              onToggleRaw={() => setRawRequested(!showRaw)}
-            />
+            {/* No channel header. The name, member count, members toggle and
+                raw-turns toggle that sat here were removed: the sidebar row
+                already names the open conversation, and the page keeps its
+                name for assistive tech through this hidden heading. Raw turns
+                stays reachable at the `?raw` address. */}
+            <PageHeader title={channelTitle(channel)} hidden />
 
             <div className="flex min-h-0 flex-1">
               <div className="flex min-w-0 flex-1 flex-col">
@@ -3172,55 +3167,6 @@ export function RoomView({
                 />
               )}
 
-              {membersOpen && (
-                <MembersPane
-                  channelMembers={inChannel}
-                  others={outsideChannel}
-                  people={companyPeople}
-                  presence={presence}
-                  leadId={
-                    // An `auto` channel has no lead (issue #1835): its memberIds
-                    // are the channel's membership in the host's order, not a
-                    // hierarchy, so badging [0] would state a rank nothing
-                    // confers — the host's own `desk_lead` is `None` for it.
-                    activeIsDesk && !active.leadless ? active.memberIds?.[0] : undefined
-                  }
-                  loading={loadingTeam}
-                  fromHost={fromHost}
-                  // `activeIsMutableDesk`, not "`channelMembers` is non-null": a DM
-                  // has real (non-null) channel membership too — one row,
-                  // itself — and is not a desk. `addDeskMember` has no
-                  // meaning there, and the affordance must not appear at all
-                  // (absent, never disabled — the rule `onManageDesk` below
-                  // already follows for the same reason).
-                  onAddExisting={
-                    activeIsMutableDesk ? (agentId) => void addExistingMember(agentId) : undefined
-                  }
-                  onMessage={(m) => selectChannel(dmChannelId(m))}
-                  /**
-                   * The way from this channel to the desk it is (issue #485).
-                   *
-                   * Only for a host-backed desk channel. A DM is not a desk, and a
-                   * fallback desk (`lib/desks.ts`) carries no `memberIds` because
-                   * the host has no desks surface at all — the chart would have
-                   * nothing to open. Both simply get no link rather than one that
-                   * lands nowhere.
-                   *
-                   * A desk's channel id **is** its desk id (`deskFromDto`), so
-                   * there is no mapping to keep in step. Written to the hash rather
-                   * than routed through a callback, as `ArtifactsTab`'s "Open in
-                   * workspace" does: this is a cross-view address, and the shell
-                   * only hands chat a chat-scoped navigate.
-                   */
-                  onManageDesk={
-                    activeIsMutableDesk && active.memberIds
-                      ? () => {
-                          window.location.hash = `/company/${active.id}`;
-                        }
-                      : undefined
-                  }
-                />
-              )}
             </div>
           </div>
         </div>
