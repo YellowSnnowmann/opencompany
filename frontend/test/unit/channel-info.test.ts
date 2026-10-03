@@ -15,6 +15,7 @@ import type { Channel } from "@/views/room/model";
 
 const ADA = { id: "ada", name: "Ada", role: "Backend Engineer" } as TeamMember;
 const BO = { id: "bo", name: "QA Engineer", role: "QA Engineer" } as TeamMember;
+const CY = { id: "cy", name: "Cy", role: "Designer" } as TeamMember;
 const DESK: Channel = {
   id: "engineering",
   name: "engineering",
@@ -53,13 +54,17 @@ describe("the channel pill", () => {
 });
 
 describe("the channel info panel", () => {
-  function renderPanel(onMessage = vi.fn()) {
+  function renderPanel(onMessage = vi.fn(), onAddExisting: ((id: string) => void) | undefined = vi.fn()) {
     act(() =>
       root.render(
         createElement(ChannelInfoPanel, {
           channel: DESK,
           members: [ADA, BO],
           channelMembers: [ADA, BO],
+          others: [CY],
+          people: [{ id: "u1", label: "Sam" }],
+          leadId: "ada",
+          onAddExisting,
           onClose: () => {},
           onMessage,
         }),
@@ -72,7 +77,10 @@ describe("the channel info panel", () => {
     renderPanel();
     expect(container.textContent).toContain("Build the product.");
     expect(container.querySelector('a[href="#/company/engineering"]')).not.toBeNull();
-    expect(container.textContent).toContain("Members · 2");
+    expect(container.textContent).toContain("In this channel");
+    expect(container.querySelector('[data-testid="channel-info-summary"]')?.textContent).toBe(
+      "2 in this channel · 3 in the company",
+    );
     const rows = [...container.querySelectorAll("li")];
     expect(rows[0].textContent).toContain("Lead");
     expect(rows[1].textContent).not.toContain("Lead");
@@ -87,7 +95,7 @@ describe("the channel info panel", () => {
 
   it("opens a DM when a member is pressed", () => {
     const onMessage = renderPanel();
-    act(() => container.querySelector<HTMLButtonElement>("li button")!.click());
+    act(() => container.querySelector<HTMLButtonElement>('li button[title="Message Ada"]')!.click());
     expect(onMessage).toHaveBeenCalledWith(expect.stringContaining("ada"));
   });
 
@@ -120,5 +128,24 @@ describe("the channel info panel", () => {
   it("offers no raw toggle on a desk", () => {
     renderPanel();
     expect(container.querySelector('[data-testid="channel-info-raw-toggle"]')).toBeNull();
+  });
+
+  it("lists everyone else with a + that adds them to the desk", () => {
+    const onAdd = vi.fn();
+    renderPanel(vi.fn(), onAdd);
+    expect(container.textContent).toContain("Everyone else");
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="Add Cy to this channel"]')!.click());
+    expect(onAdd).toHaveBeenCalledWith("cy");
+  });
+
+  it("offers no + where the desk's membership cannot change", () => {
+    renderPanel(vi.fn(), undefined);
+    expect(container.querySelector('[aria-label="Add Cy to this channel"]')).toBeNull();
+  });
+
+  it("lists the company's people and a control to copy the name", () => {
+    renderPanel();
+    expect(container.querySelector('[data-testid="person-row"]')?.textContent).toContain("Sam");
+    expect(container.querySelector('[aria-label="Copy channel name: #engineering"]')).not.toBeNull();
   });
 });
