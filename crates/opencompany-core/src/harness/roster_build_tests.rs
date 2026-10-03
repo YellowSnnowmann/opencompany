@@ -1,5 +1,9 @@
 use super::*;
+use crate::company::Credential;
 use crate::company::setup::{MAX_AGENTS, MAX_DESCRIPTION};
+use crate::harness::built_in::provider::{HostedProvider, HostedProviderConfig};
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn answers() -> SetupAnswers {
     SetupAnswers {
@@ -495,6 +499,93 @@ async fn an_output_budget_stop_is_not_reported_as_unreachable() {
         Some(FallbackReason::NotDesignable),
         "a length-truncated answer must not be reported as model_unreachable"
     );
+}
+
+/// Runs the public roster-building path through the same HTTP provider adapter
+/// used by first-run setup, against a local OpenAI-compatible endpoint.
+fn roster_builder_against(server: &MockServer) -> RosterBuilder {
+    let provider = HostedProvider::new_direct(
+        HostedProviderConfig {
+            base_url: server.uri(),
+            credential: Credential::None,
+            extra_headers: Vec::new(),
+        },
+        "openai_compatible",
+    );
+    RosterBuilder::new(Arc::new(provider), "test-model")
+}
+
+/// The larger cap reaches the provider request and allows a long response to
+/// complete the full proposal path. The padding is an ignored JSON extension,
+/// so the visible roster stays realistic while the response exceeds the former
+/// 1,500-token ceiling.
+#[tokio::test]
+async fn a_long_roster_uses_the_increased_provider_output_budget() {
+    let server = MockServer::start().await;
+    let mut roster: serde_json::Value = serde_json::from_str(&roster_json(&[
+        ("Bookings", "operations", &[0]),
+        ("Stock", "operations", &[1]),
+        ("Billing", "analysis", &[2]),
+        ("Studio Ops", "operations", &[]),
+    ]))
+    .unwrap();
+    roster["padding"] = serde_json::Value::String("context ".repeat(1_600));
+    let answer = roster.to_string();
+    assert!(answer.split_whitespace().count() > 1_500);
+
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": answer}
+            }],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 1_700, "total_tokens": 1_800}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (proposal, _) = roster_builder_against(&server).propose(&three_jobs()).await;
+
+    assert_eq!(proposal.source, RosterSource::Model);
+    assert_eq!(proposal.reason, None);
+    assert_eq!(proposal.agents.len(), 4);
+    let requests = server.received_requests().await.unwrap();
+    let request: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(
+        request["max_tokens"], 4_000,
+        "the provider must receive the increased cap"
+    );
+}
+
+/// A real empty `finish_reason: length` HTTP payload passes through the provider
+/// decoder and roster builder, retaining the non-connectivity fallback path.
+#[tokio::test]
+async fn a_provider_length_stop_reaches_the_roster_fallback_path() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"role": "assistant", "content": ""}
+            }],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 4_000, "total_tokens": 4_100}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let (proposal, _) = roster_builder_against(&server).propose(&three_jobs()).await;
+
+    assert_eq!(proposal.source, RosterSource::Fallback);
+    assert_eq!(proposal.reason, Some(FallbackReason::NotDesignable));
+    assert!(
+        !proposal.agents.is_empty(),
+        "the setup fallback remains usable"
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
 
 /// The inverse guard: a plain provider failure still reports unreachable, so
