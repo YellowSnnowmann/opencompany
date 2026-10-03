@@ -1486,3 +1486,16 @@
 :root[data-avatar-shape="rounded"] {
   --avatar-radius: calc(var(--radius) - 2px);
 }
+
+/*
+ * Mascot faces in light mode stand on a dark disc. On the white page and the
+ * near-white sidebar the pastel tone tile gave a pale mascot on a pale ground
+ * with no edge between them; a deep ink disc gives every face the contrast it
+ * already has in dark mode, where the tile sits on near-black. Unlayered and
+ * scoped to `:root:not(.dark)`, so it outranks the tile's tone utility (and the
+ * rail's `bg-avatar-disc`) in light mode only.
+ */
+:root:not(.dark) .avatar-mascot {
+  background-color: oklch(0.27 0.018 286);
+  color: oklch(0.95 0.005 286);
+}
