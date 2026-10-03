@@ -616,7 +616,11 @@ async fn an_events_log_with_a_retired_a2a_row_still_reads() {
         )
         .await
         .expect("append");
-    assert_eq!(next, EventSeq::new(2), "the retired row's seq is not reused");
+    assert_eq!(
+        next,
+        EventSeq::new(2),
+        "the retired row's seq is not reused"
+    );
 }
 
 /// A retention pass rewrites `events.jsonl`, and a retired row reads back as a
@@ -660,7 +664,10 @@ async fn pruning_keeps_a_retired_row_byte_for_byte() {
         )
         .await
         .expect("prune");
-    assert!(report.removed > 0, "the pass must actually rewrite the file");
+    assert!(
+        report.removed > 0,
+        "the pass must actually rewrite the file"
+    );
 
     let body = tokio::fs::read_to_string(bundle.events_jsonl())
         .await
