@@ -496,8 +496,13 @@ async fn an_output_budget_stop_is_not_reported_as_unreachable() {
     assert_eq!(proposal.source, RosterSource::Fallback);
     assert_eq!(
         proposal.reason,
-        Some(FallbackReason::NotDesignable),
+        Some(FallbackReason::OutputBudgetExhausted),
         "a length-truncated answer must not be reported as model_unreachable"
+    );
+    assert_eq!(
+        proposal.reason.map(|r| r.as_str()),
+        Some("output_budget_exhausted"),
+        "the wire spelling must round-trip"
     );
 }
 

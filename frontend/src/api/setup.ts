@@ -470,13 +470,20 @@ export interface SetupRoster {
    * `"not_designable"` — a model answered and the answer was unusable: too thin,
    * unreadable, or the reference team handed back unchanged. In practice, the
    * answers were too sparse to design from.
+   * `"output_budget_exhausted"` — a model answered but stopped on its output-token
+   * limit before writing anything usable (a reasoning model that spent the
+   * whole budget deliberating). Retry, or use a model with more output room.
    *
    * The review screen needs the distinction because the **action differs**. It
    * used to say "we couldn't reach a model" for every fallback, which is a plain
    * falsehood in the second case — and it pointed the operator at adding a key
    * when what they actually needed was to say more about their business.
    */
-  reason?: "no_model" | "model_unreachable" | "not_designable";
+  reason?:
+    | "no_model"
+    | "model_unreachable"
+    | "not_designable"
+    | "output_budget_exhausted";
 }
 
 /**

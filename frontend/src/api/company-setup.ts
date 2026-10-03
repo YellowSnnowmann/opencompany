@@ -56,7 +56,15 @@ export type RosterFallback =
    * more about the business. Pointing this operator at a credential would send
    * them to fix something that already worked.
    */
-  | "not_designable";
+  | "not_designable"
+  /**
+   * A model answered, but the response stopped on its output-token limit before
+   * anything usable was written — typically a reasoning model that spent the
+   * whole budget deliberating. The call landed, so this is neither a connection
+   * problem nor thin answers: the action is to retry, or use a model with more
+   * output headroom.
+   */
+  | "output_budget_exhausted";
 
 export interface RosterProposal {
   agents: ProposedAgent[];
