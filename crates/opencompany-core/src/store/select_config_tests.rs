@@ -134,7 +134,7 @@ fn remote_without_a_key_refuses_at_open() {
 fn a_retired_engine_refuses_at_open_by_name() {
     let settings = StorageSettings {
         memory_backend: MemoryBackend::Remote,
-        memory_driver: Some("supermemory".into()),
+        memory_driver: Some("cortexdb".into()),
         memory_api_key: Some("k".into()),
         ..StorageSettings::default()
     };
@@ -339,12 +339,12 @@ fn from_env_reads_the_remote_memory_knobs() {
         "OPENCOMPANY_MEMORY_API_KEY",
     ];
     let env = MapEnv::new([
-        (KEYS[0], "supermemory"),
+        (KEYS[0], "cortexdb"),
         (KEYS[1], "https://memory.example"),
         (KEYS[2], "sk-test"),
     ]);
     let settings = StorageSettings::from_env_source(&env).unwrap();
-    assert_eq!(settings.memory_driver.as_deref(), Some("supermemory"));
+    assert_eq!(settings.memory_driver.as_deref(), Some("cortexdb"));
     assert_eq!(
         settings.memory_url.as_deref(),
         Some("https://memory.example")
@@ -454,7 +454,7 @@ fn from_env_reads_allow_ephemeral_memory() {
 fn with_memory_config_from_resolves_ownership_from_the_injected_source() {
     let section = crate::app::config::MemorySection {
         backend: Some("remote".into()),
-        driver: Some("supermemory".into()),
+        driver: Some("cortexdb".into()),
         url: Some("https://memory.example".into()),
         ..Default::default()
     };
@@ -476,7 +476,7 @@ fn with_memory_config_from_resolves_ownership_from_the_injected_source() {
         .with_memory_config_from(&MapEnv::default(), &section)
         .unwrap();
     assert_eq!(unset.memory_backend, MemoryBackend::Remote);
-    assert_eq!(unset.memory_driver.as_deref(), Some("supermemory"));
+    assert_eq!(unset.memory_driver.as_deref(), Some("cortexdb"));
     assert_eq!(unset.memory_url.as_deref(), Some("https://memory.example"));
 }
 
