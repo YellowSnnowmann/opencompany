@@ -61,7 +61,6 @@ import { personAvatar } from "@/lib/person";
 import { useAskerNames } from "@/components/approval-card";
 import { useRoomRailSlot } from "@/components/room-rail";
 import { AddMemberDialog, type NewMemberFields } from "./room/AddMemberDialog";
-import { ChannelCreateDialog } from "./room/ChannelCreateDialog";
 import { ChannelRail } from "./room/ChannelRail";
 import { ChatHeader } from "./room/ChatHeader";
 import { MembersPane } from "./room/MembersPane";
