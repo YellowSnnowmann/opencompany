@@ -386,9 +386,16 @@ export function MessageTimeline({
          * about what "empty" means — a channel whose intro claimed emptiness
          * while the wrapper anchored for content would jump on every load.
          */}
+        {/* `max-w-4xl` and centred: past 896px the transcript stops widening
+            and sits in the middle of the pane, the measure every chat client
+            reads at, rather than stretching a line across a wide monitor. The
+            composer is held to the same column (`MessageComposer`). */}
         <div
           ref={content}
-          className={cn("flex min-h-full flex-col pb-4", empty ? "justify-start" : "justify-end")}
+          className={cn(
+            "mx-auto flex min-h-full w-full max-w-4xl flex-col pb-4",
+            empty ? "justify-start" : "justify-end",
+          )}
         >
           {/* The skeleton fills the same space real rows will — so a loading
               channel is spaced like a full one and the intro does not jump down

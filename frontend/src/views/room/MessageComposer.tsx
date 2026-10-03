@@ -640,7 +640,10 @@ export function MessageComposer({
         className={cn(
           // Rounded to a pill while it is one line; the radius holds as it
           // grows, so a multi-line draft reads as the same control.
-          "relative overflow-hidden rounded-3xl border bg-card shadow-sm focus-within:ring-2 focus-within:ring-ring/40",
+          // The transcript's column (`max-w-4xl`, centred), and a fill and edge
+          // of its own: `bg-muted` with a 15% ink border, so the box reads as
+          // the place to type rather than as white on a white page.
+          "relative mx-auto w-full max-w-4xl overflow-hidden rounded-3xl border border-foreground/15 bg-muted/60 shadow-sm focus-within:ring-2 focus-within:ring-ring/40",
           dragDepth > 0 && "border-primary ring-2 ring-primary/40",
         )}
         onDragEnter={(event) => {
