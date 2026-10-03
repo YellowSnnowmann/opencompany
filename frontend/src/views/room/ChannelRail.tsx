@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   CircleDot,
   Hash,
@@ -230,7 +230,7 @@ export function ChannelRail({
           so the DMs need a list of their own, or a channel appearing above them
           would shift every DM slot and play a slide that is not a re-sort. No
           caption, border or extra gap sits between the two: read as one run. */}
-      <div className="mt-0.5 flex select-none flex-col gap-px">
+      <div className="flex select-none flex-col gap-px pt-1">
         <ul className="flex flex-col gap-px">
           {channelRows.map((channel) => (
             <li key={channel.id}>{row(channel)}</li>
