@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MessageComposer } from "@/views/room/MessageComposer";
 import type { MessageIntent } from "@/api/tasks";
-import type { Channel } from "@/views/room/model";
 
 /**
  * First-run chat has one job: get an operator to make a request.
