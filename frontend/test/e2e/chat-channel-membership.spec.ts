@@ -147,25 +147,16 @@ async function mockApi(page: Page, mode: () => DesksMode) {
   });
 }
 
-/** The header's member toggle — its label ends in "members". */
-const membersToggle = (page: Page) => page.getByRole("button", { name: /agents$/i });
-
-/** The member pane; the channel rail is the other `complementary` on screen. */
-const pane = (page: Page) => page.getByRole("complementary").last();
-
 /**
- * Open the pane if it is shut.
- *
- * Not a plain click: the pane's open state lives in `RoomView`, and switching
- * channels is a hash-only navigation that does not remount it — so a second
- * click would close what the first opened.
+ * The info panel — the count and the member lists the header and its members
+ * pane carried before the header bar was removed. Opened from the pill over
+ * the transcript.
  */
-async function openPane(page: Page) {
-  if ((await membersToggle(page).getAttribute("aria-pressed")) !== "true") {
-    await membersToggle(page).click();
-  }
-  await expect(page.getByRole("heading", { name: "Team" })).toBeVisible();
-}
+const pane = channelInfo;
+const openPane = openChannelInfo;
+
+/** The panel's one-line count under the conversation's name. */
+const summary = (page: Page) => pane(page).getByTestId("channel-info-summary");
 
 async function openChannel(page: Page, channelId: string) {
   await page.goto(`/#/chat/${channelId}`);
@@ -176,9 +167,8 @@ test("#369 each desk counts and lists its own members, not the company", async (
   await mockApi(page, () => "ok");
 
   await openChannel(page, "engineering");
-  await expect(membersToggle(page)).toHaveText(/2/);
   await openPane(page);
-  await expect(pane(page)).toContainText("2 in this channel · 17 in the company");
+  await expect(summary(page)).toHaveText("2 in this channel · 17 in the company");
   await expect(pane(page).getByRole("heading", { name: "In this channel" })).toBeVisible();
   await expect(pane(page).getByRole("heading", { name: "Everyone else" })).toBeVisible();
 
@@ -195,9 +185,8 @@ test("#369 each desk counts and lists its own members, not the company", async (
 
   // A second desk reads differently — and the id with no roster row is gone.
   await openChannel(page, "content");
-  await expect(membersToggle(page)).toHaveText(/3/);
   await openPane(page);
-  await expect(pane(page)).toContainText("3 in this channel · 17 in the company");
+  await expect(summary(page)).toHaveText("3 in this channel · 17 in the company");
   await expect(pane(page).locator("ul").first().locator("li")).toHaveCount(3);
   await expect(pane(page)).not.toContainText("Agent 99");
 });
@@ -211,9 +200,12 @@ test("#369 a DM reads as two people, not as the whole company", async ({ page })
   // that section's actions still work as well as opening the DM.
   await pane(page).getByText("Agent 4", { exact: true }).click();
   await expect(page.getByPlaceholder("Message Agent 4")).toBeVisible();
-  // Two: the teammate and the operator, who has no roster row of their own.
-  await expect(membersToggle(page)).toHaveText(/2/);
+  // One teammate, not the company: the panel names a DM for what it is and
+  // lists only who it is with.
+  await expect(summary(page)).toHaveText("Direct message");
+  await expect(pane(page).getByRole("heading", { name: "With" })).toBeVisible();
   await expect(pane(page).locator("ul").first().locator("li")).toHaveCount(1);
+  await expect(pane(page).locator("ul").first()).toContainText("Agent 4");
 });
 
 test("#369 a host with no desks surface still shows the whole roster", async ({ page }) => {
@@ -224,9 +216,8 @@ test("#369 a host with no desks surface still shows the whole roster", async ({ 
 
   // The fallback desks have no membership to scope to, so this is unchanged
   // behaviour on purpose — one plain roster, no "in this channel" claim.
-  await expect(membersToggle(page)).toHaveText(/17/);
   await openPane(page);
-  await expect(pane(page)).toContainText("17 agents");
+  await expect(summary(page)).toHaveText("17 agents");
   await expect(pane(page).getByRole("heading", { name: "In this channel" })).toHaveCount(0);
   await expect(pane(page).locator("ul").first().locator("li")).toHaveCount(17);
 });
@@ -235,9 +226,8 @@ test("#general lists the whole roster and offers no membership controls", async 
   await mockApi(page, () => "ok");
   await openChannel(page, "general");
 
-  await expect(membersToggle(page)).toHaveText(/17/);
   await openPane(page);
-  await expect(pane(page)).toContainText("17 in this channel · 17 in the company");
+  await expect(summary(page)).toHaveText("17 in this channel · 17 in the company");
   await expect(pane(page).locator("ul").first().locator("li")).toHaveCount(17);
   // The host keeps its membership equal to the roster and refuses writes to it.
   await expect(pane(page).getByRole("button", { name: /to this channel$/ })).toHaveCount(0);
@@ -249,7 +239,7 @@ test("#general is pinned first in the rail", async ({ page }) => {
   await mockApi(page, () => "ok");
   await openChannel(page, "engineering");
 
-  const rail = page.getByRole("complementary").first();
+  const rail = page.getByTestId("room-rail-slot");
   const rows = rail.getByRole("button", { name: /^(general|engineering|content)\b/ });
   await expect(rows.first()).toHaveAccessibleName(/^general/);
 });
@@ -341,8 +331,7 @@ test("#370 a broken /desks is a retryable error, not invented channels", async (
 });
 
 /** The way out to the org chart, added by #485. */
-const manageLink = (page: Page) =>
-  pane(page).getByRole("button", { name: "Manage on the org chart" });
+const manageLink = (page: Page) => pane(page).getByRole("link", { name: "Manage desk" });
 
 const chart = (page: Page) => page.getByRole("tree", { name: "Company org chart" });
 
@@ -380,10 +369,15 @@ test("#485 a DM has no desk to manage", async ({ page }) => {
   await pane(page).getByText("Agent 4", { exact: true }).click();
   await expect(page.getByPlaceholder("Message Agent 4")).toBeVisible();
 
-  // A DM still gets the "In this channel" section — it has a membership of
-  // exactly one — but it is not a desk, so the chart has nothing to open.
-  await expect(pane(page).getByRole("heading", { name: "In this channel" })).toBeVisible();
+  // A DM still lists who it is with — a membership of exactly one — but it is
+  // not a desk, so the chart has nothing to open. What it offers instead is
+  // the teammate's own page.
+  await expect(pane(page).getByRole("heading", { name: "With" })).toBeVisible();
   await expect(manageLink(page)).toHaveCount(0);
+  await expect(pane(page).getByRole("link", { name: "Manage agent" })).toHaveAttribute(
+    "href",
+    "#/company/agent/agent-4",
+  );
 });
 
 test("#485 a fallback desk offers no link to a desk the host doesn't have", async ({ page }) => {
@@ -406,7 +400,10 @@ test("the send path and the thread id it addresses are undisturbed", async ({ pa
 
   await page.getByPlaceholder("Message #content").fill("ping");
   await page.getByPlaceholder("Message #content").press("Enter");
-  await expect(page.getByText("echo: ping")).toBeVisible({ timeout: 30_000 });
+  // In the transcript — the rail's preview of the channel says it too.
+  await expect(page.getByTestId("channel-transcript").getByText("echo: ping")).toBeVisible({
+    timeout: 30_000,
+  });
   // A desk's channel id doubles as its host thread id; none of the above may
   // change what the composer addresses. `detach: true` rides along on every
   // send since issue #983 (the console always asks for the accept-and-poll
