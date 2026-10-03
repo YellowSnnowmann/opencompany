@@ -25,15 +25,15 @@ export function UnknownRouteView({ address }: { address: string | null }) {
             <MapPinOff className="size-4" /> Page not found
           </CardTitle>
           <CardDescription>
-            {path} does not name a page in this console. Check the address or return to Overview.
+            {path} does not name a page in this console. Check the address or return to Room.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {/* Same host-scope rule as every recovery anchor: a new tab boots with
-              the address as written, and a `#/overview` without `?host=` would
+              the address as written, and a `#/chat` without `?host=` would
               land on the bootstrap/default host instead of the one the operator
               was on (issue #1417 review). */}
-          <Button render={<a href={withHostParam("overview")} />}>Go to Overview</Button>
+          <Button render={<a href={withHostParam("chat")} />}>Go to Room</Button>
         </CardContent>
       </Card>
     </div>

@@ -154,9 +154,9 @@ export function StyleguideView() {
 function Header() {
   // The styleguide is reachable from a console scoped to one of several hosts
   // (`#/styleguide?host=<id>`), and `App` remounts `Console` on the way back:
-  // a bare `#/overview` would drop the scope and land the operator on whichever
+  // a bare `#/chat` would drop the scope and land the operator on whichever
   // host the bootstrap fallback picks. `withHostParam` carries it over.
-  const backHref = withHostParam("overview");
+  const backHref = withHostParam("chat");
   return (
     <header
       className="sticky top-0 z-10 bg-background/95 backdrop-blur"
