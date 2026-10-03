@@ -1,28 +1,17 @@
-// Settings, Feedback and Discord, as glyphs in the window's title row.
+// Settings and Discord, as glyphs on the floating sidebar's foot.
 //
-// These were three labelled rows in the sidebar's footer (`SidebarUtilityBar`),
-// and before that three icon-only buttons in the sidebar's header. The footer
-// argument was that below the destinations there is nothing left for a label to
-// push down, so naming them cost nothing — which was true about the column and
-// says nothing about whether the column is where they belong.
+// They lived in the window's title row — chrome holding the controls that are
+// about the console rather than the page — until that row was removed and the
+// sidebar became a floating card (`sidebar-shell.tsx`, after OpenHuman's
+// shell). Settings is one of the foot's icon tabs now, beside Company,
+// Connections, Overview and Notifications; Discord leaves the product
+// altogether, so it trails your profile instead of sitting among the tabs.
 //
-// What moves them here is what they are. The sidebar is the list of places
-// inside this company: the room, the roster, the connections, the flows, what
-// is waiting on you. None of these three is that. Settings and Feedback act on
-// the *console*, and Discord leaves the product altogether — so a footer under
-// the destinations was a way of saying "not one of these" by position, in the
-// one region of the screen whose entire job is to enumerate destinations.
-//
-// The title row already says that by construction. It is chrome: it holds the
-// controls that are about the console rather than about the page, it does not
-// scroll, it does not collapse, and it is the same on every view. Overview was
-// moved into it on exactly this reasoning and these three sit beside it.
-//
-// **Glyphs, not labels**, and that is the trade the sidebar footer made in
-// reverse: a labelled button in a band of chrome reads as content, while an
-// unlabelled glyph in a list of named rows reads as decoration. Each keeps
-// `aria-label` and `title` — the whole of what a screen reader and a hovering
-// pointer respectively get from an icon-only control — so only the pixels go.
+// **Glyphs, not labels.** Each keeps `aria-label` and `title` — the whole of
+// what a screen reader and a hovering pointer respectively get from an
+// icon-only control — so only the pixels go. The file keeps its name, and the
+// controls their `title-bar-*` test ids, so the e2e specs that find them by id
+// still do.
 
 import { Settings } from "lucide-react";
 
