@@ -34,32 +34,6 @@ function firstBlock(selector: string): string {
   throw new Error(`unterminated \`${selector}\` block`);
 }
 
-/** Every top-level `${selector} {` block, brace-matched, in source order. */
-function allBlocks(selector: string): string[] {
-  const blocks: string[] = [];
-  let from = 0;
-  for (;;) {
-    const open = indexCss.indexOf(`${selector} {`, from);
-    if (open < 0) break;
-    let depth = 0;
-    let end = -1;
-    for (let i = indexCss.indexOf("{", open); i < indexCss.length; i += 1) {
-      if (indexCss[i] === "{") depth += 1;
-      else if (indexCss[i] === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          end = i;
-          break;
-        }
-      }
-    }
-    if (end < 0) throw new Error(`unterminated \`${selector}\` block starting at ${open}`);
-    blocks.push(indexCss.slice(open, end));
-    from = end + 1;
-  }
-  return blocks;
-}
-
 function declaration(body: string, name: string): string | null {
   const withoutComments = body.replace(/\/\*[\s\S]*?\*\//g, "");
   const match = new RegExp(`(?:^|[;{\\s])--${name}:\\s*([^;]+);`).exec(withoutComments);
