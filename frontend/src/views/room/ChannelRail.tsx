@@ -517,7 +517,7 @@ function RowAvatar({
           <TeammateAvatar
             key={member.id}
             {...memberFace(member)}
-            className={cn(ROUND, "absolute size-6 text-3xs ring-2 ring-sidebar", slots[i])}
+            className={cn(ROUND, "absolute size-6 text-3xs ring-2 ring-sidebar-float", slots[i])}
           />
         ))
         // Lead drawn last, so it is in front.
