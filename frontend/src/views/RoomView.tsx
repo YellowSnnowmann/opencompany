@@ -216,6 +216,18 @@ interface Props {
    */
   onSendStart?: (threadId: string) => number | undefined;
   /**
+   * Who is present right now, keyed by user id — the online dots on the
+   * details panel's People list. Empty when the host has no presence route, or
+   * when nobody else is connected to this replica.
+   */
+  presence?: ReadonlyMap<string, { status: "online" | "away" | "offline" }>;
+  /**
+   * The company's people, for the details panel's People section. Separate
+   * from `members` (teammates): desk membership is a teammate concept, and
+   * every signed-in person can already see every desk.
+   */
+  companyPeople?: Array<{ id: string; label: string }>;
+  /**
    * Display names for the typing line, in a stable order — resolved on
    * demand rather than a single precomputed array, because this view needs
    * two independent lines: the main composer's (no `parentId`) and, when a
@@ -435,6 +447,8 @@ export function RoomView({
   setTranscripts,
   hydration = HISTORY_UNTRACKED,
   onSendStart,
+  presence,
+  companyPeople,
   resolveTypingNames,
   onTyping,
   onSendEnd,
@@ -1189,6 +1203,13 @@ export function RoomView({
     return channelMembers(channel, members);
   }, [channel, members]);
 
+  /** The roster teammates not in the open channel — the panel's "Everyone else". */
+  const outsideChannel = useMemo(() => {
+    if (!inChannel) return members;
+    const inside = new Set(inChannel.map((m) => m.id));
+    return members.filter((m) => !inside.has(m.id));
+  }, [inChannel, members]);
+
   /**
    * Everything an `@` can name in this company.
    *
@@ -1843,6 +1864,11 @@ export function RoomView({
   // A local the closures below can capture as non-null: TypeScript hoists
   // function declarations, so the guard above does not narrow inside them.
   const active = channel;
+  // Whether the open channel is a real, host-backed desk whose membership the
+  // operator can change — `#general`'s is the roster, kept by the host, and a
+  // DM or a fallback desk (`lib/desks.ts`) has none to change.
+  const activeIsDesk = active.kind === "channel" && (desks ?? []).some((d) => d.id === active.id);
+  const activeIsMutableDesk = activeIsDesk && active.mutable !== false;
   // The host thread this channel is addressed on. A real desk channel's id
   // doubles as its thread id (`deskFromDto`), so addressing by it routes to
   // that desk's lead. A DM's id is console-local (`dmChannelId`), not a host
@@ -2600,6 +2626,42 @@ export function RoomView({
     return true;
   }
 
+  /**
+   * Adds a roster teammate to the open desk, from the details panel's
+   * "Everyone else" list. Refetches the desks (membership) and the `@mention`
+   * directory after, and drops every effect if the operator switched company
+   * or connection while the POST was in flight.
+   */
+  async function addExistingMember(agentId: string) {
+    if (!activeIsMutableDesk) return;
+    const scopeAtAdd = { connection: scope.connection, company: scope.company, client };
+    const stale = () => {
+      const latestScope = scopeRef.current;
+      return (
+        latestScope !== null &&
+        (scopeAtAdd.connection !== latestScope.connection ||
+          scopeAtAdd.company !== latestScope.company ||
+          scopeAtAdd.client !== latestScope.client)
+      );
+    };
+    try {
+      await client.addDeskMember(active.id, agentId, company);
+      if (stale()) return;
+      void reloadDirectory();
+      void loadDesks();
+    } catch (error) {
+      if (stale()) return;
+      if (error instanceof ApiError && error.status === 409) {
+        // The one 409 this route answers: already a member, reached only by a
+        // race with another tab or operator — refresh so the row moves now.
+        void loadDesks();
+        toast.error("Already on this channel.");
+      } else {
+        toast.error(error instanceof Error ? error.message : "Couldn't add agent.");
+      }
+    }
+  }
+
   function selectChannel(id: string) {
     onNavigate(id);
     // On a phone the rail is painted inside the sidebar's sheet, which covers
@@ -3095,6 +3157,14 @@ export function RoomView({
               channel={channel}
               members={members}
               channelMembers={inChannel}
+              others={outsideChannel}
+              people={companyPeople}
+              presence={presence}
+              loading={loadingTeam}
+              leadId={activeIsDesk && !active.leadless ? active.memberIds?.[0] : undefined}
+              onAddExisting={
+                activeIsMutableDesk ? (agentId) => void addExistingMember(agentId) : undefined
+              }
               onClose={() => {
                 setInfoOpen(false);
                 if (showRaw) setRawRequested(false);

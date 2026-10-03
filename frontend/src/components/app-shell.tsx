@@ -3555,6 +3555,8 @@ export function AppShell({
               client={client}
               company={company}
               rosterRevision={rosterTick}
+              presence={presence.peers}
+              companyPeople={companyPeople}
               // The chat segment, not the current view's — see `chatSub`.
               sub={view === "chat" ? sub : chatSub}
               routeOpen={view === "chat"}
