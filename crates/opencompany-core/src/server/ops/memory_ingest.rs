@@ -33,9 +33,12 @@
 //! `POST …/memory/ingest/links` makes this server issue an outbound request to
 //! an operator-supplied URL — the shape of a server-side request forgery. The
 //! request is therefore restricted to `http`/`https` and refused for any host
-//! that resolves to a loopback, link-local, or private address, which is what
-//! stops "remember this page" from being a read primitive against the
-//! deployment's own network.
+//! that is, or resolves to, a loopback, link-local, or private address, which
+//! is what stops "remember this page" from being a read primitive against the
+//! deployment's own network. The enforcing guard is TinyMemory's
+//! `sources::fetch::fetch_url`, which connects only to the addresses it vetted
+//! (closing DNS rebinding) and re-checks every redirect hop; the check in this
+//! module is an early, readable refusal in front of it.
 
 use axum::extract::Path;
 use axum::extract::multipart::MultipartError;

@@ -93,7 +93,7 @@ struct EngineOption {
     /// registry (`cortexdb`, `tinyhumans`), or `null`.
     ///
     /// Deliberately flatter than the `(backend, driver)` pair the runtime
-    /// takes: "remote, driver mem0" is one choice to an operator and two knobs
+    /// takes: "remote, driver cortexdb" is one choice to an operator and two knobs
     /// to the host, and asking a console to model that correctly is how a UI
     /// ends up offering `remote` with no driver — a combination the host
     /// refuses at bind.
