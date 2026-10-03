@@ -841,19 +841,6 @@ export function RoomView({
   // channels with the previous one's.
   const desksRun = useRef(0);
   /**
-   * Whether the current `desks` state is `defaultDesks()` — the fabricated
-   * starter set shown when the host exposes no desks — rather than the host's
-   * own list. `onCreated` below needs the distinction (codex on #1872):
-   * appending the company's first real channel *beside* the fallback would
-   * leave nonexistent channels in the rail until reload, and a channel named
-   * "Strategy" would collide with the fallback row of the same id, so
-   * navigation could land on the fabrication instead of the real thing. The
-   * moment one real desk exists the fallback set has no business rendering —
-   * that is the fallback's own contract (`lib/desks.ts`).
-   */
-  const desksAreFallback = useRef(false);
-
-  /**
    * The company's real desks, when the host exposes them — a company with its
    * own desks gets its own channels instead of the generic strategy/creative/
    * front-desk trio.
@@ -910,14 +897,11 @@ export function RoomView({
     try {
       const dtos = await client.listDesks(company);
       if (run !== desksRun.current) return;
-      // An answered read is never the fallback set, empty or not.
-      desksAreFallback.current = false;
       desksLoadedFor.current = { client, company };
       setDesks(dtos.map(deskFromDto));
     } catch (error) {
       if (run !== desksRun.current) return;
       if (error instanceof ApiError && error.status === 404) {
-        desksAreFallback.current = true;
         desksLoadedFor.current = { client, company };
         setDesks(defaultDesks());
         return;
