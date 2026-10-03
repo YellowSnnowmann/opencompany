@@ -136,7 +136,7 @@ export function SettingsSection({
                 aria-current={page === item.id ? "page" : undefined}
                 className={cn(
                   "flex items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors",
-                  page === item.id ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+                  page === item.id ? "bg-rail-selected text-rail-selected-foreground" : "hover:bg-rail-hover",
                 )}
               >
                 <item.icon className="size-4 shrink-0 text-muted-foreground" />
@@ -182,7 +182,7 @@ export function SettingsSection({
                 aria-current={page === item.id ? "page" : undefined}
                 className={cn(
                   "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                  page === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+                  page === item.id ? "bg-rail-selected text-rail-selected-foreground" : "text-muted-foreground",
                 )}
               >
                 {item.label}

@@ -25,7 +25,9 @@ export const TITLE_BAR_ICON_BUTTON = cn(
   "text-muted-foreground transition",
   "hover:bg-rail-hover hover:text-foreground",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-  // The view you are already on. Keyed off `aria-current` so the appearance and
-  // the announced state cannot disagree.
-  "aria-[current=page]:bg-rail-selected aria-[current=page]:text-rail-selected-foreground",
+  // The view you are already on: solid accent, not a tint — a 32px glyph in a
+  // row of six needs a mark that reads at a glance. Keyed off `aria-current` so
+  // the appearance and the announced state cannot disagree.
+  "aria-[current=page]:bg-primary aria-[current=page]:text-primary-foreground",
+  "aria-[current=page]:hover:bg-primary aria-[current=page]:hover:text-primary-foreground",
 );

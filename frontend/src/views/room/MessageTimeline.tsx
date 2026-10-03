@@ -390,12 +390,11 @@ export function MessageTimeline({
           ref={content}
           className={cn("flex min-h-full flex-col pb-4", empty ? "justify-start" : "justify-end")}
         >
-          {/* `empty` only drives the top padding, and the skeleton fills the
-              same space real rows will — so a loading channel is spaced like a
-              full one and the intro does not jump down and back up. That is also
-              why `loading` keeps the *bottom* anchor above: flipping to the top
-              while history is in flight would move the intro up and then drop it
-              back down the moment the rows land. */}
+          {/* The skeleton fills the same space real rows will — so a loading
+              channel is spaced like a full one and the intro does not jump down
+              and back up. That is also why `loading` keeps the *bottom* anchor
+              above: flipping to the top while history is in flight would move
+              the intro up and then drop it back down the moment the rows land. */}
           <ChannelIntro
             channel={channel}
             loading={loading}

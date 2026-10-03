@@ -396,8 +396,12 @@
     --page: var(--surface-light-1);
     --sidebar-float: oklch(0.982 0.0016 286);
     --sidebar-float-border: oklch(0 0 0 / 0.08);
-    --rail-selected: oklch(0 0 0 / 0.065);
-    --rail-selected-foreground: var(--ink-light-primary);
+    /* Selection carries the accent: a soft wash of `--primary` under the
+       brand ink, so the open conversation and the open settings page read in
+       the company's colour rather than as one more grey. Hover stays neutral
+       ink, so only the chosen row is coloured. */
+    --rail-selected: color-mix(in oklab, var(--primary) 13%, transparent);
+    --rail-selected-foreground: var(--sidebar-accent-foreground);
     --rail-hover: oklch(0 0 0 / 0.04);
     --avatar-disc: var(--surface-light-1);
 
