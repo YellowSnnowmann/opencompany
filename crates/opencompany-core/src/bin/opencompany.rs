@@ -447,7 +447,7 @@ async fn register_company(
     let manifest = CompanyManifest::from_path_for_reload(dir)?;
     let name = manifest.company.name.clone();
     // Capture the schedules before the manifest is moved into the builder; boot
-    // uses them to start this company's cron scheduler (lifecycle step 4).
+    // uses them to start this company's cron scheduler (lifecycle step 3).
     let schedules = manifest.schedules.clone();
     // The company's on-disk source directory (`companies/<name>`) seeds the
     // workspace tree on first boot and lets read resolvers find its committed
