@@ -14,7 +14,6 @@ import {
   SidebarContent,
   SidebarInset,
   SidebarProvider,
-  SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { AgentProfileProvider } from "@/components/agent-profile-sheet";
@@ -26,7 +25,15 @@ import { TitleBarSearch } from "@/components/title-bar-search";
 import { DiscordLink, SettingsButton } from "@/components/title-bar-utilities";
 import { RouteLoading } from "@/components/route-loading";
 import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
-import { SidebarShellFooter } from "@/components/sidebar-shell";
+import { SidebarResizeHandle, SidebarShellFooter } from "@/components/sidebar-shell";
+import { cn } from "@/lib/utils";
+import {
+  DEFAULT_SIDEBAR_WIDTH,
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
+  readStoredSidebarWidth,
+  storeSidebarWidth,
+} from "@/lib/sidebar-width";
 import { SectionContentRail } from "@/components/section-rail";
 import { SidebarNavigation, SidebarSectionTabs } from "@/components/sidebar-navigation";
 import { RoomRailSlotProvider } from "@/components/room-rail";
@@ -3383,7 +3390,15 @@ export function AppShell({
         // separate and still toggles.
         open
         onOpenChange={NO_OP}
-        className="h-svh flex-col overflow-hidden bg-page"
+        // The dragged width (`SidebarResizeHandle`), as the variable the
+        // sidebar's gap and card both size from. While a drag is live the
+        // width transition is switched off, so the edge tracks the pointer.
+        style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+        className={cn(
+          "h-svh flex-col overflow-hidden bg-page",
+          sidebarResizing &&
+            "select-none [&_[data-slot=sidebar-container]]:transition-none [&_[data-slot=sidebar-gap]]:transition-none",
+        )}
       >
       {/* Room's channel list is rendered by `RoomView`, in the content column,
           and painted in the sidebar column. This provider is the slot the two
@@ -3461,7 +3476,15 @@ export function AppShell({
             />
           }
         />
-        <SidebarRail />
+        <SidebarResizeHandle
+          width={sidebarWidth}
+          min={MIN_SIDEBAR_WIDTH}
+          max={MAX_SIDEBAR_WIDTH}
+          defaultWidth={DEFAULT_SIDEBAR_WIDTH}
+          onWidthChange={setSidebarWidth}
+          onCommit={storeSidebarWidth}
+          onResizing={setSidebarResizing}
+        />
       </Sidebar>
 
       {/* `min-w-0`: the inset is a flex item beside the sidebar, and a flex

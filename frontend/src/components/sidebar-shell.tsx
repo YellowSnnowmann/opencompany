@@ -12,7 +12,7 @@
 // card — so those controls move into the card's foot: search and the places
 // you jump to from anywhere as one row of glyphs, then who you are.
 
-import type { ReactNode } from "react";
+import type { KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 
 import { SidebarFooter } from "@/components/ui/sidebar";
 
@@ -86,7 +86,7 @@ export function SidebarResizeHandle({
 }) {
   const clamp = (w: number) => Math.round(Math.min(max, Math.max(min, w)));
 
-  function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+  function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
     event.preventDefault();
     const handle = event.currentTarget;
@@ -109,7 +109,7 @@ export function SidebarResizeHandle({
     handle.addEventListener("pointercancel", up);
   }
 
-  function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const step = event.shiftKey ? 64 : 16;
     const next =
       event.key === "ArrowLeft"
