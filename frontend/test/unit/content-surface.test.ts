@@ -64,7 +64,7 @@ describe("ContentSurface", () => {
     expect(classes).not.toContain("rounded-2xl");
     expect(classes).not.toContain("border-chrome-border");
     // Still the opaque sheet everything a page draws stacks on.
-    expect(classes).toContain("bg-background");
+    expect(classes).toContain("bg-page");
   });
 
   it("is the scroll container every view depends on", () => {
