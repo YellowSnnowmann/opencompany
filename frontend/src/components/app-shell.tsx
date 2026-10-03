@@ -964,48 +964,6 @@ export function AppShell({
   const ownApprovalDecisionsRef = useRef<Set<string>>(new Set());
   const feed = useCompany(client, company, initialStatus);
 
-  /**
-   * Whether the signed-in user is this company's admin — `null` until the read
-   * lands, which the autonomy pill renders as read-only.
-   *
-   * Mirrors the `admin = (await fetchMe(...)).role === "admin"` pattern every
-   * other admin-gated view uses, with one difference: a failed read is
-   * classified through `resolveAdminCheckError` rather than settling straight
-   * to `false`. This reader is asked once per mount instead of on every render,
-   * so a transient failure pinned as "not an admin" stays wrong until the
-   * operator reloads. Only a definitive `401` settles; anything else retries.
-   */
-  const [isCompanyAdmin, setIsCompanyAdmin] = useState<boolean | null>(null);
-  useEffect(() => {
-    let live = true;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    setIsCompanyAdmin(null);
-    const load = () => {
-      void (async () => {
-        try {
-          const admin =
-            (await withReadTimeout(fetchMe(client, company), ADMIN_CHECK_TIMEOUT_MS)).role ===
-            "admin";
-          if (!live) return;
-          setIsCompanyAdmin(admin);
-        } catch (err) {
-          if (!live) return;
-          const outcome = resolveAdminCheckError(err);
-          if (outcome.settled) {
-            setIsCompanyAdmin(outcome.isAdmin);
-          } else {
-            retryTimer = setTimeout(load, ADMIN_CHECK_RETRY_MS);
-          }
-        }
-      })();
-    };
-    load();
-    return () => {
-      live = false;
-      if (retryTimer !== undefined) clearTimeout(retryTimer);
-    };
-  }, [client, company]);
-
   const refreshTaskStatuses = useCallback(async () => {
     const read = ++taskStatusRead.current;
     const [tasks, inflight] = await Promise.allSettled([

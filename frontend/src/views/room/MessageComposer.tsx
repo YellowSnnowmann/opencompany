@@ -92,19 +92,6 @@ interface Props {
   /** Compact form, for the narrower thread panel. */
   compact?: boolean;
   /**
-   * The standing autonomy tier, as a control, on the composer's toolbar row.
-   *
-   * A node rather than the policy itself: `AppShell` is the one place that
-   * knows the tier and whether this operator may change it, and passing the
-   * rendered pill keeps that so — this component stays a composer and learns
-   * nothing about policy.
-   *
-   * Withheld in `compact`, which is the thread panel: the tier is a standing
-   * fact about the company, so one statement of it per screen is the right
-   * number and the main composer is where it belongs.
-   */
-  autonomy?: ReactNode;
-  /**
    * Show the what-is-this-message-for control (issues #580, #1152), opt-in per
    * composer.
    *
@@ -231,7 +218,6 @@ export function MessageComposer({
   onTyping,
   uploadAttachment,
   deleteAttachment,
-  autonomy,
 }: Props) {
   const [draft, setDraft] = useState("");
   // Up to the server's bounded maximum of twenty files can ride one message.
@@ -808,7 +794,8 @@ export function MessageComposer({
               it without leaving the box they are typing in.
               `mr-1` and then the icon buttons, so it reads as the row's leading
               statement rather than as a fourth glyph. */}
-          {!compact && autonomy && <span className="mr-1 flex items-center">{autonomy}</span>}
+          {/* No autonomy pill here any more: the standing tier is set on
+              Settings → Approvals, beside the always-ask list it works with. */}
           {deliverableChoice && !compact && !COMPOSER_INTENT_HIDDEN && (
             <div
               className="mr-1 flex items-center gap-0.5 rounded-lg border p-0.5"

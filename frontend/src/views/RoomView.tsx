@@ -215,13 +215,6 @@ interface Props {
    */
   onSendStart?: (threadId: string) => number | undefined;
   /**
-   * The autonomy control, rendered on the composer's toolbar row.
-   *
-   * A node, not the policy: `AppShell` owns the tier and the admin check, and
-   * handing the rendered pill down keeps every fact about policy in one place.
-   */
-  autonomy?: ReactNode;
-  /**
    * Display names for the typing line, in a stable order — resolved on
    * demand rather than a single precomputed array, because this view needs
    * two independent lines: the main composer's (no `parentId`) and, when a
@@ -436,7 +429,6 @@ export function RoomView({
   rosterRevision = 0,
   onNavigate,
   onOpenAgent,
-  autonomy,
   onReply,
   transcripts,
   setTranscripts,
@@ -2964,10 +2956,6 @@ export function RoomView({
                   />
                 )}
                 <MessageComposer
-                  // Passed straight through from `AppShell` — see the prop's
-                  // note on `MessageComposer`. This view learns nothing about
-                  // policy; it only knows where the control goes.
-                  autonomy={autonomy}
                   placeholder={`Message ${channelTitle(channel)}`}
                   // Opening a conversation lands the cursor in its composer.
                   focusKey={channel.id}
