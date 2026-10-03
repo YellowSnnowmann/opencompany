@@ -200,9 +200,10 @@ test("declining inline says so in the thread rather than leaving it stalled", as
 
   // A decline is terminal and produces no continuation, so silence would read
   // as a stall. The line is addressed to this channel, not to "wherever the
-  // operator last looked".
+  // operator last looked". Scoped to the transcript: the rail's preview of
+  // the channel repeats its latest line.
   await expect(
-    page.getByText(/Declined — the agent will not take that action/),
+    page.getByTestId("channel-transcript").getByText(/Declined — the agent will not take that action/),
   ).toBeVisible({ timeout: 30_000 });
 });
 
