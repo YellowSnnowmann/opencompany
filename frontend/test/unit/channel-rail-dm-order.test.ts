@@ -36,7 +36,7 @@ const render = (ids: string[], unread: Record<string, number> = {}) =>
   );
 
 const order = () =>
-  Array.from(container.querySelectorAll("li button")).map((b) => b.textContent?.trim() ?? "");
+  Array.from(container.querySelectorAll("li [data-testid=\"channel-name\"]")).map((b) => b.textContent?.trim() ?? "");
 
 beforeEach(() => {
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

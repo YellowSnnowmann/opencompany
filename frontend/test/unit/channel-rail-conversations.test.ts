@@ -105,7 +105,7 @@ describe("the merged conversation list", () => {
 
   it("lists channels before DMs, each kind in its own order", () => {
     render();
-    const names = [...container.querySelectorAll("li")].map((li) => li.textContent?.trim());
+    const names = [...container.querySelectorAll("li [data-testid=\"channel-name\"]")].map((li) => li.textContent?.trim());
     expect(names).toEqual(["general", "ops-desk", "Ada", "Bo"]);
   });
 
