@@ -387,6 +387,20 @@
     --sidebar-border: var(--surface-light-4);
     --sidebar-ring: var(--brand-500);
 
+    /* The floating-sidebar shell (`app-shell.tsx`). In light mode the page is
+       plain white and the sidebar a near-white NEUTRAL grey card, ruled off by
+       a hairline of ink rather than the lavender-grey surface border: on the
+       canvas tint the page read as a purple wash with white boxes on it, and
+       the brand-100 selected row was the loudest thing on screen. Selection
+       and hover are ink at low alpha, so they sit on any of these fills. */
+    --page: var(--surface-light-1);
+    --sidebar-float: oklch(0.982 0.0016 286);
+    --sidebar-float-border: oklch(0 0 0 / 0.08);
+    --rail-selected: oklch(0 0 0 / 0.065);
+    --rail-selected-foreground: var(--ink-light-primary);
+    --rail-hover: oklch(0 0 0 / 0.04);
+    --avatar-disc: var(--surface-light-1);
+
     /* Corner radius. 10px at `lg` — the whole scale derives from it, so a
        single edit re-rounds the app. */
     --radius: 0.625rem;
@@ -606,6 +620,16 @@
     --sidebar-border: var(--surface-dark-4);
     --sidebar-ring: var(--brand-400);
 
+    /* The floating-sidebar shell, dark: every token resolves to what the shell
+       already drew here, so dark mode is unchanged by the light-mode retune. */
+    --page: var(--background);
+    --sidebar-float: var(--sidebar);
+    --sidebar-float-border: var(--sidebar-border);
+    --rail-selected: var(--sidebar-accent);
+    --rail-selected-foreground: var(--sidebar-accent-foreground);
+    --rail-hover: color-mix(in oklab, var(--sidebar-accent) 50%, transparent);
+    --avatar-disc: var(--muted);
+
     /* Shadow alone cannot separate two near-black surfaces — there is no
        light for it to occlude. Dark mode adds a 1px inset top highlight
        instead, which is what actually reads as "this edge is raised". */
@@ -732,6 +756,13 @@
     --color-chart-5: var(--chart-5);
 
     --color-sidebar: var(--sidebar);
+    --color-page: var(--page);
+    --color-sidebar-float: var(--sidebar-float);
+    --color-sidebar-float-border: var(--sidebar-float-border);
+    --color-rail-selected: var(--rail-selected);
+    --color-rail-selected-foreground: var(--rail-selected-foreground);
+    --color-rail-hover: var(--rail-hover);
+    --color-avatar-disc: var(--avatar-disc);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
@@ -1432,15 +1463,14 @@
 }
 
 /*
- * The floating sidebar's fill (`app-shell.tsx`): the sidebar colour, just
- * translucent enough that the `backdrop-blur` on the card reads the page
- * scrolling beneath it. OpenHuman's `.sidebar-material` also lays a primary
- * wash from the top-left corner; with the search field ruled off by a border
- * that wash read as a shade on the card's head, so it is left out.
+ * The floating sidebar's fill (`app-shell.tsx`): `--sidebar-float`, just
+ * translucent enough that the card's `backdrop-blur` reads the page scrolling
+ * beneath it. OpenHuman's `.sidebar-material` also lays a primary wash from the
+ * top-left corner; it read as a shade on the card's head, so it is left out.
  */
 .sidebar-material {
-  background: color-mix(in oklab, var(--sidebar) 90%, transparent);
+  background: color-mix(in oklab, var(--sidebar-float) 92%, transparent);
 }
 .dark .sidebar-material {
-  background: color-mix(in oklab, var(--sidebar) 85%, transparent);
+  background: color-mix(in oklab, var(--sidebar-float) 85%, transparent);
 }
