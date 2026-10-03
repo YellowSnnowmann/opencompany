@@ -68,6 +68,8 @@ company_arg="e2e_harness"
 host_url=""
 while (( $# )); do
   case "$1" in
+    # `pnpm dev:web -- --no-browser` forwards the separator itself.
+    --) ;;
     --no-browser) open_browser=0 ;;
     --fresh) fresh=1 ;;
     --link) link_only=1 ;;
