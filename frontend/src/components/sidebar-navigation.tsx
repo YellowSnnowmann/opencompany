@@ -494,6 +494,12 @@ export function SidebarNavigation() {
           // content so the list scrolls INSIDE itself (the slot below) and
           // Company and Connections stay pinned under it.
           "min-h-0 flex-1",
+          // No vertical padding on the group: it sat OUTSIDE the scroller, so
+          // a scrolled list was clipped against a hard edge 8px under the
+          // search field and 8px over the foot — rows looked cut. The padding
+          // is on the scroller below instead, where it scrolls with the rows
+          // and the list fades under the edges rather than being sliced.
+          "py-0",
           // On the 3rem rail this group's own `px-2` is the difference between
           // fitting and not. The rail is 48px; the gutter leaves a 32px content
           // box, and `ChannelRail`'s compact rows are `size-9` (36px) with their
@@ -524,7 +530,7 @@ export function SidebarNavigation() {
           // The one scroller in the column. `SidebarContent` is `flex-1
           // min-h-0` for this, so a list at its cap scrolls here rather than
           // pushing the two rows below it out of reach.
-          className="scrollbar-on-hover flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto"
+          className="scrollbar-on-hover flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto py-2"
         />
       </SidebarGroup>
 
