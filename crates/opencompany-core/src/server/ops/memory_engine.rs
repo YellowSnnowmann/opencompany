@@ -112,6 +112,13 @@ struct EngineOption {
     unavailable_reason: Option<String>,
     /// Whether the engine needs an endpoint.
     requires_url: bool,
+    /// Whether the engine takes an endpoint at all. True with `requires_url`
+    /// false means "optional": the engine has a default (`default_url`) and an
+    /// operator may point it at their own instance instead.
+    accepts_url: bool,
+    /// The endpoint used when none is given, for the field's placeholder.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_url: Option<&'static str>,
     /// Whether the engine needs a credential.
     requires_key: bool,
     /// Whether anything this engine stores survives a restart. `false` for
@@ -267,6 +274,8 @@ fn catalog() -> Vec<EngineOption> {
         available: true,
         unavailable_reason: None,
         requires_url: false,
+        accepts_url: false,
+        default_url: None,
         requires_key: false,
         durable: true,
     }];
@@ -279,6 +288,8 @@ fn catalog() -> Vec<EngineOption> {
         available: tinymemory,
         unavailable_reason: feature(tinymemory, "tinymemory"),
         requires_url: false,
+        accepts_url: false,
+        default_url: None,
         requires_key: false,
         durable: false,
     });
@@ -296,9 +307,11 @@ fn remote_options() -> Vec<EngineOption> {
             description: engine.description,
             available: true,
             unavailable_reason: None,
-            // An engine with a default endpoint (the TinyHumans wire) can be
-            // bound with the URL left blank.
+            // An engine with a default endpoint can be bound with the URL left
+            // blank, or pointed at a self-run instance.
             requires_url: engine.needs_endpoint,
+            accepts_url: true,
+            default_url: engine.default_endpoint,
             requires_key: engine.needs_key,
             durable: true,
         })
@@ -320,7 +333,9 @@ fn remote_options() -> Vec<EngineOption> {
             unavailable_reason: Some(
                 "this build was compiled without the `tinymemory` feature".to_string(),
             ),
-            requires_url: true,
+            requires_url: false,
+            accepts_url: true,
+            default_url: None,
             requires_key: true,
             durable: true,
         })
@@ -546,7 +561,7 @@ fn selection_from(
         // Carried only for the engines that use them: leaving a stale URL on a
         // selection that switched to the built-in store would write dead keys
         // into `config.toml` and confuse the next reader of the file.
-        url: option.requires_url.then_some(url).flatten(),
+        url: option.accepts_url.then_some(url).flatten(),
         api_key: option.requires_key.then_some(api_key).flatten(),
     })
 }
