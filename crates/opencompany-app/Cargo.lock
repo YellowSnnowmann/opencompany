@@ -3913,6 +3913,7 @@ dependencies = [
  "swc_core",
  "thiserror 2.0.20",
  "tinyagents-harness",
+ "tinyconnectors",
  "tinyflows",
  "tinyhivemind",
  "tinyhivemind-core",
