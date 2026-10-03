@@ -493,7 +493,7 @@ function ChannelRow({
               (active || hasUnread) && "font-semibold",
             )}
           >
-            {isDm ? channel.name : (channel.voice ?? channel.name)}
+            {rowTitle(channel)}
           </span>
           {preview && (
             <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
@@ -609,6 +609,18 @@ function RowAvatar({
         .reverse()}
     </span>
   );
+}
+
+/**
+ * The name on a row. A desk channel goes by its desk name ("Engineering")
+ * rather than its slug, since the row no longer wears a `#`; `#general` keeps
+ * its `#` because its `voice` is whoever answers there (the orchestrator), and
+ * titling the whole company's line with one agent's name misnames it.
+ */
+function rowTitle(channel: Channel): string {
+  if (channel.kind === "dm") return channel.name;
+  if (channel.mutable === false) return `#${channel.name}`;
+  return channel.voice ?? channel.name;
 }
 
 function memberFace(m: TeamMember) {
