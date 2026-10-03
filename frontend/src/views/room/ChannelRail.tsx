@@ -4,17 +4,9 @@ import {
   Hash,
   Lock,
   PanelRight,
-  Plus,
-  SquarePen,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { AgentFace } from "@/components/agent-face";
 import { agentPresenceLabel } from "@/components/agent-status-dot";
 import { TeammateAvatar } from "@/components/teammate-avatar";
@@ -23,7 +15,6 @@ import { useStableList } from "@/hooks/use-stable-list";
 import { cn } from "@/lib/utils";
 import type { TeamMember } from "@/lib/team";
 import { useBusiestPresence, useLiveSteps, useTranscript } from "@/room/store";
-import { NewMessageDialog } from "./NewMessageDialog";
 import {
   channelMembers,
   channelSubtitle,
@@ -54,23 +45,8 @@ const NO_MEMBERS: TeamMember[] = [];
  */
 const ROUND = "rounded-full bg-muted";
 
-/** The two icon buttons above the list — same size, hit area and hover. */
-const DOOR =
-  "rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground";
-
 interface Props {
   sections: ChannelSection[];
-  /**
-   * Opens the channel creator (issue #1835) — rendered as a "+" on the
-   * Channels section header. Absent (the rule for a control that would be
-   * refused) when the roster cannot staff a channel yet.
-   */
-  onAddChannel?: () => void;
-  /**
-   * Opens the create-agent dialog (`AddMemberDialog`), which `RoomView` mounts
-   * and owns — the rail only asks. The "+" menu's "Create a new agent".
-   */
-  onAddAgent?: () => void;
   activeId: string | null;
   /** Channel id → unread count. Absent or 0 reads as caught up. */
   unread: Record<string, number>;
@@ -84,14 +60,12 @@ interface Props {
    * folds (codex P2 review). Falls back to instance-local state. */
   openSections?: Record<string, boolean>;
   onToggleSection?: (id: string) => void;
-  directMessages?: Channel[];
   /**
    * The roster. A channel row draws its members' faces stacked as one group,
    * and a channel preview names who spoke; without it a channel falls back to
    * its `#` glyph and an unprefixed line.
    */
   members?: TeamMember[];
-  onStartDirectMessage?: (id: string) => void;
   className?: string;
   /**
    * Whether the channel this rail marks is the page on screen.
@@ -128,23 +102,17 @@ interface Props {
  */
 export function ChannelRail({
   sections,
-  onAddChannel,
-  onAddAgent,
   activeId,
   unread,
   mentions,
   onSelect,
   collapsed = false,
   onExpand,
-  directMessages = [],
   members = NO_MEMBERS,
-  onStartDirectMessage,
   className,
   currentPage = true,
   animateReorder = false,
 }: Props) {
-  // Which picker the compose menu has open: `dm` is the agent picker, `channel` the channel picker. One at a time; `null` is none. (Create a new agent is not here — it asks `RoomView` for the real `AddMemberDialog`.)
-  const [dialog, setDialog] = useState<"dm" | "channel" | null>(null);
   // Resolved once and threaded down, so the three row shapes cannot come to
   // disagree about what marking the open channel means.
   const activeAria: "page" | "true" = currentPage ? "page" : "true";
@@ -241,10 +209,6 @@ export function ChannelRail({
       onSelect={onSelect}
     />
   );
-  const channelsOnly = sections
-    .filter((section) => section.id !== "dms")
-    .flatMap((section) => section.channels);
-  const canMessage = directMessages.length > 0 && !!onStartDirectMessage;
 
   return (
     <aside
@@ -254,56 +218,11 @@ export function ChannelRail({
         className,
       )}
     >
-      {/* The list's two doors, on one row with no caption: "+" makes things,
-          the pencil starts a conversation. They were each on a section header;
-          the headers are gone, the doors are not. */}
-      <div className="flex items-center gap-0.5 pt-2">
-        {/* A caption, not a control and not a heading element: the list is one
-            ungrouped run, this only names it. A `div` for the reason
-            `section-rail.tsx`'s own caption is one (issue #1392,
-            `nav-rail-headings.test.ts`); `px-2` puts it on the rows' text line. */}
-        <div className="min-w-0 flex-1 truncate px-2 text-xs font-medium text-muted-foreground">
-          Conversations
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            title="New"
-            aria-label="New"
-            className={DOOR}
-          >
-            <Plus className="size-3.5" aria-hidden />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-auto min-w-48">
-            <DropdownMenuItem disabled={!onAddChannel} onClick={() => onAddChannel?.()}>
-              Create a new channel
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={!onAddAgent} onClick={() => onAddAgent?.()}>
-              Create a new agent
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            title="Start a conversation"
-            aria-label="Start a conversation"
-            className={DOOR}
-          >
-            <SquarePen className="size-3.5" aria-hidden />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-auto min-w-56">
-            <DropdownMenuItem
-              disabled={channelsOnly.length === 0}
-              onClick={() => setDialog("channel")}
-            >
-              Start a conversation in a channel
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={!canMessage} onClick={() => setDialog("dm")}>
-              Start a conversation with the agent
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
+      {/* No caption row and no doors. "Conversations" with a `+` (new
+          channel / new agent) and a pencil (start a conversation) headed this
+          list; new agents and desks are made on Company > Agents now, and every
+          conversation is already a row here, so the row had nothing left to
+          open. */}
       {/* No horizontal padding of its own: the sidebar group already gutters the
           rail, and a second one pushed every row right of the nav rows. */}
       {/* One visual list, two lists in the DOM. The DM rows slide when a message
@@ -334,21 +253,6 @@ export function ChannelRail({
         )}
       </div>
 
-      {/* Controlled: the menu items open these, there is no trigger of their own. */}
-      <NewMessageDialog
-        open={dialog === "dm"}
-        onOpenChange={(next) => setDialog(next ? "dm" : null)}
-        directMessages={directMessages}
-        onSelect={(id) => onStartDirectMessage?.(id)}
-      />
-      <NewMessageDialog
-        open={dialog === "channel"}
-        onOpenChange={(next) => setDialog(next ? "channel" : null)}
-        directMessages={channelsOnly}
-        onSelect={onSelect}
-        title="Start a conversation in a channel"
-        description="Choose a channel to talk in."
-      />
     </aside>
   );
 }
