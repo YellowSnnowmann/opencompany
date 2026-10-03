@@ -16,7 +16,7 @@ dependency into a hard requirement for checking the server. The host stays a
 plain `path` dependency, so a change to it is picked up with no publishing step.
 
 The cost is that no root `cargo` invocation reaches the desktop, including
-`--all-features`. The `Desktop` job in `.github/workflows/ci.yml` is what builds
+`--all-features`. The `desktop` CI lane (`scripts/ci/lanes/lanes-plan.mjs`) is what builds
 and tests it; without that lane the crate would be compiled by nothing, which is
 [issue #475](https://github.com/tinyhumansai/opencompany/issues/475)'s shape.
 
@@ -86,7 +86,7 @@ the same way and less visibly (`acp_agents = None`, so every `transport =
 `DESKTOP_FEATURES` override for the leaner build. A derived value cannot drift.
 
 `scripts/ci/assert-desktop-features.sh` guards what is still duplicated (the two
-`ci.yml` steps, `npm run tauri:build`, the by-hand command below), that the
+desktop-lane steps, `npm run tauri:build`, the by-hand command below), that the
 release `tauri build` still consumes the variable it declares — otherwise the
 source of truth is a lie — and that the launcher still derives rather than
 re-hardcoding a literal.

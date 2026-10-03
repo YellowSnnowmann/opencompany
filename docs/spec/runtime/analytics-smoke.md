@@ -12,7 +12,7 @@ checks a dashboard by hand to learn whether analytics works.
 | Piece | What it proves |
 |---|---|
 | `scripts/ci/verify-analytics-capture.sh <profileId>` | The profile's events are **stored**: reads them back from OpenPanel's MCP endpoint (`https://panel.tinyhumans.ai/api/mcp`) |
-| `scripts/ci/verify-analytics-capture.sh --selftest` | The parsing and polling logic, against canned JSON and SSE fixtures in `scripts/ci/fixtures/analytics-capture/`, no network. Run in the ungated `Actions pinned` job of `ci.yml` via `scripts/ci/test-verify-analytics-capture.sh` |
+| `scripts/ci/verify-analytics-capture.sh --selftest` | The parsing and polling logic, against canned JSON and SSE fixtures in `scripts/ci/fixtures/analytics-capture/`, no network. Run in the always-on `static` CI lane via `scripts/ci/test-verify-analytics-capture.sh` |
 | `scripts/ci/assert-desktop-analytics.sh <app>` | The **built desktop app's wire contract**: runs `analytics-test` against a loopback capture server (`scripts/ci/analytics-capture-server.py`) and asserts exit 0, an `s_` profile id, `openpanel-client-id` and `openpanel-sdk-name: opencompany`, and no `Origin`/`Authorization`/`Cookie`. Runs in `build-desktop.yml` on the aarch64 leg only (the x86_64 leg is cross-compiled and cannot execute) |
 | `.github/workflows/analytics-smoke.yml` | Daily (`17 4 * * *`) and on dispatch: the published tenant image (`ghcr.io/tinyhumansai/opencompany:latest`) and the latest aarch64 desktop DMG each send and read back |
 | Release gates | A `Verify product analytics` step after `Verify crash reporting` in `release-production.yml`, and after the push in `deploy-staging.yml` |

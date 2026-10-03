@@ -27,8 +27,8 @@
 # `cargo test --lib a b` reads `a` as the filter and `b` as ANOTHER filter only
 # in recent cargo; historically the second bare argument lands in the test
 # binary's argument list where it silently narrows the selection to nothing.
-# ci.yml already documents this trap at the ACP step ("Two invocations, not
-# one"). Taking a single filter makes the safe shape the only shape: to cover
+# The lane plan documents this trap at the ACP checks ("Four invocations,
+# not one"). Taking a single filter makes the safe shape the only shape: to cover
 # two modules, call this script twice and get two asserted counts instead of one
 # ambiguous run.
 #
