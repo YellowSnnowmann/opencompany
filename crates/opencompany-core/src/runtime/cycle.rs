@@ -3382,8 +3382,7 @@ struct CycleHostImpl<'a> {
     thread_parent: Option<EventSeq>,
     /// Whether this cycle was triggered by content that arrived from OUTSIDE —
     /// a `WebhookReceived` (a channel message, an email, a third-party
-    /// callback) or an `A2aTaskReceived` (a remote agent's payload) in its
-    /// trigger batch. Computed once, like `task_id`. A brain-chosen
+    /// callback) in its trigger batch. Computed once, like `task_id`. A brain-chosen
     /// `ContextOp::Put` in such a cycle can be (and on the medulla path
     /// routinely is) the raw inbound payload echoed back, so the write goes
     /// through the taint-stamping inbound port instead of the internal one

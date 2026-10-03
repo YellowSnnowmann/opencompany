@@ -2618,7 +2618,6 @@ fn summarize_event(event: &CompanyEvent) -> String {
         }
         CompanyEvent::ScheduleFired { cron, .. } => format!("schedule fired: {cron}"),
         CompanyEvent::WebhookReceived { channel, .. } => format!("webhook on {channel}"),
-        CompanyEvent::A2aTaskReceived { from, .. } => format!("A2A task from {from}"),
         // The tool this resolved is deliberately NOT named here, though it would
         // read better: `ApprovalResolved` carries only the id, the verdict and
         // the actor, so naming the tool would mean threading a journal lookup
