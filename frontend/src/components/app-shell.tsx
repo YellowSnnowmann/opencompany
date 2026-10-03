@@ -165,6 +165,7 @@ import { ArtifactRoute } from "@/views/ArtifactRoute";
 import { TaskDetailRoute } from "@/views/TaskDetailRoute";
 import { InboxView } from "@/views/InboxView";
 import { FeedbackView } from "@/views/FeedbackView";
+import { SetupRouteView } from "@/views/SetupRouteView";
 import { UnknownRouteView } from "@/views/UnknownRouteView";
 import { ConnectionsSection } from "@/views/connections/ConnectionsSection";
 import { SettingsSection } from "@/views/SettingsSection";
@@ -3520,8 +3521,9 @@ export function AppShell({
           {/* No Overview. The page and its knowledge graph were removed, at
               both of their addresses — `#/overview` and `#/company/graph` are
               rewritten onto Room and the roster (`console-route-rewrites.ts`).
-              `#/setup` drew the graph behind its dialog; it draws nothing there
-              now, and the dialog is the whole of that route. */}
+              `#/setup` drew the graph behind its dialog; it draws an empty,
+              named page there now (`SetupRouteView`). */}
+          {view === "setup" && <SetupRouteView />}
           {view === "company" && (
             <CompanyView
               client={client}

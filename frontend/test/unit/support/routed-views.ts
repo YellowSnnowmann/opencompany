@@ -71,7 +71,7 @@ import type { SettingsPage } from "@/views/settings-pages";
  *
  * The single-leaf version of this was wrong three times over, all found by the
  * same review: `company` was mapped to `TeamView` alone while
- * `CompanyView.tsx:116-129` sends `#/company/graph` to `Overview` and every
+ * `CompanyView.tsx` sent `#/company/graph` to the knowledge graph and every
  * other segment to `OrgChartView`; and `chat` and `team` named components that
  * are simply **absent** in some of their own states. Each wrong leaf switched
  * the guard off for a whole route while reporting green — the exact failure
@@ -98,22 +98,14 @@ export type Names = readonly Leaf[];
 
 export const NAMED_BY: Record<View, Names> = {
   /**
-   * `#/overview` is the company graph again — the swap issue #1321 made was
-   * undone, so the page this route actually mounts is `Overview.tsx`.
-   * `OperatorOverview.tsx` is still in the tree and still carries its own
-   * header, but nothing routes to it, so holding this entry to it would have
-   * left the real page free to lose its heading with the guard green.
-   */
-  overview: [{ pageHeader: "Overview.tsx" }],
-  /**
-   * Three leaves, from `CompanyView`'s own dispatch: `#/company/graph` is the
-   * knowledge graph, any other segment is the org chart focused on that desk,
-   * and the bare route is the roster.
+   * Two leaves, from `CompanyView`'s own dispatch: any segment is the org chart
+   * focused on that desk, and the bare route is the roster. (`#/company/graph`
+   * was a third, the knowledge graph; it was removed and the address is
+   * rewritten onto the roster.)
    */
   company: [
     { pageHeader: "TeamView.tsx" },
     { pageHeader: "company/OrgChartView.tsx" },
-    { pageHeader: "Overview.tsx" },
   ],
   /**
    * `#/team/<id>` opens the teammate profile; the bare route is the roster.
@@ -177,25 +169,18 @@ export const NAMED_BY: Record<View, Names> = {
   settings: [{ pageHeader: "SettingsView.tsx" }],
   feedback: [{ pageHeader: "FeedbackView.tsx" }],
   /**
-   * `#/setup` does **not** render `SetupWizard`. `app-shell.tsx` keeps
-   * `OperatorOverview` mounted for this view (`view === "overview" || view ===
-   * "setup"`) and opens `SetupController`, which draws `SetupDialog` over it.
-   * `SetupWizard` belongs to `ConnectionConsole`'s pre-console phase, which is
-   * not a routed view at all — so mapping the route to it left this check
-   * inspecting a component the route never mounts, and the real surface could
-   * have lost its heading while the guard stayed green.
-   *
-   * The route is therefore held to the page it actually renders. `SetupDialog`
-   * is deliberately absent: it is an overlay, and a dialog is named by its own
-   * title rather than by a page header. That is the documented exception, not a
-   * gap — `OperatorOverview` is what carries the `h1` for this address.
+   * `#/setup` opens `SetupController`, which draws `SetupDialog` over the
+   * content pane; the pane itself renders `SetupRouteView`, an empty page whose
+   * only job is a hidden `h1` naming the address. (It drew the Overview graph
+   * until that page was removed.) `SetupDialog` is deliberately absent: it is an
+   * overlay, named by its own title rather than by a page header.
    */
   /**
    * The company's durable memory, moved out of the settings rail onto its own
    * nav row. It was covered by `SETTINGS_NAMED_BY` while it was a sub-page.
    */
   brain: [{ pageHeader: "MemoryView.tsx" }],
-  setup: [{ pageHeader: "Overview.tsx" }],
+  setup: [{ pageHeader: "SetupRouteView.tsx" }],
   "not-found": [{ pageHeader: "UnknownRouteView.tsx" }],
 };
 
