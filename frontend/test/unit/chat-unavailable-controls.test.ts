@@ -4,7 +4,6 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ChannelRail } from "@/views/room/ChannelRail";
 import { MessageComposer } from "@/views/room/MessageComposer";
 
 let container: HTMLDivElement;
@@ -31,56 +30,9 @@ afterEach(() => {
 });
 
 describe("chat only renders controls it can perform (issue #1336)", () => {
-  // The compose door is the pencil on the "Conversations" row now, and the agent
-  // picker is an item of the menu it opens. The rail has to be given someone to
-  // message for that item to be live.
-  const DMS = [{ id: "dms", label: "Direct messages", channels: [] }];
-
-  const agentItem = () =>
-    [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-      (el) => el.textContent?.trim() === "Start a conversation with the agent",
-    );
-
-  function openCompose() {
-    act(() => {
-      action("Start a conversation")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-  }
-
-  it("offers the agent picker in the compose menu when there is someone to message", () => {
-    render(
-      createElement(ChannelRail, {
-        sections: DMS,
-        activeId: null,
-        unread: {},
-        onSelect: () => {},
-        directMessages: [{ id: "dm:2", name: "Ade", kind: "dm", purpose: "" }],
-        onStartDirectMessage: () => {},
-      }),
-    );
-
-    openCompose();
-    expect(agentItem()).toBeDefined();
-    expect(agentItem()!.hasAttribute("data-disabled")).toBe(false);
-  });
-
-  it("holds the agent picker back when nobody can be messaged", () => {
-    render(
-      createElement(ChannelRail, {
-        sections: DMS,
-        activeId: null,
-        unread: {},
-        onSelect: () => {},
-        directMessages: [],
-        onStartDirectMessage: () => {},
-      }),
-    );
-
-    openCompose();
-    expect(agentItem()).toBeDefined();
-    expect(agentItem()!.hasAttribute("data-disabled")).toBe(true);
-  });
-
+  // The rail's compose door (the pencil on the "Conversations" row) is gone:
+  // every conversation is already a row, and new agents and desks are made on
+  // Company > Agents. What is left to pin here is the composer.
   it("keeps working composer controls and holds unavailable ones back", () => {
     render(
       createElement(MessageComposer, {
