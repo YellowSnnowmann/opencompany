@@ -388,7 +388,7 @@ jobs:
             | sed -n "s/.*password '\(.*\)'\./\1/p" \
             | tail -n 1)"
           test -n "${admin_secret}"
-          for attempt in $(seq 1 20); do
+          for _ in $(seq 1 20); do
             if docker exec "${container}" \
               stalwart-cli --url http://127.0.0.1:8080 \
               --credentials "admin:${admin_secret}" \
