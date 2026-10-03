@@ -20,7 +20,7 @@ import { consoleHref } from "@/lib/console-paths";
 import { roleSubtitle, type TeamMember } from "@/lib/team";
 import { cn } from "@/lib/utils";
 import { ChannelFace, memberFace } from "./ChannelRail";
-import { channelSubtitle, channelTitle, dmChannelId, type Channel } from "./model";
+import { channelSubtitle, channelTitle, dmChannelId, dmThreadId, type Channel } from "./model";
 import { PresenceDot } from "./PresenceDot";
 
 /**
@@ -55,7 +55,14 @@ export function ChannelPill({
         open && "bg-muted",
       )}
     >
-      <ChannelFace channel={channel} members={members} size="pill" />
+      {/* A DM's face wears the teammate's live status here as it does in the
+          sidebar row — the pill is where the header's dot used to be. */}
+      <ChannelFace
+        channel={channel}
+        members={members}
+        chatId={channel.kind === "dm" && channel.member ? dmThreadId(channel.member) : null}
+        size="pill"
+      />
       <span className="min-w-0 truncate">{channelTitle(channel)}</span>
       {/* On hover (or keyboard focus), a right arrow slides in: the panel
           this opens is on the right. Zero width at rest, so the label stays
