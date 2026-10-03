@@ -485,37 +485,6 @@ export function channelSubtitle(channel: Channel): string | null {
   return purpose;
 }
 
-/**
- * The line under the identity block at the top of an empty transcript.
- *
- * Pure, exported and here rather than inline in `MessageTimeline` because it is
- * four branches of prose over two nullable inputs, and prose defects are
- * invisible to a type checker. The one this arrived with: the DM branch used to
- * append a full stop by hand, which was right while the subtitle was a role
- * (`Backend Engineer`) and produced "…and services.." the moment issue #1180
- * made it a description that brings its own punctuation. `sentence` is the rule
- * for that, so every branch goes through it.
- *
- * `loading` renders the subtitle alone: both finished sentences are positive
- * claims that the channel has no history, and neither may be made before the
- * host has answered (issue #934).
- */
-export function channelIntroSentence(
-  channel: Channel,
-  loading: boolean,
-): string {
-  const subtitle = channelSubtitle(channel);
-  if (loading) return subtitle ? sentence(subtitle) : "";
-  if (channel.kind === "dm") {
-    // No subtitle drops the clause, not the sentence: where you are is still
-    // worth saying, the tautology after it is not.
-    return subtitle
-      ? `This is the start of your direct message with ${channel.name} — ${sentence(lower(subtitle))}`
-      : `This is the start of your direct message with ${channel.name}.`;
-  }
-  return `This is the very beginning of ${channelTitle(channel)}.${subtitle ? ` ${sentence(subtitle)}` : ""}`;
-}
-
 /** Lowercases the first character only, for a clause continuing a sentence. */
 function lower(s: string): string {
   return s.charAt(0).toLowerCase() + s.slice(1);
