@@ -182,7 +182,10 @@ test("deciding inline detaches, and the continuation lands in the same channel",
     { timeout: 30_000 },
   );
   // And the work resumes here, exactly once.
-  await expect(page.getByText(CONTINUATION)).toHaveCount(1, { timeout: 30_000 });
+  // Counted in the transcript: the rail's preview repeats the latest line.
+  await expect(page.getByTestId("channel-transcript").getByText(CONTINUATION)).toHaveCount(1, {
+    timeout: 30_000,
+  });
 });
 
 test("declining inline says so in the thread rather than leaving it stalled", async ({ page }) => {

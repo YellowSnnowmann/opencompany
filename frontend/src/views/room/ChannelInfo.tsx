@@ -140,9 +140,13 @@ export function ChannelInfoPanel({
   // Where this conversation is managed: a desk on the org chart, a DM's
   // teammate on their own page (persona, tools, model, schedule). Canonical
   // addresses from `consoleHref`, so following one never bounces through a
-  // rewrite.
+  // rewrite. Only a desk the host lists (`memberIds`) and lets you change:
+  // `#general` mirrors the whole roster and refuses membership writes, and a
+  // fallback desk names one the chart cannot draw.
   const manageHref =
-    channel.kind === "channel" && channel.memberIds ? consoleHref("company", channel.id) : undefined;
+    channel.kind === "channel" && channel.memberIds && channel.mutable !== false
+      ? consoleHref("company", channel.id)
+      : undefined;
   const manageAgentHref = isDm && channel.member ? consoleHref("team", channel.member.id) : undefined;
 
   return (

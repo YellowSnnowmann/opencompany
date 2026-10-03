@@ -112,7 +112,7 @@ for (const scheme of ["light", "dark"] as const) {
         added: [ROSTER[0].id],
         removed: [],
       });
-      await expect(railRows(page).first()).toHaveAccessibleName(/^Launch week/);
+      await expect(railRows(page).first()).toHaveAccessibleName(/^launch-week/);
 
       // The whole DM list moved DOWN, and moving is all it did: nothing re-sorted.
       await expect
