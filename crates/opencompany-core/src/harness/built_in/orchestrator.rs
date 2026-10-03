@@ -76,8 +76,6 @@ use async_trait::async_trait;
 use futures::future::FutureExt;
 use serde_json::{Value, json};
 
-#[cfg(test)]
-use openhuman_core as oh;
 use tinytools::{PermissionLevel, Tool, ToolResult, ToolTimeout};
 
 use crate::company::{
@@ -166,9 +164,14 @@ use crate::runtime::assignee;
 use crate::runtime::builder::agent_effective_grants;
 use crate::runtime::delegation::hand_off_target_of;
 use crate::runtime::delegation_tools;
-pub use crate::runtime::delegation_tools::{
+use crate::runtime::delegation_tools::{
     DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL, SPAWN_TASK_TOOL,
 };
+
+/// The exact failure-only promise returned when a seated teammate queues a card.
+/// Shared with the seat brief contract test so the brief cannot drift from what
+/// the tool actually tells the model.
+pub(crate) const SPAWN_TASK_FAILURE_ONLY_RECEIPT: &str = "you will be told here if it cannot be";
 /// The `run_workflow` tool name (issue #67).
 pub const RUN_WORKFLOW_TOOL: &str = "run_workflow";
 /// The `read_run_output` tool name (issue #418 — the `run_workflow` companion
@@ -328,9 +331,9 @@ a trigger plus agent / tool / condition / output steps — and say it is ready; 
 immediately and runnable. `run_workflow` executes a saved workflow by id, including to advance a \
 task waiting on a run; you can run workflows yourself, so never claim that tool is unavailable. \
 `add_agent` brings on a new teammate when the company genuinely needs one. \
-You also own the board's lifecycle: `assign_task` sets who owns an existing card (ownership only — \
-moving it to In Progress is what starts the work), and `review_task` records `approve` or `revise` \
-on a card awaiting review."
+You also own the board's lifecycle: `assign_task` sets who owns an existing card (ownership only), \
+`start_task` moves a To-do card into Working, which is what begins the work, and `review_task` \
+records `approve` or `revise` on a card awaiting review."
         .to_string()
 }
 
@@ -3034,7 +3037,7 @@ impl Tool for SpawnTaskTool {
         if seated {
             return Ok(ToolResult::success(format!(
                 "Queued a task card: \"{title}\". It is written to the board when your turn \
-                 ends; you will be told here if it cannot be. Do not describe it as open yet."
+                 ends; {SPAWN_TASK_FAILURE_ONLY_RECEIPT}. Do not describe it as open yet."
             )));
         }
         if let Some(name) = unverified {
@@ -4470,6 +4473,7 @@ pub fn orchestrator_tools(
     queue: &DelegationQueue,
     workflow_source_dir: Option<PathBuf>,
     workflow_runner: WorkflowRunnerHandle,
+    board_starter: crate::harness::built_in::board_start::BoardStarterHandle,
     run_supervisor: crate::runtime::RunSupervisor,
     store: Arc<dyn CompanyStore>,
     // Issue #274's snapshot ring, for the #661 (M7) edit/delete tools. `None`
@@ -4506,7 +4510,7 @@ pub fn orchestrator_tools(
     )));
     tools.push(Box::new(ReadTaskTool::new(
         company.clone(),
-        tasks,
+        tasks.clone(),
         runs.clone(),
         artifacts,
     )));
@@ -4566,6 +4570,17 @@ pub fn orchestrator_tools(
     tools.push(Box::new(
         crate::harness::workflow_admin::DeleteWorkflowTool::new(workflow_admin),
     ));
+    // Only with a board to read: the tool needs the card before it can move it,
+    // and an unwired `tasks` means there is none. The starter handle may still be
+    // empty at this point — it is filled when the runtime is registered — so the
+    // tool checks it per call rather than at build.
+    if let Some(tasks) = tasks.clone() {
+        tools.push(Box::new(StartTaskTool::new(
+            company.clone(),
+            tasks,
+            board_starter,
+        )));
+    }
     tools.push(Box::new(
         AddAgentTool::new(company, store, minter, minter_tools, minter_grants)
             .with_events(events.clone()),
@@ -4576,6 +4591,139 @@ pub fn orchestrator_tools(
 // ---------------------------------------------------------------------------
 // run_workflow (issue #67)
 // ---------------------------------------------------------------------------
+
+/// The `start_task` tool name — move a To-do card into Working, which dispatches it.
+pub const START_TASK_TOOL: &str = "start_task";
+
+/// Starts a board card: moves it from To-do into Working, which fires dispatch.
+///
+/// # Why this tool has to exist
+///
+/// `spawn_task` opens a card and stops. Dispatch is edge-fired on the
+/// `todo → in_progress` transition inside `CompanyRuntime::upsert_task`, which was
+/// reachable only from the console's column drag — so **nothing but a human could
+/// start a card.** An agent could open one, assign it, and watch it sit there.
+/// `AssignTaskTool` says as much: *"It does not (re)dispatch."*
+///
+/// # Why a separate tool and not a flag on `assign_task`
+///
+/// Assignment and starting are one operator intent, so a `start: true` flag on
+/// `assign_task` reads better — and is unavailable. `assign_task` is in
+/// [`EPISODE_WITHHELD_TOOLS`](crate::harness::built_in::EPISODE_WITHHELD_TOOLS),
+/// so the flag would be unreachable from inside an episode and a seat could open a
+/// card it could never start. A separate verb stays reachable.
+///
+/// # Why it writes through a handle
+///
+/// Every in-process path writes cards through the plain
+/// [`TaskStore`](crate::ports::TaskStore) port, which deliberately cannot
+/// dispatch — `advance` and the planning settle rely on that to avoid re-firing
+/// the edge. Firing it needs the runtime, and the runtime is built from the deps
+/// this tool is built from, so it arrives as a fillable handle exactly as
+/// [`WorkflowRunnerHandle`] does.
+pub struct StartTaskTool {
+    company: CompanyId,
+    tasks: Arc<dyn TaskStore>,
+    starter: crate::harness::built_in::board_start::BoardStarterHandle,
+}
+
+impl StartTaskTool {
+    /// Builds the tool over the board it reads and the capability it starts with.
+    pub fn new(
+        company: CompanyId,
+        tasks: Arc<dyn TaskStore>,
+        starter: crate::harness::built_in::board_start::BoardStarterHandle,
+    ) -> Self {
+        Self {
+            company,
+            tasks,
+            starter,
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for StartTaskTool {
+    fn name(&self) -> &str {
+        START_TASK_TOOL
+    }
+
+    fn description(&self) -> &str {
+        "Start work on a card that is already on the board: moves it from To-do into Working, which hands it to its assignee. Provide the `task_id`. Use this when the work should begin now — a card you just opened with `spawn_task` sits in To-do until somebody starts it. A card that is already Working, or past it, is left alone and says so."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "task_id": { "type": "string", "description": "The id of the card to start." }
+            },
+            "required": ["task_id"],
+            "additionalProperties": false
+        })
+    }
+
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Write
+    }
+
+    async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
+        let task_id = args
+            .get("task_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("`task_id` is required"))?
+            .to_string();
+
+        // Refused in this turn rather than reported as started, on the same terms
+        // every unwired tool on this belt uses: a receipt for work that will not
+        // happen is worse than a refusal the model can act on.
+        let Some(starter) = self.starter.get() else {
+            return Ok(ToolResult::error(format!(
+                "Could not start \"{task_id}\": this deployment has no board dispatch wired, so \
+                 moving the card would not begin any work. Say so rather than reporting it started."
+            )));
+        };
+
+        let Some(mut card) = self
+            .tasks
+            .list(&self.company)
+            .await?
+            .into_iter()
+            .find(|card| card.id == task_id)
+        else {
+            return Ok(ToolResult::error(format!(
+                "No card with id \"{task_id}\" is on this board. Check `list_tasks` for its id."
+            )));
+        };
+
+        // Only from To-do, because the edge is a transition and not a state: a card
+        // already in Working is being worked, and re-writing its column would
+        // neither start a second attempt nor be honest about the first.
+        if card.column != crate::ports::tasks::COLUMN_TODO {
+            return Ok(ToolResult::error(format!(
+                "\"{}\" is already in {} — it is not waiting to be started.",
+                card.title,
+                crate::ports::tasks::column_label(&card.column)
+            )));
+        }
+
+        let title = card.title.to_string();
+        let observed = card.clone();
+        card.column = crate::ports::tasks::COLUMN_IN_PROGRESS.to_string();
+        card.updated_at_millis = crate::ports::now_millis();
+        if !starter.start(&observed, &card).await? {
+            return Ok(ToolResult::error(format!(
+                "Card \"{task_id}\" changed while it was being started; re-read it before trying again."
+            )));
+        }
+        Ok(ToolResult::success(format!(
+            "Started \"{title}\": it is in Working now and its assignee has been handed it. The \
+             work runs in the background — it is not finished because this call returned."
+        )))
+    }
+}
 
 /// A shared, fillable handle to the company's [`WorkflowRunner`].
 ///

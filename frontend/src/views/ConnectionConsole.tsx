@@ -37,6 +37,7 @@ import {
 import type { ConnectionId } from "@/connections/types";
 import { withHostParam } from "@/hooks/use-host-route";
 import { Login } from "@/views/Login";
+import { ssoTokenFromHash } from "@/views/login/sso";
 import { SetupWizard } from "@/views/setup/SetupWizard";
 
 type Phase =
@@ -97,8 +98,13 @@ export function ConnectionConsole({
   forceLogin,
   isBootstrap = false,
 }: Props) {
+  const arrivedWithSso = useRef(
+    typeof window !== "undefined" && Boolean(ssoTokenFromHash(window.location.hash)),
+  ).current;
   const [phase, setPhase] = useState<Phase>(
-    forceLogin ? { kind: "login", company: defaultCompany, notice } : { kind: "loading" },
+    forceLogin || arrivedWithSso
+      ? { kind: "login", company: defaultCompany, notice }
+      : { kind: "loading" },
   );
   // Incremented to re-run discovery on demand. The boot effect's dependencies
   // (`client`, `defaultCompany`, `forceLogin`) never change when a sign-in
@@ -180,9 +186,10 @@ export function ConnectionConsole({
   );
 
   useEffect(() => {
-    // `forceLogin` forces the sign-in view until the *first* boot; a sign-in
-    // bumps the epoch, so the forced-login recover cannot re-enter the boot.
-    if (forceLogin && bootEpoch === 0) return;
+    // Forced login and an SSO deep link must finish sign-in before discovery:
+    // an unconfigured host reports setup before it has any company to resolve.
+    // A successful sign-in bumps the epoch and lets boot continue.
+    if ((forceLogin || arrivedWithSso) && bootEpoch === 0) return;
     let cancelled = false;
     const set = (p: Phase) => !cancelled && setPhase(p);
 
@@ -256,7 +263,7 @@ export function ConnectionConsole({
     return () => {
       cancelled = true;
     };
-  }, [client, defaultCompany, forceLogin, bootEpoch]);
+  }, [client, defaultCompany, forceLogin, arrivedWithSso, bootEpoch]);
 
   const switchCompany = useCallback(
     async (id: string, companies: CompanyStatus[], knownStatus?: CompanyStatus) => {

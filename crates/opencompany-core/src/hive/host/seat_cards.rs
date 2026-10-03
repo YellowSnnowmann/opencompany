@@ -27,13 +27,29 @@ use crate::runtime::spawn_card::SpawnCard;
 /// The roster briefs that describe the board are stripped from a seat
 /// (`seat_persona`), so this is the only place a seat learns what
 /// `spawn_task` does in a room.
+///
+/// # It must agree with the tool's own receipt
+///
+/// The receipt `spawn_task` hands a seat promises a reply **only when the write
+/// fails** ("you will be told here if it cannot be"), because the card is
+/// written after the turn ends and a turn that ends is not told anything more.
+/// This note used to say "do not describe it as open until you are told it is",
+/// which asks the seat to wait for a confirmation that never arrives on the
+/// happy path. A live run showed what that costs: a seat with the card safely
+/// queued would not claim it, and attributed the work to a teammate that never
+/// took a turn.
+///
+/// So the two have to describe one contract, and the honest one is the
+/// receipt's: silence means it landed. The seat is told that here and told it
+/// again in the receipt, which is the only place a failure can reach it.
 pub(crate) const SEAT_CARDS_NOTE: &str = "\n\n## Opening cards\n\nNothing said here is \
 tracked unless somebody opens a card for it. When the operator asks for real work, open one with \
 `spawn_task`: one card per piece of work, at most three for this whole conversation across every \
 teammate in it, and never a second card for work that already has one. The card is written when \
-your turn ends, so do not describe it as open until you are told it is. If the operator only \
-asked a question, open nothing. Handing a card to somebody else is not available here: \
-`desk_ask` the teammate who should take it.";
+your turn ends: you will hear back only if it could not be, so unless you are told otherwise it \
+is open and you may say so. Do not say it is already on the board while your turn is still \
+running. If the operator only asked a question, open nothing. Handing a card to somebody else is \
+not available here: `desk_ask` the teammate who should take it.";
 
 /// The most cards one episode may open.
 pub(crate) const EPISODE_CARD_CAP: usize = 3;

@@ -243,17 +243,19 @@ pub fn embed_servers_for_agent(
 /// the resolved [`AuthMaterial`] onto the transport's auth config. `command`
 /// stays empty so the registry always builds the HTTP transport.
 fn server_config(decl: &McpServerDecl) -> McpServerConfig {
-    McpServerConfig {
-        name: decl.name.clone(),
-        endpoint: decl.endpoint.clone(),
-        description: decl.description.clone(),
-        enabled: true,
-        allowed_tools: decl.allowed_tools.clone(),
-        disallowed_tools: decl.disallowed_tools.clone(),
-        timeout_secs: decl.timeout_secs,
-        auth: auth_config(&decl.auth),
-        ..McpServerConfig::default()
-    }
+    let mut config = McpServerConfig::default();
+    config.server.name.clone_from(&decl.name);
+    config.server.endpoint.clone_from(&decl.endpoint);
+    config.server.description.clone_from(&decl.description);
+    config.server.enabled = true;
+    config.server.allowed_tools.clone_from(&decl.allowed_tools);
+    config
+        .server
+        .disallowed_tools
+        .clone_from(&decl.disallowed_tools);
+    config.server.timeout_secs = decl.timeout_secs;
+    config.server.auth = auth_config(&decl.auth);
+    config
 }
 
 /// Maps resolved [`AuthMaterial`] onto the transport's [`McpAuthConfig`].
@@ -628,15 +630,9 @@ impl Tool for OcMcpCallTool {
                     )
                     .await;
                 }
-                // A free function, not `.into()`. `ToolResult` moved into the
-                // shared `tinytools` vocabulary, and `McpToolResult` belongs to
-                // `tinymcp-bus` — two foreign types, so the orphan rule forbids
-                // the `From` impl this used to call. OpenHuman spells the
-                // conversion once, in `skills::types`, rather than at each call
-                // site, because written out by hand it is three chances to get
-                // the error flag the wrong way round.
-                let mut result: ToolResult =
-                    oh::skills::types::tool_result_from_mcp(result.rendered);
+                // Use tinymcp's shared conversion rather than reimplementing
+                // the mapping of output text, metadata, and error state.
+                let mut result: ToolResult = tinymcp::tools::tool_result(result.rendered);
                 if options.prefer_markdown && result.markdown_formatted.is_none() {
                     result.markdown_formatted = Some(result.output());
                 }

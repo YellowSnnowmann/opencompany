@@ -17,14 +17,13 @@ use tinyflows::error::{EngineError, Result as TfResult};
 
 use oh::config::HttpRequestConfig;
 use oh::security::SecurityPolicy;
-use oh::tools::HttpRequestTool;
 use openhuman_core as oh;
 use tinytools::{Tool, ToolResult};
 
 /// A tinyflows [`HttpClient`] backed by OpenHuman's SSRF-guarded
 /// [`HttpRequestTool`].
 pub struct GuardedHttpClient {
-    tool: HttpRequestTool,
+    tool: tinytools_std::network::HttpRequestTool,
     /// The emergency stop, consulted per request, for
     /// [`WorkflowToolInvoker`](super::tools::WorkflowToolInvoker)'s reason: a
     /// run admitted before the switch was pulled never re-consults admission.
@@ -38,7 +37,7 @@ impl GuardedHttpClient {
     pub fn new(security: Arc<SecurityPolicy>, allowed_domains: Vec<String>) -> Self {
         let defaults = HttpRequestConfig::default();
         Self {
-            tool: HttpRequestTool::new(
+            tool: oh::tools::http_request_tool(
                 security,
                 allowed_domains,
                 defaults.max_response_size,

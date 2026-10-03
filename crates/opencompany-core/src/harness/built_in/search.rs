@@ -11,22 +11,28 @@
 //!
 //! # What was taken from OpenHuman, and what deliberately diverges
 //!
-//! OpenHuman owns the search domain (`openhuman::search`): six engines, one
-//! canonical `web_search_tool` slot, `managed` backend-proxied by default. This
+//! OpenHuman owns the search domain (`openhuman::search`), a host policy layer
+//! over the loadable `tinysearch` module: several engines, one canonical
+//! `web_search_tool` role slot, `managed` backend-proxied by default. This
 //! module **selects** that managed surface rather than implementing an engine —
 //! it posts the same body to the same `/agent-integrations/parallel/search`
-//! endpoint through the same [`IntegrationClient`], and deserializes
-//! OpenHuman's own [`SearchResponse`] / `SearchResultItem`. No provider trait,
-//! no engine implementation, no HTTP client of its own.
+//! endpoint through the same [`IntegrationClient`], and deserializes the same
+//! envelope, declared in [`search_wire`](crate::harness::search_wire). No
+//! provider trait, no engine implementation, no HTTP client of its own.
 //!
 //! It does **not** call `openhuman::search::build_search_tools`, and does not
-//! register OpenHuman's `WebSearchTool` directly, for three reasons that are the
+//! register OpenHuman's `TinySearchTool` directly, for four reasons that are the
 //! whole point of the issue:
 //!
-//! * **Cost is invisible through that door.** `WebSearchTool::execute` renders
-//!   the response to prose and drops `SearchResponse::cost_usd` — the one figure
-//!   the backend reports and the one thing a *metered* tool needs. Recovering
-//!   the charge means reading the response, so the tool reads the response.
+//! * **One process, one module, one credential.** `TinySearchTool` drives a
+//!   single process-global `tinysearch` module and *reinitializes* it whenever
+//!   the resolved configuration changes. Many companies share this process,
+//!   each searching through its own account, so two turns would thrash one
+//!   credential and a concurrent pair would race over whose key ran.
+//! * **Cost is invisible through that door.** The module normalizes before the
+//!   tool sees anything and renders to prose after; `cost_usd` survives
+//!   neither, and it is the one thing a *metered* tool needs. Recovering the
+//!   charge means reading the response, so the tool reads the response.
 //! * **`build_search_tools` takes OpenHuman's global `Config`.** The harness has
 //!   deliberately avoided that everywhere else; `media` and `composio` both use
 //!   the Config-free `IntegrationClient::new(backend_url, token)` seam, and this
@@ -70,11 +76,11 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use oh::integrations::IntegrationClient;
-use oh::search::tools::{SearchResponse, SearchResultItem};
 use openhuman_core as oh;
 use tinytools::{PermissionLevel, Tool, ToolResult};
 
 use crate::company::credentials::Credential;
+use crate::harness::search_wire::{SearchResponse, SearchResultItem};
 use crate::metering::record_search_call;
 use crate::ports::types::CompanyId;
 use crate::ports::usage::UsageMeter;

@@ -32,9 +32,10 @@ services:
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-off}
     image: opencompany:local
     environment:
-      # Which module spins up. Blank boots unconfigured into the setup wizard;
-      # set it in .env to boot a specific baked company.
-      OPENCOMPANY_COMPANY: ${OPENCOMPANY_COMPANY:-}
+      # Unset selects the self-hosted marketing-agency example. Set it blank
+      # explicitly to boot unconfigured; the hosted platform does this and
+      # authorizes first-run setup with its SSO bootstrap token.
+      OPENCOMPANY_COMPANY: ${OPENCOMPANY_COMPANY-marketing_agency}
       OPENCOMPANY_DISCOVERABLE: ${OPENCOMPANY_DISCOVERABLE:-false}
       # Optional: cargo features to compile the host with (e.g. "medulla").
       # Blank = the small default build; the dev overlay reads it so a key has

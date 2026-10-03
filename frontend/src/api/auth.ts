@@ -203,8 +203,9 @@ export async function claimFirstAdmin(
  *
  * The token is a short-lived, single-use JWT the dashboard put in the
  * `#/sso?token=…` fragment; the host verifies it offline and, on first use,
- * claims the standing admin it names. No email or password is involved on this
- * path — the token *is* the credential.
+ * claims the standing admin it names. On an empty hosted instance it returns a
+ * short-lived setup credential for the platform owner. No email or password is
+ * involved on this path — the token *is* the credential.
  *
  * Refusals: `invalid_sso_token` (expired, replayed, wrong company, or not the
  * standing admin), and a `404` when the host has no SSO secret configured.
@@ -216,10 +217,9 @@ export async function claimFirstAdmin(
  */
 export async function redeemSso(
   client: OpenCompanyClient,
-  company: string | null,
   token: string,
 ): Promise<SignIn> {
-  return client.postSignIn<SignIn>(`${client.scopeFor(company)}/sso/redeem`, { token });
+  return client.postSignIn<SignIn>("/api/v1/sso/redeem", { token });
 }
 
 /** Exchanges an email and password for a session. */

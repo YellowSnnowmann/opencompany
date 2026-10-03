@@ -33,6 +33,15 @@ pub struct DeskHive {
     pub hive: BoundHive<EmbedSeat>,
     /// The candidate snapshot version a Jev evaluation must echo.
     pub roster_version: u64,
+    /// The board card this room is working, when it is a card's room rather than
+    /// a desk's or a DM's.
+    ///
+    /// Carried so the host can stamp `task_id` on the rows the room writes: the
+    /// card timeline reads by `task_id`, and an episode's rows default to `None`,
+    /// so without this a convened card's work is journaled where the card can see
+    /// it (the key is the card id) and still invisible to the surface that reads
+    /// it. `None` for every desk and DM room.
+    pub card: Option<String>,
 }
 
 impl DeskHive {
@@ -89,34 +98,15 @@ pub fn desk_hives(
         let Ok(members) = desks.members(&desk.id) else {
             continue;
         };
-        let mut bindings = Vec::new();
-        let mut candidates = Vec::new();
-        let mut bound_members = Vec::new();
-        for member in members {
-            if !record.is_roster_agent(member) {
-                continue;
-            }
-            let Some(agent) = bind(member) else {
-                continue;
-            };
-            let profile = agents.iter().find(|agent| agent.id == member);
-            candidates.push(RouteCandidate {
-                id: member.to_string(),
-                label: profile
-                    .and_then(|agent| agent.name.clone())
-                    .unwrap_or_else(|| member.to_string()),
-                role: profile.map(|agent| agent.role.clone()),
-                description: profile.and_then(|agent| agent.description.clone()),
-                capabilities: Vec::new(),
-                learned_topics: Vec::new(),
-                available: true,
-            });
-            bindings.push(AgentBinding::new(member, EmbedSeat(agent)));
-            bound_members.push(member.to_string());
-        }
-        if bound_members.len() < 2 {
+        let seats = bind_seats(record, &agents, members.iter().copied(), bind);
+        if seats.members.len() < 2 {
             continue;
         }
+        let BoundSeats {
+            members: bound_members,
+            candidates,
+            bindings,
+        } = seats;
         let graph = HiveGraph::new(
             tinyhivemind::desk::Desk {
                 id: desk.id.clone(),
@@ -136,6 +126,7 @@ pub fn desk_hives(
                         desk_name: desk.name.clone(),
                         hive,
                         roster_version,
+                        card: None,
                     }),
                 );
             }
@@ -173,6 +164,168 @@ mod tests;
 pub fn dm_episodes_enabled(env: &dyn crate::app::config::EnvSource) -> bool {
     env.get("OPENCOMPANY_DM_EPISODES")
         .is_none_or(|value| !matches!(value.trim(), "0" | "false" | "no" | "off"))
+}
+
+/// Whether a desk-assigned card's work runs as an episode rather than as one
+/// pooled turn on the desk's lead.
+///
+/// **Default off**, which is the opposite of
+/// [`dm_episodes_enabled`](self::dm_episodes_enabled) and deliberate: a convened
+/// card's episode is awaited *inside* its dispatch cycle, and that cycle holds the
+/// company-wide `serial` lock. So while a room works a card, nothing else in that
+/// company runs — no chat turn, no other dispatch, no scheduler tick. For a
+/// twelve-round episode that is minutes of a single-threaded company.
+///
+/// That is a real regression for anyone who turns this on, and it is why the flag
+/// exists rather than the behaviour simply shipping. Taking a narrower lock is the
+/// fix, and it is deliberately not attempted here: the lock has to be chosen
+/// before the cycle starts while whether a card convenes is decided inside it, so
+/// the two can disagree — and a narrow lock on a turn that then runs pooled would
+/// let a hand-off reassign the card under it. Sizing that properly wants the
+/// measurement this flag exists to collect: how long a room actually holds, and
+/// what it costs.
+///
+/// `OPENCOMPANY_CARD_EPISODES=1` turns it on.
+#[must_use]
+pub fn card_episodes_enabled(env: &dyn crate::app::config::EnvSource) -> bool {
+    env.get("OPENCOMPANY_CARD_EPISODES")
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
+}
+
+/// The room a **card** convenes, keyed on the card and made of its desk.
+///
+/// # Why the card id and not the desk id
+///
+/// So two cards on one desk do not share a conversation. The key is what every
+/// row an episode journals carries as its `chat_id`, and a card id matches no
+/// desk — which `journal_task_outcome` already relies on when it files a run's
+/// reply under the card: `chat_history::owns` routes it nowhere, so the row stays
+/// timeline material reachable through `task_id` rather than appearing in a
+/// channel. Keying here the same way means an episode's rows land exactly where
+/// the card's own already do, with no new channel and no projection.
+///
+/// It also settles approvals for free: `EpisodeSeatParking` stamps the hive's key
+/// as the park's conversation, so a convened card's continuation answers on the
+/// card timeline — which is where a dispatched card's narration belongs and
+/// deliberately not the origin channel (issue #1092).
+///
+/// # Only a desk-assigned card convenes one
+///
+/// `None` for every other assignee, and that is the operator's choice rather than
+/// an inference: a card worked by a room is **owned by the desk**, so assigning it
+/// to one is how you ask for a room. A card on a single teammate, an unassigned
+/// card, a desk with no roster members, or a desk whose seats will not bind all
+/// answer `None` and take the ordinary pooled dispatch — the same rule
+/// [`desk_hives`] applies when it skips a desk with nobody to deliberate with.
+///
+/// Every other property is the desk's own: its name, description, responder mode
+/// and seat order. Only the key changes.
+#[must_use]
+pub fn card_hive(
+    record: &CompanyRecord,
+    card_id: &str,
+    desk_id: &str,
+    roster_version: u64,
+    bind: &dyn Fn(&str) -> Option<openhuman_embed::Agent>,
+) -> Option<DeskHive> {
+    let snapshots = crate::runtime::delegation_tools::tinyhivemind_desks(record);
+    let desks = snapshots.set();
+    let desk = desks.iter().find(|desk| desk.id == desk_id)?;
+    if crate::ports::general_channel::is_general_spelling(&desk.id) {
+        return None;
+    }
+    let members = desks.members(&desk.id).ok()?;
+    let agents = record.effective_agents();
+    let seats = bind_seats(record, &agents, members.iter().copied(), bind);
+    // The same floor `desk_hives` holds: a room of one cannot deliberate, and
+    // `ask` would have no legal target in it.
+    if seats.members.len() < 2 {
+        return None;
+    }
+    let graph = HiveGraph::new(
+        tinyhivemind::desk::Desk {
+            id: card_id.to_owned(),
+            name: desk.name.clone(),
+            description: desk.description.clone(),
+            members: seats.members,
+            responder_mode: desk.responder_mode.clone(),
+        },
+        seats.candidates,
+    );
+    BoundHive::new(graph, seats.bindings)
+        .inspect_err(|source| {
+            tracing::warn!(
+                company = %record.id,
+                card = %card_id,
+                desk = %desk_id,
+                %source,
+                "[hive] a card's room would not validate; it falls back to a pooled dispatch"
+            );
+        })
+        .ok()
+        .map(|hive| DeskHive {
+            desk_id: card_id.to_owned(),
+            desk_name: desk.name.clone(),
+            hive,
+            roster_version,
+            card: Some(card_id.to_owned()),
+        })
+}
+
+/// One desk's membership, bound onto live agents and ready for a graph.
+struct BoundSeats {
+    /// The canonical ids that bound, in the order given.
+    members: Vec<String>,
+    /// One router candidate per bound seat.
+    candidates: Vec<RouteCandidate>,
+    /// One binding per bound seat.
+    bindings: Vec<AgentBinding<EmbedSeat>>,
+}
+
+/// Binds `member_ids` onto live agents, dropping any that is not a roster
+/// teammate or that `bind` cannot resolve.
+///
+/// Extracted from [`desk_hives`] so a room can be built from a desk's membership
+/// while being **keyed on something else** — see [`card_hive`], which re-keys it
+/// onto a card id. The split is at the membership rather than at the graph
+/// because the graph is the only thing the two callers disagree about; sharing
+/// the loop is what keeps "who may sit in a room" one rule.
+fn bind_seats<'a>(
+    record: &CompanyRecord,
+    agents: &[crate::company::Agent],
+    member_ids: impl Iterator<Item = &'a str>,
+    bind: &dyn Fn(&str) -> Option<openhuman_embed::Agent>,
+) -> BoundSeats {
+    let mut seats = BoundSeats {
+        members: Vec::new(),
+        candidates: Vec::new(),
+        bindings: Vec::new(),
+    };
+    for member in member_ids {
+        if !record.is_roster_agent(member) {
+            continue;
+        }
+        let Some(agent) = bind(member) else {
+            continue;
+        };
+        let profile = agents.iter().find(|agent| agent.id == member);
+        seats.candidates.push(RouteCandidate {
+            id: member.to_string(),
+            label: profile
+                .and_then(|agent| agent.name.clone())
+                .unwrap_or_else(|| member.to_string()),
+            role: profile.map(|agent| agent.role.clone()),
+            description: profile.and_then(|agent| agent.description.clone()),
+            capabilities: Vec::new(),
+            learned_topics: Vec::new(),
+            available: true,
+        });
+        seats
+            .bindings
+            .push(AgentBinding::new(member, EmbedSeat(agent)));
+        seats.members.push(member.to_string());
+    }
+    seats
 }
 
 /// One hive per operator DM: the teammate it belongs to, and everyone it may
@@ -265,6 +418,7 @@ pub fn dm_hives(
                         desk_name: name,
                         hive,
                         roster_version,
+                        card: None,
                     }),
                 );
             }

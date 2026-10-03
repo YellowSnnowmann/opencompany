@@ -381,8 +381,11 @@ fn shell_factory_preserves_explicit_deadlines_and_inherits_for_invalid_values() 
             ToolTimeout::Inherit,
             "invalid or absent deadline must inherit: {args}"
         );
-        let (deadline, seconds) =
-            oh::tools::timeout::resolve_tool_deadline(shell.timeout_policy(&args));
+        let resolved =
+            tinyagents_harness::tool::ToolTimeoutSettings::new(120_000, 1_000, 3_600_000, 5_000)
+                .resolve(shell.timeout_policy(&args));
+        let deadline = resolved.deadline;
+        let seconds = resolved.budget_ms / 1000;
         assert_eq!(
             deadline,
             Some(std::time::Duration::from_secs(seconds)),

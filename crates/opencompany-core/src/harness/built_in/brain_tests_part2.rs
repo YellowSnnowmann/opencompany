@@ -422,6 +422,51 @@ async fn a_settled_channel_level_card_journals_no_thread() {
     );
 }
 
+/// A parked attempt keeps its reply in the card timeline but emits no terminal
+/// marker into the conversation that raised it. `DeskTaskCompleted` is the
+/// timeline's `finished → <column>` anchor, so the absence is what keeps a card
+/// waiting on approval from telling its origin conversation that it finished.
+#[tokio::test]
+async fn a_parked_attempt_journals_its_reply_without_a_terminal_anchor() {
+    let dir = tempfile::tempdir().unwrap();
+    let (brain, _tasks, events) = brain_with_tasks_and_events(dir.path());
+    let mut c = card("t-parked", "engineer");
+    c.origin = TaskOrigin::new(Some("strategy".to_string()), None);
+    c.column = COLUMN_PAUSED.to_string();
+
+    brain
+        .journal_task_outcome(
+            &c,
+            "engineer",
+            "Waiting for approval.".to_string(),
+            Vec::new(),
+            RunStatus::WaitingApproval,
+        )
+        .await;
+
+    let logged = events
+        .read_from(
+            &CompanyId::new("acme"),
+            crate::ports::types::EventSeq::new(0),
+            usize::MAX,
+        )
+        .await
+        .expect("read events");
+    assert!(
+        logged.iter().any(|e| matches!(
+            &e.event,
+            CompanyEvent::AgentReply { task_id: Some(task), .. } if task == "t-parked"
+        )),
+        "the parked attempt still journals its timeline reply: {logged:?}"
+    );
+    assert!(
+        !logged
+            .iter()
+            .any(|e| matches!(&e.event, CompanyEvent::DeskTaskCompleted { task_id, .. } if task_id == "t-parked")),
+        "a waiting attempt must not announce a terminal anchor to the origin: {logged:?}"
+    );
+}
+
 /// A dispatched **board-created** card (no `origin_chat_id`) runs a turn and
 /// moves to `in_review` — the operator who made it is the reviewer — with
 /// its result folded into the note under the responder that ran it.

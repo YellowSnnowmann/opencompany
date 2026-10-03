@@ -91,10 +91,38 @@ async fn workspace_search_resolves_hits_with_paths_and_totals() {
 fn sdl_snapshot_matches() {
     let expected = include_str!("schema.graphql");
     let actual = super::sdl();
+    // The schema printer indents empty lines inside doc comments with tabs;
+    // those tabs are not part of the SDL contract and should not have to live
+    // in the checked-in snapshot as trailing whitespace.
     assert_eq!(
-        actual, expected,
+        normalize_sdl_snapshot(&actual),
+        normalize_sdl_snapshot(expected),
         "GraphQL SDL drifted from schema.graphql; regenerate with \
          `cargo test -- --ignored regenerate_sdl_snapshot`"
+    );
+}
+
+fn normalize_sdl_snapshot(sdl: &str) -> String {
+    sdl.lines()
+        .map(|line| {
+            if line.trim_matches([' ', '\t']).is_empty() {
+                ""
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn sdl_snapshot_normalization_preserves_description_whitespace() {
+    let actual = "type Query {\n  \"\"\"\n  meaningful text  \n\t\n  \"\"\"\n  value: String\n}\n";
+    let normalized = normalize_sdl_snapshot(actual);
+
+    assert!(
+        normalized.contains("meaningful text  \n\n"),
+        "{normalized:?}"
     );
 }
 

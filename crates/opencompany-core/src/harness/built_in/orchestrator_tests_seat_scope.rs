@@ -152,6 +152,13 @@ async fn a_seated_spawn_is_queued_honestly_and_refused_in_turn_past_its_budget()
         "{}",
         first.text()
     );
+    assert!(
+        first
+            .text()
+            .contains("you will be told here if it cannot be"),
+        "{}",
+        first.text()
+    );
     let again = again.unwrap();
     assert!(
         again.is_error && again.text().contains("already open or queued"),

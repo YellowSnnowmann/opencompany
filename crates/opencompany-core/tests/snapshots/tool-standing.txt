@@ -69,6 +69,7 @@ review_task group=Other reach=Nothing standing=PerCall
 run_workflow group=Other reach=Consequence standing=PerCall
 shell group=Other reach=Consequence standing=PerCall
 spawn_task group=Other reach=Nothing standing=PerCall
+start_task group=Other reach=Nothing standing=PerCall
 update_workflow group=Other reach=Nothing standing=PerCall
 web_fetch group=Other reach=Consequence standing=PerCall
 web_search group=Spend reach=Money standing=PerCall

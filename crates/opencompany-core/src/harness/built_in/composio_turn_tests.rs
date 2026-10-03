@@ -327,6 +327,23 @@ async fn harness(
     composio_url: String,
     dir: &std::path::Path,
 ) -> (HarnessPool, HarnessDeps, CompanyRecord) {
+    harness_with_composio(
+        model_url,
+        TenantComposio::new(
+            composio_url,
+            Credential::from_value("stub-tenant-token"),
+            Vec::new(),
+        ),
+        dir,
+    )
+    .await
+}
+
+async fn harness_with_composio(
+    model_url: String,
+    composio: TenantComposio,
+    dir: &std::path::Path,
+) -> (HarnessPool, HarnessDeps, CompanyRecord) {
     let deps = HarnessDeps {
         takeovers: Default::default(),
         emergency_gate: None,
@@ -381,11 +398,7 @@ async fn harness(
         #[cfg(feature = "paypal")]
         paypal: None,
         hosting: None,
-        composio: Some(TenantComposio::new(
-            composio_url,
-            Credential::from_value("stub-tenant-token"),
-            Vec::new(),
-        )),
+        composio: Some(composio),
         steer: crate::company::steer::InflightRegistry::default(),
         run_supervisor: crate::runtime::RunSupervisor::default(),
         delivery: None,
