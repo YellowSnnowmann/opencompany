@@ -21,9 +21,18 @@ import { TeammateAvatar } from "@/components/teammate-avatar";
 import { useFlipList } from "@/hooks/use-flip-list";
 import { useStableList } from "@/hooks/use-stable-list";
 import { cn } from "@/lib/utils";
-import { useAgentPresence } from "@/room/store";
+import type { TeamMember } from "@/lib/team";
+import { useAgentPresence, useBusiestPresence, useLiveSteps, useTranscript } from "@/room/store";
 import { NewMessageDialog } from "./NewMessageDialog";
-import { channelSubtitle, dmFace, dmThreadId, type Channel, type ChannelSection } from "./model";
+import {
+  channelMembers,
+  channelSubtitle,
+  dmFace,
+  dmThreadId,
+  type Channel,
+  type ChannelSection,
+} from "./model";
+import { channelPreview, railTime } from "./railPreview";
 
 /**
  * What an unread badge actually claims (issue #364).
@@ -35,6 +44,8 @@ import { channelSubtitle, dmFace, dmThreadId, type Channel, type ChannelSection 
  * badge as "unread by my team".
  */
 const UNREAD_IS_LOCAL = "Estimated in this browser — unread is not tracked on the company.";
+
+const NO_MEMBERS: TeamMember[] = [];
 
 /** The two icon buttons above the list — same size, hit area and hover. */
 const DOOR =
@@ -67,6 +78,12 @@ interface Props {
   openSections?: Record<string, boolean>;
   onToggleSection?: (id: string) => void;
   directMessages?: Channel[];
+  /**
+   * The roster. A channel row draws its members' faces stacked as one group,
+   * and a channel preview names who spoke; without it a channel falls back to
+   * its `#` glyph and an unprefixed line.
+   */
+  members?: TeamMember[];
   onStartDirectMessage?: (id: string) => void;
   className?: string;
   /**
@@ -113,6 +130,7 @@ export function ChannelRail({
   collapsed = false,
   onExpand,
   directMessages = [],
+  members = NO_MEMBERS,
   onStartDirectMessage,
   className,
   currentPage = true,
@@ -207,6 +225,7 @@ export function ChannelRail({
   const row = (channel: Channel) => (
     <ChannelRow
       channel={channel}
+      members={members}
       active={channel.id === activeId}
       activeAria={activeAria}
       onPage={onPage}
@@ -399,6 +418,7 @@ function CompactChannelRow({
 
 function ChannelRow({
   channel,
+  members,
   active,
   activeAria,
   onPage,
@@ -407,6 +427,8 @@ function ChannelRow({
   onSelect,
 }: {
   channel: Channel;
+  /** The roster, for a channel's stacked faces and a preview's speaker. */
+  members: TeamMember[];
   active: boolean;
   activeAria: "page" | "true";
   /** Whether this rail's channel is the page on screen — see `onPage`. */
@@ -417,65 +439,187 @@ function ChannelRow({
 }) {
   const hasUnread = unread > 0 && !active;
   const hasMentions = mentions > 0;
-  // The dot on the avatar is decorative here (`AgentFace decorative`): its
-  // words go AFTER the name, so the row is announced "Ada Lovelace, Thinking"
-  // and a screen-reader user hears who before what. Same lookup the dot makes.
-  const statusAgent = channel.kind === "dm" && dmFace(channel) ? channel.member?.id : undefined;
-  const status = useAgentPresence(
-    statusAgent,
-    channel.member ? dmThreadId(channel.member) : undefined,
+  // Who is in this row, as roster ids: the one teammate behind a DM, or a
+  // channel's members (lead first). The busiest of them drives the second line
+  // while anyone is mid-turn — "what the agent is doing" beats "what was last
+  // said" for as long as it is true.
+  const isDm = channel.kind === "dm";
+  const agentIds = useMemo(
+    () => (isDm ? (channel.member ? [channel.member.id] : []) : (channel.memberIds ?? [])),
+    [isDm, channel.member, channel.memberIds],
   );
+  const chatId = isDm ? (channel.member ? dmThreadId(channel.member) : null) : channel.id;
+  const busy = useBusiestPresence(agentIds, chatId);
+  const steps = useLiveSteps(chatId);
+  const transcript = useTranscript(channel.id);
+  const preview = useMemo(
+    () => channelPreview(channel, transcript, members),
+    [channel, transcript, members],
+  );
+
+  const busyName = busy && !isDm ? members.find((m) => m.id === busy.agentId)?.name : undefined;
+  const runningStep = busy ? steps.findLast((step) => step.status === "running") : undefined;
+  const activity = busy
+    ? [busyName?.split(/\s+/)[0], runningStep?.label ?? agentPresenceLabel(busy.state)]
+        .filter(Boolean)
+        .join(": ")
+    : null;
+  const line = activity ?? preview?.text ?? channelSubtitle(channel) ?? "No messages yet";
 
   return (
     <button
       type="button"
       onClick={() => onSelect(channel.id)}
       aria-current={active ? activeAria : undefined}
-      // The row's own label is `channel.name`, so a tooltip that resolves to
-      // the same string is the header's issue-#1180 duplicate in a slower
-      // form: you hover for a second fact and get the one already under the
-      // cursor. No tooltip at all is the better answer, and `undefined` — not
-      // `""` — is what suppresses the native bubble.
+      // The second line is visible now, so the tooltip only earns its place
+      // when the purpose says something the preview does not.
       title={channelSubtitle(channel) ?? undefined}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-md transition-colors",
+        "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
         active
           ? onPage
-            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-            : "font-medium text-foreground"
-          : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
-        hasUnread && "font-semibold text-foreground",
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "text-foreground"
+          : "text-foreground/90 hover:bg-sidebar-accent/50",
       )}
     >
-      <ChannelIcon channel={channel} withStatus />
-      <span className="min-w-0 flex-1 truncate">{channel.name}</span>
-      {status !== "inactive" && (
-        <span className="sr-only">, {agentPresenceLabel(status)}</span>
-      )}
-      {hasMentions && (
-        <span
-          data-testid="channel-mentions"
-          title={mentions === 1 ? "1 mention of you here" : `${mentions} mentions of you here`}
-          className="shrink-0 rounded-full bg-destructive px-1.5 text-3xs font-semibold leading-4 text-destructive-foreground"
-        >
-          @{mentions > 99 ? "99+" : mentions}
+      <RowAvatar channel={channel} members={members} chatId={chatId} />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex items-baseline gap-2">
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-md",
+              (active || hasUnread) && "font-semibold",
+            )}
+          >
+            {isDm ? channel.name : (channel.voice ?? channel.name)}
+          </span>
+          {preview && (
+            <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
+              {railTime(preview.at)}
+            </span>
+          )}
         </span>
-      )}
-      {hasUnread && (
-        <span
-          data-testid="channel-unread"
-          // Issue #364: unread is derived in this browser from what this tab has
-          // seen — the host keeps no read receipts. Two consoles will disagree,
-          // and a badge that quietly means something narrower than it looks is
-          // worse than one that says so.
-          title={UNREAD_IS_LOCAL}
-          className="shrink-0 rounded-full bg-primary px-1.5 text-3xs font-semibold leading-4 text-primary-foreground"
-        >
-          {unread > 99 ? "99+" : unread}
+        <span className="flex items-center gap-2">
+          <span
+            data-testid="channel-preview"
+            className={cn(
+              "min-w-0 flex-1 truncate text-xs",
+              activity
+                ? "text-primary"
+                : hasUnread
+                  ? "text-foreground"
+                  : "text-muted-foreground",
+            )}
+          >
+            {line}
+          </span>
+          {hasMentions && (
+            <span
+              data-testid="channel-mentions"
+              title={mentions === 1 ? "1 mention of you here" : `${mentions} mentions of you here`}
+              className="shrink-0 rounded-full bg-destructive px-1.5 text-3xs font-semibold leading-4 text-destructive-foreground"
+            >
+              @{mentions > 99 ? "99+" : mentions}
+            </span>
+          )}
+          {hasUnread && (
+            <span
+              data-testid="channel-unread"
+              // Issue #364: unread is derived in this browser from what this tab has
+              // seen — the host keeps no read receipts. Two consoles will disagree,
+              // and a badge that quietly means something narrower than it looks is
+              // worse than one that says so.
+              title={UNREAD_IS_LOCAL}
+              className="shrink-0 rounded-full bg-primary px-1.5 text-3xs font-semibold leading-4 text-primary-foreground"
+            >
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
         </span>
-      )}
+      </span>
+      {busy && <span className="sr-only">, {agentPresenceLabel(busy.state)}</span>}
     </button>
   );
+}
+
+/**
+ * The expanded row's face: a 40px avatar for a DM, and for a channel the
+ * channel *as a group of agents* — up to three of its members' faces stacked
+ * in the same 40px square, lead in front, so a channel reads as the people in
+ * it rather than as a `#`.
+ */
+function RowAvatar({
+  channel,
+  members,
+  chatId,
+}: {
+  channel: Channel;
+  members: TeamMember[];
+  chatId: string | null;
+}) {
+  if (channel.kind === "dm") {
+    const face = dmFace(channel);
+    return face ? (
+      <AgentFace
+        agentId={channel.member?.id}
+        chatId={chatId}
+        size="md"
+        surface="chrome"
+        decorative
+      >
+        <TeammateAvatar {...face} className="size-10 text-sm" />
+      </AgentFace>
+    ) : (
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
+        <CircleDot className="size-4" aria-hidden />
+      </span>
+    );
+  }
+  const group = (channelMembers(channel, members) ?? []).slice(0, 3);
+  if (group.length === 0) {
+    const Icon = channel.private ? Lock : Hash;
+    return (
+      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+        <Icon className="size-4" aria-hidden />
+      </span>
+    );
+  }
+  if (group.length === 1) {
+    return <TeammateAvatar {...memberFace(group[0])} className="size-10 text-sm" />;
+  }
+  // Two faces sit on a diagonal; a third tucks in bottom-left. Each wears a
+  // ring in the sidebar's own colour so the overlap reads as a cut, not a smear.
+  const slots =
+    group.length === 2
+      ? ["left-0 top-0", "bottom-0 right-0"]
+      : ["left-1/2 top-0 -translate-x-1/2", "bottom-0 left-0", "bottom-0 right-0"];
+  return (
+    <span className="relative size-10 shrink-0" aria-hidden>
+      {group
+        .map((member, i) => (
+          <TeammateAvatar
+            key={member.id}
+            {...memberFace(member)}
+            className={cn("absolute size-6 text-3xs ring-2 ring-sidebar", slots[i])}
+          />
+        ))
+        // Lead drawn last, so it is in front.
+        .reverse()}
+    </span>
+  );
+}
+
+function memberFace(m: TeamMember) {
+  return {
+    name: m.name,
+    tone: m.id,
+    avatar: m.avatar,
+    mascotCostume: m.mascotCostume,
+    mascotSkinColor: m.mascotSkinColor,
+    mascotHandColor: m.mascotHandColor,
+    mascotMode: m.mascotMode,
+  };
 }
 
 function ChannelIcon({ channel, withStatus = false }: { channel: Channel; withStatus?: boolean }) {
