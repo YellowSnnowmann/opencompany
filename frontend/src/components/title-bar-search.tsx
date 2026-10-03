@@ -25,10 +25,18 @@ const SEARCH_PLACEHOLDER = "Search";
 export function TitleBarSearch({
   client,
   company,
+  variant = "titlebar",
 }: {
   client: OpenCompanyClient;
   company: string | null;
+  /**
+   * `sidebar` is the field at the head of the floating sidebar: the column's
+   * full width, and a bare glyph when the column is collapsed to its icon rail.
+   * `titlebar` is the capped, centred field the old window title row drew.
+   */
+  variant?: "titlebar" | "sidebar";
 }) {
+  const inSidebar = variant === "sidebar";
   const [open, setOpen] = useState(false);
 
   // ⌘K / Ctrl+K, the shortcut a palette is reached by in every tool this
@@ -47,10 +55,14 @@ export function TitleBarSearch({
 
   return (
     <div
-      data-tauri-drag-region
+      data-tauri-drag-region={inSidebar ? undefined : true}
       // Tighter gutters below `sm`: on a 390px phone this is what is left once
       // the fixed controls are placed, and 24px of padding was most of it.
-      className="flex min-w-0 flex-1 items-center justify-center self-stretch px-3 max-sm:px-1"
+      className={
+        inSidebar
+          ? "flex w-full min-w-0 items-center group-data-[collapsible=icon]:justify-center"
+          : "flex min-w-0 flex-1 items-center justify-center self-stretch px-3 max-sm:px-1"
+      }
     >
       <button
         type="button"
@@ -59,7 +71,13 @@ export function TitleBarSearch({
         aria-label={SEARCH_PLACEHOLDER}
         aria-keyshortcuts="Meta+K Control+K"
         className={
-          // Capped, not elastic: a search control that grows to fill a 1440px
+          inSidebar
+            ? "flex h-9 w-full min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-sidebar-border " +
+              "bg-background/70 pr-2 pl-3 text-sm text-muted-foreground hover:bg-sidebar-accent " +
+              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none " +
+              "group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center " +
+              "group-data-[collapsible=icon]:border-0 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0"
+            : // Capped, not elastic: a search control that grows to fill a 1440px
           // window reads as a text field somebody stretched by accident.
           // `min-w-0` + `overflow-hidden` so a squeezed row clips the label
           // inside the control instead of painting it over the glyphs beside it.
@@ -69,8 +87,8 @@ export function TitleBarSearch({
         }
       >
         <Search aria-hidden="true" className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-left max-sm:hidden">{SEARCH_PLACEHOLDER}</span>
-        <kbd className="hidden shrink-0 rounded border border-chrome-border px-1.5 py-0.5 font-sans text-2xs sm:inline">
+        <span className="min-w-0 flex-1 truncate text-left max-sm:hidden group-data-[collapsible=icon]:hidden">{SEARCH_PLACEHOLDER}</span>
+        <kbd className="hidden shrink-0 rounded border border-chrome-border px-1.5 py-0.5 font-sans text-2xs sm:inline group-data-[collapsible=icon]:hidden">
           {isAppleKeyboard() ? "⌘K" : "Ctrl K"}
         </kbd>
       </button>
