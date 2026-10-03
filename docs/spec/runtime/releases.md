@@ -131,11 +131,11 @@ the same tree cost ~30 minutes per cut and never found anything new.
 
 **Pushes by the workflow do not trigger CI.** The bump commit and the
 promotion merge are pushed with `GITHUB_TOKEN`, which GitHub deliberately
-excludes from firing `push` workflows. The promotion pushes as a GitHub App,
-which does fire `ci-fast-hosted.yml` (and the lanes force every area on for a
-`release` push or a dispatch, since
-its path filter would otherwise see an empty diff). The bump commit is version
-numbers only and is verified by the cut itself.
+excludes from firing `push` workflows. The promotion's push to `release` is
+made by a GitHub App instead, which does fire `ci-fast-hosted.yml`, and the
+lanes force every area on for a `release` push or a dispatch, since their path
+filter would otherwise see an empty diff. The bump commit is version numbers
+only and is verified by the cut itself.
 
 ## Backfilling Windows for an older release
 
