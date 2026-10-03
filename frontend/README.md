@@ -138,7 +138,8 @@ npm run typecheck:unit # tsc only, over test/unit/ + vitest.config.ts
 ```
 
 CI runs `npm ci`, then `typecheck`, `typecheck:e2e`, `typecheck:unit`, `test`
-and `build`, in the `Console` job of `.github/workflows/ci.yml`.
+and `build`, in the `console` lane of `scripts/ci/lanes/lanes-plan.mjs`
+(see `docs/ci.md`).
 
 `typecheck` covers `src/` and nothing else — `tsconfig.app.json` is
 `include: ["src"]`. Each test suite is a separate TypeScript project with its
