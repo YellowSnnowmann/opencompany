@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { CircleDot, type LucideIcon } from "lucide-react";
 
 import type { ApprovalSummary, CognitionState, DecideApproval, TurnStep, Verdict } from "@/api/types";
 import type { TaskStatus } from "@/api/tasks";
@@ -17,7 +16,6 @@ import { StepTimeline } from "./StepTimeline";
 import { WorkingIndicator } from "./WorkingIndicator";
 import {
   channelTitle,
-  dmFace,
   type Channel,
   type TimelineItem,
 } from "./model";
