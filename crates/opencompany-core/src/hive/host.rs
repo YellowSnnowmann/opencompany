@@ -1400,6 +1400,8 @@ impl EpisodeHost for DeskHost {
             .unwrap_or_else(PoisonError::into_inner)
             .get(seat)
             .cloned();
+        #[cfg(test)]
+        eprintln!("narrow turn: seat={seat} held={}", held.is_some());
         let Some(agent) = held else {
             return tinyhivemind_openhuman::Narrowing::none();
         };
@@ -1410,6 +1412,8 @@ impl EpisodeHost for DeskHost {
             .map(|verb| format!("{}{verb}", crate::hive::host::TOOL_PREFIX))
             .collect();
         seating.narrow(key.clone(), prefixed);
+        #[cfg(test)]
+        eprintln!("narrow turn: key={key} stored={:?}", seating.narrowed_to(Some(&key)));
         tinyhivemind_openhuman::Narrowing::until(move || seating.widen(&key))
     }
 
