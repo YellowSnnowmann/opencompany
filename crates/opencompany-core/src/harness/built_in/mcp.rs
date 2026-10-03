@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 use openhuman_core as oh;
 
 use oh::config::{Config, McpAuthConfig, McpServerConfig};
-use oh::mcp::config_servers::{McpRegistrySource, McpServerRegistry};
+use oh::mcp::config_servers::McpServerRegistry;
 use oh::mcp::registry::types::{ConnStatus, InstalledServer, McpTool};
 use oh::security::{SecurityPolicy, ToolOperation};
 use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
@@ -35,7 +35,7 @@ use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
 use crate::company::mcp::{AuthMaterial, McpServerDecl};
 use crate::error::OpenCompanyError;
 use crate::harness::mcp_probe::{
-    McpFailure, McpFailureQueue, classify_mcp_error, operator_message, scrub, strip_endpoint,
+    McpFailure, McpFailureQueue, classify_mcp_error, operator_message, scrub,
 };
 use crate::ports::types::CompanyId;
 use crate::ports::usage::UsageMeter;
