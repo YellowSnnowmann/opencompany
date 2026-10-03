@@ -22,7 +22,6 @@ import { ContentSurface } from "@/components/content-surface";
 import { FeedbackDialog } from "@/components/feedback-dialog";
 import { HostSwitcher } from "@/components/host-switcher";
 import { NotificationsButton } from "@/components/notifications-button";
-import { OverviewButton } from "@/components/overview-button";
 import { TitleBarSearch } from "@/components/title-bar-search";
 import { DiscordLink, SettingsButton } from "@/components/title-bar-utilities";
 import { RouteLoading } from "@/components/route-loading";
@@ -139,7 +138,6 @@ import { ConsoleProvider } from "@/lib/console-context";
 import { fromDto, type TeamMember } from "@/lib/team";
 import { agentDmThreads, defaultThreads, threadsFromDesks } from "@/lib/threads";
 import { drainReReadQueue, type PendingReRead } from "@/lib/re-read-queue";
-import { Overview } from "@/views/Overview";
 import { CompanyView } from "@/views/company/CompanyView";
 import { ManageListsView } from "@/views/company/ManageListsView";
 import { readLastChannel } from "@/lib/last-channel";
@@ -3445,10 +3443,6 @@ export function AppShell({
           tabs={
             <>
               <SidebarSectionTabs view={view} onNavigate={setView} />
-              <OverviewButton
-                active={isNavigationActive("overview", view)}
-                onNavigate={() => setView("overview")}
-              />
               <NotificationsButton
                 pending={pending}
                 active={view === "notifications" || view === "approvals"}
@@ -3523,17 +3517,11 @@ export function AppShell({
               none (Settings, Overview, Approvals) render bare, exactly as they
               did. See `components/section-rail.tsx`. */}
           <SectionContentRail view={view} sub={sub} onNavigate={setView}>
-          {/* `#/overview` is the company graph again — the page #1321 swapped
-              out for the operator landing view. The graph keeps the
-              `#/company/graph` alias that issue gave it, so every link minted
-              while it lived there still resolves.
-
-              `OperatorOverview` is left in the tree, unrouted: its panels are
-              real work (#1015, #1700, #1745) and the decision about where they
-              belong is not this change's to make. Nothing renders it today. */}
-          {(view === "overview" || view === "setup") && (
-            <Overview client={client} company={company} companyName={feed.status.name} />
-          )}
+          {/* No Overview. The page and its knowledge graph were removed, at
+              both of their addresses — `#/overview` and `#/company/graph` are
+              rewritten onto Room and the roster (`console-route-rewrites.ts`).
+              `#/setup` drew the graph behind its dialog; it draws nothing there
+              now, and the dialog is the whole of that route. */}
           {view === "company" && (
             <CompanyView
               client={client}
@@ -3566,10 +3554,6 @@ export function AppShell({
                     navigate("team", agentId, options?.edit ? { edit: "" } : undefined)
                   : navigate("company")
               }
-              // The graph at `#/company/graph` names its core node after the
-              // company the way the rest of the console does (issue #1219),
-              // not after the slug.
-              companyName={feed.status.name}
               // Setup just staffed the company, so the roster read is stale.
               refreshKey={teamBuilt}
               // Skipping setup must not be a dead end: an unstaffed company keeps
