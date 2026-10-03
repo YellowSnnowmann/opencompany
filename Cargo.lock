@@ -6790,6 +6790,7 @@ dependencies = [
  "tinytools-agent",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
