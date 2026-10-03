@@ -1,10 +1,9 @@
 //! The [`CompanyRuntime`] assembly: one running company's wired-together ports.
 //!
-//! The struct matches the sketch in `docs/spec/runtime/ports.md` — the nine
-//! ports. Three runtime-internal fields
-//! are added: the company `id`, a per-company serial lock so exactly one cycle
-//! runs at a time, and the [`RuntimeJournal`] backing at-most-once effects and
-//! the durable approval queue.
+//! The struct matches the sketch in `docs/spec/runtime/ports.md`. Three
+//! runtime-internal fields are added: the company `id`, a per-company serial
+//! lock so exactly one cycle runs at a time, and the [`RuntimeJournal`] backing
+//! at-most-once effects and the durable approval queue.
 //!
 //! The cycle logic itself lives in [`CycleRunner`](crate::runtime::CycleRunner);
 //! the methods here are thin delegations so callers hold a single
