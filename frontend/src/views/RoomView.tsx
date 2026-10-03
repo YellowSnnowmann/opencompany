@@ -1029,6 +1029,17 @@ export function RoomView({
    */
   const [rawRequested, setRawRequested] = useHashFlag("raw");
   const showRaw = rawRequested && !!rawAgentId;
+  // Raw turns belongs to the conversation it was opened on: switching to any
+  // other chat turns it off. The first id is remembered rather than acted on,
+  // so a deep-linked `#/chat/<id>?raw` still opens raw.
+  const rawChannelRef = useRef(channel?.id);
+  useEffect(() => {
+    if (rawChannelRef.current === channel?.id) return;
+    rawChannelRef.current = channel?.id;
+    if (rawRequested) setRawRequested(false);
+    // Only the channel moving resets it; reading the flag is not a trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel?.id]);
   const [rawRows, setRawRows] = useState<AgentSessionMessageDto[]>([]);
   const [rawLoad, setRawLoad] = useState<RawLoad>("loading");
   // The same stale-response guard the Session tab carries (issue #1671): a read
@@ -2686,12 +2697,14 @@ export function RoomView({
             <PageHeader title={channelTitle(channel)} hidden />
             {/* Who this is with, as a pill floating over the transcript; it
                 opens the details panel on the right (`ChannelInfo.tsx`). */}
-            <ChannelPill
-              channel={channel}
-              members={members}
-              open={infoOpen}
-              onToggle={() => setInfoOpen((o) => !o)}
-            />
+            {!showRaw && (
+              <ChannelPill
+                channel={channel}
+                members={members}
+                open={infoOpen}
+                onToggle={() => setInfoOpen((o) => !o)}
+              />
+            )}
 
             <div className="flex min-h-0 flex-1">
               <div className="flex min-w-0 flex-1 flex-col">
@@ -2708,16 +2721,12 @@ export function RoomView({
                   </p>
                 )}
                 {showRaw && rawAgentId ? (
-                  // `pt-12` clears the channel pill floating over the top, the
-                  // same clearance the transcript keeps.
-                  <div className="flex min-h-0 flex-1 flex-col pt-12">
-                    <RawTranscript
-                      load={rawLoad}
-                      rows={rawRows}
-                      agentId={rawAgentId}
-                      agentName={channelTitle(channel)}
-                    />
-                  </div>
+                  <RawTranscript
+                    load={rawLoad}
+                    rows={rawRows}
+                    agentId={rawAgentId}
+                    agentName={channelTitle(channel)}
+                  />
                 ) : (
                 <MessageTimeline
                   channel={channel}
@@ -2969,6 +2978,8 @@ export function RoomView({
                     onSteered={onInflightSteered}
                   />
                 )}
+                {/* Raw turns is a read-only record: no composer over it. */}
+                {!showRaw && (
                 <MessageComposer
                   placeholder={`Message ${channelTitle(channel)}`}
                   // Opening a conversation lands the cursor in its composer.
@@ -3000,6 +3011,7 @@ export function RoomView({
                   mentionables={mentionables}
                   channelMemberIds={inChannel?.map((m) => m.id)}
                 />
+                )}
                 </div>
               </div>
 
@@ -3076,12 +3088,17 @@ export function RoomView({
 
             </div>
           </div>
-          {infoOpen && (
+          {/* Held open while raw turns is on: the chip is hidden then, and the
+              panel's toggle is the way back to the conversation. */}
+          {(infoOpen || showRaw) && (
             <ChannelInfoPanel
               channel={channel}
               members={members}
               channelMembers={inChannel}
-              onClose={() => setInfoOpen(false)}
+              onClose={() => {
+                setInfoOpen(false);
+                if (showRaw) setRawRequested(false);
+              }}
               onMessage={selectChannel}
               // Only a DM has one teammate whose raw turns there are to show.
               raw={rawAgentId ? { on: showRaw, onToggle: () => setRawRequested(!showRaw) } : undefined}
