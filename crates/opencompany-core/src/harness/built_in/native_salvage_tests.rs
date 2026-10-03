@@ -16,7 +16,10 @@ fn recover(text: &str) -> (String, Vec<ToolCall>) {
 
 /// [`recover`], with a per-tool JSON Schema `parameters` map to type an
 /// undeclared markup `<parameter>` body against.
-fn recover_with_schemas(text: &str, schemas: &BTreeMap<String, Value>) -> (String, Vec<ToolCall>) {
+fn recover_with_schemas(
+    text: &str,
+    schemas: &BTreeMap<String, Value>,
+) -> (String, Vec<ToolCall>) {
     match recover_text_tool_calls(text, &belt(), schemas) {
         Some((cleaned, calls)) => (cleaned, calls),
         // Nothing recovered: the caller leaves the content untouched.
@@ -344,7 +347,7 @@ fn a_bare_no_argument_call_is_recovered() {
 
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].name, "list_desks");
-    assert_eq!(calls[0].arguments, json!({}));
+    assert_eq!(calls[0].arguments, empty_object());
     assert!(text.is_empty(), "the whole message was the call: {text:?}");
 }
 
@@ -579,7 +582,8 @@ fn a_pinned_tool_choice_authorizes_only_that_tool() {
         ToolSchema::new("read_ledger", "d", serde_json::json!({})),
         ToolSchema::new("write_file", "d", serde_json::json!({})),
     ];
-    let authorized = authorized_tool_names(&schemas, &ToolChoice::Tool("read_ledger".to_string()));
+    let authorized =
+        authorized_tool_names(&schemas, &ToolChoice::Tool("read_ledger".to_string()));
 
     assert_eq!(authorized.len(), 1);
     assert!(authorized.contains("read_ledger"));
