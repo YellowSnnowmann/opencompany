@@ -46,9 +46,7 @@ if [ ! -f "${DIR}/company.toml" ] && [ ! -f "${DIR}/agents.toml" ]; then
 fi
 
 echo "opencompany: launching '${COMPANY}' on ${BIND}"
-# shellcheck disable=SC2086
 exec opencompany serve \
   --company "${DIR}" \
   --bind "${BIND}" \
-  --home "${HOME_DIR}" \
-  ${DISCOVER}
+  --home "${HOME_DIR}"
