@@ -1414,7 +1414,7 @@ impl EpisodeHost for DeskHost {
     }
 
     fn seat_session(&self, seat: &str) -> String {
-        format!("episode:{}:{}", self.episode_id, seat)
+        format!("episode-{}:{seat}", self.episode_id)
     }
 
     fn persona(&self, seat: &str) -> Option<String> {
