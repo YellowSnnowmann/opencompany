@@ -1267,7 +1267,7 @@ pub enum RosterSource {
 /// It matters because the **action differs**. No model means "add a key". An
 /// unreachable model means "check the provider or retry". An unusable answer
 /// means "you told us very little; go back and say more". A response cut off by
-/// the output-token limit means "retry, or use a model with more output room".
+/// the output-token limit means "retry; a bigger model alone will not help".
 /// A single sentence covering all four can only be vague enough to be useless.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FallbackReason {
@@ -1286,7 +1286,8 @@ pub enum FallbackReason {
     /// before it wrote anything usable — typically a reasoning model that spent
     /// the whole budget deliberating. The call landed and was billed, so this is
     /// neither a connectivity problem nor sparse answers: the operator's next
-    /// move is to retry or pick a model with more output headroom.
+    /// move is to retry. The roster request is capped at a fixed output budget, so
+    /// a model with a larger limit alone will not help.
     OutputBudgetExhausted,
 }
 

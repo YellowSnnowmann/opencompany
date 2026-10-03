@@ -877,7 +877,7 @@ function fallbackExplanation(fallback: NonNullable<Fallback>): string {
     case "not_designable":
       return "A general starting team for your industry — we reached a model, but there wasn't enough in your answers to tailor one to them. Rename, retire, or add anyone from the Company page, or try again with more about what your business does.";
     case "output_budget_exhausted":
-      return "A general starting team for your industry — we reached a model, but it ran out of output room before it finished tailoring one. Rename, retire, or add anyone from the Company page, try again, or pick a model with a larger output limit in Settings.";
+      return "A general starting team for your industry — we reached a model, but it ran out of output room before it finished tailoring one. Rename, retire, or add anyone from the Company page, or try again. The team request is capped at 4,000 output tokens, so a model with a larger limit alone won't help.";
     case "unspecified":
       return "A general starting team for your industry, rather than one tailored to your answers. Rename, retire, or add anyone from the Company page.";
   }
