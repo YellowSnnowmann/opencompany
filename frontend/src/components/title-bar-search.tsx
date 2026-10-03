@@ -1,27 +1,28 @@
-// The search control in the middle of the window's title row.
+// The search control: a glyph among the floating sidebar's foot tabs.
 //
-// A *trigger*, not a field: clicking it (or pressing ⌘K) opens
-// `SearchDialog`, which owns the actual input. One search box, in a modal, is
-// what makes the results list possible at all — a dropdown hanging off a
-// title-row input has nowhere to put four groups of results.
+// A *trigger*, not a field: pressing it (or ⌘K) opens `SearchDialog`, which
+// owns the actual input. One search box, in a modal, is what makes the results
+// list possible at all — a dropdown hanging off an inline input has nowhere to
+// put four groups of results.
 //
-// **The button is capped, the wrapper is not.** The wrapper stays the row's one
-// elastic member because it is also the only thing left to grab the window by
-// across the middle: it carries `data-tauri-drag-region`, the button
-// deliberately does not, so the band stays draggable while the control keeps
-// its clicks. Capping the button rather than the wrapper is what lets the
-// control be a sensible width without giving that up.
+// It was a capped field in the middle of the window's title row, then a
+// full-width field at the head of the sidebar card. Since the palette opens on
+// ⌘K from anywhere, the field earned no screen space of its own; a glyph in the
+// tab row beside Company, Connections, Notifications and Settings is enough to
+// say it exists, and the shortcut is in its tooltip.
 
 import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 
 import type { OpenCompanyClient } from "@/api/client";
-import { SearchDialog } from "@/search/SearchDialog";
+import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
 import { isAppleKeyboard } from "@/connections/HostsContext";
+import { SearchDialog } from "@/search/SearchDialog";
 
-/** What the field is for. */
-const SEARCH_PLACEHOLDER = "Search";
+/** What the control is for — its accessible name and the start of its tooltip. */
+const SEARCH_LABEL = "Search";
 
+/** Opens the console-wide search palette, from its glyph or from ⌘K / Ctrl+K. */
 export function TitleBarSearch({
   client,
   company,
@@ -45,36 +46,21 @@ export function TitleBarSearch({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const shortcut = isAppleKeyboard() ? "⌘K" : "Ctrl K";
   return (
-    <div
-      data-tauri-drag-region
-      // Tighter gutters below `sm`: on a 390px phone this is what is left once
-      // the fixed controls are placed, and 24px of padding was most of it.
-      className="flex min-w-0 flex-1 items-center justify-center self-stretch px-3 max-sm:px-1"
-    >
+    <>
       <button
         type="button"
         onClick={() => setOpen(true)}
         data-testid="title-bar-search"
-        aria-label={SEARCH_PLACEHOLDER}
+        aria-label={SEARCH_LABEL}
         aria-keyshortcuts="Meta+K Control+K"
-        className={
-          // Capped, not elastic: a search control that grows to fill a 1440px
-          // window reads as a text field somebody stretched by accident.
-          // `min-w-0` + `overflow-hidden` so a squeezed row clips the label
-          // inside the control instead of painting it over the glyphs beside it.
-          "flex h-9 w-full min-w-0 max-w-sm items-center gap-2 overflow-hidden rounded-lg border border-chrome-border " +
-          "bg-background pr-2 pl-3 text-sm text-muted-foreground max-sm:justify-center max-sm:px-0 " +
-          "hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        }
+        title={`${SEARCH_LABEL} (${shortcut})`}
+        className={TITLE_BAR_ICON_BUTTON}
       >
-        <Search aria-hidden="true" className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-left max-sm:hidden">{SEARCH_PLACEHOLDER}</span>
-        <kbd className="hidden shrink-0 rounded border border-chrome-border px-1.5 py-0.5 font-sans text-2xs sm:inline">
-          {isAppleKeyboard() ? "⌘K" : "Ctrl K"}
-        </kbd>
+        <Search aria-hidden="true" className="size-4" />
       </button>
       <SearchDialog client={client} company={company} open={open} onOpenChange={setOpen} />
-    </div>
+    </>
   );
 }

@@ -20,7 +20,7 @@
 
 [package]
 name = "opencompany-app"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 license = "GPL-3.0-only"
 description = "OpenCompany desktop shell: many hosts at once, and local ACP harnesses."
@@ -62,7 +62,7 @@ path = "src/main.rs"
 # shipped application: `DESKTOP_RELEASE_FEATURES` in
 # `.github/workflows/build-desktop.yml` passes
 # `opencompany-core/acp,opencompany-core/composio` on the `tauri build` command line, and
-# `ci.yml`'s `Desktop` lane compiles and tests that same string. Both are
+# The CI lane plan's desktop lane compiles and tests that same string. Both are
 # `= ["openhuman"]` in the root manifest — pure `cfg` switches that pull no
 # `dep:` entry, and `mcp` above already enables `openhuman` — so turning them
 # on adds no package and leaves this crate's `Cargo.lock` byte-identical, and
@@ -90,7 +90,7 @@ path = "src/main.rs"
 # #1823 closed that half, and closed it better than a copy would have: the
 # script *parses* `DESKTOP_RELEASE_FEATURES` out of the release workflow, so the
 # launcher cannot drift from what ships. `scripts/ci/assert-desktop-features.sh`
-# guards the copies that remain — the two `ci.yml` steps, `tauri:build` and the
+# guards the copies that remain — the two desktop-lane steps in `scripts/ci/lanes/lanes-plan.mjs`, `tauri:build` and the
 # command `docs/spec/runtime/desktop.md` documents — and asserts the launcher
 # still derives rather than duplicates.
 #
@@ -142,7 +142,16 @@ path = "src/main.rs"
 # `crash-reporting` gives the shell and every embedded host the same optional,
 # operator-configured Sentry client as the server binary. It remains inert
 # without `OPENCOMPANY_SENTRY_DSN`.
-opencompany-core = { path = "../opencompany-core", default-features = false, features = ["sqlite", "platform-jwt", "oauth", "mcp", "tinymemory", "tinyhumans", "crash-reporting"] }
+# `analytics` compiles the OpenPanel transport, so the desktop reports product
+# analytics from the Rust host (never the webview; the CSP is unchanged) — on by
+# default, off by the user's Settings -> Privacy choice or
+# `OPENCOMPANY_ANALYTICS=off`. It is `["dep:reqwest"]` and nothing else, and
+# `oauth` above already pulls reqwest, so it adds no package and leaves
+# `Cargo.lock` byte-identical. It lives on this line, like `tinyhumans` and
+# `crash-reporting`, so dev, CI and release share one source rather than a
+# fourth copy of the feature string. `src/analytics.rs` supplies the deployment,
+# switch, client id and endpoint a double-clicked app has no environment for.
+opencompany-core = { path = "../opencompany-core", default-features = false, features = ["sqlite", "platform-jwt", "oauth", "mcp", "tinymemory", "tinyhumans", "crash-reporting", "analytics"] }
 
 tauri = { version = "2", features = [] }
 # The OS credential store, so a device session token never has to live in the
@@ -152,7 +161,7 @@ tauri = { version = "2", features = [] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 tauri-plugin-shell = "2"
 
-tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "net"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "net", "time"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 futures-util = "0.3"
 async-trait = "0.1"

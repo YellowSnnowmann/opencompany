@@ -25,7 +25,7 @@ updates:
   # `.github/workflows/`, so this is not a path that needs widening when a
   # workflow is added. One pin it will NOT reach is
   # `dtolnay/rust-toolchain`: that ref is the head of the `stable` branch, not a
-  # release tag, so it has to be re-resolved by hand. See `ci.yml`.
+  # release tag, so it has to be re-resolved by hand. See `scripts/ci/assert-actions-pinned.sh`.
   - package-ecosystem: github-actions
     directory: /
     schedule:

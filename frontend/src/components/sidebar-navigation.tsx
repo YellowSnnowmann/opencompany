@@ -1,4 +1,3 @@
-import { useCallback } from "react";
 import {
   BookText,
   Brain,
@@ -10,14 +9,8 @@ import {
   Workflow,
 } from "lucide-react";
 
-import {
-  SidebarGroup,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  useSidebar,
-} from "@/components/ui/sidebar";
-import { RESTING_ROW } from "@/components/sidebar-controls";
+import { SidebarGroup, useSidebar } from "@/components/ui/sidebar";
+import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
 import { useRoomRailSlot } from "@/components/room-rail";
 import { isNavigationActive, type View } from "@/lib/console-routes";
 import { CONNECTION_PAGE_GROUPS, connectionPagesIn } from "@/views/connection-pages";
@@ -486,28 +479,11 @@ export function childAnchor(section: NavSection, child: NavChild): string | unde
  * badge. Nothing else is in this region to hide any more; the fixed lists of
  * child rows that used to be hidden here at 3rem are content-rail rows now.
  */
-export function SidebarNavigation({
-  view,
-  onNavigate,
-}: {
-  view: View;
-  onNavigate: (view: View, sub?: string) => void;
-  // No `pending`. The approvals count is drawn once, by the title row's bell
-  // (`components/notifications-button.tsx`), and this column no longer carries
-  // a copy of it — see the note beside `NAV_SECTIONS` above.
-}) {
-  const { isMobile, setOpenMobile } = useSidebar();
+export function SidebarNavigation() {
+  // No props any more. The section rows that navigated from here are the
+  // foot's icon tabs (`SidebarSectionTabs`), so this column draws only the
+  // conversation list's mount point.
   const { setElement } = useRoomRailSlot();
-
-  const navigate = useCallback(
-    (next: View, nextSub?: string) => {
-      onNavigate(next, nextSub);
-      if (isMobile) setOpenMobile(false);
-    },
-    [isMobile, onNavigate, setOpenMobile],
-  );
-
-  const active = sectionOwning(view);
 
   return (
     <>
@@ -518,6 +494,18 @@ export function SidebarNavigation({
           // content so the list scrolls INSIDE itself (the slot below) and
           // Company and Connections stay pinned under it.
           "min-h-0 flex-1",
+          // No vertical padding on the group: it sat OUTSIDE the scroller, so
+          // a scrolled list was clipped against a hard edge 8px under the
+          // search field and 8px over the foot — rows looked cut. The padding
+          // is on the scroller below instead, where it scrolls with the rows
+          // and the list fades under the edges rather than being sliced.
+          "py-0",
+          // No horizontal padding on the group; the scroller below sets it.
+          // The scroller draws no scrollbar at all (a list in a card scrolls
+          // obviously enough), so it reserves no gutter either and its `px-2`
+          // is the same 8px on both sides — the rows line up with the search
+          // field and the tab row, and a hovered row's pill sits evenly.
+          "px-0",
           // On the 3rem rail this group's own `px-2` is the difference between
           // fitting and not. The rail is 48px; the gutter leaves a 32px content
           // box, and `ChannelRail`'s compact rows are `size-9` (36px) with their
@@ -548,36 +536,57 @@ export function SidebarNavigation({
           // The one scroller in the column. `SidebarContent` is `flex-1
           // min-h-0` for this, so a list at its cap scrolls here rather than
           // pushing the two rows below it out of reach.
-          className="scrollbar-on-hover flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-2 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_bottom,transparent,black_10px,black_calc(100%-10px),transparent)]"
         />
       </SidebarGroup>
 
-      {/* The two. Fixed at the foot: this group never grows, never shrinks
-          and never scrolls, so Company and Connections are always on screen
-          under the conversation list. The seam above it is a border, the way
-          the title row separates from the page — no `pt-`, which the sidebar
-          tests forbid on either group. `pb-(--frame-inset)` is the gap the
-          content card keeps (`mb-(--frame-inset)`) between its bottom edge and
-          the window's, so Connections' bottom lands on the card's bottom edge
-          and the strip under it is the column's own (transparent) fill. */}
-      <SidebarGroup className="shrink-0 border-t border-sidebar-border pb-(--frame-inset)">
-        <SidebarMenu>
-          {NAV_SECTIONS.map((section) => (
-            <SidebarMenuItem key={section.view} data-tour={`nav-${section.view}`}>
-              <SidebarMenuButton
-                isActive={section === active}
-                tooltip={section.label}
-                onClick={() => navigate(section.view, section.sub)}
-                className={RESTING_ROW}
-              >
-                <section.icon />
-                <span>{section.label}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
-      </SidebarGroup>
+      {/* The two section rows (Company, Connections) that were fixed here
+          are icon tabs on the floating sidebar's foot now — see
+          `SidebarSectionTabs` below and `sidebar-shell.tsx`. */}
+    </>
+  );
+}
 
+/**
+ * The sections as icon tabs: Company and Connections, the first two of the
+ * floating sidebar's foot (`sidebar-shell.tsx`), beside Overview,
+ * Notifications and Settings.
+ *
+ * They were two labelled rows pinned under the conversation list. The foot
+ * carries every destination an operator reaches from anywhere as one strip of
+ * glyphs, and these two are exactly that — so they read as tabs alongside the
+ * other three rather than as a second list in a second style. Same table, same
+ * active rule (`sectionOwning`) and the same `data-tour` anchors as the rows,
+ * so the guided tour and the specs that find `nav-company` still do.
+ */
+export function SidebarSectionTabs({
+  view,
+  onNavigate,
+}: {
+  view: View;
+  onNavigate: (view: View, sub?: string) => void;
+}) {
+  const { isMobile, setOpenMobile } = useSidebar();
+  const active = sectionOwning(view);
+  return (
+    <>
+      {NAV_SECTIONS.map((section) => (
+        <button
+          key={section.view}
+          type="button"
+          data-tour={`nav-${section.view}`}
+          aria-current={section === active ? "page" : undefined}
+          aria-label={section.label}
+          title={section.label}
+          onClick={() => {
+            onNavigate(section.view, section.sub);
+            if (isMobile) setOpenMobile(false);
+          }}
+          className={TITLE_BAR_ICON_BUTTON}
+        >
+          <section.icon aria-hidden="true" className="size-4" />
+        </button>
+      ))}
     </>
   );
 }

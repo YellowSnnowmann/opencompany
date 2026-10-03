@@ -483,7 +483,7 @@ export function LiveMascot({
 
   return (
     <div
-      className={cn("overflow-hidden rounded-xl", className)}
+      className={cn("overflow-hidden rounded-(--avatar-radius)", className)}
       data-testid={testId}
       aria-hidden
     >
@@ -555,7 +555,7 @@ export function MascotAvatar(props: Props) {
   if (frozen && settledUrl) {
     return (
       <div
-        className={cn("overflow-hidden rounded-xl", props.className)}
+        className={cn("overflow-hidden rounded-(--avatar-radius)", props.className)}
         data-testid={props["data-testid"]}
         aria-hidden
       >

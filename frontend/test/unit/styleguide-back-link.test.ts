@@ -2,7 +2,7 @@
 //
 // "Back to console" has to return the operator to the console they left, and on
 // a desktop holding several hosts that is a scope, not just a page (issue
-// #1358). `App` remounts `Console` on the way back, so a bare `#/overview`
+// #1358). `App` remounts `Console` on the way back, so a bare `#/chat`
 // would leave `useHostRoute` to initialize from an absent parameter and land on
 // whichever host the bootstrap fallback picks — a silent host switch.
 
@@ -86,12 +86,12 @@ function headerRow(): HTMLElement {
 describe("the styleguide back link", () => {
   it("carries the host scope the styleguide was opened with", () => {
     window.history.replaceState(null, "", "#/styleguide?host=c-2");
-    expect(backHref()).toBe("#/overview?host=c-2");
+    expect(backHref()).toBe("#/chat?host=c-2");
   });
 
   it("names no host when the address names none", () => {
     window.history.replaceState(null, "", "#/styleguide");
-    expect(backHref()).toBe("#/overview");
+    expect(backHref()).toBe("#/chat");
   });
 });
 

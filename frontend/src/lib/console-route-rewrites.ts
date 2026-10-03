@@ -69,6 +69,13 @@ export const REWRITE_RETIRED = (
   // detail sub-page (issue #264), it is what the org chart's rows and the chat
   // pane's chips link to, and it is deliberately a page so it can be linked.
   if (head === "team" && !sub) return ["company", null];
+  // The Overview page and its knowledge graph were removed, at both of their
+  // addresses: `#/overview` and Company's `#/company/graph`. A bookmark to
+  // either lands somewhere real rather than on not-found — the overview on the
+  // console's front door (Room, `DEFAULT_VIEW`), the graph on the roster it
+  // was a picture of.
+  if (head === "overview") return ["chat", null];
+  if (head === "company" && sub === "graph") return ["company", null];
   // `#/connections` is a real address again. It predates the split into OAuth /
   // MCP / Inference, then spent that time rewritten onto the OAuth page; it now
   // names the section those two pages live in, which is closer to what it

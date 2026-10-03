@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 
 import type { OpenCompanyClient } from "@/api/client";
 import { RouteLoading } from "@/components/route-loading";
@@ -8,10 +8,12 @@ import { FeedbackView } from "@/views/FeedbackView";
 import { PeopleView } from "@/views/PeopleView";
 import { AppearanceView } from "@/views/settings/AppearanceView";
 import { ApprovalsSettingsView } from "@/views/settings/ApprovalsSettingsView";
+import { PrivacyView } from "@/views/settings/PrivacyView";
 import { SettingsView } from "@/views/SettingsView";
 import {
   SETTINGS_PAGE_GROUPS,
   SETTINGS_PAGES,
+  availableSettingsPages,
   resolveSettingsPage,
   type SettingsPage,
 } from "@/views/settings-pages";
@@ -50,6 +52,12 @@ interface Props {
   onFlag: () => void;
   /** Start the reset (archive + start clean) flow for the active company (#1807). */
   onResetCompany?: (id: string, name: string) => void;
+  /**
+   * The company/host switcher, heading the rail. It headed the floating
+   * sidebar first; which company a window points at is set once and rarely,
+   * which is what this page is for, so it moved here.
+   */
+  switcher?: ReactNode;
 }
 
 /**
@@ -76,9 +84,14 @@ export function SettingsSection({
   eventTick,
   onFlag,
   onResetCompany,
+  switcher,
 }: Props) {
   const page = resolveSettingsPage(sub);
-  const activePage = SETTINGS_PAGES.find((item) => item.id === page)!;
+  // The pages this runtime may show. `privacy` is desktop-only, so a browser
+  // console gets the table without it; `resolveSettingsPage` has already sent
+  // its address to General there.
+  const pages = availableSettingsPages();
+  const activePage = pages.find((item) => item.id === page)!;
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -94,6 +107,11 @@ export function SettingsSection({
             reader either — the caption was deliberately a `div` rather than an
             `h2` (issue #1392), so it was never in the document outline, and
             the `nav`'s own `aria-label` still names this landmark. */}
+        {switcher && (
+          <div data-testid="settings-switcher" className="pb-2">
+            {switcher}
+          </div>
+        )}
         {SETTINGS_PAGE_GROUPS.map((group) => (
           <section key={group.id} aria-labelledby={`settings-group-${group.id}`}>
             {/* Named by `aria-labelledby`, which resolves against any element,
@@ -105,7 +123,7 @@ export function SettingsSection({
             >
               {group.label}
             </div>
-            {SETTINGS_PAGES.filter((item) => item.group === group.id).map((item) => (
+            {pages.filter((item) => item.group === group.id).map((item) => (
               // One line per row, and the row's own `title` carries what the
               // second line used to say (issue #2131). The hint was rendered
               // under every label here, and at `w-60` most of them wrapped:
@@ -124,10 +142,15 @@ export function SettingsSection({
                 aria-current={page === item.id ? "page" : undefined}
                 className={cn(
                   "flex items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors",
-                  page === item.id ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+                  page === item.id ? "bg-rail-selected text-rail-selected-foreground" : "hover:bg-rail-hover",
                 )}
               >
-                <item.icon className="size-4 shrink-0 text-muted-foreground" />
+                <item.icon
+                  className={cn(
+                    "size-4 shrink-0",
+                    page === item.id ? "text-rail-selected-foreground" : "text-muted-foreground",
+                  )}
+                />
                 <span className="min-w-0 truncate text-sm font-medium">{item.label}</span>
               </a>
             ))}
@@ -160,8 +183,9 @@ export function SettingsSection({
             page rather than repeating itself under every one of them. Neither
             is a second line per row, which is the thing that was removed. */}
         <div className="relative z-30 border-b lg:hidden">
+          {switcher && <div className="px-2 pt-2">{switcher}</div>}
           <div className="flex gap-1 overflow-x-auto p-2">
-            {SETTINGS_PAGES.map((item) => (
+            {pages.map((item) => (
               <a
                 key={item.id}
                 href={`#/settings/${item.id}`}
@@ -169,7 +193,7 @@ export function SettingsSection({
                 aria-current={page === item.id ? "page" : undefined}
                 className={cn(
                   "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                  page === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+                  page === item.id ? "bg-rail-selected text-rail-selected-foreground" : "text-muted-foreground",
                 )}
               >
                 {item.label}
@@ -192,6 +216,9 @@ export function SettingsSection({
         {/* Both were cards on General. See their own files for why each left. */}
         {page === "approvals" && <ApprovalsSettingsView client={client} company={company} />}
         {page === "appearance" && <AppearanceView />}
+        {/* Desktop only: `page` can only be "privacy" there, because
+            `resolveSettingsPage` falls back to General in a browser. */}
+        {page === "privacy" && <PrivacyView />}
         {/* The same page `#/feedback` renders, re-parented rather than
             rewritten. That top-level address still resolves — the flag dialog
             and the board's own links point at it — so nothing that names it

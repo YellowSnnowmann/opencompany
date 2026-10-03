@@ -31,7 +31,7 @@
 #                   image is built.
 #
 # There is deliberately NO separate build-and-test job. Everything on `release`
-# arrived through a PR that ran `ci.yml`, and the promotion dispatches `ci.yml`
+# arrived through a PR that ran the CI lanes, and the promotion runs `ci-fast-hosted.yml`
 # on the snapshot; the desktop and Docker builds below compile the tag with
 # `--locked` anyway. A third compile of the same tree added ~30 minutes to
 # every cut and found nothing the other two would not.
@@ -57,9 +57,9 @@
 # is a rehearsal; the version still moves.
 #
 # Issue #590. Every `uses:` below is a full commit SHA with the resolved version
-# in a trailing comment; the rationale is at the top of `ci.yml`. Local
+# in a trailing comment; the rationale is at the top of `ci-lanes.yml`. Local
 # reusable workflows (`./.github/workflows/...`) carry no SHA because they run
-# at this workflow's own commit — the pin check in `ci.yml` exempts them. It
+# at this workflow's own commit — the pin check (`scripts/ci/assert-actions-pinned.sh`) exempts them. It
 # matters most here: this workflow holds `contents: write` and publishes what
 # users download.
 name: Release Production
@@ -186,7 +186,7 @@ jobs:
 
       # `[skip ci]` does real work here: a push made as the App DOES fire `push`
       # workflows (unlike one made with GITHUB_TOKEN), and the commit changes
-      # version numbers only, so there is nothing for `ci.yml` to learn.
+      # version numbers only, so there is nothing for the CI lanes to learn.
       #
       # The files staged are the ones the bump script reports it wrote, so the
       # commit can never miss a file the registry gained. Branch and tag go in
@@ -547,6 +547,37 @@ jobs:
 
           echo "::error::Sentry accepted event ${event_id} but never stored it (last lookup: HTTP ${code} after 120s). Reporting is NOT working: the ingest is answering while events are discarded. Check the Sentry instance's accepted-outcome stats, not this repository." >&2
           exit 1
+
+      # Product analytics, sent AND read back (the sibling of the crash-reporting
+      # gate above, same shape). `opencompany analytics-test` sends one
+      # `analytics_self_test` event as a hosted tenant under a throwaway `s_`
+      # profile and exits 0 only when the collector ACCEPTED it; that proves the
+      # `analytics` feature is compiled in and egress works, not that the event
+      # was kept. `verify-analytics-capture.sh` then reads the profile back from
+      # OpenPanel's MCP endpoint and passes only when it is stored.
+      #
+      # `VERIFY_ANALYTICS_REQUIRED` is deliberately unset: until the operator
+      # adds the `OPENPANEL_MCP_BEARER` secret the read-back warns and passes
+      # instead of blocking a release; the send half still fails hard.
+      # Set it to `1` once the secret exists. docs/spec/runtime/analytics-smoke.md.
+      - name: Verify product analytics (analytics-test)
+        env:
+          OPENPANEL_MCP_BEARER: ${{ secrets.OPENPANEL_MCP_BEARER }}
+        run: |
+          set -euo pipefail
+          rc=0
+          profile="$(docker run --rm \
+            --entrypoint opencompany \
+            -e OPENCOMPANY_DEPLOYMENT=hosted-tenant \
+            "${IMAGE}:${TAG}" \
+            analytics-test)" || rc=$?
+          case "$rc" in
+            0) ;;
+            2) echo "::error::analytics-test says this image would be SILENT as a hosted tenant, so it reports nothing. Check the TENANT_FEATURES list and the OPENCOMPANY_ANALYTICS switch. See docs/spec/runtime/analytics-status.md." >&2; exit 1 ;;
+            *) echo "::error::analytics-test exited ${rc}: the collector did not accept the event (or the image has no analytics transport). See docs/spec/runtime/analytics-status.md." >&2; exit 1 ;;
+          esac
+          echo "analytics profile id: ${profile}"
+          scripts/ci/verify-analytics-capture.sh "$profile"
 
       - name: Log in to GHCR
         if: inputs.create_release

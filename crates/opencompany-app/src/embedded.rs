@@ -24,8 +24,14 @@
 
 use std::path::PathBuf;
 
+use std::sync::Arc;
+
+use opencompany::analytics::{AnalyticsStatus, DeferredTracker, Tracker};
 use opencompany::app::EmbeddedInstance;
+use opencompany::app::deployment::Deployment;
 use opencompany::{AppConfig, AppState};
+
+use crate::analytics::{AnalyticsSetup, GatedTracker};
 
 /// A running in-process host.
 pub struct EmbeddedHost {
@@ -37,6 +43,9 @@ pub struct EmbeddedHost {
     _instance: EmbeddedInstance,
     server: tokio::task::JoinHandle<()>,
     sweeper: tokio::task::JoinHandle<()>,
+    /// This host's analytics tracker, kept so the shell can flush it on exit
+    /// and read its status for the Privacy page.
+    analytics: Arc<GatedTracker>,
 }
 
 impl EmbeddedHost {
@@ -64,6 +73,18 @@ impl EmbeddedHost {
     /// The companies registered at boot, in listing order.
     pub fn companies(&self) -> &[String] {
         &self.companies
+    }
+
+    /// Sends whatever analytics is still queued. Called on app exit, where a
+    /// background drain loop would otherwise die with the process.
+    pub async fn flush_analytics(&self) {
+        self.analytics.flush().await;
+    }
+
+    /// What this host's analytics is doing and whether it is working — the same
+    /// answer its `/spec` serves under `analytics`, with the user's consent.
+    pub fn analytics_status(&self) -> Option<AnalyticsStatus> {
+        self.analytics.status()
     }
 }
 
@@ -131,9 +152,27 @@ pub async fn start(data_dir: PathBuf) -> opencompany::Result<EmbeddedHost> {
 /// check, the loopback bind — is identical, because the two kinds of host
 /// differ in exactly one decision and must not be allowed to drift in any
 /// other.
+///
+/// Reports nothing: this is [`start_with_analytics`] with a disabled
+/// [`AnalyticsSetup`], so the test suites and any embedder that never asked for
+/// analytics stay silent and network-free.
 pub async fn start_with(
     data_dir: PathBuf,
     first_run: FirstRun,
+) -> opencompany::Result<EmbeddedHost> {
+    start_with_analytics(data_dir, first_run, AnalyticsSetup::disabled()).await
+}
+
+/// [`start_with`], reporting product analytics as `analytics` says.
+///
+/// The tracker is wired into the state before any company is built, so every
+/// company meters into it, and *installed* once the host knows who it is — after
+/// the companies are adopted and the listener is bound — exactly as `serve`
+/// does. See `analytics.rs` for what the gate and the environment mean.
+pub async fn start_with_analytics(
+    data_dir: PathBuf,
+    first_run: FirstRun,
+    analytics: AnalyticsSetup,
 ) -> opencompany::Result<EmbeddedHost> {
     // Resolve, lock, migrate, and prove the journal root is writable — the same
     // sequence `serve` runs, shared rather than copied so the two cannot drift.
@@ -244,7 +283,12 @@ pub async fn start_with(
         ..AppConfig::resolve_host(&opencompany::app::config::ProcessEnv, config_file.as_ref())?
     };
     let api_url = config.api_url.clone();
+    // Before any company is built: the runtime bakes its usage-meter wrapper
+    // from this at build time. Installed after the companies exist — see below.
+    let deferred = Arc::new(DeferredTracker::new());
+    let tracker = Arc::new(GatedTracker::new(analytics.gate.clone(), deferred.clone()));
     let state = AppState::new(config)
+        .with_analytics(tracker.clone())
         .with_home(instance.home().to_path_buf())
         // Issue #1245: the desktop is the one place with an
         // `AcpAgentFactory` implementation to give — a `local` acp harness
@@ -316,6 +360,21 @@ pub async fn start_with(
     // below is already stopped, rather than plumbing a second shutdown path
     // through a struct that otherwise has none.
     let sweeper = state.spawn_acp_session_sweeper(std::sync::Arc::new(tokio::sync::Notify::new()));
+
+    // The companies are registered and the port is taken, so this host knows who
+    // it is: choose the tracker and report `instance_started`. Reports only when
+    // the shell's environment resolves to it (on by default, off if the user or
+    // operator said so); otherwise a no-op, and the line below says which.
+    let decision = opencompany::analytics::install_analytics_for_shell(
+        &state,
+        deferred.as_ref(),
+        analytics.env.as_ref(),
+        Some(env!("CARGO_PKG_VERSION")),
+    );
+    tracing::info!(
+        "{}",
+        opencompany::analytics::boot::describe_for(Deployment::Desktop, &decision)
+    );
     // The listener was bound at the top of this function (see there for why),
     // so nothing here can fail between starting the sweeper and serving.
     let server = tokio::spawn(async move {
@@ -338,9 +397,13 @@ pub async fn start_with(
         _instance: instance,
         server,
         sweeper,
+        analytics: tracker,
     })
 }
 
 #[cfg(test)]
 #[path = "embedded_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "embedded_analytics_tests.rs"]
+mod tests_analytics;

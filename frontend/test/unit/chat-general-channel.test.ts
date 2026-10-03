@@ -1,12 +1,8 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { OpenCompanyClient } from "@/api/client";
 import type { DeskDto, NotificationDto, ReadMarker } from "@/api/types";
-import { ConnectionScopeProvider } from "@/connections/ConnectionContext";
 import { GENERAL_CHANNEL_ID, isGeneralChannel, migrateLegacyGeneralId } from "@/lib/chat";
 import { defaultDesks, isGeneralDesk, type Desk } from "@/lib/desks";
 import { readLastChannel, writeLastChannel } from "@/lib/last-channel";
@@ -19,7 +15,6 @@ import {
   deskFromDto,
   dmThreadId,
 } from "@/views/room/model";
-import { RoomView } from "@/views/RoomView";
 
 /**
  * `#general` is a real channel: the host lists it first in `GET .../desks` as
@@ -221,93 +216,5 @@ describe("a notification from #general", () => {
       context: GENERAL_CHANNEL_ID,
     };
     expect(notificationHref(n)).toBe("#/chat/general?m=h41");
-  });
-});
-
-describe("RoomView offers no membership control on #general", () => {
-  let container: HTMLDivElement;
-  let root: Root;
-
-  beforeEach(() => {
-    (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
-    window.matchMedia = ((query: string) => ({
-      matches: query.includes("min-width"),
-      media: query,
-      onchange: null,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-      dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia;
-    Object.defineProperty(window, "innerWidth", { value: 1440, writable: true });
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-  });
-
-  afterEach(() => {
-    act(() => root.unmount());
-    container.remove();
-  });
-
-  function client(): OpenCompanyClient {
-    return {
-      listDesks: vi.fn(async () => [{ ...GENERAL_DTO, members: ["ceo"] }, ENGINEERING_DTO]),
-      listTeam: vi.fn(async () => [
-        { id: "ceo", name: "Ada", role: "Chief", isOrchestrator: true },
-        { id: "eng", name: "Blake", role: "Engineer" },
-      ]),
-      mentionables: vi.fn(async () => []),
-      capabilityStatus: vi.fn(async () => ({ cognition: null })),
-      chat: vi.fn(),
-      reactToMessage: vi.fn(),
-      getBudgetPause: vi.fn(async () => null),
-    } as unknown as OpenCompanyClient;
-  }
-
-  async function openMembers(sub: string) {
-    const c = client();
-    await act(async () => {
-      root.render(
-        createElement(ConnectionScopeProvider, {
-          scope: { connection: "local", company: "acme" },
-          children: createElement(RoomView, {
-            client: c,
-            company: "acme",
-            sub,
-            onNavigate: vi.fn(),
-            transcripts: {},
-            setTranscripts: vi.fn(),
-            scopeRef: { current: { connection: "local", company: "acme", client: c } },
-          }),
-        }),
-      );
-    });
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    const toggle = container.querySelector<HTMLButtonElement>("button[aria-pressed]");
-    expect(toggle).not.toBeNull();
-    await act(async () => toggle!.click());
-  }
-
-  it("draws neither an add button nor the org-chart link on #general", async () => {
-    await openMembers("general");
-
-    expect(container.querySelector('textarea[aria-label="Message #general"]')).not.toBeNull();
-    expect(container.textContent).toContain("Everyone else");
-    expect(container.querySelector('[aria-label^="Add "][aria-label$=" to this channel"]')).toBeNull();
-    expect(container.textContent).not.toContain("Manage on the org chart");
-  });
-
-  it("still draws both on an ordinary desk, off the same fixture", async () => {
-    await openMembers("engineering");
-
-    expect(container.querySelector('[aria-label="Add Ada to this channel"]')).not.toBeNull();
-    expect(container.textContent).toContain("Manage on the org chart");
   });
 });

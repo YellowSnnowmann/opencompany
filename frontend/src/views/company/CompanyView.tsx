@@ -28,7 +28,6 @@
 //   `#/company`            the teammates
 //   `#/company/desks`      the org chart
 //   `#/company/<deskId>`   the org chart, arriving at that desk (issue #485)
-//   `#/company/graph`      the knowledge graph (issue #1321)
 //   `#/company/comms`      who talks to whom — the comms graph
 //
 // which means the chart survives a reload, can be linked, and is reached by
@@ -42,7 +41,6 @@
 // `LedgersView.MANAGE_SEGMENT`.
 
 import type { OpenCompanyClient } from "@/api/client";
-import { Overview } from "@/views/Overview";
 import { OrgChartView } from "@/views/company/OrgChartView";
 import { CommsView } from "@/views/comms/CommsView";
 import type { CommsObservation } from "@/views/comms/model";
@@ -59,20 +57,6 @@ import { TeamView } from "@/views/TeamView";
  */
 export const DESKS_SEGMENT = "desks";
 /**
- * The declared-structure graph, moved off the operator landing page (#1321).
- *
- * Reserved like {@link DESKS_SEGMENT}, and with the same accepted collision:
- * `graph` is a legal desk id (`[a-z0-9_]+`), so a company whose manifest
- * declares a desk literally named `graph` cannot focus it through its
- * `#/company/graph` link — the address renders the graph instead. That is the
- * same tradeoff `desks` already makes, and resolving it would cost an async
- * desk read in this routing switch (delaying every graph paint, or flashing
- * the wrong page for the rare company that declares the id), so the collision
- * is documented rather than engineered around.
- */
-export const GRAPH_SEGMENT = "graph";
-
-/**
  * The roster's own segment — `#/company/agents`.
  *
  * The roster is what a bare `#/company` has always rendered, and it still is:
@@ -81,7 +65,7 @@ export const GRAPH_SEGMENT = "graph";
  * agents, which is the mismatch the `/company` prefix work set out to remove
  * everywhere else.
  *
- * Reserved exactly like {@link DESKS_SEGMENT} and {@link GRAPH_SEGMENT}, with
+ * Reserved exactly like {@link DESKS_SEGMENT}, with
  * the same accepted collision: a desk declared with the literal id `agents`
  * cannot be focused through its own link.
  */
@@ -130,13 +114,6 @@ interface Props {
   /** Reopen first-run setup, so skipping it is not a dead end. */
   onRunSetup?: () => void;
   /**
-   * The company's real name — `feed.status.name` in the shell (issue #1219).
-   * The graph's core node should name the company the way the rest of the
-   * console does, not fall back to the slug; optional so this component still
-   * stands alone, matching `Overview`'s own fallback chain.
-   */
-  companyName?: string;
-  /**
    * What the live stream has said about who spoke to whom, folded by the shell
    * (`lib/coordination.ts`), for the comms graph at `#/company/comms`.
    */
@@ -153,14 +130,9 @@ export function CompanyView({
   onOpenAgent,
   refreshKey,
   onRunSetup,
-  companyName,
   commsObservations,
   deskRoutingTick,
 }: Props) {
-  if (sub === GRAPH_SEGMENT) {
-    return <Overview client={client} company={company} companyName={companyName} />;
-  }
-
   if (sub === COMMS_SEGMENT) {
     return <CommsView client={client} company={company} observations={commsObservations} />;
   }

@@ -185,11 +185,13 @@ way with its own module name.
 
 A new file under `tests/` is not covered until a CI job both selects it and
 enables the features its crate-level `cfg` needs (issue #475). A target missing
-either builds, runs and reports zero without failing anything. The gated `Rust
-(openhuman, tinycortex)` job runs `--tests` and then asserts a non-zero count
-per target via `scripts/ci/assert-integration-targets-run.sh`; if your target
-needs a feature set no lane builds, add the lane and run that script there too
-rather than loosening the `cfg`.
+either builds, runs and reports zero without failing anything. The `gated`
+CI lane runs `--tests` and then asserts a non-zero count per target via
+`scripts/ci/assert-integration-targets-run.sh`; if your target needs a feature
+set no lane builds, add the lane and run that script there too rather than
+loosening the `cfg`. Lanes live in `scripts/ci/lanes/lanes-plan.mjs`; how CI
+runs them (one required `PR CI Gate`, org members on the Hetzner EX63) is in
+`docs/ci.md`.
 
 A feature-gated test has the same problem one level up (issue #770). Cargo
 features are additive and every CI lane pins an explicit feature set, so a test
@@ -335,11 +337,11 @@ injects its environment. When developing hosted behavior, know the seams:
   / `OPENCOMPANY_SENTRY=off` silence them, and there is no client secret. Any
   endpoint must be `https`, or `http` to a loopback host: the client id is a
   request header on every request, and the workload refuses a plain-`http`
-  collector rather than warning about it. These particular defaults — the
-  hosted-tenant analytics client id/endpoint and the `opencompany-core`
-  Sentry DSN — never apply to desktop or self-hosted deployments. The desktop
-  shell has its own, separate compiled-in Sentry default (the
-  `opencompany-tauri` project); see `docs/spec/runtime/crash-reporting.md`.
+  collector rather than warning about it. The core's hosted-tenant defaults
+  never apply to self-hosted deployments. The desktop shell supplies its own:
+  a compiled-in Sentry DSN (`opencompany-tauri`, `docs/spec/runtime/crash-reporting.md`)
+  and, **on by default with a user opt-out**, analytics to the same OpenPanel
+  endpoint from the Rust host (`docs/spec/runtime/analytics-desktop.md`).
   None of them is required to boot: an instance that says nothing is treated as **self-hosted**
   and reports nothing, which is the safe direction and the documented default
   (`docs/spec/runtime/analytics.md`). `OPENCOMPANY_TENANT_ID` alone also implies

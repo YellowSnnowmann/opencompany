@@ -611,3 +611,6 @@ struct BusyResponse {
 #[cfg(test)]
 #[path = "routes_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "routes_analytics_tests.rs"]
+mod tests_analytics;

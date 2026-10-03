@@ -39,6 +39,11 @@ const TEAMMATE = "engineer";
 const DM_CHANNEL = `dm:${TEAMMATE}`;
 
 /** The claim under test. It must not appear until the host has justified it. */
+/**
+ * The copy the bug put up over a thread still on the wire. The intro line that
+ * carried it has since been removed outright, so an empty conversation now
+ * makes no claim at all — these assertions stay to keep it that way.
+ */
 const EMPTY_CLAIM = /This is the start of your direct message/;
 
 /**
@@ -126,23 +131,20 @@ test("a reloaded DM waits for its history instead of calling itself new", async 
 
   history.release();
 
-  await expect(page.getByText("Behind the flag, shipping Thursday.")).toBeVisible({
+  // In the transcript: the rail's preview of the DM says the last line too.
+  const transcript = page.getByTestId("channel-transcript");
+  await expect(transcript.getByText("Behind the flag, shipping Thursday.")).toBeVisible({
     timeout: 30_000,
   });
-  await expect(page.getByText("Where did we land on the migration?")).toBeVisible();
+  await expect(transcript.getByText("Where did we land on the migration?")).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: /Loading messages/ })).toHaveCount(0);
-  // The intro line DOES come back here, and that is correct: it sits above the
-  // first message as the top of the scroll — see `ChannelIntro`. Standing over
-  // a rendered thread it reads as "you are at the beginning", which is true.
-  // What made it a lie was standing alone over nothing, which is the assertion
-  // before the release above.
-  await expect(page.getByText(EMPTY_CLAIM)).toBeVisible();
+  await expect(page.getByText(EMPTY_CLAIM)).toHaveCount(0);
 });
 
-test("a DM the host reports empty does say it is the start", async ({ page }) => {
-  // The other half of the fix, and the one a naive "just never show the copy"
-  // would break: an empty answer is still an answer. Without this, the guard
-  // could regress into a spinner that never resolves and no test would notice.
+test("a DM the host reports empty settles instead of loading forever", async ({ page }) => {
+  // The other half of the fix: an empty answer is still an answer. Without
+  // this, the guard could regress into a spinner that never resolves and no
+  // test would notice.
   const history = await holdHistory(page, TEAMMATE, []);
 
   await page.goto(`/#/chat/${DM_CHANNEL}`);
@@ -150,8 +152,12 @@ test("a DM the host reports empty does say it is the start", async ({ page }) =>
   await history.requested();
   await expect(page.getByText(EMPTY_CLAIM)).toHaveCount(0);
 
+  await expect(page.getByRole("status").filter({ hasText: /Loading messages/ })).toBeVisible();
+
   history.release();
 
-  await expect(page.getByText(EMPTY_CLAIM)).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("status").filter({ hasText: /Loading messages/ })).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: /Loading messages/ })).toHaveCount(0, {
+    timeout: 30_000,
+  });
+  await expect(page.getByText(EMPTY_CLAIM)).toHaveCount(0);
 });

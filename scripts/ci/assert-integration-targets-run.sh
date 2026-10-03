@@ -117,8 +117,8 @@ CI compiles an empty binary and reports success.
 
 Fix the WIRING, not the test:
 
-  * add the feature the target needs to the gated job in
-    .github/workflows/ci.yml, if it belongs on that lane; or
+  * add the feature the target needs to the gated lane in
+    scripts/ci/lanes/lanes-plan.mjs, if it belongs on that lane; or
   * add a job that builds the feature set the target needs, and run this script
     there too with that job's feature list.
 

@@ -61,10 +61,8 @@ import { personAvatar } from "@/lib/person";
 import { useAskerNames } from "@/components/approval-card";
 import { useRoomRailSlot } from "@/components/room-rail";
 import { AddMemberDialog, type NewMemberFields } from "./room/AddMemberDialog";
-import { ChannelCreateDialog } from "./room/ChannelCreateDialog";
 import { ChannelRail } from "./room/ChannelRail";
-import { ChatHeader } from "./room/ChatHeader";
-import { MembersPane } from "./room/MembersPane";
+import { ChannelInfoPanel, ChannelPill } from "./room/ChannelInfo";
 import { dmRawTurns } from "./room/rawTurnScope";
 import { TypingLine } from "./room/TypingLine";
 import { InflightRunBar } from "./room/InflightRunBar";
@@ -96,14 +94,12 @@ import {
   channelMembers,
   channelTitle,
   deskFromDto,
-  dmChannelId,
   dmThreadId,
   findChannel,
   firstChannel,
   historyReady,
   HISTORY_UNTRACKED,
   clearTaskCardEverywhere,
-  directMessageChannels,
   directMessageForId,
   inlineReplyIds,
   latestBudgetPauseMessageIdByAgent,
@@ -220,23 +216,15 @@ interface Props {
    */
   onSendStart?: (threadId: string) => number | undefined;
   /**
-   * Who is present right now, keyed by user id. Empty when the host has no
-   * presence route, or when nobody else is connected to this replica.
+   * Who is present right now, keyed by user id — the online dots on the
+   * details panel's People list. Empty when the host has no presence route, or
+   * when nobody else is connected to this replica.
    */
   presence?: ReadonlyMap<string, { status: "online" | "away" | "offline" }>;
   /**
-   * The autonomy control, rendered on the composer's toolbar row.
-   *
-   * A node, not the policy: `AppShell` owns the tier and the admin check, and
-   * handing the rendered pill down keeps every fact about policy in one place.
-   */
-  autonomy?: ReactNode;
-  /**
-   * The company's people, for the members pane's People section.
-   *
-   * Separate from `members` (teammates) on purpose: desk membership is a
-   * teammate concept, and every signed-in person can already see every desk,
-   * so people are never "in" or "outside" a channel.
+   * The company's people, for the details panel's People section. Separate
+   * from `members` (teammates): desk membership is a teammate concept, and
+   * every signed-in person can already see every desk.
    */
   companyPeople?: Array<{ id: string; label: string }>;
   /**
@@ -420,9 +408,6 @@ interface Props {
   episodeFrames?: EpisodeFrames;
 }
 
-const FIRST_TEAM_BRIEF =
-  "Help us get started: propose the first three priorities for our company and who should own each one.";
-
 /**
  * The chat workspace.
  *
@@ -457,7 +442,6 @@ export function RoomView({
   rosterRevision = 0,
   onNavigate,
   onOpenAgent,
-  autonomy,
   onReply,
   transcripts,
   setTranscripts,
@@ -600,10 +584,6 @@ export function RoomView({
   /** Set when `/desks` failed for a reason that isn't "this host has none". */
   const [desksError, setDesksError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const [composerPrefill, setComposerPrefill] = useState<{
-    text: string;
-    revision: number;
-  } | null>(null);
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
   const [dismissingCardId, setDismissingCardId] = useState<string | null>(null);
   /** Every card whose review verdict is currently in flight — one entry per
@@ -618,10 +598,11 @@ export function RoomView({
   const [redeemingBudgetPauseAgent, setRedeemingBudgetPauseAgent] = useState<string | null>(
     null,
   );
-  const [membersOpen, setMembersOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  // The details panel the channel pill opens (`ChannelInfo.tsx`). Held across
+  // channel switches, the way a side panel stays open while you browse.
+  const [infoOpen, setInfoOpen] = useState(false);
   // The rail's "+" (issue #1835) — chat's own door for creating a channel.
-  const [channelCreateOpen, setChannelCreateOpen] = useState(false);
   // The channel list is a section of the app sidebar now, so the sidebar owns
   // where it is, how dense it is, and whether it is covering the transcript.
   // See `components/room-rail.tsx`.
@@ -844,19 +825,6 @@ export function RoomView({
   // channels with the previous one's.
   const desksRun = useRef(0);
   /**
-   * Whether the current `desks` state is `defaultDesks()` — the fabricated
-   * starter set shown when the host exposes no desks — rather than the host's
-   * own list. `onCreated` below needs the distinction (codex on #1872):
-   * appending the company's first real channel *beside* the fallback would
-   * leave nonexistent channels in the rail until reload, and a channel named
-   * "Strategy" would collide with the fallback row of the same id, so
-   * navigation could land on the fabrication instead of the real thing. The
-   * moment one real desk exists the fallback set has no business rendering —
-   * that is the fallback's own contract (`lib/desks.ts`).
-   */
-  const desksAreFallback = useRef(false);
-
-  /**
    * The company's real desks, when the host exposes them — a company with its
    * own desks gets its own channels instead of the generic strategy/creative/
    * front-desk trio.
@@ -913,14 +881,11 @@ export function RoomView({
     try {
       const dtos = await client.listDesks(company);
       if (run !== desksRun.current) return;
-      // An answered read is never the fallback set, empty or not.
-      desksAreFallback.current = false;
       desksLoadedFor.current = { client, company };
       setDesks(dtos.map(deskFromDto));
     } catch (error) {
       if (run !== desksRun.current) return;
       if (error instanceof ApiError && error.status === 404) {
-        desksAreFallback.current = true;
         desksLoadedFor.current = { client, company };
         setDesks(defaultDesks());
         return;
@@ -1078,6 +1043,17 @@ export function RoomView({
    */
   const [rawRequested, setRawRequested] = useHashFlag("raw");
   const showRaw = rawRequested && !!rawAgentId;
+  // Raw turns belongs to the conversation it was opened on: switching to any
+  // other chat turns it off. The first id is remembered rather than acted on,
+  // so a deep-linked `#/chat/<id>?raw` still opens raw.
+  const rawChannelRef = useRef(channel?.id);
+  useEffect(() => {
+    if (rawChannelRef.current === channel?.id) return;
+    rawChannelRef.current = channel?.id;
+    if (rawRequested) setRawRequested(false);
+    // Only the channel moving resets it; reading the flag is not a trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel?.id]);
   const [rawRows, setRawRows] = useState<AgentSessionMessageDto[]>([]);
   const [rawLoad, setRawLoad] = useState<RawLoad>("loading");
   // The same stale-response guard the Session tab carries (issue #1671): a read
@@ -1227,6 +1203,13 @@ export function RoomView({
     return channelMembers(channel, members);
   }, [channel, members]);
 
+  /** The roster teammates not in the open channel — the panel's "Everyone else". */
+  const outsideChannel = useMemo(() => {
+    if (!inChannel) return members;
+    const inside = new Set(inChannel.map((m) => m.id));
+    return members.filter((m) => !inside.has(m.id));
+  }, [inChannel, members]);
+
   /**
    * Everything an `@` can name in this company.
    *
@@ -1298,12 +1281,6 @@ export function RoomView({
         : entry,
     );
   }, [directory, inChannel]);
-
-  const outsideChannel = useMemo(() => {
-    if (!inChannel) return members;
-    const inside = new Set(inChannel.map((m) => m.id));
-    return members.filter((m) => !inside.has(m.id));
-  }, [inChannel, members]);
 
   const transcript = useMemo(
     () => (channel ? (transcripts[channel.id] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES),
@@ -1887,10 +1864,9 @@ export function RoomView({
   // A local the closures below can capture as non-null: TypeScript hoists
   // function declarations, so the guard above does not narrow inside them.
   const active = channel;
-  // Whether the open channel is a real, host-backed desk — as opposed to a DM
-  // or a fallback desk (`lib/desks.ts`, used before `/desks`
-  // answers) — and, for the membership controls, one whose membership the
-  // operator can change: `#general`'s is the roster, kept by the host.
+  // Whether the open channel is a real, host-backed desk whose membership the
+  // operator can change — `#general`'s is the roster, kept by the host, and a
+  // DM or a fallback desk (`lib/desks.ts`) has none to change.
   const activeIsDesk = active.kind === "channel" && (desks ?? []).some((d) => d.id === active.id);
   const activeIsMutableDesk = activeIsDesk && active.mutable !== false;
   // The host thread this channel is addressed on. A real desk channel's id
@@ -1965,16 +1941,6 @@ export function RoomView({
     // over live work (Codex review on #2042).
     return candidates.find((t) => !t.queued) ?? candidates[0];
   })();
-  /**
-   * The count beside the channel title.
-   *
-   * A DM is stated as 2 rather than derived: it is a two-person conversation,
-   * but the operator has no roster row, so counting rows would say 1 and
-   * inventing a "You" row to make the arithmetic work would be worse. A desk
-   * counts its own members; a channel with no membership of its own still
-   * counts the company, which is all it can honestly claim.
-   */
-  const headerCount = active.kind === "dm" ? 2 : (inChannel?.length ?? members.length);
   /**
    * The teammate on the other end of this DM exists only in the console (issue
    * #364) — a starter-roster row, or one added while the host had no team write
@@ -2661,30 +2627,13 @@ export function RoomView({
   }
 
   /**
-   * Put an agent already on the roster onto this channel's desk (issue
-   * #2224) — not a variant of `addMember`, which creates a brand-new
-   * teammate. Dropping one from the roster entirely is a Team-page action;
-   * `MembersPane` no longer offers it here. `activeIsMutableDesk` gates
-   * `MembersPane`'s own "add existing" affordance, so `active.id` is a real
-   * desk id by the time this runs; the check here is defensive, not load
-   * bearing.
-   *
-   * `reloadDirectory` alone does not move the added agent into "In this
-   * channel": it only refetches the `@mention` picker's directory.
-   * `channelMembers`/`others` come from `inChannel`/`outsideChannel`, which
-   * are derived from `desks` — so this also calls `loadDesks`, the same
-   * function every desk-membership mutation on the org chart already
-   * refetches through after `addDeskMember`/`removeDeskMember`. Confirmed
-   * safe to call on a plain revisit, not just a scope change: `loadDesks`'s
-   * own comment says it blanks the list only when the client or company
-   * changed, never on a revisit — so this does not flash the pane empty.
+   * Adds a roster teammate to the open desk, from the details panel's
+   * "Everyone else" list. Refetches the desks (membership) and the `@mention`
+   * directory after, and drops every effect if the operator switched company
+   * or connection while the POST was in flight.
    */
   async function addExistingMember(agentId: string) {
     if (!activeIsMutableDesk) return;
-    // Same rule `send` above follows: if the operator switches company or
-    // connection while the POST is in flight, every UI-visible effect of it —
-    // refresh or toast — belongs to a scope nobody is looking at anymore, so
-    // it is dropped rather than landing on whatever they switched to.
     const scopeAtAdd = { connection: scope.connection, company: scope.company, client };
     const stale = () => {
       const latestScope = scopeRef.current;
@@ -2703,10 +2652,8 @@ export function RoomView({
     } catch (error) {
       if (stale()) return;
       if (error instanceof ApiError && error.status === 409) {
-        // The one 409 this route answers: already a member. Reached only by
-        // a race with another tab or operator — refresh now so the row
-        // leaves "Everyone else" immediately rather than on an unrelated
-        // reload.
+        // The one 409 this route answers: already a member, reached only by a
+        // race with another tab or operator — refresh so the row moves now.
         void loadDesks();
         toast.error("Already on this channel.");
       } else {
@@ -2714,15 +2661,6 @@ export function RoomView({
       }
     }
   }
-
-  /**
-   * The rail's create affordance (issue #1835) — or `undefined`, which is the
-   * rule this codebase follows for a control that would be refused: absent,
-   * not disabled. A starter roster (`!fromHost`) has no saved teammates to
-   * staff a channel with, and an empty roster has nobody at all.
-   */
-  const onAddChannel =
-    fromHost && members.length > 0 ? () => setChannelCreateOpen(true) : undefined;
 
   function selectChannel(id: string) {
     onNavigate(id);
@@ -2783,13 +2721,7 @@ export function RoomView({
             onSelect={selectChannel}
             openSections={railOpenSections}
             onToggleSection={toggleRailSection}
-            directMessages={directMessageChannels(members)}
-            onStartDirectMessage={selectChannel}
-            onAddChannel={onAddChannel}
-            // The same `AddMemberDialog` and `addMember` the empty pane and the
-            // Company > Agents "Add agent" button use — mounted below, open
-            // state `addOpen`.
-            onAddAgent={() => setAddOpen(true)}
+            members={members}
             collapsed={channelsCollapsed}
             onExpand={toggleChannels}
             // Off Room the marked channel is where Room will take you back to,
@@ -2820,17 +2752,21 @@ export function RoomView({
           open from Company and Flows as readily as from Room. */}
       {routeOpen && (
         <div className="flex min-h-0 flex-1">
-          <div className="flex min-w-0 flex-1 flex-col">
-            <ChatHeader
-              channel={channel}
-              memberCount={headerCount}
-              membersOpen={membersOpen}
-              onToggleMembers={() => setMembersOpen((o) => !o)}
-              onOpenRail={roomRail.reveal}
-              rawAvailable={!!rawAgentId}
-              raw={showRaw}
-              onToggleRaw={() => setRawRequested(!showRaw)}
-            />
+          <div className="relative flex min-w-0 flex-1 flex-col">
+            {/* No channel header bar: the page keeps its name for assistive
+                tech through this hidden heading, and the pill below carries
+                the name, the faces, and the way to details and members. */}
+            <PageHeader title={channelTitle(channel)} hidden />
+            {/* Who this is with, as a pill floating over the transcript; it
+                opens the details panel on the right (`ChannelInfo.tsx`). */}
+            {!showRaw && (
+              <ChannelPill
+                channel={channel}
+                members={members}
+                open={infoOpen}
+                onToggle={() => setInfoOpen((o) => !o)}
+              />
+            )}
 
             <div className="flex min-h-0 flex-1">
               <div className="flex min-w-0 flex-1 flex-col">
@@ -2913,13 +2849,6 @@ export function RoomView({
                   resolveAttachmentUrl={resolveAttachmentUrl}
                   taskStatusByTaskId={taskStatusByTaskId}
                   onRetrySend={retrySend}
-                  onStartBrief={() =>
-                    setComposerPrefill((current) => ({
-                      text: FIRST_TEAM_BRIEF,
-                      revision: (current?.revision ?? 0) + 1,
-                    }))
-                  }
-                  onAddPeople={() => setMembersOpen(true)}
                   now={now}
                   askerNames={askerNames}
                   decidingApprovals={decidingApprovals}
@@ -3111,14 +3040,13 @@ export function RoomView({
                     onSteered={onInflightSteered}
                   />
                 )}
+                {/* Raw turns is a read-only record: no composer over it. */}
+                {!showRaw && (
                 <MessageComposer
-                  // Passed straight through from `AppShell` — see the prop's
-                  // note on `MessageComposer`. This view learns nothing about
-                  // policy; it only knows where the control goes.
-                  autonomy={autonomy}
                   placeholder={`Message ${channelTitle(channel)}`}
+                  // Opening a conversation lands the cursor in its composer.
+                  focusKey={channel.id}
                   disabled={sending}
-                  prefill={composerPrefill ?? undefined}
                   // Not voided (unlike the thread composer below): the composer
                   // awaits this to know whether an attachment it carried actually
                   // journaled, so it can clean up one that did not (codex review
@@ -3145,6 +3073,7 @@ export function RoomView({
                   mentionables={mentionables}
                   channelMemberIds={inChannel?.map((m) => m.id)}
                 />
+                )}
                 </div>
               </div>
 
@@ -3219,57 +3148,32 @@ export function RoomView({
                 />
               )}
 
-              {membersOpen && (
-                <MembersPane
-                  channelMembers={inChannel}
-                  others={outsideChannel}
-                  people={companyPeople}
-                  presence={presence}
-                  leadId={
-                    // An `auto` channel has no lead (issue #1835): its memberIds
-                    // are the channel's membership in the host's order, not a
-                    // hierarchy, so badging [0] would state a rank nothing
-                    // confers — the host's own `desk_lead` is `None` for it.
-                    activeIsDesk && !active.leadless ? active.memberIds?.[0] : undefined
-                  }
-                  loading={loadingTeam}
-                  fromHost={fromHost}
-                  // `activeIsMutableDesk`, not "`channelMembers` is non-null": a DM
-                  // has real (non-null) channel membership too — one row,
-                  // itself — and is not a desk. `addDeskMember` has no
-                  // meaning there, and the affordance must not appear at all
-                  // (absent, never disabled — the rule `onManageDesk` below
-                  // already follows for the same reason).
-                  onAddExisting={
-                    activeIsMutableDesk ? (agentId) => void addExistingMember(agentId) : undefined
-                  }
-                  onMessage={(m) => selectChannel(dmChannelId(m))}
-                  /**
-                   * The way from this channel to the desk it is (issue #485).
-                   *
-                   * Only for a host-backed desk channel. A DM is not a desk, and a
-                   * fallback desk (`lib/desks.ts`) carries no `memberIds` because
-                   * the host has no desks surface at all — the chart would have
-                   * nothing to open. Both simply get no link rather than one that
-                   * lands nowhere.
-                   *
-                   * A desk's channel id **is** its desk id (`deskFromDto`), so
-                   * there is no mapping to keep in step. Written to the hash rather
-                   * than routed through a callback, as `ArtifactsTab`'s "Open in
-                   * workspace" does: this is a cross-view address, and the shell
-                   * only hands chat a chat-scoped navigate.
-                   */
-                  onManageDesk={
-                    activeIsMutableDesk && active.memberIds
-                      ? () => {
-                          window.location.hash = `/company/${active.id}`;
-                        }
-                      : undefined
-                  }
-                />
-              )}
             </div>
           </div>
+          {/* Held open while raw turns is on: the chip is hidden then, and the
+              panel's toggle is the way back to the conversation. */}
+          {(infoOpen || showRaw) && (
+            <ChannelInfoPanel
+              channel={channel}
+              members={members}
+              channelMembers={inChannel}
+              others={outsideChannel}
+              people={companyPeople}
+              presence={presence}
+              loading={loadingTeam}
+              leadId={activeIsDesk && !active.leadless ? active.memberIds?.[0] : undefined}
+              onAddExisting={
+                activeIsMutableDesk ? (agentId) => void addExistingMember(agentId) : undefined
+              }
+              onClose={() => {
+                setInfoOpen(false);
+                if (showRaw) setRawRequested(false);
+              }}
+              onMessage={selectChannel}
+              // Only a DM has one teammate whose raw turns there are to show.
+              raw={rawAgentId ? { on: showRaw, onToggle: () => setRawRequested(!showRaw) } : undefined}
+            />
+          )}
         </div>
       )}
 
@@ -3279,28 +3183,6 @@ export function RoomView({
         onAdd={addMember}
         client={client}
         company={company}
-      />
-      <ChannelCreateDialog
-        client={client}
-        company={company}
-        members={members}
-        open={channelCreateOpen}
-        onOpenChange={setChannelCreateOpen}
-        onCreated={(dto) => {
-          // Fold the new channel into the rail and land the operator in it —
-          // the same deskFromDto every fetched desk goes through, so a
-          // just-created channel is indistinguishable from a reloaded one.
-          //
-          // REPLACING the fallback set, not appending to it, when the rail was
-          // showing `defaultDesks()`: the company's first real channel is the
-          // event that ends the fallback's mandate, and appending beside it
-          // would keep fabricated rows in the rail — one of which could share
-          // the new channel's very id — until a reload (codex on #1872).
-          const desk = deskFromDto(dto);
-          setDesks((prev) => (desksAreFallback.current ? [desk] : [...(prev ?? []), desk]));
-          desksAreFallback.current = false;
-          selectChannel(desk.id);
-        }}
       />
     </>
   );

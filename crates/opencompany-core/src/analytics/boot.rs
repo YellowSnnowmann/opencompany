@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use crate::analytics::config::{Decision, resolve};
+use crate::analytics::config::{Decision, Silence, resolve};
 use crate::analytics::types::{Envelope, OpaqueId};
 use crate::analytics::{DeferredTracker, Event, Tracker, openpanel};
 use crate::app::AppState;
@@ -29,6 +29,18 @@ use crate::app::deployment::Deployment;
 /// Returns the decision so the caller can say, in one line, why a host that an
 /// operator expected to report is not reporting.
 pub fn install(state: &AppState, handle: &DeferredTracker, env: &dyn EnvSource) -> Decision {
+    install_for_shell(state, handle, env, None)
+}
+
+/// [`install`] for a host embedded in a shell (the desktop app), which stamps
+/// its own version onto every event as `shell_version`. `None` is exactly
+/// [`install`].
+pub fn install_for_shell(
+    state: &AppState,
+    handle: &DeferredTracker,
+    env: &dyn EnvSource,
+    shell_version: Option<&'static str>,
+) -> Decision {
     let deployment = Deployment::from_env(env);
     let decision = resolve(deployment, env);
 
@@ -68,9 +80,14 @@ pub fn install(state: &AppState, handle: &DeferredTracker, env: &dyn EnvSource) 
         .map(|runtime| runtime.cognition())
         .unwrap_or_default();
 
-    let envelope = Envelope::new(id, deployment, cognition);
+    let mut envelope = Envelope::new(id, deployment, cognition);
+    if let Some(version) = shell_version {
+        envelope = envelope.with_shell_version(version);
+    }
     let tracker: Arc<dyn Tracker> = openpanel::build(&decision, envelope);
-    handle.install(tracker);
+    // Through the decision-carrying install, so `/spec` can say *why* a
+    // process is silent: a `NullTracker` has no opinion of its own.
+    handle.install_with_decision(tracker, &decision, deployment);
 
     handle.track(Event::InstanceStarted {
         companies: state.registry().list().len() as u64,
@@ -124,6 +141,33 @@ pub(crate) fn identify(state: &AppState, env: &dyn EnvSource) -> OpaqueId {
 /// other boot line here is a `println!`. So the build is named on this line
 /// instead.
 pub fn describe(decision: &Decision) -> String {
+    describe_for(Deployment::default(), decision)
+}
+
+/// [`describe`] for a known deployment kind.
+///
+/// The desktop says what the user can do about it ("turn off in Settings →
+/// Privacy"), because there it is on by default and the person at the keyboard
+/// is the one who decides; every other deployment keeps the wording pinned by
+/// `boot_tests.rs`.
+pub fn describe_for(deployment: Deployment, decision: &Decision) -> String {
+    if deployment == Deployment::Desktop {
+        match decision {
+            Decision::Silent(Silence::OptedOut) => {
+                return "analytics: off (turned off by the user)".to_string();
+            }
+            Decision::Report { endpoint, .. }
+                if crate::analytics::BuildFlags::of_this_build().analytics =>
+            {
+                return format!(
+                    "analytics: on (desktop default; turn off in Settings → Privacy or \
+                     OPENCOMPANY_ANALYTICS=off) — reporting to {}",
+                    loggable_endpoint(endpoint)
+                );
+            }
+            _ => {}
+        }
+    }
     match decision {
         Decision::Silent(reason) => {
             format!("analytics: off ({})", reason.as_str())

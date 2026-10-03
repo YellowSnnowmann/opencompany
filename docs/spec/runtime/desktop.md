@@ -16,7 +16,7 @@ dependency into a hard requirement for checking the server. The host stays a
 plain `path` dependency, so a change to it is picked up with no publishing step.
 
 The cost is that no root `cargo` invocation reaches the desktop, including
-`--all-features`. The `Desktop` job in `.github/workflows/ci.yml` is what builds
+`--all-features`. The `desktop` CI lane (`scripts/ci/lanes/lanes-plan.mjs`) is what builds
 and tests it; without that lane the crate would be compiled by nothing, which is
 [issue #475](https://github.com/tinyhumansai/opencompany/issues/475)'s shape.
 
@@ -51,11 +51,11 @@ either a second `tauri.conf.json` or a script that invokes a bare `tauri`.
 
 The desktop links the host with an explicit feature set, and it is declared in
 **two** places — reading only the first is issue #1738. The manifest's list, on
-the `opencompany-core` dependency in `crates/opencompany-app/Cargo.toml`:
+the `opencompany-core` dependency in `crates/opencompany-app/Cargo.toml` (`analytics` is there: the desktop reports product analytics by default with an opt-out, see [analytics-desktop.md](analytics-desktop.md)):
 
 ```toml
 opencompany-core = { path = "../opencompany-core", default-features = false, features = [
-  "sqlite", "platform-jwt", "oauth", "mcp", "tinymemory",
+  "sqlite", "platform-jwt", "oauth", "mcp", "tinymemory", "tinyhumans", "crash-reporting", "analytics",
 ] }
 ```
 
@@ -86,7 +86,7 @@ the same way and less visibly (`acp_agents = None`, so every `transport =
 `DESKTOP_FEATURES` override for the leaner build. A derived value cannot drift.
 
 `scripts/ci/assert-desktop-features.sh` guards what is still duplicated (the two
-`ci.yml` steps, `npm run tauri:build`, the by-hand command below), that the
+desktop-lane steps, `npm run tauri:build`, the by-hand command below), that the
 release `tauri build` still consumes the variable it declares — otherwise the
 source of truth is a lie — and that the launcher still derives rather than
 re-hardcoding a literal.

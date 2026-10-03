@@ -125,16 +125,17 @@ land on `release` as PRs and reach `main` through the back-merge, so neither
 branch loses them.
 
 **No separate build-and-test job.** Everything on `release` came through a PR
-that ran `ci.yml`, the promotion dispatches `ci.yml` on the snapshot, and the
+that ran the CI lanes, the promotion runs them again on the snapshot, and the
 desktop and Docker jobs compile the tag `--locked` anyway. A third compile of
 the same tree cost ~30 minutes per cut and never found anything new.
 
 **Pushes by the workflow do not trigger CI.** The bump commit and the
 promotion merge are pushed with `GITHUB_TOKEN`, which GitHub deliberately
-excludes from firing `push` workflows. The promotion dispatches `ci.yml`
-explicitly for that reason (and `ci.yml` forces every lane on a dispatch, since
-its path filter would otherwise see an empty diff). The bump commit is version
-numbers only and is verified by the cut itself.
+excludes from firing `push` workflows. The promotion's push to `release` is
+made by a GitHub App instead, which does fire `ci-fast-hosted.yml`, and the
+lanes force every area on for a `release` push or a dispatch, since their path
+filter would otherwise see an empty diff. The bump commit is version numbers
+only and is verified by the cut itself.
 
 ## Backfilling Windows for an older release
 

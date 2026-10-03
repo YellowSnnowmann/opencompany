@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { hostSwitcher } from "./host-switcher";
 
 
 
@@ -259,7 +260,7 @@ test("a relaunch at a new port re-addresses the connection instead of adding one
   // (`src/product-scope.ts`), but the trigger still reports the worst status
   // across every host — with one row left, that IS this row's status, and it
   // still comes back from a real probe of the real host.
-  await expect(page.getByTestId("host-switcher")).toHaveAttribute("data-worst-status", "live", {
+  await expect(await hostSwitcher(page)).toHaveAttribute("data-worst-status", "live", {
     timeout: 30_000,
   });
 });

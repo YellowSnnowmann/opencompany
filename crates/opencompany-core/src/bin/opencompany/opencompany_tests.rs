@@ -436,6 +436,52 @@ fn the_default_filter_passes_durable_append_warnings_and_still_drops_other_ones(
     );
 }
 
+/// The analytics transport's refused-credential and rejected-event warnings are
+/// the only account of a collector that will never take this instance's events,
+/// and a bare `error` default swallowed them. Asserted by running the real
+/// filter, like the durable-append test above: the directive must let an
+/// `opencompany::analytics` warning through and still stop its `info`/`debug`.
+#[test]
+fn the_default_filter_passes_analytics_warnings_and_not_its_chatter() {
+    use tracing_subscriber::layer::SubscriberExt;
+
+    assert!(
+        DEFAULT_LOG_FILTER.contains("opencompany::analytics=warn"),
+        "the directive must be named in the default; got {DEFAULT_LOG_FILTER}"
+    );
+
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry()
+        .with(Captured(std::sync::Arc::clone(&captured)))
+        .with(log_filter(None));
+
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::warn!(target: "opencompany::analytics::openpanel::http", "refused");
+        tracing::info!(target: "opencompany::analytics::openpanel::http", "accepted");
+        tracing::debug!(target: "opencompany::analytics::openpanel::http", "chatter");
+        tracing::warn!(target: "opencompany::unrelated", "ordinary warning");
+    });
+
+    let events = captured.lock().expect("capture lock").clone();
+    let seen = |target: &str, level: tracing::Level| {
+        events.iter().any(|(t, l)| t == target && *l == level)
+    };
+    let transport = "opencompany::analytics::openpanel::http";
+    assert!(seen(transport, tracing::Level::WARN), "captured {events:?}");
+    assert!(
+        !seen(transport, tracing::Level::INFO),
+        "captured {events:?}"
+    );
+    assert!(
+        !seen(transport, tracing::Level::DEBUG),
+        "captured {events:?}"
+    );
+    assert!(
+        !seen("opencompany::unrelated", tracing::Level::WARN),
+        "the directive is scoped to analytics; captured {events:?}"
+    );
+}
+
 /// Issue #2147: the consequence-floor shadow reader's whole output is one
 /// `info!` per call it would have stopped. Without a named exception a
 /// bare `error` filter drops every line of it, so a week of staging

@@ -402,7 +402,7 @@ impl RosterBuilder {
                     return Attempt {
                         roster: None,
                         usage: TokenUsage::default(),
-                        reason: FallbackReason::NotDesignable,
+                        reason: FallbackReason::OutputBudgetExhausted,
                     };
                 }
                 tracing::info!(error = %err, "[setup] the model could not be reached");

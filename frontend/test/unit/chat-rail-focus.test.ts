@@ -32,7 +32,6 @@ const read = (rel: string) => readFileSync(resolve(here, "../../src", rel), "utf
 describe("expanding the compact rail preserves focus (issue #1340)", () => {
   const rail = read("views/room/ChannelRail.tsx");
   const chatView = read("views/RoomView.tsx");
-  const chatHeader = read("views/room/ChatHeader.tsx");
   const controls = read("components/sidebar-controls.tsx");
 
   it("keeps the compact rail's expand button the only expand affordance in the collapsed branch", () => {
@@ -51,7 +50,6 @@ describe("expanding the compact rail preserves focus (issue #1340)", () => {
     // sidebar's job forty pixels from the sidebar's own (issue #1177). The one
     // that survives the switch is `SidebarCollapseButton`, on the content
     // card's leading seam.
-    expect(chatHeader).not.toContain("Collapse channels");
     expect(chatView).toContain('document.querySelector<HTMLElement>(\'[data-testid="sidebar-collapse"]\')');
     // Only on the expand half: collapsing from the seam button leaves that
     // button mounted, and the focus it already holds is the right place to stay.

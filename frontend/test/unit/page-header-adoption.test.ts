@@ -77,14 +77,6 @@ const HAND_ROLLED: Record<string, { count: number; why: string }> = {
       "act-on-it are different questions. It names the open automation, not the page — " +
       "the page's own header is the index's, and that one is a `PageHeader`.",
   },
-  "room/ChatHeader.tsx": {
-    count: 1,
-    why:
-      "The channel bar. It names the open channel and changes as you switch, and its " +
-      "title sits inside a `group/title` whose hover reveals the copy control beside " +
-      "it — an affordance that only works while the heading and the button share a " +
-      "parent this file owns.",
-  },
   "TaskDetailView.tsx": {
     count: 1,
     why:

@@ -34,7 +34,7 @@
 #
 # Issue #590. Every `uses:` below is a full commit SHA with the resolved version
 # in a trailing comment — `actions/*` included, no exemptions. The rationale is
-# at the top of `ci.yml`; the `Actions pinned` job there enforces it. Bumps
+# at the top of `ci-lanes.yml`; scripts/ci/assert-actions-pinned.sh enforces it. Bumps
 # arrive as Dependabot PRs; re-resolve any hand edit with
 # `gh api repos/<owner>/<action>/commits/<tag> --jq .sha`.
 name: Publish staging tenant image
@@ -148,7 +148,7 @@ jobs:
       # `tinyhivemind-hive` is an unconditional path dependency in `Cargo.toml`
       # (`vendor/tinyhivemind/crates/tinyhivemind-hive`), so Cargo must read its
       # manifest to resolve the dependency graph on every build, feature-gated
-      # or not. `ci.yml`'s jobs get this for free from `submodules: true` on
+      # or not. The CI lane jobs get this for free from `submodules: true` on
       # their checkout; this job uses `submodules: false` and fetches
       # everything it needs explicitly, so it must fetch this one too.
       - name: Fetch build vendor submodules
@@ -274,3 +274,31 @@ jobs:
             printf '%s\n' "${TAGS}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Product analytics, sent AND read back, against the image just pushed
+      # (pulled by its immutable `sha-<short>` tag, so a racing push cannot swap
+      # it). Same shape as the release gate in `release-production.yml`: the
+      # image sends one `analytics_self_test` as a hosted tenant and exits 0 only
+      # when the collector accepted it, then `verify-analytics-capture.sh` reads
+      # the profile back from OpenPanel. `VERIFY_ANALYTICS_REQUIRED` is unset, so
+      # a missing `OPENPANEL_MCP_BEARER` warns instead of failing the publish.
+      # docs/spec/runtime/analytics-smoke.md.
+      - name: Verify product analytics (analytics-test)
+        env:
+          OPENPANEL_MCP_BEARER: ${{ secrets.OPENPANEL_MCP_BEARER }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          rc=0
+          profile="$(docker run --rm \
+            --entrypoint opencompany \
+            -e OPENCOMPANY_DEPLOYMENT=hosted-tenant \
+            "${IMAGE}:sha-${SHA:0:12}" \
+            analytics-test)" || rc=$?
+          case "$rc" in
+            0) ;;
+            2) echo "::error::analytics-test says this image would be SILENT as a hosted tenant, so it reports nothing. Check TENANT_FEATURES and the OPENCOMPANY_ANALYTICS switch. See docs/spec/runtime/analytics-status.md." >&2; exit 1 ;;
+            *) echo "::error::analytics-test exited ${rc}: the collector did not accept the event (or the image has no analytics transport). See docs/spec/runtime/analytics-status.md." >&2; exit 1 ;;
+          esac
+          echo "analytics profile id: ${profile}"
+          scripts/ci/verify-analytics-capture.sh "$profile"

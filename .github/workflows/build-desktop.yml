@@ -67,10 +67,10 @@
 # FEATURES ARE PASSED AT BUILD TIME, not committed to
 # `crates/opencompany-app/Cargo.toml`. See `DESKTOP_RELEASE_FEATURES` on the
 # build job for the whole argument; `scripts/ci/assert-desktop-features.sh`
-# reads the value from THIS file and holds `ci.yml` and `desktop-dev.sh` to it.
+# reads the value from THIS file and holds the CI lane plan and `desktop-dev.sh` to it.
 #
 # Every `uses:` below is a full commit SHA with the resolved version in a
-# trailing comment. The rationale is at the top of `ci.yml`.
+# trailing comment. The rationale is at the top of `ci-lanes.yml`.
 # `dtolnay/rust-toolchain` additionally passes an explicit `toolchain:` matching
 # `rust-toolchain.toml`; `scripts/ci/assert-toolchain-pin.sh` enforces that.
 name: Build Desktop (reusable)
@@ -372,7 +372,7 @@ jobs:
       #   credential they need, which a desktop operator can actually supply.
       #   It still fails closed with none; that was never the rebuild's job.
       #
-      # `ci.yml`'s `Desktop` lane passes this SAME string to clippy and test —
+      # The CI lane plan's desktop lane passes this SAME string to clippy and test —
       # otherwise the release would ship a feature combination nothing ever
       # compiled. `scripts/ci/assert-desktop-features.sh` keeps them in step.
       DESKTOP_RELEASE_FEATURES: opencompany-core/acp,opencompany-core/composio
@@ -572,6 +572,19 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Found .app: $APP_PATH"
           echo "Found .dmg: $DMG_PATH"
+
+      # The built app's analytics, executed. `analytics-test` is a hidden argv
+      # mode that runs before Tauri starts, so it works headless on the runner.
+      # It is pointed at a LOOPBACK capture server and asserts the wire contract:
+      # exit 0, an `s_` profile id, `openpanel-client-id` and
+      # `openpanel-sdk-name: opencompany`, and no Origin/Authorization/Cookie.
+      # aarch64 only: the x86_64 leg is cross-compiled and the runner cannot
+      # execute it (see the header). The same binary runs unsigned here and signed
+      # below, so this is checked once, before notarization spends minutes.
+      # docs/spec/runtime/analytics-smoke.md.
+      - name: Assert desktop analytics wire contract
+        if: matrix.settings.target == 'aarch64-apple-darwin'
+        run: scripts/ci/assert-desktop-analytics.sh "${{ steps.locate.outputs.app_path }}"
 
       # `bundle.targets` is "all", which on Windows is NSIS and MSI. Both are
       # required, and with the updater on so is each installer's `.sig`.

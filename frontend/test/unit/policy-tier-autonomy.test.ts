@@ -180,14 +180,17 @@ describe("the autonomy direction", () => {
     expect(gatedBy(["shell"], "SHELL")).toBe(true);
   });
 
-  it("shows the looser end of the scale in the console's amber risk tone", async () => {
+  it("marks only the current tier, in the accent, and labels the scale's ends", async () => {
+    // The wider tiers were each washed in amber, which read as mud in dark
+    // mode and put several warning blocks on the page at once. The scale's
+    // labels say which way autonomy grows; the selection is the accent.
     await mount(makeClient(status("supervised")).client);
-    expect(container.querySelector("[data-testid=policy-tier-auto]")?.className).toContain(
-      "status-blocked",
-    );
-    expect(container.querySelector("[data-testid=policy-tier-full]")?.className).toContain(
-      "status-blocked",
-    );
+    const auto = container.querySelector("[data-testid=policy-tier-auto]")?.className ?? "";
+    const supervised =
+      container.querySelector("[data-testid=policy-tier-supervised]")?.className ?? "";
+    expect(auto).not.toContain("status-blocked");
+    expect(supervised).toContain("border-primary");
+    expect(container.textContent).toContain("More oversight");
     expect(container.textContent).toContain("More autonomy");
   });
 });

@@ -39,7 +39,6 @@
  */
 
 export type View =
-  | "overview"
   | "company"
   | "chat"
   | "inbox"
@@ -129,7 +128,6 @@ export type View =
  * still answer.
  */
 const ROUTABLE: Record<View, true> = {
-  overview: true,
   company: true,
   chat: true,
   /** No nav row: parked by issue #302, host routes and per-agent store intact. */
@@ -209,7 +207,7 @@ const ROUTABLE: Record<View, true> = {
   settings: true,
   /** No nav row: linked from the sidebar footer instead. */
   feedback: true,
-  /** No nav row: opens SetupController over Overview (issue #1417). */
+  /** No nav row: opens SetupController over an empty content pane (issue #1417). */
   setup: true,
   /** No nav row: the explicit destination for an unrecognized address (#1417). */
   "not-found": true,

@@ -171,6 +171,6 @@ answer, and runs the shell from `crates/opencompany-app/`.
 it *derives* by scanning for a `package.json`, and which one it picks is not
 stable — on a macOS checkout it lands in `frontend/`, on CI's runner it landed
 in `vendor/openhuman/`. No relative path is correct from both, so both hooks
-are deliberately empty and `ci.yml` packages from two different working
+are deliberately empty and CI packages from two different working
 directories to keep them that way (issue #616). A script can do what the hook
 cannot: derive every path from its own location.
