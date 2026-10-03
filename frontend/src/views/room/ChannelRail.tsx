@@ -303,7 +303,7 @@ function CompactChannelRow({
         "relative flex size-9 shrink-0 items-center justify-center rounded-md transition-colors",
         active
           ? onPage
-            ? "bg-rail-selected text-rail-selected-foreground"
+            ? "bg-chat-selected text-chat-selected-foreground"
             : "text-foreground"
           : "text-muted-foreground hover:bg-rail-hover hover:text-foreground",
       )}
@@ -378,9 +378,6 @@ function ChannelRow({
         .join(": ")
     : null;
   const line = activity ?? preview?.text ?? channelSubtitle(channel) ?? "No messages yet";
-  // On the solid accent of the selected row, the muted and primary inks of the
-  // secondary text would vanish; there they are the row's own ink, dimmed.
-  const selected = active && onPage;
 
   return (
     <button
@@ -394,7 +391,7 @@ function ChannelRow({
         "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
         active
           ? onPage
-            ? "bg-rail-selected text-rail-selected-foreground"
+            ? "bg-chat-selected text-chat-selected-foreground"
             : "text-foreground"
           : "text-foreground/90 hover:bg-rail-hover",
       )}
@@ -416,10 +413,7 @@ function ChannelRow({
           </span>
           {preview && (
             <span
-              className={cn(
-                "shrink-0 text-2xs tabular-nums",
-                selected ? "text-rail-selected-foreground/75" : "text-muted-foreground",
-              )}
+              className="shrink-0 text-2xs tabular-nums text-muted-foreground"
             >
               {railTime(preview.at)}
             </span>
@@ -430,13 +424,11 @@ function ChannelRow({
             data-testid="channel-preview"
             className={cn(
               "min-w-0 flex-1 truncate text-xs",
-              selected
-                ? "text-rail-selected-foreground/80"
-                : activity
-                  ? "text-primary"
-                  : hasUnread
-                    ? "text-foreground"
-                    : "text-muted-foreground",
+              activity
+                ? "text-primary"
+                : hasUnread
+                  ? "text-foreground"
+                  : "text-muted-foreground",
             )}
           >
             {line}
