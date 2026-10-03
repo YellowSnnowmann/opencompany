@@ -139,7 +139,12 @@ export function SettingsSection({
                   page === item.id ? "bg-rail-selected text-rail-selected-foreground" : "hover:bg-rail-hover",
                 )}
               >
-                <item.icon className="size-4 shrink-0 text-muted-foreground" />
+                <item.icon
+                  className={cn(
+                    "size-4 shrink-0",
+                    page === item.id ? "text-rail-selected-foreground" : "text-muted-foreground",
+                  )}
+                />
                 <span className="min-w-0 truncate text-sm font-medium">{item.label}</span>
               </a>
             ))}

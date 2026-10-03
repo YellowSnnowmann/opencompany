@@ -268,7 +268,12 @@ function RailRow({
           current ? "bg-rail-selected text-rail-selected-foreground" : "hover:bg-rail-hover",
         )}
       >
-        <row.icon className="size-4 shrink-0 text-muted-foreground" />
+        <row.icon
+          className={cn(
+            "size-4 shrink-0",
+            current ? "text-rail-selected-foreground" : "text-muted-foreground",
+          )}
+        />
         <span className="min-w-0 truncate text-sm font-medium">{row.label}</span>
       </button>
     </div>
