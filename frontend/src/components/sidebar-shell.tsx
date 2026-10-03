@@ -26,7 +26,12 @@ import { SidebarFooter, SidebarHeader } from "@/components/ui/sidebar";
  */
 export function SidebarShellHeader({ search }: { search: ReactNode }) {
   return (
-    <SidebarHeader data-testid="sidebar-shell-header" className="px-2 pt-2 pb-0">
+    // A hairline under it, the mirror of the foot's `border-t`, and the same
+    // 8px all round: the list scrolls between two ruled edges.
+    <SidebarHeader
+      data-testid="sidebar-shell-header"
+      className="border-b border-sidebar-border p-2"
+    >
       {search}
     </SidebarHeader>
   );

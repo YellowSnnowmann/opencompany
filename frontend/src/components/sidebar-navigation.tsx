@@ -500,6 +500,11 @@ export function SidebarNavigation() {
           // is on the scroller below instead, where it scrolls with the rows
           // and the list fades under the edges rather than being sliced.
           "py-0",
+          // 4px a side rather than the group's `pl-3` + scrollbar gutter: the
+          // rows carry their own `px-2`, and stacked on the group's gutter the
+          // list sat 20px in from the card's edge — visibly narrower than the
+          // search field and the tab row, which are 8px in.
+          "px-1",
           // On the 3rem rail this group's own `px-2` is the difference between
           // fitting and not. The rail is 48px; the gutter leaves a 32px content
           // box, and `ChannelRail`'s compact rows are `size-9` (36px) with their
