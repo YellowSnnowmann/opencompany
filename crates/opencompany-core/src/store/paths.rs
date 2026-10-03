@@ -612,11 +612,6 @@ impl Bundle {
         self.dir.join("keys")
     }
 
-    /// Path to the Ed25519 identity seed (`0600` on unix).
-    pub fn agent_key(&self) -> PathBuf {
-        self.keys_dir().join("agent.ed25519")
-    }
-
     /// Bundle subdirectories excluded from exports. A shared or copied bundle
     /// must never carry the company's private key or per-company secrets; an
     /// export flow honours this list unless explicitly overridden.
