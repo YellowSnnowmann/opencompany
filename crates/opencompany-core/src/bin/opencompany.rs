@@ -1891,7 +1891,7 @@ fn log_filter(rust_log: Option<&str>) -> tracing_subscriber::EnvFilter {
     }
 }
 
-/// Resolves a base-URL env var (`TINYHUMANS_API_URL`, `TINYPLACE_API_URL`)
+/// Resolves a base-URL env var (`TINYHUMANS_API_URL`, `TINYHUMANS_WEB_URL`)
 /// for `serve`'s manual `AppConfig` build. Mirrors
 /// `opencompany::app::config::resolve_base_url`'s precedence — kept as a
 /// small local twin because `serve` builds `AppConfig` field-by-field rather
@@ -1987,7 +1987,6 @@ async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) 
             openhuman_root,
             companies,
             home,
-            discoverable,
         }) => {
             // `--home` > OPENCOMPANY_DATA_DIR > $HOME/.opencompany, then any
             // legacy doubled install is moved up before a single bundle is read.
@@ -2104,21 +2103,6 @@ async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) 
             // production defaults below are refused rather than silently
             // applied for that kind alone. See `resolve_serve_base_url`.
             let deployment = opencompany::app::deployment::Deployment::from_env(&ProcessEnv);
-            // tiny.place economy + public-card configuration resolved from the
-            // environment (with built-in defaults); the a2a routes and boot
-            // going-public flow read these off `AppConfig`.
-            let tinyplace_api_url = resolve_serve_base_url(
-                "TINYPLACE_API_URL",
-                deployment,
-                // Opt-in: `maybe_build_economy` returns before reading this
-                // unless the manifest sets `place.discoverable` AND names a
-                // handle, and takes this same default when given `None`.
-                HostedDefault::Allow,
-                config_file
-                    .as_ref()
-                    .and_then(|c| c.tinyplace_api_url.clone()),
-                opencompany::app::config::DEFAULT_TINYPLACE_API_URL.to_string(),
-            )?;
             let public_url = std::env::var("OPENCOMPANY_PUBLIC_URL")
                 .ok()
                 .filter(|value| !value.trim().is_empty());
@@ -2254,7 +2238,6 @@ async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) 
                 openhuman_root,
                 api_url,
                 web_url,
-                tinyplace_api_url,
                 public_url,
                 instance_name,
                 tenant_namespace,
@@ -2473,22 +2456,17 @@ async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) 
             let mut scheduler_handles = Vec::new();
             for dir in &companies {
                 let (id, name, schedules) =
-                    register_company(&state, &home, dir, discoverable).await?;
-                let visibility = if discoverable {
-                    " [discoverable: public]"
-                } else {
-                    ""
-                };
+                    register_company(&state, &home, dir).await?;
                 if let Some(handle) = spawn_scheduler(&state, &id, &schedules, &shutdown) {
                     scheduler_handles.push(handle);
                     println!(
-                        "registered company `{id}` ({name}) from {} with {} schedule(s){visibility}",
+                        "registered company `{id}` ({name}) from {} with {} schedule(s)",
                         dir.display(),
                         schedules.len()
                     );
                 } else {
                     println!(
-                        "registered company `{id}` ({name}) from {}{visibility}",
+                        "registered company `{id}` ({name}) from {}",
                         dir.display()
                     );
                 }
