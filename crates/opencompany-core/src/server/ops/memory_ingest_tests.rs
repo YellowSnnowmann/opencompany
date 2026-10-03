@@ -328,10 +328,10 @@ async fn a_request_over_the_body_limit_is_refused_as_413_not_malformed() {
     );
 }
 
-/// The early, spelling-only refusals: schemes, literal internal addresses
-/// (including the IPv4-compatible `::127.0.0.1` form), and internal names.
-/// What a name *resolves* to is judged by TinyMemory's pinned resolver at
-/// connect time, and is tested there.
+/// The early, spelling-only refusals: schemes, literal internal addresses and
+/// internal names. What a name *resolves* to is judged by TinyMemory's pinned
+/// resolver at connect time, and is tested there — as is the IPv4-compatible
+/// `::127.0.0.1` form (tinyhumansai/tinymemory#190).
 #[cfg(feature = "documents")]
 #[test]
 fn link_ingestion_refuses_this_deployments_own_network() {
@@ -342,7 +342,6 @@ fn link_ingestion_refuses_this_deployments_own_network() {
         "http://10.0.0.5/",
         "http://192.168.1.1/",
         "http://[::1]/",
-        "http://[::127.0.0.1]/",
         "http://[::ffff:127.0.0.1]/",
         "http://metadata.internal/",
         "file:///etc/passwd",
