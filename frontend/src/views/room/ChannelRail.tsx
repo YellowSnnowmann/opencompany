@@ -396,7 +396,7 @@ function ChannelRow({
           : "text-foreground/90 hover:bg-rail-hover",
       )}
     >
-      <RowAvatar channel={channel} members={members} chatId={chatId} />
+      <ChannelFace channel={channel} members={members} chatId={chatId} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex items-baseline gap-2">
           <span
@@ -463,35 +463,54 @@ function ChannelRow({
 }
 
 /**
- * The expanded row's face: a 40px avatar for a DM, and for a channel the
- * channel *as a group of agents* — up to three of its members' faces stacked
- * in the same 40px square, lead in front, so a channel reads as the people in
- * it rather than as a `#`.
+ * The geometry of a conversation's face at each size it is drawn: the box, a
+ * lone face filling it, a grouped face, and the ring that cuts grouped faces
+ * apart (in the colour of whatever they sit on).
  */
-function RowAvatar({
+const FACE_SIZES = {
+  /** The pill over the transcript (`ChannelInfo.tsx`). */
+  pill: { box: "size-6", one: "size-6 text-3xs", many: "size-4 text-3xs", ring: "ring-1 ring-background", glyph: "size-3" },
+  /** A conversation row in the sidebar. */
+  row: { box: "size-10", one: "size-10 text-sm", many: "size-6 text-3xs", ring: "ring-2 ring-sidebar-float", glyph: "size-4" },
+  /** The head of the info panel. */
+  hero: { box: "size-20", one: "size-20 text-xl", many: "size-12 text-xs", ring: "ring-2 ring-background", glyph: "size-6" },
+} as const;
+
+/**
+ * A conversation's face: the teammate's avatar for a DM, and for a channel
+ * the channel *as a group of agents* — up to three of its members' faces
+ * stacked in one square, lead in front, so a channel reads as the people in it
+ * rather than as a `#`. Drawn in the sidebar row, the pill over the transcript
+ * and the info panel's head, at the size each needs.
+ */
+export function ChannelFace({
   channel,
   members,
-  chatId,
+  chatId = null,
+  size = "row",
 }: {
   channel: Channel;
   members: TeamMember[];
-  chatId: string | null;
+  /** Scopes the DM's live status badge to this thread; `null` draws no badge. */
+  chatId?: string | null;
+  size?: keyof typeof FACE_SIZES;
 }) {
+  const geo = FACE_SIZES[size];
   if (channel.kind === "dm") {
     const face = dmFace(channel);
     return face ? (
       <AgentFace
-        agentId={channel.member?.id}
+        agentId={chatId ? channel.member?.id : undefined}
         chatId={chatId}
         size="md"
         surface="chrome"
         decorative
       >
-        <TeammateAvatar {...face} className={cn(ROUND, "size-10 text-sm")} />
+        <TeammateAvatar {...face} className={cn(ROUND, geo.one)} />
       </AgentFace>
     ) : (
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-(--avatar-radius) bg-muted">
-        <CircleDot className="size-4" aria-hidden />
+      <span className={cn("flex shrink-0 items-center justify-center rounded-(--avatar-radius) bg-muted", geo.box)}>
+        <CircleDot className={geo.glyph} aria-hidden />
       </span>
     );
   }
@@ -499,28 +518,28 @@ function RowAvatar({
   if (group.length === 0) {
     const Icon = channel.private ? Lock : Hash;
     return (
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-(--avatar-radius) bg-muted text-muted-foreground">
-        <Icon className="size-4" aria-hidden />
+      <span className={cn("flex shrink-0 items-center justify-center rounded-(--avatar-radius) bg-muted text-muted-foreground", geo.box)}>
+        <Icon className={geo.glyph} aria-hidden />
       </span>
     );
   }
   if (group.length === 1) {
-    return <TeammateAvatar {...memberFace(group[0])} className={cn(ROUND, "size-10 text-sm")} />;
+    return <TeammateAvatar {...memberFace(group[0])} className={cn(ROUND, geo.one)} />;
   }
   // Two faces sit on a diagonal; a third tucks in bottom-left. Each wears a
-  // ring in the sidebar's own colour so the overlap reads as a cut, not a smear.
+  // ring in its ground's colour so the overlap reads as a cut, not a smear.
   const slots =
     group.length === 2
       ? ["left-0 top-0", "bottom-0 right-0"]
       : ["left-1/2 top-0 -translate-x-1/2", "bottom-0 left-0", "bottom-0 right-0"];
   return (
-    <span className="relative size-10 shrink-0" aria-hidden>
+    <span className={cn("relative shrink-0", geo.box)} aria-hidden>
       {group
         .map((member, i) => (
           <TeammateAvatar
             key={member.id}
             {...memberFace(member)}
-            className={cn(ROUND, "absolute size-6 text-3xs ring-2 ring-sidebar-float", slots[i])}
+            className={cn(ROUND, "absolute", geo.many, geo.ring, slots[i])}
           />
         ))
         // Lead drawn last, so it is in front.
@@ -529,7 +548,8 @@ function RowAvatar({
   );
 }
 
-function memberFace(m: TeamMember) {
+/** A roster teammate as `TeammateAvatar` props. */
+export function memberFace(m: TeamMember) {
   return {
     name: m.name,
     tone: m.id,
