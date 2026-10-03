@@ -405,7 +405,10 @@ function ChannelRow({
               (active || hasUnread) && "font-semibold",
             )}
           >
-            {rowTitle(channel)}
+            {/* A DM is the teammate's name; every channel is its `#slug`, the
+                same title the channel header uses — one naming scheme for the
+                whole list rather than desk names beside `#general`. */}
+            {channelTitle(channel)}
           </span>
           {preview && (
             <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
@@ -521,17 +524,6 @@ function RowAvatar({
         .reverse()}
     </span>
   );
-}
-
-/**
- * The name on a row: a DM is the teammate's name, and every channel is its
- * `#slug` — `#general`, `#engineering`, `#product-design` — the same title the
- * channel header and the composer's placeholder use. Desk channels briefly
- * showed their desk name ("Engineering") while `#general` kept its hash, which
- * put two naming schemes in one list.
- */
-function rowTitle(channel: Channel): string {
-  return channelTitle(channel);
 }
 
 function memberFace(m: TeamMember) {
