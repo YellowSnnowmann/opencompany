@@ -3362,18 +3362,16 @@ export function AppShell({
       <div className="flex w-full min-h-0 flex-1">
       <Sidebar
         collapsible="icon"
-        // Floating, after OpenHuman's shell: a card 8px in from the window's
-        // top, bottom and left edges, over a content area that runs the full
-        // height of the window. The container is `fixed inset-y-0 h-svh
-        // left-0`, so the inset is inline style rather than classes — `top-*`
-        // and `left-*` would be fighting `inset-y-0` and `data-[side=left]:
-        // left-0` on the same element and the winner would come down to
-        // stylesheet order. `.sidebar-material` (index.css) is the
-        // translucent fill the blur reads through. No shadow: the card is
-        // edged by the same 15% ink border as the composer, so the two boxes
-        // that frame the page read as one system.
-        style={{ top: 8, bottom: 8, left: 8, height: "auto" }}
-        className="sidebar-material z-30 overflow-hidden rounded-2xl border border-foreground/15 backdrop-blur-2xl"
+        // Flush to the window's top, bottom and left edges, ruled off from the
+        // page by a right border in the composer's 15% ink. It floated as a
+        // rounded card 8px in for a while (after OpenHuman's shell); a column
+        // that bleeds to the edges gives the list its full height and reads
+        // as the window's own structure rather than an object on top of it.
+        // The container is `fixed inset-y-0 h-svh left-0`; the inline style
+        // pins that rather than racing classes for it. `.sidebar-material`
+        // (index.css) is the fill.
+        style={{ top: 0, bottom: 0, left: 0, height: "auto" }}
+        className="sidebar-material z-30 overflow-hidden border-r border-foreground/15 backdrop-blur-2xl"
       >
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
           <SidebarContent data-tour="sidebar" className="min-h-0 flex-1 pt-0">
@@ -3438,12 +3436,10 @@ export function AppShell({
       <SidebarInset
         id={MAIN_CONTENT_ID}
         tabIndex={-1}
-        // `md:ml-2`: the sidebar's in-flow gap is exactly its width, and the
-        // floating card sits 8px in from the window's left edge — so 8px here
-        // starts the content at the card's right edge. Pages bring their own
-        // gutter from there; the composer's 8px then matches the 8px the card
-        // keeps from the window on every side.
-        className="min-h-0 min-w-0 bg-page md:ml-2"
+        // No margin: the sidebar's in-flow gap is exactly its width, and the
+        // column runs flush to the window's edges, so the content starts at its
+        // right border. Pages bring their own gutter from there.
+        className="min-h-0 min-w-0 bg-page"
       >
         {/* Below `md` the sidebar is a sheet, and the way to open it was a
             glyph in the window's title row. That row is gone, so the sheet's

@@ -60,8 +60,8 @@ export function SidebarShellFooter({
  * `SidebarProvider` as `--sidebar-width` and persists it on release
  * (`lib/sidebar-width.ts`); this only reports where the edge was moved to.
  *
- * The card is `left: 8px`, so the width under a pointer at `clientX` is
- * `clientX - 8`. `onResizing` lets the shell switch the sidebar's width
+ * The column is flush to the window's left edge, so the width under a pointer
+ * at `clientX` is `clientX` itself. `onResizing` lets the shell switch the sidebar's width
  * transition off for the drag, so the edge tracks the pointer instead of
  * easing behind it.
  */
@@ -145,14 +145,14 @@ export function SidebarResizeHandle({
         onWidthChange(defaultWidth);
         onCommit(defaultWidth);
       }}
-      // Inside the card's right edge (the card clips its overflow for the
-      // rounded corners), 6px wide, invisible until hovered or focused.
-      className="group/resize absolute inset-y-3 right-0 z-20 w-1.5 cursor-col-resize touch-none outline-none"
+      // On the column's right border, 6px wide, invisible until hovered or
+      // focused.
+      className="group/resize absolute inset-y-0 right-0 z-20 w-1.5 cursor-col-resize touch-none outline-none"
     >
       <span className="absolute inset-y-0 right-0.5 w-0.5 rounded-full bg-transparent transition-colors group-hover/resize:bg-primary/40 group-focus-visible/resize:bg-primary/60 group-active/resize:bg-primary/60" />
     </div>
   );
 }
 
-/** How far the floating card sits from the window's left edge (`app-shell.tsx`). */
-const SIDEBAR_CARD_INSET = 8;
+/** How far the sidebar sits from the window's left edge (`app-shell.tsx`): flush. */
+const SIDEBAR_CARD_INSET = 0;
