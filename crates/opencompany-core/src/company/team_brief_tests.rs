@@ -132,7 +132,7 @@ fn a_narrowed_reach_names_exactly_who_the_tool_would_accept() {
     // and nobody on the content desk or the orchestrator.
     let section = team_section(&record(TEAM), "backend");
     assert!(
-        section.contains("\nYou may hand work to: Designer (`designer`)."),
+        section.contains("\nYou may message directly: Designer (`designer`)."),
         "{section}"
     );
     let reach = teammate_targets(&record(TEAM), "backend", &["engineering".to_string()]);
@@ -141,33 +141,19 @@ fn a_narrowed_reach_names_exactly_who_the_tool_would_accept() {
 
 #[test]
 fn the_section_names_the_tools_by_their_real_names() {
-    // The orchestrator delegates by design and is told the verb by name.
-    let orchestrator = team_section(&record(TEAM), "pm");
-    assert!(
-        orchestrator.contains(&format!("`{DELEGATE_TO_TEAMMATE_TOOL}`")),
-        "{orchestrator}"
-    );
-    // A member is not offered it on any turn, so its section must not name
-    // it: the prompt is composed once and has to be true on every turn.
-    let member = team_section(&record(TEAM), "writer");
-    assert!(
-        !member.contains(&format!("`{DELEGATE_TO_TEAMMATE_TOOL}`")),
-        "a member is promised a verb it does not have: {member}"
-    );
-    assert!(
-        member.contains("`spawn_task`"),
-        "and is told what it does have instead: {member}"
-    );
+    // Every teammate, the orchestrator included, reaches a colleague through
+    // the permanent hivemind tools and tracks work with `spawn_task`.
+    for id in ["pm", "writer"] {
+        let section = team_section(&record(TEAM), id);
+        assert!(section.contains("`hivemind_send_agent`"), "{id}: {section}");
+        assert!(section.contains("`hivemind_send_hive`"), "{id}: {section}");
+        assert!(section.contains("`spawn_task`"), "{id}: {section}");
+        assert!(!section.contains("delegate_to_"), "{id}: {section}");
+    }
 }
 
-/// The brief no longer advertises `delegate_to_desk`.
-///
-/// It used to name both tools, which put a desk-wide hand-off in front of every
-/// seat on every turn — and a hand-off takes ONE turn from whoever leads that
-/// desk, quietly skipping the deliberation the desk exists for. A crossing
-/// (`@#desk`) is the move that asks a desk a question, and it is advertised by
-/// the episode prompt to the seats a policy actually permits it to. Naming the
-/// tool here reached further than that policy and said nothing about its cost.
+/// The brief does not advertise the retired desk hand-off: a desk is reached
+/// by speaking in its hive.
 #[test]
 fn the_section_does_not_advertise_the_desk_hand_off() {
     let section = team_section(&record(TEAM), "writer");
@@ -247,10 +233,9 @@ fn a_manifest_teammates_operator_rename_is_the_name_other_agents_are_given() {
         "the live overlay name and canonical id must both reach the teammate prompt: {section}"
     );
     // Still the point of the assertion — the prompt has to say how to reach
-    // Johnny — but a member's way is not `delegate_to_teammate`, which it is
-    // not offered on any turn.
+    // Johnny.
     assert!(
-        section.contains("ask them directly") && section.contains("`spawn_task`"),
+        section.contains("`hivemind_send_agent`") && section.contains("`spawn_task`"),
         "the same prompt must say how to contact Johnny: {section}"
     );
 }
@@ -259,10 +244,7 @@ fn sections(record: &CompanyRecord) -> Vec<(String, String)> {
     ["pm", "backend", "designer", "writer"]
         .into_iter()
         .flat_map(|id| {
-            [
-                (format!("{id} (roster)"), team_section(record, id)),
-                (format!("{id} (seat)"), seat_team_section(record, id)),
-            ]
+            [(format!("{id} (roster)"), team_section(record, id))]
         })
         .collect()
 }
@@ -297,21 +279,4 @@ fn every_row_leads_with_a_name_and_keeps_the_id_for_tool_calls() {
             assert!(row.ends_with("for tool calls)"), "{who}: {row}");
         }
     }
-}
-
-#[test]
-fn a_seat_is_not_told_about_hand_off_tools_it_does_not_have() {
-    let record = record(TEAM);
-    for id in ["pm", "backend", "designer", "writer"] {
-        let section = seat_team_section(&record, id);
-        assert!(section.starts_with("\n\n## Your team"), "{section}");
-        for phrase in ["delegate_to_teammate", "hand work", "You may hand work to"] {
-            assert!(!section.contains(phrase), "{id}: `{phrase}` in {section}");
-        }
-    }
-    assert!(
-        seat_team_section(&record, "designer")
-            .contains("- Engineering: Backend Engineer (lead), Designer (id `engineering`"),
-        "a seat still knows its desks"
-    );
 }
