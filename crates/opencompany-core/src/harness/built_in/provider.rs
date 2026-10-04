@@ -1103,12 +1103,9 @@ fn model_response_from_payload(payload: serde_json::Value) -> TaResult<ModelResp
 /// `mcp_call_tool`, not the catalogue behind it. Read from the same messages
 /// that go on the wire, so it can never name a tool this turn did not offer.
 ///
-/// User messages as well as the system prompt: a roster rebuilt under a
-/// resumed session re-announces the catalogue on the turn text
-/// (`build::opencompany_mcp_rebrief`), and that brief is the current one
-/// where the prompt's is pinned. A name a person typed under that heading
-/// buys nothing — a salvaged call is served only if the MCP host's
-/// allowlist names it.
+/// User messages as well as the system prompt, so a brief carried on a turn's
+/// text counts too. A name a person typed under that heading buys nothing — a
+/// salvaged call is served only if the MCP host's allowlist names it.
 fn mcp_served_tools(messages: &[Message]) -> std::collections::BTreeSet<String> {
     messages
         .iter()
