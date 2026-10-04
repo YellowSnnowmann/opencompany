@@ -22,9 +22,9 @@
 //!
 //! Without the `openhuman` feature there is no runtime to hold memory:
 //! [`CompanyMemory::status`] reports off and every other call is
-//! [`OpenCompanyError::NotInBuild`]. With it but no engine bound (no
+//! [`NotInBuild`](crate::error::OpenCompanyError::NotInBuild). With it but no engine bound (no
 //! TinyHumans credential, no CortexDB key) memory is off and calls are
-//! [`OpenCompanyError::NotConfigured`].
+//! [`NotConfigured`](crate::error::OpenCompanyError::NotConfigured).
 
 mod types;
 
@@ -36,6 +36,7 @@ pub use types::{
     MemoryItemKind, MemoryPage, MemoryQuery, MemoryStatus, RecallAnswer, RecallCitation,
 };
 
+#[cfg(not(feature = "openhuman"))]
 use crate::error::OpenCompanyError;
 use crate::ports::CompanyId;
 
