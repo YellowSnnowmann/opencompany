@@ -1301,11 +1301,6 @@ impl HarnessAgentRunner {
         let runner = crate::runtime::delegation::DelegationRunner::for_workflow_run(
             &self.record,
             self.deps.tasks.as_ref(),
-            // Never touched by a board write. Threaded because the shared runner
-            // needs one, and the company's own rather than a fresh one so a
-            // future reachable path would surface in the operator's in-flight
-            // list rather than in a registry nobody can see.
-            &self.deps.steer,
             &self.company,
             queue,
             crate::runtime::delegation::WorkflowRunRef {

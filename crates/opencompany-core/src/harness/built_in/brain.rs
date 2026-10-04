@@ -2998,7 +2998,6 @@ impl HarnessBrain {
             run_turn,
             record,
             self.deps.tasks.as_ref(),
-            &self.deps.steer,
             &record.id,
             &self.deps.delegations,
             orchestrator::MAX_DELEGATIONS_PER_TURN,

@@ -104,8 +104,6 @@ pub(super) struct SettleTurn<'a> {
     pub(super) seat: &'a HiveSeat,
     /// The console chat the turn answers in.
     pub(super) chat: &'a str,
-    /// Whether the operator is among the turn's senders.
-    pub(super) operator: bool,
 }
 
 /// What a wrapped turn hands back: the adapter's result, and how the
@@ -375,7 +373,6 @@ impl SettleTurn<'_> {
                 &run_turn,
                 &record,
                 deps.tasks.as_ref(),
-                &deps.steer,
                 self.company(),
                 &deps.delegations,
                 crate::harness::orchestrator::MAX_DELEGATIONS_PER_TURN,

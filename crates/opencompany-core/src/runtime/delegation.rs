@@ -576,7 +576,7 @@ pub(crate) struct OperatorTurn {
 /// answered synchronously — relay through exactly one more responder turn.
 ///
 /// Holds only brain-agnostic handles: the company record (for desk-lead
-/// resolution), the task store, the steer registry, the company id, the shared
+/// resolution), the task store, the company id, the shared
 /// delegation queue the turn pushes onto, and the per-turn delegation cap. The
 /// harness-specific [`HarnessDeps`](crate::harness::HarnessDeps) is deliberately
 /// absent — that is the whole point of the seam; it lives behind the [`RunTurn`]
@@ -585,7 +585,6 @@ pub(crate) struct DelegationRunner<'a> {
     run_turn: &'a dyn RunTurn,
     record: &'a CompanyRecord,
     tasks: Option<&'a Arc<dyn TaskStore>>,
-    steer: &'a InflightRegistry,
     company: &'a CompanyId,
     queue: &'a DelegationQueue,
     max_delegations: usize,
@@ -691,7 +690,6 @@ impl<'a> DelegationRunner<'a> {
         run_turn: &'a dyn RunTurn,
         record: &'a CompanyRecord,
         tasks: Option<&'a Arc<dyn TaskStore>>,
-        steer: &'a InflightRegistry,
         company: &'a CompanyId,
         queue: &'a DelegationQueue,
         max_delegations: usize,
@@ -700,7 +698,6 @@ impl<'a> DelegationRunner<'a> {
             run_turn,
             record,
             tasks,
-            steer,
             company,
             queue,
             max_delegations,
@@ -727,14 +724,7 @@ impl<'a> DelegationRunner<'a> {
     /// [`NoTurn`]), and it stamps run provenance onto everything it opens. The
     /// only thing it is ever asked to execute is
     /// [`execute_board_writes`](Self::execute_board_writes).
-    ///
-    /// `steer` is threaded because the shared runner needs one and there is no
-    /// honest way to pass nothing — **it is never touched on this path**: the only
-    /// registration site is the [`Delegation::DelegateToDesk`] arm, which a board
-    /// claim makes unstageable. Passing the company's own registry rather than a
-    /// fresh one keeps it that way by accident-proofing: were the arm ever
-    /// reachable, the run would appear in the operator's in-flight list rather
-    /// than in a registry nobody can see.
+
     ///
     /// No approval queue is wired: `with_approvals` exists so a *settle* can tell
     /// whether the turn it is recording parked (issue #465), and this runner
@@ -743,7 +733,6 @@ impl<'a> DelegationRunner<'a> {
     pub(crate) fn for_workflow_run(
         record: &'a CompanyRecord,
         tasks: Option<&'a Arc<dyn TaskStore>>,
-        steer: &'a InflightRegistry,
         company: &'a CompanyId,
         queue: &'a DelegationQueue,
         run: WorkflowRunRef,
@@ -752,7 +741,6 @@ impl<'a> DelegationRunner<'a> {
             run_turn: &NO_TURN,
             record,
             tasks,
-            steer,
             company,
             queue,
             max_delegations: orchestrator::MAX_DELEGATIONS_PER_TURN,
