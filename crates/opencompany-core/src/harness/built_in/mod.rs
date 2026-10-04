@@ -2244,6 +2244,15 @@ where
 /// A pool of live agents, one roster per company.
 pub struct HarnessPool {
     agents: RwLock<HashMap<CompanyId, Vec<Arc<CompanyAgent>>>>,
+    /// Each company's hive (OC-2), started on the first `ensure` whose deps
+    /// carry a hive store and a journal, and shared with every other pool
+    /// serving the same company (`hive::runtime::for_company`).
+    hives: RwLock<HashMap<CompanyId, Arc<crate::hive::runtime::CompanyHive>>>,
+    /// This pool, weakly, once a caller holding it in an `Arc` said so
+    /// ([`HarnessPool::remember`]) — what a hive seat reaches its admission
+    /// gates and isolated turns through. A pool nobody shares has none, and
+    /// its hive turns run ungated.
+    self_ref: std::sync::OnceLock<std::sync::Weak<HarnessPool>>,
     /// The process-wide `opencompany` MCP host every roster agent is served
     /// on (plan hive-desks Phase 3): its listener, its bearers, and the
     /// in-flight turn registry the hive driver attributes calls through.
@@ -2537,6 +2546,8 @@ impl HarnessPool {
     pub fn new() -> Self {
         Self {
             agents: RwLock::new(HashMap::new()),
+            hives: RwLock::new(HashMap::new()),
+            self_ref: std::sync::OnceLock::new(),
             mcp: crate::hive::mcp_server::global(),
             monthly_budgets: RwLock::new(HashMap::new()),
             mcp_fingerprints: RwLock::new(HashMap::new()),
@@ -2556,6 +2567,47 @@ impl HarnessPool {
             context_fingerprints: RwLock::new(HashMap::new()),
             workspace_failures: std::sync::Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Remembers this pool as the one its hive seats belong to. Idempotent;
+    /// every holder of the pool's `Arc` may call it.
+    pub fn remember(self: &Arc<Self>) {
+        let _ = self.self_ref.set(Arc::downgrade(self));
+    }
+
+    /// The company's hive, once an `ensure` started it.
+    pub async fn hive(&self, company: &CompanyId) -> Option<Arc<crate::hive::runtime::CompanyHive>> {
+        self.hives.read().await.get(company).cloned()
+    }
+
+    /// The company's hive, started when `deps` carry a hive store and a
+    /// journal and none is running for this pool yet.
+    async fn company_hive(
+        &self,
+        company: &CompanyRecord,
+        deps: &HarnessDeps,
+        runtime: &openhuman_embed::Runtime,
+    ) -> crate::Result<Option<Arc<crate::hive::runtime::CompanyHive>>> {
+        if let Some(hive) = self.hive(&company.id).await {
+            return Ok(Some(hive));
+        }
+        let (Some(store), Some(events)) = (deps.hive_store.clone(), deps.events.clone()) else {
+            return Ok(None);
+        };
+        let hive = crate::hive::runtime::for_company(crate::hive::runtime::HiveConfig {
+            company: company.id.clone(),
+            runtime_id: runtime.runtime_id().to_string(),
+            store,
+            events,
+            options: crate::hive::routing::coordinator_options(company),
+            turn_timeout: crate::hive::routing::turn_timeout(company),
+        })
+        .await?;
+        self.hives
+            .write()
+            .await
+            .insert(company.id.clone(), Arc::clone(&hive));
+        Ok(Some(hive))
     }
 
     /// Records one workspace-ensure outcome for `(company, agent)` and returns
