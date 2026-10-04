@@ -1820,7 +1820,7 @@ fn table_counts_and_intentional_widenings_are_explicit() {
             .map(|route| route.path)
             .collect::<BTreeSet<_>>()
             .len(),
-        172,
+        173,
     );
     assert_eq!(OPS_EXACT_ROUTES.len(), 3);
     assert_eq!(
@@ -1849,7 +1849,7 @@ fn table_counts_and_intentional_widenings_are_explicit() {
             .flat_map(route_patterns)
             .collect::<BTreeSet<_>>()
             .len(),
-        390,
+        392,
         "concrete paths",
     );
     assert_eq!(render_snapshot().lines().count(), 3_479);
