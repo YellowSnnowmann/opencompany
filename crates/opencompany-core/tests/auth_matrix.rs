@@ -713,18 +713,24 @@ const OPS_SCOPED_ROUTES: &[Route] = &[
     r!(Post, "/memory", Scoped, Ordinary, ""),
     r!(Get, "/memory", Scoped, Ordinary, ""),
     r!(Get, "/memory/traces", Scoped, Ordinary, ""),
-    r!(Get, "/memory/stats", Scoped, Ordinary, ""),
-    r!(Get, "/memory/archives", Scoped, Ordinary, ""),
+    r!(Get, "/memory/status", Scoped, Ordinary, ""),
+    r!(Get, "/memory/agents", Scoped, Ordinary, ""),
+    r!(Get, "/memory/brain", Scoped, Ordinary, ""),
+    r!(Post, "/memory/recall", Scoped, Ordinary, ""),
     r!(
         Delete,
-        "/memory/{fact_id}",
+        "/memory/{item_id}",
         Scoped,
         Destructive,
-        "Members may delete company memory facts."
+        "Members may forget a company memory item."
     ),
-    r!(Get, "/memory/engine", Admin, Authority, ""),
-    r!(Put, "/memory/engine", Admin, Credential, ""),
-    r!(Post, "/memory/engine/test", Admin, Credential, ""),
+    r!(
+        Delete,
+        "/memory/agents/{agent_id}",
+        Scoped,
+        Destructive,
+        "Members may forget a teammate's logged turns."
+    ),
     r!(Post, "/memory/ingest", Scoped, Ordinary, ""),
     r!(
         Post,
