@@ -346,7 +346,6 @@ pub(super) fn deps_with_plan(
         skills_registry: std::sync::Arc::from([]),
         default_mcp_servers: Vec::new(),
         mcp_servers: Vec::new(),
-        facts: None,
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle::default(),
