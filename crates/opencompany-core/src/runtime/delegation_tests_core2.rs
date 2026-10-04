@@ -68,14 +68,6 @@ pub(super) fn handler_card_in(title: String, column: &str) -> TaskRecord {
     }
 }
 
-#[async_trait]
-impl crate::ports::tasks::TitleSummariser for ScriptedTitler {
-    async fn title(&self, request: &str) -> Option<TaskTitle> {
-        self.asked.lock().expect("asked").push(request.to_string());
-        TaskTitle::summarised(self.title)
-    }
-}
-
 pub(super) fn authored(workflow_id: &str) -> TaskOutputWorkflow {
     TaskOutputWorkflow {
         workflow_id: workflow_id.to_string(),
