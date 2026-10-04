@@ -926,6 +926,7 @@ impl RuntimeBuilder {
         self.sessions = Some(handles.sessions.clone());
         self.login_codes = Some(handles.login_codes.clone());
         self.journal_store = Some(handles.journal.clone());
+        self.hive_store = Some(handles.hive.clone());
         self.with_store(handles.company.clone())
             .with_events(handles.events.clone())
             .with_traces(handles.traces.clone())
