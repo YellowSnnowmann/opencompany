@@ -1,38 +1,55 @@
-// Brain lives under Settings (issue #1416): the memory browser and its engine
-// controls belong together, while the sidebar keeps its scarce permanent rows
-// for surfaces an operator works from every day.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Brain, Loader2, Plus, Search, Trash2 } from "lucide-react";
+// Brain: the company's memory, served by OpenHuman's memory v2 engine.
+//
+// Learnings live at the company root, each teammate's conversations under its
+// own agent node, and dropped documents under one node per source kind. The
+// engine is OpenHuman's `[memory]` config, not a console choice, so this page
+// reports whether memory is on rather than offering a picker.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Brain, FileText, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
-  CONTEXT_ORIGINS,
+  brainSources,
   createMemory,
   deleteMemory,
-  documentSlug,
+  forgetAgentMemory,
   forgetDocument,
-  KIND_STYLES,
+  ITEM_KIND_LABELS,
+  ITEM_KIND_STYLES,
+  ITEM_KINDS,
+  LEARNING_KIND_LABELS,
+  LEARNING_KINDS,
   listMemory,
-  MEMORY_KINDS,
-  memoryStats,
-  ORIGIN_LABELS,
-  ORIGIN_STYLES,
-  type MemoryEngineState,
+  memoryAgents,
+  memoryStatus,
+  type BrainSources,
+  type ItemKind,
+  type LearningKind,
+  type MemoryAgent,
   type MemoryEntry,
-  type MemoryKind,
-  type MemoryStats,
+  type MemoryStatus,
 } from "@/api/memory";
 import type { OpenCompanyClient } from "@/api/client";
 import { VirtualList } from "@/components/virtual-list";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { DropZone } from "@/views/memory/DropZone";
-import { EngineSection } from "@/views/memory/EngineSection";
 import { BRAIN_PAGES, resolveBrainPage, type BrainPage } from "@/views/memory/brain-pages";
 import { PageTabPanel, PageTabs } from "@/components/page-tabs";
 import { consoleHref } from "@/lib/console-paths";
 import { Markdown } from "@/components/markdown";
 import { PageHeader } from "@/components/page-header";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -61,41 +78,13 @@ interface Props {
   sub?: string | null;
 }
 
-const KIND_LABELS: Record<string, string> = {
-  all: "All types",
-  fact: "Facts",
-  preference: "Preferences",
-  person: "People",
-  project: "Projects",
-  reference: "References",
-};
+/** How long the search box waits after the last keystroke before asking the host. */
+const SEARCH_DEBOUNCE_MS = 300;
 
-/**
- * The value the type filter matches a row on: a fact matches on its `kind`, a
- * read-only context row matches on its `origin` (agent-memory / task-outcome).
- * Keeps the original per-kind filtering while extending it to the new sources.
- */
-function entryType(e: MemoryEntry): string {
-  return e.origin === "fact" ? (e.kind ?? "fact") : e.origin;
-}
-
-/** The badge label + style for a row, from its kind (facts) or origin (context). */
-function entryBadge(e: MemoryEntry): { label: string; style: string } {
-  if (e.origin === "fact") {
-    const kind = e.kind ?? "fact";
-    return { label: kind, style: KIND_STYLES[kind] };
-  }
-  return { label: ORIGIN_LABELS[e.origin], style: ORIGIN_STYLES[e.origin] };
-}
-
-/** The type-filter options in display order: fact kinds, then context origins. */
-const TYPE_FILTERS: string[] = [...MEMORY_KINDS, ...CONTEXT_ORIGINS];
-
-/** Labels for every type-filter value (including `all`), for the Select. */
-const TYPE_FILTER_LABELS: Record<string, string> = {
-  all: "All types",
-  ...Object.fromEntries(MEMORY_KINDS.map((k) => [k, KIND_LABELS[k]])),
-  ...Object.fromEntries(CONTEXT_ORIGINS.map((o) => [o, ORIGIN_LABELS[o]])),
+/** Labels for the kind filter, including `all`. */
+const KIND_FILTER_LABELS: Record<string, string> = {
+  all: "All kinds",
+  ...Object.fromEntries(ITEM_KINDS.map((k) => [k, `${ITEM_KIND_LABELS[k]}s`])),
 };
 
 /** Formats an epoch-millis instant as a short absolute date, or a dash when 0. */
@@ -108,60 +97,98 @@ function formatUpdated(ms: number): string {
   });
 }
 
+/** The badge a row wears: its learning kind for learnings, else its item kind. */
+function entryBadge(e: MemoryEntry): { label: string; style: string } {
+  const style = ITEM_KIND_STYLES[e.kind] ?? ITEM_KIND_STYLES.learning;
+  if (e.kind === "learning" && e.learningKind) {
+    return { label: LEARNING_KIND_LABELS[e.learningKind], style };
+  }
+  return { label: ITEM_KIND_LABELS[e.kind] ?? e.kind, style };
+}
+
+/** Where a row came from, for the card footer. */
+function entryOrigin(e: MemoryEntry): string {
+  if (e.agentId) return e.agentId;
+  if (e.source) return e.source;
+  return e.namespace;
+}
+
 /**
- * The company's Brain: its durable memory, read live from the host (`…/memory`)
- * with a health strip proving the store is real (fact + agent-context counts).
- * Operators add and delete facts; a create is mirrored server-side into the
- * agents' recallable context so a note reaches an agent on its next turn.
+ * The company's Brain: its memory read live from the host (`…/memory`), with
+ * the engine's status, the teammates that remember conversations, and the
+ * brain's documents by source. Operators add learnings and forget items,
+ * whole teammates, or whole document sources.
  */
 export function MemoryView({ client, company, sub }: Props) {
-  // Which of the three this address names. Overview for a bare `#/company/brain`
-  // and for any segment that names nothing — a stale bookmark lands on the page
-  // the section is for rather than on an error.
+  // Overview for a bare `#/company/brain` and for any segment that names
+  // nothing — a stale `#/company/brain/settings` bookmark lands on the page the
+  // section is for rather than on an error.
   const page = resolveBrainPage(sub ?? null);
   // Brain's tabs ride the path segment they already owned rather than `?tab=`,
-  // so every `#/company/brain/upload` ever linked still opens Upload. A plain
-  // hash assignment, like every other address change in the console: it is a
-  // real history entry, so Back returns to the tab you came from.
-  //
-  // Overview clears the segment instead of writing it — `#/company/brain` and
-  // `#/company/brain/overview` are the same place, and only one of them should
-  // be the address you copy out of the bar.
+  // so every `#/company/brain/upload` ever linked still opens Upload.
   const openPage = (next: BrainPage) => {
     window.location.hash = consoleHref("brain", next === "overview" ? null : next);
   };
+  const [status, setStatus] = useState<MemoryStatus | null>(null);
+  const [agents, setAgents] = useState<MemoryAgent[]>([]);
+  const [brain, setBrain] = useState<BrainSources | null>(null);
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
-  const [stats, setStats] = useState<MemoryStats | null>(null);
-  // The truncation metadata that rode in with the last list read, kept beside
-  // `entries` because the banner's "newest N of M" must describe the SAME read
-  // as the rows it counts — a write between two requests would let N and M
-  // silently disagree.
-  const [totalContext, setTotalContext] = useState(0);
-  const [contextTruncated, setContextTruncated] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
   const [kind, setKind] = useState<string>("all");
+  const [agent, setAgent] = useState<string>("all");
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const lanes = useMediaQuery("(min-width: 640px)") ? 2 : 1;
-  // A generation token so a response from a previous company scope (or after
+  // A generation token so a response from a previous scope or filter (or after
   // unmount) can't overwrite the current one.
   const gen = useRef(0);
+
+  useEffect(() => {
+    const t = setTimeout(() => setAppliedQuery(query.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const filters = useCallback(
+    () => ({
+      query: appliedQuery || undefined,
+      kind: kind === "all" ? undefined : (kind as ItemKind),
+      agent: agent === "all" ? undefined : agent,
+    }),
+    [appliedQuery, kind, agent],
+  );
 
   const load = useCallback(
     async (opts?: { silent?: boolean }) => {
       const mine = ++gen.current;
       if (!opts?.silent) setLoading(true);
       try {
-        const [list, s] = await Promise.all([
-          listMemory(client, company),
-          memoryStats(client, company),
+        // Status first: it is the one route that answers when memory is off,
+        // and every other route would only say `503 MEMORY_OFF`.
+        const s = await memoryStatus(client, company);
+        if (mine !== gen.current) return;
+        setStatus(s);
+        if (!s.on) {
+          setEntries([]);
+          setNextCursor(undefined);
+          setAgents([]);
+          setBrain(null);
+          setError(null);
+          return;
+        }
+        const [list, a, b] = await Promise.all([
+          listMemory(client, company, filters()),
+          memoryAgents(client, company),
+          brainSources(client, company),
         ]);
         if (mine !== gen.current) return;
         setEntries(list.items);
-        setTotalContext(list.totalContext);
-        setContextTruncated(list.contextTruncated);
-        setStats(s);
+        setNextCursor(list.nextCursor);
+        setAgents(a.agents);
+        setBrain(b);
         setError(null);
       } catch (e) {
         if (mine !== gen.current) return;
@@ -170,91 +197,88 @@ export function MemoryView({ client, company, sub }: Props) {
         if (mine === gen.current && !opts?.silent) setLoading(false);
       }
     },
-    [client, company],
+    [client, company, filters],
   );
 
   useEffect(() => {
-    setEntries([]);
-    setTotalContext(0);
-    setContextTruncated(false);
-    setStats(null);
     void load();
     return () => {
       gen.current++;
     };
   }, [load]);
 
-  // The bound memory engine, from the engine route rather than `/spec`.
-  //
-  // One source, because the two can now disagree: `/spec`'s snapshot is what
-  // boot bound, and an operator who switches engines from the section below
-  // changes what is bound without restarting. A header badge naming the
-  // previous engine would be the most confusing possible answer to "did my
-  // change take".
-  const [engine, setEngine] = useState<MemoryEngineState | null>(null);
+  // A new company scope starts from a blank page rather than the last one's rows.
+  useEffect(() => {
+    setStatus(null);
+    setEntries([]);
+    setNextCursor(undefined);
+    setAgents([]);
+    setBrain(null);
+    setAgent("all");
+  }, [client, company]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return entries
-      .filter((e) => kind === "all" || entryType(e) === kind)
-      .filter((e) => !q || e.title.toLowerCase().includes(q) || e.body.toLowerCase().includes(q));
-  }, [entries, query, kind]);
-
-  // Per-type counts for the health badges, keyed by the same value the filter
-  // matches on (fact kind or context origin) so every source shows a count.
-  const perType = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const e of entries) {
-      const t = entryType(e);
-      counts[t] = (counts[t] ?? 0) + 1;
+  async function loadMore() {
+    if (!nextCursor) return;
+    const mine = gen.current;
+    setLoadingMore(true);
+    try {
+      const list = await listMemory(client, company, { ...filters(), cursor: nextCursor });
+      if (mine !== gen.current) return;
+      setEntries((all) => {
+        const seen = new Set(all.map((e) => e.id));
+        return [...all, ...list.items.filter((e) => !seen.has(e.id))];
+      });
+      setNextCursor(list.nextCursor);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "could not load more memory");
+    } finally {
+      setLoadingMore(false);
     }
-    return counts;
-  }, [entries]);
+  }
 
-  const listedContextItems = useMemo(
-    () => entries.filter((entry) => entry.origin !== "fact").length,
-    [entries],
-  );
+  const off = status !== null && !status.on;
 
-  // The one engine state the *writing* half of this page has to respect: the
-  // null engine takes every write and throws it away, so a live "New memory"
-  // button beside that warning invites work the host will silently drop
-  // (issue #1410). The panel's health dot already refuses to go green here for
-  // the same reason.
-  const discarding = engine?.active === "null";
-
-  async function add(fields: { kind: MemoryKind; title: string; body: string }) {
+  async function add(fields: { text: string; kind: LearningKind }) {
     await createMemory(client, company, fields);
-    // Reload in the background once the write is confirmed. The panel's catch
-    // owns the "could not save the memory" toast, so only createMemory — an
-    // actual save failure — may reach it; awaiting the reload here instead
-    // would route a reload failure into that same catch and report a save that
-    // did happen as one that did not, prompting a duplicate. `void load` is
-    // fire-and-forget: load handles its own errors via the page banner and
-    // never leaks a rejection.
+    // Fire-and-forget: a reload failure must not reach the panel's "could not
+    // save" toast and report a save that did happen as one that did not.
     void load({ silent: true });
   }
 
   async function remove(entry: MemoryEntry) {
-    // Optimistic: drop the card immediately, then reconcile counts from the host.
+    // Optimistic: drop the card immediately, then reconcile from the host.
     setEntries((all) => all.filter((x) => x.id !== entry.id));
     try {
-      if (entry.origin === "document") {
-        // A document is many chunks under one slug, so forgetting it is one
-        // call against the document — deleting the card's own chunk would
-        // leave the rest of the file in memory, which is worse than not
-        // offering a delete at all.
-        await forgetDocument(client, company, documentSlug(entry.source));
-      } else {
-        await deleteMemory(client, company, entry.id);
-      }
-      await load({ silent: true });
+      await deleteMemory(client, company, entry.id);
+      void load({ silent: true });
     } catch (e) {
-      // Re-insert only this entry on failure (no whole-list rollback).
       setEntries((all) => (all.some((x) => x.id === entry.id) ? all : [entry, ...all]));
-      toast.error(e instanceof Error ? e.message : "could not delete the memory");
+      toast.error(e instanceof Error ? e.message : "could not forget the memory");
     }
   }
+
+  async function forgetAgent(agentId: string) {
+    try {
+      const { forgotten } = await forgetAgentMemory(client, company, agentId);
+      toast.success(`Forgot ${forgotten} item${forgotten === 1 ? "" : "s"} from ${agentId}.`);
+      setAgent("all");
+      void load({ silent: true });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "could not forget the agent's memory");
+    }
+  }
+
+  async function forgetSource(source: string) {
+    try {
+      const { forgotten } = await forgetDocument(client, company, source);
+      toast.success(`Forgot ${forgotten} ${source} document${forgotten === 1 ? "" : "s"}.`);
+      void load({ silent: true });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "could not forget the documents");
+    }
+  }
+
+  const filtering = appliedQuery !== "" || kind !== "all" || agent !== "all";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -263,8 +287,8 @@ export function MemoryView({ client, company, sub }: Props) {
         width="full"
         description={
           <>
-            What your company remembers — facts, people, projects, and preferences your
-            agents can recall.
+            What your company remembers — learnings, conversations, and documents your agents can
+            recall.
           </>
         }
         tabs={
@@ -277,160 +301,180 @@ export function MemoryView({ client, company, sub }: Props) {
           />
         }
         actions={
-          <>
-            {engine && (
-              <span
-                className={cn(
-                  "rounded-full border px-3 py-1 text-xs",
-                  // A capability count in the calm register, inches above an
-                  // alert saying every write is discarded, reads as a fact
-                  // about a working engine. Amber, like the dot (issue #1410).
-                  discarding
-                    ? "border-status-blocked/40 text-status-blocked-text"
-                    : "text-muted-foreground",
-                )}
-                title={
-                  discarding
-                    ? "This engine discards every write — nothing saved here is retained."
-                    : engine.capabilities.length
-                      ? `Capability families: ${engine.capabilities.join(", ")}`
-                      : "Capabilities not negotiated"
-                }
-                data-testid="memory-engine-badge"
-              >
-                engine: {engine.active}
-                {engine.capabilities.length > 0 && (
-                  <> · {engine.capabilities.length} families</>
-                )}
-              </span>
-            )}
-          </>
+          status && (
+            <span
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs",
+                status.on ? "text-muted-foreground" : "border-status-blocked/40 text-status-blocked-text",
+              )}
+              title={status.on ? status.endpoint : status.reason}
+              data-testid="memory-status-badge"
+            >
+              {status.on ? `memory: ${status.engine ?? "on"}` : "memory off"}
+            </span>
+          )
         }
       />
       <div
         ref={setScrollEl}
         className="min-h-0 w-full flex-1 space-y-5 overflow-y-auto px-4 py-6"
       >
-
-        {/* Settings. The engine is chosen once and then almost never, so it
-            sat on top of the browser that is read constantly. */}
-        <PageTabPanel idBase="brain" id="settings" value={page}>
-        <EngineSection
-          client={client}
-          company={company}
-          onApplied={(next) => {
-            setEngine(next);
-            // The new engine's memory is a different set of rows — often an
-            // empty one, since nothing migrates between engines — so the list
-            // has to be re-read rather than left showing the old engine's.
-            void load({ silent: true });
-          }}
-        />
-        </PageTabPanel>
-
-        {/* Upload. Its own page rather than a target above the list: dropping a
-            document is something an operator does when one arrives, not on the
-            way to reading what is already remembered. */}
-        <PageTabPanel idBase="brain" id="upload" value={page} className="space-y-5">
-        <DropZone
-          client={client}
-          company={company}
-          discarding={discarding}
-          onIngested={() => void load({ silent: true })}
-        />
-        <AddMemoryPanel discarding={discarding} onAdd={add} />
-        </PageTabPanel>
-
+        {off && (
+          <Alert data-testid="memory-off">
+            <AlertDescription>
+              Memory is off{status?.reason ? ` — ${status.reason}` : ""}. Configure OpenHuman's{" "}
+              <code className="text-xs">[memory]</code> engine to turn it on.
+            </AlertDescription>
+          </Alert>
+        )}
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
-        {/* Overview: the health strip, the filters and the list — what the
-            section is for, and what a bare `#/company/brain` lands on. */}
-        <PageTabPanel idBase="brain" id="overview" value={page} className="space-y-5">
-        <HealthStrip loading={loading} stats={stats} perType={perType} />
-        {contextTruncated && (
-          <Alert>
-            <AlertDescription>
-              Showing the newest {listedContextItems} of {totalContext} context memory items.
-            </AlertDescription>
-          </Alert>
-        )}
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 sm:max-w-xs">
-            <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              aria-label="Search memory"
-              placeholder="Search memory…"
-              className="pl-8"
-            />
-          </div>
-          <Select value={kind} onValueChange={(v) => v && setKind(v)} items={TYPE_FILTER_LABELS}>
-            <SelectTrigger className="w-40" aria-label="Filter by memory type">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All types</SelectItem>
-              {TYPE_FILTERS.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {TYPE_FILTER_LABELS[t]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {loading ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Skeleton className="h-28 rounded-xl" />
-            <Skeleton className="h-28 rounded-xl" />
-          </div>
-        ) : filtered.length === 0 ? (
-          <EmptyMemory hasEntries={entries.length > 0} />
-        ) : (
-          <VirtualList
-            items={filtered}
-            scrollElement={scrollEl}
-            lanes={lanes}
-            estimateRowHeight={132}
-            getKey={(e) => e.id}
-            renderItem={(e) => <MemoryCard entry={e} onDelete={() => void remove(e)} />}
-            data-testid="memory-list"
+        {/* Upload. Its own page rather than a target above the list: dropping a
+            document is something an operator does when one arrives, not on the
+            way to reading what is already remembered. */}
+        <PageTabPanel idBase="brain" id="upload" value={page} className="space-y-5">
+          <DropZone
+            client={client}
+            company={company}
+            off={off}
+            onIngested={() => void load({ silent: true })}
           />
-        )}
+          <AddLearningPanel off={off} onAdd={add} />
+        </PageTabPanel>
+
+        {/* Overview: status, sources, filters and the list — what the section
+            is for, and what a bare `#/company/brain` lands on. */}
+        <PageTabPanel idBase="brain" id="overview" value={page} className="space-y-5">
+          <StatusStrip loading={loading} status={status} agents={agents} brain={brain} />
+          {brain && brain.sources.length > 0 && (
+            <BrainSourcesCard brain={brain} onForget={(s) => void forgetSource(s)} />
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 sm:max-w-xs">
+              <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="Search memory"
+                placeholder="Search memory…"
+                className="pl-8"
+                disabled={off}
+              />
+            </div>
+            <Select value={kind} onValueChange={(v) => v && setKind(v)} items={KIND_FILTER_LABELS}>
+              <SelectTrigger className="w-40" aria-label="Filter by memory kind">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All kinds</SelectItem>
+                {ITEM_KINDS.map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {KIND_FILTER_LABELS[k]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={agent}
+              onValueChange={(v) => v && setAgent(v)}
+              items={{
+                all: "All agents",
+                ...Object.fromEntries(agents.map((a) => [a.agentId, a.agentId])),
+              }}
+            >
+              <SelectTrigger className="w-44" aria-label="Filter by agent">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All agents</SelectItem>
+                {agents.map((a) => (
+                  <SelectItem key={a.agentId} value={a.agentId}>
+                    {a.agentId} · {a.turns}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {agent !== "all" && (
+              <ConfirmAction
+                trigger={
+                  <Button variant="outline" size="sm" data-testid="memory-forget-agent">
+                    <Trash2 className="mr-1.5 size-4" /> Forget {agent}'s memory
+                  </Button>
+                }
+                title={`Forget everything ${agent} remembers?`}
+                description="Every conversation this teammate has in memory is forgotten. Learnings and documents are kept. This cannot be undone."
+                confirmLabel="Forget"
+                onConfirm={() => void forgetAgent(agent)}
+              />
+            )}
+          </div>
+
+          {loading ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Skeleton className="h-28 rounded-xl" />
+              <Skeleton className="h-28 rounded-xl" />
+            </div>
+          ) : entries.length === 0 ? (
+            <EmptyMemory filtering={filtering} off={off} />
+          ) : (
+            <>
+              <VirtualList
+                items={entries}
+                scrollElement={scrollEl}
+                lanes={lanes}
+                estimateRowHeight={132}
+                getKey={(e) => e.id}
+                renderItem={(e) => <MemoryCard entry={e} onDelete={() => void remove(e)} />}
+                data-testid="memory-list"
+              />
+              {nextCursor && (
+                <div className="flex justify-center">
+                  <Button
+                    variant="outline"
+                    onClick={() => void loadMore()}
+                    disabled={loadingMore}
+                    data-testid="memory-load-more"
+                  >
+                    {loadingMore && <Loader2 className="mr-1.5 size-4 animate-spin" />}
+                    Load more
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
         </PageTabPanel>
       </div>
-
     </div>
   );
 }
 
-function HealthStrip({
+function StatusStrip({
   loading,
-  stats,
-  perType,
+  status,
+  agents,
+  brain,
 }: {
   loading: boolean;
-  stats: MemoryStats | null;
-  perType: Record<string, number>;
+  status: MemoryStatus | null;
+  agents: MemoryAgent[];
+  brain: BrainSources | null;
 }) {
-  if (loading && !stats) {
+  if (loading && !status) {
     return <Skeleton className="h-16 rounded-xl" />;
   }
+  const documents =
+    (brain?.sources.reduce((n, s) => n + s.documents, 0) ?? 0) + (brain?.unfiled ?? 0);
   const tiles: { label: string; value: string }[] = [
-    { label: "Total items", value: String(stats?.totalItems ?? 0) },
-    { label: "Operator facts", value: String(stats?.facts ?? 0) },
-    { label: "Agent memory", value: String(stats?.teammateMemory ?? 0) },
-    { label: "Document chunks", value: String(stats?.documentMemory ?? 0) },
-    { label: "Task outcomes", value: String(stats?.taskOutcomes ?? 0) },
-    // Across every memory source, not just operator facts — teammates write only
-    // context chunks, so a facts-only figure left this stat at "—" forever.
-    { label: "Last updated", value: formatUpdated(stats?.lastUpdatedAtMillis ?? 0) },
+    { label: "Memory", value: status?.on ? "On" : "Off" },
+    { label: "Engine", value: status?.engine ?? "—" },
+    { label: "Agents", value: String(agents.length) },
+    { label: "Conversation turns", value: String(agents.reduce((n, a) => n + a.turns, 0)) },
+    { label: "Documents", value: String(documents) },
   ];
   return (
     <Card data-testid="memory-health">
@@ -441,18 +485,66 @@ function HealthStrip({
             <p className="text-lg font-semibold tabular-nums">{t.value}</p>
           </div>
         ))}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {MEMORY_KINDS.filter((k) => perType[k]).map((k) => (
-            <Badge key={k} variant="outline" className={cn("capitalize", KIND_STYLES[k])}>
-              {k} · {perType[k]}
-            </Badge>
+        {status?.root && (
+          <span className="font-mono text-xs text-muted-foreground" title="Memory root">
+            {status.root}
+          </span>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function BrainSourcesCard({
+  brain,
+  onForget,
+}: {
+  brain: BrainSources;
+  onForget: (source: string) => void;
+}) {
+  return (
+    <Card data-testid="memory-brain-sources">
+      <CardContent className="space-y-2">
+        <h3 className="flex items-center gap-1.5 text-sm font-medium">
+          <FileText className="size-4" /> Documents by source
+        </h3>
+        <ul className="divide-y">
+          {brain.sources.map((s) => (
+            <li
+              key={s.source}
+              className="flex items-center justify-between gap-2 py-2"
+              data-testid="memory-brain-source"
+            >
+              <span className="text-sm">
+                <span className="font-mono">{s.source}</span>{" "}
+                <span className="text-muted-foreground">
+                  · {s.documents} document{s.documents === 1 ? "" : "s"}
+                </span>
+              </span>
+              <ConfirmAction
+                trigger={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 text-muted-foreground hover:text-destructive"
+                    aria-label={`Forget ${s.source} documents`}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                }
+                title={`Forget every ${s.source} document?`}
+                description={`All ${s.documents} ${s.source} document${s.documents === 1 ? "" : "s"} in the brain are forgotten. This cannot be undone.`}
+                confirmLabel="Forget"
+                onConfirm={() => onForget(s.source)}
+              />
+            </li>
           ))}
-          {CONTEXT_ORIGINS.filter((o) => perType[o]).map((o) => (
-            <Badge key={o} variant="outline" className={ORIGIN_STYLES[o]}>
-              {ORIGIN_LABELS[o]} · {perType[o]}
-            </Badge>
-          ))}
-        </div>
+        </ul>
+        {brain.unfiled > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {brain.unfiled} document{brain.unfiled === 1 ? "" : "s"} with no source.
+          </p>
+        )}
       </CardContent>
     </Card>
   );
@@ -469,18 +561,17 @@ function MemoryCard({ entry, onDelete }: { entry: MemoryEntry; onDelete: () => v
             {badge.label}
           </Badge>
         </div>
-        {entry.body && (
-          // Render markdown so **bold**/lists in memory bodies format instead
-          // of showing raw markup. Force muted-foreground on every descendant so
-          // prose's own palette doesn't override the card's muted body styling.
+        {entry.body && entry.body !== entry.title && (
+          // Render markdown so **bold**/lists format instead of showing raw
+          // markup, muted on every descendant to keep the card's body styling.
           <Markdown className="text-muted-foreground [&_*]:text-muted-foreground [&>:first-child]:mt-0 [&>:last-child]:mb-0">
             {entry.body}
           </Markdown>
         )}
         <div className="flex items-center justify-between pt-1">
-          <span className="text-xs text-muted-foreground">via {entry.source}</span>
-          {/* Delete is only offered on operator facts; agent memory and task
-              outcomes are read-only, so they show no delete affordance. */}
+          <span className="text-xs text-muted-foreground">
+            via {entryOrigin(entry)} · {formatUpdated(entry.updatedAt)}
+          </span>
           {entry.editable && (
             <Button
               variant="ghost"
@@ -498,53 +589,79 @@ function MemoryCard({ entry, onDelete }: { entry: MemoryEntry; onDelete: () => v
   );
 }
 
-function EmptyMemory({ hasEntries }: { hasEntries: boolean }) {
+function EmptyMemory({ filtering, off }: { filtering: boolean; off: boolean }) {
   return (
     <div className="mt-16 flex flex-col items-center gap-2 text-center text-muted-foreground">
       <Brain className="size-8" />
-      <p className="text-sm">{hasEntries ? "No memories match your search." : "No memories yet."}</p>
+      <p className="text-sm">
+        {off ? "Memory is off." : filtering ? "No memories match." : "No memories yet."}
+      </p>
     </div>
   );
 }
 
+function ConfirmAction({
+  trigger,
+  title,
+  description,
+  confirmLabel,
+  onConfirm,
+}: {
+  trigger: React.ReactElement;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger render={trigger} />
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className="bg-destructive text-white hover:bg-destructive/90"
+          >
+            {confirmLabel}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 /**
- * Add one memory by hand — inline, on the Upload page.
- *
- * This was a dialog opened from a button in the Brain header. The header is
- * shared by all three sub-pages, so the control stood on Overview and Settings
- * too — neither of which is about writing — while the one page whose whole job
- * is putting things into memory had no visible way to do it by hand.
- *
- * On a page that already hosts the drop zone, a modal is packaging around a
- * form with nowhere else to be. The two ways in — drop a document, type a fact
- * — now sit one above the other, and neither covers the other while you read
- * it.
+ * Add one learning by hand — inline, on the Upload page beside the drop zone,
+ * so the two ways in (drop a document, type a learning) sit together. The host
+ * stores it at the company root, where every teammate recalls it.
  */
-function AddMemoryPanel({
-  discarding,
+function AddLearningPanel({
+  off,
   onAdd,
 }: {
-  discarding: boolean;
-  onAdd: (fields: { kind: MemoryKind; title: string; body: string }) => Promise<void>;
+  off: boolean;
+  onAdd: (fields: { text: string; kind: LearningKind }) => Promise<void>;
 }) {
-  const [kind, setKind] = useState<MemoryKind>("fact");
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
+  const [kind, setKind] = useState<LearningKind>("fact");
+  const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (!title.trim()) return;
+    if (!text.trim()) return;
     setBusy(true);
     try {
-      await onAdd({ kind, title: title.trim(), body: body.trim() });
-      // A dialog used to clear itself by closing. Nothing closes now, so the
-      // form has to reset explicitly — text left standing in the fields after a
-      // successful save reads as work that has not been saved yet.
+      await onAdd({ kind, text: text.trim() });
+      // Nothing closes, so the form resets explicitly — text left standing
+      // after a successful save reads as work that has not been saved yet.
       setKind("fact");
-      setTitle("");
-      setBody("");
+      setText("");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "could not save the memory");
+      toast.error(e instanceof Error ? e.message : "could not save the learning");
     } finally {
       setBusy(false);
     }
@@ -555,74 +672,53 @@ function AddMemoryPanel({
       <CardContent className="grid gap-4">
         <div className="grid gap-1">
           <h3 className="flex items-center gap-1.5 text-sm font-medium">
-            <Plus className="size-4" /> New memory
+            <Plus className="size-4" /> Add learning
           </h3>
           <p className="text-xs text-muted-foreground">
-            Capture something your company should remember.
+            Something every teammate should know and recall.
           </p>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="mem-kind">Type</Label>
+          <Label htmlFor="mem-kind">Kind</Label>
           <Select
             value={kind}
-            onValueChange={(v) => v && setKind(v as MemoryKind)}
-            items={Object.fromEntries(MEMORY_KINDS.map((k) => [k, KIND_LABELS[k]]))}
+            onValueChange={(v) => v && setKind(v as LearningKind)}
+            items={LEARNING_KIND_LABELS}
           >
             <SelectTrigger id="mem-kind" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {MEMORY_KINDS.map((k) => (
+              {LEARNING_KINDS.map((k) => (
                 <SelectItem key={k} value={k}>
-                  {KIND_LABELS[k]}
+                  {LEARNING_KIND_LABELS[k]}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="mem-title">Title</Label>
-          <Input
-            id="mem-title"
-            data-testid="memory-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Client prefers Friday reviews"
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="mem-body">Details</Label>
+          <Label htmlFor="mem-text">Learning</Label>
           <Textarea
-            id="mem-body"
-            data-testid="memory-body"
+            id="mem-text"
+            data-testid="memory-text"
             rows={3}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder="The detail your company should recall."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="e.g. The client prefers Friday reviews."
           />
         </div>
         <div className="flex justify-end">
-          {/*
-            The reason rides on the wrapper, not the button: `Button` carries
-            `disabled:pointer-events-none`, so a `title` on a disabled button
-            never surfaces — the span still takes the hover and shows it.
-          */}
-          <span
-            title={
-              discarding
-                ? "This engine discards every write — nothing saved here is retained."
-                : undefined
-            }
-          >
+          {/* The reason rides on the wrapper: a `title` on a disabled button
+              never surfaces, since `Button` drops pointer events. */}
+          <span title={off ? "Memory is off — nothing saved here would be kept." : undefined}>
             <Button
-              // Rendered, not hidden: the operator should see that writing is
-              // the thing this engine cannot do, not find the control missing.
-              disabled={discarding || !title.trim() || busy}
+              disabled={off || !text.trim() || busy}
               onClick={() => void submit()}
               data-testid="memory-save"
             >
               {busy && <Loader2 className="mr-1.5 size-4 animate-spin" />}
-              Save memory
+              Save learning
             </Button>
           </span>
         </div>
