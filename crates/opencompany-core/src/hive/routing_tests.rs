@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::ports::types::{CompanyId, DeskHiveOverride};
-use tinyhivemind_embed::{
+use tinyhivemind_core::embed::{
     CandidateProbability, EvaluationDisposition, RoutingEvaluation, RoutingFallback,
 };
 
