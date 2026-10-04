@@ -487,62 +487,6 @@ pub struct DelegationQueue {
     /// that has not claimed stages nothing, and now cannot be *un*-claimed by a
     /// concurrent one either.
     committed: Arc<Mutex<BTreeMap<DelegationScope, DrainClaim>>>,
-    /// Desk keys a `delegate_to_desk` call named that the company does not have
-    /// (issue #272).
-    ///
-    /// A refused hand-off never becomes a [`Delegation`], so without this the
-    /// drain has no way to know one was attempted — and a dispatched card would
-    /// settle under the delegator with only whatever the turn chose to say about
-    /// it. Carried on the queue because it shares the queue's exact lifetime:
-    /// filled by the tool during a turn, read by the drain right after, and
-    /// wiped by the same [`clear`](Self::clear) that keeps a prior turn from
-    /// leaking into this one.
-    ///
-    /// Bucketed per [`DelegationScope`] since issue #661, and this field is why
-    /// that issue is a **live** defect rather than a latent one:
-    /// [`push_refusal`](Self::push_refusal) is called by `DelegateToDeskTool`
-    /// *before* the claim is consulted, so an ungrounded hand-off from a
-    /// concurrently-running workflow node already lands here today — and a chat
-    /// turn's [`drain_refusals`](Self::drain_refusals) would take it, record it
-    /// on its own card, and clear it.
-    refused: Arc<Mutex<BTreeMap<DelegationScope, Vec<String>>>>,
-    /// Targets refused because this dispatched task already queued its one hand-off.
-    task_handoff_refusals: Arc<Mutex<BTreeMap<DelegationScope, Vec<String>>>>,
-    /// The **scope chain**: the resolved desk ids of the hand-offs currently
-    /// being executed, outermost first (issue #176).
-    ///
-    /// Depth **is** `scope.len()` — there is no counter beside it to fall out of
-    /// step. Empty while the orchestrator's own turn runs (depth 0); one entry
-    /// while a desk lead the orchestrator handed work to runs (depth 1); two
-    /// while that lead's own delegate runs (depth 2).
-    ///
-    /// It lives on the queue for the same reason [`refused`](Self::refused)
-    /// does, and for one more. Belts are cached per roster
-    /// ([`HarnessPool::ensure`](crate::harness::HarnessPool::ensure)) and rebuilt
-    /// rarely, so a member's tools are wired **statically** — the queue handle
-    /// they were constructed with is the only shared state they can reach at
-    /// call time. Putting depth anywhere else (the message context, the task
-    /// record, the runner) would put it somewhere the member's own tool cannot
-    /// see it.
-    ///
-    /// Deliberately **not** touched by [`clear`](Self::clear): clearing runs
-    /// between delegations *inside* a scope, and dropping the chain there would
-    /// reset the depth of a chain that is still running.
-    ///
-    /// # Bucketed, and why depth is unaffected (issue #661)
-    ///
-    /// Renamed from `scope` to `chains` when it became a map, because "the
-    /// scope of the scope" was about to mean two things: the key is a
-    /// [`DelegationScope`] (*which claimant*), the value is that claimant's own
-    /// #176 chain (*how deep it is nested*).
-    ///
-    /// Depth accounting is untouched by the bucketing. Depth still **is**
-    /// `chain.len()`, still has no counter beside it, and is still read and
-    /// written only within one claimant's own bucket — so a concurrent run can
-    /// neither deepen nor shallow another's chain. Every existing caller is
-    /// [`DelegationScope::Unscoped`], where this is one `Vec` under one key and
-    /// therefore byte-for-byte the pre-#661 structure.
-    chains: Arc<Mutex<BTreeMap<DelegationScope, Vec<String>>>>,
 }
 
 impl DelegationQueue {
@@ -720,15 +664,6 @@ impl DelegationQueue {
     /// leftovers) while losing its reach.
     fn claim_as(&self, scope: DelegationScope, state: DrainClaim) -> DelegationClaim {
         self.clear_scope(&scope);
-        // Issue #176: a claim opens a fresh chain. The chain outlives an
-        // ordinary `clear`, so it is reset on the two boundaries that really do
-        // end a chain — the claim's acquire and its `Drop` — and nowhere else.
-        // Both halves matter: a panic inside a nested turn unwinds past the
-        // `ScopeGuard`s, and without the exit reset a leftover chain would make
-        // the *next* operator message start at depth 2 and refuse its first
-        // hand-off. Same every-exit-path discipline the claim already applies to
-        // the queue itself.
-        self.reset_chain(&scope);
         self.committed
             .lock()
             .expect("delegation commitment")
@@ -737,66 +672,6 @@ impl DelegationQueue {
             queue: self.clone(),
             scope,
         }
-    }
-
-    /// How deep the delegation chain currently running is: `0` inside the
-    /// orchestrator's own turn, `1` inside a desk lead it handed work to, and so
-    /// on (issue #176).
-    ///
-    /// Read from the calling scope's own chain since issue #661, so a
-    /// concurrent workflow run's nesting cannot deepen a chat turn's depth (or
-    /// vice versa). Depth is still exactly `chain.len()`.
-    pub fn scope_depth(&self) -> usize {
-        self.chains
-            .lock()
-            .expect("delegation scope")
-            .get(&Self::current_scope())
-            .map_or(0, Vec::len)
-    }
-
-    /// The resolved desk ids currently on the chain, outermost first (issue
-    /// #176) — the set a hand-off target is checked against for a cycle.
-    pub fn scope_chain(&self) -> Vec<String> {
-        self.chains
-            .lock()
-            .expect("delegation scope")
-            .get(&Self::current_scope())
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    /// Enters the scope of a hand-off to `desk_id`, for as long as the returned
-    /// [`ScopeGuard`] lives (issue #176).
-    ///
-    /// Pushes on the way in and pops on `Drop`, so every exit path from the
-    /// delegate's turn — an early return, a `?`, a panic — leaves the chain
-    /// exactly as deep as it found it. `desk_id` must be the **resolved** id
-    /// rather than whatever key the model typed, so the cycle check compares
-    /// identities rather than spellings.
-    ///
-    /// The guard records which [`DelegationScope`]'s chain it pushed onto
-    /// (issue #661) and pops from that one, rather than from whatever scope
-    /// happens to be ambient when it drops — so the pop cannot land in another
-    /// claimant's chain and take a live level off it.
-    #[must_use = "the scope pops on drop; dropping it immediately leaves the chain unchanged"]
-    pub fn enter_scope(&self, desk_id: String) -> ScopeGuard {
-        let scope = Self::current_scope();
-        self.chains
-            .lock()
-            .expect("delegation scope")
-            .entry(scope.clone())
-            .or_default()
-            .push(desk_id);
-        ScopeGuard {
-            queue: self.clone(),
-            scope,
-        }
-    }
-
-    /// Empties one scope's chain. Called only where a chain genuinely ends —
-    /// the claim's acquire and release.
-    fn reset_chain(&self, scope: &DelegationScope) {
-        self.chains.lock().expect("delegation scope").remove(scope);
     }
 
     /// Enqueues a delegation unless nothing will drain it, or `cap` are already
