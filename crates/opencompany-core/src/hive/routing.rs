@@ -154,29 +154,12 @@ pub struct EffectiveRouting {
     pub clarification_threshold: f64,
     /// High-impact threshold, `0..=1`.
     pub high_impact_threshold: f64,
-    /// Cross-desk referral policy.
-    pub referral: EffectiveReferral,
-}
-
-/// The referral policy in force.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EffectiveReferral {
-    /// Whether crossing is on.
-    pub enabled: bool,
-    /// Hops one question may make.
-    pub max_hops: u32,
-    /// How far a mention may reach.
-    pub reach: ReferralReach,
-    /// Whether the answer comes home.
-    pub returns: bool,
 }
 
 impl EffectiveRouting {
     /// Resolves a declared block against the defaults.
     #[must_use]
     pub fn resolve(config: &RoutingConfig) -> Self {
-        let referral = config.referral.clone().unwrap_or_default();
-        let enabled = referral.enabled.unwrap_or(false);
         Self {
             round_width: config.round_width.unwrap_or(DEFAULT_ROUND_WIDTH).max(1),
             choice_option_limit: config
@@ -192,19 +175,6 @@ impl EffectiveRouting {
             high_impact_minimum_confidence: config.high_impact_minimum_confidence.unwrap_or(0.0),
             clarification_threshold: config.clarification_threshold.unwrap_or(1.0),
             high_impact_threshold: config.high_impact_threshold.unwrap_or(1.0),
-            referral: EffectiveReferral {
-                enabled,
-                max_hops: referral.max_hops.unwrap_or(DEFAULT_REFERRAL_MAX_HOPS),
-                reach: match referral.reach.as_deref() {
-                    Some("local") => ReferralReach::Local,
-                    Some("channels") => ReferralReach::Channels,
-                    // Enabled without a word: crossing is the point of the
-                    // block, so the widest reach is the one it meant.
-                    Some("desks") | None => ReferralReach::Desks,
-                    Some(_) => ReferralReach::Local,
-                },
-                returns: referral.returns.unwrap_or(true),
-            },
         }
     }
 
@@ -218,17 +188,6 @@ impl EffectiveRouting {
             high_impact_threshold: probability(self.high_impact_threshold),
             round_width: self.round_width,
             choice_option_limit: self.choice_option_limit,
-        }
-    }
-
-    /// The referral policy `tinyhivemind::referral::referral` decides under.
-    #[must_use]
-    pub fn referral_policy(&self) -> ReferralPolicy {
-        ReferralPolicy {
-            enabled: self.referral.enabled,
-            max_hops: self.referral.max_hops,
-            reach: self.referral.reach,
-            returns: self.referral.returns,
         }
     }
 
@@ -459,22 +418,6 @@ pub struct EffectiveRoutingDto {
     pub clarification_threshold: f64,
     /// High-impact threshold.
     pub high_impact_threshold: f64,
-    /// Referral policy in force.
-    pub referral: EffectiveReferralDto,
-}
-
-/// The referral policy, camelCase for the console.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EffectiveReferralDto {
-    /// Whether crossing is on.
-    pub enabled: bool,
-    /// Hop budget.
-    pub max_hops: u32,
-    /// Reach word.
-    pub reach: String,
-    /// Whether answers come home.
-    pub returns: bool,
 }
 
 /// One seat the router may pick.
@@ -524,17 +467,6 @@ impl EffectiveRouting {
             high_impact_minimum_confidence: self.high_impact_minimum_confidence,
             clarification_threshold: self.clarification_threshold,
             high_impact_threshold: self.high_impact_threshold,
-            referral: EffectiveReferralDto {
-                enabled: self.referral.enabled,
-                max_hops: self.referral.max_hops,
-                reach: match self.referral.reach {
-                    ReferralReach::Local => "local",
-                    ReferralReach::Channels => "channels",
-                    ReferralReach::Desks => "desks",
-                }
-                .to_string(),
-                returns: self.referral.returns,
-            },
         }
     }
 }
