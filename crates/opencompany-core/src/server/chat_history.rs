@@ -245,46 +245,6 @@ pub fn agent_channels(record: &CompanyRecord, agent_id: &str) -> Vec<Channel> {
         });
     }
 
-    // **The private line this teammate shares with each of the others (#2368).**
-    //
-    // A pair thread is `dm:<a>+<b>` — neither a desk nor this agent's own
-    // direct line — so it matched nothing above, and an agent could not read
-    // back a conversation it had itself been part of. Two seats settled
-    // something and rediscovered it from scratch the next day.
-    //
-    // Enumerable rather than searchable: `pair_conversation` sorts the two
-    // ids, so the thread this agent shares with any teammate is computable
-    // without an index, and one that never happened simply holds no rows.
-    // Only threads this agent is IN: every key is built from its own id, so a
-    // pair between two other people is not addressable here at all.
-    //
-    // Agent-scoped by construction. Every caller of this function reads on
-    // behalf of ONE agent — its session delta, its own speech targets, and the
-    // console's Session tab for that agent — so this adds no channel to the
-    // operator's rail.
-    let mut partners: Vec<String> = Vec::new();
-    for agent in record
-        .manifest
-        .agents
-        .iter()
-        .map(|a| a.id.clone())
-        .chain(record.overlay_agents.iter().map(|a| a.id.clone()))
-    {
-        if agent != agent_id && !partners.contains(&agent) {
-            partners.push(agent);
-        }
-    }
-    for partner in partners {
-        let thread = crate::hive::referral::pair_conversation(agent_id, &partner);
-        if seen.insert(thread.clone()) {
-            channels.push(Channel {
-                label: format!("@{partner}"),
-                name: thread.clone(),
-                id: thread,
-            });
-        }
-    }
-
     channels
 }
 
@@ -358,122 +318,6 @@ pub fn dispatch_marker_text(column: &str) -> String {
     format!("finished → {}", crate::ports::tasks::column_label(column))
 }
 
-/// Where a crossing referral came from, folded onto the message it caused.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReferredFrom {
-    /// The asking desk, by id — for the link.
-    pub desk_id: String,
-    /// Its display name as captured when the referral was made.
-    pub desk_name: String,
-    /// The agent that asked.
-    pub asker_id: String,
-    /// Its display label as captured when the referral was made.
-    pub asker_label: String,
-    /// The asking message, so the console can link to it.
-    pub sequence: u64,
-    /// Whether this is the answer coming home rather than the outbound ask.
-    /// Carried from the marker; see `CompanyEvent::ReferralEnqueued`.
-    pub returning: bool,
-    /// Whether a PERSON was asked rather than a desk.
-    ///
-    /// The chip names whoever was actually addressed. "Answered by Front Desk"
-    /// for a question put to one person names a room that was never asked — its
-    /// other members had no part in it, and on a direct crossing it holds none
-    /// of the exchange.
-    pub direct: bool,
-}
-
-/// One line of a crossing, in the order it was said.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReferralLine {
-    /// The agent that wrote it.
-    pub author_id: String,
-    /// Their display label, captured when the referral was made.
-    pub author_label: String,
-    /// What they said, with any host note to the asker already stripped.
-    pub text: String,
-    /// True when this desk's own agent wrote it — the question going out.
-    pub outbound: bool,
-}
-
-/// One agent-to-agent exchange on this desk, folded onto the `ask` row that
-/// opened it.
-///
-/// Same idiom and the same reason as [`ReferralConversation`] beside it, with
-/// one difference worth stating: a crossing's relayed rows are *dropped*
-/// host-side, while these are *kept* — in the pair channel the exchange was
-/// written to. The desk still never sees them, because a desk reads its own
-/// channel and they are not in it, so without this fold the only trace of two
-/// seats talking is the concluding paraphrase. The rows exist; this is what
-/// carries them to the row that sent the seats aside.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AgentConversation {
-    /// The `ask` row it is rooted at, and its identity.
-    ///
-    /// Two seats can hold several exchanges in one episode, and they share a
-    /// channel: `pair_conversation` is deterministic, so every one of them is
-    /// `dm:<a>+<b>`. Without the root they are indistinguishable -- same
-    /// asker, same askee, same channel -- and a reader sees the same line
-    /// twice with no way to tell which is which.
-    pub root: u64,
-    /// The seat that asked.
-    pub asker_id: String,
-    /// The seat it asked.
-    pub askee_id: String,
-    /// The channel the exchange is written to (`dm:{a}+{b}`).
-    pub conversation_id: String,
-    /// Whether it has ended. A live exchange is worded in the present tense,
-    /// for the reason [`ReferralConversation`] words a running crossing that
-    /// way: past tense is a claim that something is over.
-    pub concluded: bool,
-    /// Whether it ended by running out of turns rather than by concluding.
-    pub forced: bool,
-    /// The exchange itself, in transcript order.
-    pub lines: Vec<ReferralLine>,
-}
-
-/// The whole exchange between an agent on this desk and somebody who is not,
-/// folded onto the report that brought it home.
-///
-/// The relayed rows themselves are still dropped from the transcript: a desk's
-/// history is the conversation that happened ON it, and an agent who does not
-/// work here did not speak here. But dropping them outright left an operator
-/// able to see that a question crossed and never what was said either way,
-/// with only the asker's paraphrase to go on. This carries the exchange as its
-/// own collapsible line — closed by default, so the desk still reads as its
-/// own conversation and the crossing is one click away rather than gone.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReferralConversation {
-    /// The agent on this desk that asked.
-    pub asker_id: String,
-    /// Who they asked.
-    pub other_id: String,
-    /// And where that person sits, for the label and the link.
-    pub other_desk_id: String,
-    pub other_desk_name: String,
-    /// Whether a PERSON was asked, rather than a desk.
-    ///
-    /// The two are different acts and the label says which: `@name` went to
-    /// somebody, `#desk` was put to a room. Taken from whether the crossing
-    /// named its own pair conversation — a desk crossing runs on the desk and
-    /// names none.
-    pub direct: bool,
-    /// Which side of the crossing this desk is on.
-    ///
-    /// Every other field is named from the asking desk's point of view, because
-    /// until now that was the only desk a crossing was folded onto. The desk
-    /// that was ASKED carries the same exchange with the roles swapped, and a
-    /// label that cannot tell them apart renders it backwards: `exchanges`
-    /// answering a question reads as "asked #order_ops", which is the one thing
-    /// that did not happen. The host says it for the same reason
-    /// [`ReferredFrom::returning`] exists — both sides are agent lines on a
-    /// desk, so nothing else on the row distinguishes them.
-    pub inbound: bool,
-    /// The exchange, oldest first. Its length is the message count the
-    /// collapsed label shows.
-    pub lines: Vec<ReferralLine>,
-}
-
 #[cfg(test)]
 impl MessageView {
     /// A bare row, for tests that exercise the folds rather than the projection.
@@ -493,11 +337,8 @@ impl MessageView {
             at_millis: 0.0,
             mine: false,
             by_person: false,
-            referred_from: None,
-            referral_conversation: None,
-            agent_conversations: Vec::new(),
             aside_audience: audience,
-            episode: None,
+            hive: None,
             steps: Vec::new(),
             task_id: None,
             parent_id: None,
@@ -653,31 +494,15 @@ pub struct MessageView {
     /// dispatch marker and an agent reply are both `false`: neither was typed by
     /// a person.
     pub by_person: bool,
-    /// Set when a crossing referral caused this message (tinyhivemind P15).
-    ///
-    /// Folded from the `ReferralEnqueued` marker rather than stored on the
-    /// message: the marker is written inside the enqueue transaction, before
-    /// the child turn exists, so the message cannot carry it at write time.
-    pub referred_from: Option<ReferredFrom>,
-    /// The crossing this report brought home, when it brought one.
-    pub referral_conversation: Option<ReferralConversation>,
-    /// The agent-to-agent exchanges this row reported, oldest first.
-    ///
-    /// A list, not one: several exchanges legitimately land on the same row.
-    /// Every exchange still running folds onto the row that sent the seats
-    /// aside, and one seat can open several from a single desk message --
-    /// which it does whenever the first answer does not settle the question.
-    /// A single slot kept whichever was folded last and dropped the rest.
-    pub agent_conversations: Vec<AgentConversation>,
     /// The addressees of this row when the host narrowed it — a seat's `dm`
     /// inside a desk — else empty. Projected as `audience`; an operator reads
     /// the row regardless, because audience is a coordination device between
     /// agents and never access control.
     pub aside_audience: Vec<String>,
-    /// What this reply was inside the episode that produced it (plan
-    /// hive-desks, Phase 4): its round, its speech act, a `dm`'s recipients
-    /// and how a `broadcast` was routed on. `None` outside an episode.
-    pub episode: Option<crate::ports::types::ReplyEpisode>,
+    /// Where this reply sits in the company hive's transcript (OC-2): its
+    /// hive sequence, episode and thread. `None` for a row that did not come
+    /// through the hive.
+    pub hive: Option<crate::ports::types::HiveRef>,
     /// Whether this row may reach only administrators (issue #1781 review,
     /// Codex P1).
     ///
@@ -949,7 +774,7 @@ impl MessageView {
                 parent,
                 mentions,
                 audience,
-                episode,
+                hive,
                 ..
             } => {
                 // Keys rework #2306, round-2 review KR-L2-03: re-classifies
@@ -976,12 +801,8 @@ impl MessageView {
                     mine: false,
                     // The runtime wrote this, whichever brain produced it.
                     by_person: false,
-                    // Set by the referral fold in `history_for_desk`, never here.
-                    referred_from: None,
-                    referral_conversation: None,
-                    agent_conversations: Vec::new(),
                     aside_audience: audience,
-                    episode,
+                    hive,
                     steps,
                     task_id,
                     outputs,
@@ -1058,12 +879,8 @@ impl MessageView {
                     ),
                 };
                 MessageView {
-                    // Set by the referral fold in `history_for_desk`, never here.
-                    referred_from: None,
-                    referral_conversation: None,
-                    agent_conversations: Vec::new(),
                     aside_audience: Vec::new(),
-                    episode: None,
+                    hive: None,
                     id,
                     channel: voice,
                     admin_only: false,
@@ -1153,12 +970,8 @@ impl MessageView {
                 at_millis,
                 mine: false,
                 by_person: false,
-                // Set by the referral fold in `history_for_desk`, never here.
-                referred_from: None,
-                referral_conversation: None,
-                agent_conversations: Vec::new(),
                 aside_audience: Vec::new(),
-                episode: None,
+                hive: None,
                 steps: Vec::new(),
                 task_id: Some(task_id),
                 outputs: Vec::new(),
@@ -1191,12 +1004,8 @@ impl MessageView {
                 at_millis,
                 mine: false,
                 by_person: false,
-                // Set by the referral fold in `history_for_desk`, never here.
-                referred_from: None,
-                referral_conversation: None,
-                agent_conversations: Vec::new(),
                 aside_audience: Vec::new(),
-                episode: None,
+                hive: None,
                 steps: Vec::new(),
                 task_id: None,
                 outputs: Vec::new(),
