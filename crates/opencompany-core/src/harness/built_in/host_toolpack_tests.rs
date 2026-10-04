@@ -9,7 +9,7 @@ fn coordinator_preserves_real_workflow_and_integration_tools() {
             "create_workflow",
             "run_workflow",
             "read_workflow",
-            "memory_recall",
+            "memory",
         ]
         .into_iter()
         .map(str::to_string)
@@ -33,7 +33,7 @@ fn specialist_disclosure_does_not_gain_workflow_tools() {
     // filtered run can reach this test before any agent build declares it,
     // leaving every pack withheld.
     crate::harness::built_in::tool_posture::declare();
-    let mut tools: HashSet<String> = ["composio_execute", "memory_recall"]
+    let mut tools: HashSet<String> = ["composio_execute", "memory"]
         .into_iter()
         .map(str::to_string)
         .collect();

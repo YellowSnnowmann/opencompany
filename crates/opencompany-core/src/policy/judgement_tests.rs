@@ -59,7 +59,6 @@ fn reads_searches_and_drafts_do_not_stop() {
         "grep",
         "list",
         "read_workspace_state",
-        "memory_recall",
         "image_info",
         "query_company",
     ] {
@@ -78,8 +77,7 @@ fn the_agents_own_drafts_do_not_stop() {
         "edit",
         "apply_patch",
         "csv_export",
-        "memory_store",
-        "memory_forget",
+        "memory",
     ] {
         assert_eq!(judge_bare(tool), Judgement::Silent, "`{tool}` is a draft");
     }

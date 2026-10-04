@@ -279,7 +279,7 @@ async fn event_log_subscribe_delivers_new_event() {
 }
 
 #[tokio::test]
-async fn memory_store_traces_tail_and_evict() {
+async fn trace_store_tails_and_evicts() {
     let root_dir = tmp_root();
     let root = root_dir.path().to_path_buf();
     let mem = FsTraceStore::new(&root);

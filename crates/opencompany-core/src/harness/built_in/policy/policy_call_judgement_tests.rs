@@ -34,7 +34,7 @@ async fn full_autonomy_stops_for_an_irreversible_call() {
 #[tokio::test]
 async fn full_autonomy_still_allows_reads_and_drafts() {
     let p = policy("full", &[], None);
-    for tool in ["file_read", "grep", "list", "memory_recall", "web_search"] {
+    for tool in ["file_read", "grep", "list", "web_search"] {
         let d = p.check(&request(tool, serde_json::json!({}))).await;
         assert_eq!(decision_name(&d), "allow", "`{tool}` must still run");
     }
