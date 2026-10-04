@@ -2949,87 +2949,39 @@ fn optional_str(args: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The orchestrator's delegation and lifecycle tools over a shared queue:
-/// `spawn_task`, `delegate_to_desk`, and — since #186 part b — `assign_task`
-/// and `review_task`. `query_company` is built separately because it needs the
-/// read ports, not the queue.
+/// The orchestrator's board tools over a shared queue: `spawn_task`, and —
+/// since #186 part b — `assign_task` and `review_task`. `query_company` is
+/// built separately because it needs the read ports, not the queue.
 ///
-/// `delegate_to_desk` additionally takes the company id + store, which it reads
-/// at call time to ground the delegation target against the company's real
-/// desks (issue #272).
+/// The desk and teammate hand-off tools that used to sit here went with the
+/// hive cutover (OC-2): the orchestrator reaches a desk or a teammate through
+/// the permanent `hivemind_*` tools.
 pub fn delegation_tools(
     queue: &DelegationQueue,
     company: CompanyId,
     store: Arc<dyn CompanyStore>,
 ) -> Vec<Box<dyn Tool>> {
     vec![
-        Box::new(SpawnTaskTool::new(
-            queue.clone(),
-            company.clone(),
-            store.clone(),
-        )),
-        Box::new(DelegateToDeskTool::new(
-            queue.clone(),
-            company.clone(),
-            store.clone(),
-        )),
-        // Issue #884: the orchestrator can now reach a named teammate directly
-        // rather than only whoever leads their desk.
-        Box::new(DelegateToTeammateTool::new(queue.clone(), company, store)),
+        Box::new(SpawnTaskTool::new(queue.clone(), company, store)),
         Box::new(AssignTaskTool::new(queue.clone())),
         Box::new(ReviewTaskTool::new(queue.clone())),
     ]
 }
 
-/// The delegation tools every **non-orchestrator** roster agent gets:
-/// `spawn_task`, a `delegate_to_desk` and a `delegate_to_teammate`, both
-/// scoped by its manifest `delegates_to` — unrestricted when that list is
-/// empty (the ordinary case), narrowed to the named desks (and, for the
-/// teammate tool, its own desk-mates plus those desks' members) when it is not.
-/// Issue #176 wired these only onto a member that opted in with a list; a
-/// specialist with none had no way to reach the colleague beside it.
+/// The board tool every **non-orchestrator** roster agent gets: `spawn_task`,
+/// so a teammate can leave work tracked for somebody else (issue #176).
 ///
 /// Deliberately a subset of [`delegation_tools`] rather than the same list.
 /// `assign_task`, `review_task`, `query_company`, `run_workflow`,
 /// `create_workflow` and `add_agent` are the orchestrator's *authority* over the
-/// company — who owns a card, whether work passes review, who is on the roster —
-/// and #176 is about a lead pulling in a specialist, not about every desk lead
-/// becoming a second CEO. A member gets exactly what it needs to pass a slice
-/// on and to leave the rest tracked.
-///
-/// All three names are already covered by
-/// [`is_delegation_tool`], so
-/// [`ApprovalPolicy`](crate::harness::policy::ApprovalPolicy) classifies them as
-/// internal here exactly as it does on the orchestrator — no policy change comes
-/// with this wiring.
+/// company. A teammate reaches a colleague through the permanent `hivemind_*`
+/// tools; what it gets here is the one board write that keeps work tracked.
 pub fn member_delegation_tools(
     queue: &DelegationQueue,
     company: CompanyId,
     store: Arc<dyn CompanyStore>,
-    scope: MemberScope,
 ) -> Vec<Box<dyn Tool>> {
-    vec![
-        Box::new(SpawnTaskTool::new(
-            queue.clone(),
-            company.clone(),
-            store.clone(),
-        )),
-        Box::new(DelegateToDeskTool::for_member(
-            queue.clone(),
-            company.clone(),
-            store.clone(),
-            scope.clone(),
-        )),
-        // Issue #884, D1: without this a desk lead can reach every desk its
-        // allowlist names and nobody at all on its own — the one hand-off it is
-        // best placed to make.
-        Box::new(DelegateToTeammateTool::for_member(
-            queue.clone(),
-            company,
-            store,
-            scope,
-        )),
-    ]
+    vec![Box::new(SpawnTaskTool::new(queue.clone(), company, store))]
 }
 
 /// The hand-off and tracking brief appended to every **non-orchestrator**
@@ -3037,18 +2989,9 @@ pub fn member_delegation_tools(
 /// ([`team_brief::team_section`](crate::company::team_brief::team_section))
 /// that lists who it may hand work to.
 ///
-/// It exists because a refusal costs a whole turn. A model handed
-/// `delegate_to_desk` with no idea that the chain it is running inside is
-/// nearly at its bound spends turns discovering that one refusal at a time —
-/// and the depth refusal in particular is not retryable, so a model that has
-/// not been told will burn every remaining call on it. Naming the shape of the
-/// bound up front is cheaper than the refusals it avoids.
-///
-/// The bound is stated qualitatively rather than as a number. The number lives
-/// on the live company record and is read at call time; baking a snapshot of it
-/// into a persona that is cached with the belt would be a claim that goes stale
-/// the moment an operator edits the manifest — and a *confidently wrong* bound
-/// is worse guidance than an honest "there is one".
+/// It exists because a teammate's reach is a message, not a hand-off: an
+/// answer it asks for arrives on a later turn, and a model not told so writes
+/// as though it already had it.
 ///
 /// # The board is a tool call
 ///
@@ -3067,9 +3010,10 @@ pub fn member_delegation_tools(
 pub fn member_delegation_brief() -> String {
     "\n\n## Handing work on, and tracking it\n\nDo what is yours yourself. When a slice of the ask \
 belongs to a teammate's specialism — a design question to the designer, a security check to the \
-security engineer — and you are in a room with them, `ask` them for it. Asking ends your turn: \
-their answer reaches you in a later brief, not this one. So say you have asked and what you are \
-waiting on; never write as though you already had the answer. When it arrives, fold it in and \
+security engineer — ask them for it: `hivemind_ask` inside a conversation you share, \
+`hivemind_send_agent` to message them directly. Their answer reaches you on a later turn, not \
+this one. So say you have asked and what you are waiting on; never write as though you already \
+had the answer. When your part of a hive conversation is done, say so with `hivemind_complete`. When it arrives, fold it in and \
 relay what they said rather than saying you asked. Ask for the part somebody else is genuinely \
 better placed to answer, not the whole ask, and never decline something as \"not mine\" when a \
 teammate who owns it is one question away.\n\nNothing said to you in chat is on \
