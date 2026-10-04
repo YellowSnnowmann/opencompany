@@ -10,11 +10,15 @@ use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(feature = "openhuman")]
+use serde_json::json;
 use tower::ServiceExt;
 
 use crate::company::CompanyManifest;
-use crate::ports::types::{CompanyEvent, CompanyId, CompressedTrace, EventSeq};
+use crate::ports::types::{CompanyId, CompressedTrace};
+#[cfg(feature = "openhuman")]
+use crate::ports::types::{CompanyEvent, EventSeq};
 use crate::runtime::RuntimeBuilder;
 use crate::server::router;
 use crate::{AppConfig, AppState};
