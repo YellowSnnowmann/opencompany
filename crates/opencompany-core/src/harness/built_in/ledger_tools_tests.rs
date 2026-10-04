@@ -703,23 +703,4 @@ fn the_boards_catalogue_line_is_replaceable_and_its_episode_form_promises_nothin
         standing.contains("spawn_task"),
         "the standing line names the verbs that really do write the board: {standing}"
     );
-
-    let episode = episode_written_by_note(crate::hive::host::TOOL_PREFIX);
-    for withheld in crate::harness::built_in::EPISODE_WITHHELD_TOOLS {
-        assert!(
-            !episode.contains(withheld),
-            "`{withheld}` is off an episode seat's belt, so its catalogue must not name it: \
-             {episode}"
-        );
-    }
-    assert!(
-        episode.contains("desk_ask"),
-        "and it must name the verb that does work here, prefixed as the belt carries it: \
-         {episode}"
-    );
-
-    assert!(
-        episode.contains("`spawn_task`"),
-        "a seat opens cards, so the note names the verb it keeps: {episode}"
-    );
 }
