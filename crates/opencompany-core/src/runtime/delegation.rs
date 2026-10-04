@@ -23,9 +23,7 @@ use async_trait::async_trait;
 
 use crate::Result;
 use crate::company::Policy;
-use crate::company::steer::{
-    InflightEntry, InflightKind, InflightRegistry, SteerAction, SteerControl,
-};
+use crate::company::steer::SteerControl;
 use crate::harness::TurnOutcome;
 use crate::harness::lifecycle::{self, TaskRunEnd};
 use crate::harness::orchestrator::{self, Delegation, DelegationQueue};
@@ -34,7 +32,7 @@ use crate::harness::run_trace::RunTraceSink;
 use crate::harness::workflow_refs::WorkflowRefQueue;
 use crate::ports::tasks::{TaskOutput, TaskOutputAction, TaskOutputSource, TaskOutputWorkflow};
 use crate::ports::types::{CompanyId, CompanyRecord, EventSeq, OutboundMessage, TurnStep};
-use crate::ports::{TaskOrigin, TaskRecord, TaskStore, generate_id, now_millis};
+use crate::ports::{TaskOrigin, TaskRecord, TaskStore, now_millis};
 use crate::runtime::assignee;
 use crate::runtime::cycle::{
     BUILDER_ANNOTATION, OPEN_WORK_ANNOTATION, SETTLED_WORK_ANNOTATION, THREAD_INDEX_ANNOTATION,
@@ -316,7 +314,8 @@ pub trait RunTurn: Send + Sync {
 // `desk_lead` is the brain-agnostic desk-lead resolver — it moved to
 // `runtime::delegation_tools` (issue #176) so the hosted path can resolve a
 // desk lead without the `openhuman` feature. Re-exported here so this module's
-// callers (and its tests) keep using `desk_lead(...)` unchanged.
+// tests keep using `desk_lead(...)` unchanged.
+#[cfg(test)]
 pub(crate) use crate::runtime::delegation_tools::desk_lead;
 
 use crate::runtime::delegation_tools;
