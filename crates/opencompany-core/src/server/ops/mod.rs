@@ -167,7 +167,6 @@ mod tests_mcp_manifest;
 #[path = "write_mcp_probed_identity_tests.rs"]
 mod tests_mcp_probed_identity;
 #[cfg(test)]
-#[cfg(test)]
 #[path = "write_parent_task_id_rejects_tests.rs"]
 mod tests_parent_task_id_rejects;
 #[cfg(test)]
