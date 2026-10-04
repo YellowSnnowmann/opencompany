@@ -729,7 +729,6 @@ impl RuntimeBuilder {
             store: None,
             events: None,
             traces: None,
-            #[cfg(feature = "openhuman")]
             tools: None,
             channels: None,
             approvals: None,
