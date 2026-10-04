@@ -17,6 +17,12 @@
 # reads as a failure rather than a confusing type mismatch three crates away.
 #
 # Moved out of the old ci.yml's gated job unchanged, so both CI profiles run it.
+#
+# Widened again with the hive coordinator cutover: `tinyhivemind-openhuman`
+# also names `tinytools`/`tinytools-agent` and `tinymemory-api`/`-tools` by git
+# URL, each patched onto OpenHuman's vendored copy in the root manifest. A
+# second tinyhivemind, tinytools or tinymemory package (or one resolved from
+# its git source) means two `Tool` / `MemoryProvider` traits in one process.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -25,7 +31,7 @@ if ! report="$(cargo tree --locked -p opencompany-core -e normal --features open
   echo "::error::cargo tree failed to resolve the graph" >&2
   exit 1
 fi
-if grep -E "^(openhuman|tinymcp|tinyagents|tinyinference|tinymemory|tinyflows|tinybus)" <<< "$report"; then
+if grep -E "^(openhuman|tinymcp|tinyagents|tinyinference|tinymemory|tinyflows|tinybus|tinyhivemind|tinytools)" <<< "$report"; then
   echo "::error::duplicated OpenHuman-family package in the resolve graph" >&2
   exit 1
 fi
@@ -34,4 +40,9 @@ if cargo metadata --locked --format-version 1 \
   echo "::error::an OpenHuman package resolved from its git source instead of vendor/openhuman" >&2
   exit 1
 fi
-echo "No duplicated OpenHuman-family crates; every one resolves from vendor/openhuman."
+if cargo metadata --locked --format-version 1 \
+    | jq -e '[.packages[] | select(.source != null and (.source | test("github.com/tinyhumansai/(tinytools|tinymemory|tinyhivemind)")))] | length > 0' >/dev/null; then
+  echo "::error::a tinytools/tinymemory/tinyhivemind package resolved from its git source instead of the vendored checkout" >&2
+  exit 1
+fi
+echo "No duplicated OpenHuman-family crates; every one resolves from its vendored checkout."
