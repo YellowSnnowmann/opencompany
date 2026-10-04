@@ -1,7 +1,7 @@
 # Console-surface stores (WS3)
 
 The durable stores behind the operator console's own surfaces — the board, the
-deliverables, the note tree, memory, usage, skills and inboxes. `RunStore` is
+deliverables, the note tree, usage, skills and inboxes. `RunStore` is
 one of them and has its own file, [ports-runs.md](ports-runs.md), because its
 contract is the longest. Part of the port contracts indexed by
 [ports.md](ports.md).
