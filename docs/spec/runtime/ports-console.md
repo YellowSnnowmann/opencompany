@@ -6,8 +6,8 @@ one of them and has its own file, [ports-runs.md](ports-runs.md), because its
 contract is the longest. Part of the port contracts indexed by
 [ports.md](ports.md).
 
-Seven additional ports back the operator console's durable surfaces. They follow
-the same one-trait-per-file convention (`src/ports/{tasks,workspace,facts,
+Six additional ports back the operator console's durable surfaces. They follow
+the same one-trait-per-file convention (`src/ports/{tasks,workspace,
 usage,skills_state,inbox,runs}.rs`), key everything on `CompanyId`, return the
 crate `Result<T>`, and are covered by the conformance suite
 ([storage.md](storage.md)). Their fs/sqlite/mongodb backends live alongside the

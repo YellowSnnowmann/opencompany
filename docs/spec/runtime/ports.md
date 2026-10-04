@@ -22,8 +22,7 @@ event vocabulary those traits carry moved to [`events.md`](events.md)
 | `ChannelAdapter` | [ports-cognition.md](ports-cognition.md#channeladapter) | outbound conversation surfaces, and the `TurnStep` activity trace on a bubble |
 | `CompanyStore` | [ports-state.md](ports-state.md#companystore) | charter, roster, ledger, approval queue, operator overlays |
 | `EventLog` | [ports-state.md](ports-state.md#eventlog) | the append-only journal (its vocabulary: [events.md](events.md)) |
-| `MemoryStore` | [ports-state.md](ports-state.md#memorystore) | compressed cycle traces and task results |
-| `ContextStore` | [ports-state.md](ports-state.md#contextstore) | the RLM environment the brain queries lazily |
+| `TraceStore` | [ports-state.md](ports-state.md#tracestore) | compressed cycle traces and task results (not memory; company memory is [memory-engine.md](memory-engine.md)) |
 | `SecretStore` | [ports-state.md](ports-state.md#secretstore) | per-company credentials |
 | `UserStore`, `SessionStore`, `LoginCodeStore` | [ports-state.md](ports-state.md#userstore-sessionstore-logincodestore) | human collaborators and their credentials ([users.md](users.md)) |
 | `ToolProvider` | [ports-effects.md](ports-effects.md#toolprovider) | tool catalog + invocation, grant-checked |
@@ -31,7 +30,6 @@ event vocabulary those traits carry moved to [`events.md`](events.md)
 | `TaskStore` | [ports-console.md](ports-console.md#taskstore) | the Kanban board |
 | `ArtifactStore` | [ports-console.md](ports-console.md#artifactstore) | versioned task outputs and the human-edit diff |
 | `WorkspaceStore` | [ports-console.md](ports-console.md#workspacestore) | the note tree |
-| `FactStore` | [ports-console.md](ports-console.md#factstore) | the operator's curated Memory view |
 | `UsageMeter` | [ports-console.md](ports-console.md#usagemeter) | durable per-company usage accounting |
 | `SkillStateStore` | [ports-console.md](ports-console.md#skillstatestore) | installed-skill state overlay |
 | `InboxStore` | [ports-console.md](ports-console.md#inboxstore) | per-teammate email inboxes |
@@ -48,8 +46,7 @@ pub struct CompanyRuntime {
     brain: Arc<dyn Brain>,
     store: Arc<dyn CompanyStore>,
     events: Arc<dyn EventLog>,
-    memory: Arc<dyn MemoryStore>,
-    context: Arc<dyn ContextStore>,
+    traces: Arc<dyn TraceStore>,
     tools: Arc<dyn ToolProvider>,
     channels: Vec<Arc<dyn ChannelAdapter>>,
     approvals: Arc<dyn ApprovalGate>,
@@ -67,12 +64,12 @@ the multi-tenant platform case with the same type.
 | --- | --- | --- |
 | `Brain` | `HostedMedullaBrain` (`src/brain/hosted.rs`) | stub, sidecar, native |
 | `CompanyStore`, `EventLog` | fs bundle (TOML + JSONL) | sqlite, operator-supplied |
-| `MemoryStore`, `ContextStore` | fs (JSONL + content-addressed blobs) | hosted provider, operator-supplied |
+| `TraceStore` | fs (JSONL) | sqlite, mongodb, operator-supplied |
 | `ToolProvider` | OpenHuman RPC, built-ins fallback | TinyAgents-native |
 | `ChannelAdapter` | built-in operator chat | OpenHuman channels |
 | `ApprovalGate` | manifest `[policy]` evaluator | OpenHuman policy hook |
 | `SecretStore` | fs (encrypted at rest) | OS keychain, operator-supplied |
-| `TaskStore`, `WorkspaceStore`, `FactStore`, `UsageMeter`, `SkillStateStore`, `InboxStore` | fs bundle | sqlite, mongodb |
+| `TaskStore`, `WorkspaceStore`, `UsageMeter`, `SkillStateStore`, `InboxStore` | fs bundle | sqlite, mongodb |
 | `UserStore`, `SessionStore`, `LoginCodeStore` | fs bundle | sqlite, mongodb |
 | `ArtifactStore`, `RunStore`, `WorkflowRevisionStore` | fs bundle (JSONL) | sqlite, mongodb |
 | `JournalStore` | fs bundle (`journal.jsonl`) | sqlite, mongodb |
