@@ -1137,21 +1137,14 @@ impl HarnessBrain {
         }
         // A blank assignee is the one legitimate miss: nobody was named, so the
         // orchestrator picks it up.
-        //
-        // Not final: a turn that hands the work off (issue #204) reassigns the
-        // card to the delegate, and from that point the delegate is the
-        // responder every downstream write credits — the note, the artifact,
-        // the journal, and the relay.
-        let mut responder = resolution
+        let responder = resolution
             .working_agent()
             .unwrap_or(&self.responder)
             .to_string();
-        // Every id `responder` held before a reassignment overwrote it — a
-        // hand-off's `[<old responder>] delegated to …` block stays on the
-        // note under that old name, so `relay_text`'s `known_labels` needs it
-        // too or the strip leaves that block's chrome in the relayed bubble
-        // (issue #1949 review, CodeRabbit 3895599021).
-        let mut prior_responders: Vec<String> = Vec::new();
+        // Every id a card's note may carry a block under besides `responder`'s
+        // own, for `relay_text`'s `known_labels` (issue #1949 review). Empty
+        // since card hand-offs went with the hive cutover (OC-2).
+        let prior_responders: Vec<String> = Vec::new();
 
         // Link the working agent to the card, and persist it BEFORE the turn
         // runs (#205). A card the CEO picked up used to keep `assignee = ""`
