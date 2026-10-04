@@ -332,7 +332,6 @@ pub(super) fn deps_with_plan(
         provider: Arc::new(MockProvider::new("mock: ")),
         provider_slug: "mock".to_string(),
         serves: None,
-        context,
         store: Arc::new(RecordingStore::default()),
         meter,
         workspace_root: dir.to_path_buf(),

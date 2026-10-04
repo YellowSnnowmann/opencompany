@@ -369,3 +369,15 @@ async fn conformance_run_reaper() {
 async fn conformance_deep_trace_store() {
     conformance::assert_deep_trace_store(store()).await;
 }
+
+#[tokio::test]
+async fn conformance_isolation_by_company() {
+    let s = store();
+    conformance::assert_isolation_by_company(s.clone(), s.clone(), s).await;
+}
+
+#[tokio::test]
+async fn conformance_export_totality() {
+    let s = store();
+    conformance::assert_export_totality(s.clone(), s.clone(), s).await;
+}

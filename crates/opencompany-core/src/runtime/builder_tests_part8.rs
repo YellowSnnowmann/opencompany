@@ -400,7 +400,7 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
 
     let routed: Vec<String> = runtime
         .events()
-        .read_from(&id, crate::ports::EventSeq::new(0), usize::MAX)
+        .read_from(&id, crate::ports::types::EventSeq::new(0), usize::MAX)
         .await
         .unwrap()
         .into_iter()

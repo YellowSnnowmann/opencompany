@@ -495,3 +495,17 @@ async fn durable_ownership_round_trip() {
     assert!(s.owners().await.expect("owners").is_empty());
     drop_db(&s).await;
 }
+
+#[tokio::test]
+async fn conformance_isolation_by_company() {
+    let Some(s) = store().await else { return };
+    conformance::assert_isolation_by_company(s.clone(), s.clone(), s.clone()).await;
+    drop_db(&s).await;
+}
+
+#[tokio::test]
+async fn conformance_export_totality() {
+    let Some(s) = store().await else { return };
+    conformance::assert_export_totality(s.clone(), s.clone(), s.clone()).await;
+    drop_db(&s).await;
+}

@@ -1,5 +1,4 @@
 use super::*;
-use crate::ports::facts::FactKind;
 use crate::ports::skills_state::SkillSource;
 use crate::ports::usage::SampleKind;
 use crate::store::conformance;
@@ -521,4 +520,67 @@ async fn conformance_workspace_read_capped_race() {
     let root_dir = tmp_root();
     let root = root_dir.path().to_path_buf();
     conformance::assert_workspace_read_capped_race(Arc::new(FsOps::new(&root))).await;
+}
+
+#[tokio::test]
+async fn workspace_files_land_on_disk_under_folders() {
+    let root_dir = tmp_root();
+    let root = root_dir.path().to_path_buf();
+    let ops = FsOps::new(&root);
+    let company = CompanyId::new("acme");
+    let now = now_millis();
+    // Qualified: `FsOps` implements `create` for the workspace, session, and
+    // login-code ports, so the concrete receiver needs the trait named.
+    WorkspaceStore::create(
+        &ops,
+        &company,
+        &WorkspaceNode {
+            id: "f1".into(),
+            name: "brand".into(),
+            kind: NodeKind::Folder,
+            parent_id: None,
+            updated_at_millis: now,
+            created_by: WorkspaceOrigin::Operator,
+            updated_by: WorkspaceOrigin::Operator,
+            mime: None,
+            size: None,
+            sha256: None,
+            adopted: false,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    WorkspaceStore::create(
+        &ops,
+        &company,
+        &WorkspaceNode {
+            id: "n1".into(),
+            name: "voice.md".into(),
+            kind: NodeKind::File,
+            parent_id: Some("f1".into()),
+            updated_at_millis: now,
+            created_by: WorkspaceOrigin::Operator,
+            updated_by: WorkspaceOrigin::Operator,
+            mime: None,
+            size: None,
+            sha256: None,
+            adopted: false,
+        },
+        Some("# Voice"),
+    )
+    .await
+    .unwrap();
+    let disk = root.join("companies/acme/workspace/brand/voice.md");
+    assert_eq!(tokio::fs::read_to_string(&disk).await.unwrap(), "# Voice");
+
+    // A rename physically relocates the subtree.
+    ops.rename_move(&company, "f1", Some("Branding"), None)
+        .await
+        .unwrap();
+    let moved = root.join("companies/acme/workspace/Branding/voice.md");
+    assert!(tokio::fs::try_exists(&moved).await.unwrap());
+    assert!(!tokio::fs::try_exists(&disk).await.unwrap());
+
+    let _ = (SkillSource::Company, SampleKind::Inference);
 }

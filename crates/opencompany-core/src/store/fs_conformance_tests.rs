@@ -157,3 +157,30 @@ fn legacy_context_index_line_without_a_stamp_still_parses() {
     assert_eq!(entry.len, 24);
     assert_eq!(entry.stored_at_millis, 0);
 }
+
+// The fs backend runs the identical port-conformance suite the sqlite
+// backend runs under `--features sqlite`. Each test gets a fresh root so the
+// stores start empty.
+#[tokio::test]
+async fn conformance_isolation_by_company() {
+    let root_dir = tmp_root();
+    let root = root_dir.path().to_path_buf();
+    conformance::assert_isolation_by_company(
+        Arc::new(FsCompanyStore::new(&root)),
+        Arc::new(FsEventLog::new(&root)),
+        Arc::new(FsTraceStore::new(&root)),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn conformance_export_totality() {
+    let root_dir = tmp_root();
+    let root = root_dir.path().to_path_buf();
+    conformance::assert_export_totality(
+        Arc::new(FsCompanyStore::new(&root)),
+        Arc::new(FsEventLog::new(&root)),
+        Arc::new(FsTraceStore::new(&root)),
+    )
+    .await;
+}
