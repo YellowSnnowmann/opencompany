@@ -1931,298 +1931,59 @@ impl<'a> DelegationRunner<'a> {
         &self,
         chat_id: Option<&str>,
         ctx: MessageContext,
-        hand_offs: HandOffs,
     ) -> Result<Drained> {
         let mut drained = Drained::default();
         for delegation in self.queue.drain(self.max_delegations) {
-            if hand_offs == HandOffs::Drop
-                && let Some(target) = hand_off_target_of(&delegation)
-            {
-                tracing::debug!(
-                    company = %self.company,
-                    target = %target,
-                    "[delegation] dropped a hand-off queued by the relay turn: a relay may only \
-                     relay"
-                );
-                continue;
-            }
-            // Captured before the delegation is consumed, so a cancellation can
-            // be reported against whoever it was aimed at (issues #176, #884).
-            let target = hand_off_target_of(&delegation).map(str::to_string);
             let out = self.run_delegation(delegation, chat_id, ctx).await?;
-            drained.absorb(out, target);
+            drained.absorb(out);
         }
         if self.queue.has_queued() {
-            let nested = Box::pin(self.drain_and_execute(chat_id, ctx, hand_offs)).await?;
+            let nested = Box::pin(self.drain_and_execute(chat_id, ctx)).await?;
             drained.merge(nested);
         }
         Ok(drained)
     }
 
     /// Drains and executes whatever a **dispatched card's** turn queued (issue
-    /// #204), and reports the hand-off when one happened.
+    /// #204): the cards it opened, assigned or reviewed, each written through
+    /// the board exactly as the console writes it. A refused board write is
+    /// recorded on the card, so the card says what its own turn could not do.
     ///
-    /// Before this, `run_task` ran exactly one background turn and never
-    /// touched the queue — so when the dispatched responder (the orchestrator,
-    /// which carries the delegation tools) called `delegate_to_desk`, the
-    /// delegation was silently dropped, the turn still returned `Ok`, and the
-    /// card landed in `in_review` under the delegator with a blank assignee and
-    /// no delegate ever having run.
-    ///
-    /// The first hand-off to a desk with a resolvable lead that **produces
-    /// something** owns the card: the card is reassigned to that lead and
-    /// persisted in [`COLUMN_IN_PROGRESS`](lifecycle::COLUMN_IN_PROGRESS)
-    /// *before* their turn starts, so the board shows who is working it while
-    /// they work it, and the caller settles the card from their output
-    /// afterwards.
-    ///
-    /// An earlier hand-off that produced nothing (its run was cancelled
-    /// mid-flight) holds the card only *provisionally* — a later hand-off that
-    /// answers takes it over. Otherwise the card would settle from the
-    /// cancellation while work that actually ran was merely appended to the
-    /// note, filing a real deliverable under a card marked cancelled.
-    ///
-    /// Every other delegation — `spawn_task`, `assign_task`, `review_task`, a
-    /// hand-off to a desk nobody leads, and any further hand-off once one has
-    /// answered — executes for its side effect; a later hand-off's answer is
-    /// appended to the note so it is recorded rather than silently discarded.
-    ///
-    /// `chat_id` is `None` throughout: a dispatched card has no chat thread, and
-    /// stamping one would make a spawned card post back into an unrelated
-    /// conversation.
+    /// `chat_id` is `None` throughout: a dispatched card has no chat thread,
+    /// and stamping one would make a spawned card post back into an unrelated
+    /// conversation. Hand-offs of the card itself are gone with the hive
+    /// cutover (OC-2); a turn that wants a colleague messages them.
     pub(crate) async fn handle_task_delegations(
         &self,
         card: &mut TaskRecord,
         delegator: &str,
-    ) -> Result<Option<TaskHandoff>> {
-        // A hand-off the tool refused (issue #272) never becomes a
-        // `Delegation`, so it is read separately — and recorded on the card
-        // before anything else, because the turn's own account of it is exactly
-        // what cannot be trusted: a refused hand-off is precisely the case where
-        // the reply claimed work had changed hands and the board showed
-        // otherwise.
-        for target in self.queue.drain_refusals(self.max_delegations) {
-            tracing::warn!(
-                task_id = %card.id,
-                delegator = %delegator,
-                "[task] a hand-off was refused before it could be queued"
-            );
-            card.note = Some(append_note(
-                card.note.as_deref(),
-                delegator,
-                &undeliverable_handoff(
-                    &target,
-                    delegator,
-                    // Kind-agnostic since #884: this list holds both refused desk
-                    // keys and refused teammate ids, and the refusal that
-                    // recorded them is not carried through the queue.
-                    "it is not somewhere this company can hand work to",
-                ),
-            ));
-        }
-        for target in self.queue.drain_task_handoff_refusals(self.max_delegations) {
-            tracing::warn!(
-                task_id = %card.id,
-                delegator = %delegator,
-                target = %target,
-                "[task] a second hand-off was refused because this task already transferred ownership"
-            );
-            card.note = Some(append_note(
-                card.note.as_deref(),
-                delegator,
-                &format!(
-                    "Hand-off to {target} was refused because this board task already has its one +                     ownership transfer queued. Only the first colleague will run; this second +                     target was not assigned."
-                ),
-            ));
-        }
+    ) -> Result<()> {
         let queued = self.queue.drain(self.max_delegations);
         if queued.is_empty() {
-            return Ok(None);
+            return Ok(());
         }
         tracing::debug!(
             task_id = %card.id,
             delegator = %delegator,
             queued = queued.len(),
-            "[task] draining delegations queued by a dispatched turn"
+            "[task] draining board writes queued by a dispatched turn"
         );
-        let mut handoff: Option<TaskHandoff> = None;
         for delegation in queued {
-            // Resolve the hand-off target BEFORE running it, so the card can be
-            // reassigned while the delegate works. `desk_lead` is pure, so the
-            // second resolution inside `run_delegation` yields the same member.
-            let lead = match &delegation {
-                Delegation::DelegateToDesk { desk, .. } => desk_lead(self.record, desk),
-                // Issue #884: resolved directly, with no desk in between — which
-                // is the point. `resolve_teammate_key` is pure over the same
-                // record, so the second resolution inside `run_delegation`
-                // yields the same member, exactly as `desk_lead` does above.
-                //
-                // It grounds the display-name half of the roster too (#1162).
-                // The tool now queues the canonical id, so on the ordinary path
-                // this is the identity — but `ground` fails open for the
-                // orchestrator when the record cannot be read, and that path
-                // queues the key exactly as the model wrote it. Resolving the
-                // same way here is what stops a name that reached the queue
-                // from being dropped at the drain.
-                Delegation::DelegateToTeammate { teammate, .. } => {
-                    self.record.resolve_teammate_key(teammate).agent()
-                }
-                _ => None,
-            };
-            let Some(member) = lead else {
-                // A hand-off whose desk resolves to no lead cannot be
-                // delivered. #213 settles the card under the delegator rather
-                // than stranding it, which is right — but until #272 it did so
-                // silently, leaving a card whose note claimed a hand-off that
-                // never happened and whose assignee was the delegator, with
-                // nothing on the board connecting the two. Record the
-                // undeliverable hand-off on the card so the operator reads the
-                // fact instead of inferring it from an absence. Every other
-                // delegation kind carries no target and is unaffected.
-                //
-                // The cause is written per kind (issue #884): "that desk has no
-                // lead" and "that teammate is not on the roster" are different
-                // facts, and an operator reading the card is the one who has to
-                // act on whichever it was.
-                let undeliverable = hand_off_target_of(&delegation).map(|target| {
-                    let cause = match delegation {
-                        Delegation::DelegateToTeammate { .. } => {
-                            "no teammate with that id is on the roster"
-                        }
-                        _ => "no desk with that id has a lead on the roster",
-                    };
-                    (target.to_string(), cause)
-                });
-                let outcome = self
-                    .run_delegation(delegation, None, MessageContext::default())
-                    .await?;
-                if let Some(refused) = outcome.refused_card {
-                    card.note = Some(append_note(
-                        card.note.as_deref(),
-                        delegator,
-                        &format!(
-                            "{} refused for card {:?}: {}",
-                            refused.tool, refused.card, refused.reason
-                        ),
-                    ));
-                }
-                if let Some((target, cause)) = undeliverable {
-                    card.note = Some(append_note(
-                        card.note.as_deref(),
-                        delegator,
-                        &undeliverable_handoff(&target, delegator, cause),
-                    ));
-                }
-                continue;
-            };
-            // The card belongs to the first hand-off that actually PRODUCES
-            // something. A hand-off whose run was cancelled produced nothing, so
-            // it does not get to keep the card: it would settle `Cancelled` ->
-            // `todo` while a later hand-off that really ran had its answer
-            // merely appended to the note — filing work that happened under a
-            // card marked cancelled. So an empty hand-off is *provisional* and a
-            // later one that answers takes the card over from it (issue #213
-            // review finding 3).
-            // Once a hand-off owns the card, no LATER one in this turn runs.
-            //
-            // The synchronous model could let a second hand-off run and take the
-            // card from an empty first (issue #213 finding 3). Asynchronously it
-            // cannot: the first hand-off's delegate is already dispatched, so a
-            // second that ran here would produce work under a card whose owner
-            // is somebody else — and if that owner is then cancelled, the card
-            // settles `todo` carrying output that really did run. That is the
-            // exact "work filed under a card marked cancelled" #213 fixed,
-            // reached the other way round.
-            //
-            // So it is recorded and not started. One card, one owner, one
-            // dispatch — and the operator can see what else was asked for.
-            if handoff.as_ref().is_some_and(|prior| prior.pending) {
-                if let Some(target) = hand_off_target_of(&delegation) {
-                    card.note = Some(append_note(
-                        card.note.as_deref(),
-                        delegator,
-                        &format!(
-                            "also asked {target}: {} — not started, this card is already with \
-                             its new owner",
-                            instruction_of(&delegation)
-                        ),
-                    ));
-                }
-                continue;
-            }
-            // A hand-off that produced nothing is PROVISIONAL and a later one
-            // that answers takes the card from it (issue #213 finding 3) — but
-            // a PENDING hand-off is not "produced nothing", it is "has not run
-            // yet". It already owns the card and the delegate is about to be
-            // dispatched for it, so a second hand-off in the same turn must not
-            // move the card again; its instruction is recorded on the note
-            // instead, exactly as a non-owning hand-off's answer is.
-            let owns_card = handoff
-                .as_ref()
-                .is_none_or(|prior| prior.reply.is_none() && !prior.pending);
-            if owns_card {
-                self.hand_card_over(card, delegator, &member, instruction_of(&delegation))
-                    .await?;
-                // SPIKE: hand over and STOP. The delegate is not run inside this
-                // attempt — the card now names them, the delegator settles
-                // `Delegated`, and the dispatch edge re-fires for the new owner.
-                //
-                // What that buys, and why the synchronous version could not:
-                // one attempt row per agent (so cost is attributable), the
-                // per-company cycle lock released between hops, and a card
-                // whose `assignee` is a real reassignment rather than a
-                // mid-turn display concession.
-                handoff = Some(TaskHandoff {
-                    delegate: member,
-                    reply: None,
-                    budget_paused: None,
-                    pending: true,
-                });
-                continue;
-            }
             let outcome = self
                 .run_delegation(delegation, None, MessageContext::default())
                 .await?;
-            match (owns_card, outcome.desk_reply, outcome.cancelled) {
-                // The delegate answered: they own the card and it settles from
-                // their output.
-                (true, Some(desk), _) => {
-                    handoff = Some(TaskHandoff {
-                        delegate: member,
-                        reply: Some(desk.reply),
-                        budget_paused: desk.budget_paused,
-                        pending: false,
-                    });
-                }
-                // An operator cancelled their run mid-flight, so it produced
-                // nothing. Reported as a cancellation because `run_delegation`
-                // said it was one — not because the reply is missing.
-                (true, None, true) => {
-                    handoff = Some(TaskHandoff {
-                        delegate: member,
-                        reply: None,
-                        budget_paused: None,
-                        pending: false,
-                    });
-                }
-                // Nothing produced and NOT a cancellation. `run_delegation`'s
-                // only other empty exit for a hand-off is a desk with no
-                // resolvable lead, which cannot be reached here — the lead
-                // resolved above and `desk_lead` is pure over the same record.
-                // If it ever becomes reachable, this reports *no hand-off*, so
-                // the delegator's own reply settles the card exactly as an
-                // unresolvable desk already does, rather than telling the
-                // operator their run was cancelled when it was not.
-                (true, None, false) => {}
-                // A later hand-off does not take the card over, but its answer
-                // is real work — record it rather than dropping it.
-                (false, Some(desk), _) => {
-                    card.note = Some(append_note(card.note.as_deref(), &member, &desk.reply));
-                }
-                (false, None, _) => {}
+            if let Some(refused) = outcome.refused_card {
+                card.note = Some(append_note(
+                    card.note.as_deref(),
+                    delegator,
+                    &format!(
+                        "{} refused for card {:?}: {}",
+                        refused.tool, refused.card, refused.reason
+                    ),
+                ));
             }
         }
-        Ok(handoff)
+        Ok(())
     }
 
     /// Opens the board card that tracks a piece of work, **before** the turn
