@@ -121,15 +121,6 @@ pub use crate::company::ORCHESTRATOR_TIER;
 /// told five were opened, find two.
 pub const MAX_DELEGATIONS_PER_TURN: usize = 3;
 
-/// The depth argument passed by the delegations the chain bound does not apply
-/// to (issue #176).
-///
-/// [`DelegationQueue::push_within_cap`] gates on depth only for a
-/// [`Delegation::DelegateToDesk`] — the one delegation that runs another
-/// synchronous turn and can therefore multiply. A board write passes a bound it
-/// can never reach, rather than a plausible-looking real number that would
-/// quietly start mattering if the gate were widened.
-const NO_DEPTH_BOUND: usize = usize::MAX;
 
 /// How many recent events [`QueryCompanyTool`] surfaces.
 const RECENT_EVENTS: usize = 10;
@@ -888,10 +879,7 @@ impl NoDrainReason {
         match self {
             Self::Unwired => "drain_unwired",
             Self::Triage => "triaged_as_question",
-            Self::Depth => "depth_capped",
             Self::WorkflowLifecycle => "workflow_lifecycle_operator_only",
-            Self::WorkflowHandOff => "workflow_handoff_no_reply_target",
-            Self::TaskHandoffAlreadyQueued => "task_handoff_already_queued",
             Self::Seat => "seat_opens_cards_only",
         }
     }
@@ -2624,15 +2612,11 @@ impl Tool for SpawnTaskTool {
                 return Ok(ToolResult::error(card_refused(&effect, refusal)));
             }
         };
-        let staged = self.queue.push_within_cap(
-            Delegation::SpawnTask {
+        let staged = self.queue.push_within_cap(Delegation::SpawnTask {
                 title: title.clone(),
                 note,
                 assignee: owner,
-            },
-            MAX_DELEGATIONS_PER_TURN,
-            NO_DEPTH_BOUND,
-        );
+            }, MAX_DELEGATIONS_PER_TURN);
         if seated && staged != Staged::Queued {
             super::card_budget::release(&title);
         }
@@ -2729,15 +2713,11 @@ impl Tool for AssignTaskTool {
         let note = optional_str(&args, "note");
 
         let effect = format!("card {task_id} was NOT assigned");
-        match self.queue.push_within_cap(
-            Delegation::AssignTask {
+        match self.queue.push_within_cap(Delegation::AssignTask {
                 task_id: task_id.clone(),
                 assignee: assignee.clone(),
                 note,
-            },
-            MAX_DELEGATIONS_PER_TURN,
-            NO_DEPTH_BOUND,
-        ) {
+            }, MAX_DELEGATIONS_PER_TURN) {
             Staged::Queued => {}
             Staged::OverCap => return Ok(ToolResult::error(over_cap(&effect))),
             Staged::NoDrain(why) => {
@@ -2817,15 +2797,11 @@ impl Tool for ReviewTaskTool {
         let note = optional_str(&args, "note");
 
         let effect = format!("card {task_id} was NOT reviewed");
-        match self.queue.push_within_cap(
-            Delegation::ReviewTask {
+        match self.queue.push_within_cap(Delegation::ReviewTask {
                 task_id: task_id.clone(),
                 decision,
                 note,
-            },
-            MAX_DELEGATIONS_PER_TURN,
-            NO_DEPTH_BOUND,
-        ) {
+            }, MAX_DELEGATIONS_PER_TURN) {
             Staged::Queued => {}
             Staged::OverCap => return Ok(ToolResult::error(over_cap(&effect))),
             Staged::NoDrain(why) => {
@@ -2908,13 +2884,6 @@ fn no_drain(tool: &str, effect: &str, reason: NoDrainReason) -> String {
          model's own turn rather than queuing into a queue nothing will drain"
     );
     match reason {
-        NoDrainReason::TaskHandoffAlreadyQueued => format!(
-            "Refused: this board task already has an ownership transfer queued, so {effect}. \
-             Only the first colleague will run; a task hand-off does not return their answer \
-             to you. Do not claim this second colleague was assigned or reviewed the result. \
-             For a multi-colleague calculation and review, use a manual workflow with separate \
-             agent steps and explicit dependencies instead of multiple hand-offs on one card."
-        ),
         NoDrainReason::Unwired => format!(
             "Refused: nothing here can carry out board work, so {effect}. Board actions are \
              unavailable in this context. Do not retry — it will fail the same way — and do NOT \
@@ -2924,17 +2893,10 @@ fn no_drain(tool: &str, effect: &str, reason: NoDrainReason) -> String {
         NoDrainReason::Triage => format!(
             "Refused: this message was read as a question rather than a request to do work, so \
              {effect}. Board writes are held back for this message only — answer it from what you \
-             can read, and hand it to a desk if somebody else knows better. Do not retry this \
+             can read, and message a teammate if somebody else knows better. Do not retry this \
              call; it will fail the same way. Do NOT report the action as done or describe the \
              card as moved. If the operator did mean it as work, say so plainly and ask them to \
              restate it as a direct request."
-        ),
-        NoDrainReason::Depth => format!(
-            "Refused: this work has already been handed on as far as this company allows, so \
-             {effect}. You are the last link in the chain — do the part you can do yourself and \
-             say plainly what still needs another desk, or open a task card for it with \
-             `spawn_task`, which still works. Do not retry this call; it will fail the same way, \
-             and do NOT report the hand-off as done."
         ),
         NoDrainReason::WorkflowLifecycle => format!(
             "Refused: you are running inside a workflow, which can put work on the board but \
@@ -2947,14 +2909,6 @@ fn no_drain(tool: &str, effect: &str, reason: NoDrainReason) -> String {
         NoDrainReason::Seat => format!(
             "Refused: in this room you can open a card and nothing else on the board, so {effect}. \
              Ask the teammate concerned with `hivemind_ask` instead. Do NOT report it as done."
-        ),
-        NoDrainReason::WorkflowHandOff => format!(
-            "Refused: you are running inside a workflow, which has no conversation for a desk's \
-             reply to come back to, so {effect}. A hand-off is only worth making when somebody is \
-             waiting on the answer, and here nobody is. Open a card for that desk instead with \
-             `spawn_task` — naming the desk as its assignee — which persists and reaches them. Do \
-             not retry this call; it will fail the same way, and do NOT report the work as handed \
-             over or the desk as having replied."
         ),
     }
 }
