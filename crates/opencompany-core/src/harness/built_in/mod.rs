@@ -4745,104 +4745,11 @@ impl HarnessPool {
         // observe, and the console goes on rendering that ceiling as if it
         // still applied. A refusal an operator can see and act on is a better
         // state than a cap that silently stopped existing.
-        let _ceiling = match Self::total_ceiling_refusal(company, agent_id, deps).await {
-            CeilingGate::Admitted(reservation) => reservation,
-            CeilingGate::Refused(refusal) => return Ok(refusal),
+        let _admission = match self.admit(company, &agent, deps).await {
+            Ok(admission) => admission,
+            Err(refusal) => return Ok(*refusal),
         };
 
-        let _monthly_budget = match self.monthly_budget_refusal(company, agent_id, deps).await {
-            MonthlyBudgetGate::Admitted(guard) => guard,
-            MonthlyBudgetGate::Refused(refusal) => return Ok(*refusal),
-        };
-
-        // Per-agent daily spend cap (issue #304): the same HARD, pre-model-call
-        // refusal as the ceiling above, scoped to ONE teammate.
-        //
-        // This is the layer that matters most in practice. The manifest's
-        // `budget_usd_daily` was validated, persisted and passed to
-        // `ApprovalPolicy` — where it sat on a field with no reader. But the
-        // dominant spend stream is not tool calls at all, it is inference, and
-        // inference never reaches a `ToolPolicy`. Gating only priced tool calls
-        // (the policy arm) would leave a capped teammate free to burn its budget
-        // many times over on model turns alone, which is how the cap came to be
-        // decorative in the first place.
-        //
-        // Refused BEFORE retrieve→inject and the memory writeback, exactly like
-        // the total ceiling, so a refused turn costs nothing and leaves no
-        // fabricated outcome in the store. The reply names the teammate, the cap
-        // and the reset — never a bare failure.
-        //
-        // Scoped to the desk that declared a bound: an uncapped colleague is
-        // never gated by a meter fault, so an unreadable meter costs the company
-        // its capped teammates, not its cognition.
-        if let Some(cap) = agent.budget_usd_daily {
-            let since = crate::metering::utc_day_start_millis(crate::ports::now_millis());
-            let samples = match read_spend_for_gate(deps.meter.as_deref(), company, since).await {
-                Ok(samples) => samples,
-                Err(fault) => {
-                    match &fault {
-                        SpendReadFault::NoMeter => tracing::error!(
-                            company = %company,
-                            agent = agent_id,
-                            cap,
-                            "[agent-budget] a daily spend cap is declared but this host has no usage meter; refusing dispatch to this teammate (no model call) until a meter is configured or the cap is removed"
-                        ),
-                        SpendReadFault::QueryFailed(error) => tracing::error!(
-                            company = %company,
-                            agent = agent_id,
-                            cap,
-                            %error,
-                            "[agent-budget] daily-spend query failed; refusing dispatch to this teammate (no model call) rather than spending against a cap that cannot be checked"
-                        ),
-                    }
-                    return Ok(spend_gate_refusal(
-                        unmeasurable_agent_budget_notice(agent_id, cap, &fault),
-                        SpendGateCause::Unmeasurable,
-                    ));
-                }
-            };
-
-            let spent = crate::metering::usd_spent_by_agent(&samples, agent_id);
-            // Issue #1846: same coarse proximity warning as the total-ceiling
-            // read above, reusing the SAME `samples` — no second query.
-            // Non-blocking; only fires when this teammate is not already
-            // refused below.
-            if spent < cap && is_approaching_budget_ceiling_f64(spent, cap) {
-                tracing::info!(
-                    company = %company,
-                    agent = agent_id,
-                    spent,
-                    cap,
-                    "[agent-budget] approaching the daily spend cap; publishing a non-blocking proximity warning"
-                );
-                crate::turn_stream::publish(
-                    company,
-                    crate::turn_stream::BudgetProximityFrame {
-                        kind: "budget_proximity",
-                        agent_id: Some(agent_id.to_string()),
-                        message: budget_proximity_message_usd(agent_id),
-                        at_millis: crate::ports::now_millis(),
-                    },
-                );
-            }
-            if spent >= cap {
-                tracing::info!(
-                    company = %company,
-                    agent = agent_id,
-                    spent,
-                    cap,
-                    "[agent-budget] daily spend cap reached; refusing dispatch (no model call) until 00:00 UTC"
-                );
-                return Ok(spend_gate_refusal(
-                    agent_budget_exhausted_notice(agent_id, cap),
-                    SpendGateCause::Exhausted,
-                ));
-            }
-        }
-
-        // Memory is OpenHuman's: the runtime recalls a pack for this agent and
-        // logs the turn under its own node (`crate::memory`), so the message
-        // goes through as composed.
         let augmented = message.to_string();
 
         // Run the turn and record its real cost. `CompanyAgent::run` reads each
@@ -5508,6 +5415,88 @@ fn policy_override_for(policy: &Policy, manifest: &Policy) -> PolicyOverride {
         at_millis: 0,
     }
 }
+
+/// The teammate's own daily spend cap (issue #304), as a dispatch gate: the
+/// refusal a turn of `agent`'s returns instead of running, or `None` to admit
+/// it. A cap that cannot be measured refuses rather than spends blind, and a
+/// teammate near its cap gets a non-blocking proximity frame.
+pub(crate) async fn daily_cap_refusal(
+    company: &CompanyId,
+    agent: &CompanyAgent,
+    deps: &HarnessDeps,
+) -> Option<TurnOutcome> {
+    let agent_id = agent.agent_id.as_str();
+        if let Some(cap) = agent.budget_usd_daily {
+            let since = crate::metering::utc_day_start_millis(crate::ports::now_millis());
+            let samples = match read_spend_for_gate(deps.meter.as_deref(), company, since).await {
+                Ok(samples) => samples,
+                Err(fault) => {
+                    match &fault {
+                        SpendReadFault::NoMeter => tracing::error!(
+                            company = %company,
+                            agent = agent_id,
+                            cap,
+                            "[agent-budget] a daily spend cap is declared but this host has no usage meter; refusing dispatch to this teammate (no model call) until a meter is configured or the cap is removed"
+                        ),
+                        SpendReadFault::QueryFailed(error) => tracing::error!(
+                            company = %company,
+                            agent = agent_id,
+                            cap,
+                            %error,
+                            "[agent-budget] daily-spend query failed; refusing dispatch to this teammate (no model call) rather than spending against a cap that cannot be checked"
+                        ),
+                    }
+                    return Some(spend_gate_refusal(
+                        unmeasurable_agent_budget_notice(agent_id, cap, &fault),
+                        SpendGateCause::Unmeasurable,
+                    ));
+                }
+            };
+
+            let spent = crate::metering::usd_spent_by_agent(&samples, agent_id);
+            // Issue #1846: same coarse proximity warning as the total-ceiling
+            // read above, reusing the SAME `samples` — no second query.
+            // Non-blocking; only fires when this teammate is not already
+            // refused below.
+            if spent < cap && is_approaching_budget_ceiling_f64(spent, cap) {
+                tracing::info!(
+                    company = %company,
+                    agent = agent_id,
+                    spent,
+                    cap,
+                    "[agent-budget] approaching the daily spend cap; publishing a non-blocking proximity warning"
+                );
+                crate::turn_stream::publish(
+                    company,
+                    crate::turn_stream::BudgetProximityFrame {
+                        kind: "budget_proximity",
+                        agent_id: Some(agent_id.to_string()),
+                        message: budget_proximity_message_usd(agent_id),
+                        at_millis: crate::ports::now_millis(),
+                    },
+                );
+            }
+            if spent >= cap {
+                tracing::info!(
+                    company = %company,
+                    agent = agent_id,
+                    spent,
+                    cap,
+                    "[agent-budget] daily spend cap reached; refusing dispatch (no model call) until 00:00 UTC"
+                );
+                return Some(spend_gate_refusal(
+                    agent_budget_exhausted_notice(agent_id, cap),
+                    SpendGateCause::Exhausted,
+                ));
+            }
+        }
+
+        // Memory is OpenHuman's: the runtime recalls a pack for this agent and
+        // logs the turn under its own node (`crate::memory`), so the message
+        // goes through as composed.
+    None
+}
+
 
 /// The live overlay state one roster rebuild is resolved against.
 ///
