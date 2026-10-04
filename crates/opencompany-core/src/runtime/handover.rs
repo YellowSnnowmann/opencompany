@@ -53,7 +53,7 @@ use crate::company::runtime::{CompanyRuntime, OpsStores};
 use crate::feedback::service::FeedbackFiler;
 use crate::feedback::store::FeedbackStore;
 use crate::policy::ManifestApprovalGate;
-use crate::ports::{CompanyStore, ContextStore, EventLog, InboxStore, TraceStore, SecretStore};
+use crate::ports::{CompanyStore, EventLog, InboxStore, SecretStore, TraceStore};
 use crate::runtime::blocked_nodes::BlockedNodeQueue;
 use crate::runtime::continuation::ContinuationQueue;
 use crate::runtime::grants::GrantSet;
