@@ -5532,8 +5532,8 @@ impl CompanyRuntime {
             // pause the continuation, and park a brand-new card for a
             // decision that has already been made.
             self.workflow_gates.decide(&turn, id, Verdict::Deny);
-            let hive_seat = crate::runtime::hive_resume::parse(&turn);
-            let expiry = hive_seat
+            let parked_seat = crate::runtime::hive_resume::parse(&turn);
+            let expiry = parked_seat
                 .as_ref()
                 .map(|_| CompanyEvent::ApprovalResolved {
                     approval_id: id.clone(),
@@ -5544,7 +5544,7 @@ impl CompanyRuntime {
                     },
                 });
             if let Some(batch) = self.continuations.decide(&turn, expiry) {
-                if let Some(seat) = hive_seat {
+                if let Some(seat) = parked_seat {
                     let rt = Arc::clone(self);
                     tokio::spawn(async move {
                         if let Err(error) = rt.resume_hive_seat(&seat, batch).await {
@@ -7837,7 +7837,7 @@ mod tests_dispatch;
 mod tests_emergency_stop;
 #[cfg(test)]
 #[path = "runtime_hive_seat_tests.rs"]
-mod tests_episode_seat;
+mod tests_hive_seat;
 /// What is under test is whether a continuation run is started, with what
 /// trigger input, and how many times.
 #[cfg(feature = "openhuman")]
