@@ -319,7 +319,7 @@ pub(super) async fn ceo_tool_names(pool: &HarnessPool, id: &CompanyId) -> Vec<St
 /// wiring (mock provider/context, recording store).
 pub(super) fn deps_with_plan(
     dir: &std::path::Path,
-    context: Arc<MockContext>,
+    _context: Arc<MockContext>,
     meter: Option<Arc<dyn UsageMeter>>,
     plan: Option<crate::harness::capability_budget::CapabilityPlan>,
 ) -> HarnessDeps {
