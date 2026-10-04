@@ -19,7 +19,7 @@ fn granting(rec: &CompanyRecord, namespace: &str) -> CompanyRecord {
 #[tokio::test]
 async fn a_rebuild_that_moves_the_belt_owes_the_session_no_brief() {
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let mut rec = capped_record();
     rec.manifest.tools.allow = vec!["*".to_string()];
     let mut deps = deps_with_plan(dir.path(), context, None, None);

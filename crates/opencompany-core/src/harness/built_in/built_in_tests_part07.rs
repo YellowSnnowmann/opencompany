@@ -575,7 +575,7 @@ async fn monthly_inference_cap_refuses_a_company_after_spend() {
     let dir = tempfile::tempdir().expect("temporary workspace");
     let store = Arc::new(crate::store::FsCompanyStore::new(dir.path()));
     let provider = Arc::new(ScriptedProvider::new(vec![Ok("model-ran".to_string())]));
-    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext::default()), None, None);
+    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext), None, None);
     deps.store = store.clone();
     deps.provider = provider.clone();
 

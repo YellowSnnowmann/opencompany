@@ -302,7 +302,7 @@ async fn a_tool_policy_write_moves_the_mcp_fingerprint() {
 
     let mut rec = record();
     rec.manifest = manifest_declaring_a_server();
-    let mut deps = deps_with_plan(home.path(), Arc::new(MockContext::default()), None, None);
+    let mut deps = deps_with_plan(home.path(), Arc::new(MockContext), None, None);
     deps.secrets = Some(secrets.clone());
 
     let pool = HarnessPool::new();
@@ -386,7 +386,7 @@ async fn a_per_agent_policy_write_moves_the_mcp_fingerprint() {
 
     let mut rec = record();
     rec.manifest = manifest_declaring_a_server();
-    let mut deps = deps_with_plan(home.path(), Arc::new(MockContext::default()), None, None);
+    let mut deps = deps_with_plan(home.path(), Arc::new(MockContext), None, None);
     deps.secrets = Some(secrets.clone());
 
     let pool = HarnessPool::new();

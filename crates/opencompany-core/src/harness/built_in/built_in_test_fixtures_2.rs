@@ -464,7 +464,7 @@ description = "Builds the product."
 /// expensive half.
 pub(super) fn belt(grants: &[&str], is_orchestrator: bool, wire_everything: bool) -> Vec<String> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext::default()), None, None);
+    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext), None, None);
     if wire_everything {
         // The three tool families gated on a wired dependency rather than
         // on a cargo feature. Without these the belt is missing exactly the
@@ -598,7 +598,7 @@ pub(super) fn record_granting(grants: &[&str]) -> CompanyRecord {
 /// The inert fixture deps, with a secret store and a "last known" connection.
 #[cfg(any(feature = "chargebee", feature = "paypal"))]
 pub(super) fn billing_deps(dir: &std::path::Path, secrets: Arc<dyn SecretStore>) -> HarnessDeps {
-    let mut deps = deps_with_plan(dir, Arc::new(MockContext::default()), None, None);
+    let mut deps = deps_with_plan(dir, Arc::new(MockContext), None, None);
     deps.secrets = Some(secrets);
     deps
 }

@@ -20,7 +20,7 @@ async fn an_overlay_teammate_can_be_capped_from_the_console() {
     use crate::ports::types::{Actor, ActorKind, BudgetOverride};
 
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let meter = Arc::new(RecordingMeter::default());
 
     let mut rec = record();
@@ -112,7 +112,7 @@ async fn an_overlay_teammate_can_be_capped_from_the_console() {
 #[tokio::test]
 async fn run_refuses_a_capped_teammate_when_spend_cannot_be_read() {
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let manifest: CompanyManifest = toml::from_str(
         r#"
 [company]
@@ -229,7 +229,7 @@ description = "Builds the product."
 #[tokio::test]
 async fn a_yesterday_stamped_spend_does_not_refuse_todays_dispatch() {
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let meter = Arc::new(RecordingMeter::default());
     let rec = capped_record();
 
@@ -269,7 +269,7 @@ async fn a_yesterday_stamped_spend_does_not_refuse_todays_dispatch() {
 #[tokio::test]
 async fn a_pooled_teammate_reads_its_conversation_by_name_on_its_own_belt() {
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let rec = capped_record();
     let mut deps = deps_with_plan(dir.path(), context, None, None);
     deps.events = Some(Arc::new(crate::hive::test_support::MemoryLog::default()));
@@ -292,7 +292,7 @@ async fn a_pooled_teammate_reads_its_conversation_by_name_on_its_own_belt() {
 #[tokio::test]
 async fn a_pooled_teammate_without_an_events_log_keeps_a_refusing_read() {
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let rec = capped_record();
     let deps = deps_with_plan(dir.path(), context, None, None);
     let pool = HarnessPool::new();
@@ -399,7 +399,7 @@ fn every_registered_tool_is_declared() {
 fn nothing_that_declares_itself_executable_is_internal_or_grantable() {
     use tinytools::PermissionLevel;
     let dir = tempfile::tempdir().expect("tempdir");
-    let deps = deps_with_plan(dir.path(), Arc::new(MockContext::default()), None, None);
+    let deps = deps_with_plan(dir.path(), Arc::new(MockContext), None, None);
     let manifest_agent = ManifestAgent {
         provider: None,
         global: false,

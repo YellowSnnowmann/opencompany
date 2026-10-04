@@ -27,7 +27,7 @@ async fn a_tool_grant_written_through_the_store_rebuilds_the_roster_in_place() {
     use crate::ports::types::{Actor, ActorKind, ToolGrantsOverride};
 
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     // A catch-all company: `*` covers shell/code/web and confers none of the
     // five namespaces this route deals in, which is the manifest shape the
     // issue was reported against.
@@ -110,7 +110,7 @@ async fn resolve_tenant_search_honours_a_console_grant_a_stale_company_misses() 
     use crate::ports::types::{Actor, ActorKind, ToolGrantsOverride};
 
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
 
     // The stale snapshot: no explicit `search` grant in its own
     // `[tools].allow`, exactly what a caller holding a boot-time
@@ -191,7 +191,7 @@ async fn a_budget_written_through_the_store_is_enforced_on_the_next_dispatch() {
     use crate::ports::types::{Actor, ActorKind, BudgetOverride};
 
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let meter = Arc::new(RecordingMeter::default());
     let rec = capped_record();
 
@@ -498,7 +498,7 @@ async fn a_persona_override_written_through_the_store_rebuilds_the_roster() {
     use crate::ports::types::AgentOverride;
 
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let rec = capped_record();
 
     // A live store, so `ensure` re-resolves the overrides as production does.
@@ -585,7 +585,7 @@ async fn a_persona_override_written_through_the_store_rebuilds_the_roster() {
 #[tokio::test]
 async fn a_company_rename_written_through_the_store_rebuilds_the_roster() {
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let rec = capped_record();
     assert_eq!(rec.manifest.company.name, "Acme");
 

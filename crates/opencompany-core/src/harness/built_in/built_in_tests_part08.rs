@@ -50,7 +50,7 @@ async fn racing_inference_turns_cannot_both_spend_the_last_monthly_budget() {
                 },
             ),
         ));
-        let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext::default()), None, None);
+        let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext), None, None);
         deps.store = store.clone();
         deps.provider = provider.clone();
         let deps = Arc::new(deps);
@@ -142,7 +142,7 @@ async fn racing_turns_cannot_dispatch_against_the_same_total_budget() {
         ));
         let mut deps = deps_with_plan(
             dir.path(),
-            Arc::new(MockContext::default()),
+            Arc::new(MockContext),
             Some(meter.clone()),
             Some(crate::harness::capability_budget::CapabilityPlan {
                 period: crate::harness::capability_budget::BudgetPeriod::Daily,
@@ -214,7 +214,7 @@ static CEILING_SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(()
 async fn run_refuses_dispatch_once_the_total_ceiling_is_crossed() {
     let _serial = CEILING_SERIAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let meter = Arc::new(RecordingMeter::default());
     let plan = crate::harness::capability_budget::CapabilityPlan {
         period: crate::harness::capability_budget::BudgetPeriod::Daily,
@@ -300,7 +300,7 @@ async fn run_refuses_dispatch_once_the_total_ceiling_is_crossed() {
 async fn a_confined_turn_is_refused_once_the_total_ceiling_is_crossed() {
     let _serial = CEILING_SERIAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let meter = Arc::new(RecordingMeter::default());
     let plan = crate::harness::capability_budget::CapabilityPlan {
         period: crate::harness::capability_budget::BudgetPeriod::Daily,
@@ -383,7 +383,7 @@ async fn a_confined_turn_is_refused_once_the_total_ceiling_is_crossed() {
 async fn run_refuses_when_a_declared_total_ceiling_cannot_be_read() {
     let _serial = CEILING_SERIAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     // A generous ceiling: a readable meter would admit this turn, so the
     // refusal below can only come from the spend read failing.
     let plan = || crate::harness::capability_budget::CapabilityPlan {
@@ -464,7 +464,7 @@ async fn run_refuses_when_a_declared_total_ceiling_cannot_be_read() {
 async fn a_company_with_no_declared_ceiling_runs_without_a_meter() {
     let _serial = CEILING_SERIAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let deps = deps_with_plan(dir.path(), context.clone(), None, None);
     let pool = HarnessPool::new();
     let rec = record();
@@ -533,7 +533,7 @@ fn an_exhausted_cap_and_an_unreadable_meter_do_not_read_alike() {
 async fn run_refuses_dispatch_for_a_teammate_over_its_daily_cap() {
     let _serial = CEILING_SERIAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let meter = Arc::new(RecordingMeter::default());
     let rec = capped_record();
 
@@ -611,7 +611,7 @@ async fn run_refuses_dispatch_for_a_teammate_over_its_daily_cap() {
 async fn a_zero_daily_cap_refuses_the_teammates_very_first_turn() {
     let _serial = CEILING_SERIAL.lock().await;
     let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext::default());
+    let context = Arc::new(MockContext);
     let meter = Arc::new(RecordingMeter::default());
     let rec = zero_capped_record();
 
