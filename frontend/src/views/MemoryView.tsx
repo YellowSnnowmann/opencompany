@@ -14,6 +14,7 @@ import {
   deleteMemory,
   forgetAgentMemory,
   forgetDocument,
+  isMemoryOff,
   ITEM_KIND_LABELS,
   ITEM_KIND_STYLES,
   ITEM_KINDS,
@@ -167,7 +168,7 @@ export function MemoryView({ client, company, sub }: Props) {
       if (!opts?.silent) setLoading(true);
       try {
         // Status first: it is the one route that answers when memory is off,
-        // and every other route would only say `503 MEMORY_OFF`.
+        // and every other route would only say `409 not_configured`.
         const s = await memoryStatus(client, company);
         if (mine !== gen.current) return;
         setStatus(s);
@@ -192,6 +193,19 @@ export function MemoryView({ client, company, sub }: Props) {
         setError(null);
       } catch (e) {
         if (mine !== gen.current) return;
+        if (isMemoryOff(e)) {
+          // Memory went off between the status read and the rest: re-read
+          // status so the page explains why instead of showing the refusal.
+          void memoryStatus(client, company)
+            .then((s) => {
+              if (mine === gen.current) setStatus(s);
+            })
+            .catch(() => {});
+          setEntries([]);
+          setNextCursor(undefined);
+          setError(null);
+          return;
+        }
         setError(e instanceof Error ? e.message : "could not load memory");
       } finally {
         if (mine === gen.current && !opts?.silent) setLoading(false);

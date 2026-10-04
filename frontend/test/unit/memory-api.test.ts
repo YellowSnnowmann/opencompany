@@ -93,3 +93,14 @@ describe("memory api routes", () => {
     ]);
   });
 });
+
+describe("isMemoryOff", () => {
+  it("recognises only the host's 409 not_configured refusal", async () => {
+    const { ApiError } = await import("@/api/types");
+    const { isMemoryOff } = await import("@/api/memory");
+    expect(isMemoryOff(new ApiError(409, "not_configured", "memory is off"))).toBe(true);
+    expect(isMemoryOff(new ApiError(409, "conflict", "already removed"))).toBe(false);
+    expect(isMemoryOff(new ApiError(503, "not_configured", "x"))).toBe(false);
+    expect(isMemoryOff(new Error("boom"))).toBe(false);
+  });
+});

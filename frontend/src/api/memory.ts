@@ -5,9 +5,20 @@
 // (`team:<company>`). Each teammate's conversations live under
 // `team:<company>/agent:<id>`, learnings at the root, and brain documents under
 // `team:<company>/source:<kind>`. When no engine is configured every route but
-// `/memory/status` answers `503 MEMORY_OFF`, so the console reads status first.
+// `/memory/status` answers `409 not_configured`, so the console reads status
+// first.
 
 import type { OpenCompanyClient } from "./client";
+import { ApiError } from "./types";
+
+/**
+ * Whether an error is the host saying memory is off — `409` with the
+ * standard `not_configured` code. The page then renders from `/memory/status`
+ * rather than showing the refusal as a failure.
+ */
+export function isMemoryOff(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 409 && e.code === "not_configured";
+}
 
 /** What a memory item is: a learning, a conversation turn, or a brain document. */
 export type ItemKind = "learning" | "conversation" | "document";
