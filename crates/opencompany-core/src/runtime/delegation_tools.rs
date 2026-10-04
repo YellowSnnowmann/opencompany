@@ -23,7 +23,7 @@
 use serde_json::{Value, json};
 
 use crate::brain::medulla::wire::ToolManifestEntry;
-use crate::ports::types::{CompanyRecord, TeammateResolution};
+use crate::ports::types::CompanyRecord;
 
 /// TinyHiveMind's active roster snapshot for one routing/dispatch decision.
 pub fn tinyhivemind_roster(record: &CompanyRecord) -> Vec<tinyhivemind_core::roster::RosterMember> {
