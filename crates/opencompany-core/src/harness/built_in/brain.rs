@@ -1285,10 +1285,10 @@ impl HarnessBrain {
         // chip, the attempt row, the note, the relay — is reached unchanged. A
         // second settle is what this avoids, and a second settle is where the next
         // lifecycle bug would come from.
-        let convened = self.convene_for_card(&card, &resolution).await;
-        let (run_end, result_text) = if let Some(room) = convened {
+        let convened = self.convene_for_card(&resolution).await;
+        let (run_end, result_text) = if let Some((hive, desk)) = convened {
             let (end, result) = delegation_claim
-                .scoped(Box::pin(self.run_card_room(room, &card)))
+                .scoped(Box::pin(self.run_card_room(hive, &desk, &card)))
                 .await;
             let (end, result) = room_outcome_after_steer(&mut card, control.take(), end, result);
             settle(&mut card, end, &responder, &result);
@@ -2674,175 +2674,109 @@ impl HarnessBrain {
     /// next message with nothing to invalidate.
     /// The room this card convenes, or `None` for the ordinary pooled dispatch.
     ///
-    /// Three gates, all of which must hold. The flag, because a convened card's
-    /// episode is awaited inside this cycle and the cycle holds the company-wide
-    /// lock (see `card_episodes_enabled`). A **desk** assignee, because a card
-    /// worked by a room is owned by the desk — that makes convening the operator's
-    /// choice rather than something inferred from a teammate's memberships, which
-    /// has no good answer for somebody on three desks. And a room that actually
-    /// binds, which `card_hive` decides: a desk under two bindable seats cannot
-    /// deliberate, so the card takes the pooled path instead.
+    /// Three gates, all of which must hold. The flag
+    /// (`OPENCOMPANY_CARD_EPISODES`, default off), because a convened card's
+    /// episode is awaited inside this cycle and the cycle holds the
+    /// company-wide lock. A **desk** assignee, because a card worked by a room
+    /// is owned by the desk. And a desk the company hive can actually convene:
+    /// two or more of its members registered there, so the episode has
+    /// somebody to deliberate with.
     async fn convene_for_card(
         &self,
-        card: &TaskRecord,
         resolution: &assignee::AssigneeResolution,
-    ) -> Option<crate::hive::graph::DeskHive> {
-        if !crate::hive::graph::card_episodes_enabled(&crate::app::config::ProcessEnv) {
+    ) -> Option<(Arc<crate::hive::runtime::CompanyHive>, String)> {
+        if !card_episodes_enabled(&crate::app::config::ProcessEnv) {
             return None;
         }
         let assignee::AssigneeResolution::Desk { desk, .. } = resolution else {
             return None;
         };
         let record = self.record();
-        let mut agents: std::collections::HashMap<String, openhuman_embed::Agent> =
-            std::collections::HashMap::new();
-        for agent in record.effective_agents() {
-            if let Some(live) = self.pool.agent(&record.id, &agent.id).await {
-                agents.insert(agent.id.clone(), live.runtime_agent().clone());
-            }
-        }
-        let roster_version = record.effective_agents().len() as u64;
-        crate::hive::graph::card_hive(&record, &card.id, desk, roster_version, &|id| {
-            agents.get(id).cloned()
-        })
+        let hive = self.pool.hive(&record.id).await?;
+        let seated = crate::hive::route::hive_members(&record, desk)
+            .iter()
+            .filter(|member| hive.coordinator_id(member).is_some())
+            .count();
+        (seated >= 2).then(|| (hive, desk.clone()))
     }
 
-    /// Runs a card's work as one episode and folds it into the pair the settle
-    /// wants, so everything after the branch is the pooled path's own code.
+    /// Runs a card's work as one episode on its desk's hive and folds it into
+    /// the pair the settle wants, so everything after the branch is the
+    /// pooled path's own code (OC-2).
     ///
-    /// Awaited, not detached. That is what holds the company-wide lock for the
-    /// episode's life and why the flag defaults off — but it is also what lets the
-    /// existing settle land the card, rather than a second settle written for a
-    /// detached pass.
+    /// The brief goes in through the Coordinator's `send_as_host`, started by
+    /// the desk's default responder; the card settles once the episode it
+    /// opened does — `Completed` when it settled, `Failed` (back to the
+    /// column it came from) when it stopped on a wall, an error or an
+    /// interrupted turn. Awaited, not detached, for the reason the flag
+    /// defaults off.
     async fn run_card_room(
         &self,
-        room: crate::hive::graph::DeskHive,
+        hive: Arc<crate::hive::runtime::CompanyHive>,
+        desk: &str,
         card: &TaskRecord,
     ) -> (lifecycle::TaskRunEnd, String) {
-        let Some(events) = self.deps.events.clone() else {
-            return (
-                lifecycle::TaskRunEnd::Failed,
-                "this card's desk could not convene: no journal is wired for the room to read \
-                 and commit through"
-                    .to_string(),
-            );
-        };
-        let hives = std::collections::HashMap::from([(card.id.clone(), Arc::new(room))]);
-        let dispatcher = crate::hive::dispatch::dispatcher(
-            self.record(),
-            events,
-            hives,
-            Arc::new(HarnessDeps::clone(&self.deps)),
-            Arc::clone(&self.pool),
-            self.mentions.clone(),
-        )
-        .await;
-
-        // `carried_on` so the room reads this as work it has been handed rather
-        // than a question to answer — `Trigger::is_question` is the only thing the
-        // flag gates, and a card brief is an assignment.
-        //
-        // `seq` is zero because a card has no journaled message behind it;
-        // `trigger_for` takes `Option` and defaults the same way for the same
-        // reason.
-        let trigger = crate::hive::conducted::Trigger {
-            seq: crate::ports::types::EventSeq::new(0),
-            text: task_instruction(card),
-            parent: None,
-            mentions: Vec::new(),
-            carried_on: true,
-        };
-        let episode_id = uuid::Uuid::new_v4().simple().to_string();
-        match dispatcher
-            .run_desk_message_as(&card.id, trigger, episode_id)
+        let record = self.record();
+        let starters: Vec<String> =
+            crate::hive::route::default_starter(&record, desk, &self.orchestrator())
+                .and_then(|lead| hive.coordinator_id(&lead))
+                .into_iter()
+                .collect();
+        let coordinator = hive.coordinator();
+        let mut changes = coordinator.subscribe();
+        let receipt = match coordinator
+            .send_as_host(tinyhivemind_hives::SendMessage {
+                message_id: format!("card:{}:{}", card.id, uuid::Uuid::new_v4().simple()),
+                sender: String::new(),
+                destination: tinyhivemind_hives::Destination::Hive(desk.to_string()),
+                body: task_instruction(card),
+                thread: None,
+                only_for: Vec::new(),
+                starters,
+            })
             .await
         {
-            // At least one seat reported its work finished. The room's own words
-            // are already journaled on this card's conversation — the hive is
-            // keyed on the card id — so the note says what happened rather than
-            // repeating a transcript the timeline already holds.
-            Ok(report) if report.settled > 0 => (
-                lifecycle::TaskRunEnd::Completed,
-                format!(
-                    "{} worked this card as a room: {} seat turn(s) across {} wave(s), {} \
-                     reporting the work finished.",
-                    card.assignee, report.turns, report.waves, report.settled
-                ),
-            ),
-            // The room ran and nobody claimed the work. That is not a success with
-            // nothing to show; it is a card to put back, which `Failed` does.
-            Ok(report) => (
-                lifecycle::TaskRunEnd::Failed,
-                format!(
-                    "this card's desk convened but no seat reported the work finished after {} \
-                     turn(s)",
-                    report.turns
-                ),
-            ),
-            Err(err) => (
-                lifecycle::TaskRunEnd::Failed,
-                format!("this card's desk could not convene: {err}"),
-            ),
-        }
-    }
-
-    async fn desk_hives(
-        &self,
-        record: &CompanyRecord,
-    ) -> std::collections::HashMap<String, Arc<crate::hive::graph::DeskHive>> {
-        let mut agents: std::collections::HashMap<String, openhuman_embed::Agent> =
-            std::collections::HashMap::new();
-        for agent in record.effective_agents() {
-            if let Some(live) = self.pool.agent(&record.id, &agent.id).await {
-                agents.insert(agent.id.clone(), live.runtime_agent().clone());
+            Ok(receipt) => receipt,
+            Err(error) => {
+                return (
+                    lifecycle::TaskRunEnd::Failed,
+                    format!("this card's desk could not convene: {error}"),
+                );
+            }
+        };
+        loop {
+            let phase = coordinator.episodes().ok().and_then(|episodes| {
+                episodes
+                    .into_iter()
+                    .find(|episode| episode.opened_at == receipt.sequence)
+                    .map(|episode| episode.phase)
+            });
+            match phase {
+                Some(tinyhivemind_hives::EpisodePhase::Settled) => {
+                    return (
+                        lifecycle::TaskRunEnd::Completed,
+                        format!(
+                            "{} worked this card as a room; the episode settled and its lines \
+                             are on the desk.",
+                            card.assignee
+                        ),
+                    );
+                }
+                Some(tinyhivemind_hives::EpisodePhase::Failed(reason)) => {
+                    return (
+                        lifecycle::TaskRunEnd::Failed,
+                        format!("this card's desk convened but its episode stopped: {reason}"),
+                    );
+                }
+                _ => {}
+            }
+            if changes.changed().await.is_err() {
+                return (
+                    lifecycle::TaskRunEnd::Failed,
+                    "this card's desk stopped before its episode settled".to_string(),
+                );
             }
         }
-        crate::hive::dispatch::hives_for(record, &|id| agents.get(id).cloned())
-    }
-
-    /// The episode seat that parked `approval_id`, if a seat did.
-    fn episode_seat_of(
-        &self,
-        approval_id: &crate::ports::types::ApprovalId,
-    ) -> Option<crate::runtime::episode_resume::EpisodeSeat> {
-        self.deps
-            .approval_parker
-            .as_ref()?
-            .turn_of(approval_id)
-            .as_deref()
-            .and_then(crate::runtime::episode_resume::parse)
-    }
-
-    /// Carries on a desk episode from its last checkpoint, on its own task.
-    async fn resume_desk_episode(&self, episode_id: &str) -> bool {
-        let Some(events) = self.deps.events.clone() else {
-            return false;
-        };
-        let warmed = match self.refresh_record().await {
-            Ok(()) => self.run_turn().ensure(&self.record()).await,
-            Err(error) => Err(error),
-        };
-        if let Err(error) = warmed {
-            tracing::error!(
-                episode = %episode_id,
-                %error,
-                "[hive] the roster a parked episode resumes with could not be built"
-            );
-            return false;
-        }
-        let record = self.record();
-        let hives = self.desk_hives(&record).await;
-        let dispatcher = crate::hive::dispatch::dispatcher(
-            record,
-            events,
-            hives,
-            Arc::new(HarnessDeps::clone(&self.deps)),
-            Arc::clone(&self.pool),
-            self.mentions.clone(),
-        )
-        .await;
-        crate::hive::dispatch::spawn_resume(dispatcher, episode_id.to_owned());
-        true
     }
 
     /// The first active teammate the message named, in reading order —
@@ -3286,6 +3220,19 @@ impl HarnessBrain {
             .map(|card| card.id)
             .next_back()
     }
+}
+
+/// Whether a desk-assigned card's work runs as an episode on its desk's hive
+/// rather than as one pooled turn on the desk's lead.
+///
+/// **Default off**: a convened card's episode is awaited *inside* its dispatch
+/// cycle, and that cycle holds the company-wide `serial` lock, so while a room
+/// works a card nothing else in that company runs. `OPENCOMPANY_CARD_EPISODES=1`
+/// turns it on.
+#[must_use]
+pub fn card_episodes_enabled(env: &dyn crate::app::config::EnvSource) -> bool {
+    env.get("OPENCOMPANY_CARD_EPISODES")
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
 }
 
 /// The turn instruction for a dispatched card: its title, plus its note when it
