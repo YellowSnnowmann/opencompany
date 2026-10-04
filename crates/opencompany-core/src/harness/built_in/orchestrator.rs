@@ -343,34 +343,6 @@ pub enum Delegation {
         /// An optional assignee (a roster/desk id); empty when unassigned.
         assignee: Option<String>,
     },
-    /// Hand a turn to a desk's lead member.
-    DelegateToDesk {
-        /// The desk id or name to delegate to.
-        desk: String,
-        /// The instruction handed to the desk's lead member.
-        instruction: String,
-    },
-    /// Hand a turn to a **named teammate** rather than to whoever leads their
-    /// desk (issue #884).
-    ///
-    /// Everything else about it is [`DelegateToDesk`](Self::DelegateToDesk): it
-    /// runs one synchronous turn, opens the same hand-off card, folds the same
-    /// [`DeskReply`](crate::runtime::delegation::DeskReply) back for the relay,
-    /// and passes the same depth cap. Only the resolution differs — a roster id
-    /// straight to that agent, instead of a desk key through
-    /// [`desk_lead`](crate::runtime::delegation_tools::desk_lead) — which is the
-    /// whole of what D1 was missing.
-    DelegateToTeammate {
-        /// The teammate's **canonical** roster id, resolved and validated at
-        /// the tool boundary (#1162 — before it, this carried the key exactly
-        /// as the model typed it, and the drain had to resolve it a second
-        /// time). The one exception is the fail-open path, where the record
-        /// could not be read at all: nothing was refused there and nothing was
-        /// canonicalised, so the drain resolves it with the same resolver.
-        teammate: String,
-        /// The instruction handed to that teammate.
-        instruction: String,
-    },
     /// Set (or change) who owns an existing board card (issue #186 part b).
     AssignTask {
         /// The card's id.
@@ -393,29 +365,6 @@ pub enum Delegation {
 }
 
 impl Delegation {
-    /// Whether this delegation is a way of **answering** the operator, rather
-    /// than only a write to the board (issue #267).
-    ///
-    /// Only [`DelegateToDesk`](Self::DelegateToDesk) is. It runs a teammate's
-    /// turn and hands their reply back for the orchestrator to relay, so it is
-    /// how a question the orchestrator cannot answer alone reaches somebody who
-    /// can — "what did the design desk ship this week?" is unanswerable without
-    /// it. [`SpawnTask`](Self::SpawnTask), [`AssignTask`](Self::AssignTask) and
-    /// [`ReviewTask`](Self::ReviewTask) change the board and return nothing to
-    /// say, so they have no answering role and stay refused on a question turn.
-    ///
-    /// This is what [`DrainClaim::Answering`] filters on.
-    ///
-    /// [`DelegateToTeammate`](Self::DelegateToTeammate) is (issue #884), for
-    /// exactly the reason `DelegateToDesk` is: "what did the SEO specialist find?"
-    /// is unanswerable without running their turn.
-    pub fn answers(&self) -> bool {
-        matches!(
-            self,
-            Self::DelegateToDesk { .. } | Self::DelegateToTeammate { .. }
-        )
-    }
-
     /// Whether this delegation is one a **workflow run** may perform
     /// ([`DrainClaim::Board`], issue #661).
     ///
@@ -423,21 +372,8 @@ impl Delegation {
     /// they open a card in To-do and set who owns one, and neither moves a card
     /// between columns nor needs anywhere to put a reply.
     ///
-    /// [`ReviewTask`](Self::ReviewTask) and
-    /// [`DelegateToDesk`](Self::DelegateToDesk) are not, for two unrelated
-    /// reasons that [`no_drain`] states separately rather than collapsing:
-    /// `review_task`'s `in_review → done` is the operator's accept lane, and a
-    /// hand-off's only value is a synchronous reply that a run has nowhere to
-    /// land.
-    ///
-    /// [`DelegateToTeammate`](Self::DelegateToTeammate) is not either, on the
-    /// same ground as `DelegateToDesk`: a run has nowhere to put a synchronous
-    /// reply (issue #884).
-    ///
-    /// This is [`answers`](Self::answers) inverted, and deliberately not
-    /// written as `!self.answers()`: the two partitions agree today only by
-    /// coincidence, and a further variant would have to be classified for each
-    /// question on its own terms.
+    /// [`ReviewTask`](Self::ReviewTask) is not: `review_task`'s
+    /// `in_review → done` is the operator's accept lane.
     pub fn writes_board_only(&self) -> bool {
         matches!(self, Self::SpawnTask { .. } | Self::AssignTask { .. })
     }
