@@ -34,6 +34,12 @@ ephemeral scratch, discarded on every container replacement. It is now selected
 from the same handles as every other store, with a one-time receipt-gated import
 off the old file: [journal.md](journal.md).
 
+A sixteenth, `HiveStore`, holds the hive coordinator's durable state — one
+compare-and-swap state document and an append-only message log per company,
+opaque JSON bodies ([contract](ports-state.md#hivestore)). It rides the same
+handles (`StorageHandles::hive`), so a mongodb tenant's coordination state is
+never left on `/data`; see [Hive store](#hive-store) for each backend.
+
 Three of those fourteen — `UserStore`, `SessionStore`, `LoginCodeStore` — back
 [human user authentication](users.md). Sessions and login codes are credential
 material: they hold **hashes only**, and they must never be added to the
@@ -115,7 +121,8 @@ from a `counters` collection via atomic `findOneAndUpdate {$inc}`.
 
 Collections (all uniquely indexed on `company_id` + their key):
 `companies`, `ledger`, `events`, `memory_traces`, `memory_tasks`,
-`context_chunks`, `secrets`, `journal` and `journal_imports`, plus `counters`
+`context_chunks`, `secrets`, `journal` and `journal_imports`, `hive_state` and
+`hive_messages`, plus `counters`
 and `owners`; and the WS3 console-surface collections `tasks`, `workspace`,
 `facts`, `usage`, `skills`, and `inboxes`. The `usage` collection is trimmed to the 90-day retention window
 on each `record` (see [`UsageMeter`](ports-console.md#usagemeter)).
@@ -294,3 +301,38 @@ sibling of the run store rather than part of it.
 — that rebuild recreates `runs` from a fixed column list, so an index declared in
 `MIGRATIONS` would fail outright on exactly the legacy databases the additive
 step exists for.
+
+## Hive store
+
+`HiveStore` ([contract](ports-state.md#hivestore)) is implemented in
+`src/store/hive/`, one file per engine, and every backend runs the same
+`store::hive::conformance` suite: `assert_hive_store` (compare-and-swap,
+append, `before` bound, refusals, isolation, purge and recreate) and
+`assert_hive_commit_race` (eight writers on one revision: exactly one commits,
+and the log holds only the winner's rows — each writer's bodies differ, so a
+loser's rows landing over the winner's fails rather than passes).
+
+| Backend | Layout | How a commit lands whole |
+|---|---|---|
+| fs | `<bundle>/hive/state.json` + `hive/messages.jsonl` | `state.json` records `messagesLen`, the committed byte length. A commit truncates the log to it, appends its rows in one write, `sync_data`s, then atomically and durably renames the new state into place. Anything past `messagesLen` — whole lines or a torn one — is never read and is cut by the next commit. |
+| sqlite | `hive_state`, `hive_messages` tables | One `IMMEDIATE` transaction: read, check, upsert rows, swap. |
+| mongodb | `hive_state` (`_id = company_id`), `hive_messages` (`_id = {c, s}`, indexed `(company_id, sequence)`) | The swap carries the commit's rows as `pending`; rows reach `hive_messages` only after the swap wins (and the next commit re-writes the previous `pending` before its own swap). |
+| memory | `MemoryHiveStore` | One mutex. Tests only. |
+
+Why mongodb differs: with no transaction it can require, rows-then-swap is not
+enough — nothing serializes two replicas, so a writer about to lose the swap
+could upsert its rows over sequences the winner just committed. Carrying the
+rows inside the swap makes the swap the only write a loser ever makes. The
+first commit is an `insert_one` keyed `_id = company_id`, so the create path is
+a compare-and-swap on the always-present `_id` index rather than on an index
+`ensure_indexes` could fail to build. Company ids arrive tenant-namespaced in
+shared-single-DB mode, so neither key collides across tenants.
+
+Every backend clips loads to the document's `next_sequence`, so rows at or
+above it never load whatever put them there, and the commit that claims their
+sequence replaces them. Hive state is not exported
+([why](ports-state.md#hivestore)).
+
+The sqlite and mongodb tests sit with their stores' own
+(`store/sqlite_hive_tests.rs`, `store/mongodb_hive_tests.rs`), so the existing
+`store::sqlite` and `store::mongodb` lane filters run them.
