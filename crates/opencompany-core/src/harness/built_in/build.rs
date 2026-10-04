@@ -1828,6 +1828,7 @@ pub fn agent_spec_for(
                     .collect();
                 let belt = openhuman_embed::HostTurnTools {
                     tools,
+                    permanent: std::collections::HashSet::new(),
                     visible,
                     withheld: std::collections::HashSet::new(),
                     policy: None,
@@ -1976,6 +1977,7 @@ pub fn agent_spec_for(
             );
             openhuman_embed::HostTurnTools {
                 tools,
+                permanent: std::collections::HashSet::new(),
                 visible,
                 withheld,
                 policy: Some(seat_gate),
