@@ -1,4 +1,5 @@
-//! The company-brain memory read: `Company.memory` over the [`FactStore`] port.
+//! The company-brain memory read: `Company.memory` over the company's
+//! OpenHuman memory ([`crate::memory`]).
 
 use std::sync::Arc;
 
@@ -6,93 +7,109 @@ use async_graphql::{Enum, ID, SimpleObject};
 
 use super::pagination::Page;
 use crate::company::runtime::CompanyRuntime;
-use crate::ports::facts::{FactKind, FactRecord};
+use crate::memory::{MemoryItem, MemoryItemKind, MemoryQuery};
 use crate::ports::iso8601;
 
-/// The kind of a remembered fact, in the console's memory taxonomy.
+/// Most items one `Company.memory` read pages over.
+const MAX_ITEMS: usize = 200;
+
+/// The kind of a memory item: TinyMemory's three item kinds.
 #[derive(Enum, Copy, Clone, Eq, PartialEq)]
 #[graphql(name = "MemoryKind")]
 pub enum MemoryKindGql {
-    /// A plain fact.
-    Fact,
-    /// An operator preference.
-    Preference,
-    /// A person the company knows.
-    Person,
-    /// A project the company tracks.
-    Project,
-    /// A reference document or link.
-    Reference,
+    /// A statement: an operator fact, or something an agent learned.
+    Learning,
+    /// One logged agent turn.
+    Conversation,
+    /// A brain document.
+    Document,
 }
 
-impl From<FactKind> for MemoryKindGql {
-    fn from(kind: FactKind) -> Self {
+impl From<MemoryItemKind> for MemoryKindGql {
+    fn from(kind: MemoryItemKind) -> Self {
         match kind {
-            FactKind::Fact => Self::Fact,
-            FactKind::Preference => Self::Preference,
-            FactKind::Person => Self::Person,
-            FactKind::Project => Self::Project,
-            FactKind::Reference => Self::Reference,
+            MemoryItemKind::Learning => Self::Learning,
+            MemoryItemKind::Conversation => Self::Conversation,
+            MemoryItemKind::Document => Self::Document,
         }
     }
 }
 
-impl From<MemoryKindGql> for FactKind {
+impl From<MemoryKindGql> for MemoryItemKind {
     fn from(kind: MemoryKindGql) -> Self {
         match kind {
-            MemoryKindGql::Fact => Self::Fact,
-            MemoryKindGql::Preference => Self::Preference,
-            MemoryKindGql::Person => Self::Person,
-            MemoryKindGql::Project => Self::Project,
-            MemoryKindGql::Reference => Self::Reference,
+            MemoryKindGql::Learning => Self::Learning,
+            MemoryKindGql::Conversation => Self::Conversation,
+            MemoryKindGql::Document => Self::Document,
         }
     }
 }
 
-/// One remembered fact. Mirrors [`FactRecord`].
+/// One memory item. Mirrors [`MemoryItem`].
 #[derive(SimpleObject)]
-#[graphql(name = "MemoryFact")]
-pub struct MemoryFactGql {
-    /// The fact id.
+#[graphql(name = "MemoryItem")]
+pub struct MemoryItemGql {
+    /// The item id.
     pub id: ID,
-    /// The fact's kind.
+    /// The item's kind.
     pub kind: MemoryKindGql,
-    /// A short title.
+    /// A short title: the first line.
     pub title: String,
-    /// The fact body.
+    /// The item's text.
     pub body: String,
-    /// Which desk/teammate captured it.
-    pub source: String,
-    /// When it was last updated, ISO-8601 UTC.
-    pub updated_at: String,
+    /// The teammate whose node holds it, for a teammate's item.
+    pub agent_id: Option<String>,
+    /// The namespace node it lives at.
+    pub namespace: String,
+    /// For a brain document, the source it is filed under.
+    pub source: Option<String>,
+    /// When it was observed, ISO-8601 UTC; absent when the engine has no stamp.
+    pub updated_at: Option<String>,
 }
 
-impl From<FactRecord> for MemoryFactGql {
-    fn from(record: FactRecord) -> Self {
+impl From<MemoryItem> for MemoryItemGql {
+    fn from(item: MemoryItem) -> Self {
         Self {
-            id: ID(record.id),
-            kind: record.kind.into(),
-            title: record.title,
-            body: record.body,
-            source: record.source,
-            updated_at: iso8601(record.updated_at_millis),
+            id: ID(item.id),
+            kind: item.kind.into(),
+            title: item.title,
+            body: item.body,
+            agent_id: item.agent_id,
+            namespace: item.namespace,
+            source: item.source,
+            updated_at: u64::try_from(item.updated_at)
+                .ok()
+                .filter(|millis| *millis > 0)
+                .map(iso8601),
         }
     }
 }
 
-/// Resolves `Company.memory(query, kind, first, offset)`.
+/// Resolves `Company.memory(query, kind, first, offset)`: ranked matches for
+/// `query`, else the newest items.
 pub(crate) async fn resolve(
     runtime: &Arc<CompanyRuntime>,
     query: Option<String>,
     kind: Option<MemoryKindGql>,
     first: i32,
     offset: i32,
-) -> async_graphql::Result<Page<MemoryFactGql>> {
-    let rows = runtime
-        .facts()
-        .list(runtime.id(), query.as_deref(), kind.map(FactKind::from))
-        .await?;
-    let items: Vec<MemoryFactGql> = rows.into_iter().map(MemoryFactGql::from).collect();
+) -> async_graphql::Result<Page<MemoryItemGql>> {
+    let memory = runtime.memory();
+    let kind = kind.map(MemoryItemKind::from);
+    let rows = match query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+        Some(query) => memory.search(query, kind, MAX_ITEMS).await?,
+        None => {
+            memory
+                .list(MemoryQuery {
+                    kind,
+                    limit: Some(MAX_ITEMS),
+                    ..MemoryQuery::default()
+                })
+                .await?
+                .items
+        }
+    };
+    let items: Vec<MemoryItemGql> = rows.into_iter().map(MemoryItemGql::from).collect();
     Ok(Page::slice(
         items,
         offset.max(0) as usize,
