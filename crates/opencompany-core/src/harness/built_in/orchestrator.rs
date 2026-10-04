@@ -14,7 +14,7 @@
 //! `delegate_to_teammate` — also onto every other roster agent, scoped; see
 //! [`member_delegation_tools`]):
 //!
-//! * [`QueryCompanyTool`] — a read surface over the company's [`FactStore`],
+//! * [`QueryCompanyTool`] — a read surface over the company's learnings,
 //!   recent [`EventLog`] history, and (issue #1859) a `## Board` summary of
 //!   open task cards.
 //! * [`ListTasksTool`] / [`ReadTaskTool`] / [`ReadRunTool`] (issue #1859) —
