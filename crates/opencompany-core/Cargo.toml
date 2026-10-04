@@ -479,21 +479,13 @@ rusqlite = { version = "0.40", features = ["bundled"], optional = true }
 # Only links under the `mongodb` feature; the default build stays offline.
 mongodb = { version = "3", optional = true }
 
-# TinyMemory v2 — the engine-neutral `MemoryEngine` contract (recall, fetch,
-# store, forget, list over typed items with `MemoryMeta`) plus the engine
-# registry (`build_engine`, `list_engines`: CortexDB direct and the TinyHumans
-# hosted wire). OpenCompany binds it behind its own tenant boundary
-# (`store::memory::BoundMemory`); nothing here hands a raw engine to callers.
-#
-# A path dep rather than a `[patch.crates-io]` entry because the crates are
-# `publish = false`. The path is byte-identical to the one
-# `vendor/openhuman/crates/openhuman-core/Cargo.toml` declares, which is
-# load-bearing — Cargo unifies two path deps only when they resolve to the same
-# directory, and two copies of `tinymemory` would mean two nominally
-# distinct `MemoryEngine` traits in one process. Features are added by the
-# host features that need them (`documents` pulls the converters and the
-# SSRF-pinned link fetcher, `tinymemory` the scrubber).
-tinymemory = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory", optional = true, default-features = false }
+# TinyMemory's integrations crate, for one thing only: the SSRF-pinned link
+# fetcher behind "remember this link" (`documents`). Memory itself is
+# OpenHuman's (`openhuman_embed::memory`, `src/memory/`); the host never binds
+# an engine of its own. The path is byte-identical to the one
+# `vendor/openhuman/crates/openhuman-core/Cargo.toml` declares, so Cargo
+# resolves one copy.
+tinymemory-integrations = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory-integrations", optional = true, default-features = false, features = ["sources-network"] }
 
 # The TinyHumans backend's own SDK, for the hub calls this host makes directly
 # (feedback forwarding, the key exchange). Same byte-identical path openhuman's
@@ -622,7 +614,7 @@ tinyhivemind-openhuman = { path = "../../vendor/tinyhivemind/crates/tinyhivemind
 # running the shipped container is not an instruction they can follow. It is
 # pure Rust already in `Cargo.lock` (the contract, the registry and the cortex
 # HTTP engine); there is no in-pod engine to opt into any more.
-default = ["oauth", "platform-jwt", "documents", "tinymemory"]
+default = ["oauth", "platform-jwt", "documents"]
 # Text extraction for files dropped on the Brain page (PDF, Word, Excel,
 # PowerPoint). Without it those formats still upload and are still refused
 # honestly — the route reports "no text could be extracted" rather than
@@ -641,8 +633,7 @@ documents = [
     # Link fetches go through TinyMemory's SSRF-pinned fetcher (a public-only
     # resolver the connection is pinned to, redirect hops re-checked) rather
     # than a host-side resolve-then-connect guard that DNS rebinding defeats.
-    "dep:tinymemory",
-    "tinymemory/sources-network",
+    "dep:tinymemory-integrations",
 ]
 
 tiny = ["tinyagents-harness", "tinyinference"]
@@ -725,15 +716,6 @@ sqlite = ["dep:rusqlite"]
 # each tenant its own database on a shared cluster. The fs stores and the
 # port-conformance suite compile without this; only `MongoStore` is gated here.
 mongodb = ["dep:mongodb"]
-# The TinyMemory `MemoryEngine` contract (issue #914): binds the three memory
-# ports to a hosted engine (CortexDB or the TinyHumans memory wire) or the
-# explicit null engine, behind the `BoundMemory` tenant boundary.
-tinymemory = [
-    "dep:tinymemory",
-    # Secret/PII scrubbing applied before anything an agent writes reaches
-    # memory (`harness::built_in::redact::redact_secrets`).
-    "tinymemory/safety",
-]
 # Node sidecar brain for self-hosters (bring-your-own-inference). Adds
 # `SidecarBrain`, which speaks the same `/orchestration/v1` wire frames as the
 # hosted brain but against a local sidecar process, with inference routed back
@@ -825,13 +807,10 @@ paypal = ["dep:reqwest"]
 tempfile = "3"
 tinyflows = { version = "0.8", features = ["mock"] }
 
-# The upstream engine-conformance suite (`tinymemory_conformance::run`) and its
-# in-memory `ReferenceEngine`, which the `store::memory` tests bind behind
-# `BoundMemory`. Unconditional on purpose — dev-dependencies cannot be
-# optional — and cheap: the crate is contract-only (tinymemory-api +
-# async-trait), so it adds no engine weight to any lane's graph. Same
-# byte-identical-path rule as the `tinymemory` entry above.
-tinymemory-conformance = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory-conformance" }
+# TinyMemory's in-memory `ReferenceEngine`, which tests install as the process's
+# memory engine (`RuntimeBoot::ephemeral`). Same byte-identical path as the
+# core's own dependency.
+tinymemory-api = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory-api", features = ["conformance"] }
 # `test-util` only — for `#[tokio::test(start_paused = true)]`, which the git
 # deadline test needs to fire a timeout deterministically instead of racing a
 # real child process. Dev-only: under resolver v2 this feature is not unified
