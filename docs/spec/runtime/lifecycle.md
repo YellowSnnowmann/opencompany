@@ -47,16 +47,17 @@ distinct companies run concurrently. A cycle
 ([company-brain/README.md](../company-brain/README.md)):
 
 1. Drain pending events for the company.
-2. Load working memory (`MemoryStore::recent_traces`), context index, roster
-   + charter.
+2. Load recent traces (`TraceStore::recent_traces`), roster + charter.
+   Company memory is not loaded here: OpenHuman packs it into each agent
+   turn ([memory-engine.md](memory-engine.md)).
 3. `Brain::run_cycle`, servicing callbacks: tool calls → `ToolProvider`
-   (grant-checked), context ops → `ContextStore`, effects →
+   (grant-checked), context ops → `CompanyMemory::context_op`, effects →
    `ApprovalGate::evaluate`.
 4. Effects: `Allow` executes; `RequireApproval` parks
    (`EffectDisposition::PendingApproval`) and surfaces in the operator's
    approvals inbox; `Deny` returns to the brain as a refusal it can plan
    around.
-5. Persist: compressed traces → `MemoryStore`, events/effects → `EventLog`,
+5. Persist: compressed traces → `TraceStore`, events/effects → `EventLog`,
    ledger deltas → `CompanyStore`. Cycle results stream to API subscribers
    over SSE.
 
