@@ -150,12 +150,6 @@ pub fn desk_aliases(record: &CompanyRecord, chat_id: Option<&str>) -> (String, S
     (id, name)
 }
 
-/// Does a chat id stamped on a room's own bookkeeping name the conversation
-/// being read? Matches either slot the resolver produced, as [`owns`] does.
-fn bookkeeping_names(stored: &str, desk_id: &str, desk_name: &str) -> bool {
-    stored == desk_id || stored == desk_name
-}
-
 /// Does a conversation id stamped onto a record name `desk`? A record with no
 /// stamped conversation names none.
 pub fn stamped_conversation_is(origin: Option<&str>, desk: &str) -> bool {

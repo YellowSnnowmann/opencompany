@@ -129,6 +129,11 @@ impl DisplayNames {
 }
 
 /// Agent-written `text` as a person reads it. See the module docs.
+///
+/// The single-body form of [`project_history`]. Its only production callers
+/// were the retired referral and agent-conversation folds (OC-2); the tests
+/// pin the projection through it, so it stays as the documented entry point.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn readable_moves(text: String, names: &DisplayNames) -> String {
     project(&text, names, &[]).text
 }

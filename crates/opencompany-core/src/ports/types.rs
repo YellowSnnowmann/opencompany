@@ -434,10 +434,6 @@ fn is_zero_depth(depth: &u8) -> bool {
     *depth == 0
 }
 
-/// `skip_serializing_if` for a defaulted hop counter.
-fn is_zero_u32(value: &u32) -> bool {
-    *value == 0
-}
 
 /// Where a projected hive row sits in the company Coordinator's transcript
 /// (OC-2): its global hive sequence, the episode it belongs to and the hive
