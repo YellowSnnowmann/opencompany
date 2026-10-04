@@ -3888,8 +3888,7 @@ fn no_drain(tool: &str, effect: &str, reason: NoDrainReason) -> String {
         ),
         NoDrainReason::Seat => format!(
             "Refused: in this room you can open a card and nothing else on the board, so {effect}. \
-             Ask the teammate concerned with `{prefix}ask` instead. Do NOT report it as done.",
-            prefix = crate::hive::host::TOOL_PREFIX
+             Ask the teammate concerned with `hivemind_ask` instead. Do NOT report it as done."
         ),
         NoDrainReason::WorkflowHandOff => format!(
             "Refused: you are running inside a workflow, which has no conversation for a desk's \
