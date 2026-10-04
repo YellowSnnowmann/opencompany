@@ -1,0 +1,51 @@
+# Changed-area filters for the CI lanes (dorny/paths-filter, read by the `plan`
+# job in ci-lanes.yml). An area turns WHOLE suites on; nothing is narrowed to
+# the changed files (scripts/ci/lanes/lanes-plan.mjs).
+#
+# Every area also matches the CI wiring itself — the lane workflows, this file
+# and scripts/ci/** — so a change to how CI runs runs everything. Without that
+# a guard is the one thing its own diff cannot run: a PR touching only
+# `scripts/ci/**` once skipped the console checks entirely, and that is how the
+# broken `assert-single-tauri-app.sh` got in.
+#
+# Globs, never hand-written lists of paths: OpenHuman's filter enumerated its
+# vendored crates by hand, the list went stale, and a submodule bump ran no Rust
+# lane at all while the gate showed green (its #5616). `vendor/**` matches a
+# bare gitlink path.
+rust:
+  - '.github/workflows/ci-*.yml'
+  - '.github/ci-paths-filter.yml'
+  - 'scripts/ci/**'
+  - 'Cargo.toml'
+  - 'Cargo.lock'
+  - 'rust-toolchain.toml'
+  - '.cargo/**'
+  # The host crate: manifest, build.rs, src/, tests/, benches/, examples/. The
+  # tui crate is a workspace member built by the bare cargo lines.
+  - 'crates/opencompany-core/**'
+  - 'crates/opencompany-tui/**'
+  # build.rs embeds every bundle's agents/ and the global baseline at
+  # companies/_globals, and declares rerun-if-changed on them.
+  - 'companies/**'
+  - 'vendor/**'
+  - '.gitmodules'
+frontend:
+  - '.github/workflows/ci-*.yml'
+  - '.github/ci-paths-filter.yml'
+  - 'scripts/ci/**'
+  - 'frontend/**'
+  # The release-notes generator and its tests run in the console lane.
+  - 'scripts/release/**'
+  # The deploy entrypoint's blank-company branch is exercised with a stubbed
+  # host binary in the console lane.
+  - 'deploy/**'
+desktop:
+  - '.github/workflows/ci-*.yml'
+  - '.github/ci-paths-filter.yml'
+  - 'scripts/ci/**'
+  - 'crates/opencompany-app/**'
+  # The shell compiles the core's `analytics` feature and drives its tracker,
+  # and `desktop.rs` builds every desktop company. A change there can break the
+  # desktop without touching the shell's crate.
+  - 'crates/opencompany-core/src/analytics/**'
+  - 'crates/opencompany-core/src/desktop.rs'

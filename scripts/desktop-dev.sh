@@ -10,7 +10,7 @@
 # scanning for a `package.json`, and which one it picks is not stable — on a
 # macOS checkout it lands in `frontend/`, on CI's runner it landed in
 # `vendor/openhuman/`. No relative path is correct from both, which is why
-# those hooks are deliberately empty and why `ci.yml` packages from two
+# those hooks are deliberately empty and why CI packages from two
 # different working directories to keep them that way (issue #616).
 #
 # A script has the one thing the hook does not: it knows where it is. Every
@@ -145,7 +145,7 @@ fi
 # can follow.
 #
 # **Parsed rather than copied.** A second literal here is a third place to
-# forget: the release workflow and `ci.yml` already carry the same string with a
+# forget: the release workflow and the CI lane plan already carry the same string with a
 # comment asking a human to keep them in step, and this script would have made
 # that promise harder to keep at exactly the moment it started to matter. The
 # workflow stays the source of truth; this reads it.
@@ -179,7 +179,7 @@ else
     echo "desktop-dev: building with no extra features (DESKTOP_FEATURES is empty)"
 fi
 
-# The CLI from `frontend/node_modules`, as `ci.yml` uses, falling back to a
+# The CLI from `frontend/node_modules`, as CI uses, falling back to a
 # `cargo install`ed one. Run from `crates/opencompany-app` so the CLI finds this project:
 # it searches *subfolders* of the working directory, so from `frontend/` it
 # would pick the console wrapper in `frontend/src-tauri/` instead — a different

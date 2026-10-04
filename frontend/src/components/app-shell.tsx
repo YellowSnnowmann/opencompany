@@ -1,4 +1,14 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import type { OpenCompanyClient } from "@/api/client";
 import {
   ApiError,
@@ -14,7 +24,6 @@ import {
   SidebarContent,
   SidebarInset,
   SidebarProvider,
-  SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { AgentProfileProvider } from "@/components/agent-profile-sheet";
@@ -22,16 +31,21 @@ import { ContentSurface } from "@/components/content-surface";
 import { FeedbackDialog } from "@/components/feedback-dialog";
 import { HostSwitcher } from "@/components/host-switcher";
 import { NotificationsButton } from "@/components/notifications-button";
-import { OverviewButton } from "@/components/overview-button";
 import { TitleBarSearch } from "@/components/title-bar-search";
-import { TitleBarUtilities } from "@/components/title-bar-utilities";
+import { DiscordLink, SettingsButton } from "@/components/title-bar-utilities";
 import { RouteLoading } from "@/components/route-loading";
-import { WINDOW_TITLE_BAR_HEIGHT } from "@/components/window-chrome";
-import { TITLE_BAR_ICON_BUTTON, WindowTitleBar } from "@/components/window-title-bar";
+import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
+import { SidebarResizeHandle, SidebarShellFooter } from "@/components/sidebar-shell";
 import { cn } from "@/lib/utils";
-import { SidebarCollapseButton } from "@/components/sidebar-controls";
+import {
+  DEFAULT_SIDEBAR_WIDTH,
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
+  readStoredSidebarWidth,
+  storeSidebarWidth,
+} from "@/lib/sidebar-width";
 import { SectionContentRail } from "@/components/section-rail";
-import { SidebarNavigation } from "@/components/sidebar-navigation";
+import { SidebarNavigation, SidebarSectionTabs } from "@/components/sidebar-navigation";
 import { RoomRailSlotProvider } from "@/components/room-rail";
 import { SetupController } from "@/setup/SetupController";
 import {
@@ -41,8 +55,6 @@ import {
 } from "@/setup/state";
 import { TourController } from "@/tour/TourController";
 import { shouldHoldShellPending } from "@/setup/hold-shell";
-import { resolveAdminCheckError } from "@/lib/admin-check";
-import { me as fetchMe } from "@/api/auth";
 import { useCompany } from "@/hooks/use-company";
 import { getRun, listRuns } from "@/api/runs";
 import {
@@ -53,7 +65,6 @@ import {
   type TaskStatus,
 } from "@/api/tasks";
 import { startVisiblePolling } from "@/lib/visible-poll";
-import { withReadTimeout } from "@/lib/read-timeout";
 import {
   hasOtherOpenTurns,
   isDuplicateLiveReply,
@@ -98,8 +109,6 @@ import {
   operationalNotificationsToAnnounce,
 } from "@/lib/operational-notifications";
 import { usePresence } from "@/hooks/use-presence";
-import { useAutonomy } from "@/hooks/use-autonomy";
-import { AutonomyPill } from "@/components/autonomy-pill";
 import { useTyping } from "@/hooks/use-typing";
 import { typersIn } from "@/lib/awareness";
 import type { WorkspaceEvent } from "@/views/WorkspaceView";
@@ -107,7 +116,7 @@ import { useHashView } from "@/hooks/use-hash-view";
 import { formatConsolePath, parseConsolePath } from "@/lib/console-paths";
 import { LEDGER_VIEW_PARAM, readLedgerViewMode } from "@/hooks/use-ledger-view-mode";
 import { BOARD_LEDGER } from "@/lib/board-columns";
-import { DEFAULT_VIEW, isNavigationActive, VIEWS, type View } from "@/lib/console-routes";
+import { DEFAULT_VIEW, VIEWS, type View } from "@/lib/console-routes";
 import { REWRITE_RETIRED } from "@/lib/console-route-rewrites";
 import { taskIdFromSegment } from "@/lib/task-route";
 import { toast } from "sonner";
@@ -141,7 +150,6 @@ import { ConsoleProvider } from "@/lib/console-context";
 import { fromDto, type TeamMember } from "@/lib/team";
 import { agentDmThreads, defaultThreads, threadsFromDesks } from "@/lib/threads";
 import { drainReReadQueue, type PendingReRead } from "@/lib/re-read-queue";
-import { Overview } from "@/views/Overview";
 import { CompanyView } from "@/views/company/CompanyView";
 import { ManageListsView } from "@/views/company/ManageListsView";
 import { readLastChannel } from "@/lib/last-channel";
@@ -169,6 +177,7 @@ import { ArtifactRoute } from "@/views/ArtifactRoute";
 import { TaskDetailRoute } from "@/views/TaskDetailRoute";
 import { InboxView } from "@/views/InboxView";
 import { FeedbackView } from "@/views/FeedbackView";
+import { SetupRouteView } from "@/views/SetupRouteView";
 import { UnknownRouteView } from "@/views/UnknownRouteView";
 import { ConnectionsSection } from "@/views/connections/ConnectionsSection";
 import { SettingsSection } from "@/views/SettingsSection";
@@ -204,6 +213,10 @@ const MemoryView = lazy(() =>
 const FinanceSection = lazy(() =>
   import("@/views/finance/FinanceSection").then((m) => ({ default: m.FinanceSection })),
 );
+
+
+/** `SidebarProvider`'s `onOpenChange` while the column is held open. */
+const NO_OP = () => {};
 
 /**
  * The `h1` a cold visit to `#/finances/<sub>` announces before the chunk lands.
@@ -322,30 +335,6 @@ const WORKFLOW_EVENT_WINDOW = 300;
  * right when the frames were missed), not to drive the animation.
  */
 const TURN_POLL_MS = 4000;
-
-/**
- * How long the company's admin check waits before retrying a `fetchMe` failure
- * that was not a definitive `401` — a dropped connection or a proxy 5xx, not
- * "this user is not an admin". A few seconds is generous relative to how rarely
- * this fires (a fresh mount's first read, or a genuine network blip) and cheap
- * relative to the alternative: giving up and reading as non-admin leaves the
- * autonomy control read-only for the rest of the mount.
- */
-const ADMIN_CHECK_RETRY_MS = 3000;
-
-/**
- * How long a single `fetchMe` call is allowed to sit with no response at all
- * before it is treated as a failure.
- *
- * `resolveAdminCheckError` only ever runs once the call's promise settles.
- * `fetchMe` goes through `OpenCompanyClient`, whose request path has no timeout
- * of its own (`api/transport/browser.ts` calls bare `fetch`, no `AbortSignal`),
- * so a stalled proxy leaves that promise pending forever and the retry below
- * never gets its chance. `withReadTimeout` turns that silence into an ordinary
- * rejection, which `resolveAdminCheckError` classifies as non-terminal. Long
- * enough that a legitimately cold host is never mistaken for a hang.
- */
-const ADMIN_CHECK_TIMEOUT_MS = 20000;
 
 /**
  * Operator-facing copy for a legacy `connect_error` query from the former
@@ -528,6 +517,10 @@ export function AppShell({
   // event for either (see the hook's own doc comment).
   const ledgerNav = useLedgerNav(client, company);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  // The floating sidebar's width, dragged by its right edge and remembered
+  // per browser (`lib/sidebar-width.ts`).
+  const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
+  const [sidebarResizing, setSidebarResizing] = useState(false);
   /**
    * Whether the product tour should hold — first-run setup is on screen, or the
    * company still has nobody on it (`docs/spec/runtime/company-setup.md`).
@@ -943,48 +936,6 @@ export function AppShell({
   // decisions are in flight or freshly settled, which is never many.
   const ownApprovalDecisionsRef = useRef<Set<string>>(new Set());
   const feed = useCompany(client, company, initialStatus);
-
-  /**
-   * Whether the signed-in user is this company's admin — `null` until the read
-   * lands, which the autonomy pill renders as read-only.
-   *
-   * Mirrors the `admin = (await fetchMe(...)).role === "admin"` pattern every
-   * other admin-gated view uses, with one difference: a failed read is
-   * classified through `resolveAdminCheckError` rather than settling straight
-   * to `false`. This reader is asked once per mount instead of on every render,
-   * so a transient failure pinned as "not an admin" stays wrong until the
-   * operator reloads. Only a definitive `401` settles; anything else retries.
-   */
-  const [isCompanyAdmin, setIsCompanyAdmin] = useState<boolean | null>(null);
-  useEffect(() => {
-    let live = true;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    setIsCompanyAdmin(null);
-    const load = () => {
-      void (async () => {
-        try {
-          const admin =
-            (await withReadTimeout(fetchMe(client, company), ADMIN_CHECK_TIMEOUT_MS)).role ===
-            "admin";
-          if (!live) return;
-          setIsCompanyAdmin(admin);
-        } catch (err) {
-          if (!live) return;
-          const outcome = resolveAdminCheckError(err);
-          if (outcome.settled) {
-            setIsCompanyAdmin(outcome.isAdmin);
-          } else {
-            retryTimer = setTimeout(load, ADMIN_CHECK_RETRY_MS);
-          }
-        }
-      })();
-    };
-    load();
-    return () => {
-      live = false;
-      if (retryTimer !== undefined) clearTimeout(retryTimer);
-    };
-  }, [client, company]);
 
   const refreshTaskStatuses = useCallback(async () => {
     const read = ++taskStatusRead.current;
@@ -2714,11 +2665,6 @@ export function AppShell({
   // the state they feed has to live where that stream is read.
   const presence = usePresence(client, company);
   const typing = useTyping(client, company);
-  // The standing autonomy tier, for the title row. Shell-owned because the row
-  // is: it outlives every view, so the read has to sit above all of them. It is
-  // the same `GET {scope}/policy` the settings page makes, so the pill and the
-  // page that changes it cannot disagree about which tier is in force.
-  const autonomy = useAutonomy(client, company);
   /**
    * The coarse "near your credit limit" warning (issue #1846), off the live
    * `budget_proximity` frame. Shell-owned for the same reason presence/typing
@@ -3374,7 +3320,24 @@ export function AppShell({
           provider stays the outermost box — the title row holds the profile
           control, which is inside this context — so the direction is flipped
           here rather than by wrapping the provider in another element. */}
-      <SidebarProvider className="h-svh flex-col overflow-hidden">
+      <SidebarProvider
+        // Always expanded on desktop: the floating sidebar has no collapse
+        // control any more, so a saved "collapsed" cookie (or the provider's
+        // keyboard shortcut) must not be able to strand it on the icon rail
+        // with no way back. Below `md` it is a sheet, whose open state is
+        // separate and still toggles.
+        open
+        onOpenChange={NO_OP}
+        // The dragged width (`SidebarResizeHandle`), as the variable the
+        // sidebar's gap and card both size from. While a drag is live the
+        // width transition is switched off, so the edge tracks the pointer.
+        style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+        className={cn(
+          "h-svh flex-col overflow-hidden bg-page",
+          sidebarResizing &&
+            "select-none [&_[data-slot=sidebar-container]]:transition-none [&_[data-slot=sidebar-gap]]:transition-none",
+        )}
+      >
       {/* Room's channel list is rendered by `RoomView`, in the content column,
           and painted in the sidebar column. This provider is the slot the two
           agree on; `room-rail.tsx` explains why it is a portal rather than the
@@ -3393,134 +3356,26 @@ export function AppShell({
         >
           Skip to content
         </a>
-      {/* The window's one title row, above the sidebar and above the content
-          and spanning the full width of the window. It carries the two controls
-          that are about the *console* rather than about the page: which company
-          you are in, and who you are signed in as. Both used to sit in the
-          sidebar column — the switcher at its head under a reserved strip for
-          the traffic lights, the profile row in its footer — which put them at
-          opposite ends of a 15rem column and left the lights overlapping a
-          narrow column instead of insetting a bar. See `window-title-bar.tsx`,
-          which owns the geometry including the traffic-light inset. */}
-      <WindowTitleBar
-        switcher={
-          <HostSwitcher
-            variant="titlebar"
-            companyName={feed.status.name}
-            // The company's lifecycle, and every company on this host: both
-            // were rows in the sidebar footer, and both are facts about *which
-            // company you are in* — which is what this control is. See
-            // `HostSwitcher`'s `companyState` for why the lifecycle is not
-            // folded into the connection dot.
-            companyState={lifecycle(feed.status.lifecycle, feed.status.emergency_paused)}
-            companies={companies}
-            activeCompany={company}
-            onSwitchCompany={onSwitchCompany}
-            onBackToPicker={onBackToPicker}
-            onCreateCompany={onCreateCompany}
-            canCreateCompany={offersCompanyCreation(client)}
-          />
-        }
-        sidebarToggle={
-          // Two controls, one slot, exact complements — so the way to the
-          // navigation is in the same corner at every width and is never in
-          // both places or neither.
-          //
-          // `md` and up is the column, which collapses: `SidebarCollapseButton`
-          // says "Collapse"/"Expand", and `md` is the width `useIsMobile` flips
-          // at, so its own mobile guard and this gate agree by construction.
-          //
-          // Below `md` the sidebar is a sheet, which opens: those two labels are
-          // both wrong for one, so the sheet's own trigger takes the slot. It
-          // used to be a reserved row at the FOOT of the inset (issue #1265,
-          // which was about a `fixed` trigger floating over the content and
-          // winning every hit-test in the bottom-left corner). A row of its own
-          // solved that and put the way back to navigation at the bottom of the
-          // screen, furthest from the header it belongs to. In the title row it
-          // is neither floating nor buried.
-          <>
-            <span className="hidden md:inline-flex">
-              <SidebarCollapseButton />
-            </span>
-            <SidebarTrigger
-              aria-label="Toggle sidebar"
-              // The row's shared glyph shape, so it sits with its neighbours
-              // rather than reading as a `ghost` Button that wandered in.
-              className={cn(TITLE_BAR_ICON_BUTTON, "md:hidden")}
-            />
-          </>
-        }
-        search={<TitleBarSearch client={client} company={company} />}
-        utilities={
-          // The three that were the sidebar's footer, beside Overview in the
-          // same group: all four are about the console rather than the page.
-          <TitleBarUtilities view={view} onNavigate={setView} />
-        }
-        overview={
-          // The console's front page, as a glyph. `NAV` still carries the
-          // labelled row and will until the sidebar restructure removes it; in a
-          // chrome band a labelled button reads as content, so the name moves
-          // here to `aria-label` and `title`. First thing the row drops as the
-          // window narrows — see `TITLE_BAR_LADDER`.
-          <OverviewButton
-            active={isNavigationActive("overview", view)}
-            onNavigate={() => setView("overview")}
-          />
-        }
-        approvals={
-          // The bell, beside Overview and Settings in the same group: all
-          // three are about the console rather than about the page. It is a
-          // page now rather than a bare queue — Approvals and the activity
-          // feed, as two tabs — which is what answers the objection that sent
-          // the old shield glyph back to the sidebar (one unlabelled square
-          // could not say it was a destination; a bell says exactly what this
-          // one is). The count it carries is `pending_approvals`, unchanged,
-          // and the sidebar draws no second copy of it any more.
-          <NotificationsButton
-            pending={pending}
-            active={view === "notifications" || view === "approvals"}
-            onNavigate={() => setView("notifications")}
-          />
-        }
-        // No `autonomy` slot. The tier is a control on the composer's
-        // toolbar row now (`views/chat/MessageComposer.tsx`): it is a fact
-        // about what happens when you press Send, so it belongs beside Send
-        // rather than in the band that holds facts about the console.
-        profile={
-          // Who you are signed in as, and nothing else. It renders nothing
-          // where there is nobody to name — a host with no sign-in, or a
-          // session that has just gone — and the row simply closes up.
-          <ProfileRow
-            variant="titlebar"
-            client={client}
-            company={company}
-            onSignedOut={() => void forgetSession(scope.connection)}
-          />
-        }
-      />
-
       {/* The shell proper, below the title row: the sidebar column and the
           content column, still flex siblings so the sidebar's `peer` selectors
           and its in-flow width gap keep working. */}
       <div className="flex w-full min-h-0 flex-1">
       <Sidebar
         collapsible="icon"
-        // The sidebar's container is `fixed inset-y-0 h-svh` — it positions
-        // against the VIEWPORT, so a title row placed above it in the flow does
-        // not push it down and the column would slide underneath the bar. This
-        // is the offset that puts it back, as inline style rather than a class
-        // because `top-*` and `h-*` would be fighting `inset-y-0` and `h-svh`
-        // on the same element and the winner would come down to stylesheet
-        // order.
-        style={{
-          top: WINDOW_TITLE_BAR_HEIGHT,
-          height: `calc(100svh - ${WINDOW_TITLE_BAR_HEIGHT}px)`,
-        }}
+        // Flush to the window's top, bottom and left edges, ruled off from the
+        // page by a right border in the composer's 15% ink. It floated as a
+        // rounded card 8px in for a while (after OpenHuman's shell); a column
+        // that bleeds to the edges gives the list its full height and reads
+        // as the window's own structure rather than an object on top of it.
+        // The container is `fixed inset-y-0 h-svh left-0`; the inline style
+        // pins that rather than racing classes for it. `.sidebar-material`
+        // (index.css) is the fill.
+        style={{ top: 0, bottom: 0, left: 0, height: "auto" }}
+        className="sidebar-material z-30 overflow-hidden border-r border-foreground/15 backdrop-blur-2xl"
       >
-
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
-          <SidebarContent data-tour="sidebar" className="min-h-0 flex-1">
-          <SidebarNavigation view={view} onNavigate={setView} />
+          <SidebarContent data-tour="sidebar" className="min-h-0 flex-1 pt-0">
+          <SidebarNavigation />
         </SidebarContent>
         {/* The console's own utilities sit at the FOOT of the column, under the
             destinations rather than over them. They act on the console, not on
@@ -3535,7 +3390,39 @@ export function AppShell({
             md:inline-flex`, went with them — the glyph up there is on at every
             width now, so the destination is still on screen exactly once. */}
         </nav>
-        <SidebarRail />
+        <SidebarShellFooter
+          tabs={
+            <>
+              <TitleBarSearch client={client} company={company} />
+              <SidebarSectionTabs view={view} onNavigate={setView} />
+              <NotificationsButton
+                pending={pending}
+                active={view === "notifications" || view === "approvals"}
+                onNavigate={() => setView("notifications")}
+              />
+              <SettingsButton view={view} onNavigate={setView} />
+              <DiscordLink />
+            </>
+          }
+          profile={
+            // Who you are signed in as. Renders nothing where there is nobody
+            // to name — a host with no sign-in — and the row closes up.
+            <ProfileRow
+              client={client}
+              company={company}
+              onSignedOut={() => void forgetSession(scope.connection)}
+            />
+          }
+        />
+        <SidebarResizeHandle
+          width={sidebarWidth}
+          min={MIN_SIDEBAR_WIDTH}
+          max={MAX_SIDEBAR_WIDTH}
+          defaultWidth={DEFAULT_SIDEBAR_WIDTH}
+          onWidthChange={setSidebarWidth}
+          onCommit={storeSidebarWidth}
+          onResizing={setSidebarResizing}
+        />
       </Sidebar>
 
       {/* `min-w-0`: the inset is a flex item beside the sidebar, and a flex
@@ -3546,7 +3433,21 @@ export function AppShell({
           wrapper that clips and cannot scroll. On the task board that clipped
           strip held the "Done" column, which is why a card could not be dragged
           into it (issue #334); every view was losing the same strip. */}
-      <SidebarInset id={MAIN_CONTENT_ID} tabIndex={-1} className="min-h-0 min-w-0">
+      <SidebarInset
+        id={MAIN_CONTENT_ID}
+        tabIndex={-1}
+        // No margin: the sidebar's in-flow gap is exactly its width, and the
+        // column runs flush to the window's edges, so the content starts at its
+        // right border. Pages bring their own gutter from there.
+        className="min-h-0 min-w-0 bg-page"
+      >
+        {/* Below `md` the sidebar is a sheet, and the way to open it was a
+            glyph in the window's title row. That row is gone, so the sheet's
+            trigger heads the content instead — in flow, never floating over the
+            page (issue #1265). */}
+        <div className="flex h-12 shrink-0 items-center px-3 md:hidden">
+          <SidebarTrigger aria-label="Toggle sidebar" className={TITLE_BAR_ICON_BUTTON} />
+        </div>
           {/* The sidebar toggle was here — absolutely positioned over this
               inset, straddling the content card's leading edge. It is a glyph
               in the window's title row now, beside the switcher whose column it
@@ -3574,17 +3475,12 @@ export function AppShell({
               none (Settings, Overview, Approvals) render bare, exactly as they
               did. See `components/section-rail.tsx`. */}
           <SectionContentRail view={view} sub={sub} onNavigate={setView}>
-          {/* `#/overview` is the company graph again — the page #1321 swapped
-              out for the operator landing view. The graph keeps the
-              `#/company/graph` alias that issue gave it, so every link minted
-              while it lived there still resolves.
-
-              `OperatorOverview` is left in the tree, unrouted: its panels are
-              real work (#1015, #1700, #1745) and the decision about where they
-              belong is not this change's to make. Nothing renders it today. */}
-          {(view === "overview" || view === "setup") && (
-            <Overview client={client} company={company} companyName={feed.status.name} />
-          )}
+          {/* No Overview. The page and its knowledge graph were removed, at
+              both of their addresses — `#/overview` and `#/company/graph` are
+              rewritten onto Room and the roster (`console-route-rewrites.ts`).
+              `#/setup` drew the graph behind its dialog; it draws an empty,
+              named page there now (`SetupRouteView`). */}
+          {view === "setup" && <SetupRouteView />}
           {view === "company" && (
             <CompanyView
               client={client}
@@ -3617,10 +3513,6 @@ export function AppShell({
                     navigate("team", agentId, options?.edit ? { edit: "" } : undefined)
                   : navigate("company")
               }
-              // The graph at `#/company/graph` names its core node after the
-              // company the way the rest of the console does (issue #1219),
-              // not after the slug.
-              companyName={feed.status.name}
               // Setup just staffed the company, so the roster read is stale.
               refreshKey={teamBuilt}
               // Skipping setup must not be a dead end: an unstaffed company keeps
@@ -3663,25 +3555,11 @@ export function AppShell({
               client={client}
               company={company}
               rosterRevision={rosterTick}
-              // What the agents in this company are allowed to do without
-              // asking, rendered on the composer's toolbar row. Nothing renders
-              // until the host has said what the tier is, rather than guessing
-              // one — see `useAutonomy`.
-              //
-              // `canManage` is the role this shell already knows. Both write
-              // routes behind the pill call `require_admin`
-              // (`src/server/ops/policy.rs:309,427`), so without it a member was
-              // offered a menu whose every selection ends in a 403. The pill
-              // still STATES the tier for them — standing policy is a fact about
-              // what the agents around you may do, not an admin setting — it
-              // simply stops pretending to be a control. `null` while `fetchMe`
-              // is in flight reads as read-only, which is the safe direction.
-              autonomy={<AutonomyPill status={autonomy} canManage={isCompanyAdmin} />}
+              presence={presence.peers}
+              companyPeople={companyPeople}
               // The chat segment, not the current view's — see `chatSub`.
               sub={view === "chat" ? sub : chatSub}
               routeOpen={view === "chat"}
-              presence={presence.peers}
-              companyPeople={companyPeople}
               resolveTypingNames={resolveTypingNames}
               onTyping={typing.announce}
               onNavigate={(channelId) => navigate("chat", channelId)}
@@ -4068,6 +3946,23 @@ export function AppShell({
               eventTick={workflowRunTick + backgroundTurnTick}
               onFlag={() => setFeedbackOpen(true)}
               onResetCompany={onResetCompany}
+              switcher={
+                <HostSwitcher
+                  variant="titlebar"
+                  companyName={feed.status.name}
+                  // The company's lifecycle, and every company on this host:
+                  // both are facts about *which company you are in* — which is
+                  // what this control is. See `HostSwitcher`'s `companyState`
+                  // for why the lifecycle is not folded into the connection dot.
+                  companyState={lifecycle(feed.status.lifecycle, feed.status.emergency_paused)}
+                  companies={companies}
+                  activeCompany={company}
+                  onSwitchCompany={onSwitchCompany}
+                  onBackToPicker={onBackToPicker}
+                  onCreateCompany={onCreateCompany}
+                  canCreateCompany={offersCompanyCreation(client)}
+                />
+              }
             />
           )}
           {view === "feedback" && <FeedbackView client={client} company={company} />}

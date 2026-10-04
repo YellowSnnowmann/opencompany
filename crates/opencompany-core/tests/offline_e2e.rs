@@ -32,7 +32,7 @@
 //!
 //! # The egress guard
 //!
-//! The lane runs this under `sudo unshare -n` (see `.github/workflows/ci.yml`),
+//! The lane runs this under `unshare -n` (see `scripts/ci/lanes/lanes-plan.mjs`),
 //! which gives the process a network namespace with nothing but loopback.
 //!
 //! `a_deliberate_outbound_call_fails` is what makes that a proof rather than a

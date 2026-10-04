@@ -57,7 +57,7 @@ async function settleConnectionScope(page: Page): Promise<void> {
   const profiles = () =>
     page.evaluate(() => window.localStorage.getItem("oc.connections.v1") ?? "");
 
-  await page.goto("/#/overview");
+  await page.goto("/#/chat");
   await expect(page.getByText(WELCOME), "first run should offer the tour").toBeVisible();
 
   // Two reloads is what the audit needed; poll rather than fix the count so a
@@ -99,16 +99,18 @@ function expectScopedKey(key: string): void {
 
 /** Reload the document and assert the welcome card does not come back. */
 async function expectWelcomeStaysAway(page: Page, exit: string): Promise<void> {
-  // Back to Overview first. A finished tour leaves the console on its last
+  // Back to the chat first. A finished tour leaves the console on its last
   // stop's view, and the liveness check below needs one known anchor for all
   // three exits. Changing only the fragment is not a document load, so the
   // `reload()` after it is what makes this the *full page load* the bug was
   // reported against.
-  await page.goto("/#/overview");
+  await page.goto("/#/chat");
   await page.reload();
   // Positively wait for the console to have rendered before concluding the
-  // welcome is absent, otherwise this would pass against a blank page.
-  await expect(page.getByRole("heading", { name: "Overview", level: 1 })).toBeVisible();
+  // welcome is absent, otherwise this would pass against a blank page. The
+  // chat's composer is that anchor — Overview, which this used to wait on,
+  // was removed and its address now lands here.
+  await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: 30_000 });
   await expect(
     page.getByText(WELCOME),
     `after ${exit}, the welcome must not be re-offered on reload`,

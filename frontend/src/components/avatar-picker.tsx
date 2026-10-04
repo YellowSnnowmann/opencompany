@@ -210,7 +210,7 @@ export function AvatarPicker({
             name={name}
             tone={tone}
             avatar={current}
-            className="size-14 rounded-xl text-base"
+            className="size-14 text-base"
             data-testid="avatar-preview"
           />
         )}
@@ -292,7 +292,7 @@ export function AvatarPicker({
               <TeammateAvatar
                 name={name}
                 avatar={ref}
-                className="size-9 rounded-md text-xs"
+                className="size-9 text-xs"
               />
             </button>
           );

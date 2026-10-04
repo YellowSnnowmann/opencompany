@@ -14,7 +14,7 @@ test("the standalone styleguide keeps theme controls and console navigation avai
 
   await expect(header).toBeVisible();
   await expect(themeToggle).toBeVisible();
-  await expect(backToConsole).toHaveAttribute("href", "#/overview");
+  await expect(backToConsole).toHaveAttribute("href", "#/chat");
 
   await page.locator("text=Components").scrollIntoViewIfNeeded();
   const headerBox = await header.boundingBox();
@@ -25,5 +25,5 @@ test("the standalone styleguide keeps theme controls and console navigation avai
   await expect(page.locator("html")).toHaveClass(/\bdark\b/);
 
   await backToConsole.click();
-  await expect(page).toHaveURL(/#\/overview$/);
+  await expect(page).toHaveURL(/#\/chat/);
 });

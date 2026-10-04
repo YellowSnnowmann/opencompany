@@ -298,7 +298,7 @@ describe("one line per row, with the gloss on hover", () => {
     render("finances", "wallet");
     const chips = container.querySelector(".lg\\:hidden")!;
     const filled = [...chips.querySelectorAll("button")]
-      .filter((b) => b.className.includes("bg-accent"))
+      .filter((b) => b.className.includes("bg-rail-selected"))
       .map((b) => b.textContent?.trim());
     expect(filled).toEqual(["Wallet"]);
   });
@@ -490,7 +490,7 @@ describe("one address lights one row, across groups", () => {
     const chips = container.querySelector(".lg\\:hidden")!;
     expect(
       [...chips.querySelectorAll("button")]
-        .filter((b) => b.className.includes("bg-accent"))
+        .filter((b) => b.className.includes("bg-rail-selected"))
         .map((b) => b.textContent?.trim()),
     ).toEqual(["Composio"]);
   });

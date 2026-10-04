@@ -6,7 +6,7 @@
 #
 # The failure this exists to catch is not a red test. It is a feature-gated test
 # that NOTHING SELECTS. Cargo features are additive and every test lane in
-# ci.yml pins an explicit feature set, so the default fate of a gated test is
+# the CI lane plan pins an explicit feature set, so the default fate of a gated test is
 # "compiled by `Check (--all-features)`, executed by nothing" — `cargo test`
 # prints no mention of it, no lane reports zero, and a suite everybody reads as
 # coverage guards nothing. Six features had accumulated never-executed tests
@@ -28,7 +28,7 @@
 #     because a table that describes a tree that no longer exists is worse than
 #     no table);
 #   * `tested` / `partial` rows name a feature set that some `cargo test` line in
-#     ci.yml actually enables, and `partial` rows additionally name filters that
+#     the lane plan actually enables, and `partial` rows additionally name filters that
 #     appear there;
 #   * `compile-only` rows carry a reason AND have no feature-gated test anywhere
 #     under src/ or tests/. This is the load-bearing one: it is what makes
@@ -38,7 +38,7 @@
 # there. For a `partial` row it cannot prove the filters SELECT every gated test
 # the feature owns — a filter that misses one is invisible here. Two other
 # things cover that from the runtime side: the per-step count assertions in
-# ci.yml (a filter that selects nothing exits 0, which is why every lane's count
+# the lane plan (a filter that selects nothing exits 0, which is why every lane's count
 # is asserted non-zero) and scripts/ci/assert-integration-targets-run.sh. This
 # script is the STATIC half — it proves a lane was declared, not that the lane
 # is exhaustive. Keep the filters honest by hand.
@@ -60,14 +60,17 @@ REPO_ROOT=$(CDPATH='' cd -- "${SCRIPT_DIR}/../.." && pwd)
 cd "${REPO_ROOT}"
 
 TABLE="scripts/ci/feature-lanes.txt"
-WORKFLOW=".github/workflows/ci.yml"
+# Where the lanes live: the lane plan (every check both CI profiles run) and
+# ci-lanes.yml (the service-backed suites that need a job-level `services:`
+# container, so they stay workflow steps). Grepped as one text below.
+LANE_SOURCES="scripts/ci/lanes/lanes-plan.mjs .github/workflows/ci-lanes.yml"
 
 if ! command -v jq > /dev/null 2>&1; then
   echo "assert-feature-lanes: jq is required but not installed" >&2
   exit 1
 fi
 
-for required in "${TABLE}" "${WORKFLOW}"; do
+for required in "${TABLE}" ${LANE_SOURCES}; do
   if [ ! -f "${required}" ]; then
     echo "assert-feature-lanes: ${required} is missing" >&2
     exit 1
@@ -76,6 +79,10 @@ done
 
 WORK=$(mktemp -d)
 trap 'rm -rf "${WORK}"' EXIT
+
+# shellcheck disable=SC2086  # a space-separated list of repo paths
+cat ${LANE_SOURCES} > "${WORK}/lanes"
+WORKFLOW="${WORK}/lanes"
 
 # --- Ground truth: the features Cargo itself reports ------------------------
 #
@@ -228,8 +235,10 @@ while IFS='|' read -r feature status features detail; do
       if [ "${features}" = "(default)" ]; then
         # The default set is not passed via --features; it is what a bare
         # `cargo test` builds. Assert that bare invocation exists.
-        if ! grep -qE 'cargo test --locked[[:space:]]*$' "${WORKFLOW}"; then
-          echo "::error title=No default test lane::\`${feature}\` is covered by the default feature set, but ${WORKFLOW} has no bare \`cargo test --locked\` line to run it." >&2
+        # The plan writes it as a JS string, so the bare command is followed
+        # by its closing quote rather than the end of the line.
+        if ! grep -qE 'cargo test --locked("|[[:space:]]*$)' "${WORKFLOW}"; then
+          echo "::error title=No default test lane::\`${feature}\` is covered by the default feature set, but ${LANE_SOURCES} have no bare \`cargo test --locked\` command to run it." >&2
           failed=1
         fi
       # A lane is either a direct `cargo test … --features X` line or a
@@ -240,7 +249,7 @@ while IFS='|' read -r feature status features detail; do
       # to satisfy a grep.
       elif ! grep -q -- "cargo test .*--features ${features}" "${WORKFLOW}" \
         && ! grep -qE "run-scoped-suite\.sh .*[[:space:]]${features}[[:space:]]" "${WORKFLOW}"; then
-        echo "::error title=Feature has no lane::\`${feature}\` is classified ${status} on \`--features ${features}\`, but no \`cargo test\` line and no \`run-scoped-suite.sh\` invocation in ${WORKFLOW} enables that feature set. Add the lane, or reclassify the row." >&2
+        echo "::error title=Feature has no lane::\`${feature}\` is classified ${status} on \`--features ${features}\`, but no \`cargo test\` line and no \`run-scoped-suite.sh\` invocation in ${LANE_SOURCES} enables that feature set. Add the lane, or reclassify the row." >&2
         failed=1
       fi
 
@@ -251,7 +260,7 @@ while IFS='|' read -r feature status features detail; do
         else
           for filter in ${detail}; do
             if ! grep -q -- "${filter}" "${WORKFLOW}"; then
-              echo "::error title=Filter not in the workflow::\`${feature}\` claims filter \`${filter}\`, which appears nowhere in ${WORKFLOW}. The table and the lane disagree." >&2
+              echo "::error title=Filter not in the workflow::\`${feature}\` claims filter \`${filter}\`, which appears nowhere in ${LANE_SOURCES}. The table and the lane disagree." >&2
               failed=1
             fi
           done
@@ -271,7 +280,7 @@ while IFS='|' read -r feature status features detail; do
       if [ -n "${found}" ]; then
         echo "::error title=Compile-only feature has gated tests::\`${feature}\` is declared compile-only in ${TABLE}, but these feature-gated tests exist. They are compiled by \`Check (--all-features)\` and RUN BY NOTHING." >&2
         echo "${found}" | sed 's/^/  /' >&2
-        echo "  Fix the WIRING: add a lane to ${WORKFLOW} that runs them, then reclassify this row as tested/partial." >&2
+        echo "  Fix the WIRING: add a lane to scripts/ci/lanes/lanes-plan.mjs that runs them, then reclassify this row as tested/partial." >&2
         failed=1
       fi
 
@@ -293,7 +302,7 @@ while IFS='|' read -r feature status features detail; do
       #     compile-only with a reason, so `owed` cannot be used to skip the
       #     harder question of why a feature has no tests at all.
       #
-      # What it does NOT do is let a red lane sit in ci.yml. There is no lane —
+      # What it does NOT do is let a red lane sit in the lane plan. There is no lane —
       # that is the point. A lane permitted to be red is the state #428 was filed
       # about, at more expense.
       case "${detail}" in

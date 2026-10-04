@@ -201,7 +201,7 @@ export function SectionRail({
                   // chips read as two current destinations (Codex P2 review).
                   // What says "you are in this branch" here is the same thing
                   // that says it on the rail: its children are in the row at all.
-                  row === current ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+                  row === current ? "bg-rail-selected text-rail-selected-foreground" : "text-muted-foreground",
                 )}
               >
                 {row.label}
@@ -265,10 +265,15 @@ function RailRow({
           // Depth is what the indent says. Every row is one line now, so this is
           // the only thing distinguishing a sub-page from its parent.
           nested && "pl-8",
-          current ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+          current ? "bg-rail-selected text-rail-selected-foreground" : "hover:bg-rail-hover",
         )}
       >
-        <row.icon className="size-4 shrink-0 text-muted-foreground" />
+        <row.icon
+          className={cn(
+            "size-4 shrink-0",
+            current ? "text-rail-selected-foreground" : "text-muted-foreground",
+          )}
+        />
         <span className="min-w-0 truncate text-sm font-medium">{row.label}</span>
       </button>
     </div>

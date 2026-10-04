@@ -352,7 +352,7 @@ What was actually written, against the plan above:
 - Console: `finance-money.test.ts` (18), `finance-health.test.ts` (9),
   `finance-invoicing.test.ts` (6), `finance-company-switch.test.ts` (3).
 - `scripts/ci/feature-lanes.txt` gained `server::ops::finance` on both the
-  `chargebee` and `paypal` rows, and the matching filter is in ci.yml. Without
+  `chargebee` and `paypal` rows, and the matching filter is in the CI lane plan. Without
   it the two feature-gated tests here would be compiled by the lane and selected
   by nothing — the #770 pathology, arrived at from a new direction.
 

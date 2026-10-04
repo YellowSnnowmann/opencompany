@@ -42,7 +42,7 @@ fn the_skill_registry_parses() {
 /// ref is on that company's roster.
 ///
 /// Gated on `openhuman` because `translate` and `namespace_of` live behind that
-/// feature; the `Rust (openhuman, tinymemory)` CI lane runs it.
+/// feature; the `gated` CI lane runs it.
 #[cfg(feature = "openhuman")]
 #[test]
 fn every_bundled_workflow_is_runnable_against_its_roster() {

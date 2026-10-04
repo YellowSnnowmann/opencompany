@@ -28,19 +28,8 @@ import { VISUAL, VISUAL_REASON } from "./capabilities";
  *     whether it is in the frame depends on how fast the machine was.
  *   - **`reducedMotion: "reduce"`** is set for this lane in
  *     `playwright.config.ts`, and it is not a duplicate of the line above.
- *     `animations: "disabled"` reaches CSS animations; Overview's knowledge
- *     graph is a d3 simulation driven from `requestAnimationFrame`, which no
- *     CSS switch touches. Without the media query it never holds still — the
- *     run does not fail on a diff, it fails on "failed to take two consecutive
- *     stable screenshots", and it costs seconds per attempt while the frame
- *     budget goes to the graph.
- *   - **The graph's physics is waited out, not raced.** The media query stops
- *     the camera and the pulses, but the d3 simulation still repaints nodes
- *     until it cools to sleep (`alphaDecay(0.015)` ≈ 8s), and
- *     `toHaveScreenshot`'s own two-stable-shots retry window is 5s — shorter
- *     than a cold settle. `settleKnowledgeGraph` below polls the graph until
- *     two samples agree, so the screenshot is taken of the settled graph the
- *     baseline was recorded from.
+ *     `animations: "disabled"` reaches CSS animations only; the media query
+ *     is what quiets motion driven from JavaScript.
  *
  * # Masks, and the clock this deliberately does not freeze
  *
@@ -88,7 +77,6 @@ type Surface = {
 };
 
 const SURFACES: Surface[] = [
-  { name: "overview", hash: "/#/company/graph", settle: settleKnowledgeGraph },
   { name: "tasks", hash: "/#/company/work/tasks" },
   { name: "workflows", hash: "/#/workflows" },
   { name: "company", hash: "/#/company" },
@@ -121,8 +109,6 @@ const LOADING_PLACEHOLDERS = [
   `${CONTENT_SURFACE} >> [data-slot="skeleton"]`,
   // Approvals pulses its own rows instead of the Skeleton component.
   `${CONTENT_SURFACE} >> [aria-label="Loading approvals"]`,
-  // Overview suspends on the graph chunk's import and says so in a fallback.
-  `${CONTENT_SURFACE} >> text=Drawing the graph…`,
   // Settings' sub-pages say what they are waiting on beside a spinner, not
   // via the shared Skeleton — `Loader2` plus a label in `domain-settings.tsx`
   // and `policy-settings.tsx`. Each is named so a slow `--update-snapshots`
@@ -182,57 +168,6 @@ async function open(page: Page, theme: "dark" | "light", hash: string) {
   // differs from every later run by the whole page.
   await page.evaluate(() => document.fonts.ready);
   await hideScrollbars(page);
-}
-
-/**
- * Wait for Overview's knowledge graph to finish moving.
- *
- * The graph is a d3 simulation that cools to sleep on its own schedule
- * (`alphaDecay(0.015)` ≈ 8s from a cold start; the comment above line 1900 of
- * `KnowledgeGraph.tsx` says so). `toHaveScreenshot` needs two consecutive
- * identical shots, and its retry window is 5s — shorter than a cold settle, so
- * without this the comparison is made while the physics is still repainting
- * and the run flips on machine speed. Reduced motion freezes the camera and
- * the pulses, but the simulation's own ticks still move nodes until it sleeps.
- *
- * Two identical samples 750ms apart is the settle signal rather than a fixed
- * timeout, which would have to guess at how long a particular graph takes. The
- * page writes nothing once the sim is asleep — the camera loop is at rest and
- * emits no transforms in the home state — so byte-identical markup is the
- * honest "done".
- *
- * The signal also demands the markup *changed at least once* first. A cold
- * sim repaints nodes for its whole ~8s cool-down, so a settled graph has
- * necessarily rewritten the SVG hundreds of times before it holds still. If it
- * never moves, the graph did not settle — it never ran. Headless Chromium can
- * occasionally stall a page's frame clock entirely (`requestAnimationFrame`
- * stops firing), and a stall would make the two-sample check pass on the first
- * attempt: the graph is born on its resting positions, and two identical
- * samples of a motionless graph record a baseline of nothing. Failing loudly
- * with a re-run hint beats committing a screenshot of a physics sim that never
- * ticked. The lane retries once (`retries` in `playwright.config.ts`), which
- * absorbs the stall when it is the frame clock that stumbled rather than the
- * graph.
- */
-async function settleKnowledgeGraph(page: Page) {
-  const svg = page.getByRole("img", { name: "Operating knowledge graph" });
-  await expect(svg).toBeVisible({ timeout: 30_000 });
-  let previous = "";
-  let changes = 0;
-  for (let attempt = 0; attempt < 24; attempt += 1) {
-    const current = await svg.evaluate((el) => el.innerHTML);
-    if (current !== previous) {
-      changes += 1;
-      previous = current;
-    } else if (changes >= 2) {
-      return;
-    }
-    await page.waitForTimeout(750);
-  }
-  throw new Error(
-    "knowledge graph never animated: the d3 simulation did not tick, so there is no " +
-      "settled layout to record. This is the headless frame-clock stall; re-run the lane.",
-  );
 }
 
 for (const theme of ["light", "dark"] as const) {

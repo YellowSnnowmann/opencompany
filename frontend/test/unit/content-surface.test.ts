@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ContentSurface } from "@/components/content-surface";
 
 /**
- * The card half of the two-layer shell (issue #1178).
+ * The content sheet: the card half of the two-layer shell (issue #1178), unframed
+ * since the sidebar became a floating card over a full-bleed page.
  *
  * Every page renders on this one card — there is no full-bleed escape hatch,
  * and the component's own docblock says why.
@@ -47,46 +48,23 @@ function render() {
 }
 
 describe("ContentSurface", () => {
-  it("frames the page as a card inset from three edges, flush to the leading one", () => {
+  it("runs full-bleed under the floating sidebar: no frame, no card, no halo", () => {
+    // The floating sidebar (`app-shell.tsx`) is the one card in the shell now.
+    // The content runs the full window behind it, so the margins, rounded
+    // corners, hairline and orbiting halo that framed it as a second card are
+    // gone — and must not creep back, or the page reads as a card beside a card.
     const surface = render();
     const classes = surface.className.split(/\s+/);
-    // The margins live on the FRAME, which is the card's parent: the orbiting
-    // halo is a sibling positioned against the same rectangle, and the card
-    // cannot host it — `overflow-hidden` is what keeps a page's scrolling
-    // inside the rounded corners and it clips a pseudo-element just as readily.
-    const frame = surface.parentElement!;
-    const frameClasses = frame.className.split(/\s+/);
+    const frameClasses = surface.parentElement!.className.split(/\s+/);
 
-    // An even four-sided inset WAS the contract, when nothing sat above or
-    // beside this card. Two things do now, and each takes an edge off:
-    //
-    //   - the LEADING edge is flush (`ml-0`). The sidebar's groups already
-    //     carry their own 12px gutter, so an inset here put 12px of card margin
-    //     against 12px of column padding — 24px between the last nav row and
-    //     the first pixel of the page, against 12px on the other sides.
-    //   - the TOP is thinner (`mt-0.5`). The window title row has its own
-    //     bottom padding, so a full inset there stacked the two and read as a
-    //     gap twice the size of the others.
-    //
-    // Stated as the exact set rather than "some margin exists", because the
-    // failure this guards is a stray `ml-` creeping back and reopening the
-    // double gutter — which looks like a design choice rather than a bug.
-    expect(frameClasses).toContain("mr-(--frame-inset)");
-    expect(frameClasses).toContain("mb-(--frame-inset)");
-    expect(frameClasses).toContain("ml-0");
-    expect(frameClasses).toContain("mt-0.5");
-    expect(frameClasses).not.toContain("mx-(--frame-inset)");
-
-    // The halo is a sibling of the card, inside the frame, and decorative.
-    const halo = frame.querySelector('[aria-hidden="true"].content-orbit');
-    expect(halo, "the frame draws no orbiting halo").not.toBeNull();
-
-    expect(classes).toContain("rounded-2xl");
-    // The edge carries the chrome hairline, and the sheet is opaque: it is the
-    // only opaque surface in the shell, so anything a page draws stacks on it.
-    expect(classes).toContain("border-chrome-border");
-    expect(classes).toContain("bg-background");
-    expect(surface.dataset.unframed).toBeUndefined();
+    for (const cls of ["mr-(--frame-inset)", "mb-(--frame-inset)", "mt-0.5"]) {
+      expect(frameClasses).not.toContain(cls);
+    }
+    expect(surface.parentElement!.querySelector(".content-orbit")).toBeNull();
+    expect(classes).not.toContain("rounded-2xl");
+    expect(classes).not.toContain("border-chrome-border");
+    // Still the opaque sheet everything a page draws stacks on.
+    expect(classes).toContain("bg-page");
   });
 
   it("is the scroll container every view depends on", () => {

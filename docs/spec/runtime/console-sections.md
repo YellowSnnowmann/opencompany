@@ -78,8 +78,11 @@ question an operator is answering:
 | Can my teammates reach X yet? | **Connections** |
 | What does this company do on repeat? | **Automations** (was "Flows") |
 
-Everything else is chrome (Settings, Feedback, Discord in the footer; Overview
-and Approvals in the window's title row) or is filed under one of the four.
+Everything else is chrome — Search, Notifications (with Approvals), Settings
+and Discord are icon tabs in the sidebar's foot beside Company and Connections,
+and Feedback is a row on the Settings rail — or is filed under one of the four.
+There is no Overview: the knowledge-graph page was removed and `#/overview`
+rewrites to the chat.
 
 ## The sub-navigation is in the CONTENT AREA — and this reverses a decision
 
@@ -275,8 +278,8 @@ treatments it takes.
 
 | View | Treatment | Why |
 | --- | --- | --- |
-| `overview` | **Discoverable elsewhere** | An icon in the window's title row, left of the profile. A place you jump to from anywhere is chrome, not a destination in a list of destinations. |
-| `approvals` | **Discoverable elsewhere** | The same, and the count travels with it. The title row is visible from every page in every sidebar state — the sidebar badge was not, which is the whole reason `SidebarMenuDot` had to exist (issue #1018). It is deleted with the row. |
+| `overview` | **Removed** | The knowledge-graph page is gone; `#/overview` (and `#/company/graph`) rewrite to the chat and to Company. |
+| `approvals` | **Discoverable elsewhere** | The Approvals tab of Notifications, whose bell is an icon tab in the sidebar's foot, and the count travels with it. The foot is visible from every page — the old sidebar badge was not, which is the whole reason `SidebarMenuDot` had to exist (issue #1018). It is deleted with the row. |
 | `observatory` | **Discoverable elsewhere** | A row on the Settings rail. `#/settings/observatory` is *rewritten* onto `#/observatory` rather than rendered under Settings — the Observatory owns four query keys of its own and reads them off the hash's head (`views/observatory/hash.ts`), so under `#/settings/…` its analytics tab and agent/turn selection stop being addressable. The rail row is the doorway; the surface keeps its own address. |
 | `tasks` | **Deep-link destination** | `#/tasks/<id>` is a card on Work's board, linked from chat, approvals, workflow rows and every card. Bare `#/tasks` is rewritten onto the board (Rule 2). |
 | `team` | **Deep-link destination** | `#/team/<id>` is a seat on the org chart. Bare `#/team` is rewritten onto Agents (issue #1141). |

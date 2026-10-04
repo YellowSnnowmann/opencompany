@@ -1631,7 +1631,7 @@ function IdentityAvatar({
       name={name}
       tone={tone}
       avatar={avatar}
-      className="size-14 rounded-xl text-base"
+      className="size-14 text-base"
       data-testid="agent-avatar"
     />
   );

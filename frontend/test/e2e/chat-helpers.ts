@@ -47,3 +47,35 @@ export function workingRow(page: Page): Locator {
 export function liveReceipt(page: Page): Locator {
   return page.getByTestId("chat-live-receipt");
 }
+
+/**
+ * The pill floating over the top of the transcript — the open conversation's
+ * face and name, where the channel header bar used to be. It toggles the info
+ * panel and says which way through `aria-expanded`.
+ */
+export function channelPill(page: Page): Locator {
+  return page.getByTestId("channel-pill");
+}
+
+/**
+ * The info panel on the right: the conversation's details and members, which
+ * the header and its members pane used to carry.
+ */
+export function channelInfo(page: Page): Locator {
+  return page.getByTestId("channel-info-panel");
+}
+
+/**
+ * Open the info panel if it is shut.
+ *
+ * Not a plain click: the panel's open state lives in `RoomView` and survives a
+ * hash-only channel switch, so a second click would close what the first
+ * opened.
+ */
+export async function openChannelInfo(page: Page): Promise<Locator> {
+  const pill = channelPill(page);
+  await expect(pill).toBeVisible({ timeout: 30_000 });
+  if ((await pill.getAttribute("aria-expanded")) !== "true") await pill.click();
+  await expect(channelInfo(page)).toBeVisible();
+  return channelInfo(page);
+}

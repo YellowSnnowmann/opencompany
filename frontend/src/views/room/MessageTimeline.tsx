@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { Bot, CircleDot, Hash, Lock, Send, UserPlus } from "lucide-react";
 
 import type { ApprovalSummary, CognitionState, DecideApproval, TurnStep, Verdict } from "@/api/types";
 import type { TaskStatus } from "@/api/tasks";
@@ -16,9 +15,7 @@ import { MessageRow } from "./MessageRow";
 import { StepTimeline } from "./StepTimeline";
 import { WorkingIndicator } from "./WorkingIndicator";
 import {
-  channelIntroSentence,
   channelTitle,
-  dmFace,
   type Channel,
   type TimelineItem,
 } from "./model";
@@ -126,16 +123,6 @@ interface Props {
   taskStatusByTaskId?: Readonly<Record<string, TaskStatus>>;
   /** Sends a line whose POST never completed again (B-099), by its id. */
   onRetrySend?: (messageId: string) => void;
-  /**
-   * Places a first brief into the composer on an empty channel.
-   * Optional so the thread panel — which renders no intro — need not pass it.
-   */
-  onStartBrief?: () => void;
-  /**
-   * Opens the members pane, for the "Add people" card on an empty channel.
-   * Optional so the thread panel — which renders no intro — need not pass it.
-   */
-  onAddPeople?: () => void;
   /** Now, for the cards' "waiting N minutes" line. Owned by the shell's feed. */
   now?: number;
   /** Agent id → display name, for a card's "Asked by" line. */
@@ -218,8 +205,6 @@ export function MessageTimeline({
   resolveAttachmentUrl,
   taskStatusByTaskId,
   onRetrySend,
-  onStartBrief,
-  onAddPeople,
   now,
   askerNames,
   chatChannelByThread,
@@ -398,23 +383,24 @@ export function MessageTimeline({
          * about what "empty" means — a channel whose intro claimed emptiness
          * while the wrapper anchored for content would jump on every load.
          */}
+        {/* `max-w-4xl` and centred: past 896px the transcript stops widening
+            and sits in the middle of the pane, the measure every chat client
+            reads at, rather than stretching a line across a wide monitor. The
+            composer is held to the same column (`MessageComposer`). */}
         <div
           ref={content}
-          className={cn("flex min-h-full flex-col pb-4", empty ? "justify-start" : "justify-end")}
+          className={cn(
+            // `pt-14` clears the channel pill floating over the top, so the
+            // first message is never under it when scrolled to the start.
+            "mx-auto flex min-h-full w-full max-w-4xl flex-col pt-14 pb-4",
+            empty ? "justify-start" : "justify-end",
+          )}
         >
-          {/* `empty` only drives the top padding, and the skeleton fills the
-              same space real rows will — so a loading channel is spaced like a
-              full one and the intro does not jump down and back up. That is also
-              why `loading` keeps the *bottom* anchor above: flipping to the top
-              while history is in flight would move the intro up and then drop it
-              back down the moment the rows land. */}
-          <ChannelIntro
-            channel={channel}
-            empty={empty}
-            loading={loading}
-            onStartBrief={onStartBrief}
-            onAddPeople={onAddPeople}
-          />
+          {/* No intro block ("This is the very beginning of #…") at the top:
+              the pill over the transcript names the conversation and opens its
+              details, so the welcome card restated it. The skeleton fills the
+              space real rows will, so a loading channel is spaced like a full
+              one. */}
           {loading && <HistorySkeleton />}
           {items.map(renderRow)}
           {receipt ? (
@@ -495,202 +481,6 @@ function DayDivider({ label }: { label: string }) {
       </p>
       <span className="h-px flex-1 bg-border" aria-hidden />
     </div>
-  );
-}
-
-/**
- * The block at the very top of a channel, explaining what it is for. It stays
- * above the first message rather than only showing when the channel is empty —
- * scrolling to the beginning of a channel should tell you where you are.
- */
-function ChannelIntro({
-  channel,
-  empty,
-  loading,
-  onStartBrief,
-  onAddPeople,
-}: {
-  channel: Channel;
-  empty: boolean;
-  loading: boolean;
-  onStartBrief?: () => void;
-  onAddPeople?: () => void;
-}) {
-  return (
-    // `pt-8` on an empty channel, not `pt-16`. The taller lead-in was there to
-    // push the intro down into a pane with nothing under it — but the
-    // transcript grows from the bottom, so the moment a channel has one message
-    // the intro is pushed up by the message anyway, and on a brand new one 64px
-    // of nothing above the title read as the pane failing to load rather than
-    // as breathing room. Still more than the `pt-6` a channel with history
-    // gets, because on an empty channel the intro IS the content.
-    <div className={cn("px-4 pb-3", empty ? "pt-8" : "pt-6")}>
-      <IntroMark channel={channel} />
-      <h2 className="text-xl font-semibold tracking-tight">{channelTitle(channel)}</h2>
-      {/* Both of these sentences are positive claims that the channel has no
-          history — "the start of", "the very beginning of". Neither may render
-          until the host has answered, or a reload of a busy DM reads as lost
-          conversation (issue #934). The identity block above is not a claim
-          and stays either way, so the pane still says where you are. */}
-      <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-        {channelIntroSentence(channel, loading)}
-      </p>
-      {/* The two openings a new channel actually has. Held back until the
-          history has answered, for the same reason the sentence above is:
-          offering "add an agent here" over a channel that turns out to be full
-          of conversation reads as data loss. */}
-      {empty && !loading && channel.kind === "channel" && (
-        <ActionCards onStartBrief={onStartBrief} onAddPeople={onAddPeople} />
-      )}
-    </div>
-  );
-}
-
-/**
- * What the intro draws above the channel's name (issue #1327).
- *
- * The same rule the header settled in #1170, at the intro's larger size: a DM
- * has exactly one person on the other end and wears their face; a channel has
- * nobody behind it and wears its kind.
- *
- * Before this, every channel but `main` fell through to `TeammateAvatar` seeded
- * on the channel *name*, so `#engineering` grew an arbitrary mascot — a face
- * belonging to no one, at the largest avatar size on the surface, as the first
- * thing in the pane — while the header eighteen pixels above drew `#` for the
- * same channel. Two marks for one thing, disagreeing on screen.
- *
- * `dmFace` is the shared seed, so the mark here and the rail row and the header
- * cannot drift about who a DM is with.
- */
-function IntroMark({ channel }: { channel: Channel }) {
-  // The geometry is fixed across all three branches so the copy beneath never
-  // shifts with the kind of channel being opened.
-  const box = "mb-3 size-12 rounded-lg";
-
-  if (channel.kind === "dm") {
-    const face = dmFace(channel);
-    // A DM with no roster entry has nobody to draw. The header falls back to a
-    // glyph rather than inventing a mascot for a stranger; so does this.
-    return face ? (
-      <TeammateAvatar {...face} className={cn(box, "text-base")} />
-    ) : (
-      <MarkTile icon={CircleDot} className={box} />
-    );
-  }
-
-  // `#general` wears the company brand mark.
-  if (channel.id === GENERAL_CHANNEL_ID) {
-    return (
-      <TeammateAvatar
-        name={channel.voice ?? channel.name}
-        tone={channel.tone}
-        company
-        className={cn(box, "text-base")}
-      />
-    );
-  }
-
-  return <MarkTile icon={channel.private ? Lock : Hash} className={box} />;
-}
-
-/**
- * A channel's kind on a tile, matching the treatment `ActionCard` gives its own
- * icon — `--surface-icon`, the rung the brand guide names for an icon ground —
- * so the two blocks on an empty channel read as one system rather than two.
- */
-function MarkTile({ icon: Icon, className }: { icon: typeof Hash; className?: string }) {
-  return (
-    <span
-      className={cn(
-        "flex items-center justify-center bg-surface-icon text-muted-foreground",
-        className,
-      )}
-      aria-hidden
-    >
-      <Icon className="size-5" />
-    </span>
-  );
-}
-
-/**
- * The pair of starting moves on an empty channel.
- *
- * Cards rather than buttons in a row: an empty channel is mostly empty space,
- * and the two things worth doing there deserve to be the largest objects on
- * it. The icon sits on `--surface-icon` — the rung the brand guide names for
- * exactly this, an icon circle — rather than on `muted`, which is the ground
- * for recessed *fills*.
- */
-function ActionCards({
-  onStartBrief,
-  onAddPeople,
-}: {
-  onStartBrief?: () => void;
-  onAddPeople?: () => void;
-}) {
-  return (
-    <div className="mt-5 flex flex-wrap gap-4">
-      <ActionCard
-        icon={Send}
-        title="Give the team a brief"
-        hint="Start with a first request."
-        onClick={onStartBrief}
-      />
-      <ActionCard
-        icon={UserPlus}
-        title="Add people"
-        hint="Invite members."
-        onClick={onAddPeople}
-      />
-    </div>
-  );
-}
-
-function ActionCard({
-  icon: Icon,
-  title,
-  hint,
-  href,
-  onClick,
-}: {
-  icon: typeof Bot;
-  title: string;
-  hint: string;
-  href?: string;
-  onClick?: () => void;
-}) {
-  const body = (
-    <>
-      <span className="flex size-9 items-center justify-center rounded-lg bg-surface-icon text-muted-foreground">
-        <Icon className="size-4.5" aria-hidden />
-      </span>
-      <span className="mt-4 block">
-        <span className="block text-lg font-semibold tracking-tight">{title}</span>
-        <span className="mt-0.5 block text-2xs text-muted-foreground">{hint}</span>
-      </span>
-    </>
-  );
-  // `bg-glow-brand-card` is a background *image* and `bg-card` a background
-  // *colour*, so the two compose rather than collide: the glow sits over the
-  // card's fill and under its content, and `hover:bg-accent` still swaps the
-  // fill beneath it. See `--glow-brand-card` in `index.css` for why the tint is
-  // a token.
-  const cls =
-    "flex h-33 w-60 flex-col items-start rounded-xl border bg-card bg-glow-brand-card p-4 text-left transition-colors hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none";
-
-  // A navigation is an anchor and an in-page action is a button, so the card
-  // keeps the affordance its behaviour actually has.
-  if (href) {
-    return (
-      <a href={href} className={cls}>
-        {body}
-      </a>
-    );
-  }
-  return (
-    <button type="button" onClick={onClick} className={cls} disabled={!onClick}>
-      {body}
-    </button>
   );
 }
 

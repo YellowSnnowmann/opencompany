@@ -30,9 +30,9 @@
 # It exists for a version-bump-only run; nobody needs it often.
 #
 # Issue #590. Every `uses:` below is a full commit SHA with the resolved version
-# in a trailing comment; the rationale is at the top of `ci.yml`. Local
+# in a trailing comment; the rationale is at the top of `ci-lanes.yml`. Local
 # reusable workflows (`./.github/workflows/...`) carry no SHA because they run
-# at this workflow's own commit — the pin check in `ci.yml` exempts them.
+# at this workflow's own commit — the pin check (`scripts/ci/assert-actions-pinned.sh`) exempts them.
 name: Release Staging
 
 on:
@@ -155,7 +155,7 @@ jobs:
 
       # `[skip ci]` does real work here: a push made as the App DOES fire `push`
       # workflows (unlike one made with GITHUB_TOKEN), and the commit changes
-      # version numbers only, so there is nothing for `ci.yml` to learn.
+      # version numbers only, so there is nothing for the CI lanes to learn.
       #
       # The files staged are the ones the bump script reports it wrote, so the
       # commit can never miss a file the registry gained. Branch and tag go in
@@ -249,7 +249,7 @@ jobs:
       with_updater: false
       with_release_upload: false
 
-  # The tenant image, built and thrown away. `ci.yml` never runs the
+  # The tenant image, built and thrown away. The CI lanes never run the
   # Dockerfile and `deploy-staging.yml` only builds from main, so a cut from
   # `release` is otherwise the first time anyone learns the tree no longer
   # containerises. ~25 minutes cold; the gha cache scope is shared with the

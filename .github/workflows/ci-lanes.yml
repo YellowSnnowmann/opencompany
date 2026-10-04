@@ -1,0 +1,550 @@
+---
+# CI lanes: the shared body behind ci-fast.yml (org members, EX63 microVM) and
+# ci-fast-hosted.yml (everyone and everything else, GitHub-hosted runners).
+# Both run the same lane plan, scripts/ci/lanes/lanes-plan.mjs: every check the
+# old monolithic ci.yml ran, grouped into lanes that execute in parallel.
+#
+#   ex63    one job on one throwaway Firecracker microVM. All lanes run at
+#           once, each Rust lane in its own target dir on the per-job scratch
+#           disk, all warmed by the host's shared sccache store. The Rust
+#           graph used to compile on six separate runners per PR.
+#   hosted  the same lanes split over four GitHub-hosted jobs, each restoring
+#           its own rust-cache entry.
+#
+# Both profiles also run the two service-backed suites (MongoDB, the Stalwart
+# mail round trip) as GitHub-hosted jobs: they need a job-level `services:`
+# container, and the microVM has no Docker.
+#
+# Area flags pick whole suites; nothing here narrows a suite to changed files.
+# The `Gate` job is what ci-gate.yml reads for this flow ("Lanes / Gate").
+#
+# Pins: every `uses:` names a 40-hex commit SHA with the version in a trailing
+# comment (issue #590, scripts/ci/assert-actions-pinned.sh). A tag is a pointer
+# its owner can move. Local reusable workflows (`./.github/workflows/...`) take
+# no ref and are exempt.
+#
+# Toolchain: rust-toolchain.toml pins an explicit Rust version (issue #1298),
+# and every `toolchain:` input below must say the same
+# (scripts/ci/assert-toolchain-pin.sh).
+name: CI Lanes
+
+on:
+  workflow_call:
+    inputs:
+      profile:
+        description: "ex63 or hosted"
+        type: string
+        required: true
+      ref:
+        description: "Ref to check out; empty for the triggering event's own"
+        type: string
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+defaults:
+  run:
+    shell: bash
+
+# Issue #1118. The critical path is compile-shaped. `CARGO_INCREMENTAL: 0`:
+# incremental exists to make a SECOND build in a working directory fast, and a
+# CI job has none — it only grows the cache. `line-tables-only` keeps a panic's
+# file and line and drops the DWARF a debugger wants and CI never opens.
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  VITE_SENTRY_DSN: "off"
+
+jobs:
+  # ── plan: areas and the hosted matrix, for both profiles ────────────────────
+  plan:
+    name: Plan lanes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.areas.outputs.rust }}
+      frontend: ${{ steps.areas.outputs.frontend }}
+      desktop: ${{ steps.areas.outputs.desktop }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout the filter and the lane plan
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            scripts/ci/lanes
+          # The EX63 flow runs under pull_request_target for org members only
+          # (ci-fast.yml's route job); this job has a read-only token and no
+          # secrets. See the ex63 job for the full argument.
+          allow-unsafe-pr-checkout: ${{ inputs.profile == 'ex63' }}
+
+      # Issue #793. A merge-queue commit has no pull-request file list, and the
+      # filter's fallback for an event with no PR is a diff against the default
+      # branch — empty for a just-promoted `release` push, too. Either would
+      # turn every conditional lane into a green skip, so those events (and a
+      # manual dispatch) select every area instead.
+      - name: Detect changed areas
+        id: filter
+        if: >-
+          github.event_name != 'merge_group' &&
+          github.event_name != 'workflow_dispatch' &&
+          !(github.event_name == 'push' && github.ref == 'refs/heads/release')
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: .github/ci-paths-filter.yml
+
+      - name: Resolve the areas
+        id: areas
+        env:
+          FORCED: ${{ steps.filter.outcome == 'skipped' }}
+          RUST: ${{ steps.filter.outputs.rust }}
+          FRONTEND: ${{ steps.filter.outputs.frontend }}
+          DESKTOP: ${{ steps.filter.outputs.desktop }}
+        run: |
+          set -euo pipefail
+          if [ "${FORCED}" = "true" ]; then RUST=true FRONTEND=true DESKTOP=true; fi
+          {
+            echo "rust=${RUST:-false}"
+            echo "frontend=${FRONTEND:-false}"
+            echo "desktop=${DESKTOP:-false}"
+          } | tee -a "$GITHUB_OUTPUT"
+
+      - name: Build the hosted job matrix
+        id: plan
+        env:
+          CI_AREA_RUST: ${{ steps.areas.outputs.rust }}
+          CI_AREA_FRONTEND: ${{ steps.areas.outputs.frontend }}
+          CI_AREA_DESKTOP: ${{ steps.areas.outputs.desktop }}
+        run: |
+          set -euo pipefail
+          matrix="$(node scripts/ci/lanes/lanes.mjs --profile hosted --print-matrix)"
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "[ci][plan] ${matrix}"
+
+  # ── ex63: the whole lane plan in one job on one microVM ─────────────────────
+  ex63:
+    name: CI Fast (EX63)
+    needs: plan
+    if: inputs.profile == 'ex63'
+    runs-on: [self-hosted, openhuman-ex63]
+    timeout-minutes: 120
+    env:
+      CI_AREA_RUST: ${{ needs.plan.outputs.rust }}
+      CI_AREA_FRONTEND: ${{ needs.plan.outputs.frontend }}
+      CI_AREA_DESKTOP: ${{ needs.plan.outputs.desktop }}
+    steps:
+      - name: Checkout PR merge commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+          submodules: true
+          # Deliberate. This job only runs when ci-fast.yml's route job (run
+          # from main, never from the PR) found the PR author and pusher to be
+          # org members, and only on the `openhuman-ex63` runner group, which
+          # admits nothing but ci-fast.yml / ci-lanes.yml at refs/heads/main.
+          # The token is read-only, no secrets reach this job, and each job
+          # runs in a throwaway microVM whose supervisor re-checks membership
+          # and wipes the caches on a mismatch. Without the opt-in, checkout
+          # refuses every fork PR under pull_request_target.
+          allow-unsafe-pr-checkout: true
+
+      - name: Init vendored openhuman crate submodules
+        run: scripts/ci/init-vendored-submodules.sh
+
+      # The guest image ships Node, but not the version the console pins.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: frontend/.nvmrc
+
+      # One step per lane: `Start lanes` launches every lane in the background
+      # (they still run in parallel); each `Lane:` step streams its own lane's
+      # log and passes or fails on that lane alone; `Lane summary` waits for
+      # the whole run and carries the overall result. `!cancelled()` keeps a
+      # red lane from hiding the lanes after it.
+      - name: Start lanes
+        id: lanes
+        run: node scripts/ci/lanes/lanes.mjs --profile ex63 --detach
+
+      - name: "Lane: static checks"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'static') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait static
+
+      - name: "Lane: gated (openhuman) build, lint and tests"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'gated') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait gated
+
+      - name: "Lane: core (default features) lint and tests"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'core') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait core
+
+      - name: "Lane: console"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'console') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait console
+
+      - name: "Lane: console e2e"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'e2e') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait e2e
+
+      - name: "Lane: console e2e (live brain)"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'e2e-live') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait e2e-live
+
+      - name: "Lane: desktop"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'desktop') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait desktop
+
+      - name: Lane summary
+        if: ${{ !cancelled() && steps.lanes.outcome == 'success' }}
+        run: node scripts/ci/lanes/lanes.mjs --wait-all
+
+      - name: Upload lane logs and timings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-out-ex63
+          path: |
+            ci-out/
+            !ci-out/bin/
+            frontend/test-results/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ── hosted: one GitHub-hosted job per lane group ────────────────────────────
+  lanes:
+    name: Lanes (${{ matrix.group }})
+    needs: plan
+    if: inputs.profile == 'hosted' && fromJSON(needs.plan.outputs.matrix).include[0] != null
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      CI_AREA_RUST: ${{ needs.plan.outputs.rust }}
+      CI_AREA_FRONTEND: ${{ needs.plan.outputs.frontend }}
+      CI_AREA_DESKTOP: ${{ needs.plan.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+          submodules: true
+
+      - name: Init vendored openhuman crate submodules
+        run: scripts/ci/init-vendored-submodules.sh
+
+      # The gated graph and the e2e suites beside it outgrow a runner's free
+      # disk once node_modules and Chromium join a multi-feature target dir.
+      - name: Free disk space
+        if: matrix.group == 'gated' || matrix.group == 'core'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h / || true
+
+      - name: Install system build dependencies
+        if: matrix.group == 'gated'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev \
+            libx11-dev libxi-dev libxtst-dev libxrandr-dev libxcb1-dev libxkbcommon-dev
+
+      - name: Install webkit and GTK
+        if: matrix.group == 'desktop'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libsoup-3.0-dev
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: "1.98.0"
+          components: rustfmt, clippy
+
+      # One entry per group: the groups compile different graphs, and sharing
+      # a key would have each save over the other's. Entries are written by
+      # runs on main (a PR's own entries are visible to that PR only), never
+      # from a pull_request_target run, whose cache scope is the base branch.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: ci-${{ matrix.group }}
+          workspaces: ${{ matrix.group == 'desktop' && 'crates/opencompany-app' || '.' }}
+          cache-on-failure: true
+          save-if: ${{ github.event_name != 'pull_request_target' }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Same step-per-lane shape as the ex63 job.
+      - name: Start lanes
+        id: lanes
+        run: >-
+          node scripts/ci/lanes/lanes.mjs --profile hosted --detach
+          --lanes '${{ matrix.lanes }}' --max-parallel ${{ matrix['max-parallel'] }}
+
+      - name: "Lane: static checks"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'static') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait static
+
+      - name: "Lane: gated (openhuman) build, lint and tests"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'gated') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait gated
+
+      - name: "Lane: core (default features) lint and tests"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'core') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait core
+
+      - name: "Lane: console"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'console') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait console
+
+      - name: "Lane: console e2e"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'e2e') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait e2e
+
+      - name: "Lane: console e2e (live brain)"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'e2e-live') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait e2e-live
+
+      - name: "Lane: desktop"
+        if: ${{ !cancelled() && contains(fromJSON(steps.lanes.outputs.lanes || '[]'), 'desktop') }}
+        run: node scripts/ci/lanes/lanes.mjs --wait desktop
+
+      - name: Lane summary
+        if: ${{ !cancelled() && steps.lanes.outcome == 'success' }}
+        run: node scripts/ci/lanes/lanes.mjs --wait-all
+
+      - name: Upload lane logs and timings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-out-${{ matrix.group }}
+          path: |
+            ci-out/
+            !ci-out/bin/
+            frontend/test-results/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ── service-backed suites: GitHub-hosted for both profiles ──────────────────
+  services-mail:
+    name: Rust (mail)
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The live SMTP-to-IMAP round trip against a real mail server. Stalwart
+    # generates its admin password at first boot and logs it; the step below
+    # reads it back to create the smoke-test account.
+    services:
+      stalwart:
+        image: stalwartlabs/mail-server:v0.9.4
+        ports:
+          - 25:25
+          - 993:993
+          - 8080:8080
+        options: >-
+          --health-cmd "test -s /opt/stalwart-mail/etc/config.toml"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+          submodules: true
+          # Members-only under pull_request_target; read-only token, no
+          # secrets (see the ex63 job).
+          allow-unsafe-pr-checkout: ${{ inputs.profile == 'ex63' }}
+
+      - name: Init vendored openhuman crate submodules
+        run: scripts/ci/init-vendored-submodules.sh
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: "1.98.0"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: ci-services-mail
+          cache-on-failure: true
+          save-if: ${{ github.event_name != 'pull_request_target' }}
+
+      - name: Create the smoke-test mailbox
+        run: |
+          container="${{ job.services.stalwart.id }}"
+          admin_secret="$(docker logs "${container}" 2>&1 \
+            | sed -n "s/.*password '\(.*\)'\./\1/p" \
+            | tail -n 1)"
+          test -n "${admin_secret}"
+          for _ in $(seq 1 20); do
+            if docker exec "${container}" \
+              stalwart-cli --url http://127.0.0.1:8080 \
+              --credentials "admin:${admin_secret}" \
+              domain create localhost.test \
+              && docker exec "${container}" \
+              stalwart-cli --url http://127.0.0.1:8080 \
+              --credentials "admin:${admin_secret}" \
+              account create smoke ci-mail-password \
+              --addresses smoke@localhost.test; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Stalwart did not accept the smoke-test account within 20 seconds" >&2
+          exit 1
+
+      - name: Run the live SMTP to IMAP round trip
+        env:
+          OPENCOMPANY_MAIL_ADDRESS: smoke@localhost.test
+          OPENCOMPANY_MAIL_SMTP_HOST: localhost
+          OPENCOMPANY_MAIL_SMTP_PORT: "25"
+          OPENCOMPANY_MAIL_IMAP_HOST: localhost
+          OPENCOMPANY_MAIL_IMAP_PORT: "993"
+          OPENCOMPANY_MAIL_USER: smoke
+          OPENCOMPANY_MAIL_PASSWORD: ci-mail-password
+          OPENCOMPANY_MAIL_TEST_INSECURE_TLS: "1"
+        run: scripts/ci/run-scoped-suite.sh "mail live round trip" imap,smtp send_then_receive_roundtrip --ignored
+
+  services-mongodb:
+    name: Rust (mongodb)
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+          submodules: true
+          # Members-only under pull_request_target; read-only token, no
+          # secrets (see the ex63 job).
+          allow-unsafe-pr-checkout: ${{ inputs.profile == 'ex63' }}
+
+      - name: Init vendored openhuman crate submodules
+        run: scripts/ci/init-vendored-submodules.sh
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: "1.98.0"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: ci-services-mongodb
+          cache-on-failure: true
+          save-if: ${{ github.event_name != 'pull_request_target' }}
+
+      # Issue #555: the suite must assert something. A filter that selects no
+      # tests exits 0, so the passing count is checked, not trusted.
+      - name: Test the MongoDB backend
+        env:
+          OPENCOMPANY_TEST_MONGODB_URI: mongodb://localhost:27017
+          OPENCOMPANY_TEST_MONGODB_REQUIRED: "1"
+        run: |
+          set -euo pipefail
+          cargo test --locked --features mongodb --lib store::mongodb \
+            | tee "${RUNNER_TEMP}/mongodb-suite.log"
+          passed=$(sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' \
+            "${RUNNER_TEMP}/mongodb-suite.log" | head -n 1)
+          if [ -z "${passed}" ] || [ "${passed}" -eq 0 ]; then
+            echo "::error title=MongoDB suite ran nothing::cargo reported no passing tests for --lib store::mongodb, so this job is green while asserting nothing about the backend hosted tenants run. The filter selects no tests — see issue #555." >&2
+            exit 1
+          fi
+          echo "MongoDB backend suite: ${passed} tests passed."
+
+      - name: Test the MongoDB storage selection
+        if: ${{ !cancelled() }}
+        run: scripts/ci/run-scoped-suite.sh "mongodb selection" mongodb store::select
+
+  # ── advisory: the console on the newest Node (never gates) ──────────────────
+  console-current-node:
+    name: Console (current Node, advisory)
+    needs: plan
+    if: needs.plan.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+          allow-unsafe-pr-checkout: ${{ inputs.profile == 'ex63' }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: current
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run typecheck
+        working-directory: frontend
+      - run: npm run typecheck:unit
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+
+  # ── the decisive job ci-gate.yml reads ("Lanes / Gate") ─────────────────────
+  # Strict per profile, because a skip is never a pass: the EX63 job must have
+  # succeeded on the ex63 profile, the hosted matrix on the hosted profile
+  # (the static lane is always active, so the matrix is never empty), and the
+  # service suites whenever the Rust area is on.
+  gate:
+    name: Gate
+    needs: [plan, ex63, lanes, services-mail, services-mongodb]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every lane job of this profile to pass
+        env:
+          PROFILE: ${{ inputs.profile }}
+          RUST: ${{ needs.plan.outputs.rust }}
+          PLAN: ${{ needs.plan.result }}
+          EX63: ${{ needs.ex63.result }}
+          LANES: ${{ needs.lanes.result }}
+          MAIL: ${{ needs.services-mail.result }}
+          MONGODB: ${{ needs.services-mongodb.result }}
+        run: |
+          set -euo pipefail
+          echo "profile=${PROFILE} rust=${RUST} plan=${PLAN} ex63=${EX63} lanes=${LANES} mail=${MAIL} mongodb=${MONGODB}"
+          bad=()
+          [ "${PLAN}" = "success" ] || bad+=("plan=${PLAN}")
+          case "${PROFILE}" in
+            ex63) [ "${EX63}" = "success" ] || bad+=("ex63=${EX63}") ;;
+            hosted) [ "${LANES}" = "success" ] || bad+=("lanes=${LANES}") ;;
+            *) bad+=("unknown profile '${PROFILE}'") ;;
+          esac
+          if [ "${RUST}" = "true" ]; then
+            [ "${MAIL}" = "success" ] || bad+=("services-mail=${MAIL}")
+            [ "${MONGODB}" = "success" ] || bad+=("services-mongodb=${MONGODB}")
+          fi
+          if [ "${#bad[@]}" -gt 0 ]; then
+            echo "::error::Lane job(s) did not pass: ${bad[*]}" >&2
+            exit 1
+          fi
+          echo "Every lane job for the ${PROFILE} profile passed."

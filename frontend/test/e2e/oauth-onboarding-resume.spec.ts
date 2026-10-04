@@ -92,7 +92,7 @@ test("an unknown failure code still produces a usable message", async ({ page })
 });
 
 test("the tour resumes on the accounts stop after a redirect", async ({ page }) => {
-  await page.goto("/#/overview");
+  await page.goto("/#/chat");
 
   // First run offers the tour. Skipping writes the per-company key, which is
   // how we learn the key name without hard-coding the company id.
@@ -143,7 +143,7 @@ test("the tour resumes on the accounts stop after a redirect", async ({ page }) 
 });
 
 test("a stale resume marker does not hijack a later visit", async ({ page }) => {
-  await page.goto("/#/overview");
+  await page.goto("/#/chat");
   const skip = page.getByRole("button", { name: "Skip for now" });
   await expect(skip).toBeVisible();
   await skip.click();
@@ -169,7 +169,7 @@ test("a stale resume marker does not hijack a later visit", async ({ page }) => 
     [key],
   );
 
-  await page.goto("/#/overview");
+  await page.goto("/#/chat");
   // No tour: the marker aged out and the tour is already marked skipped.
   await expect(page.getByText("Connect your tools")).toHaveCount(0);
   await expect(page.getByText("Welcome to your company")).toHaveCount(0);

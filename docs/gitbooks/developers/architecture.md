@@ -11,12 +11,12 @@ OpenCompany is a single configurable host. Companies are data — a manifest plu
 Dependencies point strictly downward. OpenCompany owns the kernel; every neighbor is behind a port.
 
 ```
-L4  Surfaces        Axum HTTP (operator API, webhooks), CLI, console
+L4  Surfaces        Axum HTTP (operator API, A2A, webhooks), CLI, console
 L3  Company Brain   cycle loop, approvals, effect routing, feedback loop
 L2  Kernel ports    Brain, CompanyStore, EventLog, MemoryStore, ContextStore,
                     ChannelAdapter, ToolProvider, ApprovalGate
-L1  Adapters        hosted-medulla | openhuman (embedded) | tinyhivemind | tinycortex |
-                    fs (default)
+L1  Adapters        hosted-medulla | openhuman (embedded) | tinyhivemind | tinymemory |
+                    tinyplace | fs (default)
 L0  Substrate       api.tinyhumans.ai, openhuman-core, filesystem
 ```
 
@@ -28,10 +28,10 @@ L0  Substrate       api.tinyhumans.ai, openhuman-core, filesystem
 | Model access, billing                                    | TinyHumans backend     | sends tier names + credential; never sees SKUs   |
 | Tools, channels, credentials                             | OpenHuman              | consumed via JSON-RPC; gaps go upstream as PRs   |
 | In-process LLM sub-work                                  | TinyAgents             | embedded library behind `ToolProvider`           |
-| Long-term memory                                         | TinyCortex (candidate) | behind `MemoryStore`; default is file-based      |
+| Long-term memory                                         | TinyMemory v2 engines (CortexDB) | behind `MemoryStore`; default is file-based      |
 | Company definition, brain state, lifecycle, HTTP surface | **OpenCompany**        | owned outright                                   |
 
-The takeaway: OpenCompany reuses Medulla, OpenHuman, TinyAgents, and TinyCortex instead of reimplementing them. Changes those layers need go **upstream as PRs.**
+The takeaway: OpenCompany reuses Medulla, OpenHuman, TinyAgents, and TinyMemory instead of reimplementing them. Changes those layers need go **upstream as PRs.**
 
 ## Crate layout
 

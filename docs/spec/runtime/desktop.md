@@ -16,7 +16,7 @@ dependency into a hard requirement for checking the server. The host stays a
 plain `path` dependency, so a change to it is picked up with no publishing step.
 
 The cost is that no root `cargo` invocation reaches the desktop, including
-`--all-features`. The `Desktop` job in `.github/workflows/ci.yml` is what builds
+`--all-features`. The `desktop` CI lane (`scripts/ci/lanes/lanes-plan.mjs`) is what builds
 and tests it; without that lane the crate would be compiled by nothing, which is
 [issue #475](https://github.com/tinyhumansai/opencompany/issues/475)'s shape.
 
@@ -86,7 +86,7 @@ the same way and less visibly (`acp_agents = None`, so every `transport =
 `DESKTOP_FEATURES` override for the leaner build. A derived value cannot drift.
 
 `scripts/ci/assert-desktop-features.sh` guards what is still duplicated (the two
-`ci.yml` steps, `npm run tauri:build`, the by-hand command below), that the
+desktop-lane steps, `npm run tauri:build`, the by-hand command below), that the
 release `tauri build` still consumes the variable it declares — otherwise the
 source of truth is a lie — and that the launcher still derives rather than
 re-hardcoding a literal.
@@ -105,7 +105,6 @@ the vendored runtime. Features left off, each on purpose:
 
 | Off | Why |
 | --- | --- |
-| `tinycortex`, `tinymemory*` | In-pod memory engines. They carry tinycortex, `tinyagents/sqlite` and a second bundled SQLite into the bundle for a surface the desktop does not offer; the runtime keeps its fs-backed memory stores. |
 | `media` | Unlike `composio` it is `["openhuman", "openhuman_core/media"]`, so it pulls an upstream domain nothing else here compiles, and its credential really is managed: the tools are wired only when a company grants the namespace **and** a platform credential is configured. There is no BYO tier, so no desktop operator has anything to supply, and `…/capabilities` answers `media_in_build: false`. |
 | `mongodb` | A per-tenant cluster is a hosting concern. |
 
@@ -124,7 +123,7 @@ named a `search` feature, which does not exist; `search_in_build` derives from
 A `[patch]` section only applies in the workspace root that declares it, and
 this crate is its own workspace. Until `mcp` put `openhuman_core` in the graph
 none of the vendored crates were reachable from here, so the table could be
-omitted. Now it cannot: without it Cargo resolves `tinycortex-api`, `tinyflows`
+omitted. Now it cannot: without it Cargo resolves `tinyflows`
 and the rest from crates.io — where some do not exist at all — and any that did
 resolve would be a *second* copy whose trait identities would not match the ones
 the host compiled against. `crates/opencompany-app/Cargo.toml` therefore carries a replica of

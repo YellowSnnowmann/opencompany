@@ -10,7 +10,7 @@
 # the `Protect release` ruleset (repository settings → Rules), which requires a pull
 # request for every push and lists the App — and only the App — as an actor
 # allowed to bypass that. A push made with GITHUB_TOKEN would be rejected. The
-# App's push also fires `push` workflows, so `ci.yml` runs on the promoted
+# App's push also fires `push` workflows, so `ci-fast-hosted.yml` runs on the promoted
 # `release` without an explicit dispatch. Production releases are cut from `release` only;
 # staging cuts may come from `main` or `release`. Fixes for anything found on
 # `release` are PRs opened against `release`; each cut merges `release` back
@@ -21,7 +21,7 @@
 # main this is a no-op.
 #
 # Issue #590. Every `uses:` below is a full commit SHA with the resolved version
-# in a trailing comment; the rationale is at the top of `ci.yml`.
+# in a trailing comment; the rationale is at the top of `ci-lanes.yml`.
 name: Promote main to release
 
 on:
@@ -121,4 +121,4 @@ jobs:
       - name: Summarise
         if: env.promoted == 'true'
         run: |
-          echo "Promoted main into release; the App push fires ci.yml on release by itself. Next: dispatch **Release Staging** or **Release Production** from the \`release\` branch." >> "$GITHUB_STEP_SUMMARY"
+          echo "Promoted main into release; the App push fires CI Fast (hosted) on release by itself. Next: dispatch **Release Staging** or **Release Production** from the \`release\` branch." >> "$GITHUB_STEP_SUMMARY"

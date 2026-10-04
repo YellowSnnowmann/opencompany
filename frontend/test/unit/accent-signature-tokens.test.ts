@@ -11,10 +11,8 @@ import { describe, expect, it } from "vitest";
  * through `--signature-*`, never `--brand-*`, and that no preset block can
  * reach them (`architecture.md` §4, `roadblocks.md` R10).
  *
- * `--kg-accent` sits in a **second** `.dark { … }` block — the knowledge-graph
- * bridge, `index.css` — so this file cannot reuse `shell-chrome-tokens.test.ts`'s
- * `block(".dark")`, which returns only the first. It finds every top-level
- * `.dark {` block instead.
+ * (`--kg-accent` was a third consumer, in the knowledge-graph bridge's own
+ * `.dark` block; the bridge went with the Overview page.)
  */
 
 const indexCss = readFileSync(
@@ -36,32 +34,6 @@ function firstBlock(selector: string): string {
   throw new Error(`unterminated \`${selector}\` block`);
 }
 
-/** Every top-level `${selector} {` block, brace-matched, in source order. */
-function allBlocks(selector: string): string[] {
-  const blocks: string[] = [];
-  let from = 0;
-  for (;;) {
-    const open = indexCss.indexOf(`${selector} {`, from);
-    if (open < 0) break;
-    let depth = 0;
-    let end = -1;
-    for (let i = indexCss.indexOf("{", open); i < indexCss.length; i += 1) {
-      if (indexCss[i] === "{") depth += 1;
-      else if (indexCss[i] === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          end = i;
-          break;
-        }
-      }
-    }
-    if (end < 0) throw new Error(`unterminated \`${selector}\` block starting at ${open}`);
-    blocks.push(indexCss.slice(open, end));
-    from = end + 1;
-  }
-  return blocks;
-}
-
 function declaration(body: string, name: string): string | null {
   const withoutComments = body.replace(/\/\*[\s\S]*?\*\//g, "");
   const match = new RegExp(`(?:^|[;{\\s])--${name}:\\s*([^;]+);`).exec(withoutComments);
@@ -80,16 +52,6 @@ describe("signature tokens (issue #2493 Phase 1)", () => {
     const dark = firstBlock(".dark");
     expect(declaration(light, "chart-1")).toBe("var(--signature-500)");
     expect(declaration(dark, "chart-1")).toBe("var(--signature-400)");
-  });
-
-  it("routes --kg-accent through the signature tokens, in the knowledge-graph bridge's .dark block", () => {
-    const darkBlocks = allBlocks(".dark");
-    expect(darkBlocks.length).toBeGreaterThanOrEqual(2);
-    const kgBridgeDark = darkBlocks.find((b) => declaration(b, "kg-accent") !== null);
-    expect(kgBridgeDark, "no `.dark` block declares --kg-accent").toBeTruthy();
-    expect(declaration(kgBridgeDark!, "kg-accent")).toBe("var(--signature-400)");
-    const kgBridgeLight = allBlocks(":root").find((b) => declaration(b, "kg-accent") !== null);
-    expect(declaration(kgBridgeLight!, "kg-accent")).toBe("var(--signature-500)");
   });
 
   it("no accent-preset block declares --signature-500 or --signature-400", () => {

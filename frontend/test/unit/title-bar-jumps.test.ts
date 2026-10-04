@@ -13,7 +13,6 @@ import {
   NotificationsButton,
   notificationsLabel,
 } from "@/components/notifications-button";
-import { OverviewButton, OVERVIEW_LABEL } from "@/components/overview-button";
 
 /**
  * The two jumps in the title row's first group — and the signal that moved into
@@ -62,13 +61,6 @@ function renderNotifications(pending: number, extra: Record<string, unknown> = {
     root.render(createElement(NotificationsButton, { pending, onNavigate: () => {}, ...extra }));
   });
   return container.querySelector("[data-testid=title-bar-notifications]") as HTMLElement;
-}
-
-function renderOverview(extra: Record<string, unknown> = {}) {
-  act(() => {
-    root.render(createElement(OverviewButton, { onNavigate: () => {}, ...extra }));
-  });
-  return container.querySelector("[data-testid=title-bar-overview]") as HTMLElement;
 }
 
 describe("the notifications jump", () => {
@@ -158,33 +150,6 @@ describe("the notifications jump", () => {
     });
     act(() => {
       (container.querySelector("[data-testid=title-bar-notifications]") as HTMLElement).click();
-    });
-    expect(onNavigate).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("the overview jump", () => {
-  it("keeps its name reachable without printing it", () => {
-    // A labelled button in a chrome band reads as content. The word goes, and
-    // both of the channels that can still carry it do.
-    const button = renderOverview();
-    expect(button.getAttribute("aria-label")).toBe(OVERVIEW_LABEL);
-    expect(button.getAttribute("title")).toBe(OVERVIEW_LABEL);
-    expect(button.textContent).toBe("");
-  });
-
-  it("marks itself as the page you are on", () => {
-    expect(renderOverview({ active: true }).getAttribute("aria-current")).toBe("page");
-    expect(renderOverview().getAttribute("aria-current")).toBeNull();
-  });
-
-  it("navigates when pressed", () => {
-    const onNavigate = vi.fn();
-    act(() => {
-      root.render(createElement(OverviewButton, { onNavigate }));
-    });
-    act(() => {
-      (container.querySelector("[data-testid=title-bar-overview]") as HTMLElement).click();
     });
     expect(onNavigate).toHaveBeenCalledTimes(1);
   });

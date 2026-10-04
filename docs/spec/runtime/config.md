@@ -142,9 +142,9 @@ it:
 
 ```toml
 [memory]
-backend = "remote"          # store | embedded | remote | null
-driver  = "supermemory"     # supermemory | mem0 | cognee | namespace
-url     = "https://api.supermemory.ai"
+backend = "remote"          # store | remote | null
+driver  = "cortexdb"        # cortexdb (alias cortex) | tinyhumans
+url     = "https://api-v1.cortexdb.ai"   # optional: omit for the engine's default
 api_key = "sk-…"
 ```
 
@@ -250,7 +250,7 @@ added.
 | Cycles (the brain) | TinyHumans credential | build/inspect only |
 | Tools/channels beyond built-ins | OpenHuman reachable | built-in tools; non-operator channels warn and disable |
 | Feedback auto-filing | `GITHUB_TOKEN` + consent | local capture + manual prefilled link |
-| SQLite / TinyCortex stores | respective features | fs bundle |
+| SQLite stores | respective features | fs bundle |
 
 ## Authentication
 

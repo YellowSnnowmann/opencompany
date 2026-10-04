@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { TeamMember } from "@/lib/team";
 import {
   buildChannels,
-  channelIntroSentence,
   channelSubtitle,
   channelTitle,
   type Channel,
@@ -182,83 +181,6 @@ describe("channelSubtitle on a channel", () => {
         channelFor({ channel: "engineering", blurb: "Engineering" }),
       ),
     ).toBeNull();
-  });
-});
-
-describe("channelIntroSentence", () => {
-  it("ends a DM's opening line with exactly one full stop", () => {
-    // The defect a browser caught and this suite did not. The clause used to
-    // take a hardcoded ".", which was invisible while the subtitle was a role
-    // and produced "…and services.." the moment it became a description that
-    // punctuates itself. Asserted as a suffix rule, not a fixed string, so it
-    // fails for any description whatever punctuation the manifest gave it.
-    const line = channelIntroSentence(dmFor(ROLE_ONLY), false);
-    expect(line).toBe(
-      "This is the start of your direct message with Backend Engineer — build and operate the backend and services.",
-    );
-    expect(line.endsWith("..")).toBe(false);
-  });
-
-  it("still supplies a full stop for a description that came without one", () => {
-    const dm = dmFor(
-      member({
-        id: "agent_ada",
-        name: "Ada",
-        role: "Engineer",
-        description: "Keeps the schedulers honest",
-      }),
-    );
-    expect(channelIntroSentence(dm, false)).toBe(
-      "This is the start of your direct message with Ada — keeps the schedulers honest.",
-    );
-  });
-
-  it("drops the clause, not the sentence, when there is nothing to add", () => {
-    // The #1180 read: no description and a name that IS the role. The line
-    // still says where you are; it just stops rather than repeating itself.
-    const dm = dmFor(
-      member({ id: "agent_ops", name: "Ops Lead", role: "Ops Lead" }),
-    );
-    expect(channelIntroSentence(dm, false)).toBe(
-      "This is the start of your direct message with Ops Lead.",
-    );
-  });
-
-  it("keeps a channel's two-sentence opening", () => {
-    expect(
-      channelIntroSentence(
-        channelFor({
-          channel: "engineering",
-          blurb: "Build, test, and secure the product.",
-        }),
-        false,
-      ),
-    ).toBe(
-      "This is the very beginning of #engineering. Build, test, and secure the product.",
-    );
-  });
-
-  it("leaves no trailing space on a channel with no blurb", () => {
-    const line = channelIntroSentence(
-      channelFor({ channel: "engineering", blurb: "" }),
-      false,
-    );
-    expect(line).toBe("This is the very beginning of #engineering.");
-    expect(line).toBe(line.trimEnd());
-  });
-
-  it("makes no claim about emptiness while history is still loading (issue #934)", () => {
-    // Neither finished sentence may render before the host has answered — both
-    // assert the channel has no history. The subtitle alone is not a claim.
-    expect(channelIntroSentence(dmFor(ROLE_ONLY), true)).toBe(
-      "Build and operate the backend and services.",
-    );
-    expect(
-      channelIntroSentence(
-        dmFor(member({ id: "a", name: "Ops Lead", role: "Ops Lead" })),
-        true,
-      ),
-    ).toBe("");
   });
 });
 

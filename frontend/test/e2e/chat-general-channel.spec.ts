@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { openChannel } from "./chat-helpers";
+import { channelInfo, openChannel, openChannelInfo } from "./chat-helpers";
 
 /**
  * `#general` against a live host: the host lists it first in `GET .../desks`
@@ -20,15 +20,9 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-const membersToggle = (page: Page) => page.getByRole("button", { name: /agents$/i });
-const pane = (page: Page) => page.getByRole("complementary").last();
-
-async function openPane(page: Page) {
-  if ((await membersToggle(page).getAttribute("aria-pressed")) !== "true") {
-    await membersToggle(page).click();
-  }
-  await expect(page.getByRole("heading", { name: "Team" })).toBeVisible();
-}
+/** The channel's details panel, opened from the pill over the transcript. */
+const pane = channelInfo;
+const openPane = openChannelInfo;
 
 const inChannel = (page: Page) => pane(page).locator("ul").first();
 
@@ -51,7 +45,7 @@ test("#general offers no membership control", async ({ page }) => {
 
   await expect(pane(page).getByRole("heading", { name: "In this channel" })).toBeVisible();
   await expect(pane(page).getByRole("button", { name: /to this channel$/ })).toHaveCount(0);
-  await expect(pane(page).getByRole("button", { name: "Manage on the org chart" })).toHaveCount(0);
+  await expect(pane(page).getByRole("link", { name: "Manage desk" })).toHaveCount(0);
 });
 
 test("an agent added or removed elsewhere appears in and leaves #general live", async ({
@@ -75,9 +69,9 @@ test("an agent added or removed elsewhere appears in and leaves #general live", 
 
     expect((await request.delete(`${API}/team/${encodeURIComponent(id)}`)).status()).toBe(204);
     await expect(inChannel(page)).not.toContainText(name, { timeout: 15_000 });
-    // No navigation happened: the pane is the same one, on the same address.
+    // No navigation happened: the panel is the same one, on the same address.
     expect(page.url()).toBe(urlBefore);
-    await expect(page.getByRole("heading", { name: "Team" })).toBeVisible();
+    await expect(pane(page)).toBeVisible();
   } finally {
     await request.delete(`${API}/team/${encodeURIComponent(id)}`);
   }

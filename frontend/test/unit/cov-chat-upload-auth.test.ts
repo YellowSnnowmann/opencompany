@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import { act, createElement, type ReactNode } from "react";
+
+import { menuItemEnabled, openAttachItem } from "./support/composer-menu";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -102,8 +104,8 @@ async function mount(client: OpenCompanyClient) {
   await flush();
 }
 
-function paperclip(): HTMLButtonElement | null {
-  return container.querySelector('[aria-label="Attach a file"]');
+function paperclip(): HTMLElement | null {
+  return openAttachItem(container);
 }
 
 describe("the chat attach control, for a plain member", () => {
@@ -112,7 +114,7 @@ describe("the chat attach control, for a plain member", () => {
 
     const clip = paperclip();
     expect(clip).not.toBeNull();
-    expect(clip?.disabled).toBe(false);
+    expect(clip && menuItemEnabled(clip)).toBe(true);
   });
 
   it("actually uploads through client.postForm for a member session", async () => {
@@ -134,6 +136,7 @@ describe("the chat attach control, for a plain member", () => {
   it("renders the same live paperclip for an admin, so the control does not differ by role", async () => {
     await mount(clientAs("admin"));
 
-    expect(paperclip()?.disabled).toBe(false);
+    const clip = paperclip();
+    expect(clip && menuItemEnabled(clip)).toBe(true);
   });
 });

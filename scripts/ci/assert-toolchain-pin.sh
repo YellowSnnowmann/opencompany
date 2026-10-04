@@ -10,7 +10,7 @@
 # Local checkouts on 1.97.x stayed green, so the first read of it was "CI is
 # broken", not "the compiler moved".
 #
-# Pinning fixes that, but only while the pins agree. Four call sites in `ci.yml`
+# Pinning fixes that, but only while the pins agree. The call sites in `ci-lanes.yml`
 # and the release workflows each name the version separately, because the
 # workflow comment there wants the selection visible to a reader at the call
 # site rather than hidden behind an action ref. Five copies of a version is five
@@ -71,7 +71,7 @@ done < <(
 if [ "$found" -eq 0 ]; then
   echo "assert-toolchain-pin: found no 'toolchain:' inputs in .github/workflows/." >&2
   echo "  Either the call sites stopped passing one explicitly (see the comment" >&2
-  echo "  at the top of ci.yml for why they should), or this script's pattern is" >&2
+  echo "  at the top of ci-lanes.yml for why they should), or this script's pattern is" >&2
   echo "  stale. Both need a human." >&2
   exit 1
 fi
