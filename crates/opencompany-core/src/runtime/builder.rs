@@ -3397,7 +3397,6 @@ impl RuntimeBuilder {
                                 // the live slug from the provider per turn.
                                 provider_slug: "managed".to_string(),
                                 serves: None,
-                                context: context.clone(),
                                 store: store.clone(),
                                 // The harness must write usage to the SELECTED
                                 // backend, not always the filesystem. The read
@@ -3439,7 +3438,6 @@ impl RuntimeBuilder {
                                 // (#53): the company's facts + event log ground
                                 // `query_company`; a fresh queue per company backs
                                 // the delegation tools the brain drains.
-                                facts: Some(ops.facts.clone()),
                                 events: Some(events.clone()),
                                 delegations: crate::harness::orchestrator::DelegationQueue::default(
                                 ),
