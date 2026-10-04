@@ -24,7 +24,7 @@ Each tick, the Manager reads (read-only, through the existing ports):
 | Denial patterns | `EventLog` | 3 denials of outreach emails → propose tightening tone / adding a checkpoint |
 | Feedback inbox | brain state, [feedback loop](../feedback-loop/README.md) | repeated "too formal" thumbs-downs → propose a Charter `tone` edit |
 | Ledger | `CompanyStore` | one teammate consumes 80% of budget for 5% of output → propose rebalancing per-agent caps |
-| Memory traces | `MemoryStore` | recurring task type with no owning teammate → propose a hire; a teammate idle for a month → propose retiring it |
+| Cycle traces | `TraceStore` | recurring task type with no owning teammate → propose a hire; a teammate idle for a month → propose retiring it |
 | Schedule outcomes | `EventLog` | weekly digest always read Monday night → propose moving the cron |
 | Template registry | Template library | upstream template improved → surface the diff ([templates.md](../product/templates.md)) |
 
