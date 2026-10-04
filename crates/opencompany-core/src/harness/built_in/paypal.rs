@@ -110,7 +110,6 @@ mod live {
     use crate::paypal::api;
     use crate::paypal::client::PaypalClient;
 
-    use openhuman_core as oh;
     use tinytools::{PermissionLevel, Tool, ToolResult};
 
     /// Builds the per-company PayPal tools over a resolved connection.
