@@ -45,7 +45,6 @@ fn spawn(title: &str) -> Delegation {
 async fn a_spawn_with_no_board_is_reported_rather_than_silently_dropped() {
     let record = record();
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let fx = Fixture::new();
     let turns = ScriptedTurns::new(&fx, vec![]);
     let runner = DelegationRunner::new(
@@ -87,7 +86,6 @@ async fn one_card_the_board_refuses_does_not_drop_the_rest_of_the_drain() {
     });
     let record = record();
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let fx = Fixture::new();
     let turns = ScriptedTurns::new(&fx, vec![]);
     let runner = DelegationRunner::new(

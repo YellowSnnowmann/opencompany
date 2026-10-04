@@ -100,67 +100,6 @@ impl Turn {
         }
     }
 
-    pub(super) fn cancelled(reply: &str) -> Self {
-        Self {
-            reply: reply.to_string(),
-            cancel: true,
-            ..Self::default()
-        }
-    }
-
-    /// A turn the in-turn spend brake halted (issue #1032): it replies with
-    /// whatever it had, and reports the halt alongside.
-    pub(super) fn spend_halted(reply: &str, agent: &str, spent_usd: f64, cap_usd: f64) -> Self {
-        Self {
-            reply: reply.to_string(),
-            spend_halt: Some(crate::harness::SpendHalt {
-                agent: agent.to_string(),
-                spent_usd,
-                cap_usd,
-            }),
-            ..Self::default()
-        }
-    }
-
-    /// A turn that paused for lack of inference budget/credits (issue
-    /// #1846): it replies with the actionable pause copy, and reports the
-    /// pause alongside — the delegation-fold analogue of
-    /// [`spend_halted`](Self::spend_halted).
-    pub(super) fn budget_paused(reply: &str, agent: &str, summary: &str) -> Self {
-        Self {
-            reply: reply.to_string(),
-            budget_paused: Some(crate::harness::BudgetPause {
-                agent: agent.to_string(),
-                summary: summary.to_string(),
-            }),
-            ..Self::default()
-        }
-    }
-
-    /// A turn that hit the harness's per-turn wall-clock ceiling (issue
-    /// #1680) — the sibling of [`budget_paused`](Self::budget_paused).
-    pub(super) fn ceiling_paused(reply: &str, agent: &str, elapsed_ms: u64) -> Self {
-        Self {
-            reply: reply.to_string(),
-            ceiling_paused: Some(crate::harness::CeilingPause {
-                agent: agent.to_string(),
-                elapsed: std::time::Duration::from_millis(elapsed_ms),
-                summary: format!("{agent} hit the per-turn wall-clock ceiling"),
-            }),
-            ..Self::default()
-        }
-    }
-
-    /// A turn whose **first** tool call parked for approval, so it produced
-    /// nothing: the reply is the agent saying it is blocked, not a result.
-    /// This is the shape in the issue #465 report.
-    pub(super) fn parked(reply: &str, tool: &str) -> Self {
-        Self {
-            reply: reply.to_string(),
-            parks: vec![tool.to_string()],
-            ..Self::default()
-        }
-    }
 }
 
 /// A [`RunTurn`] that plays a fixed script of turns and records who was
@@ -229,12 +168,6 @@ impl ScriptedTurns {
     /// `(agent_id, message)` for every turn run, in order.
     pub(super) fn calls(&self) -> Vec<(String, String)> {
         self.calls.lock().expect("calls").clone()
-    }
-
-    /// `(assignee, column)` for every card on the board when turn `n`
-    /// started.
-    pub(super) fn board_at_turn(&self, n: usize) -> Vec<(String, String)> {
-        self.board_at_turn.lock().expect("board")[n].clone()
     }
 
     /// Whether the delegation queue was claimed at all while turn `n` ran
@@ -508,45 +441,6 @@ members = ["designer"]
     }
 }
 
-/// The company shape issue #884 D1 was observed on: ONE desk with three
-/// members, so the lead has peers beside it that `delegate_to_desk` — which
-/// only ever resolves to the lead — could never reach.
-pub(super) fn peer_record() -> CompanyRecord {
-    let manifest = toml::from_str(
-        r#"
-[company]
-name = "Acme"
-
-[[agent]]
-id = "chief"
-role = "Chief of Staff"
-tier = "orchestrator"
-
-[[agent]]
-id = "brand_strategist"
-role = "Brand Strategist"
-
-[[agent]]
-id = "seo_specialist"
-role = "SEO Specialist"
-
-[[agent]]
-id = "copywriter"
-role = "Copywriter"
-
-[[group_chat]]
-id = "strategy"
-name = "Strategy desk"
-members = ["brand_strategist", "seo_specialist", "copywriter"]
-"#,
-    )
-    .expect("valid manifest");
-    CompanyRecord {
-        manifest,
-        ..record()
-    }
-}
-
 /// The wired pieces one drain needs: the company record, a real task store
 /// over a temp dir, the shared queue, and the steer registry.
 pub(super) struct Fixture {
@@ -554,7 +448,6 @@ pub(super) struct Fixture {
     pub(super) record: CompanyRecord,
     pub(super) tasks: Arc<dyn TaskStore>,
     pub(super) queue: DelegationQueue,
-    steer: InflightRegistry,
     /// Wired into every runner, so the parked-approval overlay (issue #465)
     /// is exercised by the whole existing suite rather than only by the
     /// tests that park something.
@@ -575,11 +468,6 @@ impl Fixture {
         Self::over(nested_record())
     }
 
-    /// A fixture over the one three-person desk issue #884 D1 was seen on.
-    pub(super) fn peers() -> Self {
-        Self::over(peer_record())
-    }
-
     pub(super) fn over(record: CompanyRecord) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         Self {
@@ -587,7 +475,6 @@ impl Fixture {
             _dir: dir,
             record,
             queue: DelegationQueue::default(),
-            steer: InflightRegistry::default(),
             approvals: ApprovalRequestQueue::default(),
             workflow_refs: WorkflowRefQueue::default(),
         }

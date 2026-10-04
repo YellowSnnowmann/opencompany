@@ -1,16 +1,5 @@
 use super::*;
 
-fn tool_policy_request(tool_name: &str) -> oh::agent::tool_policy::ToolPolicyRequest {
-    let context = oh::agent::tool_policy::ToolCallContext::session(
-        "episode-session",
-        "operator",
-        "researcher",
-        "call-1",
-        0,
-    );
-    oh::agent::tool_policy::ToolPolicyRequest::new(tool_name, serde_json::json!({}), context)
-}
-
 // --- Agent-workspace provisioning (issue #409) --------------------------
 
 fn manifest_agent(role: &str, description: Option<&str>) -> ManifestAgent {

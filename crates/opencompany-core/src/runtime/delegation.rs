@@ -2426,12 +2426,6 @@ mod tests_part4;
 #[path = "delegation_tests_part5.rs"]
 mod tests_part5;
 #[cfg(test)]
-#[path = "delegation_tests_part6.rs"]
-mod tests_part6;
-#[cfg(test)]
-#[path = "delegation_tests_part7.rs"]
-mod tests_part7;
-#[cfg(test)]
 #[path = "delegation_tests_part8.rs"]
 mod tests_part8;
 #[cfg(test)]

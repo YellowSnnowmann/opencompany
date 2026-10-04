@@ -1,46 +1,4 @@
 use super::*;
-use oh::agent::prompts::GROUNDING_HEADING;
-
-const STYLE_HEADING: &str = "# Writing style";
-
-fn blueprint(dir: &std::path::Path, is_orchestrator: bool) -> AgentBlueprint {
-    let deps = pin_deps(dir.to_path_buf());
-    let manifest_agent = ManifestAgent {
-        provider: None,
-        global: false,
-        id: "qa_engineer".to_string(),
-        role: "QA Engineer".to_string(),
-        name: Some("Quinn".to_string()),
-        description: Some("Finds the failing case.".to_string()),
-        tier: None,
-        harness: None,
-        tools: None,
-        skills: None,
-        delegates_to: Vec::new(),
-        context: None,
-        budget_usd_daily: None,
-        prompt: None,
-        prompt_files: Vec::new(),
-        prompt_files_resolved: Vec::new(),
-        classes: Vec::new(),
-        ledgers: None,
-        can_declare_ledgers: true,
-        model: None,
-    };
-    build_agent(
-        &CompanyId::new("acme"),
-        "Acme",
-        &manifest_agent,
-        Arc::new(ApprovalPolicy::new(&Policy::default(), None)),
-        &deps,
-        &[],
-        &[],
-        &[],
-        None,
-        is_orchestrator,
-    )
-    .expect("agent builds")
-}
 
 #[test]
 fn the_reader_brief_sets_the_audience_not_a_length_budget() {

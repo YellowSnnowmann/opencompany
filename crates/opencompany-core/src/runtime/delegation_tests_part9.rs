@@ -18,7 +18,6 @@ async fn two_concurrent_assignments_of_the_same_card_admit_exactly_one_writer() 
         barrier,
     });
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let idle_turns_fx = Fixture::new();
     let idle_turns = ScriptedTurns::new(&idle_turns_fx, vec![]);
     let runner_a = DelegationRunner::new(
@@ -92,7 +91,6 @@ async fn two_concurrent_reviews_of_the_same_card_admit_exactly_one_writer() {
         barrier,
     });
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let idle_turns_fx = Fixture::new();
     let idle_turns = ScriptedTurns::new(&idle_turns_fx, vec![]);
     let runner_a = DelegationRunner::new(
@@ -166,7 +164,6 @@ async fn a_same_column_assignment_cannot_be_overwritten_by_a_stale_review() {
         assignment_written: Arc::new(tokio::sync::Barrier::new(2)),
     });
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let idle_turns_fx = Fixture::new();
     let idle_turns = ScriptedTurns::new(&idle_turns_fx, vec![]);
     let assigner = DelegationRunner::new(

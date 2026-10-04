@@ -71,51 +71,6 @@ members = ["nobody"]
 
 // --- Recursive desk delegation (issue #176) -----------------------------
 
-/// A three-desk record where two desks have roster leads, so a member of one
-/// can be given an allowlist that admits one desk and not another.
-pub(super) fn nested_desks_record(id: &CompanyId) -> CompanyRecord {
-    let manifest = toml::from_str(
-        r#"
-[company]
-name = "Acme"
-
-[[agent]]
-id = "ceo"
-role = "Chief Executive"
-tier = "orchestrator"
-
-[[agent]]
-id = "writer"
-role = "Writer"
-delegates_to = ["research"]
-
-[[agent]]
-id = "analyst"
-role = "Analyst"
-
-[[group_chat]]
-id = "strategy"
-name = "Strategy desk"
-members = ["writer"]
-
-[[group_chat]]
-id = "research"
-name = "Research desk"
-members = ["analyst"]
-
-[[group_chat]]
-id = "legal"
-name = "Legal desk"
-members = ["ceo"]
-"#,
-    )
-    .expect("valid manifest");
-    CompanyRecord {
-        manifest,
-        ..seeded_record(id)
-    }
-}
-
 /// A store that cannot answer, so the grounding read has nothing to check
 /// the target against.
 pub(super) struct BrokenStore;
@@ -137,60 +92,6 @@ impl CompanyStore for BrokenStore {
 }
 
 // ── delegate_to_teammate at the tool boundary (issue #884) ──────────────
-
-/// A company whose `strategy` desk has THREE members, so its lead has peers
-/// to reach — the shape D1 was observed on — plus an `analyst` on a desk the
-/// lead's `delegates_to` permits and a `legal_counsel` on one it does not.
-pub(super) fn peers_record(id: &CompanyId) -> CompanyRecord {
-    let manifest = toml::from_str(
-        r#"
-[company]
-name = "Acme"
-
-[[agent]]
-id = "ceo"
-role = "Chief Executive"
-tier = "orchestrator"
-
-[[agent]]
-id = "writer"
-role = "Writer"
-delegates_to = ["research"]
-
-[[agent]]
-id = "editor"
-role = "Editor"
-
-[[agent]]
-id = "analyst"
-role = "Analyst"
-
-[[agent]]
-id = "legal_counsel"
-role = "Counsel"
-
-[[group_chat]]
-id = "strategy"
-name = "Strategy desk"
-members = ["writer", "editor"]
-
-[[group_chat]]
-id = "research"
-name = "Research desk"
-members = ["analyst"]
-
-[[group_chat]]
-id = "legal"
-name = "Legal desk"
-members = ["legal_counsel"]
-"#,
-    )
-    .expect("valid manifest");
-    CompanyRecord {
-        manifest,
-        ..seeded_record(id)
-    }
-}
 
 // --- add_agent (issue #71) ----------------------------------------------
 

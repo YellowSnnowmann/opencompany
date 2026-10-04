@@ -399,7 +399,6 @@ async fn a_task_store_write_failure_on_assign_task_surfaces_as_an_error() {
         inner: backing.clone(),
     });
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let idle_turns_fx = Fixture::new();
     let idle_turns = ScriptedTurns::new(&idle_turns_fx, vec![]);
 
@@ -448,7 +447,6 @@ async fn a_task_store_write_failure_on_review_task_surfaces_as_an_error() {
         inner: backing.clone(),
     });
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let idle_turns_fx = Fixture::new();
     let idle_turns = ScriptedTurns::new(&idle_turns_fx, vec![]);
 

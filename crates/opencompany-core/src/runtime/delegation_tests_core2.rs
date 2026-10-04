@@ -68,26 +68,6 @@ pub(super) fn handler_card_in(title: String, column: &str) -> TaskRecord {
     }
 }
 
-/// A titling pass that answers with one canned name, and records what it
-/// was asked to name.
-pub(super) struct ScriptedTitler {
-    title: &'static str,
-    asked: Mutex<Vec<String>>,
-}
-
-impl ScriptedTitler {
-    pub(super) fn new(title: &'static str) -> Self {
-        Self {
-            title,
-            asked: Mutex::new(Vec::new()),
-        }
-    }
-
-    pub(super) fn asked(&self) -> Vec<String> {
-        self.asked.lock().expect("asked").clone()
-    }
-}
-
 #[async_trait]
 impl crate::ports::tasks::TitleSummariser for ScriptedTitler {
     async fn title(&self, request: &str) -> Option<TaskTitle> {

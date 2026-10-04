@@ -309,10 +309,6 @@ pub(super) struct TurnFaults {
 }
 
 impl DelegatingProvider {
-    /// The board snapshot each turn ran against, in invoke order.
-    pub(super) fn board(&self) -> Vec<(String, String)> {
-        self.board.lock().unwrap().clone()
-    }
 }
 
 #[async_trait]
