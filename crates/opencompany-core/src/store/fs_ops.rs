@@ -2342,16 +2342,10 @@ where
 /// Something a JSONL log keys its last-write-wins dedupe on.
 ///
 /// Kept as a trait rather than a closure so [`dedup_latest`] reads identically
-/// at every call site; the two implementors below are the only record types
+/// at every call site; the implementors below are the only record types
 /// stored in an id-keyed JSONL log.
 trait HasId {
     fn record_id(&self) -> &str;
-}
-
-impl HasId for FactRecord {
-    fn record_id(&self) -> &str {
-        &self.id
-    }
 }
 
 impl HasId for ArtifactRecord {
