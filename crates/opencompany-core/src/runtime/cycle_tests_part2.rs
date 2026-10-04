@@ -638,6 +638,6 @@ async fn end_to_end_operator_message_echoes_and_persists() {
     );
 
     // (c) a compressed trace was persisted.
-    let traces = rt.memory.recent_traces(rt.id(), 10).await.unwrap();
+    let traces = rt.traces.recent_traces(rt.id(), 10).await.unwrap();
     assert!(!traces.is_empty());
 }

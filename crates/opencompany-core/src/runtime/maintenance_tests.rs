@@ -353,7 +353,7 @@ async fn maintenance_retains_only_the_newest_cycle_traces() {
 
     for i in 0..=TRACE_RETENTION_LIMIT {
         runtime
-            .memory
+            .traces
             .save_trace(
                 runtime.id(),
                 CompressedTrace {
@@ -369,7 +369,7 @@ async fn maintenance_retains_only_the_newest_cycle_traces() {
     ticker.tick().await;
 
     let traces = runtime
-        .memory
+        .traces
         .recent_traces(runtime.id(), TRACE_RETENTION_LIMIT + 1)
         .await
         .expect("traces read");
