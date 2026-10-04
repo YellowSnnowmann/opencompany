@@ -439,99 +439,67 @@ fn is_zero_u32(value: &u32) -> bool {
     *value == 0
 }
 
-/// The one speech act a seat ended its turn with (plan hive-desks, Phase 4).
-/// Mirrors `tinyhivemind::speech::Utterance`'s four kinds; `read` is a query
-/// and never reaches the journal.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UtteranceKind {
-    /// A message for the whole desk.
-    Post,
-    /// A message the host routed to the best-placed teammates.
-    Broadcast,
-    /// A message for named peers only.
-    Dm,
-    /// A message that also reports the author's assignment finished.
-    CompleteEpisode,
-    /// A private question to one seat, which opens a conversation only those
-    /// two read. New with the conductor; a desk without conversations never
-    /// writes one.
-    Ask,
-}
-
-impl UtteranceKind {
-    /// The kind of a tinyhivemind utterance.
-    #[must_use]
-    pub fn of(utterance: &tinyhivemind::speech::Utterance) -> Self {
-        use tinyhivemind::speech::Utterance;
-        match utterance {
-            Utterance::Post { .. } => Self::Post,
-            Utterance::Broadcast { .. } => Self::Broadcast,
-            Utterance::Dm { .. } => Self::Dm,
-            Utterance::CompleteEpisode { .. } => Self::CompleteEpisode,
-            Utterance::Ask { .. } => Self::Ask,
-        }
-    }
-}
-
-/// How a broadcast was routed onward, on the reply that carried it.
+/// Where a projected hive row sits in the company Coordinator's transcript
+/// (OC-2): its global hive sequence, the episode it belongs to and the hive
+/// conversation root it answers. Carried on [`CompanyEvent::AgentReply`] so a
+/// console can group a desk's lines by episode and a later reply can be
+/// threaded under the row it answers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoutedBy {
-    /// The accepted plan.
-    pub plan: crate::hive::routing::RoutingPlanDto,
-    /// Which router chose.
-    pub router: crate::hive::routing::Router,
-}
-
-/// What a journaled reply was inside the episode that produced it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReplyEpisode {
-    /// The episode the reply was committed into.
-    pub id: String,
-    /// The driver revision it was committed at (raw, 0-based).
-    pub revision: u64,
-    /// The speech act.
-    pub kind: UtteranceKind,
-    /// A `dm`'s recipients.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub to: Vec<String>,
-    /// How a `broadcast` was routed onward, once the host recorded it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub routed_by: Option<RoutedBy>,
-}
-
-/// One seat's committed utterance inside a `RoundCommitted` event.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoundUtteranceRecord {
-    /// The seat.
-    pub agent_id: String,
-    /// The journal sequence the driver committed it at — the `AgentReply`
-    /// row's own sequence.
+#[serde(rename_all = "camelCase")]
+pub struct HiveRef {
+    /// The Coordinator transcript sequence the row was accepted at.
     pub sequence: u64,
-    /// The speech act.
-    pub kind: UtteranceKind,
-    /// The `AgentReply` row it produced, when it produced one.
+    /// The conducted episode the row belongs to, when it belongs to one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message_seq: Option<u64>,
-    /// A `dm`'s recipients.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub to: Vec<String>,
+    pub episode_id: Option<String>,
+    /// The hive conversation root, by hive sequence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<u64>,
 }
 
-/// Why an episode closed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EpisodeReason {
-    /// Every assigned seat called `complete_episode`.
-    CompleteEpisode,
-    /// The desk's `max_rounds` was reached.
-    RoundCap,
-    /// A seat ran past its turn timeout and the host closed the room.
-    Timeout,
-    /// A seat failed past its retries and the host closed the room.
-    Failed,
-    /// The desk's membership changed under the episode.
-    MembershipChanged,
+/// Which hive a turn bracket ran in, on [`CompanyEvent::TurnStarted`] /
+/// [`CompanyEvent::TurnSettled`] / [`CompanyEvent::TurnFailed`]. Both halves
+/// are optional: a direct message runs in no hive and, on an agent's own
+/// inbox, in no episode.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HiveTurnRef {
+    /// The hive (desk) the turn answered in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hive_id: Option<String>,
+    /// The episode the turn ran for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode_id: Option<String>,
+}
+
+/// The destination of a [`CompanyEvent::HiveMessage`]: a hive by id, or one
+/// agent's inbox by manifest agent id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "id", rename_all = "snake_case")]
+pub enum HiveDestination {
+    /// A hive (desk) id.
+    Hive(String),
+    /// A manifest agent id.
+    Agent(String),
+}
+
+/// What raised a parked approval, when it was not an ordinary cycle turn.
+///
+/// A coordinator turn that parks on an approval is held by the Coordinator
+/// until the host releases it, so the resolution has to know which agent to
+/// release — and which episode it was in — rather than re-dispatching the call
+/// on a cycle of its own (OC-2).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ApprovalOrigin {
+    /// A turn the company hive's Coordinator ran.
+    Hive {
+        /// The manifest agent id whose turn parked.
+        agent_id: String,
+        /// The episode the turn ran for, when it ran in one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        episode_id: Option<String>,
+    },
 }
 
 /// How a seat turn ended, as `turn_settled` reports it.
@@ -805,116 +773,6 @@ pub const RELAY_NOTE_MARKER: &str = "\n\n[referral-note]\n";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum CompanyEvent {
-    /// A crossing referral's child turn was durably created (tinyhivemind P15).
-    ///
-    /// The idempotency marker, and the only reason this is journaled at all: a
-    /// referral is triggered by a COMMITTED reply, so anything that reprocesses
-    /// that reply — a restart, a redelivered frame, a retry — would decide the
-    /// same referral again and ask the target desk twice. The queue writes this
-    /// under the trigger's identity and refuses a second enqueue that finds it.
-    ///
-    /// Not a conversational line: `chat_history::owns` does not admit it and no
-    /// transcript renders it.
-    ReferralEnqueued {
-        /// The desk the triggering reply was committed on.
-        from_desk: String,
-        /// Sequence of that reply — with `from_desk`, the idempotency key.
-        trigger_sequence: u64,
-        /// The asking desk's display name, captured now.
-        ///
-        /// The console renders this on the referred message, and a desk renamed
-        /// later must not rewrite what the transcript said at the time — the
-        /// same rule `SessionAuthor` follows for its own labels.
-        ///
-        /// **Defaulted, because the journal is append-only.** Markers written
-        /// before this field existed must still deserialize: a required field
-        /// here made every older marker unreadable, and because the history
-        /// projection reads the journal, that took the whole transcript with
-        /// it. Any field added to a journaled event has to default.
-        #[serde(default)]
-        from_desk_name: String,
-        /// Whether this marker is a RETURN — the answer coming home — rather
-        /// than the outbound ask. Defaulted for the reason above.
-        ///
-        /// The console draws a different word for each ("Asked by Design" vs
-        /// "Answered by Design"), and it cannot work this out for itself: both
-        /// legs are agent-authored lines on a desk, so every signal the console
-        /// holds says the same thing about each. `tinyhivemind` decided it
-        /// already — `ReferralKind` — and this carries that decision rather
-        /// than letting the render side infer a second, disagreeing answer.
-        #[serde(default)]
-        returning: bool,
-        /// On a RETURN, the journal sequence of the forward marker this answers.
-        /// `None` on a forward leg, and on returns written before this field
-        /// existed.
-        ///
-        /// **The host already knew this and was discarding it.** Authorizing a
-        /// return means finding the forward it answers (`answering_a_forward`),
-        /// which locates the exact marker and then kept only a bool — leaving
-        /// the console to re-derive the same pairing at read time, from a
-        /// different window and a separately-written set of match rules. Two
-        /// readers of one fact, free to disagree, and they did: a crossing whose
-        /// ask fell outside the console's window rendered as though the question
-        /// had never been asked.
-        ///
-        /// Recorded here, the pairing is a fact rather than an inference, and
-        /// the projection reads one event instead of scanning for it. Defaulted
-        /// for the reason above, so older markers still deserialize and fall
-        /// back to the scan.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        answers: Option<u64>,
-        /// The conversation the exchange actually happened in, when it was not
-        /// a desk — the two teammates' own thread (`dm:a+b`).
-        ///
-        /// The desk fields stay what they are: who asked, from where, and whose
-        /// home desk the answerer keeps. Those name the PEOPLE, and the console
-        /// labels a crossing with them. This names the PLACE, which is what a
-        /// reader needs to find the rows. Keeping them apart is why a crossing
-        /// can move off the answerer's channel without the label following it
-        /// somewhere meaningless.
-        ///
-        /// Absent on a crossing that ran on a desk, and on markers written
-        /// before pairs had their own conversation. Defaulted for the reason
-        /// every other field here is.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        conversation: Option<String>,
-        /// The first and last rows of the exchange inside [`Self::conversation`].
-        ///
-        /// The fold finds a crossing's rows by scanning FORWARD from this
-        /// marker, which holds while the rows are written by the deliberation
-        /// that raised them — the marker goes first, the turns follow. A
-        /// `desk_dm` inverts that: the tool journals during the turn, and the
-        /// marker folds onto the turn's own reply, which is composed after every
-        /// tool has run. So the rows sit BEFORE the marker and a forward scan
-        /// misses the question it is a chip for.
-        ///
-        /// Carrying both ends makes the fold independent of journal order.
-        /// Absent on a crossing whose rows do follow it, which is every marker
-        /// written before this field existed — defaulted for the reason every
-        /// other field here is (#2368).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        rows: Option<(u64, u64)>,
-        /// The agent that asked. Defaulted for the reason above.
-        #[serde(default)]
-        asker: String,
-        /// That agent's display label, captured now, for the same reason.
-        #[serde(default)]
-        asker_label: String,
-        /// The desk the child turn runs on.
-        to_desk: String,
-        /// The agent the child turn runs as.
-        target: String,
-        /// The episode on the asking desk that raised the crossing (plan
-        /// hive-desks, Phase 6). Absent on a pair DM and on older markers.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        episode_id: Option<String>,
-        /// The episode opened on the far desk to answer it.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        to_episode_id: Option<String>,
-        /// The hop the child turn runs at.
-        #[serde(default, skip_serializing_if = "is_zero_u32")]
-        hop: u32,
-    },
     /// A human sent a chat message.
     OperatorMessage {
         /// The message text.
@@ -1068,12 +926,10 @@ pub enum CompanyEvent {
         /// bracket — and on every row written before the field existed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_id: Option<String>,
-        /// The episode this seat turn runs for, when it is a hive round's.
+        /// The hive and episode this turn ran in, for a coordinator turn
+        /// (OC-2). `None` on a turn outside the company hive.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        episode_id: Option<String>,
-        /// The round revision inside that episode.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        round_revision: Option<u64>,
+        hive: Option<HiveTurnRef>,
     },
     /// A turn that was accepted did not produce an answer (issue #983).
     ///
@@ -1101,12 +957,10 @@ pub enum CompanyEvent {
             skip_serializing_if = "Option::is_none"
         )]
         chat_id: Option<String>,
-        /// The episode the seat turn ran for.
+        /// The hive and episode this turn ran in, for a coordinator turn
+        /// (OC-2). `None` on a turn outside the company hive.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        episode_id: Option<String>,
-        /// The round revision inside that episode.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        round_revision: Option<u64>,
+        hive: Option<HiveTurnRef>,
         /// How the turn ended, when it is finer than "failed": `timed_out`
         /// for a seat that ran past its turn timeout. Absent means `failed`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1133,12 +987,10 @@ pub enum CompanyEvent {
             skip_serializing_if = "Option::is_none"
         )]
         chat_id: Option<String>,
-        /// The episode the seat turn ran for.
+        /// The hive and episode this turn ran in, for a coordinator turn
+        /// (OC-2). `None` on a turn outside the company hive.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        episode_id: Option<String>,
-        /// The round revision inside that episode.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        round_revision: Option<u64>,
+        hive: Option<HiveTurnRef>,
         /// How the turn ended: `committed` (the default, and every row written
         /// before the field existed) or `no_utterance` for a seat that
         /// answered without calling a speech tool.
@@ -1239,6 +1091,11 @@ pub enum CompanyEvent {
         /// journaled before this existed. Omitted from the wire when absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         thread: Option<String>,
+        /// What raised it, when not an ordinary cycle turn: a coordinator
+        /// turn the resolution has to release (OC-2). `None` on every park a
+        /// cycle made, and on every row written before the field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<ApprovalOrigin>,
     },
     /// An operator resolved a parked approval.
     ApprovalResolved {
@@ -1421,15 +1278,16 @@ pub enum CompanyEvent {
         /// stored record needs migrating.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         audience: Vec<String>,
-        /// What this reply was inside the episode that produced it — its
-        /// round, its speech act, a `dm`'s recipients, and how a `broadcast`
-        /// was routed onward (plan hive-desks, Phase 4).
+        /// Where this reply sits in the company hive's transcript — its
+        /// hive sequence, episode and thread (OC-2) — when the projector wrote
+        /// it from a Coordinator row.
         ///
-        /// `None` for every reply outside an episode and every row written
-        /// before episodes existed; such a row renders exactly as before.
-        /// Additive on the terms `task_id`, `parent` and `audience` above are.
+        /// `None` for every reply that did not come through the hive (a card
+        /// settle, a system notice) and every row written before the cutover;
+        /// such a row renders exactly as before. Older rows that carried the
+        /// retired `episode` object decode with it ignored.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        episode: Option<ReplyEpisode>,
+        hive: Option<HiveRef>,
     },
     /// A reaction was set or cleared on one chat message (issue #364).
     ///
