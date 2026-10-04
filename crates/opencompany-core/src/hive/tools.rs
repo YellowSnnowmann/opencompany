@@ -30,7 +30,7 @@ use tinytools::{Tool, ToolCallOptions, ToolResult, ToolRunContext, WorkspaceDesc
 use crate::ports::types::CompanyId;
 
 /// One turn in flight for one agent: what the MCP handler needs to attribute a
-/// call and where the seat's one utterance lands.
+/// call, and where it is executed.
 #[derive(Clone, Debug)]
 pub struct InFlight {
     /// The company the agent belongs to.
@@ -41,11 +41,10 @@ pub struct InFlight {
     pub agent_id: String,
     /// The conversation the turn answers in.
     pub surface: ConversationRef,
-    /// The episode/round, for a desk turn driven by a hive; `None` for a
-    /// direct, general or workflow turn, which has no round and no `dm`.
-    pub hive: Option<HiveTurn>,
-    /// What the seat said this turn — at most one utterance.
-    pub outbox: Vec<Utterance>,
+    /// Where a coordinator turn sits in the company hive — its hive, episode
+    /// and thread — so a tool can attribute what it files (a card, a parked
+    /// approval) to it. `None` for an isolated pool turn.
+    pub hive: Option<HiveScope>,
     /// Where an OpenCompany tool call is handed so it runs on the turn's own
     /// task (see [`ToolJob`]). `None` — a test, or a caller that registered
     /// the turn without running one — has the server run the call itself.
@@ -81,23 +80,21 @@ impl fmt::Debug for ToolJob {
 /// The turn-side end of the hand-off; the turn's task drains the receiver.
 pub type ToolJobSender = tokio::sync::mpsc::Sender<ToolJob>;
 
-/// What one speech call became.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Speech {
-    /// The utterance was recorded on the outbox; the text is the seat's receipt.
-    Recorded(String),
-    /// A `read`, which the handler serves from the session log.
-    Read {
-        /// How many recent messages the seat asked for, already clamped.
-        limit: usize,
-    },
-    /// The call was refused. Rendered as a tool ERROR; the text is written to
-    /// be read by the seat and always contains `refused`.
-    Refused(String),
+/// A coordinator turn's place in the company hive (OC-2): the hive the turn
+/// answers in (absent for a direct message), the episode it belongs to and the
+/// conversation root.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HiveScope {
+    /// The hive (desk) id, when the turn answers in a hive.
+    pub hive_id: Option<String>,
+    /// The conducted episode the turn belongs to.
+    pub episode_id: Option<String>,
+    /// The hive conversation root the turn answers, by hive sequence.
+    pub thread: Option<u64>,
 }
 
 impl InFlight {
-    /// A turn with an empty outbox and no hive coordinates.
+    /// A turn with no hive coordinates.
     #[must_use]
     pub fn new(
         company: CompanyId,
@@ -111,14 +108,13 @@ impl InFlight {
             agent_id: agent_id.into(),
             surface,
             hive: None,
-            outbox: Vec::new(),
             executor: None,
         }
     }
 
-    /// Attaches the hive coordinates of a desk round.
+    /// Attaches the hive coordinates of a coordinator turn.
     #[must_use]
-    pub fn with_hive(mut self, hive: HiveTurn) -> Self {
+    pub fn with_hive(mut self, hive: HiveScope) -> Self {
         self.hive = Some(hive);
         self
     }
@@ -128,91 +124,6 @@ impl InFlight {
     pub fn with_executor(mut self, executor: ToolJobSender) -> Self {
         self.executor = Some(executor);
         self
-    }
-
-    /// Folds one speech call: `speech::interpret` over the wire arguments,
-    /// then the two host rules — one action per turn, and a `dm` may only
-    /// name desk members other than the speaker.
-    pub fn speak(&mut self, name: &str, arguments: &Value) -> Speech {
-        let message = arguments.get("message").and_then(Value::as_str);
-        let to: Vec<String> = arguments
-            .get("to")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let limit = arguments.get("limit").and_then(Value::as_u64);
-        let call = speech::interpret(
-            name,
-            &CallArguments {
-                message,
-                to: &to,
-                limit,
-            },
-        );
-        let utterance = match call {
-            Ok(ToolCall::Read { limit }) => return Speech::Read { limit },
-            Ok(ToolCall::Speak(utterance)) => utterance,
-            Err(rejection) => return Speech::Refused(format!("refused: {rejection}")),
-        };
-        if let Some(first) = self.outbox.first() {
-            return Speech::Refused(format!(
-                "refused: one action per turn; your first action is recorded ({}). End your \
-                 turn now — say nothing else.",
-                kind_of(first)
-            ));
-        }
-        if let Err(reason) = self.check_dm(&utterance) {
-            return Speech::Refused(format!("refused: {reason}"));
-        }
-        let receipt = format!(
-            "recorded: {} ({} chars). Your turn is complete; say nothing else.",
-            kind_of(&utterance),
-            utterance.message().chars().count()
-        );
-        self.outbox.push(utterance);
-        Speech::Recorded(receipt)
-    }
-
-    /// The `dm` rule: only inside a desk episode, only to members of that desk,
-    /// never only to oneself. Mirrors [`speech::check_recipients`] over the
-    /// captured membership instead of a live roster.
-    fn check_dm(&self, utterance: &Utterance) -> Result<(), String> {
-        let Utterance::Dm { to, .. } = utterance else {
-            return Ok(());
-        };
-        let Some(hive) = &self.hive else {
-            return Err(
-                "`dm` is only available inside a desk episode; this turn is not in one".to_string(),
-            );
-        };
-        for id in to {
-            if !hive.members.iter().any(|member| member == id) {
-                return Err(UtteranceRejection::UnknownRecipient { id: id.clone() }.to_string());
-            }
-        }
-        if to.iter().all(|id| id == &self.agent_id) {
-            return Err(UtteranceRejection::SelfRecipient.to_string());
-        }
-        Ok(())
-    }
-}
-
-/// The wire kind of an utterance, as `Utterance`'s serde tag spells it.
-fn kind_of(utterance: &Utterance) -> &'static str {
-    match utterance {
-        Utterance::Post { .. } => "post",
-        Utterance::Broadcast { .. } => "broadcast",
-        Utterance::Dm { .. } => "dm",
-        // New with the conductor: a private question to one seat, which
-        // opens a conversation only those two read.
-        Utterance::Ask { .. } => "ask",
-        Utterance::CompleteEpisode { .. } => "complete_episode",
     }
 }
 
@@ -323,7 +234,7 @@ impl InFlightRegistry {
 
 /// Ownership of one registered turn. Dropping it deregisters the turn, so a
 /// turn that panics or is cancelled never leaves its agent "busy" forever;
-/// [`finish`](Self::finish) deregisters it and hands the outbox back.
+/// [`finish`](Self::finish) deregisters it and hands its final state back.
 pub struct InFlightTicket {
     registry: Arc<InFlightRegistry>,
     runtime_agent_id: String,
@@ -345,13 +256,13 @@ impl InFlightTicket {
         &self.runtime_agent_id
     }
 
-    /// The turn as it stands now (the outbox so far).
+    /// The turn as it stands now.
     #[must_use]
     pub fn snapshot(&self) -> InFlight {
         self.slot.lock().expect("in-flight turn poisoned").clone()
     }
 
-    /// Deregisters the turn and returns its final state, outbox included.
+    /// Deregisters the turn and returns its final state.
     #[must_use]
     pub fn finish(self) -> InFlight {
         self.registry.remove(&self.runtime_agent_id);
@@ -489,58 +400,13 @@ pub fn share_belt(belt: Vec<Box<dyn Tool>>) -> Vec<Arc<dyn Tool>> {
 /// How a model reaches `tool` on a company agent — the shape the scripted
 /// models in this crate's turn tests emit, and the console's mock brain.
 ///
-/// **Almost everything is a bare name now.** This crate's own tools ride the
-/// agent's belt directly (`AgentSpec::tools`), so a model calls them the way
-/// it calls a shell: by name, against their own schema. Only the speech tools
-/// are still served over the `opencompany` server, because only a seat in an
-/// episode answers with one, and they go on the wire wrapped in
-/// `mcp_call_tool` with `args` as the arguments object.
+/// Always a bare name now: this crate's own tools ride the agent's belt
+/// directly (`AgentSpec::tools`), and the speech tools that were still served
+/// over the `opencompany` server went with the conducted episode (OC-2). Kept
+/// as the one seam the scripted turn tests spell a call through.
 #[must_use]
 pub fn via_opencompany_mcp(tool: &str, args: Value) -> (String, Value) {
-    if !speech_tool_names().contains(&tool) {
-        return (tool.to_string(), args);
-    }
-    (
-        "mcp_call_tool".to_string(),
-        json!({
-            "server": crate::hive::mcp_server::SERVER_SLUG,
-            "tool": tool,
-            "arguments": args,
-        }),
-    )
-}
-
-/// Renders one speech spec to an MCP tool descriptor.
-#[must_use]
-pub fn speech_descriptor(spec: &ToolSpec) -> Value {
-    let mut properties = serde_json::Map::new();
-    let mut required: Vec<&str> = Vec::new();
-    for parameter in spec.parameters {
-        let mut schema = match parameter.kind {
-            ParameterKind::Text => json!({ "type": "string" }),
-            ParameterKind::TextList => json!({ "type": "array", "items": { "type": "string" } }),
-            ParameterKind::Count { default, min, max } => json!({
-                "type": "integer", "minimum": min, "maximum": max, "default": default
-            }),
-        };
-        if let Some(description) = parameter.description {
-            schema["description"] = Value::String(description.to_string());
-        }
-        properties.insert(parameter.name.to_string(), schema);
-        if parameter.required {
-            required.push(parameter.name);
-        }
-    }
-    json!({
-        "name": spec.name,
-        "description": spec.description,
-        "inputSchema": {
-            "type": "object",
-            "properties": Value::Object(properties),
-            "required": required,
-            "additionalProperties": false,
-        },
-    })
+    (tool.to_string(), args)
 }
 
 #[cfg(test)]
