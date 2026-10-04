@@ -10,6 +10,8 @@
 
 mod fs;
 mod memory;
+#[cfg(feature = "sqlite")]
+mod sqlite;
 
 /// The backend-agnostic hive assertions every backend runs. Test-only.
 #[cfg(test)]
@@ -17,3 +19,5 @@ pub mod conformance;
 
 pub use fs::FsHiveStore;
 pub use memory::MemoryHiveStore;
+#[cfg(feature = "sqlite")]
+pub(crate) use sqlite::HIVE_MIGRATIONS;
