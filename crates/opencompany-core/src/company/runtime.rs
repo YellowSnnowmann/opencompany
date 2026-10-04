@@ -4445,7 +4445,7 @@ impl CompanyRuntime {
                     &self.id,
                     CompanyEvent::AgentReply {
                         audience: Vec::new(),
-                        episode: None,
+                        hive: None,
                         parent,
                         chat_id: chat_id.to_string(),
                         // Issue #885: the author, falling back to the
@@ -6779,7 +6779,7 @@ impl CompanyRuntime {
                 &self.id,
                 CompanyEvent::AgentReply {
                     audience: Vec::new(),
-                    episode: None,
+                    hive: None,
                     parent,
                     chat_id: thread.to_string(),
                     agent_id,

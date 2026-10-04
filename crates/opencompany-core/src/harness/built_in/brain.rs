@@ -2326,7 +2326,7 @@ impl HarnessBrain {
                     steps: Vec::new(),
                     task_id: Some(card.id.clone()),
                     outputs: Vec::new(),
-                    episode: None,
+                    hive: None,
                 },
             )
             .await
@@ -4361,7 +4361,7 @@ impl HarnessBrain {
                                         steps: response.steps.clone(),
                                         mentions: Vec::new(),
                                         mention_depth: 0,
-                                        episode: None,
+                                        hive: None,
                                     },
                                 )
                                 .await

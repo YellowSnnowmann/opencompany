@@ -1364,7 +1364,7 @@ async fn report_to_operator(
             &record.id,
             CompanyEvent::AgentReply {
                 audience: Vec::new(),
-                episode: None,
+                hive: None,
                 chat_id: dm.clone(),
                 agent_id: author.to_string(),
                 text: operator_report(subject, text),
