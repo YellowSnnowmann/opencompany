@@ -538,7 +538,7 @@ pub fn desk_routing_dto(record: &CompanyRecord, desk_id: &str, router: Router) -
 ///
 /// It answers for `OPENCOMPANY_JEV_KEY` and the inherited environment ladder,
 /// and it takes no company, so it cannot see a company's *own* stored key.
-/// [`crate::hive::dispatch::host_router`] does read that key, which means the
+/// `hive::route`, which picks a desk's starters, does read that key, which means the
 /// two can disagree: a company that signed in through the console has its
 /// desks routed by Jev while this reports `Fallback`. Reporting the host's
 /// ladder is right for the host-level question; it is the per-company answer
@@ -557,6 +557,66 @@ pub fn host_router() -> Router {
         }
     }
     Router::Fallback
+}
+
+/// The settled episodes the company Coordinator's state row keeps, and the
+/// acknowledged deliveries. The transcript is never pruned; these bound only
+/// the row every commit rewrites, which is what keeps a busy company's state
+/// document far from MongoDB's 16 MB cap.
+pub const RETAINED_SETTLED_EPISODES: usize = 256;
+/// See [`RETAINED_SETTLED_EPISODES`].
+pub const RETAINED_DELIVERIES: usize = 1024;
+
+/// The one company Coordinator's options, folded from every desk's block.
+///
+/// The Coordinator conducts every desk of a company, so per-desk pacing has
+/// to collapse to one value: the widest `round_width` any desk declares (a
+/// narrower desk is still bounded by its own membership), and an episode turn
+/// wall of that width times the longest `max_rounds` — the turns the slowest
+/// desk was allowed before. A company with no desks runs on the defaults.
+#[must_use]
+pub fn coordinator_options(record: &CompanyRecord) -> tinyhivemind_hives::CoordinatorOptions {
+    let desks = crate::runtime::delegation_tools::desk_ids(record);
+    let resolved: Vec<EffectiveRouting> = desks
+        .iter()
+        .map(|desk| desk_routing(record, desk))
+        .collect();
+    let round_width = resolved
+        .iter()
+        .map(|routing| routing.round_width)
+        .max()
+        .unwrap_or(DEFAULT_ROUND_WIDTH);
+    let max_rounds = resolved
+        .iter()
+        .map(|routing| routing.max_rounds)
+        .max()
+        .unwrap_or(DEFAULT_MAX_ROUNDS);
+    let mut conduct_policy = tinyhivemind_core::driver::ConductPolicy::default();
+    conduct_policy.turn_wall = (round_width as u64)
+        .saturating_mul(u64::from(max_rounds))
+        .max(1);
+    tinyhivemind_hives::CoordinatorOptions {
+        round_width,
+        conduct_policy,
+        broadcast_budget: None,
+        retention: tinyhivemind_hives::RetentionPolicy {
+            settled_episodes: Some(RETAINED_SETTLED_EPISODES),
+            delivered: Some(RETAINED_DELIVERIES),
+        },
+    }
+}
+
+/// The wall on one coordinator turn: the longest `turn_timeout_secs` any desk
+/// declares, or the default. One value for the same reason
+/// [`coordinator_options`] folds: the adapter applies one wall to every turn.
+#[must_use]
+pub fn turn_timeout(record: &CompanyRecord) -> std::time::Duration {
+    let secs = crate::runtime::delegation_tools::desk_ids(record)
+        .iter()
+        .map(|desk| desk_routing(record, desk).turn_timeout_secs)
+        .max()
+        .unwrap_or(DEFAULT_TURN_TIMEOUT_SECS);
+    std::time::Duration::from_secs(secs.max(1))
 }
 
 #[cfg(test)]
