@@ -1,4 +1,5 @@
 pub(super) use super::*;
+pub(super) use crate::company::steer::{InflightRegistry, SteerAction};
 pub(super) use crate::ports::tasks::COLUMN_TODO;
 pub(super) use crate::ports::tasks::TaskTitle;
 
@@ -652,7 +653,6 @@ impl Fixture {
             turns,
             &self.record,
             Some(&self.tasks),
-            &self.steer,
             &self.record.id,
             &self.queue,
             orchestrator::MAX_DELEGATIONS_PER_TURN,
