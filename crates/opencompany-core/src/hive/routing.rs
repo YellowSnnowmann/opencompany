@@ -1,10 +1,18 @@
 //! How a desk routes and paces the episodes it opens: the `[group_chat.routing]`
 //! block, its resolved policy, and the console's view of both.
 //!
+//! Since the OC-2 cutover the company hive's Coordinator conducts every
+//! episode; this block now feeds it and the host-side Jev route rather than a
+//! per-desk driver. [`coordinator_options`] folds every desk's block into the
+//! one company `CoordinatorOptions` (the widest round, the longest turn wall)
+//! and [`turn_timeout`] into the adapter's turn wall, while the Jev thresholds
+//! still freeze the `RoutingPolicy` a desk's starters are chosen under. The
+//! cross-desk referral block it once carried went with referral itself.
+//!
 //! One block, three readers. The manifest declares it (`RoutingConfig`, every
 //! key optional so "not said" stays distinct from any value it could hold);
-//! the runtime resolves it into the `tinyhivemind_embed::RoutingPolicy` a
-//! `CompletionDriver` and a Jev route are frozen on (`EffectiveRouting`); and
+//! the runtime resolves it into the `tinyhivemind_core::embed::RoutingPolicy` a
+//! Jev route is frozen on (`EffectiveRouting`); and
 //! the console reads the two side by side (`DeskRoutingDto`), because a
 //! `round_width = 2` is either an operator's decision or the library default
 //! and the two behave differently the moment the manifest changes.
@@ -20,9 +28,8 @@
 //! three ways.
 
 use serde::{Deserialize, Serialize};
-use tinyhivemind::referral::{ReferralPolicy, ReferralReach};
-use tinyhivemind::responder::{PROBABILITY_SCALE, Probability};
-use tinyhivemind_embed::{RoutingFallback, RoutingPlan, RoutingPolicy};
+use tinyhivemind_core::embed::{RoutingFallback, RoutingPlan, RoutingPolicy};
+use tinyhivemind_core::responder::{PROBABILITY_SCALE, Probability};
 
 use crate::ports::types::CompanyRecord;
 
@@ -352,7 +359,7 @@ pub enum RoutingPlanDto {
     Fallback {
         /// The seat.
         primary_id: String,
-        /// `snake_case` of `tinyhivemind_embed::RoutingFallback`.
+        /// `snake_case` of `tinyhivemind_core::embed::RoutingFallback`.
         reason: String,
     },
 }
