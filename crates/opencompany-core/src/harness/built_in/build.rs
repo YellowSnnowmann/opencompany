@@ -432,9 +432,7 @@ pub fn build_agent_with_model(
     #[cfg(feature = "mcp")]
     let mut company_mcp_servers: Vec<openhuman_embed::McpServer> = Vec::new();
 
-    // Deliberate-memory tools, oc-authored over this company's own context
-    // port — see `memory_tools`'s doc comment for why not the vendored ones.
-    let mut tools: Vec<Box<dyn Tool>> = memory_tools(deps, company, &manifest_agent.id);
+    let mut tools: Vec<Box<dyn Tool>> = Vec::new();
     // Belt tools this agent keeps but is not offered — see AgentBlueprint::unadvertised.
     let mut unadvertised: Vec<String> = Vec::new();
     // Approvals are an explicit agent action, not a policy side effect. Every
@@ -1465,6 +1463,7 @@ pub fn build_agent_with_model(
         workspace,
         policy,
         definition_name,
+        memory: AgentMemory::teammate(company, &manifest_agent.id),
     })
 }
 
@@ -1522,6 +1521,45 @@ pub struct AgentBlueprint {
     /// The definition name the agent runs under — its manifest id, or
     /// `integrations_agent` when Composio toolkits are wired.
     pub definition_name: String,
+    /// Whose memory the agent reads and writes (see [`AgentMemory`]).
+    pub memory: AgentMemory,
+}
+
+/// Whose OpenHuman memory an agent reads and writes.
+///
+/// Every agent on the shared runtime is bound, because an unbound agent would
+/// log its turns at the engine's default root — shared by every company the
+/// process serves. A teammate is bound as itself under its company's root
+/// ([`crate::memory::memory_root`]); a confined turn is bound to the same root
+/// but with memory **inactive**: no `memory` tool, no recalled pack, nothing
+/// logged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMemory {
+    /// The memory agent id: the teammate's manifest id.
+    pub agent_id: String,
+    /// The company's layout root (`team:<company>`).
+    pub root: String,
+    /// Whether the agent recalls, logs and carries the `memory` tool.
+    pub active: bool,
+}
+
+impl AgentMemory {
+    /// A teammate's memory: its own node under its company's root.
+    pub fn teammate(company: &CompanyId, agent_id: &str) -> Self {
+        Self {
+            agent_id: agent_id.to_string(),
+            root: crate::memory::memory_root(company),
+            active: true,
+        }
+    }
+
+    /// Bound to `company`'s root but switched off — a confined turn.
+    pub fn inactive(company: &CompanyId, agent_id: &str) -> Self {
+        Self {
+            active: false,
+            ..Self::teammate(company, agent_id)
+        }
+    }
 }
 
 impl std::fmt::Debug for AgentBlueprint {
@@ -1691,7 +1729,13 @@ pub fn agent_spec_for(
     // The MCP attachment stays for what MCP is actually for — the speech tools
     // an episode seat answers with, and any server an operator connected to
     // this company. A company with neither carries no bridge tools at all.
-    let tool_names = scope_tool_names(blueprint, belt, mcp.is_some());
+    let mut tool_names = scope_tool_names(blueprint, belt, mcp.is_some());
+    // OpenHuman's own `memory` tool (recall / fetch / learn / forget), built
+    // from the agent's config and so confined to its company's root. Named in
+    // the scope or the runtime withholds it.
+    if blueprint.memory.active {
+        tool_names.push(oh::memory::MEMORY_TOOL_NAME.to_string());
+    }
     let turn_scope_names = tool_names.clone();
     let mut system_prompt = blueprint.system_prompt.clone();
     if let Some(mcp) = mcp {
@@ -1712,7 +1756,12 @@ pub fn agent_spec_for(
                 .max_iterations(MAX_TOOL_ITERATIONS),
         )
         .provider(provider)
-        .access(Access::full());
+        .access(Access::full())
+        .memory(
+            openhuman_embed::MemoryBinding::new(blueprint.memory.agent_id.clone())
+                .root(blueprint.memory.root.clone()),
+        );
+    let memory_active = blueprint.memory.active;
     if let Some(belt) = belt {
         let belt = Arc::clone(belt);
         // **The gate travels with the belt.**
@@ -1986,6 +2035,10 @@ pub fn agent_spec_for(
         // agent shapes disagreed about the tool protocol for no reason. Pin the
         // pooled path to the same one.
         config.agent.tool_dispatcher = "native".into();
+        if !memory_active {
+            config.memory.recall.enabled = false;
+            config.memory.conversations.enabled = false;
+        }
         withhold_openhuman_docs(config);
         withhold_openhuman_composio(config);
     })
@@ -2233,40 +2286,6 @@ pub fn build_agent(
         // every caller of this wrapper is exercising something else.
         "",
     )
-}
-
-/// The intrinsic deliberate-memory tools (`memory_store` / `memory_recall` /
-/// `memory_forget`) — **oc-authored**, over the company's own `ContextStore`
-/// (issue #1113 / G11).
-///
-/// # Why not the vendored upstream tools (history that must not be re-learned)
-///
-/// Through openhuman's earlier API, `MemoryStoreTool::new` /
-/// `MemoryRecallTool::new` took the `Arc<dyn Memory>` directly, so each
-/// company's own `ContextStore` was exactly what the two tools read and wrote.
-/// The version this crate now vendors changed both constructors to
-/// `fn new(security: Arc<SecurityPolicy>)` / `fn new()` — no memory parameter
-/// — and moved resolution *inside* `execute()` to
-/// `active_memory_guard()`, which reaches an ambient `CoreContext`
-/// this crate's session/turn machinery never scopes (`rg CoreContext::scope`
-/// under `agent/harness/session` finds nothing), or — with no context bound —
-/// falls back to **one process-global workspace** resolved from
-/// `Config::load_or_init()`. Either path is disconnected from `.memory(memory)`
-/// on the session builder: `Tool::execute(&self, args)` takes no session or
-/// memory parameter at all, so there is no route left by which a per-company
-/// `Arc<dyn Memory>` could reach these two tools.
-///
-/// Wiring the upstream tools would mean every company's "deliberate" memory
-/// read and write lands in one shared, unconfigured store instead of that
-/// company's own `ContextStore` — silently wrong at best, a cross-company
-/// memory leak at worst under this crate's multi-tenant-in-one-process model.
-/// So the tools here are oc-authored instead (`super::memory_tools`), the
-/// `workspace_tools` shape: company and agent captured at build time, the
-/// port a field, nothing ambient for `execute()` to reach. Forget became
-/// possible when `ContextStore` grew `delete` (every backend implements it);
-/// it is scoped to the agent's own `agent-memory/<id>/` rows.
-fn memory_tools(deps: &HarnessDeps, company: &CompanyId, agent_id: &str) -> Vec<Box<dyn Tool>> {
-    super::memory_tools::memory_tools(deps.context.clone(), company.clone(), agent_id.to_string())
 }
 
 /// Whether an agent's effective `grants` cover a tool `namespace`.
