@@ -3553,25 +3553,6 @@ impl HarnessPool {
         Ok(())
     }
 
-    /// Drops every cached artifact for one company, so the next `ensure`
-    /// rebuilds its roster from scratch.
-    async fn invalidate_roster(&self, company: &CompanyId) {
-        self.agents.write().await.remove(company);
-        self.monthly_budgets.write().await.remove(company);
-        self.mcp_fingerprints.write().await.remove(company);
-        self.overlay_fingerprints.write().await.remove(company);
-        self.capability_fingerprints.write().await.remove(company);
-        self.composio_fingerprints.write().await.remove(company);
-        self.billing_fingerprints.write().await.remove(company);
-        self.skill_fingerprints.write().await.remove(company);
-        self.budget_fingerprints.write().await.remove(company);
-        self.override_fingerprints.write().await.remove(company);
-        self.company_name_fingerprints.write().await.remove(company);
-        self.policy_fingerprints.write().await.remove(company);
-        self.desk_fingerprints.write().await.remove(company);
-        self.grants_fingerprints.write().await.remove(company);
-        self.context_fingerprints.write().await.remove(company);
-    }
 
     /// Re-resolves the company's capability filter (issue #108): with a plan
     /// wired ([`HarnessDeps::plan`]), a per-tenant, per-period, fail-closed
