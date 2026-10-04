@@ -504,10 +504,12 @@ pub struct HarnessDeps {
     /// cheap-shared-handle pattern as [`Self::delegations`]; the default is an
     /// empty queue, which simply means nothing is ever parked.
     pub approval_requests: ApprovalRequestQueue,
-    /// Where a guest seat stages a takeover, and the dispatcher drains it once
-    /// the episode that produced it has ended. Same cheap-shared-handle shape
-    /// as the queues above; an empty default simply means nothing is claimed.
-    pub takeovers: crate::hive::takeover::TakeoverQueue,
+    /// Where the company hive's Coordinator persists its state and transcript
+    /// (OC-2) — the [`HiveStore`](crate::ports::hive::HiveStore) the storage
+    /// selection built beside the journal. With it (and [`Self::events`]) the
+    /// pool runs every conversational turn through the company hive; `None` —
+    /// every test that exercises a pooled turn — runs no hive at all.
+    pub hive_store: Option<Arc<dyn crate::ports::hive::HiveStore>>,
     /// The runtime's shared park transaction, for a turn that parks outside a
     /// cycle. `None` where no runtime is wired (tests, examples).
     pub approval_parker: Option<crate::runtime::approval_park::ApprovalParker>,
