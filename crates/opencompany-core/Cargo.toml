@@ -605,15 +605,7 @@ tinyhivemind-openhuman = { path = "../../vendor/tinyhivemind/crates/tinyhivemind
 # and *run* by nothing. Moving it into the default set makes both `cargo test`
 # lanes execute them, which is why this needs no new CI lane. It costs one pure
 # dependency (`jsonwebtoken`), already in `Cargo.lock`.
-#
-# `tinymemory` ships in the standard build because the memory-engine catalog is
-# a console surface in every build, and without this feature its engine tiles
-# (CortexDB, TinyHumans memory, "No memory") render disabled with "this build
-# was compiled without the `tinymemory` feature" — an instruction to go and
-# find a differently compiled binary, which for the desktop app and for anyone
-# running the shipped container is not an instruction they can follow. It is
-# pure Rust already in `Cargo.lock` (the contract, the registry and the cortex
-# HTTP engine); there is no in-pod engine to opt into any more.
+
 default = ["oauth", "platform-jwt", "documents"]
 # Text extraction for files dropped on the Brain page (PDF, Word, Excel,
 # PowerPoint). Without it those formats still upload and are still refused

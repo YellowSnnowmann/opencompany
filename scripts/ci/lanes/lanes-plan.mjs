@@ -250,7 +250,7 @@ export function buildPlan({ profile, areas, env = {} }) {
         {
           name: "clippy-acp",
           when: rust,
-          run: "cargo clippy --locked -p opencompany-core --no-deps --features acp,runner,tinymemory --all-targets -- -D warnings",
+          run: "cargo clippy --locked -p opencompany-core --no-deps --features acp,runner --all-targets -- -D warnings",
         },
         {
           name: "no-duplicated-openhuman",
@@ -265,34 +265,34 @@ export function buildPlan({ profile, areas, env = {} }) {
         {
           name: "runner",
           when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "runner" acp,runner,tinymemory runner`,
+          run: `scripts/ci/run-scoped-suite.sh "runner" acp,runner runner`,
         },
         // Four invocations, not one: run-scoped-suite.sh takes exactly one
         // filter (a second positional is libtest's, not a second filter).
         {
           name: "acp-server",
           when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "acp server" acp,runner,tinymemory server::acp`,
+          run: `scripts/ci/run-scoped-suite.sh "acp server" acp,runner server::acp`,
         },
         {
           name: "acp-run-turn",
           when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "acp run turn" acp,runner,tinymemory harness::acp::run_turn`,
+          run: `scripts/ci/run-scoped-suite.sh "acp run turn" acp,runner harness::acp::run_turn`,
         },
         {
           name: "acp-routes",
           when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "acp routes" acp,runner,tinymemory server::routes`,
+          run: `scripts/ci/run-scoped-suite.sh "acp routes" acp,runner server::routes`,
         },
         {
           name: "acp-lanes",
           when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "acp lanes" acp,runner,tinymemory harness::lanes`,
+          run: `scripts/ci/run-scoped-suite.sh "acp lanes" acp,runner harness::lanes`,
         },
         {
           name: "routes-no-acp",
           when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "routes no-acp" oauth,platform-jwt,documents,tinymemory console_does_not_shadow_unmatched_reserved_paths`,
+          run: `scripts/ci/run-scoped-suite.sh "routes no-acp" oauth,platform-jwt,documents console_does_not_shadow_unmatched_reserved_paths`,
         },
         {
           name: "chargebee",
@@ -365,29 +365,9 @@ export function buildPlan({ profile, areas, env = {} }) {
           run: `scripts/ci/run-scoped-suite.sh "hive mcp tools" openhuman,mcp,media hive::tools`,
         },
         {
-          name: "tinymemory-contract",
+          name: "bin-tests-acp",
           when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "tinymemory contract" acp,runner,tinymemory store::memory`,
-        },
-        {
-          name: "tinymemory-selection",
-          when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "tinymemory selection" acp,runner,tinymemory store::select`,
-        },
-        {
-          name: "bin-tests-tinymemory",
-          when: rust,
-          run: "cargo test --locked -p opencompany-core --features acp,runner,tinymemory --bin opencompany",
-        },
-        {
-          name: "memory-provider-contract",
-          when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "memory provider contract" tinymemory store::memory`,
-        },
-        {
-          name: "memory-selection",
-          when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "memory selection" tinymemory store::select`,
+          run: "cargo test --locked -p opencompany-core --features acp,runner --bin opencompany",
         },
         {
           name: "tinyplace",

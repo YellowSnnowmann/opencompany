@@ -81,10 +81,6 @@ env:
   # medulla (hosted brain transport), and sidecar. `sqlite` is intentionally omitted — its bundled rusqlite needs a C
   # compiler the slim build image lacks, and it is redundant on a mongodb tenant.
   #
-  # `tinymemory` is the hosted-memory contract: `OPENCOMPANY_MEMORY=remote` +
-  # `OPENCOMPANY_MEMORY_DRIVER=supermemory|mem0|cognee` (plus `null`), inert
-  # until an operator sets those.
-  #
   # `analytics` (issue #1739) is the OpenPanel transport, and this list is the
   # only place it is ever compiled: product analytics reports from **hosted
   # tenants only**, so the image built here is the one build that needs it,
@@ -114,7 +110,7 @@ env:
   # `sentry` plus a small `ureq` on the `rustls` already in the graph; no second
   # HTTP client and no native TLS (`cargo tree -d` is unchanged but for
   # `base64`).
-  TENANT_FEATURES: mongodb,openhuman,github,smtp,dns,tinyhumans,webhooks,platform-jwt,export,mcp,media,composio,imap,medulla,sidecar,chargebee,paypal,tinymemory,analytics,crash-reporting
+  TENANT_FEATURES: mongodb,openhuman,github,smtp,dns,tinyhumans,webhooks,platform-jwt,export,mcp,media,composio,imap,medulla,sidecar,chargebee,paypal,analytics,crash-reporting
 
 jobs:
   publish:
