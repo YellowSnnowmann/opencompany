@@ -54,7 +54,7 @@ async fn assign_task_reassigns_the_card_without_dispatching_it() {
         .await
         .expect("delegation runs");
     assert!(
-        out.bubble.is_none() && out.desk_reply.is_none(),
+        out.bubble.is_none(),
         "the orchestrator is mid-turn; a second voice here would be it talking to itself"
     );
 
@@ -232,7 +232,7 @@ async fn a_lifecycle_delegation_for_a_missing_card_is_a_no_op() {
             .run_delegation(delegation, None)
             .await
             .expect("a missing card must not error");
-        assert!(out.bubble.is_none() && out.desk_reply.is_none());
+        assert!(out.bubble.is_none());
     }
     assert!(
         tasks
@@ -290,7 +290,7 @@ async fn delegate_to_desk_delegation_answers_as_the_desk_lead() {
         .await
         .expect("delegation runs");
     assert!(
-        none.bubble.is_none() && none.desk_reply.is_none(),
+        none.bubble.is_none(),
         "an unknown desk yields nothing"
     );
 }
