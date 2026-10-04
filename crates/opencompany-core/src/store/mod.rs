@@ -1,12 +1,12 @@
 //! Filesystem-backed persistence for the runtime's durable ports.
 //!
 //! Each company owns a [`Bundle`] directory (see [`paths`]) holding its
-//! manifest, event log, ledger, memory, context, and secrets. The [`fs`]
+//! manifest, event log, ledger, cycle traces, and secrets. The [`fs`]
 //! module implements [`CompanyStore`](crate::ports::CompanyStore),
 //! [`EventLog`](crate::ports::EventLog),
-//! [`TraceStore`](crate::ports::TraceStore),
-//! [`ContextStore`](crate::ports::ContextStore), and
-//! [`SecretStore`](crate::ports::SecretStore) over that layout.
+//! [`TraceStore`](crate::ports::TraceStore), and
+//! [`SecretStore`](crate::ports::SecretStore) over that layout. Company memory
+//! is not stored here: it is OpenHuman's (`crate::memory`).
 
 /// Store-agnostic bundle export and import: read everything through the four
 /// durable ports and write the canonical fs [`Bundle`](paths::Bundle) layout
@@ -14,7 +14,7 @@
 /// directory; a single-file `.tar` wrapper is gated behind the `export` feature.
 pub mod export;
 pub mod fs;
-/// Filesystem backends for the WS3 console ports (tasks, facts, usage,
+/// Filesystem backends for the WS3 console ports (tasks, usage,
 /// skill-state, workspace tree) over the same [`Bundle`](paths::Bundle) layout.
 pub mod fs_ops;
 pub mod layout;
@@ -30,22 +30,12 @@ pub mod paths;
 
 /// Config-driven backend selection: maps `OPENCOMPANY_STORAGE` (fs | sqlite |
 /// mongodb) onto opened port implementations, injected once per process into
-/// every company's `RuntimeBuilder`. `OPENCOMPANY_MEMORY` can select a hosted
-/// provider overlay for the memory, context, and facts ports.
+/// every company's `RuntimeBuilder`.
 pub mod select;
 
-/// Char-boundary-safe slicing shared by the context backends' ranged `peek`
-/// and search-snippet windows, so a byte offset landing mid-codepoint widens
+/// Char-boundary-safe slicing, so a byte offset landing mid-codepoint widens
 /// to the boundary instead of panicking the slice.
 pub(crate) mod text;
-
-/// The shared lexical ranker behind `ContextStore::search`.
-///
-/// Stood four times over in `mongodb.rs`, `fs.rs`, `sqlite.rs` and
-/// the since-removed in-pod engine's module; three of those four copies carried the same two defects (a
-/// substring test scored 1.0, and truncation to `limit` before any sorting).
-/// One module, so the backends cannot drift apart again.
-pub mod lexical;
 
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
@@ -58,22 +48,10 @@ pub mod sqlite;
 #[cfg(feature = "mongodb")]
 pub mod mongodb;
 
-/// The TinyMemory `MemoryEngine` seam (issue #914): one engine-neutral contract
-/// behind the three memory ports, with the engine chosen by configuration — a
-/// hosted engine behind a credential (CortexDB, or the TinyHumans memory wire),
-/// or nothing. [`memory::BoundMemory`] is the only public way to get a port out
-/// of an engine, and it derives the tenant workspace from the `CompanyId`, which
-/// is what keeps the tenant-isolation invariant the ports' `&CompanyId`
-/// argument gives us and the engine's metadata-only scoping does not. Only
-/// links under `tinymemory`.
-#[cfg(feature = "tinymemory")]
-pub mod memory;
-
 /// A backend-agnostic port-conformance suite: async assertions parameterized
 /// over any [`CompanyStore`](crate::ports::CompanyStore) /
 /// [`EventLog`](crate::ports::EventLog) /
-/// [`TraceStore`](crate::ports::TraceStore) /
-/// [`ContextStore`](crate::ports::ContextStore) implementation. Both the fs and
+/// [`TraceStore`](crate::ports::TraceStore) implementation. Both the fs and
 /// sqlite backends run the identical suite, so a new store proves it upholds the
 /// port contract (per-company isolation, append-only logs, monotonic seqs,
 /// export totality) rather than re-testing each backend by hand. Test-only.
@@ -81,8 +59,7 @@ pub mod memory;
 pub mod conformance;
 
 pub use fs::{
-    FsCompanyStore, FsContextStore, FsEventLog, FsInboxStore, FsJournalStore, FsTraceStore,
-    FsSecretStore,
+    FsCompanyStore, FsEventLog, FsInboxStore, FsJournalStore, FsSecretStore, FsTraceStore,
 };
 pub use fs_ops::FsOps;
 pub use layout::DataLayout;
@@ -93,8 +70,7 @@ pub use layout::DataLayout;
 pub use migrate::migrate_legacy_nest_announced;
 pub use paths::{Bundle, DATA_DIR_ENV, home_divergence_warning, resolve_home};
 pub use select::{
-    MemoryBackend, MemoryOverlay, MemoryScopes, MemorySelection, StorageHandles, StorageKind,
-    StorageSettings, open_memory_overlay, open_storage, plaintext_secret_refusal,
+    StorageHandles, StorageKind, StorageSettings, open_storage, plaintext_secret_refusal,
     refuse_bundle_env,
 };
 
@@ -103,17 +79,3 @@ pub use sqlite::SqliteStore;
 
 #[cfg(feature = "mongodb")]
 pub use mongodb::MongoStore;
-
-use std::hash::{DefaultHasher, Hash, Hasher};
-
-/// Computes the content address of a context-chunk body.
-///
-/// Shared by every [`ContextStore`](crate::ports::ContextStore) backend so the
-/// fs and sqlite stores mint identical addresses for identical bodies. Phase 1
-/// uses a non-cryptographic [`DefaultHasher`]; a real content hash (sha-256) is
-/// a documented follow-up.
-pub(crate) fn content_address(body: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    body.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
-}
