@@ -1443,11 +1443,10 @@ impl HarnessBrain {
                                 // via the #186 lifecycle seam; the loop still yields
                                 // the reply so the #185/#190 completion events
                                 // report the same text that landed in the note.
-                                let (end, result) = match () {
+                                let (end, result) = if outcome.ceiling_paused.is_some() {
                                     // A ceiling pause can happen after tool calls, so
                                     // settle it only after draining the staged board
                                     // writes above (issue #1680).
-                                    () if outcome.ceiling_paused.is_some() => {
                                         let pause = outcome
                                             .ceiling_paused
                                             .as_ref()
@@ -1455,8 +1454,7 @@ impl HarnessBrain {
                                         let result = ceiling_pause_notice(pause);
                                         settle(&mut card, TaskRunEnd::Paused, &responder, &result);
                                         (TaskRunEnd::Paused, result)
-                                    }
-                                    () => {
+                                } else {
                                         let result = outcome.reply;
                                         settle(
                                             &mut card,
@@ -1465,7 +1463,6 @@ impl HarnessBrain {
                                             &result,
                                         );
                                         (TaskRunEnd::Completed, result)
-                                    }
                                 };
                                 break (end, result);
                             }
