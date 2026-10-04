@@ -105,6 +105,9 @@ pub mod file_tool_outputs;
 /// The keys it reads live in `company::hosting`, which is compiled in every
 /// build — the console's Hosting settings write them whether or not this
 /// harness exists to use them.
+/// The company hive's turn hooks: admission, the turn bracket, the per-turn
+/// claims, and the filing of what a coordinator turn left (OC-2).
+pub mod hive_hooks;
 pub mod hosting;
 /// End-to-end proof of issue #988: a turn really does get
 /// [`MAX_TOOL_ITERATIONS`](build::MAX_TOOL_ITERATIONS) tool rounds instead of the
@@ -175,6 +178,8 @@ mod publish_turn_helpers_tests;
 #[cfg(test)]
 mod publish_turn_link_tests;
 pub mod run_origin;
+/// A shared tool handed out as an owned belt entry per turn.
+pub mod shared_tool;
 pub mod run_trace;
 pub mod run_turn;
 pub mod search;
@@ -199,6 +204,9 @@ pub mod steer;
 pub mod steps;
 pub mod title;
 pub mod tool_posture;
+/// What every agent turn runs inside — the turn lock, the tool executor, the
+/// stop hooks — and the admission gates before it (OC-2).
+pub(crate) mod turn_envelope;
 pub mod toolbelt;
 pub mod triage;
 pub mod turn_outputs;
