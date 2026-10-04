@@ -43,7 +43,7 @@ use crate::harness::{HarnessDeps, HarnessPool};
 use crate::ports::WorkflowRunContext;
 use crate::ports::types::CompanyRecord;
 use crate::runtime::journal::RuntimeJournal;
-use crate::store::{FsCompanyStore, FsContextStore, FsInboxStore, FsOps};
+use crate::store::{FsCompanyStore, FsInboxStore, FsOps};
 use crate::workflows::delivery::{DeliveryParking, WorkflowDeliveryDeps};
 
 /// A graph whose single working node is an agent turn — the exact shape a

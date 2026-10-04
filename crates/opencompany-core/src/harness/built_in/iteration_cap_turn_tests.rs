@@ -57,7 +57,7 @@ use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{CompanyAgent, HarnessDeps};
 use crate::ports::types::CompanyId;
 use crate::runtime::delegation::ChatTarget;
-use crate::store::{FsCompanyStore, FsContextStore};
+use crate::store::{FsCompanyStore};
 
 /// The vendored `AgentConfig::default().max_tool_iterations` this crate used to
 /// inherit by omission — the number #988 exists to leave behind.
@@ -200,7 +200,6 @@ fn deps(model_url: String, dir: &std::path::Path) -> HarnessDeps {
         })),
         provider_slug: "managed".to_string(),
         serves: None,
-        context: Arc::new(FsContextStore::new(dir)),
         store: Arc::new(FsCompanyStore::new(dir)),
         meter: None,
         workspace_root: dir.to_path_buf(),
@@ -220,7 +219,6 @@ fn deps(model_url: String, dir: &std::path::Path) -> HarnessDeps {
         skills_registry: std::sync::Arc::from([]),
         default_mcp_servers: Vec::new(),
         mcp_servers: Vec::new(),
-        facts: None,
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: WorkflowRunnerHandle::default(),

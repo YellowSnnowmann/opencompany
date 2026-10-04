@@ -41,7 +41,7 @@ use crate::ports::types::{
     ApprovalId, CompanyEvent, CompanyId, CompanyRecord, ContextOp, ContextOpResult, CycleRequest,
     Effect, EffectDisposition, ToolCall, ToolResult,
 };
-use crate::store::{FsCompanyStore, FsContextStore, FsOps};
+use crate::store::{FsCompanyStore, FsOps};
 
 /// The agent this fixture dispatches to. Its workspace is
 /// `{root}/acme/ceo/workspace`.

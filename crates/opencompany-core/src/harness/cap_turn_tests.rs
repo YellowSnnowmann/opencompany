@@ -49,7 +49,7 @@ use crate::ports::types::{
     ApprovalId, CompanyEvent, CompanyId, CompanyRecord, ContextOp, ContextOpResult, CycleRequest,
     Effect, EffectDisposition, OutboundMessage, ToolCall, ToolResult,
 };
-use crate::store::{FsCompanyStore, FsContextStore, FsOps};
+use crate::store::{FsCompanyStore, FsOps};
 
 /// The agent every test here talks to.
 const AGENT: &str = "ceo";

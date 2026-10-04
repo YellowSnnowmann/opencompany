@@ -426,7 +426,7 @@ async fn wire_company_agent(
     use crate::harness::build::{agent_workspace, build_agent};
     use crate::harness::policy::ApprovalPolicy;
     use crate::harness::provider::{HostedProvider, HostedProviderConfig};
-    use crate::store::{FsCompanyStore, FsContextStore};
+    use crate::store::{FsCompanyStore};
 
     let deps = HarnessDeps {
         takeovers: Default::default(),
