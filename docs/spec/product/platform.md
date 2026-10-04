@@ -11,7 +11,7 @@ Depend on the `opencompany` crate and construct companies programmatically:
 let runtime = RuntimeBuilder::new(manifest)
     .company_store(my_postgres_store)   // any impl of the port traits
     .event_log(my_postgres_log)
-    .trace_store(my_s3_traces)          // cycle traces; company memory is OpenHuman's
+    .with_traces(my_s3_traces)          // cycle traces; company memory is OpenHuman's
     .build()?;
 ```
 
