@@ -468,8 +468,7 @@ impl NewRun {
             workflow_run_id: None,
             node_id: None,
             thread_root: None,
-            episode_id: None,
-            round_revision: None,
+            hive: None,
         }
     }
 
@@ -487,8 +486,7 @@ impl NewRun {
             workflow_run_id: None,
             node_id: None,
             thread_root: None,
-            episode_id: None,
-            round_revision: None,
+            hive: None,
         }
     }
 
@@ -534,8 +532,7 @@ impl NewRun {
             workflow_run_id: Some(workflow_run_id.into()),
             node_id: Some(node_id.into()),
             thread_root: None,
-            episode_id: None,
-            round_revision: None,
+            hive: None,
         }
     }
 }

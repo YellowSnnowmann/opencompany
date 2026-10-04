@@ -45,8 +45,7 @@ fn single_agent_picks_one_addressee_and_falls_back_otherwise() {
                 parent: None,
                 by: None,
                 agent_id: None,
-                episode_id: None,
-                round_revision: None,
+                hive: None,
             },
         )]),
         None

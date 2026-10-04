@@ -321,8 +321,7 @@ async fn boot_reclaims_a_chat_turn_stranded_by_a_previous_host() {
                 parent: None,
                 by: None,
                 agent_id: None,
-                episode_id: None,
-                round_revision: None,
+                hive: None,
             },
         )
         .await
@@ -412,8 +411,7 @@ async fn a_rebuild_sweeps_no_live_chat_turn() {
                 parent: None,
                 by: None,
                 agent_id: None,
-                episode_id: None,
-                round_revision: None,
+                hive: None,
             },
         )
         .await

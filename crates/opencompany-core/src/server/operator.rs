@@ -3526,8 +3526,7 @@ async fn accept_chat_turn(
                     parent,
                     by: by.cloned(),
                     agent_id: None,
-                    episode_id: None,
-                    round_revision: None,
+                    hive: None,
                 },
             )
             .await
@@ -3598,8 +3597,7 @@ async fn settle_chat_turn_by(
                     error: failure.0.to_string(),
                     agent_id: agent_id.map(str::to_string),
                     chat_id: None,
-                    episode_id: None,
-                    round_revision: None,
+                    hive: None,
                     outcome: None,
                 },
             )
@@ -3621,8 +3619,7 @@ async fn settle_chat_turn_by(
                     turn_id: turn_id.to_string(),
                     agent_id: agent_id.map(str::to_string),
                     chat_id: None,
-                    episode_id: None,
-                    round_revision: None,
+                    hive: None,
                     outcome: crate::ports::types::TurnOutcome::Committed,
                 },
             )

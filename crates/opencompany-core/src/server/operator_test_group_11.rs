@@ -668,8 +668,7 @@ fn projects_turn_started_with_structural_keys_only() {
             id: "u-1".into(),
         }),
         agent_id: None,
-        episode_id: None,
-        round_revision: None,
+        hive: None,
     }))
     .expect("an accepted turn is an attention signal");
     assert_eq!(v["type"], "turn_started");
@@ -691,8 +690,7 @@ fn projects_turn_started_with_structural_keys_only() {
         parent: None,
         by: None,
         agent_id: None,
-        episode_id: None,
-        round_revision: None,
+        hive: None,
     }))
     .expect("an accepted turn is an attention signal");
     assert!(v.get("parentId").is_none(), "unexpected parentId: {v}");
@@ -709,8 +707,7 @@ fn projects_turn_settled_without_the_failure_reason() {
         error: "connection to db-primary.internal refused".into(),
         agent_id: None,
         chat_id: None,
-        episode_id: None,
-        round_revision: None,
+        hive: None,
         outcome: None,
     }))
     .expect("a settled turn is an attention signal");
