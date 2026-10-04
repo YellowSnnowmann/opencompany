@@ -2889,9 +2889,6 @@ fn cycle_task_id(
     let mut found: Option<String> = None;
     for event in events {
         let candidate = match event {
-            // Never a trigger: the marker records that a child turn was created,
-            // it does not ask for one.
-            CompanyEvent::ReferralEnqueued { .. } => None,
             CompanyEvent::TaskDispatched { task_id, .. } => Some(task_id.clone()),
             CompanyEvent::ApprovalResolved { approval_id, .. } => {
                 match approval_task(approval_id) {
@@ -2962,21 +2959,13 @@ fn cycle_task_id(
             | CompanyEvent::DeskMembersChanged { .. }
             | CompanyEvent::DeskRoutingConfigured { .. }
             | CompanyEvent::SkillChanged { .. }
-            // Plan hive-desks, Phase 4: the episode record — brackets around
-            // the `AgentReply` rows a room wrote, and the driver's checkpoint.
-            // Records of a round that already ran, not stimuli for a cycle.
-            | CompanyEvent::EpisodeOpened { .. }
-            | CompanyEvent::RoundStarted { .. }
-            | CompanyEvent::RoundCommitted { .. }
-            | CompanyEvent::BroadcastRouted { .. }
-            | CompanyEvent::DmDelivered { .. }
-            | CompanyEvent::EpisodeCompleted { .. }
-            | CompanyEvent::ConversationOpened { .. }
-            | CompanyEvent::ConversationConcluded { .. }
-            | CompanyEvent::UtteranceRefused { .. }
-            | CompanyEvent::EpisodeSeatParked { .. }
-            | CompanyEvent::EpisodeSeatResumed { .. }
-            | CompanyEvent::EpisodeStateSaved { .. }
+            // OC-2: the company hive's record — rows the projector wrote
+            // from a Coordinator commit that already happened. Records, not
+            // stimuli for a cycle.
+            | CompanyEvent::HiveAccepted { .. }
+            | CompanyEvent::HiveMessage { .. }
+            | CompanyEvent::HiveEpisodeSettled { .. }
+            | CompanyEvent::HiveTurnInterrupted { .. }
             | CompanyEvent::WorkflowEnabledChanged { .. }
             | CompanyEvent::WorkflowRunFinished { .. }
             // Issue #371/#382: a run's start and its per-node start/finish
@@ -3222,21 +3211,13 @@ fn cycle_conversation(
             | CompanyEvent::DeskMembersChanged { .. }
             | CompanyEvent::DeskRoutingConfigured { .. }
             | CompanyEvent::SkillChanged { .. }
-            // Plan hive-desks, Phase 4: the episode record — brackets around
-            // the `AgentReply` rows a room wrote, and the driver's checkpoint.
-            // Records of a round that already ran, not stimuli for a cycle.
-            | CompanyEvent::EpisodeOpened { .. }
-            | CompanyEvent::RoundStarted { .. }
-            | CompanyEvent::RoundCommitted { .. }
-            | CompanyEvent::BroadcastRouted { .. }
-            | CompanyEvent::DmDelivered { .. }
-            | CompanyEvent::EpisodeCompleted { .. }
-            | CompanyEvent::ConversationOpened { .. }
-            | CompanyEvent::ConversationConcluded { .. }
-            | CompanyEvent::UtteranceRefused { .. }
-            | CompanyEvent::EpisodeSeatParked { .. }
-            | CompanyEvent::EpisodeSeatResumed { .. }
-            | CompanyEvent::EpisodeStateSaved { .. }
+            // OC-2: the company hive's record — rows the projector wrote
+            // from a Coordinator commit that already happened. Records, not
+            // stimuli for a cycle.
+            | CompanyEvent::HiveAccepted { .. }
+            | CompanyEvent::HiveMessage { .. }
+            | CompanyEvent::HiveEpisodeSettled { .. }
+            | CompanyEvent::HiveTurnInterrupted { .. }
             | CompanyEvent::WorkflowEnabledChanged { .. }
             | CompanyEvent::WorkflowRunFinished { .. }
             | CompanyEvent::WorkflowRunStarted { .. }
