@@ -215,19 +215,18 @@ pub fn existing() -> Option<Arc<Runtime>> {
 
 /// The domain families the one process-wide runtime registers.
 ///
-/// The embed default (`DomainSet::embedded()` plus MCP and skills), with
-/// OpenHuman's own **memory domain switched off**. That domain is one engine
-/// bound to this runtime's single `Config` and credential, and with it on, its
-/// conversation-ingest subscriber batches every committed turn into that one
-/// engine — across every company this process serves. Company memory belongs to
-/// `store::memory::BoundMemory`, which scopes every read and write to the
-/// company the call is made for; a second, unscoped memory path beside it would
-/// be a cross-tenant leak.
+/// The embed default (`DomainSet::embedded()`) plus MCP, skills and
+/// **memory**. Memory is OpenHuman's: every company agent is bound to its
+/// company's root (`MemoryBinding`, `harness::built_in::build::agent_spec_for`)
+/// and its turns run TinyMemory's lifecycle there. No path ingests a turn
+/// outside its agent's binding — the session host runs the hooks under the
+/// agent's own config — so one engine serves every company without one
+/// reaching another's subtree (`crate::memory`).
 pub(crate) fn host_domains() -> openhuman_core::core::runtime::DomainSet {
     let mut domains = openhuman_core::core::runtime::DomainSet::embedded();
     domains.mcp = true;
     domains.skills = true;
-    domains.memory = false;
+    domains.memory = true;
     domains
 }
 
@@ -251,6 +250,16 @@ async fn build(boot: RuntimeBoot) -> crate::Result<Arc<Runtime>> {
     }
     if let Some(url) = boot.backend_url.as_deref() {
         builder = builder.backend_url(url);
+    }
+    // A unit-test binary has no TinyHumans credential, so the configured
+    // engine is off; TinyMemory's in-memory reference engine stands in, so
+    // memory paths run for real. Companies stay apart by root, as in
+    // production.
+    #[cfg(test)]
+    {
+        builder = builder.memory_engine(std::sync::Arc::new(
+            tinymemory_api::conformance::ReferenceEngine::new(),
+        ));
     }
     match builder.build().await {
         Ok(runtime) => {
