@@ -24,7 +24,7 @@ An Operator boots a real company from a manifest and works with it daily.
 - **Phase 2 — Hosted Medulla brain.** `HostedMedullaBrain` speaking the
   [/orchestration/v1 wire contract](integrations/medulla.md): HTTP event
   ingestion plus the Socket.IO effect/device-tool channel. Compressed traces
-  land in `MemoryStore`; budget ledger starts. Requires a TinyHumans
+  land in `TraceStore` (then `MemoryStore`); budget ledger starts. Requires a TinyHumans
   credential ([runtime/config.md](runtime/config.md)).
 - **Phase 3 — Tools, channels, approvals via OpenHuman.** `ApprovalGate`
   mapped to OpenHuman policy tiers; cron schedules; the
@@ -46,7 +46,8 @@ The product improves itself and companies remember.
   operator-pluggable store guide, export/import migration between local and
   hosted.
 - **Phase 6 — Memory maturity + alternate brains.** TinyCortex `MemoryStore` /
-  `ContextStore` implementations; `SidecarBrain`; feedback triage agent;
+  `ContextStore` implementations (**superseded**: replaced wholesale by
+  OpenHuman memory v2, [runtime/memory-engine.md](runtime/memory-engine.md)); `SidecarBrain`; feedback triage agent;
   Signals and the Opportunity Engine arrive as a venture-studio Template, not
   kernel code.
 - **Phase 7 — Agentic setup + Manager.** The [agentic company](agentic/README.md):
