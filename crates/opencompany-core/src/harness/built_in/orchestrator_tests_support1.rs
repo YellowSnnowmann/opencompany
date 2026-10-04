@@ -69,15 +69,6 @@ members = ["nobody"]
     }
 }
 
-pub(super) fn desk_tool(record: CompanyRecord, queue: &DelegationQueue) -> DelegateToDeskTool {
-    let company = record.id.clone();
-    DelegateToDeskTool::new(
-        queue.clone(),
-        company,
-        Arc::new(MemStore::seeded(record)) as Arc<dyn CompanyStore>,
-    )
-}
-
 // --- Recursive desk delegation (issue #176) -----------------------------
 
 /// A three-desk record where two desks have roster leads, so a member of one
@@ -123,23 +114,6 @@ members = ["ceo"]
         manifest,
         ..seeded_record(id)
     }
-}
-
-/// The `writer`'s copy of `delegate_to_desk`: allowed `research` only.
-pub(super) fn member_desk_tool(
-    record: CompanyRecord,
-    queue: &DelegationQueue,
-) -> DelegateToDeskTool {
-    let company = record.id.clone();
-    DelegateToDeskTool::for_member(
-        queue.clone(),
-        company,
-        Arc::new(MemStore::seeded(record)) as Arc<dyn CompanyStore>,
-        MemberScope {
-            member: "writer".to_string(),
-            delegates_to: vec!["research".to_string()],
-        },
-    )
 }
 
 /// A store that cannot answer, so the grounding read has nothing to check
