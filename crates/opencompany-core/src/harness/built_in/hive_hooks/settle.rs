@@ -382,12 +382,8 @@ impl SettleTurn<'_> {
             )
             .with_approvals(&deps.approval_requests)
             .with_workflow_refs(&deps.workflow_refs);
-            let context = MessageContext {
-                answering: !self.operator,
-                ..MessageContext::default()
-            };
             match delegations
-                .scoped(runner.drain_and_execute(Some(self.chat), context))
+                .scoped(runner.drain_and_execute(Some(self.chat)))
                 .await
             {
                 Ok(drained) => {
