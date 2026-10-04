@@ -71,8 +71,31 @@ impl HiveStore for MongoStore {
         company: &CompanyId,
         before: Option<u64>,
     ) -> Result<Option<HiveSnapshot>> {
-        let _ = (company, before);
-        todo!("load_hive")
+        let Some(stored) = read_state(self, company).await? else {
+            return Ok(None);
+        };
+        let bound = load_bound(stored.state.next_sequence, before);
+        let mut rows: BTreeMap<u64, HiveMessageRow> = BTreeMap::new();
+        let mut cursor = self
+            .collection(HIVE_MESSAGES)
+            .find(doc! {"company_id": company.as_ref(), "sequence": {"$lt": to_i64(bound)?}})
+            .sort(doc! {"sequence": 1})
+            .await
+            .map_err(mongo_err)?;
+        while let Some(document) = cursor.try_next().await.map_err(mongo_err)? {
+            let row = decode_row(&document)?;
+            rows.insert(row.sequence, row);
+        }
+        // The latest commit's rows may not have reached the collection yet.
+        for row in stored.pending {
+            if row.sequence < bound {
+                rows.insert(row.sequence, row);
+            }
+        }
+        Ok(Some(HiveSnapshot {
+            state: stored.state,
+            messages: rows.into_values().collect(),
+        }))
     }
 
     async fn commit_hive(
@@ -82,12 +105,162 @@ impl HiveStore for MongoStore {
         next: HiveStateDoc,
         appended: Vec<HiveMessageRow>,
     ) -> Result<HiveCommit> {
-        let _ = (company, expected, next, appended);
-        todo!("commit_hive")
+        let current = read_state(self, company).await?;
+        let current_key = current
+            .as_ref()
+            .map(|stored| (stored.state.revision.as_str(), stored.state.next_sequence));
+        if let CommitCheck::Conflict(current) = check_commit(current_key, expected, &next, &appended)? {
+            return Ok(HiveCommit::Conflict { current });
+        }
+        // Step 2: the previous commit's rows must be in the collection before
+        // this swap replaces the only other copy of them.
+        if let Some(stored) = &current {
+            materialize(self, company, &stored.pending).await?;
+        }
+
+        let pending = appended
+            .iter()
+            .map(encode_pending)
+            .collect::<Result<Vec<Document>>>()?;
+        let fields = doc! {
+            "company_id": company.as_ref(),
+            "revision": next.revision.as_str(),
+            "next_sequence": to_i64(next.next_sequence)?,
+            "body_json": serde_json::to_string(&next.body)?,
+            "pending": pending,
+            "updated_ms": now_millis() as i64,
+        };
+        let state = self.collection(HIVE_STATE);
+        let swapped = match expected {
+            None => {
+                let mut document = doc! {"_id": company.as_ref()};
+                document.extend(fields);
+                match state.insert_one(document).await {
+                    Ok(_) => true,
+                    Err(error) if is_duplicate_key(&error) => false,
+                    Err(error) => return Err(mongo_err(error)),
+                }
+            }
+            Some(expected) => {
+                state
+                    .update_one(
+                        doc! {"_id": company.as_ref(), "revision": expected},
+                        doc! {"$set": fields},
+                    )
+                    .await
+                    .map_err(mongo_err)?
+                    .matched_count
+                    == 1
+            }
+        };
+        if !swapped {
+            let current = read_state(self, company)
+                .await?
+                .map(|stored| stored.state.revision);
+            return Ok(HiveCommit::Conflict { current });
+        }
+
+        // Step 4: best effort. The rows are committed (they are in `pending`),
+        // so failing the call here would tell the caller a landed commit did
+        // not land; the next commit writes them out before it swaps.
+        if let Err(error) = materialize(self, company, &appended).await {
+            tracing::warn!(
+                company = %company.as_ref(), %error,
+                "hive rows committed but not yet written to hive_messages; \
+                 the next commit writes them"
+            );
+        }
+        Ok(HiveCommit::Committed)
     }
 
+    /// State first, so the company reads as absent the moment the purge
+    /// starts; rows a crash leaves behind sit above any recreated document's
+    /// `next_sequence` until a commit replaces them.
     async fn purge_hive(&self, company: &CompanyId) -> Result<()> {
-        let _ = company;
-        todo!("purge_hive")
+        self.collection(HIVE_STATE)
+            .delete_one(doc! {"_id": company.as_ref()})
+            .await
+            .map_err(mongo_err)?;
+        self.collection(HIVE_MESSAGES)
+            .delete_many(doc! {"company_id": company.as_ref()})
+            .await
+            .map_err(mongo_err)?;
+        Ok(())
     }
+}
+
+async fn read_state(store: &MongoStore, company: &CompanyId) -> Result<Option<Stored>> {
+    let Some(document) = store
+        .collection(HIVE_STATE)
+        .find_one(doc! {"_id": company.as_ref()})
+        .await
+        .map_err(mongo_err)?
+    else {
+        return Ok(None);
+    };
+    let pending = match document.get_array("pending") {
+        Ok(items) => items
+            .iter()
+            .map(|item| match item {
+                Bson::Document(row) => decode_row(row),
+                other => Err(mongo_err(format!("hive pending row is not a document: {other}"))),
+            })
+            .collect::<Result<Vec<_>>>()?,
+        Err(_) => Vec::new(),
+    };
+    Ok(Some(Stored {
+        state: HiveStateDoc {
+            revision: get_str(&document, "revision")?,
+            next_sequence: from_i64(get_i64(&document, "next_sequence")?)?,
+            body: serde_json::from_str(&get_str(&document, "body_json")?)?,
+        },
+        pending,
+    }))
+}
+
+/// Upserts `rows` into `hive_messages`, replacing whatever holds each key —
+/// which is how an orphan above the old `next_sequence` is overwritten.
+async fn materialize(store: &MongoStore, company: &CompanyId, rows: &[HiveMessageRow]) -> Result<()> {
+    let messages = store.collection(HIVE_MESSAGES);
+    for row in rows {
+        let sequence = to_i64(row.sequence)?;
+        messages
+            .replace_one(
+                doc! {"_id": {"c": company.as_ref(), "s": sequence}},
+                doc! {
+                    "company_id": company.as_ref(),
+                    "sequence": sequence,
+                    "body_json": serde_json::to_string(&row.body)?,
+                },
+            )
+            .upsert(true)
+            .await
+            .map_err(mongo_err)?;
+    }
+    Ok(())
+}
+
+fn encode_pending(row: &HiveMessageRow) -> Result<Document> {
+    Ok(doc! {
+        "sequence": to_i64(row.sequence)?,
+        "body_json": serde_json::to_string(&row.body)?,
+    })
+}
+
+fn decode_row(document: &Document) -> Result<HiveMessageRow> {
+    Ok(HiveMessageRow {
+        sequence: from_i64(get_i64(document, "sequence")?)?,
+        body: serde_json::from_str(&get_str(document, "body_json")?)?,
+    })
+}
+
+/// BSON integers are signed; a sequence past `i64::MAX` is refused rather
+/// than wrapped into a negative that would sort first.
+fn to_i64(value: u64) -> Result<i64> {
+    i64::try_from(value)
+        .map_err(|_| OpenCompanyError::InvalidRequest(format!("hive sequence {value} is too large")))
+}
+
+fn from_i64(value: i64) -> Result<u64> {
+    u64::try_from(value).map_err(|_| mongo_err(format!("negative hive sequence {value}")))
 }
