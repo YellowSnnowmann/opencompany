@@ -214,7 +214,7 @@ fn relay_bubble(origin: &str) -> CompanyEvent {
         parent: None,
         mentions: Vec::new(),
         mention_depth: 0,
-        episode: None,
+        hive: None,
     }
 }
 
@@ -236,7 +236,7 @@ fn advisory_bubble(origin: &str) -> CompanyEvent {
         parent: None,
         mentions: Vec::new(),
         mention_depth: 0,
-        episode: None,
+        hive: None,
     }
 }
 
@@ -432,7 +432,7 @@ async fn a_grandfathered_system_teammate_still_anchors_its_own_relay() {
             parent: None,
             mentions: Vec::new(),
             mention_depth: 0,
-            episode: None,
+            hive: None,
         },
     )
     .await;
