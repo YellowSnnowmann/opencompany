@@ -1694,6 +1694,7 @@ impl CompanyRuntime {
                     approval_id: approval_id.clone(),
                     effect_kind: effect.kind.clone(),
                     thread: Some(thread.clone()),
+                    origin: None,
                 },
             )
             .await

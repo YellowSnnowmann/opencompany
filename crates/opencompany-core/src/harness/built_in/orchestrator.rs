@@ -2616,10 +2616,6 @@ fn truncate_chars(s: &str, max: usize) -> String {
 fn summarize_event(event: &CompanyEvent) -> String {
     match event {
         CompanyEvent::OperatorMessage { .. } => "operator message".to_string(),
-        // Structural only, like every arm here: which desks, never the content.
-        CompanyEvent::ReferralEnqueued {
-            from_desk, to_desk, ..
-        } => format!("referral {from_desk} → {to_desk}"),
         // Issue #983. Structural only, like every arm here: the turn id, which
         // is a minted identifier, and nothing else. Neither the desk nor the
         // failure reason is named — the desk is operator-authored free text on
@@ -2774,20 +2770,13 @@ fn summarize_event(event: &CompanyEvent) -> String {
             };
             format!("skill {what}: {slug}")
         }
-        // Plan hive-desks: the episode ledger. Structural only — ids and
-        // counts, never an utterance — for the same reason every arm here is.
-        CompanyEvent::EpisodeOpened { .. } => "episode opened".into(),
-        CompanyEvent::RoundStarted { .. } => "episode round started".into(),
-        CompanyEvent::RoundCommitted { .. } => "episode round committed".into(),
-        CompanyEvent::BroadcastRouted { .. } => "episode broadcast routed".into(),
-        CompanyEvent::DmDelivered { .. } => "episode dm delivered".into(),
-        CompanyEvent::UtteranceRefused { .. } => "episode utterance refused".into(),
-        CompanyEvent::ConversationOpened { .. } => "episode conversation opened".into(),
-        CompanyEvent::ConversationConcluded { .. } => "episode conversation concluded".into(),
-        CompanyEvent::EpisodeSeatParked { .. } => "episode seat waiting on the operator".into(),
-        CompanyEvent::EpisodeSeatResumed { .. } => "episode seat resumed".into(),
-        CompanyEvent::EpisodeCompleted { .. } => "episode completed".into(),
-        CompanyEvent::EpisodeStateSaved { .. } => "episode state saved".into(),
+        // OC-2: the company hive's record. Structural only — never what was
+        // said — for the same reason every arm here is.
+        CompanyEvent::HiveAccepted { .. } => "hive accepted a message".into(),
+        CompanyEvent::HiveMessage { .. } => "agents spoke privately".into(),
+        CompanyEvent::HiveEpisodeSettled { failure: None, .. } => "hive episode settled".into(),
+        CompanyEvent::HiveEpisodeSettled { .. } => "hive episode stopped".into(),
+        CompanyEvent::HiveTurnInterrupted { .. } => "hive turn interrupted".into(),
         // Issue #276. This one-liner is folded into the orchestrator's
         // recent-activity context, so it is read by a model — and the arms
         // around it drop free text and actor ids for that reason. Name and id
