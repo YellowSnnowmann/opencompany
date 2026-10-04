@@ -2568,15 +2568,7 @@ fn undeclared(name: &str) -> Consequence {
     // Declare a known `describe_*` tool instead, as `describe_skill` does for
     // issue #845, so its reach is an explicit policy decision.
     const READ_ONLY_PREFIXES: &[&str] = &[
-        "read",
-        "list",
-        "get",
-        "search",
-        "recall",
-        "query",
-        "peek",
-        "inspect",
-        "view",
+        "read", "list", "get", "search", "recall", "query", "peek", "inspect", "view",
     ];
     let reads = READ_ONLY_PREFIXES.iter().any(|p| name.starts_with(p));
     Consequence {

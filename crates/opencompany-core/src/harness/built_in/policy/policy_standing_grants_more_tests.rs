@@ -17,13 +17,7 @@ use crate::policy::test_support::{composio_args, composio_unclassified_args};
 #[tokio::test]
 async fn a_workspace_read_runs_without_asking_whatever_its_name_begins_with() {
     let p = policy("supervised", &[], None);
-    for tool in [
-        "file_read",
-        "glob",
-        "grep",
-        "image_info",
-        "list",
-    ] {
+    for tool in ["file_read", "glob", "grep", "image_info", "list"] {
         assert_eq!(
             p.check(&request(tool, serde_json::json!({}))).await,
             ToolPolicyDecision::Allow,

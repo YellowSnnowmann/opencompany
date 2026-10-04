@@ -102,13 +102,7 @@ pub(super) fn reading_workspace_state_is_classified_with_shell_because_it_runs_g
 /// of autonomy is still handing over something useful.
 #[test]
 pub(super) fn the_agents_own_workspace_writes_stay_grantable() {
-    for tool in [
-        "file_write",
-        "edit",
-        "apply_patch",
-        "csv_export",
-        "memory",
-    ] {
+    for tool in ["file_write", "edit", "apply_patch", "csv_export", "memory"] {
         let verdict = c(tool);
         assert_eq!(verdict.standing, Standing::Grantable, "`{tool}`");
         // They mutate, so `readonly` must still deny and `supervised` must

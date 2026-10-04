@@ -5,15 +5,11 @@ use std::collections::HashSet;
 #[test]
 fn coordinator_preserves_real_workflow_and_integration_tools() {
     for composio in [false, true] {
-        let mut tools: HashSet<String> = [
-            "create_workflow",
-            "run_workflow",
-            "read_workflow",
-            "memory",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect();
+        let mut tools: HashSet<String> =
+            ["create_workflow", "run_workflow", "read_workflow", "memory"]
+                .into_iter()
+                .map(str::to_string)
+                .collect();
         if composio {
             tools.insert("composio_execute".into());
         }
