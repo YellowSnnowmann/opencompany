@@ -139,15 +139,16 @@ pub trait Brain: Send + Sync {
         None
     }
 
-    /// Carries on a hive episode that is not running in this process from
-    /// its last checkpoint, answering whether a resume is now under way.
+    /// Releases a company-hive agent the Coordinator holds parked on an
+    /// approval, with `note` — the operator's decisions, rendered — delivered
+    /// at the top of its next turn (OC-2). Answers whether an agent was
+    /// released.
     ///
-    /// The runtime calls it when an operator decides an approval an episode
-    /// seat parked on and no running episode took the decision -- after a
-    /// restart, typically. The default is `false`: a brain that runs no
-    /// episodes has none to resume.
-    async fn resume_episode(&self, episode_id: &str) -> bool {
-        let _ = episode_id;
+    /// The runtime calls it when the last decision a coordinator turn waits on
+    /// lands. The default is `false`: a brain that runs no hive has nobody to
+    /// release.
+    async fn release_hive_agent(&self, agent_id: &str, note: Option<String>) -> bool {
+        let _ = (agent_id, note);
         false
     }
 }

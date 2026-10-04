@@ -60,9 +60,9 @@ impl CompanyRuntime {
 
     /// Hands a seat's released batch to its episode, resuming the episode
     /// when nothing running here takes it.
-    pub(crate) async fn resume_episode_seat(
+    pub(crate) async fn resume_hive_seat(
         &self,
-        seat: &EpisodeSeat,
+        seat: &HiveSeat,
         batch: Vec<CompanyEvent>,
     ) -> Result<CycleReport> {
         let decisions: Vec<SeatDecision> = batch
@@ -86,35 +86,31 @@ impl CompanyRuntime {
                 tracing::warn!(
                     company = %self.id,
                     %error,
-                    "[hive] an episode seat's resolution could not be appended to the event log"
+                    "[hive] a hive turn's resolution could not be appended to the event log"
                 );
             }
         }
         let count = decisions.len();
-        let taken = self
-            .grants
-            .episode_releases()
-            .deliver(&seat.episode_id, &seat.seat, decisions);
+        let note = crate::runtime::hive_resume::release_note(&decisions);
+        let released = self.brain.release_hive_agent(&seat.agent_id, note).await;
         tracing::info!(
             company = %self.id,
-            episode = %seat.episode_id,
-            seat = %seat.seat,
+            agent = %seat.agent_id,
+            episode = ?seat.episode_id,
             decisions = count,
-            running = taken,
-            "[hive] an episode seat's decisions are in"
+            released,
+            "[hive] a parked agent's decisions are in"
         );
-        if !taken && !self.brain.resume_episode(&seat.episode_id).await {
+        if !released {
             tracing::error!(
                 company = %self.id,
-                episode = %seat.episode_id,
-                seat = %seat.seat,
-                "[hive] an episode seat was decided but its episode is not running and could \
-                 not be resumed"
+                agent = %seat.agent_id,
+                "[hive] a parked agent was decided but no company hive could release it"
             );
             self.announce_to_operator(
-                "A teammate you just answered was part of a room conversation that is no \
-                 longer running, so your decision could not be handed back to it. Ask the \
-                 room again to pick the work back up.",
+                "A teammate you just answered is no longer waiting in this company's hive, so \
+                 your decision could not be handed back to it. Ask it again to pick the work \
+                 back up.",
             )
             .await;
         }
@@ -201,7 +197,7 @@ impl CompanyRuntime {
                     approval = %id,
                     %error,
                     "[hive] a seat's decision continuation could not be retired; a restart may \
-                     hand the decision to the episode again"
+                     hand the decision to the agent again"
                 );
             }
         }

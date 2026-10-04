@@ -548,10 +548,10 @@ pub struct GrantSet {
     /// like it shares the state, so every holder of a cloned `GrantSet` agrees
     /// on the ordering.
     reconcile_lock: Arc<TokioMutex<()>>,
-    /// The decisions owed to parked hive episode seats. Carried here so the
-    /// runtime that resolves and the episode hosts that wait share one
-    /// registry on the handle both already hold.
-    episodes: crate::runtime::episode_resume::EpisodeReleases,
+    /// The operator's held answers to escalations a hive agent raised.
+    /// Carried here so the runtime that resolves them and the decision it
+    /// assembles later share one registry on the handle both already hold.
+    hive_answers: crate::runtime::hive_resume::HiveAnswers,
 }
 
 #[derive(Default)]
@@ -637,9 +637,9 @@ fn scopes_overlap(a: Option<&str>, b: Option<&str>) -> bool {
 }
 
 impl GrantSet {
-    /// The registry that hands operator decisions to parked episode seats.
-    pub fn episode_releases(&self) -> crate::runtime::episode_resume::EpisodeReleases {
-        self.episodes.clone()
+    /// The held escalation answers of parked hive agents.
+    pub fn hive_answers(&self) -> crate::runtime::hive_resume::HiveAnswers {
+        self.hive_answers.clone()
     }
 
     /// Mints a grant.
