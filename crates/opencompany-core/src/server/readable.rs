@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use crate::ports::types::{CompanyRecord, Mention};
-use crate::server::chat_history::{MentionView, MessageView, ReferralLine};
+use crate::server::chat_history::{MentionView, MessageView};
 
 /// Teammate and desk ids mapped to the names a person reads.
 ///
