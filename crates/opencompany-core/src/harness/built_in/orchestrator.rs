@@ -864,39 +864,13 @@ pub enum NoDrainReason {
     /// operator's message triaged as a question, so board writes are held back
     /// for **this message only** (issue #267).
     Triage,
-    /// The delegation chain is already as deep as
-    /// `[tools].max_delegation_depth` allows (issue #176), so a further
-    /// **hand-off** is refused. Board writes are unaffected — a member at the
-    /// bound may still open a card.
-    ///
-    /// Unlike the two above this is not a property of the context at all: the
-    /// same member, on the same company, delegating from a shallower chain would
-    /// have been staged. So the refusal must not tell the model its context
-    /// cannot do board work (it can) nor that the message was a question (it was
-    /// not) — it must say the chain has run as deep as the company allows.
-    Depth,
     /// The queue is claimed by a workflow run ([`DrainClaim::Board`], issue
     /// #661) and the call would move a card through its lifecycle, which is the
     /// operator's lane rather than the run's.
     ///
-    /// Distinct from [`WorkflowHandOff`](Self::WorkflowHandOff) because the
-    /// causes are unrelated: this one is a deliberate authority boundary that no
-    /// amount of wiring will move, and the model's recourse is to leave the card
-    /// for a person. Collapsing the two would tell a model that `review_task`
-    /// failed for want of somewhere to put a reply, which is untrue and points
-    /// it at the wrong alternative.
+    /// A deliberate authority boundary that no amount of wiring will move; the
+    /// model's recourse is to leave the card for a person.
     WorkflowLifecycle,
-    /// The queue is claimed by a workflow run ([`DrainClaim::Board`], issue
-    /// #661) and the call is a hand-off, whose only value is a synchronous reply
-    /// that a run has nowhere to land.
-    ///
-    /// A run has no conversation behind it and nobody watching at 3am, so the
-    /// reply would be composed and dropped. The recourse is real and worth
-    /// naming: open a card for the desk instead, which persists and is exactly
-    /// what a run *can* do.
-    WorkflowHandOff,
-    /// A dispatched card already has its one ownership transfer queued.
-    TaskHandoffAlreadyQueued,
     /// The queue is claimed by a HiveMind seat turn ([`DrainClaim::Seat`]),
     /// which may open cards and nothing else on the board.
     Seat,
@@ -1041,44 +1015,7 @@ impl Drop for DelegationClaim {
         // scope. Before that this reset a single global commitment and cleared
         // one shared vector, so a claim ending anywhere un-claimed the queue
         // everywhere — the exit half of the same defect the acquire had.
-        //
-        // Issue #176: the chain ends with the claim. `ScopeGuard` pops its own
-        // entry on every ordinary exit, so this is the belt to that braces — a
-        // panic mid-nested-turn unwinds past the guards, and a chain left
-        // standing would make the next message start at depth 2.
         self.queue.release(&self.scope);
-    }
-}
-
-/// One level of the delegation scope chain, held for the span in which a
-/// delegate's turn runs (issue #176).
-///
-/// Pushes its desk id when created and pops on `Drop`. Same reasoning as
-/// [`DelegationClaim`]: the pop has to happen on **every** exit path, including
-/// the ones nobody wrote by hand, or a chain that dies mid-turn leaves the queue
-/// permanently one level deeper than it is.
-///
-/// Deliberately not [`Clone`] — two guards for one level would pop twice and
-/// take a live outer level off the chain with them.
-pub struct ScopeGuard {
-    queue: DelegationQueue,
-    /// Which claimant's chain this level was pushed onto (issue #661), so the
-    /// pop lands in that same chain rather than in whichever one is ambient at
-    /// drop time.
-    scope: DelegationScope,
-}
-
-impl Drop for ScopeGuard {
-    fn drop(&mut self) {
-        if let Some(chain) = self
-            .queue
-            .chains
-            .lock()
-            .expect("delegation scope")
-            .get_mut(&self.scope)
-        {
-            chain.pop();
-        }
     }
 }
 
