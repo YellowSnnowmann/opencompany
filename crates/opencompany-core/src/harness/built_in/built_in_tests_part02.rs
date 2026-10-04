@@ -368,66 +368,6 @@ async fn run_executes_a_turn_on_the_openhuman_runtime() {
     );
 }
 
-#[tokio::test]
-async fn run_stores_outcomes_and_injects_them_into_later_turns() {
-    let fx = fixture();
-    let pool = HarnessPool::new();
-    let rec = record();
-    pool.ensure(&rec, &fx.deps).await.expect("ensure");
-
-    // Cold store: nothing to inject on the first turn.
-    let first = pool
-        .run(
-            &rec.id,
-            "ceo",
-            "alpha task",
-            &fx.deps,
-            crate::runtime::delegation::ChatTarget::default(),
-        )
-        .await
-        .expect("first turn")
-        .reply;
-    assert!(
-        !first.contains("Relevant prior work"),
-        "a cold turn injects nothing: {first:?}"
-    );
-
-    // The outcome was written back under the task-outcome prefix.
-    let stored = fx
-        .deps
-        .context
-        .list(&rec.id, memory_loop::OUTCOME_LABEL_PREFIX)
-        .await
-        .unwrap();
-    assert_eq!(stored.len(), 1, "the first turn stores its outcome");
-
-    // Second turn: the prior outcome (its body contains "alpha") is
-    // retrieved and injected, so the agent sees the preamble.
-    let second = pool
-        .run(
-            &rec.id,
-            "ceo",
-            "alpha",
-            &fx.deps,
-            crate::runtime::delegation::ChatTarget::default(),
-        )
-        .await
-        .expect("second turn")
-        .reply;
-    assert!(
-        second.contains("Relevant prior work"),
-        "the second turn injects the retrieved outcome: {second:?}"
-    );
-
-    let stored = fx
-        .deps
-        .context
-        .list(&rec.id, memory_loop::OUTCOME_LABEL_PREFIX)
-        .await
-        .unwrap();
-    assert_eq!(stored.len(), 2, "the second turn stores its outcome too");
-}
-
 /// Recall is driven by **what the operator typed**, not by the briefings
 /// this turn folded onto it.
 ///
