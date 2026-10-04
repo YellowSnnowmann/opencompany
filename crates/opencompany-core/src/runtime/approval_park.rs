@@ -8,7 +8,9 @@
 use std::sync::Arc;
 
 use crate::error::OpenCompanyError;
-use crate::ports::types::{Actor, ActorKind, ApprovalId, CompanyEvent, CompanyId, Effect, Verdict};
+use crate::ports::types::{
+    Actor, ActorKind, ApprovalId, ApprovalOrigin, CompanyEvent, CompanyId, Effect, Verdict,
+};
 use crate::ports::{ApprovalGate, EventLog, now_millis};
 use crate::runtime::continuation::ContinuationQueue;
 use crate::runtime::grants::GrantSet;
