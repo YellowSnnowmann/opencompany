@@ -2145,48 +2145,6 @@ impl<'a> DelegationRunner<'a> {
         Ok(Some(card))
     }
 
-    /// The card a **hand-off** opens (issue #442, path two), or `None` when
-    /// this hand-off must not open one.
-    ///
-    /// # It stands down on a question, and only the card does (issue #267)
-    ///
-    /// `delegate_to_desk` is the one delegation that ANSWERS. It runs the
-    /// desk's lead and hands their reply back for the orchestrator to relay, so
-    /// it is how a question the orchestrator cannot answer alone — "what did the
-    /// design desk ship this week?" — reaches somebody who can. Refusing the
-    /// tool on a question turn therefore cost the operator the answer, not just
-    /// a card.
-    ///
-    /// So the tool runs and this suppresses the card, which is the same shape
-    /// [`open_direct_work_card`](Self::open_direct_work_card) uses one path
-    /// over and for the same reason: nobody commissioned work, so nothing
-    /// should be tracked — but somebody did ask a question, so somebody should
-    /// answer it. Everything else about the hand-off is untouched: the delegate
-    /// runs, their steps fold onto the operator timeline, and the CEO-relay
-    /// hand-back surfaces their answer.
-    ///
-    /// With no card there is nothing to settle and nothing to report on
-    /// `spawned_task`, which is the honest reading — the console's "Card
-    /// opened" chip must not claim a card that does not exist.
-    async fn open_hand_off_work_card(
-        &self,
-        member: &str,
-        instruction: &str,
-        chat_id: Option<&str>,
-        ctx: MessageContext,
-    ) -> Result<Option<TaskRecord>> {
-        if ctx.answering {
-            tracing::debug!(
-                company = %self.company,
-                delegate = %member,
-                "[delegation] not opening a hand-off card: the operator asked a question, so the \
-                 desk lead answers it without the board carrying work nobody commissioned"
-            );
-            return Ok(None);
-        }
-        self.open_work_card(member, instruction, chat_id, ctx).await
-    }
-
     /// The card the REST chat handler opened for this message, when it opened
     /// one and it is still on the board (issue #463).
     ///
@@ -2288,59 +2246,6 @@ impl<'a> DelegationRunner<'a> {
             column = %card.column,
             "[delegation] settled the card opened for this turn"
         );
-        Ok(())
-    }
-
-    /// Reassigns a dispatched card to the delegate taking it over and persists
-    /// it, so the board shows them working it *while* they work rather than
-    /// only once they are done (issue #204).
-    ///
-    /// The write goes through the [`TaskStore`] port, **not**
-    /// `CompanyRuntime::upsert_task`, so it cannot re-fire the
-    /// `column → in_progress` dispatch edge — the card is already in
-    /// `in_progress` and this only re-states it. No task store wired is a silent
-    /// no-op, matching every other task path on this seam.
-    async fn hand_card_over(
-        &self,
-        card: &mut TaskRecord,
-        delegator: &str,
-        member: &str,
-        instruction: &str,
-    ) -> Result<()> {
-        // **An owner is an agent. A desk is a channel, not an owner.**
-        //
-        // `member` is the agent that will run the card, and that is exactly who
-        // now owns it — for a teammate hand-off the teammate, for a desk
-        // hand-off that desk's lead.
-        //
-        // This briefly wrote the hand-off target reduced by
-        // `AssigneeResolution::canonical` instead, on the reading that a desk
-        // hand-off should leave the DESK on the card. That put a channel id in
-        // an ownership field: `assignee` is also what the thread's overseer is
-        // read from, so a card handed to a desk named nobody who could answer
-        // for it. `canonical` maps a desk to its own id because it is the
-        // stored-key helper for whatever a card happens to say — not a claim
-        // that a desk is a thing which owns work.
-        card.assignee = member.to_string();
-        card.note = Some(append_note(
-            card.note.as_deref(),
-            delegator,
-            &match instruction.trim() {
-                "" => format!("delegated to {member}"),
-                instruction => format!("delegated to {member}: {instruction}"),
-            },
-        ));
-        card.column = lifecycle::landing_column(TaskRunEnd::Delegated).to_string();
-        card.updated_at_millis = now_millis();
-        tracing::debug!(
-            task_id = %card.id,
-            delegate = %member,
-            column = %card.column,
-            "[task] card handed over to the delegate"
-        );
-        if let Some(tasks) = self.tasks {
-            tasks.upsert(self.company, card).await?;
-        }
         Ok(())
     }
 
@@ -2727,62 +2632,9 @@ impl<'a> DelegationRunner<'a> {
 fn kind_label(delegation: &Delegation) -> &'static str {
     match delegation {
         Delegation::SpawnTask { .. } => "spawn_task",
-        Delegation::DelegateToDesk { .. } => "delegate_to_desk",
-        Delegation::DelegateToTeammate { .. } => "delegate_to_teammate",
         Delegation::AssignTask { .. } => "assign_task",
         Delegation::ReviewTask { .. } => "review_task",
     }
-}
-
-/// What a hand-off was aimed at — a desk key or a teammate id — or `None` for
-/// every delegation that is not a hand-off, which is what distinguishes "this
-/// delegation had a target that did not resolve" from "this delegation never had
-/// a target" (issues #272, #884).
-///
-/// Replaces the desk-only `desk_of` this seam used before #884. Its callers all
-/// wanted "the thing this was handed to"; that they could only ever be handed a
-/// desk was an accident of there being one hand-off kind. The one place the
-/// distinction still matters — the card note that says *why* delivery failed —
-/// picks its wording from the delegation's own variant at the call site rather
-/// than from a second accessor.
-///
-/// Crate-visible because the delegation queue records a dispatched card's
-/// refused second hand-off by this same target at the staging boundary.
-pub(crate) fn hand_off_target_of(delegation: &Delegation) -> Option<&str> {
-    match delegation {
-        Delegation::DelegateToDesk { desk, .. } => Some(desk),
-        Delegation::DelegateToTeammate { teammate, .. } => Some(teammate),
-        _ => None,
-    }
-}
-
-/// The instruction a hand-off carries, for the note that records it (issue
-/// #204). Empty for every other delegation kind — callers only ask this of a
-/// [`Delegation::DelegateToDesk`].
-fn instruction_of(delegation: &Delegation) -> &str {
-    match delegation {
-        Delegation::DelegateToDesk { instruction, .. }
-        | Delegation::DelegateToTeammate { instruction, .. } => instruction,
-        _ => "",
-    }
-}
-
-/// The note recorded on a card when a hand-off could not be delivered (issue
-/// #272).
-///
-/// Written in the delegator's voice, like every other note this seam appends,
-/// and deliberately explicit about the two facts an operator otherwise has to
-/// infer: nothing was handed off, and the card is still theirs. Names only the
-/// target key, the cause, and the delegator — no instruction text, no delegate
-/// output.
-///
-/// `target` names a desk **or** a teammate since #884, so the sentence no longer
-/// calls it a desk; the `cause` its callers pass is what says which it was.
-fn undeliverable_handoff(target: &str, delegator: &str, cause: &str) -> String {
-    format!(
-        "hand-off to \"{target}\" was not delivered — {cause}. Nothing was delegated; this \
-card is still with {delegator}."
-    )
 }
 
 /// Appends a responder-attributed result block to a card's note, preserving any
