@@ -35,12 +35,6 @@ pub(super) struct Turn {
     /// on a question turn is REFUSED in the model's own turn, and a fixture
     /// that pushed straight onto the queue could never observe the refusal.
     pub(super) tool_pushes: Vec<Delegation>,
-    /// Desks this turn named that the tool REFUSED (issue #272 for the
-    /// delegator, #176 for a member), recorded the way
-    /// `DelegateToDeskTool` records them so the drain can report the
-    /// attempt. A refusal never becomes a `Delegation`, so this is the only
-    /// way a fixture can stand in for one.
-    pub(super) refuses: Vec<String>,
     /// Workflows this turn authors inline with `create_workflow`, staged onto
     /// the shared [`WorkflowRefQueue`] *while the turn runs* — which is the
     /// only honest place for it (issue #678). A fixture that staged before
@@ -114,17 +108,6 @@ impl Turn {
         }
     }
 
-    /// A turn whose `delegate_to_desk` call was REFUSED at the tool
-    /// boundary (issue #176): nothing is queued, and the desk it named is
-    /// recorded for the drain to report.
-    pub(super) fn refused(reply: &str, desks: &[&str]) -> Self {
-        Self {
-            reply: reply.to_string(),
-            refuses: desks.iter().map(|d| d.to_string()).collect(),
-            ..Self::default()
-        }
-    }
-
     /// A turn the in-turn spend brake halted (issue #1032): it replies with
     /// whatever it had, and reports the halt alongside.
     pub(super) fn spend_halted(reply: &str, agent: &str, spent_usd: f64, cap_usd: f64) -> Self {
@@ -193,12 +176,6 @@ pub(super) struct ScriptedTurns {
     /// The board as it looked at the START of each turn, so a test can prove
     /// a card existed *while* an agent worked rather than only afterwards.
     board_at_turn: Mutex<Vec<Vec<(String, String)>>>,
-    /// The delegation-chain bound the scripted tool boundary enforces
-    /// (issue #176), standing in for `[tools].max_delegation_depth`. The
-    /// production `DelegateToDeskTool` reads it off the live record; a
-    /// scripted turn has no tool, so the depth a test runs under is set
-    /// here.
-    max_depth: usize,
     /// How the delegation queue was **claimed** while each turn ran (issues
     /// #453, #267). This is what a real tool reads to decide between
     /// staging and refusing, so recording it here is how a test proves the
@@ -240,16 +217,7 @@ impl ScriptedTurns {
             tasks: fx.tasks.clone(),
             company: fx.record.id.clone(),
             workflow_refs: fx.workflow_refs.clone(),
-            max_depth: usize::from(crate::company::DEFAULT_MAX_DELEGATION_DEPTH),
         }
-    }
-
-    /// Runs this script under a different `[tools].max_delegation_depth`
-    /// (issue #176) — `1` reproduces the pre-#176 "desks may not
-    /// re-delegate" behaviour.
-    pub(super) fn with_max_depth(mut self, max_depth: usize) -> Self {
-        self.max_depth = max_depth;
-        self
     }
 
     /// What the tool boundary answered every [`Turn::tool_pushes`] call, in
@@ -326,17 +294,10 @@ impl ScriptedTurns {
         // …and the ones that go through the boundary a real tool goes
         // through, recording what it answered (issue #267).
         for delegation in turn.tool_pushes {
-            let staged = self.queue.push_within_cap(
-                delegation,
-                orchestrator::MAX_DELEGATIONS_PER_TURN,
-                self.max_depth,
-            );
+            let staged = self
+                .queue
+                .push_within_cap(delegation, orchestrator::MAX_DELEGATIONS_PER_TURN);
             self.staged.lock().expect("staged").push(staged);
-        }
-        // …and the ones the tool refused outright, which never become a
-        // `Delegation` at all (issues #272, #176).
-        for desk in turn.refuses {
-            self.queue.push_refusal(desk);
         }
         // Staged mid-turn, like the inline `create_workflow` tool (#678).
         for authored in turn.authors {
