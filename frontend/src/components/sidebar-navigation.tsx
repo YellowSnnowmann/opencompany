@@ -164,10 +164,10 @@ export const NAV_SECTIONS: NavSection[] = [
       // row and not one per list.
       { view: "ledgers", label: "Work", icon: BookText, hint: "Tasks, and every list it declared" },
       { view: "workspace", label: "Workspace", icon: FolderClosed, hint: "The files it keeps" },
-      // One row, not a three-row caption group. Brain's Overview, Upload and
-      // Settings are tabs in the page's own header now
-      // (`views/memory/brain-pages.ts` argues why): one subject looked at three
-      // ways, rather than three destinations worth three of the sidebar's
+      // One row, not a caption group. Brain's Overview and Upload
+      // are tabs in the page's own header now
+      // (`views/memory/brain-pages.ts` argues why): one subject looked at two
+      // ways, rather than destinations worth several of the sidebar's
       // scarce rows. The addresses are unchanged — the row still opens
       // `#/company/brain`, and `#/company/brain/upload` still opens Upload.
       { view: "brain", label: "Brain", icon: Brain, hint: "What it remembers" },
