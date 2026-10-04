@@ -3107,22 +3107,12 @@ impl HarnessPool {
         // lands on a numbered suffix (`CompanyAgent::register`) and the old
         // one releases when the turn ends.
         let previous = self.agents.write().await.remove(&company.id);
-        // What each retired entry's prompt brief named, and whether it still
-        // owed the session that brief — see `CompanyAgent::catalogue_brief_stale`.
-        // Read before the drop: the rebuilt entry inherits it below.
-        let retired_briefs: HashMap<String, (Vec<String>, bool)> = previous
-            .iter()
-            .flatten()
-            .map(|agent| {
-                (
-                    agent.agent_id.clone(),
-                    (
-                        agent.served_catalogue().to_vec(),
-                        agent.catalogue_brief_pending(),
-                    ),
-                )
-            })
-            .collect();
+        // OC-2: the company hive, when this pool's deps carry its store. Its
+        // own clones of the retired handles go with the roster's, so a
+        // rebuild below can register the new handle under the same id.
+        let hive = self
+            .company_hive(&fresh_company, &fresh_deps, &runtime)
+            .await?;
         if let Some(previous) = previous {
             let quiesce = std::time::Duration::from_secs(30);
             for agent in &previous {
@@ -3136,31 +3126,38 @@ impl HarnessPool {
                          the rebuilt agent registers beside it"
                     ),
                 }
+                if let Some(hive) = &hive {
+                    hive.release_handle(&agent.runtime_id);
+                }
             }
             drop(previous);
         }
 
-        let roster = build_roster(
-            &runtime,
-            &fresh_company,
-            &fresh_deps,
-            &skill_deltas,
-            &routed_context,
-        )?;
-
-        // Keep the policy snapshot and the roster together for the entire turn.
-        // `ensure_with_policy` pins the snapshot on the pool (above), so a
-        // concurrent plain `ensure` — the workflow runner, a spawned task outside
-        // the cycle serial lock — rebuilds the policy axis against that same pin
-        // instead of a live override it could otherwise adopt a turn early. The
-        // serial lock already serializes cycle callers; the pin is what keeps a
-        // direct caller from regressing a pinned roster before `run_inner` clones
-        // its agent.
-        for agent in &roster {
-            if let Some((catalogue, pending)) = retired_briefs.get(&agent.agent_id) {
-                agent.inherit_catalogue_brief(catalogue, *pending);
+        let blueprints =
+            roster_blueprints(&fresh_company, &fresh_deps, &skill_deltas, &routed_context)?;
+        let roster = match &hive {
+            None => blueprints
+                .into_iter()
+                .map(|blueprint| {
+                    blueprint
+                        .register(&runtime, &company.id, fresh_deps.events.clone())
+                        .map(Arc::new)
+                })
+                .collect::<crate::Result<Vec<_>>>()?,
+            Some(hive) => {
+                let roster = self
+                    .seat_roster(hive, &runtime, &company.id, &fresh_deps, blueprints)
+                    .await?;
+                if let Err(error) = hive.sync(&fresh_company).await {
+                    tracing::warn!(
+                        company = %company.id,
+                        %error,
+                        "[hive] the company hive's desks could not be brought in line with the roster"
+                    );
+                }
+                roster
             }
-        }
+        };
 
         let mut agents = self.agents.write().await;
         agents.insert(company.id.clone(), roster);
@@ -3217,6 +3214,68 @@ impl HarnessPool {
             .await
             .insert(company.id.clone(), context_fp);
         Ok(())
+    }
+
+    /// Registers a rebuilt roster with the company hive: a teammate the hive
+    /// already runs is rebuilt in place (`CompanyHive::replace`), so its
+    /// continuing session and queued work carry over; a new one is registered
+    /// fresh. A teammate the hive could not take still serves this pool's
+    /// isolated turns — a warning, never a failed ensure.
+    async fn seat_roster(
+        &self,
+        hive: &crate::hive::runtime::CompanyHive,
+        runtime: &openhuman_embed::Runtime,
+        company: &CompanyId,
+        deps: &HarnessDeps,
+        blueprints: Vec<RosterBlueprint>,
+    ) -> crate::Result<Vec<Arc<CompanyAgent>>> {
+        let pool = self.self_ref.get().cloned().unwrap_or_default();
+        let shared = Arc::new(deps.clone());
+        let mut roster = Vec::with_capacity(blueprints.len());
+        for blueprint in blueprints {
+            let base = crate::session_key::runtime_agent_id(company, blueprint.agent_id());
+            let events = deps.events.clone();
+            let seat = |agent: CompanyAgent| hive_hooks::HiveSeat {
+                agent: Arc::new(agent),
+                pool: pool.clone(),
+                deps: Arc::clone(&shared),
+            };
+            if hive.is_registered(&base) {
+                match hive
+                    .replace(&base, || {
+                        blueprint.register(runtime, company, events).map(seat)
+                    })
+                    .await
+                {
+                    Ok(seat) => roster.push(seat.agent),
+                    Err((Some(seat), error)) => {
+                        tracing::warn!(
+                            %company,
+                            agent = %seat.agent.agent_id,
+                            %error,
+                            "[hive] a rebuilt teammate could not take over its hive handle; it \
+                             serves isolated turns until the next rebuild"
+                        );
+                        roster.push(seat.agent);
+                    }
+                    Err((None, error)) => return Err(error),
+                }
+            } else {
+                let agent = seat(blueprint.register(runtime, company, events)?);
+                let pooled = Arc::clone(&agent.agent);
+                if let Err(error) = hive.register(agent).await {
+                    tracing::warn!(
+                        %company,
+                        agent = %pooled.agent_id,
+                        %error,
+                        "[hive] a teammate could not be registered with the company hive; it \
+                         serves isolated turns only"
+                    );
+                }
+                roster.push(pooled);
+            }
+        }
+        Ok(roster)
     }
 
     /// Re-resolves the company's capability filter (issue #108): with a plan
