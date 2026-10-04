@@ -83,6 +83,7 @@ async fn a_park_is_counted_journaled_held_and_announced() {
                     parent: Some(EventSeq::new(7)),
                 },
                 turn: Some("cycle-1".to_string()),
+                origin: None,
             },
         )
         .await
@@ -114,6 +115,7 @@ async fn a_conversation_park_holds_the_threads_work_unit() {
                     parent: None,
                 },
                 turn: None,
+                origin: None,
             },
         )
         .await
@@ -134,7 +136,8 @@ async fn a_park_the_journal_refuses_leaves_nothing_behind() {
             ParkSite {
                 task: TaskLink::from_task_id(Some("card-1")),
                 conversation: ApprovalConversation::default(),
-                turn: Some("cycle-1".to_string()),                origin: None,
+                turn: Some("cycle-1".to_string()),
+                origin: None,
             },
         )
         .await;

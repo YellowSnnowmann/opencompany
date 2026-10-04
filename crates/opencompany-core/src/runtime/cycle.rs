@@ -3491,6 +3491,7 @@ impl<'a> CycleHostImpl<'a> {
                         parent: self.thread_parent,
                     },
                     turn: Some(self.cycle_id.clone()),
+                    origin: None,
                 },
             )
             .await?;
