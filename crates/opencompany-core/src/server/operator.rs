@@ -589,7 +589,6 @@ async fn reset_desk_routing(
     )))
 }
 
-
 /// `PUT {scope}/desks/{desk_id}/order` — set the operator's explicit member
 /// order (the desk hierarchy) for a desk through the overlay (issue #131). The
 /// version-controlled `[[group_chat]]` blueprint is never rewritten; the order

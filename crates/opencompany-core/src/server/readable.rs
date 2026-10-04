@@ -160,15 +160,6 @@ pub(crate) fn project_reply(text: &str, mentions: &[Mention], names: &DisplayNam
     project(text, names, &spans)
 }
 
-fn project_lines(lines: &mut [ReferralLine], names: &DisplayNames) {
-    for line in lines {
-        line.text = readable_moves(std::mem::take(&mut line.text), names);
-        if let Some(name) = names.name_of(&line.author_label) {
-            line.author_label = name.to_string();
-        }
-    }
-}
-
 fn mention_span(mention: &MentionView) -> Range<usize> {
     mention.offset..mention.offset + mention.text.len()
 }
