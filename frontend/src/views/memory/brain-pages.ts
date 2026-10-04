@@ -3,18 +3,22 @@
 // A leaf module, exactly as `views/connection-pages.ts`, `views/settings-pages.ts`
 // and `views/finance/finance-pages.ts` are, and for the same reason: the nav
 // table has to name these pages, and a static import of `MemoryView` from there
-// would pull the whole memory browser — its virtual list, its dialogs, its
-// engine section — into a module the sidebar renders on every route.
+// would pull the whole memory browser — its virtual list and its dialogs —
+// into a module the sidebar renders on every route.
 //
-// # Why Brain is three tabs
+// # Why Brain is two tabs
 //
-// It was one page: the engine picker, then the drop zone, then the browser,
+// It was one page: an engine picker, then the drop zone, then the browser,
 // stacked in a column. An operator arriving to answer "does it already know
 // this" — which is what this surface is for, and the reason it left the
 // settings rail (issue #1416) — scrolled past a provider form and an upload
 // target to reach it, every time. The three do not change at the same rate
 // either: the engine is set once and then almost never, an upload happens when
 // a document arrives, the browser is read constantly.
+//
+// The engine picker's Settings tab went with the OpenHuman memory v2 cutover:
+// the engine is OpenHuman's `[memory]` config now, not a console choice, and
+// the Overview reports whether memory is on.
 //
 // So they were split into three rail rows. That over-corrected. Three rows
 // under a caption said Brain was three destinations, when it is one subject —
@@ -31,7 +35,7 @@
 // buy nothing. `PageTabs` is controlled, so what a page routes its tabs
 // through is the page's own business.
 
-import { Cog, FileUp, Brain as BrainIcon, type LucideIcon } from "lucide-react";
+import { FileUp, Brain as BrainIcon, type LucideIcon } from "lucide-react";
 
 /**
  * The tabs across Brain's header. The id is the third hash segment —
@@ -53,12 +57,6 @@ export const BRAIN_PAGES = [
     label: "Upload",
     icon: FileUp,
     hint: "Add documents for it to remember",
-  },
-  {
-    id: "settings",
-    label: "Settings",
-    icon: Cog,
-    hint: "Which engine holds the memory",
   },
 ] as const satisfies readonly { id: string; label: string; icon: LucideIcon; hint: string }[];
 
