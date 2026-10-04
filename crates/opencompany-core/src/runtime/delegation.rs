@@ -325,12 +325,8 @@ use crate::runtime::delegation_tools;
 ///
 /// A `spawn_task` yields no bubble of its own — it opens a board card and
 /// reports that card's id (issue #246), which is what the caller stamps onto the
-/// bubble it was already sending. A synchronous `delegate_to_desk` yields a
-/// [`DeskReply`] — the teammate's
-/// answer captured so the orchestrator can **relay** it in a follow-up turn (the
-/// CEO-relay hand-back) instead of leaving it as a disconnected sibling bubble.
-/// `bubble` stays for any future delegation that surfaces its own standalone
-/// message directly.
+/// bubble it was already sending. `bubble` stays for any future delegation that
+/// surfaces its own standalone message directly.
 #[derive(Default)]
 pub(crate) struct DelegationOutcome {
     /// Legacy single standalone bubble slot. Existing delegation kinds leave
@@ -339,17 +335,6 @@ pub(crate) struct DelegationOutcome {
     /// Chat bubbles to surface as-is. Conversation dispatch uses this for the
     /// recipient's DM reply and any bounded child replies it caused.
     pub(crate) bubbles: Vec<OutboundMessage>,
-    /// A synchronous desk reply to relay through a second orchestrator turn.
-    pub(crate) desk_reply: Option<DeskReply>,
-    /// Set when an operator CANCELLED this delegation's run mid-flight, so its
-    /// reply was discarded.
-    ///
-    /// `desk_reply: None` on its own does not mean "cancelled" —
-    /// `run_delegation` also returns an empty outcome for a desk with no
-    /// resolvable lead, and for every delegation that is not a hand-off. This
-    /// flag carries the cancellation as a **fact** so a caller can report the
-    /// cause rather than inferring one from an absence (issue #213 review).
-    pub(crate) cancelled: bool,
     /// The id of the board card a `spawn_task` opened (issue #246).
     ///
     /// A `spawn_task` used to be entirely silent: it returned
@@ -488,50 +473,6 @@ fn no_turn_error() -> crate::error::OpenCompanyError {
     )
 }
 
-/// A synchronous desk-lead answer captured for the orchestrator to relay: which
-/// member answered, their reply text, and their own turn steps (folded onto the
-/// operator timeline so the teammate's activity stays visible on the single
-/// relayed bubble).
-pub(crate) struct DeskReply {
-    pub(crate) member: String,
-    pub(crate) reply: String,
-    pub(crate) steps: Vec<TurnStep>,
-    /// Whether this teammate's turn — or any turn nested beneath it — paused at
-    /// its tool-iteration cap (issue #926).
-    ///
-    /// Folded the same way `reply` and `steps` are: a deeper delegate's work is
-    /// folded INTO this member's answer rather than surfacing on its own, so a
-    /// cap two levels down is a cap on what the operator reads here.
-    pub(crate) hit_iteration_cap: bool,
-    /// The in-turn spend halt behind this answer, if one stopped it — this
-    /// teammate's own turn or any turn nested beneath it (issue #1032).
-    ///
-    /// Folded exactly as `hit_iteration_cap` is, and for the same reason: a
-    /// deeper delegate's work is folded INTO this member's reply, so a halt two
-    /// levels down is a halt on what the operator ends up reading.
-    ///
-    /// **First halt wins** rather than last, because this carries figures and a
-    /// teammate name rather than a bare flag — there is one bubble and it can
-    /// name one cap. The first is the one that cut work short earliest, and the
-    /// claim it makes is incomplete but never wrong, the same trade the
-    /// first-wins `spawned_task` beside it already takes.
-    pub(crate) halted_for_spend: Option<crate::harness::SpendHalt>,
-    /// The budget pause behind this answer, if this teammate's own turn — or
-    /// any turn nested beneath it — paused for lack of inference budget/credits
-    /// (issue #1846).
-    ///
-    /// Folded exactly as `halted_for_spend` is, first-wins, for the same
-    /// reason: one bubble, one figure worth naming.
-    pub(crate) budget_paused: Option<crate::harness::BudgetPause>,
-    /// Whether the turn behind this answer hit the harness's per-turn
-    /// **wall-clock ceiling** (issue #1680).
-    ///
-    /// Folded exactly as `budget_paused` is, first-wins, for the same reason:
-    /// one bubble, one duration worth naming, and the relay turn replaces the
-    /// reply text so tracking only the last value would erase an earlier pause.
-    pub(crate) ceiling_paused: Option<crate::harness::CeilingPause>,
-}
-
 /// What was already decided about the operator message a drain belongs to
 /// (issues #463, #267, #984).
 ///
@@ -596,20 +537,6 @@ pub(crate) struct MessageContext {
     pub(crate) not_work: bool,
 }
 
-/// Whether a drain may run the hand-offs it finds, or must drop them.
-///
-/// The CEO-relay turn is the one caller that must drop: a second hand-off from
-/// there is the re-delegation loop the drain exists to stop. Board writes are
-/// still executed — a card the relay turn opened is not a re-delegation (issue
-/// #442).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum HandOffs {
-    /// Run them, and report what came back.
-    Run,
-    /// Drop them, with a log line; execute everything else.
-    Drop,
-}
-
 /// What one drain of the delegation queue produced (issue #453).
 ///
 /// Extracted so every path that runs a turn can reuse the *exact* execution
@@ -620,19 +547,6 @@ pub(crate) enum HandOffs {
 pub(crate) struct Drained {
     /// Standalone chat bubbles to surface as-is.
     pub(crate) bubbles: Vec<OutboundMessage>,
-    /// Synchronous desk answers, in the order they came back. Empty when
-    /// [`HandOffs::Drop`] was asked for.
-    pub(crate) desk_replies: Vec<DeskReply>,
-    /// The desks whose hand-off an operator CANCELLED mid-flight (issue #176).
-    ///
-    /// Carried as a fact rather than inferred from a missing reply, for the
-    /// same reason [`DelegationOutcome::cancelled`] is: a hand-off yields no
-    /// reply for several reasons and only one of them is a cancellation. The
-    /// nested drain reads this so a delegate's own cancelled hand-off is folded
-    /// into the reply as a cancellation note instead of vanishing — the
-    /// alternative being an answer that quietly omits a branch the model said it
-    /// had started.
-    pub(crate) cancelled_desks: Vec<String>,
     /// The **first** board card this drain opened, matching
     /// [`OperatorTurn::spawned_task`]'s first-wins rule.
     pub(crate) spawned_task: Option<String>,
@@ -641,12 +555,7 @@ pub(crate) struct Drained {
 }
 
 impl Drained {
-    fn absorb(&mut self, out: DelegationOutcome, target: Option<String>) {
-        if out.cancelled
-            && let Some(target) = target
-        {
-            self.cancelled_desks.push(target);
-        }
+    fn absorb(&mut self, out: DelegationOutcome) {
         if let Some(id) = out.spawned_task {
             self.spawned_task.get_or_insert(id);
         }
@@ -654,9 +563,6 @@ impl Drained {
             self.bubbles.push(bubble);
         }
         self.bubbles.extend(out.bubbles);
-        if let Some(reply) = out.desk_reply {
-            self.desk_replies.push(reply);
-        }
         if let Some(refused) = out.refused_card {
             self.refused_cards.push(refused);
         }
@@ -664,8 +570,6 @@ impl Drained {
 
     fn merge(&mut self, nested: Drained) {
         self.bubbles.extend(nested.bubbles);
-        self.desk_replies.extend(nested.desk_replies);
-        self.cancelled_desks.extend(nested.cancelled_desks);
         self.refused_cards.extend(nested.refused_cards);
         if let Some(id) = nested.spawned_task {
             self.spawned_task.get_or_insert(id);
@@ -729,50 +633,6 @@ pub(crate) struct OperatorTurn {
     /// one bubble, one duration worth naming, and the relay turn replaces the
     /// reply text so tracking only the last value would erase an earlier pause.
     pub(crate) ceiling_paused: Option<crate::harness::CeilingPause>,
-}
-
-/// What a **dispatched card's** turn handed off (issue #204).
-///
-/// Returned by [`DelegationRunner::handle_task_delegations`] when the turn
-/// called `delegate_to_desk` and the desk resolved to a real teammate: that
-/// teammate is now the card's assignee and has already run. `reply` is what
-/// they produced.
-///
-/// A `TaskHandoff` with `reply: None` is only ever built from a run an operator
-/// actually CANCELLED — [`DelegationOutcome::cancelled`] is the input, not the
-/// absence of a reply. A hand-off that yields nothing for any *other* reason
-/// reports no hand-off at all, so the delegator's own turn settles the card
-/// (the same path a desk with no resolvable lead already takes) rather than the
-/// card being settled as a cancellation that never happened (issue #213
-/// review).
-pub(crate) struct TaskHandoff {
-    /// The delegate that took the card over — now its `assignee`.
-    pub(crate) delegate: String,
-    /// What the delegate produced. `None` means their run was cancelled
-    /// mid-flight, and nothing else.
-    pub(crate) reply: Option<String>,
-    /// The budget pause behind the delegate's run, if any (issue #1846
-    /// review, Codex #3865395868).
-    ///
-    /// [`DeskReply`] has carried this since the top-level fix this issue
-    /// added, but this struct dropped it on the way through — `reply` here
-    /// is `desk.reply`'s text with `desk.budget_paused` thrown away, so a
-    /// dispatched card whose delegate ran out of credits reached
-    /// `HarnessBrain::run_task` with no way to tell a real completion from a
-    /// pause notice standing in for one, and settled `Completed` either way.
-    /// Carried through so the caller can gate the card's terminal state on
-    /// it, the same way `direct_card` and this hand-off's own card already
-    /// do.
-    pub(crate) budget_paused: Option<crate::harness::BudgetPause>,
-    /// SPIKE (async hand-off): the delegate owns the card but has NOT run yet.
-    ///
-    /// The synchronous model awaits the delegate inside the delegator's
-    /// attempt, which is why `TaskRunEnd::Delegated` was documented as
-    /// "unreachable as a run settle today". Handing over without running makes
-    /// it reachable: the delegator settles `Delegated`, and the delegate is
-    /// dispatched as its own attempt with its own cost and its own lock
-    /// acquisition.
-    pub(crate) pending: bool,
 }
 
 /// Drives the brain-agnostic delegation orchestration over a [`RunTurn`]: run the
