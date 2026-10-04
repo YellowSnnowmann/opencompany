@@ -40,7 +40,7 @@ use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState, SkillSta
 use crate::ports::store::CompanyStore;
 use crate::ports::tasks::{TaskOrigin, TaskRecord, TaskStore, TaskTitle};
 use crate::ports::types::{
-    Attachment, ChunkAddr, ChunkMeta, CompanyEvent, CompanyId, CompanyRecord, CompressedTrace,
+    Attachment, CompanyEvent, CompanyId, CompanyRecord, CompressedTrace,
     EventSeq, LedgerEntry, SecretValue, TemplateProvenance,
 };
 use crate::ports::usage::{SampleKind, UsageMeter, UsageSample};
