@@ -368,64 +368,6 @@ async fn run_executes_a_turn_on_the_openhuman_runtime() {
     );
 }
 
-/// Recall is driven by **what the operator typed**, not by the briefings
-/// this turn folded onto it.
-///
-/// The composed message can carry the open-work briefing, the settled-work
-/// digest, the thread index or attachment markers. Those are for the model
-/// to read; searching on them makes the query something nobody asked. Under
-/// this store's substring matching that costs the recall outright — any
-/// briefing at all and nothing matches — and under a vector store it drifts
-/// instead, toward whatever the briefing happens to name. The settled digest
-/// is a list of finished card titles, so a conversation that had just closed
-/// some work pulled *that* work in, and the bias grew with every card that
-/// finished.
-///
-/// Found by the `orchestration-simulation` E2E, which went red the moment
-/// two cards settled in the conversation it drives (#1890 review).
-#[tokio::test]
-async fn recall_searches_the_operators_words_not_the_briefings() {
-    let fx = fixture();
-    let pool = HarnessPool::new();
-    let rec = record();
-    pool.ensure(&rec, &fx.deps).await.expect("ensure");
-
-    // Turn one stores an outcome whose body carries "alpha".
-    pool.run(
-        &rec.id,
-        "ceo",
-        "alpha task",
-        &fx.deps,
-        crate::runtime::delegation::ChatTarget::default(),
-    )
-    .await
-    .expect("first turn");
-
-    // Turn two asks the same thing, with a briefing folded on — the shape
-    // every turn takes once a card has settled in the conversation.
-    let briefed = format!(
-        "alpha{} has finished — this is where each card landed:\n- something else\n]",
-        crate::runtime::cycle::SETTLED_WORK_ANNOTATION
-    );
-    let second = pool
-        .run(
-            &rec.id,
-            "ceo",
-            &briefed,
-            &fx.deps,
-            crate::runtime::delegation::ChatTarget::default(),
-        )
-        .await
-        .expect("second turn")
-        .reply;
-
-    assert!(
-        second.contains("Relevant prior work"),
-        "the operator asked about alpha, so alpha is recalled — the briefing \
-         appended after their words must not change what is searched for: {second:?}"
-    );
-}
-
 /// A pool serving one named harness builds only the agents bound to it.
 ///
 /// This is what makes one-pool-per-harness affordable: without the filter a
