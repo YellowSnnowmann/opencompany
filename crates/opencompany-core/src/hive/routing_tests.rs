@@ -231,6 +231,8 @@ fn the_coordinator_folds_every_desk_to_the_widest_round_and_longest_wall() {
     );
     assert_eq!(options.retention.settled_episodes, Some(RETAINED_SETTLED_EPISODES));
     assert_eq!(options.retention.delivered, Some(RETAINED_DELIVERIES));
+    assert_eq!(options.retention.interrupted, Some(RETAINED_INTERRUPTIONS));
+    assert_eq!(options.retention.pending_per_agent, Some(PENDING_PER_AGENT));
     assert_eq!(turn_timeout(&record), std::time::Duration::from_secs(900));
 }
 

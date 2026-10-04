@@ -29,7 +29,19 @@
 //!
 //! The options the Coordinator was started with (round width, turn walls,
 //! retention, the adapter's turn timeout) are fixed for the life of the hive;
-//! a `[group_chat.routing]` edit reaches them on the next start.
+//! a `[group_chat.routing]` edit reaches them on the next start. Retention is
+//! bounded (`routing::RETAINED_*`, `PENDING_PER_AGENT`): settled episodes,
+//! delivered and interrupted records are pruned from the state row once the
+//! projector has journaled them, and a send to an agent whose inbox is full
+//! is refused (`InboxFull`) as backpressure.
+//!
+//! # One writer per store
+//!
+//! Starting a Coordinator claims its store (a fencing epoch): an older
+//! Coordinator over the same store is refused every write from then on with
+//! `Error::Fenced`. This process runs exactly one Coordinator per company
+//! (`for_company`), and a run loop that is fenced stops for good — another
+//! process owns the company — rather than retrying.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
@@ -199,6 +211,20 @@ impl CompanyHive {
                 loop {
                     match coordinator.run().await {
                         Ok(()) => break,
+                        // Another process claimed this company's store (a
+                        // newer Coordinator fenced this one out): its writes
+                        // are refused from here on, so retrying would only
+                        // spin. Stop, and say so.
+                        Err(error @ tinyhivemind_hives::Error::Fenced { .. }) => {
+                            tracing::error!(
+                                %company,
+                                %error,
+                                "[hive] another process owns this company's hive; this one stops \
+                                 running it"
+                            );
+                            coordinator.shutdown();
+                            break;
+                        }
                         Err(error) => {
                             tracing::error!(
                                 %company,

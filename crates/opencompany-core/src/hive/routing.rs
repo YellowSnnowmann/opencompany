@@ -559,13 +559,25 @@ pub fn host_router() -> Router {
     Router::Fallback
 }
 
-/// The settled episodes the company Coordinator's state row keeps, and the
-/// acknowledged deliveries. The transcript is never pruned; these bound only
-/// the row every commit rewrites, which is what keeps a busy company's state
-/// document far from MongoDB's 16 MB cap.
+/// The settled episodes the company Coordinator's state row keeps. The
+/// transcript is never pruned; these bounds cap only the row every commit
+/// rewrites, which is what keeps a busy company's state document far from
+/// MongoDB's 16 MB cap. 256 settled episodes is days of desk work for a busy
+/// company, and the projector has journaled each one long before it is
+/// pruned.
 pub const RETAINED_SETTLED_EPISODES: usize = 256;
-/// See [`RETAINED_SETTLED_EPISODES`].
+/// The acknowledged direct deliveries the state row keeps. Delivered rows are
+/// bookkeeping only (the message itself stays in the transcript).
 pub const RETAINED_DELIVERIES: usize = 1024;
+/// The interruption records (and interrupted deliveries) the state row keeps.
+/// Each is journaled as a `HiveTurnInterrupted` row as soon as it appears, so
+/// the row needs only the recent ones.
+pub const RETAINED_INTERRUPTIONS: usize = 256;
+/// The most direct messages one agent may have waiting. A send past it is
+/// refused with `InboxFull` — backpressure on a sender (or the operator)
+/// talking to an agent that cannot keep up or is not attached — rather than
+/// growing the state row without limit.
+pub const PENDING_PER_AGENT: usize = 64;
 
 /// The one company Coordinator's options, folded from every desk's block.
 ///
@@ -602,6 +614,8 @@ pub fn coordinator_options(record: &CompanyRecord) -> tinyhivemind_hives::Coordi
         retention: tinyhivemind_hives::RetentionPolicy {
             settled_episodes: Some(RETAINED_SETTLED_EPISODES),
             delivered: Some(RETAINED_DELIVERIES),
+            interrupted: Some(RETAINED_INTERRUPTIONS),
+            pending_per_agent: Some(PENDING_PER_AGENT),
         },
     }
 }
