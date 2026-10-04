@@ -78,6 +78,21 @@ impl HarnessBrain {
                 .send_as_host(send(None))
                 .await
                 .map_err(hive_error)?,
+            // Backpressure: the teammate already has as many messages waiting
+            // as the hive holds for one agent. Said to the operator in the
+            // chat rather than failed, so they know to wait, not resend.
+            Err(HiveError::InboxFull { agent_id, limit }) => {
+                let who = hive.manifest_id(&agent_id);
+                self.notice_in(
+                    &chat_id,
+                    format!(
+                        "{who} already has {limit} messages waiting and is not taking more yet. \
+                         Your message was not delivered — send it again once they have caught up."
+                    ),
+                )
+                .await;
+                return Ok(true);
+            }
             Err(HiveError::MessageConflict(_)) => {
                 tracing::info!(
                     company = %record.id,
@@ -184,6 +199,29 @@ impl HarnessBrain {
             route: None,
             direct_to: Some(agent),
         })
+    }
+
+    /// Says `text` in `chat_id` as the system, outside any turn.
+    async fn notice_in(&self, chat_id: &str, text: String) {
+        let Some(events) = self.deps.events.as_ref() else {
+            return;
+        };
+        let event = CompanyEvent::AgentReply {
+            chat_id: chat_id.to_string(),
+            agent_id: crate::ports::SYSTEM_AUTHOR.to_string(),
+            text,
+            steps: Vec::new(),
+            outputs: Vec::new(),
+            task_id: None,
+            parent: None,
+            mentions: Vec::new(),
+            mention_depth: 0,
+            audience: Vec::new(),
+            hive: None,
+        };
+        if let Err(error) = events.append(&self.record().id, event).await {
+            tracing::warn!(%error, "[hive] a hive notice could not be journaled");
+        }
     }
 
     /// The hive turn that parked `approval_id`, if a coordinator turn did.

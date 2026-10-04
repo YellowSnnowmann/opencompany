@@ -164,8 +164,10 @@ pub struct Cursor {
     direct: HashMap<String, Landed>,
     /// Episodes already journaled as settled.
     settled: HashSet<String>,
-    /// Interruptions already journaled.
-    interruptions: usize,
+    /// Interruptions already journaled, by [`interruption_key`]. A set rather
+    /// than a count: the Coordinator prunes old interruption records
+    /// (`RetentionPolicy::interrupted`), so their positions shift.
+    interruptions: HashSet<String>,
 }
 
 impl Cursor {
@@ -340,12 +342,17 @@ impl Projector {
             cursor.settled.insert(episode.episode_id);
         }
         let interruptions = self.coordinator.interruptions().map_err(hive_error)?;
-        for interrupted in interruptions.iter().skip(cursor.interruptions) {
+        for interrupted in &interruptions {
+            let agent_id = self.roster.manifest_id(&self.company, &interrupted.agent_id);
+            let key = interruption_key(&agent_id, &interrupted.message_ids, &interrupted.reason);
+            if cursor.interruptions.contains(&key) {
+                continue;
+            }
             self.events
                 .append(
                     &self.company,
                     CompanyEvent::HiveTurnInterrupted {
-                        agent_id: self.roster.manifest_id(&self.company, &interrupted.agent_id),
+                        agent_id,
                         episode_id: interrupted.episode_id.clone(),
                         message_ids: interrupted.message_ids.clone(),
                         reason: interrupted.reason.clone(),
@@ -353,7 +360,7 @@ impl Projector {
                 )
                 .await?;
             appended += 1;
-            cursor.interruptions += 1;
+            cursor.interruptions.insert(key);
         }
         Ok(appended)
     }
@@ -498,9 +505,25 @@ fn fold(cursor: &mut Cursor, seq: EventSeq, event: &CompanyEvent, roster: &HiveR
         CompanyEvent::HiveEpisodeSettled { episode_id, .. } => {
             cursor.settled.insert(episode_id.clone());
         }
-        CompanyEvent::HiveTurnInterrupted { .. } => cursor.interruptions += 1,
+        CompanyEvent::HiveTurnInterrupted {
+            agent_id,
+            message_ids,
+            reason,
+            ..
+        } => {
+            cursor
+                .interruptions
+                .insert(interruption_key(agent_id, message_ids, reason));
+        }
         _ => {}
     }
+}
+
+/// The identity of one interruption record: whose turn, delivering what, and
+/// why — what the journal row carries, so a restarted projector recognises
+/// the rows it already wrote.
+fn interruption_key(agent_id: &str, message_ids: &[String], reason: &str) -> String {
+    format!("{agent_id}\u{1f}{}\u{1f}{reason}", message_ids.join(","))
 }
 
 fn hive_error(error: tinyhivemind_hives::Error) -> crate::OpenCompanyError {
