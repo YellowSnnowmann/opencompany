@@ -321,7 +321,8 @@ pub(super) fn tenant_run(company: &str, id: &str) -> RunRecord {
         step_count: 0,
         workflow_run_id: None,
         node_id: None,
-        hive: None,
+        episode_id: None,
+        round_revision: None,
     }
 }
 

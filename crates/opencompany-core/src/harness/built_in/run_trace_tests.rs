@@ -190,7 +190,8 @@ async fn a_store_failure_never_reaches_the_turn() {
                 step_count: 0,
                 workflow_run_id: None,
                 node_id: None,
-                hive: None,
+                episode_id: None,
+                round_revision: None,
             })
         }
         async fn get_run(
