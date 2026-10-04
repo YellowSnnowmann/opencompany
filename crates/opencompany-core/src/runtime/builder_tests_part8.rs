@@ -398,19 +398,10 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
         .await
         .expect("cycle");
 
-    let routed: Vec<String> = runtime
-        .events()
-        .read_from(&id, crate::ports::types::EventSeq::new(0), usize::MAX)
-        .await
-        .unwrap()
-        .into_iter()
-        .filter_map(|stored| {
-            eprintln!("EVENT {}", serde_json::to_string(&stored.event).unwrap_or_default());
-            match stored.event {
-                CompanyEvent::AgentReply { agent_id, .. } => Some(agent_id),
-                _ => None,
-            }
-        })
+    let routed: Vec<String> = report
+        .responses
+        .iter()
+        .filter_map(|response| response.agent.clone())
         .collect();
     assert!(
         routed.contains(&"eng2".to_string()),
