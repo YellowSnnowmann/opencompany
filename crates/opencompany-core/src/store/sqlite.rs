@@ -1,7 +1,7 @@
 //! SQLite-backed implementations of the storage ports.
 //!
 //! One [`SqliteStore`] opens a single bundled-SQLite connection and implements
-//! every durable port — [`CompanyStore`], [`EventLog`], [`MemoryStore`],
+//! every durable port — [`CompanyStore`], [`EventLog`], [`TraceStore`],
 //! [`ContextStore`], and [`SecretStore`] — sharing that connection behind an
 //! `Arc<Mutex<_>>`. The same `Arc<SqliteStore>` can therefore be injected into
 //! all four `RuntimeBuilder::with_*` setters so one database file serves the
@@ -38,7 +38,7 @@ use crate::error::OpenCompanyError;
 use crate::ports::context::ContextStore;
 use crate::ports::events::{EventLog, EventStreamItem, PruneReport, RetentionPolicy, plan_prune};
 use crate::ports::login_codes::LoginCodeRecord;
-use crate::ports::memory::MemoryStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::now_millis;
 use crate::ports::secrets::SecretStore;
 use crate::ports::sessions::SessionRecord;
@@ -1129,11 +1129,11 @@ impl EventLog for SqliteStore {
 }
 
 // ---------------------------------------------------------------------------
-// MemoryStore
+// TraceStore
 // ---------------------------------------------------------------------------
 
 #[async_trait]
-impl MemoryStore for SqliteStore {
+impl TraceStore for SqliteStore {
     async fn save_trace(&self, id: &CompanyId, trace: CompressedTrace) -> Result<()> {
         let trace_json = serde_json::to_string(&trace)?;
         let conn = self.conn();

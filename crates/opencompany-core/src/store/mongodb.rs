@@ -1,7 +1,7 @@
 //! MongoDB-backed implementations of the storage ports.
 //!
 //! One [`MongoStore`] wraps a single [`mongodb::Database`] and implements
-//! every durable port — [`CompanyStore`], [`EventLog`], [`MemoryStore`],
+//! every durable port — [`CompanyStore`], [`EventLog`], [`TraceStore`],
 //! [`ContextStore`], and [`SecretStore`] — so the same `Arc<MongoStore>` can
 //! be injected into all of the `RuntimeBuilder::with_*` setters.
 //!
@@ -50,7 +50,7 @@ use crate::error::OpenCompanyError;
 use crate::ports::context::ContextStore;
 use crate::ports::events::{EventLog, EventStreamItem, PruneReport, RetentionPolicy, plan_prune};
 use crate::ports::login_codes::LoginCodeRecord;
-use crate::ports::memory::MemoryStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::now_millis;
 use crate::ports::secrets::SecretStore;
 use crate::ports::sessions::SessionRecord;
@@ -1134,11 +1134,11 @@ impl EventLog for MongoStore {
 }
 
 // ---------------------------------------------------------------------------
-// MemoryStore
+// TraceStore
 // ---------------------------------------------------------------------------
 
 #[async_trait]
-impl MemoryStore for MongoStore {
+impl TraceStore for MongoStore {
     async fn save_trace(&self, id: &CompanyId, trace: CompressedTrace) -> Result<()> {
         let trace_json = serde_json::to_string(&trace)?;
         let seq = self.next_seq(id, "memory_traces").await?;

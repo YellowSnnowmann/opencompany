@@ -377,7 +377,7 @@ async fn one_store_serves_every_port_through_arc() {
     let s = store();
     let company: Arc<dyn CompanyStore> = s.clone();
     let events: Arc<dyn EventLog> = s.clone();
-    let memory: Arc<dyn MemoryStore> = s.clone();
+    let memory: Arc<dyn TraceStore> = s.clone();
     let context: Arc<dyn ContextStore> = s.clone();
     let secrets: Arc<dyn SecretStore> = s.clone();
 

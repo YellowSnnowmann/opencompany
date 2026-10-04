@@ -128,7 +128,7 @@ pub use feedback::{
 pub use policy::ManifestApprovalGate;
 pub use ports::{CompanyEvent, CompanyId, Effect, EffectDisposition, PolicyDecision, Verdict};
 pub use runtime::{CompanyRegistry, CompanyRuntime, CycleReport, RuntimeBuilder};
-pub use store::{FsCompanyStore, FsContextStore, FsEventLog, FsMemoryStore, FsSecretStore};
+pub use store::{FsCompanyStore, FsContextStore, FsEventLog, FsTraceStore, FsSecretStore};
 
 /// Current crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

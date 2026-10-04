@@ -49,7 +49,7 @@ use crate::ports::types::{
 };
 use crate::ports::{
     ArtifactStore, Brain, ChannelAdapter, CompanyStore, ContextStore, EventLog, FactStore,
-    InboxStore, LoginCodeStore, MemoryStore, RunStore, SecretStore, SessionStore, SkillStateStore,
+    InboxStore, LoginCodeStore, TraceStore, RunStore, SecretStore, SessionStore, SkillStateStore,
     TaskStore, ToolProvider, UsageMeter, UserStore, WorkflowRevisionStore, WorkspaceStore,
 };
 #[cfg(feature = "openhuman")]
@@ -67,7 +67,7 @@ use crate::runtime::tools::{StubToolProvider, grant_matches};
 use crate::runtime::workspace_events::WorkspaceAnnouncer;
 use crate::store::paths::Bundle;
 use crate::store::{
-    FsCompanyStore, FsContextStore, FsEventLog, FsInboxStore, FsMemoryStore, FsOps, FsSecretStore,
+    FsCompanyStore, FsContextStore, FsEventLog, FsInboxStore, FsTraceStore, FsOps, FsSecretStore,
 };
 #[cfg(feature = "openhuman")]
 use crate::workflows::HarnessWorkflowRunner;
@@ -566,7 +566,7 @@ pub struct RuntimeBuilder {
     transport: Option<Arc<dyn MedullaTransport>>,
     store: Option<Arc<dyn CompanyStore>>,
     events: Option<Arc<dyn EventLog>>,
-    memory: Option<Arc<dyn MemoryStore>>,
+    memory: Option<Arc<dyn TraceStore>>,
     context: Option<Arc<dyn ContextStore>>,
     /// The context port for writes whose content arrived from OUTSIDE — a
     /// channel message, a webhook body, fetched web text. Same store and
@@ -944,7 +944,7 @@ impl RuntimeBuilder {
     }
 
     /// Swaps the memory store.
-    pub fn with_memory(mut self, memory: Arc<dyn MemoryStore>) -> Self {
+    pub fn with_memory(mut self, memory: Arc<dyn TraceStore>) -> Self {
         self.memory = Some(memory);
         self
     }
@@ -1805,15 +1805,15 @@ impl RuntimeBuilder {
         self.manifest.tools.allow =
             effective_tool_allow(&self.manifest.tools.allow, overlay_tool_grants.as_ref());
 
-        let memory: Arc<dyn MemoryStore> = if self.memory_overlay_applied {
+        let memory: Arc<dyn TraceStore> = if self.memory_overlay_applied {
             self.memory
-                .unwrap_or_else(|| Arc::new(FsMemoryStore::new(home.clone())))
+                .unwrap_or_else(|| Arc::new(FsTraceStore::new(home.clone())))
         } else {
             handover
                 .as_ref()
                 .map(|h| h.memory.clone())
                 .or(self.memory)
-                .unwrap_or_else(|| Arc::new(FsMemoryStore::new(home.clone())))
+                .unwrap_or_else(|| Arc::new(FsTraceStore::new(home.clone())))
         };
         let context: Arc<dyn ContextStore> = if self.memory_overlay_applied {
             self.context

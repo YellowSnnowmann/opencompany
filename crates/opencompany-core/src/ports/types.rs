@@ -3441,7 +3441,7 @@ impl TokenUsage {
 /// **A cycle carries no working memory.** The struct once also carried
 /// `compressed_history` (32 recent [`CompressedTrace`]s) and `context_index`
 /// (every [`ChunkMeta`] in the company, unbounded), loaded from the
-/// [`MemoryStore`](crate::ports::MemoryStore) and
+/// [`TraceStore`](crate::ports::TraceStore) and
 /// [`ContextStore`](crate::ports::ContextStore) on every cycle — and read by no
 /// [`Brain`](crate::ports::Brain) implementation. Two facts made them dead
 /// rather than merely unused: no summariser exists anywhere in the crate, so a

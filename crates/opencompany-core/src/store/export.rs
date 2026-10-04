@@ -1,7 +1,7 @@
 //! Store-agnostic bundle export and import.
 //!
 //! Export reads *everything* for a company through the four durable storage
-//! ports ([`CompanyStore`], [`EventLog`], [`MemoryStore`], [`ContextStore`]) and
+//! ports ([`CompanyStore`], [`EventLog`], [`TraceStore`], [`ContextStore`]) and
 //! writes the canonical filesystem [`Bundle`](crate::store::paths::Bundle)
 //! layout. Because it drives the ports rather than a backend's private files, an
 //! export is *total by construction* for any backend — the fs and sqlite stores
@@ -29,7 +29,7 @@ use crate::error::OpenCompanyError;
 use crate::ports::context::ContextStore;
 use crate::ports::events::EventLog;
 use crate::ports::facts::{FactRecord, FactStore};
-use crate::ports::memory::MemoryStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::store::CompanyStore;
 use crate::ports::types::{
     AgentOverride, BudgetOverride, CompanyEvent, CompanyId, CompanyRecord, CompressedTrace,
@@ -63,11 +63,11 @@ const SECRETS_DIR: &str = "secrets";
 const KEYS_DIR: &str = "keys";
 
 /// The four durable storage ports as trait objects, in export/import order
-/// (`CompanyStore`, `EventLog`, `MemoryStore`, `ContextStore`).
+/// (`CompanyStore`, `EventLog`, `TraceStore`, `ContextStore`).
 pub type Ports = (
     Arc<dyn CompanyStore>,
     Arc<dyn EventLog>,
-    Arc<dyn MemoryStore>,
+    Arc<dyn TraceStore>,
     Arc<dyn ContextStore>,
 );
 
@@ -331,7 +331,7 @@ impl BundleContents {
         id: &CompanyId,
         store: Arc<dyn CompanyStore>,
         events: Arc<dyn EventLog>,
-        memory: Arc<dyn MemoryStore>,
+        memory: Arc<dyn TraceStore>,
         context: Arc<dyn ContextStore>,
         facts: Option<Arc<dyn FactStore>>,
         scopes: Option<Arc<dyn MemoryScopes>>,
@@ -432,7 +432,7 @@ impl BundleContents {
         &self,
         store: Arc<dyn CompanyStore>,
         events: Arc<dyn EventLog>,
-        memory: Arc<dyn MemoryStore>,
+        memory: Arc<dyn TraceStore>,
         context: Arc<dyn ContextStore>,
         facts: Option<Arc<dyn FactStore>>,
         scopes: Option<Arc<dyn MemoryScopes>>,
@@ -827,7 +827,7 @@ pub async fn export_bundle(
     dest: &Path,
     store: Arc<dyn CompanyStore>,
     events: Arc<dyn EventLog>,
-    memory: Arc<dyn MemoryStore>,
+    memory: Arc<dyn TraceStore>,
     context: Arc<dyn ContextStore>,
     facts: Option<Arc<dyn FactStore>>,
     opts: ExportOpts,
@@ -842,7 +842,7 @@ pub async fn export_bundle_with_scopes(
     dest: &Path,
     store: Arc<dyn CompanyStore>,
     events: Arc<dyn EventLog>,
-    memory: Arc<dyn MemoryStore>,
+    memory: Arc<dyn TraceStore>,
     context: Arc<dyn ContextStore>,
     facts: Option<Arc<dyn FactStore>>,
     scopes: Option<Arc<dyn MemoryScopes>>,
@@ -873,7 +873,7 @@ pub async fn import_bundle(
     src: &Path,
     store: Arc<dyn CompanyStore>,
     events: Arc<dyn EventLog>,
-    memory: Arc<dyn MemoryStore>,
+    memory: Arc<dyn TraceStore>,
     context: Arc<dyn ContextStore>,
     facts: Option<Arc<dyn FactStore>>,
 ) -> Result<CompanyId> {
@@ -885,7 +885,7 @@ pub async fn import_bundle_with_scopes(
     src: &Path,
     store: Arc<dyn CompanyStore>,
     events: Arc<dyn EventLog>,
-    memory: Arc<dyn MemoryStore>,
+    memory: Arc<dyn TraceStore>,
     context: Arc<dyn ContextStore>,
     facts: Option<Arc<dyn FactStore>>,
     scopes: Option<Arc<dyn MemoryScopes>>,

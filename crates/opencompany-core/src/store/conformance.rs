@@ -31,7 +31,7 @@ use crate::ports::events::{EventLog, EventStreamItem};
 use crate::ports::facts::{FactKind, FactRecord, FactStore};
 use crate::ports::inbox::{EmailRecord, InboxMeta, InboxStore};
 use crate::ports::login_codes::{LoginCodeRecord, LoginCodeStore};
-use crate::ports::memory::MemoryStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::notifications::{Notification, NotificationStore, Subject, SubjectKind};
 use crate::ports::now_millis;
 use crate::ports::run_output::{
@@ -417,7 +417,7 @@ fn ledger_entry(i: usize) -> LedgerEntry {
 pub async fn assert_isolation_by_company(
     store: Arc<dyn CompanyStore>,
     events: Arc<dyn EventLog>,
-    memory: Arc<dyn MemoryStore>,
+    memory: Arc<dyn TraceStore>,
     context: Arc<dyn ContextStore>,
 ) {
     let alpha = CompanyId::new("alpha");
@@ -1226,7 +1226,7 @@ pub async fn assert_event_retention(events: Arc<dyn EventLog>) {
 pub async fn assert_export_totality(
     store: Arc<dyn CompanyStore>,
     events: Arc<dyn EventLog>,
-    memory: Arc<dyn MemoryStore>,
+    memory: Arc<dyn TraceStore>,
     context: Arc<dyn ContextStore>,
 ) {
     let id = CompanyId::new("alpha");

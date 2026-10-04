@@ -4,7 +4,7 @@
 //! manifest, event log, ledger, memory, context, and secrets. The [`fs`]
 //! module implements [`CompanyStore`](crate::ports::CompanyStore),
 //! [`EventLog`](crate::ports::EventLog),
-//! [`MemoryStore`](crate::ports::MemoryStore),
+//! [`TraceStore`](crate::ports::TraceStore),
 //! [`ContextStore`](crate::ports::ContextStore), and
 //! [`SecretStore`](crate::ports::SecretStore) over that layout.
 
@@ -72,7 +72,7 @@ pub mod memory;
 /// A backend-agnostic port-conformance suite: async assertions parameterized
 /// over any [`CompanyStore`](crate::ports::CompanyStore) /
 /// [`EventLog`](crate::ports::EventLog) /
-/// [`MemoryStore`](crate::ports::MemoryStore) /
+/// [`TraceStore`](crate::ports::TraceStore) /
 /// [`ContextStore`](crate::ports::ContextStore) implementation. Both the fs and
 /// sqlite backends run the identical suite, so a new store proves it upholds the
 /// port contract (per-company isolation, append-only logs, monotonic seqs,
@@ -81,7 +81,7 @@ pub mod memory;
 pub mod conformance;
 
 pub use fs::{
-    FsCompanyStore, FsContextStore, FsEventLog, FsInboxStore, FsJournalStore, FsMemoryStore,
+    FsCompanyStore, FsContextStore, FsEventLog, FsInboxStore, FsJournalStore, FsTraceStore,
     FsSecretStore,
 };
 pub use fs_ops::FsOps;

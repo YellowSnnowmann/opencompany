@@ -26,7 +26,7 @@ use crate::ports::inbox::InboxStore;
 use crate::ports::journal::JournalStore;
 use crate::ports::ledgers::LedgerStore;
 use crate::ports::login_codes::LoginCodeStore;
-use crate::ports::memory::MemoryStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::notifications::NotificationStore;
 use crate::ports::read_state::ReadStateStore;
 use crate::ports::run_output::WorkflowRunOutputStore;
@@ -227,7 +227,7 @@ impl std::str::FromStr for MemoryBackend {
 /// [`RuntimeBuilder::with_memory_overlay`](crate::runtime::RuntimeBuilder::with_memory_overlay).
 #[derive(Clone)]
 pub struct MemoryOverlay {
-    pub memory: Arc<dyn MemoryStore>,
+    pub memory: Arc<dyn TraceStore>,
     pub context: Arc<dyn ContextStore>,
     /// The operator's facts, when the selected engine serves them too.
     ///
@@ -292,7 +292,7 @@ impl MemoryOverlay {
     /// field doc) — tests outside this module cannot construct the struct.
     #[cfg(test)]
     pub(crate) fn test_with_ports(
-        memory: Arc<dyn MemoryStore>,
+        memory: Arc<dyn TraceStore>,
         context: Arc<dyn ContextStore>,
         inbound_context: Option<Arc<dyn ContextStore>>,
     ) -> Self {
@@ -590,7 +590,7 @@ pub trait OwnershipStore: Send + Sync {
 pub struct StorageHandles {
     pub company: Arc<dyn CompanyStore>,
     pub events: Arc<dyn EventLog>,
-    pub memory: Arc<dyn MemoryStore>,
+    pub memory: Arc<dyn TraceStore>,
     pub context: Arc<dyn ContextStore>,
     pub secrets: Arc<dyn SecretStore>,
     pub inbox: Arc<dyn InboxStore>,

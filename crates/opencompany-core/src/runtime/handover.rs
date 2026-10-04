@@ -53,7 +53,7 @@ use crate::company::runtime::{CompanyRuntime, OpsStores};
 use crate::feedback::service::FeedbackFiler;
 use crate::feedback::store::FeedbackStore;
 use crate::policy::ManifestApprovalGate;
-use crate::ports::{CompanyStore, ContextStore, EventLog, InboxStore, MemoryStore, SecretStore};
+use crate::ports::{CompanyStore, ContextStore, EventLog, InboxStore, TraceStore, SecretStore};
 use crate::runtime::blocked_nodes::BlockedNodeQueue;
 use crate::runtime::continuation::ContinuationQueue;
 use crate::runtime::grants::GrantSet;
@@ -73,7 +73,7 @@ use crate::runtime::workflow_gates::WorkflowGateQueue;
 pub struct RuntimeHandover {
     pub(crate) store: Arc<dyn CompanyStore>,
     pub(crate) events: Arc<dyn EventLog>,
-    pub(crate) memory: Arc<dyn MemoryStore>,
+    pub(crate) memory: Arc<dyn TraceStore>,
     pub(crate) context: Arc<dyn ContextStore>,
     pub(crate) inbound_context: Arc<dyn ContextStore>,
     pub(crate) scratch_context: Option<Arc<dyn ContextStore>>,

@@ -34,7 +34,7 @@ use crate::ports::types::{
 };
 use crate::ports::{
     ApprovalGate, ArtifactStore, Brain, ChannelAdapter, CompanyStore, ContextStore, EventLog,
-    FactStore, InboxStore, LoginCodeStore, MemoryStore, NotificationStore, ReadStateStore,
+    FactStore, InboxStore, LoginCodeStore, TraceStore, NotificationStore, ReadStateStore,
     RunStore, SecretStore, SessionStore, SkillStateStore, TaskRecord, TaskStore, ToolProvider,
     UsageMeter, UserStore, WorkflowRevisionStore, WorkspaceStore,
 };
@@ -248,7 +248,7 @@ pub struct CompanyRuntime {
     pub(crate) brain: Arc<dyn Brain>,
     pub(crate) store: Arc<dyn CompanyStore>,
     pub(crate) events: Arc<dyn EventLog>,
-    pub(crate) memory: Arc<dyn MemoryStore>,
+    pub(crate) memory: Arc<dyn TraceStore>,
     pub(crate) context: Arc<dyn ContextStore>,
     /// The taint-stamping context port for external content (issue #1113);
     /// resolved at build time — same store as `context` when the engine
@@ -569,7 +569,7 @@ impl CompanyRuntime {
         brain: Arc<dyn Brain>,
         store: Arc<dyn CompanyStore>,
         events: Arc<dyn EventLog>,
-        memory: Arc<dyn MemoryStore>,
+        memory: Arc<dyn TraceStore>,
         context: Arc<dyn ContextStore>,
         inbound_context: Arc<dyn ContextStore>,
         tools: Arc<dyn ToolProvider>,

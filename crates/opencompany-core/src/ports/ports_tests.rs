@@ -11,7 +11,7 @@ fn assert_object_safe(
     _host: &dyn CycleHost,
     _store: &dyn CompanyStore,
     _events: &dyn EventLog,
-    _memory: &dyn MemoryStore,
+    _memory: &dyn TraceStore,
     _context: &dyn ContextStore,
     _channel: &dyn ChannelAdapter,
     _tools: &dyn ToolProvider,

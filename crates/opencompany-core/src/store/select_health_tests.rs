@@ -122,7 +122,7 @@ async fn a_slow_engine_is_slow_not_refused() {
 #[tokio::test]
 async fn refresh_health_records_the_answer_on_the_descriptor() {
     let mut overlay = MemoryOverlay::test_with_ports(
-        Arc::new(crate::store::FsMemoryStore::new(std::env::temp_dir())),
+        Arc::new(crate::store::FsTraceStore::new(std::env::temp_dir())),
         Arc::new(crate::store::FsContextStore::new(std::env::temp_dir())),
         None,
     );

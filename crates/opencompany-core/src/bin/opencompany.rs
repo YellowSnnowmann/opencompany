@@ -1056,7 +1056,7 @@ async fn live_ports(
     opencompany::store::StorageKind,
 )> {
     use opencompany::store::{
-        FsCompanyStore, FsContextStore, FsEventLog, FsMemoryStore, FsOps, StorageSettings,
+        FsCompanyStore, FsContextStore, FsEventLog, FsTraceStore, FsOps, StorageSettings,
         open_memory_overlay, open_storage,
     };
     let settings = StorageSettings::from_env()?;
@@ -1084,7 +1084,7 @@ async fn live_ports(
             None => (
                 Arc::new(FsCompanyStore::new(home.to_path_buf())) as _,
                 Arc::new(FsEventLog::new(home.to_path_buf())) as _,
-                Arc::new(FsMemoryStore::new(home.to_path_buf())) as _,
+                Arc::new(FsTraceStore::new(home.to_path_buf())) as _,
                 Arc::new(FsContextStore::new(home.to_path_buf())) as _,
                 Some(Arc::new(FsOps::new(home.to_path_buf()))
                     as Arc<dyn opencompany::ports::FactStore>),

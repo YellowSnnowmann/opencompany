@@ -12,7 +12,7 @@ async fn conformance_isolation_by_company() {
     conformance::assert_isolation_by_company(
         Arc::new(FsCompanyStore::new(&root)),
         Arc::new(FsEventLog::new(&root)),
-        Arc::new(FsMemoryStore::new(&root)),
+        Arc::new(FsTraceStore::new(&root)),
         Arc::new(FsContextStore::new(&root)),
     )
     .await;
@@ -408,7 +408,7 @@ async fn conformance_export_totality() {
     conformance::assert_export_totality(
         Arc::new(FsCompanyStore::new(&root)),
         Arc::new(FsEventLog::new(&root)),
-        Arc::new(FsMemoryStore::new(&root)),
+        Arc::new(FsTraceStore::new(&root)),
         Arc::new(FsContextStore::new(&root)),
     )
     .await;

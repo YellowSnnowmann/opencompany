@@ -21,7 +21,7 @@ use crate::error::OpenCompanyError;
 use crate::ports::context::ContextStore;
 use crate::ports::events::{EventLog, EventStreamItem, PruneReport, RetentionPolicy, plan_prune};
 use crate::ports::inbox::{EmailRecord, InboxMeta, InboxStore};
-use crate::ports::memory::MemoryStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::secrets::SecretStore;
 use crate::ports::store::CompanyStore;
 use crate::ports::types::{
@@ -63,7 +63,7 @@ impl PathLocks {
 /// process (issue #388).
 ///
 /// The locks these replaced were **fields** on `FsCompanyStore`, `FsEventLog`,
-/// `FsMemoryStore`, `FsContextStore`, `FsInboxStore` and `FsOps` — so two stores
+/// `FsTraceStore`, `FsContextStore`, `FsInboxStore` and `FsOps` — so two stores
 /// over one bundle serialised against nothing, which is the state those types
 /// have always been in and which nothing stopped a caller reaching: each
 /// constructor takes a root and builds a fresh registry. A `static` is the only
@@ -73,7 +73,7 @@ impl PathLocks {
 /// derives the next sequence from the current line count and then appends, so
 /// two unsynchronised instances hand out the **same** `seq` — breaking every
 /// consumer that treats it as an identity. And the read-modify-write sites
-/// (`FsMemoryStore::evict`, `FsInboxStore::mark_read`, and the whole-file
+/// (`FsTraceStore::evict`, `FsInboxStore::mark_read`, and the whole-file
 /// rewrites in [`FsOps`](crate::store::fs_ops::FsOps)) replace the file with a
 /// snapshot, so an append that raced one of them was simply erased.
 ///
@@ -620,7 +620,7 @@ pub(crate) struct SkippedLine {
 /// then rewrites the file atomically would write back exactly the lines that
 /// parsed, deleting the damaged one for good — converting a recoverable fault
 /// into silent, permanent data loss, which is strictly worse than the failed
-/// boot this function exists to prevent. Rewriters ([`FsMemoryStore::evict`],
+/// boot this function exists to prevent. Rewriters ([`FsTraceStore::evict`],
 /// [`FsInboxStore::mark_read`]) stay on strict [`read_jsonl`], where a damaged
 /// line aborts the rewrite instead of laundering it.
 ///
@@ -2180,16 +2180,16 @@ impl EventLog for FsEventLog {
 }
 
 // ---------------------------------------------------------------------------
-// MemoryStore
+// TraceStore
 // ---------------------------------------------------------------------------
 
-/// Filesystem [`MemoryStore`]: compressed traces and task results as JSONL.
+/// Filesystem [`TraceStore`]: compressed traces and task results as JSONL.
 #[derive(Clone)]
-pub struct FsMemoryStore {
+pub struct FsTraceStore {
     root: PathBuf,
 }
 
-impl FsMemoryStore {
+impl FsTraceStore {
     /// Creates a memory store rooted at `root` (the OpenCompany home).
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -2201,7 +2201,7 @@ impl FsMemoryStore {
 }
 
 #[async_trait]
-impl MemoryStore for FsMemoryStore {
+impl TraceStore for FsTraceStore {
     async fn save_trace(&self, id: &CompanyId, trace: CompressedTrace) -> Result<()> {
         let bundle = self.bundle(id);
         bundle.ensure_dirs().await?;
