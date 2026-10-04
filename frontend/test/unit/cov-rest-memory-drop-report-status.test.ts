@@ -76,7 +76,7 @@ describe("DropZone's per-item report, on a mixed batch", () => {
           client,
           company: "acme",
           onIngested: () => {},
-          discarding: false,
+          off: false,
         }),
       );
     });
