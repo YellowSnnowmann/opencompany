@@ -3873,7 +3873,7 @@ fn spawn_chat_turn(turn: ChatTurn) -> JoinHandle<Result<(CycleReport, Option<Str
                 };
                 let notice = CompanyEvent::AgentReply {
                     audience: Vec::new(),
-                    episode: None,
+                    hive: None,
                     // Issue #1890 D: threaded on exactly the terms a successful
                     // reply is. This notice IS the answer when there is no
                     // other one, and `reply_thread`'s whole argument is that
