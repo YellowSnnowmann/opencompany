@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, PoisonError, RwLock, Weak};
 
-use tinyhivemind_hives::{Destination, HOST_ID, TurnDisposition};
+use tinyhivemind_hives::{Destination, TurnDisposition};
 use tinyhivemind_openhuman::{HostedTurn, TurnHooks, TurnOptions, TurnProgressSink, TurnScope};
 
 use super::progress_pump::ProgressPump;
@@ -161,10 +161,6 @@ impl HiveHooks {
         }
     }
 
-    /// Whether the turn answers the operator directly (a DM the host sent).
-    fn answers_operator(scope: &TurnScope) -> bool {
-        scope.senders.iter().any(|sender| sender == HOST_ID)
-    }
 }
 
 impl TurnHooks for HiveHooks {
@@ -253,7 +249,6 @@ impl HiveHooks {
             scope,
             seat: &seat,
             chat: &chat,
-            operator: Self::answers_operator(scope),
         };
         let (result, disposition) = settle.run(turn, pump).await;
         if let Some(slot) = self.slots().get_mut(&scope.agent_id) {
