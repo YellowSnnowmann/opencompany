@@ -1,14 +1,17 @@
-//! The MCP server the company agents speak and reach OpenCompany's tools on
-//! (plan `hive-desks`, Phase 3).
+//! The MCP server the company agents reach OpenCompany's tools on (plan
+//! `hive-desks`, Phase 3).
 //!
 //! # Why a server at all
 //!
 //! `openhuman_embed::Agent` has no seam for an in-process host tool: an agent's
 //! tools are OpenHuman's own groups plus the `McpServer`s fixed on its spec.
-//! So every tool this crate authors — ledger, tasks, pages, memory, workspace,
-//! and the room's speech tools `post` / `broadcast` / `dm` /
-//! `complete_episode` / `read` — is served here and reached by the agent as
-//! `mcp_call_tool{server: "opencompany", tool, arguments}`.
+//! So every tool this crate authors — ledger, tasks, pages, workspace — was
+//! served here and reached by the agent as
+//! `mcp_call_tool{server: "opencompany", tool, arguments}`. The belt now rides
+//! the spec natively (`AgentSpec::tools`); the server stays for the in-flight
+//! registry its handler shares with the turn envelope, and for any caller that
+//! still reaches a tool over MCP. The room's speech tools it served until
+//! OC-2 are gone: agents speak through the permanent `hivemind_*` tools.
 //!
 //! # The wire
 //!
@@ -28,9 +31,8 @@
 //! # Attribution and approvals
 //!
 //! The bearer names the agent; the agent's one in-flight turn
-//! ([`InFlightRegistry`]) names the episode, round and conversation. A speech
-//! call folds into that turn's outbox; an OpenCompany tool call is decided by
-//! the agent's [`ApprovalPolicy`] — allow, deny, or park — and runs under an
+//! ([`InFlightRegistry`]) names the conversation. An OpenCompany tool call is
+//! decided by the agent's [`ApprovalPolicy`] — allow, deny, or park — and runs under an
 //! [`InFlightContext`]. A call parks only on a task that holds an approval
 //! claim; without one the policy refuses it and says nobody was asked.
 
@@ -47,7 +49,7 @@ use openhuman_embed::{AgentSpec, McpAuthConfig, McpServer};
 use serde_json::Value;
 use tinytools::Tool;
 
-use super::tools::{InFlightRegistry, McpToolAdapter, speech_descriptor, speech_tool_names};
+use super::tools::{InFlightRegistry, McpToolAdapter};
 use crate::harness::policy::ApprovalPolicy;
 use crate::ports::events::EventLog;
 use crate::ports::types::CompanyId;
@@ -73,17 +75,13 @@ pub struct McpAgent {
     /// The runtime agent id the route and the bearer resolve to.
     pub runtime_agent_id: String,
     bearer: String,
-    /// The speech tools this agent may call. Every desk seat gets all five;
-    /// a non-desk turn still lists them so the catalogue is stable across
-    /// surfaces, and the handler refuses `dm` outside an episode.
-    pub speech_tools: Vec<String>,
     tools: Vec<McpToolAdapter>,
     /// The approval policy that decides each OpenCompany tool call. `None`
     /// allows everything — for tests over a bare belt only.
     pub policy: Option<Arc<ApprovalPolicy>>,
     /// The agent workspace the served tools sandbox to.
     pub workspace: Option<PathBuf>,
-    /// The company journal `read` is served from.
+    /// The company journal, for a served tool that reads it.
     pub events: Option<Arc<dyn EventLog>>,
 }
 
@@ -99,7 +97,7 @@ impl fmt::Debug for McpAgent {
 }
 
 impl McpAgent {
-    /// An agent with every speech tool and no OpenCompany tools yet.
+    /// An agent with no OpenCompany tools yet.
     #[must_use]
     pub fn new(
         company: CompanyId,
@@ -112,10 +110,6 @@ impl McpAgent {
             agent_id: agent_id.into(),
             runtime_agent_id: runtime_agent_id.into(),
             bearer: bearer.into(),
-            speech_tools: speech_tool_names()
-                .iter()
-                .map(|name| (*name).to_string())
-                .collect(),
             tools: Vec::new(),
             policy: None,
             workspace: None,
@@ -137,17 +131,6 @@ impl McpAgent {
         self
     }
 
-    /// Restricts the speech tools this agent may call.
-    #[must_use]
-    pub fn speech_tools<I, S>(mut self, names: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.speech_tools = names.into_iter().map(Into::into).collect();
-        self
-    }
-
     /// The approval policy that decides this agent's tool calls.
     #[must_use]
     pub fn policy(mut self, policy: Arc<ApprovalPolicy>) -> Self {
@@ -162,7 +145,7 @@ impl McpAgent {
         self
     }
 
-    /// The journal `read` is served from.
+    /// The company journal.
     #[must_use]
     pub fn events(mut self, events: Arc<dyn EventLog>) -> Self {
         self.events = Some(events);
@@ -188,9 +171,7 @@ impl McpAgent {
     /// attached `McpServer`.
     #[must_use]
     pub fn allow_tools(&self) -> Vec<String> {
-        let mut names = self.speech_tools.clone();
-        names.extend(self.tool_names());
-        names
+        self.tool_names()
     }
 
     fn tool(&self, name: &str) -> Option<&McpToolAdapter> {
@@ -198,30 +179,8 @@ impl McpAgent {
     }
 
     fn catalogue(&self) -> Vec<Value> {
-        let mut tools: Vec<Value> = tinyhivemind::speech::tool_specs()
-            .iter()
-            .filter(|spec| self.speech_tools.iter().any(|name| name == spec.name))
-            .map(speech_descriptor)
-            .collect();
-        tools.extend(self.tools.iter().map(McpToolAdapter::descriptor));
-        tools
+        self.tools.iter().map(McpToolAdapter::descriptor).collect()
     }
-}
-
-/// The `dm` recipient rule Phase 4's `DeskHive` supplies (`hive.resolve_dm`).
-///
-/// TODO(Phase 4): install one on the host from `graph.rs`. Until then the
-/// membership snapshot on [`HiveTurn`](super::tools::HiveTurn) is the rule.
-pub trait DmResolver: Send + Sync {
-    /// `Ok` when `speaker` may address `to` on `desk_id`; `Err(reason)` is
-    /// rendered to the seat as `refused: <reason>`.
-    fn resolve_dm(
-        &self,
-        company: &CompanyId,
-        desk_id: &str,
-        speaker: &str,
-        to: &[String],
-    ) -> Result<(), String>;
 }
 
 /// The server: the agents it serves, the turns in flight, and the listener.
@@ -229,7 +188,6 @@ pub struct McpHost {
     agents: RwLock<HashMap<String, Arc<McpAgent>>>,
     in_flight: Arc<InFlightRegistry>,
     addr: OnceLock<SocketAddr>,
-    dm_resolver: RwLock<Option<Arc<dyn DmResolver>>>,
 }
 
 impl fmt::Debug for McpHost {
@@ -248,7 +206,6 @@ impl Default for McpHost {
             agents: RwLock::new(HashMap::new()),
             in_flight: Arc::new(InFlightRegistry::new()),
             addr: OnceLock::new(),
-            dm_resolver: RwLock::new(None),
         }
     }
 }
@@ -331,11 +288,6 @@ impl McpHost {
             .expect("mcp agents poisoned")
             .get(runtime_agent_id)
             .cloned()
-    }
-
-    /// Installs Phase 4's `dm` rule.
-    pub fn set_dm_resolver(&self, resolver: Arc<dyn DmResolver>) {
-        *self.dm_resolver.write().expect("dm resolver poisoned") = Some(resolver);
     }
 
     /// The loopback address the listener is bound to, once it is.
@@ -475,7 +427,7 @@ pub fn opencompany_mcp_server(ctx: &McpAttach) -> McpServer {
         })
         .allow_tools(ctx.allow_tools.clone())
         .timeout_secs(CALL_TIMEOUT_SECS)
-        .description("OpenCompany: speak to the desk and use the company's tools")
+        .description("OpenCompany: use the company's tools")
 }
 
 /// Byte-equality that does not stop at the first mismatch.

@@ -1,8 +1,7 @@
 //! The request side of the `opencompany` MCP server: bearer check, JSON-RPC
-//! dispatch, and the four things a call can be — a speech tool folded into
-//! the in-flight turn, a `read` served from the journal, an OpenCompany tool
-//! decided under the agent's policy, or a hand-off of that decision to the
-//! turn's own task. The host, the agents and the spec attachment are the
+//! dispatch, and the two things a call can be — an OpenCompany tool decided
+//! under the agent's policy, or a hand-off of that decision to the turn's own
+//! task. The host, the agents and the spec attachment are the
 //! parent module's.
 
 use std::sync::Arc;
@@ -17,9 +16,7 @@ use openhuman_core::agent::tool_policy::{
 use serde_json::{Value, json};
 
 use super::{HEADER_SESSION_ID, McpAgent, McpHost, SERVER_SLUG, constant_time_eq};
-use crate::hive::tools::{
-    InFlight, InFlightContext, Speech, ToolJob, is_speech_tool, read_conversation,
-};
+use crate::hive::tools::{InFlight, InFlightContext, ToolJob};
 
 fn bearer_of(headers: &HeaderMap) -> Option<&str> {
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
@@ -143,12 +140,6 @@ fn initialize(id: Value, params: &Value) -> Response {
 }
 
 async fn call(host: &McpHost, agent: &McpAgent, name: &str, arguments: Value) -> Value {
-    if is_speech_tool(name) {
-        if !agent.speech_tools.iter().any(|allowed| allowed == name) {
-            return tool_result(format!("refused: '{name}' is not available to you"), true);
-        }
-        return call_speech(host, agent, name, &arguments).await;
-    }
     if agent.tool(name).is_none() {
         return tool_result(format!("refused: unknown tool '{name}'"), true);
     }
@@ -229,79 +220,5 @@ impl McpAgent {
         let result = tool.execute(arguments, &context).await;
         let is_error = result.is_error;
         tool_result(result.output(), is_error)
-    }
-}
-
-async fn call_speech(host: &McpHost, agent: &McpAgent, name: &str, arguments: &Value) -> Value {
-    let Some(speech) = host
-        .in_flight
-        .with(&agent.runtime_agent_id, |turn| turn.speak(name, arguments))
-    else {
-        return tool_result(
-            "refused: no turn is in flight for this agent, so nothing can be said",
-            true,
-        );
-    };
-    match speech {
-        Speech::Recorded(receipt) => {
-            // Phase 4's `resolve_dm` outranks the membership snapshot when it
-            // is installed: a `dm` it refuses is unrecorded again.
-            if name == "dm"
-                && let Some(reason) = resolve_dm_via_host(host, agent, arguments)
-            {
-                host.in_flight
-                    .with(&agent.runtime_agent_id, |turn| turn.outbox.clear());
-                return tool_result(format!("refused: {reason}"), true);
-            }
-            tool_result(receipt, false)
-        }
-        Speech::Refused(text) => tool_result(text, true),
-        Speech::Read { limit } => read(host, agent, limit).await,
-    }
-}
-
-fn resolve_dm_via_host(host: &McpHost, agent: &McpAgent, arguments: &Value) -> Option<String> {
-    let resolver = host
-        .dm_resolver
-        .read()
-        .expect("dm resolver poisoned")
-        .clone()?;
-    let desk_id = host
-        .in_flight
-        .with(&agent.runtime_agent_id, |turn| {
-            turn.hive.as_ref().map(|hive| hive.desk_id.clone())
-        })
-        .flatten()?;
-    let to: Vec<String> = arguments
-        .get("to")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(|id| id.trim().trim_start_matches('@').to_string())
-                .collect()
-        })
-        .unwrap_or_default();
-    resolver
-        .resolve_dm(&agent.company, &desk_id, &agent.agent_id, &to)
-        .err()
-}
-
-/// Serves `read`: the conversation's recent rows, oldest first, narrowed to
-/// what this agent may see.
-async fn read(host: &McpHost, agent: &McpAgent, limit: usize) -> Value {
-    let Some(events) = agent.events.clone() else {
-        return tool_result("refused: this agent has no journal to read from", true);
-    };
-    let Some(surface) = host
-        .in_flight
-        .with(&agent.runtime_agent_id, |turn| turn.surface.clone())
-    else {
-        return tool_result("refused: no turn is in flight for this agent", true);
-    };
-    match read_conversation(events, &agent.company, &agent.agent_id, &surface, limit).await {
-        Ok(body) => tool_result(body, false),
-        Err(text) => tool_result(text, true),
     }
 }
