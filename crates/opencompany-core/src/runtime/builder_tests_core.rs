@@ -1,26 +1,6 @@
 pub(super) use super::*;
-pub(super) use crate::ports::types::{CompanyId, CompressedTrace, ToolCall};
+pub(super) use crate::ports::types::{CompanyId, ToolCall};
 pub(super) use crate::runtime::journal::ExecutedEffect;
-
-#[derive(Clone)]
-pub(super) struct TestMemoryScopes {
-    pub(super) context: Arc<dyn ContextStore>,
-}
-
-#[async_trait::async_trait]
-impl crate::store::MemoryScopes for TestMemoryScopes {
-    fn agent_context(&self, _agent_id: &str) -> Arc<dyn ContextStore> {
-        self.context.clone()
-    }
-
-    fn desk_context(&self, _desk_id: &str) -> Arc<dyn ContextStore> {
-        self.context.clone()
-    }
-
-    async fn archived_traces(&self, _company: &CompanyId) -> Result<Vec<CompressedTrace>> {
-        Ok(Vec::new())
-    }
-}
 
 pub(super) fn tmp_home(prefix: &str) -> tempfile::TempDir {
     tempfile::Builder::new()
