@@ -1871,8 +1871,9 @@ fn table_counts_and_intentional_widenings_are_explicit() {
             .iter()
             .filter(|route| route.access == Access::Admin)
             .count(),
-        87,
-        "72 signature-admin, seven body-admin, and eight aspirational authority rows",
+        84,
+        "signature-admin, seven body-admin, and aspirational authority rows (the three \
+         memory-engine admin routes went with the OpenHuman memory cutover)",
     );
     assert_eq!(
         OPS_SCOPED_ROUTES
