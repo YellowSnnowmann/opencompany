@@ -354,7 +354,7 @@ fn link_refusal(url: &str) -> Result<(), String> {
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err("only http:// and https:// links can be fetched".to_string());
     }
-    if !tinymemory_integrations::sources::readers::ssrf::is_url_allowed(&parsed) {
+    if !tinymemory_integrations::sources::fetch::ssrf::is_url_allowed(&parsed) {
         return Err("that host is inside this deployment's own network".to_string());
     }
     Ok(())
