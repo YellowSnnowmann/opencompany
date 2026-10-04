@@ -5496,6 +5496,45 @@ pub(crate) fn agent_policy_for(
     agent_policy
 }
 
+/// One teammate of a roster, built but not yet registered on the runtime.
+///
+/// Split from registration (OC-2) because a rebuild of an agent the company
+/// hive already runs has to register the new handle *inside*
+/// `OpenHumanHost::replace_agent`, after the adapter dropped the old one —
+/// OpenHuman keeps an agent id reserved while any clone of it is alive.
+pub(crate) struct RosterBlueprint {
+    agent_id: String,
+    role: String,
+    budget_usd_daily: Option<f64>,
+    blueprint: build::AgentBlueprint,
+}
+
+impl RosterBlueprint {
+    /// The manifest agent id.
+    pub(crate) fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+
+    /// Registers the blueprint on `runtime` — see [`CompanyAgent::register`].
+    pub(crate) fn register(
+        self,
+        runtime: &openhuman_embed::Runtime,
+        company: &CompanyId,
+        events: Option<Arc<dyn EventLog>>,
+    ) -> crate::Result<CompanyAgent> {
+        CompanyAgent::register(
+            runtime,
+            company,
+            &self.agent_id,
+            &self.role,
+            self.budget_usd_daily,
+            self.blueprint,
+            events,
+        )
+    }
+}
+
+/// Builds and registers every teammate this pool serves.
 pub(crate) fn build_roster(
     runtime: &openhuman_embed::Runtime,
     company: &CompanyRecord,
@@ -5503,6 +5542,23 @@ pub(crate) fn build_roster(
     skill_deltas: &[SkillState],
     routed_context: &HashMap<String, Vec<(String, String)>>,
 ) -> crate::Result<Vec<Arc<CompanyAgent>>> {
+    roster_blueprints(company, deps, skill_deltas, routed_context)?
+        .into_iter()
+        .map(|blueprint| {
+            blueprint
+                .register(runtime, &company.id, deps.events.clone())
+                .map(Arc::new)
+        })
+        .collect()
+}
+
+/// Builds the blueprint of every teammate this pool serves, registering none.
+pub(crate) fn roster_blueprints(
+    company: &CompanyRecord,
+    deps: &HarnessDeps,
+    skill_deltas: &[SkillState],
+    routed_context: &HashMap<String, Vec<(String, String)>>,
+) -> crate::Result<Vec<RosterBlueprint>> {
     // Issue #562: the policy in force, not the one the manifest shipped with —
     // the same relationship `effective_budget` (issue #343) has to the manifest
     // cap, and resolved through the same record so the console and this gate
@@ -5604,15 +5660,12 @@ pub(crate) fn build_roster(
             is_orchestrator,
             &crate::company::team_brief::team_section(company, &manifest_agent.id),
         )?;
-        roster.push(Arc::new(CompanyAgent::register(
-            runtime,
-            &company.id,
-            &manifest_agent.id,
-            &manifest_agent.role,
-            effective_budget,
+        roster.push(RosterBlueprint {
+            agent_id: manifest_agent.id.clone(),
+            role: manifest_agent.role.clone(),
+            budget_usd_daily: effective_budget,
             blueprint,
-            deps.events.clone(),
-        )?));
+        });
     }
 
     // Issue #71 — Active Runtime Teammates (minimal slice): promote every
@@ -5678,15 +5731,12 @@ pub(crate) fn build_roster(
             /* is_orchestrator */ false,
             &crate::company::team_brief::team_section(company, &manifest_agent.id),
         )?;
-        roster.push(Arc::new(CompanyAgent::register(
-            runtime,
-            &company.id,
-            &manifest_agent.id,
-            &manifest_agent.role,
-            effective_budget,
+        roster.push(RosterBlueprint {
+            agent_id: manifest_agent.id.clone(),
+            role: manifest_agent.role.clone(),
+            budget_usd_daily: effective_budget,
             blueprint,
-            deps.events.clone(),
-        )?));
+        });
     }
 
     Ok(roster)
