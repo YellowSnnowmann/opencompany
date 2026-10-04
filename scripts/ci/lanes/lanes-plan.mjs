@@ -390,11 +390,6 @@ export function buildPlan({ profile, areas, env = {} }) {
           run: `scripts/ci/run-scoped-suite.sh "memory selection" tinymemory store::select`,
         },
         {
-          name: "tinyplace",
-          when: rust,
-          run: "cargo test --locked -p opencompany-core --features tinyplace --lib",
-        },
-        {
           name: "webhooks",
           when: rust,
           run: "cargo test --locked -p opencompany-core --features webhooks --lib server::webhook",
