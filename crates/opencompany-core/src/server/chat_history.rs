@@ -21,7 +21,7 @@ use crate::ports::general_channel::{
 };
 use crate::ports::types::{
     Actor, ActorKind, Attachment, ChatOutput, ChatOutputKind, CompanyEvent, CompanyId,
-    CompanyRecord, EventSeq, Mention, MentionTarget, StoredEvent, TurnStep, UtteranceKind,
+    CompanyRecord, EventSeq, Mention, MentionTarget, StoredEvent, TurnStep,
 };
 use crate::server::readable::{DisplayNames, project_history};
 
