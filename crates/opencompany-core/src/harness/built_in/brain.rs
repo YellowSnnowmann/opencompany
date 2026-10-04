@@ -1235,15 +1235,14 @@ impl HarnessBrain {
         // accumulating operator/agent blocks, but a redirect always re-runs from
         // the original brief plus the fresh instruction — last redirect wins).
         let base_instruction = format!(
-            "{}\n\nBoard-task coordination: delegate_to_teammate/delegate_to_desk TRANSFERS \
-             this card to one colleague and ends your ownership; it does not consult them and \
-             return a result. Only one hand-off can run. If this task requires several colleagues, \
-             independent review, or your final synthesis, use create_workflow/run_workflow when \
-             available, with separate agent steps, explicit dependencies, and a manual trigger \
-             only. If you lack those tools, hand the full remaining coordination brief to one \
-             authorized coordinator or report the actual limitation. Verify every required \
-             step and saved output before reporting completion. Do not replace \
-             a required colleague's work with your own or claim a queued hand-off is a review.",
+            "{}\n\nBoard-task coordination: a message to a colleague (`hivemind_send_agent`) is \
+             delivered, not answered in this turn — it does not return their result to you. If \
+             this task requires several colleagues, independent review, or your final synthesis, \
+             use create_workflow/run_workflow when available, with separate agent steps, explicit \
+             dependencies, and a manual trigger only. If you lack those tools, report the actual \
+             limitation. Verify every required step and saved output before reporting \
+             completion. Do not replace a required colleague's work with your own or claim a \
+             message you sent is a review.",
             task_instruction(&card)
         );
         let mut instruction = base_instruction.clone();

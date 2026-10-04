@@ -887,11 +887,6 @@ const INTRINSIC_TOOLS: &[&str] = &[
     crate::harness::approval_tool::REQUEST_APPROVAL_TOOL,
     "query_company",
     "spawn_task",
-    "delegate_to_desk",
-    // #884's sibling of `delegate_to_desk`. Its refusals are the same shape —
-    // whole sentences naming the teammates the caller may actually reach — and
-    // one collapsed to a bare failure class is a refusal the agent cannot act on.
-    "delegate_to_teammate",
     "run_workflow",
     // #418's `run_workflow` companion — its full-output pages are the same kind
     // of OC-authored, agent-facing text as the other intrinsics, safe to surface

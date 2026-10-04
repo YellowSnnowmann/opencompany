@@ -382,11 +382,6 @@ const DECLARED: &[Declared] = &[
     // `PerCall` is the answer that respects what they asked for.
     d("query_company", EffectGroup::Other, Reach::Nothing),
     d("spawn_task", EffectGroup::Other, Reach::Nothing),
-    d("delegate_to_desk", EffectGroup::Other, Reach::Nothing),
-    // Issue #884: `delegate_to_teammate` is `delegate_to_desk` resolved to a
-    // person instead of a desk. Same class exactly — it runs a turn inside this
-    // company and nothing leaves it.
-    d("delegate_to_teammate", EffectGroup::Other, Reach::Nothing),
     d("add_agent", EffectGroup::Other, Reach::Nothing),
     d("create_workflow", EffectGroup::Other, Reach::Nothing),
     d("assign_task", EffectGroup::Other, Reach::Nothing),
