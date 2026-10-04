@@ -120,6 +120,7 @@ async fn drop_files(state: &AppState, files: &[(&str, &str, &[u8])]) -> (StatusC
 
 /// Reads the company's Brain list back, which is where an operator will look
 /// for what they just dropped.
+#[cfg(feature = "openhuman")]
 async fn brain_rows(state: &AppState) -> Vec<Value> {
     let request = Request::builder()
         .method("GET")
