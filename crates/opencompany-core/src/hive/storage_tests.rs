@@ -1,6 +1,6 @@
 //! `PortStorage` drives a real Coordinator over the in-memory `HiveStore`:
-//! state and transcript survive a reload, a stale writer conflicts, and a row
-//! written past the committed state is ignored on load.
+//! state and transcript survive a reload, a stale writer conflicts, and a
+//! transcript row written through the port decodes back into the state.
 
 use std::sync::Arc;
 
@@ -126,7 +126,7 @@ async fn a_stale_writer_conflicts_and_changes_nothing() {
 }
 
 #[tokio::test]
-async fn rows_past_the_committed_sequence_are_ignored_on_load() {
+async fn a_seeded_transcript_row_decodes_into_the_state() {
     let store: Arc<dyn HiveStore> = Arc::new(MemoryHiveStore::new());
     let state = StoredState {
         revision: 1,
