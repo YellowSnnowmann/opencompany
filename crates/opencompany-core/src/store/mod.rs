@@ -66,7 +66,7 @@ pub use fs::{
     FsCompanyStore, FsEventLog, FsInboxStore, FsJournalStore, FsSecretStore, FsTraceStore,
 };
 pub use fs_ops::FsOps;
-pub use hive::MemoryHiveStore;
+pub use hive::{FsHiveStore, MemoryHiveStore};
 pub use layout::DataLayout;
 // Only the boot entry point is re-exported here. The migration is a one-shot
 // step the binary runs before it reads anything, and its silent core and result
