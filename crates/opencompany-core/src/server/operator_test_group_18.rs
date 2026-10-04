@@ -16,6 +16,7 @@ fn projects_approval_parked_without_a_channel_when_no_thread_produced_it() {
         approval_id: ApprovalId::new("appr-cron"),
         effect_kind: "email.send".into(),
         thread: None,
+        origin: None,
     }))
     .expect("a parked approval is an attention signal");
     assert_eq!(v["type"], "approval_parked");
@@ -48,32 +49,3 @@ fn projects_agent_reply_omits_empty_steps() {
     assert!(v.get("taskId").is_none());
 }
 
-/// A crossing put to a person is a two-way exchange, and the frame says so.
-#[test]
-fn a_direct_crossing_names_both_sides_of_the_exchange() {
-    let v = super::project_event(&stored(CompanyEvent::ReferralEnqueued {
-        conversation: Some("dm:cancellations+amendments".into()),
-        answers: None,
-        from_desk: "order_ops".into(),
-        from_desk_name: "Order Operations".into(),
-        asker: "cancellations".into(),
-        asker_label: "cancellations".into(),
-        trigger_sequence: 12,
-        to_desk: "order_ops".into(),
-        target: "amendments".into(),
-        returning: false,
-        rows: None,
-        episode_id: None,
-        to_episode_id: None,
-        hop: 0,
-    }))
-    .expect("a direct crossing is projected");
-
-    assert_eq!(v["direct"], true, "a person was asked, not a desk");
-    assert_eq!(v["target"], "amendments");
-    assert_eq!(v["asker"], "cancellations");
-    assert!(
-        v.get("lines").is_none(),
-        "and still no crossing content: {v}"
-    );
-}

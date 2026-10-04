@@ -179,6 +179,7 @@ fn cycle_thread_id_reads_an_addressed_message_inherits_a_resolution_and_refuses_
             approval_id: ApprovalId::new("appr-desk"),
             effect_kind: "payment.send".into(),
             thread: Some("desk-finance".into()),
+            origin: None,
         },
         CompanyEvent::DeskTaskCompleted {
             task_id: "t-9".into(),
