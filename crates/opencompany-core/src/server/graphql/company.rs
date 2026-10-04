@@ -14,7 +14,7 @@ use super::auth::GqlAuth;
 use super::connections::{ConnectionStateGql, DomainStatusGql, SmtpStatusGql};
 use super::finances::FinancesGql;
 use super::inbox::InboxGql;
-use super::memory_facts::{MemoryFactGql, MemoryKindGql};
+use super::memory_facts::{MemoryItemGql, MemoryKindGql};
 use super::observability;
 use super::pagination::Page;
 use super::policy;
@@ -200,7 +200,7 @@ impl CompanyGql {
         kind: Option<MemoryKindGql>,
         #[graphql(default = 50)] first: i32,
         #[graphql(default = 0)] offset: i32,
-    ) -> async_graphql::Result<Page<MemoryFactGql>> {
+    ) -> async_graphql::Result<Page<MemoryItemGql>> {
         memory_facts::resolve(&self.runtime, query, kind, first, offset).await
     }
 
