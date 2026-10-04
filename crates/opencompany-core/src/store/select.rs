@@ -10,13 +10,13 @@
 //! Backends behind disabled cargo features fail loudly at open time rather
 //! than silently falling back to the filesystem.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::Result;
-use crate::app::config::{EnvSource, ProcessEnv, data_dir_from_source};
+use crate::app::config::{EnvSource, ProcessEnv};
 use crate::error::OpenCompanyError;
 use crate::ports::artifacts::ArtifactStore;
 use crate::ports::events::EventLog;
@@ -256,6 +256,13 @@ where
     }
 }
 
+impl StorageSettings {
+    /// Reads the CLI-surface storage env vars (`OPENCOMPANY_STORAGE`,
+    /// `OPENCOMPANY_MONGODB_URI`, `OPENCOMPANY_MONGODB_DB`,
+    /// `OPENCOMPANY_TENANT_ID`).
+    pub fn from_env() -> Result<Self> {
+        Self::from_env_source(&ProcessEnv)
+    }
 
     /// Resolves storage settings from an injected environment source.
     pub fn from_env_source(env: &dyn EnvSource) -> Result<Self> {
