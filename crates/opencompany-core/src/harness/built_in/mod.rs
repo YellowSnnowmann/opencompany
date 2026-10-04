@@ -713,10 +713,8 @@ pub struct CompanyAgent {
     pub company: CompanyId,
     /// The runtime agent. Shared, not locked: see the type docs.
     agent: openhuman_embed::Agent,
-    /// Serialises this agent's turns.
-    /// Belts episodes have lent this teammate, by conversation. The same map
-    /// the belt factory reads, so what a host lends here reaches the turn.
-    seating: crate::hive::seating::EpisodeBelts,
+    /// Serialises this agent's turns — the pool's isolated ones and the
+    /// company hive's coordinator turns alike (`turn_envelope`).
     turn_lock: Arc<Mutex<()>>,
     /// The loopback route this agent's model is served on, and the usage tap
     /// its attempts are metered from. See [`model_bridge`](crate::harness::model_bridge).
@@ -754,30 +752,6 @@ pub struct CompanyAgent {
     /// telemetry cells. Held here so `meter_turn_costs` reads the SAME
     /// instance the turn ran through.
     chat_model: Arc<dyn HarnessModel>,
-    /// Always empty for an embedded agent: there is no `opencompany` MCP
-    /// catalogue left to brief it about, so [`Self::catalogue_brief_stale`]'s
-    /// comparison can never find this field to have moved. Kept as the type
-    /// the rebuild-comparison plumbing expects.
-    served_catalogue: Vec<String>,
-    /// Whether the session this agent resumes may still carry an OLDER brief
-    /// than [`Self::served_catalogue`].
-    ///
-    /// The embedded runtime pins a session's system prompt at its first
-    /// committed turn (`tinyagents_runtime::Session::apply_prefix` refuses a
-    /// changed prefix after one), and every conversational turn resumes this
-    /// agent's one stable [`session_key`](Self::session_key). So a roster
-    /// rebuild that changes the served catalogue — a Composio token set, a
-    /// tool grant, an MCP server added — reaches the MCP host (the rebuilt
-    /// [`McpAgent`] serves the new set at once) but never the prompt the
-    /// model reads the catalogue off. The previous builder rebuilt an
-    /// in-memory session per roster, so the prompt was always current; here
-    /// the fix is OpenHuman's own for a warm session (its
-    /// `refresh_dynamic_announcements`): say it on the turn text. Set by
-    /// [`HarnessPool::ensure`] when the rebuilt entry's catalogue differs
-    /// from the retired one's (or the retired one was itself still pending),
-    /// read by [`Self::run_with_steer`], which prepends the current brief to
-    /// the next conversational turn and clears it once that turn commits.
-    catalogue_brief_stale: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for CompanyAgent {
@@ -1334,8 +1308,6 @@ impl CompanyAgent {
         )?;
         let mcp = crate::hive::mcp_server::global();
         let mcp_bearer = crate::hive::mcp_server::McpAgent::mint_bearer();
-        let served_catalogue: Vec<String> = Vec::new();
-        let read_binding = Arc::new(std::sync::OnceLock::new());
         // Shared once, here, and handed to the spec as a factory that mints
         // owned handles per turn. OpenHuman's own tools are filtered out: it
         // runs those itself, and handing them back would register each twice.
@@ -1347,21 +1319,13 @@ impl CompanyAgent {
             .map(|tool| tool.name().to_string())
             .collect();
         let gate = Arc::clone(&blueprint.policy);
-        let mut shared_belt = crate::hive::tools::share_belt(
+        let shared_belt = crate::hive::tools::share_belt(
             std::mem::take(&mut blueprint.tools)
                 .into_iter()
                 .filter(|tool| !build::OPENHUMAN_NATIVE_TOOLS.contains(&tool.name()))
                 .collect(),
         );
-        shared_belt.push(Arc::new(crate::hive::tools::ConversationReadTool::new(
-            Arc::clone(mcp.in_flight()),
-            Arc::clone(&read_binding),
-            events.clone(),
-        )));
         let native_belt: Arc<Vec<Arc<dyn tinytools::Tool>>> = Arc::new(shared_belt);
-        // Created before the agent, because the belt factory closes over it at
-        // registration and an episode writes to it long afterwards.
-        let seating = crate::hive::seating::EpisodeBelts::default();
         let base_id = crate::session_key::runtime_agent_id(company, agent_id);
         let mut runtime_id = base_id.clone();
         let mut attempt = 0u32;
@@ -1373,7 +1337,6 @@ impl CompanyAgent {
                 None,
                 Some(&native_belt),
                 Some(&gate),
-                Some(&seating),
             );
             match runtime.agent(spec) {
                 Ok(agent) => break agent,
@@ -1401,7 +1364,6 @@ impl CompanyAgent {
                 "[harness] runtime id was taken; registered under a numbered suffix"
             );
         }
-        let _ = read_binding.set(runtime_id.clone());
         let build::AgentBlueprint {
             workspace,
             chat_model,
@@ -1430,7 +1392,6 @@ impl CompanyAgent {
             mcp_bearer,
             company: company.clone(),
             agent,
-            seating,
             turn_lock: Arc::new(Mutex::new(())),
             bridge,
             step_labels,
@@ -1439,37 +1400,7 @@ impl CompanyAgent {
             mcp,
             workspace,
             chat_model,
-            served_catalogue,
-            catalogue_brief_stale: std::sync::atomic::AtomicBool::new(false),
         })
-    }
-
-    /// The catalogue this agent's prompt brief names — see
-    /// [`Self::catalogue_brief_stale`].
-    #[must_use]
-    pub(crate) fn served_catalogue(&self) -> &[String] {
-        &self.served_catalogue
-    }
-
-    /// Whether the next conversational turn re-announces the catalogue — see
-    /// [`Self::catalogue_brief_stale`].
-    #[must_use]
-    pub(crate) fn catalogue_brief_pending(&self) -> bool {
-        self.catalogue_brief_stale
-            .load(std::sync::atomic::Ordering::Acquire)
-    }
-
-    /// Marks the resumed session's brief as possibly older than this entry's
-    /// catalogue, given what the entry it replaces was briefed with and
-    /// whether that one had itself still to announce. Carried forward rather
-    /// than compared pairwise alone: a rebuild that changed the catalogue and
-    /// was rebuilt again (to the same set) before any turn ran still leaves
-    /// the session on the prefix the first roster committed.
-    pub(crate) fn inherit_catalogue_brief(&self, previous_catalogue: &[String], pending: bool) {
-        if pending || previous_catalogue != self.served_catalogue.as_slice() {
-            self.catalogue_brief_stale
-                .store(true, std::sync::atomic::Ordering::Release);
-        }
     }
 
     /// The conversation a turn on `chat_id` answers in, as the in-flight
@@ -1479,8 +1410,8 @@ impl CompanyAgent {
         chat_id: Option<&str>,
         thread_root: Option<EventSeq>,
         session_id: &str,
-    ) -> tinyhivemind_embed::ConversationRef {
-        use tinyhivemind_embed::ConversationKind;
+    ) -> tinyhivemind_core::embed::ConversationRef {
+        use tinyhivemind_core::embed::ConversationKind;
         let (id, kind) = match chat_id {
             Some(chat) if chat == crate::ports::general_channel::GENERAL_CHANNEL_ID => {
                 (chat.to_string(), ConversationKind::General)
@@ -1489,10 +1420,10 @@ impl CompanyAgent {
             Some(chat) => (chat.to_string(), ConversationKind::Desk),
             None => (session_id.to_string(), ConversationKind::Workflow),
         };
-        tinyhivemind_embed::ConversationRef {
+        tinyhivemind_core::embed::ConversationRef {
             id,
             kind,
-            thread_root: thread_root.map(|root| tinyhivemind::Sequence(root.value())),
+            thread_root: thread_root.map(|root| tinyhivemind_core::runtime::Sequence(root.value())),
         }
     }
 
@@ -1505,12 +1436,6 @@ impl CompanyAgent {
     /// this agent is bound into, so two desks cannot run it at once.
     pub fn turn_lock(&self) -> Arc<Mutex<()>> {
         self.turn_lock.clone()
-    }
-
-    /// Where an episode lends this teammate its belt.
-    #[must_use]
-    pub fn seating(&self) -> &crate::hive::seating::EpisodeBelts {
-        &self.seating
     }
 
     /// The names of every tool this agent's belt wires, in belt order — the
