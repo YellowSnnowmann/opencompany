@@ -33,7 +33,7 @@ async fn state_at(dir: &std::path::Path) -> AppState {
     let manifest: CompanyManifest =
         toml::from_str("[company]\nname = \"Acme\"\n[policy]\nmode = \"full\"\n").unwrap();
     let store = FsCompanyStore::new(dir.to_path_buf());
-    let slug = format!("acme-{}", uuid::Uuid::new_v4().simple());
+    let slug = format!("acme-{}", crate::ports::generate_id());
     COMPANY.with(|c| *c.borrow_mut() = slug.clone());
     let id = CompanyId::new(&slug);
     store

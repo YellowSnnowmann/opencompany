@@ -21,7 +21,7 @@ use crate::{AppConfig, AppState};
 
 /// A fresh company id, so no other test's memory is in view.
 fn unique(prefix: &str) -> String {
-    format!("{prefix}-{}", uuid::Uuid::new_v4().simple())
+    format!("{prefix}-{}", crate::ports::generate_id())
 }
 
 /// A state serving `ids`, each a registered company with a seeded admin.
