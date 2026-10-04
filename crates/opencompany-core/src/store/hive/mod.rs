@@ -22,6 +22,6 @@ pub mod conformance;
 pub use fs::FsHiveStore;
 pub use memory::MemoryHiveStore;
 #[cfg(feature = "mongodb")]
-pub(crate) use mongodb::{HIVE_MESSAGES, HIVE_STATE};
+pub(crate) use mongodb::HIVE_MESSAGES;
 #[cfg(feature = "sqlite")]
 pub(crate) use sqlite::HIVE_MIGRATIONS;
