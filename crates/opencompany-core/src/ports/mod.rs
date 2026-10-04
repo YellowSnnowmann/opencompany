@@ -68,6 +68,7 @@ pub use ids::{
 };
 pub use inbox::{EmailRecord, InboxMeta, InboxStore};
 pub use journal::{Durability, JournalStore};
+pub use traces::TraceStore;
 pub use ledgers::LedgerStore;
 pub use login_codes::{LoginCodeRecord, LoginCodeStore};
 pub use notifications::{Notification, NotificationStore, NotificationView, Subject, SubjectKind};
@@ -86,7 +87,6 @@ pub use skills_state::{SkillInstall, SkillSource, SkillState, SkillStateStore, S
 pub use store::CompanyStore;
 pub use tasks::{TaskOpener, TaskOrigin, TaskRecord, TaskStore};
 pub use tools::ToolProvider;
-pub use traces::TraceStore;
 pub use types::*;
 pub use usage::{SampleKind, UsageMeter, UsageSample};
 pub use users::{
