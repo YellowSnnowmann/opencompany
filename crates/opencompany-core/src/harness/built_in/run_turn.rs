@@ -37,6 +37,7 @@ pub struct HarnessRunTurn {
 impl HarnessRunTurn {
     /// Wraps a pool + deps as one harness lane.
     pub fn new(pool: Arc<HarnessPool>, deps: Arc<HarnessDeps>) -> Self {
+        pool.remember();
         Self { pool, deps }
     }
 }

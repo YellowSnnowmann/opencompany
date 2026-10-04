@@ -531,6 +531,7 @@ impl HarnessBrain {
     /// else the first roster agent). The pool is shared so the roster is built
     /// once and reused across cycles.
     pub fn new(pool: Arc<HarnessPool>, deps: HarnessDeps, record: CompanyRecord) -> Self {
+        pool.remember();
         // Resolved over the roster as it effectively stands: a company whose
         // first declared agent has since been removed still has an orchestrator,
         // and answering as a teammate the harness no longer builds would leave
