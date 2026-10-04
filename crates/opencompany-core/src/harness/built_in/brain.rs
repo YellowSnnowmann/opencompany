@@ -4422,3 +4422,5 @@ impl HarnessBrain {
 #[cfg(test)]
 #[path = "brain_tests.rs"]
 mod tests;
+
+mod hive_chat;
