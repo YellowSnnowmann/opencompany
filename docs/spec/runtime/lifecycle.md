@@ -133,8 +133,7 @@ against the default. See [journal.md](journal.md).
 ├── company.toml        # materialized charter + roster (with provenance)
 ├── events.jsonl        # append-only event log
 ├── ledger.jsonl        # append-only money/usage journal
-├── memory/             # compressed traces, task results
-├── context/            # content-addressed chunks + index
+├── memory/             # compressed traces, task results (TraceStore, not company memory)
 ├── keys/agent.ed25519  # company identity (0600)
 └── secrets/            # encrypted at rest
 ```
