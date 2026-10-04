@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use super::tests::{drop_db, store};
 use super::*;
-use crate::ports::hive::HiveStore;
+use crate::ports::hive::{HiveCommit, HiveStateDoc, HiveStore};
 use crate::store::hive::conformance;
 
 #[tokio::test]
