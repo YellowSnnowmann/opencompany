@@ -193,7 +193,7 @@ impl CompanyGql {
         workspace::resolve_search(&self.runtime, &query, prefix.as_deref(), limit).await
     }
 
-    /// The company-brain memory facts.
+    /// The company's memory: learnings, logged turns and brain documents.
     async fn memory(
         &self,
         query: Option<String>,
