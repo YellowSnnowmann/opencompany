@@ -5490,13 +5490,8 @@ pub(crate) async fn daily_cap_refusal(
                 ));
             }
         }
-
-        // Memory is OpenHuman's: the runtime recalls a pack for this agent and
-        // logs the turn under its own node (`crate::memory`), so the message
-        // goes through as composed.
     None
 }
-
 
 /// The live overlay state one roster rebuild is resolved against.
 ///
