@@ -8,7 +8,6 @@
 use super::built_in_test_fixtures::*;
 use super::built_in_test_fixtures_2::*;
 use super::*;
-use crate::ports::types::ContextChunk;
 use tinyinference::model::ModelRequest;
 
 /// The confined agent is not on the roster, so nothing can address it: a
