@@ -319,7 +319,7 @@ pub(super) async fn ceo_tool_names(pool: &HarnessPool, id: &CompanyId) -> Vec<St
 /// wiring (mock provider/context, recording store).
 pub(super) fn deps_with_plan(
     dir: &std::path::Path,
-    context: Arc<MockContext>,
+    _context: Arc<MockContext>,
     meter: Option<Arc<dyn UsageMeter>>,
     plan: Option<crate::harness::capability_budget::CapabilityPlan>,
 ) -> HarnessDeps {
@@ -332,7 +332,6 @@ pub(super) fn deps_with_plan(
         provider: Arc::new(MockProvider::new("mock: ")),
         provider_slug: "mock".to_string(),
         serves: None,
-        context,
         store: Arc::new(RecordingStore::default()),
         meter,
         workspace_root: dir.to_path_buf(),
@@ -346,7 +345,6 @@ pub(super) fn deps_with_plan(
         skills_registry: std::sync::Arc::from([]),
         default_mcp_servers: Vec::new(),
         mcp_servers: Vec::new(),
-        facts: None,
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle::default(),
@@ -466,7 +464,7 @@ description = "Builds the product."
 /// expensive half.
 pub(super) fn belt(grants: &[&str], is_orchestrator: bool, wire_everything: bool) -> Vec<String> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext::default()), None, None);
+    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext), None, None);
     if wire_everything {
         // The three tool families gated on a wired dependency rather than
         // on a cargo feature. Without these the belt is missing exactly the
@@ -600,7 +598,7 @@ pub(super) fn record_granting(grants: &[&str]) -> CompanyRecord {
 /// The inert fixture deps, with a secret store and a "last known" connection.
 #[cfg(any(feature = "chargebee", feature = "paypal"))]
 pub(super) fn billing_deps(dir: &std::path::Path, secrets: Arc<dyn SecretStore>) -> HarnessDeps {
-    let mut deps = deps_with_plan(dir, Arc::new(MockContext::default()), None, None);
+    let mut deps = deps_with_plan(dir, Arc::new(MockContext), None, None);
     deps.secrets = Some(secrets);
     deps
 }

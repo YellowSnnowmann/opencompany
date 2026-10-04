@@ -913,17 +913,24 @@
   }
 
   async function checkDataHygiene(rows, scope) {
-    const res = await http(`${scope}/memory/stats`);
-    if (!res.ok) return push(rows, unread("data-hygiene", res, "memory stats"));
-    const m = res.body || {};
+    const res = await http(`${scope}/memory/status`);
+    if (!res.ok) return push(rows, unread("data-hygiene", res, "memory status"));
+    const status = res.body || {};
+    if (!status.on) {
+      rows.push(row("data-hygiene", WARN, `memory off: ${status.reason || "no engine bound"}`, "bind a memory engine"));
+      return;
+    }
+    const agents = await http(`${scope}/memory/agents`);
+    const brain = await http(`${scope}/memory/brain`);
+    const teammates = agents.ok ? (agents.body?.agents || []) : [];
+    const turns = teammates.reduce((sum, a) => sum + (a.turns || 0), 0);
+    const documents = brain.ok ? (brain.body?.sources || []).reduce((sum, s) => sum + (s.documents || 0), 0) : 0;
     rows.push(
       row(
         "data-hygiene",
         PASS,
-        `${m.totalItems || 0} items: ${m.facts || 0} facts · ${m.teammateMemory || 0} teammate memories · ${m.taskOutcomes || 0} outcomes · ${m.documentMemory || 0} document chunks · last write ${age(m.lastUpdatedAtMillis)} ago`,
-        // `factsUpdatedAtMillis` sits at 0 for any company whose operator never
-        // hand-authored a fact, so it is not the freshness signal.
-        m.lastUpdatedAtMillis ? "" : "nothing has ever been remembered here",
+        `memory on (${status.engine || "engine"} @ ${status.root}): ${teammates.length} teammates · ${turns} logged turns · ${documents} brain documents`,
+        turns || documents ? "" : "nothing has ever been remembered here",
       ),
     );
   }

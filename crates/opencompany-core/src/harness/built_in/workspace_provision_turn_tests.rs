@@ -40,7 +40,7 @@ use crate::ports::types::{
     ApprovalId, CompanyEvent, CompanyId, CompanyRecord, ContextOp, ContextOpResult, CycleRequest,
     Effect, EffectDisposition, OverlayAgent, ToolCall, ToolResult,
 };
-use crate::store::{FsCompanyStore, FsContextStore, FsOps};
+use crate::store::{FsCompanyStore, FsOps};
 
 /// The manifest teammate this fixture dispatches to.
 const AGENT: &str = "writer";

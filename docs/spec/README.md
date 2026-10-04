@@ -29,10 +29,10 @@ neighbor sits behind a Rust trait ("port") and is swappable.
 ```text
 L4  Surfaces        Axum HTTP (operator API, webhooks), CLI, future UI
 L3  Company Brain   cycle loop, approvals, effect routing, feedback loop
-L2  Kernel ports    Brain, CompanyStore, EventLog, MemoryStore, ContextStore,
+L2  Kernel ports    Brain, CompanyStore, EventLog, TraceStore,
                     ChannelAdapter, ToolProvider, ApprovalGate
 L1  Adapters        hosted-medulla | openhuman (embedded) | tinyhivemind |
-                    hosted-memory | fs (default)
+                    fs (default)
 L0  Substrate       api.tinyhumans.ai, openhuman-core, filesystem
 ```
 
@@ -43,7 +43,7 @@ L0  Substrate       api.tinyhumans.ai, openhuman-core, filesystem
 | Tools, agents, sessions, credentials | OpenHuman | embedded as a library (`openhuman_embed`); gaps go upstream as PRs |
 | Desk deliberation: episodes, rounds, speech, Jev routing, referral | tinyhivemind | hosted over the embedded agents (`tinyhivemind-openhuman`); the host commits, the library folds |
 | In-process LLM sub-work | TinyAgents | embedded library behind `ToolProvider` |
-| Long-term memory | TinyMemory v2 engines (CortexDB) | behind `MemoryStore`; default is file-based |
+| Long-term memory | OpenHuman memory v2 (CortexDB) | `crate::memory::CompanyMemory`; off with no engine |
 | Company definition, brain state, lifecycle, approvals, HTTP surface | **OpenCompany** | owned outright |
 
 ## Reading Paths

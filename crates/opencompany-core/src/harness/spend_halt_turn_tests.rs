@@ -43,7 +43,6 @@ use super::spend_halt_turn_test_fixtures::*;
 use crate::harness::brain::{iteration_cap_pause_notice, spend_halt_notice};
 use crate::harness::{HarnessBrain, HarnessPool};
 use crate::ports::brain::Brain;
-use crate::store::FsContextStore;
 
 // ---------------------------------------------------------------------------
 // The flag
@@ -358,42 +357,6 @@ async fn the_step_notice_and_the_spend_notice_do_not_cross_fire() {
     assert!(
         !texts.contains(&iteration_cap_pause_notice(AGENT).as_str()),
         "a spend halt must not be reported as a step pause: {texts:?}"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// What memory keeps
-// ---------------------------------------------------------------------------
-
-/// The turn's memory write carries the agent's own text and **not** the
-/// platform's notice.
-///
-/// This is why the notice is a sibling bubble rather than text appended to the
-/// reply. `HarnessPool::run` persists `outcome.reply` to the context store, so
-/// appending would file "you ran out of budget" as something the agent said, and
-/// the memory loop would recall it into a later turn as prior work.
-#[tokio::test]
-async fn the_spend_notice_never_reaches_memory() {
-    let (base_url, _script) = spawn_script(write_then_answer(CAP), EXPENSIVE_TOKENS).await;
-    let dir = tempfile::tempdir().unwrap();
-    let (deps, ops) = deps_for(base_url, dir.path());
-    let context = FsContextStore::new(dir.path());
-    let brain =
-        HarnessBrain::new(Arc::new(HarnessPool::new()), deps, record(Some(CAP_USD))).with_runs(ops);
-
-    brain
-        .run_cycle(chat("Write a short feature spec."), &NoopHost)
-        .await
-        .expect("cycle runs");
-
-    let bodies = memory_bodies(&context).await;
-    assert!(
-        !bodies.is_empty(),
-        "the turn must have written its outcome back, or this proves nothing"
-    );
-    assert!(
-        bodies.iter().all(|b| !b.contains(SPEND_MARKER)),
-        "the platform's halt notice must never be recalled as something the agent said: {bodies:?}"
     );
 }
 

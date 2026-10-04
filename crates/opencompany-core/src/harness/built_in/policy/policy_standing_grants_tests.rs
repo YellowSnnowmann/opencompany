@@ -258,7 +258,7 @@ fn what_may_be_granted_standing_is_what_a_tool_can_reach() {
     // The feature keeps its point: writes confined to the agent's own
     // sandbox stay grantable, so a stretch of unattended autonomy is still
     // worth granting.
-    for tool in ["file_write", "edit", "apply_patch", "memory_store"] {
+    for tool in ["file_write", "edit", "apply_patch", "memory"] {
         assert!(grantable(tool, &args), "{tool} stays grantable");
     }
 }

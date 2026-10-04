@@ -152,8 +152,7 @@ pub(super) fn an_unplaceable_composio_call_has_no_scope() {
 pub(super) fn a_tool_whose_name_says_everything_has_no_scope() {
     for tool in [
         "file_write",
-        "memory_forget",
-        "memory_store",
+        "memory",
         "shell",
         "workspace_write",
         "workspace_create",

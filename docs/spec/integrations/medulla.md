@@ -126,7 +126,7 @@ Default namespace, credential in handshake `auth.token`.
 | `CycleHost::context_op` | exposed as device tools (`context_put`, `context_search`, …) until v2 adds first-class context ops |
 | `CycleHost::emit_effect` | every effect frame passes the `ApprovalGate` **before** acking `ok`; parked effects ack `ok: false` with a "pending approval" error so the brain hears the gate |
 | `CycleResult.token_usage` | `orch:usage` frames folded into the cycle total, then metered by `CycleRunner` onto the Usage surface (`SampleKind::Inference`, provider `medulla`) and, when the frame carries USD, onto Finances as an `inference.spend` ledger entry. Per-teammate attribution is not on the wire, so hosted usage is charged to the whole-company bucket (`company`) |
-| `MemoryStore` | mirrors the read surface (`/sessions/:id/messages`) plus locally-journaled cycle summaries; server keeps its own compressed state |
+| `TraceStore` | mirrors the read surface (`/sessions/:id/messages`) plus locally-journaled cycle summaries; server keeps its own compressed state |
 | World state | `POST /v1/world-diff` after notable local effects (approvals resolved, payments, feedback) |
 
 Constraints inherited from v1: the 30 s device-tool timeout means long tools

@@ -228,11 +228,6 @@ fn dispatched_desk_agent_tool_belt_is_pinned() {
         "http_request",
         "image_info",
         "list",
-        // The deliberate-memory trio (issue #1113): intrinsic, on every
-        // belt — company-scoped by construction, see memory_tools.rs.
-        "memory_forget",
-        "memory_recall",
-        "memory_store",
         "read_workspace_state",
         "request_approval",
         "shell",
@@ -596,8 +591,8 @@ fn dispatched_belt_excludes_every_deferred_family() {
         "memory_tree",
         "memory_tree_search",
         "memory_tree_get",
-        // destructive memory: upstream's raw `forget` stays out; the
-        // scoped oc-authored `memory_forget` is a real belt tool now.
+        // destructive memory: upstream's raw `forget` stays out; memory
+        // is OpenHuman's single `memory` tool, scoped to the company.
         "forget",
     ];
     for tool in forbidden {

@@ -31,13 +31,13 @@ use crate::Result;
 use crate::company::CompanyManifest;
 use crate::error::OpenCompanyError;
 use crate::ports::events::EventLog;
-use crate::ports::traces::TraceStore;
 use crate::ports::store::CompanyStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::types::{
     AgentOverride, BudgetOverride, CompanyEvent, CompanyId, CompanyRecord, CompressedTrace,
-    DeskHiveOverride, EventSeq, LedgerEntry, OverlayAgent, OverlayDesk,
-    OverlayDeskMember, OverlayDeskOrder, OverlayWorkflow, PolicyOverride, StoredEvent,
-    TemplateProvenance, ToolGrantsOverride,
+    DeskHiveOverride, EventSeq, LedgerEntry, OverlayAgent, OverlayDesk, OverlayDeskMember,
+    OverlayDeskOrder, OverlayWorkflow, PolicyOverride, StoredEvent, TemplateProvenance,
+    ToolGrantsOverride,
 };
 
 /// Canonical bundle file and directory names, matching the fs
@@ -53,7 +53,11 @@ const KEYS_DIR: &str = "keys";
 
 /// The three durable storage ports as trait objects, in export/import order
 /// (`CompanyStore`, `EventLog`, `TraceStore`).
-pub type Ports = (Arc<dyn CompanyStore>, Arc<dyn EventLog>, Arc<dyn TraceStore>);
+pub type Ports = (
+    Arc<dyn CompanyStore>,
+    Arc<dyn EventLog>,
+    Arc<dyn TraceStore>,
+);
 
 /// Options controlling what an export includes.
 #[derive(Clone, Debug, Default)]

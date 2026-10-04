@@ -534,22 +534,19 @@ async fn a_dispatch_naming_an_unknown_run_does_not_fail_the_cycle() {
 }
 
 /// Issue #1175: a cycle used to load 32 recent traces *and the whole context
-/// index* (`list(company, "")` — no prefix, no limit) into `CycleRequest`,
-/// where no brain read either. Both reads are gone, and the context one was
-/// the expensive half: it grew with every turn the company had ever run.
+/// index* into `CycleRequest`, where no brain read either. Both reads are
+/// gone; the context index went with the host's own memory engine.
 ///
 /// The trace *write* deliberately stayed — traces travel with the export
 /// bundle — so this asserts the save as well. Without that half, a later
 /// "nothing reads traces, delete the write" would pass silently.
 #[tokio::test]
-async fn a_cycle_reads_neither_recent_traces_nor_the_context_index() {
+async fn a_cycle_never_reads_recent_traces() {
     let home_dir = tmp_home();
     let home = home_dir.path().to_path_buf();
     let memory = Arc::new(CountingMemory::new(FsTraceStore::new(home.clone())));
-    let context = Arc::new(CountingContext::new(FsContextStore::new(home.clone())));
     let rt = RuntimeBuilder::new(home, manifest("full"))
-        .with_memory(memory.clone())
-        .with_context(context.clone())
+        .with_traces(memory.clone())
         .build()
         .await
         .unwrap();
@@ -557,7 +554,6 @@ async fn a_cycle_reads_neither_recent_traces_nor_the_context_index() {
     // Boot is not what this test is about; only what one cycle costs.
     memory.reads.store(0, Ordering::SeqCst);
     memory.writes.store(0, Ordering::SeqCst);
-    context.lists.store(0, Ordering::SeqCst);
 
     rt.run_cycle(vec![CompanyEvent::OperatorMessage {
         mentions: Vec::new(),
@@ -577,11 +573,6 @@ async fn a_cycle_reads_neither_recent_traces_nor_the_context_index() {
         memory.reads.load(Ordering::SeqCst),
         0,
         "a cycle must not read traces back: no brain consumes them"
-    );
-    assert_eq!(
-        context.lists.load(Ordering::SeqCst),
-        0,
-        "a cycle must not scan the context index: no brain consumes it"
     );
     assert_eq!(
         memory.writes.load(Ordering::SeqCst),
@@ -647,6 +638,6 @@ async fn end_to_end_operator_message_echoes_and_persists() {
     );
 
     // (c) a compressed trace was persisted.
-    let traces = rt.memory.recent_traces(rt.id(), 10).await.unwrap();
+    let traces = rt.traces.recent_traces(rt.id(), 10).await.unwrap();
     assert!(!traces.is_empty());
 }

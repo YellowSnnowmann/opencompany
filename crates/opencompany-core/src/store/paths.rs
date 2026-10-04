@@ -8,8 +8,7 @@
 //!   meta.json         # lifecycle state and other bundle metadata
 //!   events.jsonl      # append-only event log
 //!   ledger.jsonl      # append-only ledger
-//!   memory/           # compressed traces + task results
-//!   context/          # content-addressed context blobs + index
+//!   memory/           # compressed cycle traces + task results
 //!   secrets/          # per-company secret files (0700 on unix)
 //!   keys/             # Ed25519 identity seed (0700 dir, 0600 files)
 //! ```
@@ -344,26 +343,6 @@ impl Bundle {
         self.memory_dir().join("tasks.jsonl")
     }
 
-    /// The context subdirectory.
-    pub fn context_dir(&self) -> PathBuf {
-        self.dir.join("context")
-    }
-
-    /// The content-addressed blob subdirectory.
-    pub fn context_blobs_dir(&self) -> PathBuf {
-        self.context_dir().join("blobs")
-    }
-
-    /// Path to a single context blob by address.
-    pub fn context_blob(&self, addr: &str) -> PathBuf {
-        self.context_blobs_dir().join(addr)
-    }
-
-    /// Path to the context index.
-    pub fn context_index_jsonl(&self) -> PathBuf {
-        self.context_dir().join("index.jsonl")
-    }
-
     /// The per-company feedback subdirectory (the "feedback family").
     pub fn feedback_dir(&self) -> PathBuf {
         self.dir.join("feedback")
@@ -421,12 +400,6 @@ impl Bundle {
     /// Path to the per-ledger event log directory.
     pub fn ledgers_dir(&self) -> PathBuf {
         self.dir.join("ledgers")
-    }
-
-    /// Path to the durable facts log (`facts.jsonl`, one fact per line;
-    /// last-write-wins per id).
-    pub fn facts_jsonl(&self) -> PathBuf {
-        self.dir.join("facts.jsonl")
     }
 
     /// Path to the versioned task-artifact log (`artifacts.jsonl`, one artifact
@@ -627,7 +600,6 @@ impl Bundle {
         for dir in [
             self.dir.clone(),
             self.memory_dir(),
-            self.context_blobs_dir(),
             self.secrets_dir(),
             self.keys_dir(),
         ] {

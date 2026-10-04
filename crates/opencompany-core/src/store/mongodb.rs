@@ -30,7 +30,6 @@
 //! `findOneAndUpdate {$inc}` per `(company, kind)` key.
 
 use std::collections::HashMap;
-use std::ops::Range;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
@@ -49,15 +48,14 @@ use crate::company::CompanyManifest;
 use crate::error::OpenCompanyError;
 use crate::ports::events::{EventLog, EventStreamItem, PruneReport, RetentionPolicy, plan_prune};
 use crate::ports::login_codes::LoginCodeRecord;
-use crate::ports::traces::TraceStore;
 use crate::ports::now_millis;
 use crate::ports::secrets::SecretStore;
 use crate::ports::sessions::SessionRecord;
 use crate::ports::store::CompanyStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::types::{
     CompanyEvent, CompanyId, CompanyRecord, CompanySummary, CompressedTrace, EventSeq,
-    EvictionPolicy, LedgerEntry, OverlayBlob, SecretValue,
-    StoredEvent, TaskResult,
+    EvictionPolicy, LedgerEntry, OverlayBlob, SecretValue, StoredEvent, TaskResult,
 };
 use crate::ports::users::{InviteRecord, UserRecord};
 
@@ -131,43 +129,6 @@ fn get_str(doc: &Document, key: &str) -> Result<String> {
 fn get_i64(doc: &Document, key: &str) -> Result<i64> {
     doc.get_i64(key)
         .map_err(|e| mongo_err(format!("missing field {key}: {e}")))
-}
-
-/// Every label claiming a context document (issue #1300): the `labels` set,
-/// plus the legacy scalar `label` field — documents written before the set
-/// existed carry only the scalar, and new writes keep it as the first label so
-/// a downgraded binary still reads what it always read. Deduped, scalar first.
-/// Wraps an array-valued aggregation expression in a `$reduce` that drops
-/// duplicates while **preserving order** — `$setUnion` dedupes but reorders,
-/// and the context-chunk label list is read in order (the first claim is the
-/// one the legacy scalar `label` names).
-fn dedupe_preserving_order(input: Document) -> Document {
-    doc! {"$reduce": {
-        "input": input,
-        "initialValue": [],
-        "in": {"$cond": [
-            {"$in": ["$$this", "$$value"]},
-            "$$value",
-            {"$concatArrays": ["$$value", ["$$this"]]},
-        ]},
-    }}
-}
-
-fn doc_labels(doc: &Document) -> Vec<String> {
-    let mut labels = Vec::new();
-    if let Ok(scalar) = doc.get_str("label") {
-        labels.push(scalar.to_string());
-    }
-    if let Ok(set) = doc.get_array("labels") {
-        for value in set {
-            if let Some(label) = value.as_str()
-                && !labels.iter().any(|have| have == label)
-            {
-                labels.push(label.to_string());
-            }
-        }
-    }
-    labels
 }
 
 /// A unique index restricted to the documents that carry `present` at all

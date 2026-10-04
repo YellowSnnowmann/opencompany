@@ -190,7 +190,7 @@ async fn chat_routes_through_the_harness_brain() {
     use crate::harness::provider::MockProvider;
     use crate::harness::{HarnessBrain, HarnessDeps, HarnessPool};
     use crate::ports::CompanyStore;
-    use crate::store::{FsContextStore, FsOps};
+    use crate::store::FsOps;
 
     let home_dir = home();
     let home = home_dir.path().to_path_buf();

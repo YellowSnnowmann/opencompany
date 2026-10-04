@@ -150,11 +150,6 @@ fn bundle_paths_nest_under_company_slug() {
             .ends_with("companies/acme/events.jsonl")
     );
     assert!(bundle.traces_jsonl().ends_with("memory/traces.jsonl"));
-    assert!(
-        bundle
-            .context_index_jsonl()
-            .ends_with("context/index.jsonl")
-    );
 }
 
 #[test]

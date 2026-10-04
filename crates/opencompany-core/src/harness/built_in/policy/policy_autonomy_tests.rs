@@ -175,7 +175,7 @@ async fn auto_runs_sandbox_writes_and_outward_reads_but_parks_anything_that_leav
             ("edit", serde_json::json!({})),
             ("apply_patch", serde_json::json!({})),
             ("csv_export", serde_json::json!({})),
-            ("memory_store", serde_json::json!({})),
+            ("memory", serde_json::json!({ "action": "learn" })),
             ("file_read", serde_json::json!({})),
             ("mcp_list_tools", serde_json::json!({})),
             ("composio_list_tools", serde_json::json!({})),

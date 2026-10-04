@@ -46,9 +46,7 @@ mcp_registry_tool_call group=Other reach=Consequence standing=PerCall
 media_generate_image group=Spend reach=Consequence standing=PerCall
 media_generate_video group=Spend reach=Consequence standing=PerCall
 media_list_models group=Other reach=Nothing standing=PerCall
-memory_forget group=Other reach=Consequence standing=PerCall
-memory_recall group=Other reach=Nothing standing=PerCall
-memory_store group=Other reach=Consequence standing=Grantable
+memory group=Other reach=Consequence standing=Grantable
 pages_delete group=Other reach=Consequence standing=PerCall
 pages_list group=Other reach=Nothing standing=PerCall
 pages_read group=Other reach=Nothing standing=PerCall

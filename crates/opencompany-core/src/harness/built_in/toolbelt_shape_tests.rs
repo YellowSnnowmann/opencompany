@@ -265,9 +265,7 @@ fn namespace_table_maps_exec_tools_and_leaves_intrinsic_unmapped() {
     // token-budget plan can shed it under spend pressure.
     assert_eq!(namespace_of("web_search"), Some("search"));
     // Intrinsic tools are unmapped (always kept by the filter).
-    assert_eq!(namespace_of("memory_store"), None);
-    assert_eq!(namespace_of("memory_recall"), None);
-    assert_eq!(namespace_of("memory_forget"), None);
+    assert_eq!(namespace_of("memory"), None);
     assert_eq!(namespace_of("file_read"), None);
     assert_eq!(namespace_of("mcp_registry_tool_call"), None);
 }

@@ -59,40 +59,20 @@ impl RunTurn for RefusalWorkflowTurn {
     }
 }
 
-/// A [`FactStore`] that always answers `list` with one fixed fact,
-/// regardless of the query — standing in for a real match so `ask_around`
-/// always has evidence to offer.
-struct OneFactStore;
-
-#[async_trait]
-impl crate::ports::FactStore for OneFactStore {
-    async fn list(
-        &self,
-        _company: &CompanyId,
-        _query: Option<&str>,
-        _kind: Option<crate::ports::FactKind>,
-    ) -> crate::Result<Vec<crate::ports::FactRecord>> {
-        Ok(vec![crate::ports::FactRecord {
-            id: "f1".to_string(),
-            kind: crate::ports::FactKind::Fact,
-            title: "Company context".to_string(),
-            body: "irrelevant background, not the customer's name".to_string(),
-            source: "test".to_string(),
-            updated_at_millis: 0,
-        }])
-    }
-
-    async fn upsert(
-        &self,
-        _company: &CompanyId,
-        _fact: &crate::ports::FactRecord,
-    ) -> crate::Result<()> {
-        unreachable!("not exercised by this test")
-    }
-
-    async fn delete(&self, _company: &CompanyId, _id: &str) -> crate::Result<bool> {
-        unreachable!("not exercised by this test")
-    }
+/// A fresh company whose memory holds one irrelevant learning, so
+/// `ask_around` always has evidence to offer — and evidence that does not
+/// answer the customer-name ask. Unique per test: the memory engine is shared.
+async fn company_with_context() -> CompanyId {
+    let company = CompanyId::new(format!("caps-{}", uuid::Uuid::new_v4().simple()));
+    crate::memory::CompanyMemory::new(&company)
+        .learn(
+            "Company context: irrelevant background, not the customer's name",
+            crate::memory::LearningKind::Fact,
+            Vec::new(),
+        )
+        .await
+        .expect("learn");
+    company
 }
 
 /// Codex review on #1990 (issue #1866, #3903874673): found evidence is not
@@ -113,8 +93,8 @@ async fn recovered_evidence_that_does_not_close_the_gap_is_not_accepted() {
         crate::workflows::gated_tool_turn_tests::Turn::Say("{\"verdict\":\"retry\"}"),
     ])
     .await;
-    let (mut deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(base_url, dir.path());
-    deps.facts = Some(Arc::new(OneFactStore));
+    let (deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(base_url, dir.path());
+    let company = company_with_context().await;
     let record = crate::workflows::gated_tool_turn_tests::record();
     let turn = Arc::new(RefusalWorkflowTurn);
     let board_claim = Arc::new(deps.delegations.claim_board("run-1990g"));
@@ -124,7 +104,7 @@ async fn recovered_evidence_that_does_not_close_the_gap_is_not_accepted() {
         turn,
         deps,
         record,
-        CompanyId::new("acme"),
+        company.clone(),
         "wf-1990g".to_string(),
         "run-1990g".to_string(),
         None,
@@ -185,8 +165,8 @@ async fn a_recovered_reply_ships_the_exact_text_the_judge_certified() {
         crate::workflows::gated_tool_turn_tests::Turn::Say("{\"verdict\":\"continue\"}"),
     ])
     .await;
-    let (mut deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(base_url, dir.path());
-    deps.facts = Some(Arc::new(OneFactStore));
+    let (deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(base_url, dir.path());
+    let company = company_with_context().await;
     let record = crate::workflows::gated_tool_turn_tests::record();
     let oversized = "R".repeat(25_000);
     let turn = Arc::new(ScriptedTurn(crate::harness::TurnOutcome {
@@ -205,7 +185,7 @@ async fn a_recovered_reply_ships_the_exact_text_the_judge_certified() {
         turn,
         deps,
         record,
-        CompanyId::new("acme"),
+        company.clone(),
         "wf-1990h".to_string(),
         "run-1990h".to_string(),
         None,
@@ -266,8 +246,8 @@ async fn a_recovered_reply_does_not_emit_its_pre_recovery_json_parse() {
             crate::workflows::gated_tool_turn_tests::Turn::Say("{\"verdict\":\"continue\"}"),
         ])
         .await;
-    let (mut deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(base_url, dir.path());
-    deps.facts = Some(Arc::new(OneFactStore));
+    let (deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(base_url, dir.path());
+    let company = company_with_context().await;
     let record = crate::workflows::gated_tool_turn_tests::record();
     let turn = Arc::new(ScriptedTurn(crate::harness::TurnOutcome {
         reply: "{\"draft\": \"no customer name yet\"}".to_string(),
@@ -285,7 +265,7 @@ async fn a_recovered_reply_does_not_emit_its_pre_recovery_json_parse() {
         turn,
         deps,
         record,
-        CompanyId::new("acme"),
+        company.clone(),
         "wf-1990i".to_string(),
         "run-1990i".to_string(),
         None,
@@ -350,8 +330,8 @@ async fn a_recovered_reply_that_fails_its_postcondition_does_not_settle_succeede
             crate::workflows::gated_tool_turn_tests::Turn::Say("{\"verdict\":\"continue\"}"),
         ])
         .await;
-    let (mut deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(base_url, dir.path());
-    deps.facts = Some(Arc::new(OneFactStore));
+    let (deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(base_url, dir.path());
+    let company = company_with_context().await;
     let record = crate::workflows::gated_tool_turn_tests::record();
     let turn = Arc::new(ScriptedTurn(crate::harness::TurnOutcome {
         reply: "{\"draft\": \"no customer name yet\"}".to_string(),
@@ -371,7 +351,7 @@ async fn a_recovered_reply_that_fails_its_postcondition_does_not_settle_succeede
         turn,
         deps,
         record,
-        CompanyId::new("acme"),
+        company.clone(),
         "wf-1990j".to_string(),
         "run-1990j".to_string(),
         None,
@@ -408,7 +388,7 @@ async fn a_recovered_reply_that_fails_its_postcondition_does_not_settle_succeede
 
     let attempts = runs
         .list_runs(
-            &CompanyId::new("acme"),
+            &company,
             &crate::ports::RunFilter::for_workflow_run("run-1990j".to_string()),
         )
         .await

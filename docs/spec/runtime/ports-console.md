@@ -1,13 +1,13 @@
 # Console-surface stores (WS3)
 
 The durable stores behind the operator console's own surfaces — the board, the
-deliverables, the note tree, memory, usage, skills and inboxes. `RunStore` is
+deliverables, the note tree, usage, skills and inboxes. `RunStore` is
 one of them and has its own file, [ports-runs.md](ports-runs.md), because its
 contract is the longest. Part of the port contracts indexed by
 [ports.md](ports.md).
 
-Seven additional ports back the operator console's durable surfaces. They follow
-the same one-trait-per-file convention (`src/ports/{tasks,workspace,facts,
+Six additional ports back the operator console's durable surfaces. They follow
+the same one-trait-per-file convention (`src/ports/{tasks,workspace,
 usage,skills_state,inbox,runs}.rs`), key everything on `CompanyId`, return the
 crate `Result<T>`, and are covered by the conformance suite
 ([storage.md](storage.md)). Their fs/sqlite/mongodb backends live alongside the
@@ -151,24 +151,6 @@ destroying the diff.
 ### WorkspaceStore
 
 Moved to [`ports-console-workspace.md`](ports-console-workspace.md) — this file was over the repository's 500-line limit. See that page for the full detail.
-
-### FactStore
-
-The operator's durable, hand-curated Memory view — distinct from the two
-cognition-facing memory ports (see
-[company-brain/memory.md](../company-brain/memory.md)).
-
-```rust
-pub trait FactStore: Send + Sync {
-    async fn list(&self, company: &CompanyId, /* query, kind, page */)
-        -> Result<Vec<FactRecord>>;
-    async fn upsert(&self, company: &CompanyId, fact: &FactRecord) -> Result<()>;
-    async fn delete(&self, company: &CompanyId, id: &str) -> Result<bool>;
-}
-```
-
-`FactRecord` carries `{id, kind, title, body, source, updated_at}`; `FactKind`
-∈ `fact|preference|person|project|reference`.
 
 ### UsageMeter
 

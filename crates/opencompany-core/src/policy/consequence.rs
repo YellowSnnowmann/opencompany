@@ -220,7 +220,7 @@ impl Consequence {
     /// The split `auto` needs is already declared. [`Standing::Grantable`]
     /// marks exactly the calls whose consequence stays inside this company —
     /// the agent's own scratch writes (`file_write`, `edit`, `apply_patch`,
-    /// `csv_export`, `memory_store`) and a read scoped to one connected account.
+    /// `csv_export`, `memory` learning) and a read scoped to one connected account.
     /// Everything that can execute arbitrary code, reach an arbitrary address,
     /// overwrite operator-authored guidance, spend on generation, or perform an
     /// effect this layer cannot see is [`Standing::PerCall`] — deliberately, and
@@ -473,7 +473,7 @@ const DECLARED: &[Declared] = &[
     // `file_read`, `glob`, `grep` and `image_info` PARKED before this table
     // existed — not by anyone's decision, but because the read-only-prefix
     // heuristic keys on the *start* of the name and none of them begins with
-    // one. `list` and `memory_recall` happened to.
+    // one. `list` happened to.
     //
     // `read_workspace_state` was the seventh member of this list until issue
     // #459; it is classified with `shell` below, for the reason given there.
@@ -481,7 +481,6 @@ const DECLARED: &[Declared] = &[
     d("glob", EffectGroup::Other, Reach::Nothing),
     d("grep", EffectGroup::Other, Reach::Nothing),
     d("list", EffectGroup::Other, Reach::Nothing),
-    d("memory_recall", EffectGroup::Other, Reach::Nothing),
     // Queues an internal operator question. It does not perform the proposed
     // action and must stay callable even while the company is read-only.
     d("request_approval", EffectGroup::Other, Reach::Nothing),
@@ -497,15 +496,11 @@ const DECLARED: &[Declared] = &[
     d_grantable("edit", EffectGroup::Other, Reach::Consequence),
     d_grantable("apply_patch", EffectGroup::Other, Reach::Consequence),
     d_grantable("csv_export", EffectGroup::Other, Reach::Consequence),
-    d_grantable("memory_store", EffectGroup::Other, Reach::Consequence),
-    // Per-call, like every other delete in this table (`delete_workflow`,
-    // `workspace_delete`, `pages_delete`) and for their stated reason: a
-    // standing grant on deletion is the shape that turns one bad turn into a
-    // memory that is quietly empty by the end of it. The own-prefix
-    // confinement is not grounds for a lower price — a memory row has no
-    // revision history and no artifact chain, so a wrong forget is simply
-    // gone.
-    d("memory_forget", EffectGroup::Other, Reach::Consequence),
+    // OpenHuman's `memory` tool (`recall | fetch | learn | forget`), confined
+    // to the company's own memory root. Graded on its `action`
+    // ([`memory_consequence`]); this row answers a call whose action cannot be
+    // read, which is the fail-closed `learn` verdict.
+    d_grantable("memory", EffectGroup::Other, Reach::Consequence),
     // `git_operations` is deliberately NOT grantable alongside its filesystem
     // siblings: it can push to a configured remote, so it reaches an address
     // this layer does not get to see.
@@ -952,6 +947,7 @@ const ARGUMENT_GRADED: &[(&str, Grader)] = &[
     ("workspace_write", workspace_mutation_consequence),
     ("workspace_delete", workspace_mutation_consequence),
     ("workspace_rename", workspace_mutation_consequence),
+    ("memory", memory_consequence),
 ];
 
 /// The classifier that answers for `name`, or `None` when the table does.
@@ -1384,7 +1380,7 @@ pub(crate) fn composio_action_slug(args: &serde_json::Value) -> Result<&str, Act
 /// Which slice of a tool one standing grant is confined to (issue #457).
 ///
 /// `None` for almost everything, and that is the honest answer: for a tool
-/// whose name *is* the whole of what it can do — `file_write`, `memory_store` —
+/// whose name *is* the whole of what it can do — `file_write`, `csv_export` —
 /// "this tool, for this teammate, until a deadline" already describes exactly
 /// what the operator consented to, and there is nothing left to narrow.
 ///
@@ -1776,6 +1772,29 @@ fn shell_consequence(args: &serde_json::Value) -> Consequence {
 /// `AutonomyLevel::Supervised`, where `gate_decision(Write)` *is* `Prompt` and
 /// the conjunction reduces to the operation test alone. A list that cannot
 /// drift silently is not the failure mode being warned about.
+/// OpenHuman's `memory` tool, graded on its `action`.
+///
+/// * `recall` / `fetch` read the company's own memory: nothing reached.
+/// * `learn` writes a learning into the company's own memory — low consequence,
+///   grantable, the standing the old `memory_store` had.
+/// * `forget` is per-call, like every other delete in the table and for their
+///   reason: a standing grant on deletion turns one bad turn into a memory that
+///   is quietly empty, and a forgotten item has no revision history.
+///
+/// An unreadable action is graded as `learn`, the [`DECLARED`] row.
+fn memory_consequence(args: &serde_json::Value) -> Consequence {
+    let of = |reach, standing| Consequence {
+        group: EffectGroup::Other,
+        reach,
+        standing,
+    };
+    match args.get("action").and_then(|v| v.as_str()) {
+        Some("recall") | Some("fetch") => of(Reach::Nothing, Standing::PerCall),
+        Some("forget") => of(Reach::Consequence, Standing::PerCall),
+        _ => of(Reach::Consequence, Standing::Grantable),
+    }
+}
+
 fn git_operations_consequence(args: &serde_json::Value) -> Consequence {
     let gated = Consequence {
         group: EffectGroup::Other,
@@ -2558,8 +2577,6 @@ fn undeclared(name: &str) -> Consequence {
         "peek",
         "inspect",
         "view",
-        "memory_recall",
-        "memory_search",
     ];
     let reads = READ_ONLY_PREFIXES.iter().any(|p| name.starts_with(p));
     Consequence {

@@ -1,27 +1,6 @@
 use super::*;
-use crate::ports::facts::{FactKind, FactRecord};
 use crate::ports::types::{CompanyRecord, CompanySummary, LedgerEntry, StoredEvent};
 use futures::stream::{self, BoxStream};
-
-struct FailingFacts;
-
-#[async_trait]
-impl FactStore for FailingFacts {
-    async fn list(
-        &self,
-        _company: &CompanyId,
-        _query: Option<&str>,
-        _kind: Option<FactKind>,
-    ) -> crate::Result<Vec<FactRecord>> {
-        Err(OpenCompanyError::Store("facts offline".into()))
-    }
-    async fn upsert(&self, _company: &CompanyId, _fact: &FactRecord) -> crate::Result<()> {
-        unimplemented!("not exercised")
-    }
-    async fn delete(&self, _company: &CompanyId, _id: &str) -> crate::Result<bool> {
-        unimplemented!("not exercised")
-    }
-}
 
 struct FailingEvents;
 
@@ -99,10 +78,10 @@ fn unreadable(result: &ToolResult) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn query_company_says_facts_and_activity_could_not_be_read() {
+async fn query_company_says_activity_could_not_be_read() {
     let tool = QueryCompanyTool::new(
         CompanyId::new("acme"),
-        Some(Arc::new(FailingFacts)),
+        None,
         Some(Arc::new(FailingEvents)),
         None,
         None,
@@ -111,11 +90,10 @@ async fn query_company_says_facts_and_activity_could_not_be_read() {
     let result = tool.execute(json!({})).await.unwrap();
     assert!(!result.is_error);
     let out = result.output_for_llm(true);
-    assert!(out.contains("Facts could not be read"), "{out}");
-    assert!(!out.contains("No durable facts recorded"), "{out}");
+    assert!(out.contains("No durable facts recorded"), "{out}");
     assert!(out.contains("Recent activity could not be read"), "{out}");
     assert!(!out.contains("No recent activity"), "{out}");
-    assert_eq!(unreadable(&result), ["facts", "recent_activity"]);
+    assert_eq!(unreadable(&result), ["recent_activity"]);
 }
 
 #[tokio::test]
