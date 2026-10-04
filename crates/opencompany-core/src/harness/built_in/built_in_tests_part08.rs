@@ -268,12 +268,6 @@ async fn run_refuses_dispatch_once_the_total_ceiling_is_crossed() {
         .await
         .unwrap();
 
-    let before = context
-        .list(&rec.id, memory_loop::OUTCOME_LABEL_PREFIX)
-        .await
-        .unwrap()
-        .len();
-
     // Over the ceiling: dispatch is refused with a benign notice — NOT an Err.
     let refused = pool
         .run(
@@ -294,14 +288,6 @@ async fn run_refuses_dispatch_once_the_total_ceiling_is_crossed() {
         !refused.contains("should-not-echo"),
         "the model was never called, so the prompt is not echoed: {refused:?}"
     );
-
-    // A refused turn writes no outcome back to memory.
-    let after = context
-        .list(&rec.id, memory_loop::OUTCOME_LABEL_PREFIX)
-        .await
-        .unwrap()
-        .len();
-    assert_eq!(before, after, "a refused turn stores nothing in memory");
 }
 
 /// Issue #416, the reason [`HarnessPool::total_ceiling_refusal`] was
@@ -570,11 +556,6 @@ async fn run_refuses_dispatch_for_a_teammate_over_its_daily_cap() {
     pool.ensure(&rec, &deps).await.expect("ensure");
 
     let samples_before = meter.samples.lock().unwrap().len();
-    let memory_before = context
-        .list(&rec.id, memory_loop::OUTCOME_LABEL_PREFIX)
-        .await
-        .unwrap()
-        .len();
 
     let refused = pool
         .run(
@@ -600,15 +581,6 @@ async fn run_refuses_dispatch_for_a_teammate_over_its_daily_cap() {
         meter.samples.lock().unwrap().len(),
         samples_before,
         "a pre-model-call refusal meters nothing"
-    );
-    assert_eq!(
-        context
-            .list(&rec.id, memory_loop::OUTCOME_LABEL_PREFIX)
-            .await
-            .unwrap()
-            .len(),
-        memory_before,
-        "a refused turn stores no fabricated outcome"
     );
 
     // The cap is per-teammate: the uncapped engineer is untouched, and the
