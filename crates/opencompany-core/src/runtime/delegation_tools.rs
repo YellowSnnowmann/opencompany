@@ -1,38 +1,21 @@
-//! Brain-agnostic delegation-tool primitives (issue #176, slice 2).
+//! Brain-agnostic roster, desk and board-tool primitives (issue #176).
 //!
-//! The delegation *runtime* — draining a queue and running desk-lead turns —
-//! lives in [`delegation`](crate::runtime::delegation) and is harness-only
-//! (it needs in-process cognition). But the delegation *tools* themselves —
-//! their names, their argument schemas, and the desk-lead resolver — are
-//! brain-agnostic: the hosted Medulla path advertises the same tools to the
-//! remote cognition service and services them device-side.
+//! The pieces both brains share one definition of:
 //!
-//! This module holds those brain-agnostic pieces so BOTH brains share one
-//! definition:
+//! - the `spawn_task` tool name, schema and argument parser ([`SPAWN_TASK_TOOL`],
+//!   [`spawn_task_schema`], [`SpawnTaskArgs`]) — the harness `orchestrator`
+//!   module re-exports the name, and [`delegation_manifest_entries`] is the
+//!   catalog the hosted brain registers with Medulla;
+//! - the desk and roster resolvers — [`desk_lead`], [`desk_default_responder`],
+//!   [`chat_responder`], [`desk_ids`], [`roster_agent_ids`];
+//! - the **reach** rule — [`teammate_targets`] and [`reach_is_unrestricted`] —
+//!   which the company hive's send policy (`hive::policy`) decides
+//!   `hivemind_send_agent` under, and the team brief renders.
 //!
-//! - the canonical tool-name constants ([`SPAWN_TASK_TOOL`],
-//!   [`DELEGATE_TO_DESK_TOOL`]) — the harness `orchestrator` module re-exports
-//!   them so the two paths cannot drift;
-//! - [`delegation_manifest_entries`], the [`ToolManifestEntry`] catalog the
-//!   hosted brain registers with Medulla;
-//! - [`desk_lead`], the desk-lead resolver (moved here from the harness-only
-//!   [`delegation`](crate::runtime::delegation) module so the hosted path can
-//!   resolve a desk's lead without the `openhuman` feature);
-//! - the argument parsers ([`SpawnTaskArgs`], [`DelegateArgs`]) the host uses
-//!   to service a `spawn_task` / `delegate_to_desk` tool-call frame;
-//! - the hand-off **target checks** — [`reject_desk_target`] (issue #272) and,
-//!   since the recursive-delegation slice, [`reject_cycle_target`] and
-//!   [`reject_out_of_allowlist_target`] (issue #176). Each returns the refusal
-//!   as an `Option<String>` rather than rejecting in place, so the harness tool
-//!   can turn it into a `ToolResult::error` and the hosted device-side handler
-//!   into a failed tool frame, from one definition.
-//!
-//! What is *not* here is the enforcement of delegation **depth**. That lives on
-//! the harness [`DelegationQueue`](crate::harness::orchestrator::DelegationQueue),
-//! because only the harness runs a desk member's turn at all: the hosted path
-//! services delegation tools solely for the orchestrator's own cycle and writes
-//! a durable card, so its chain is always empty. The definitions above are
-//! brain-agnostic; the recursion they guard is not.
+//! The desk and teammate hand-off tools (`delegate_to_desk`,
+//! `delegate_to_teammate`) and their target checks are gone with the hive
+//! cutover (OC-2): agents talk to each other through the permanent
+//! `hivemind_*` tools.
 //!
 //! Compiled in every build (no feature gate): the hosted brain is in the
 //! default build, and the harness path re-exports from here.
@@ -142,25 +125,11 @@ pub fn spawn_task_schema() -> Value {
     })
 }
 
-/// The delegation tools advertised to Medulla on the hosted path: `spawn_task`
-/// and `delegate_to_desk`, with the same names + schemas the harness exposes.
-///
-/// **`delegate_to_teammate` is deliberately absent** (issue #884). The hosted
-/// brain forwards every event to a single `counterpart_agent_id` and does no
-/// per-agent routing at all (`src/brain/hosted.rs`, tracked in #176), so
-/// advertising a tool the device-side handler in
-/// [`cycle`](crate::runtime::cycle) cannot service would turn a hand-off into a
-/// failed tool frame. The harness path wires it directly instead.
-///
-/// Registered on top of the manifest's own `tools.allow` catalog so a hosted
-/// company's orchestrator can delegate exactly as the harness one does. The
-/// device services the resulting tool-call frames in
-/// [`CycleHostImpl`](crate::runtime::cycle) without any local cognition — a
-/// `spawn_task` opens a board card, a `delegate_to_desk` writes a durable
-/// hand-off card assigned to the desk. (The *synchronous* desk-lead cognition
-/// relay the harness performs in-process needs Medulla multi-agent support and
-/// is tracked separately in #176 — the hosted hand-off is durable and
-/// asynchronous.)
+/// The board tool advertised to Medulla on the hosted path: `spawn_task`, with
+/// the same name + schema the harness exposes. Registered on top of the
+/// manifest's own `tools.allow` catalog; the device services the resulting
+/// tool-call frame in [`CycleHostImpl`](crate::runtime::cycle) by opening a
+/// board card.
 pub fn delegation_manifest_entries() -> Vec<ToolManifestEntry> {
     vec![
         ToolManifestEntry {
@@ -192,8 +161,8 @@ or teammate id)."
 ///
 /// An [`Auto`](crate::ports::types::ResponderMode::Auto) channel (issue #1835)
 /// answers `None` **by definition, not by accident**: no lead exists there, so
-/// every lead-derived surface — the org chart's crown, the members-pane badge,
-/// a `delegate_to_desk` hand-off — stays honest without knowing the mode. The
+/// every lead-derived surface — the org chart's crown, the members-pane badge
+/// — stays honest without knowing the mode. The
 /// deterministic "who answers here" question is [`desk_default_responder`],
 /// which ignores the mode on purpose.
 pub fn desk_lead(record: &CompanyRecord, desk: &str) -> Option<String> {
@@ -280,17 +249,12 @@ pub fn chat_responder(record: &CompanyRecord, chat: &str) -> Option<String> {
         .and_then(|key| record.resolve_roster_agent_id(key).or_else(|| direct(key)))
 }
 
-/// How many desk ids a rejection message names before eliding the rest, so the
-/// message stays short enough to be useful on a company with many desks.
-const LISTED_DESKS: usize = 12;
-
 /// Every desk id the company actually has: the manifest `[[group_chat]]` desks
 /// in declaration order, then any operator-created overlay desks, deduplicated.
 ///
-/// The **id** is what [`delegate_to_desk`](DELEGATE_TO_DESK_TOOL) takes, so this
-/// is the set a delegation target is grounded against. Reads the same two
-/// sources [`CompanyRecord::resolve_desk_id`] searches, so "what ids exist" and
-/// "does this id resolve" cannot disagree.
+/// Every desk is a hive of the company hive (OC-2), so this is also the set of
+/// hives it syncs. Reads the same two sources [`CompanyRecord::resolve_desk_id`]
+/// searches, so "what ids exist" and "does this id resolve" cannot disagree.
 pub fn desk_ids(record: &CompanyRecord) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
     for chat in &record.manifest.group_chats {
@@ -362,16 +326,16 @@ pub fn reach_is_unrestricted(allowed: &[String]) -> bool {
             .any(|entry| entry.trim() == crate::company::DELEGATES_TO_WILDCARD)
 }
 
-/// The teammates `caller` may hand work to with [`DELEGATE_TO_TEAMMATE_TOOL`]
-/// (issue #884). Never the caller itself.
+/// The teammates `caller` may message directly (`hivemind_send_agent`, decided
+/// by the company hive's send policy) — issue #884's reach rule. Never the
+/// caller itself.
 ///
 /// With an unrestricted `allowed` (see [`reach_is_unrestricted`]) — the
 /// ordinary case, an agent whose manifest entry says nothing — that is
 /// **everybody on the roster**: desk-mates first, then everybody else in
 /// roster order. A teammate is not locked out of the company because nobody
 /// wrote it a list, and the orchestrator and a desk-less specialist are
-/// reachable like anyone else. What bounds a chain is the depth cap and the
-/// cycle guard at the tool boundary, not the reach.
+/// reachable like anyone else.
 ///
 /// With a list that names desks, the reach is everybody on a desk with the
 /// caller, plus everybody on a desk the list permits. The desk-peer arm is the
@@ -421,30 +385,14 @@ pub(crate) fn desks_of_member(record: &CompanyRecord, member: &str) -> Vec<Strin
         .collect()
 }
 
-/// Renders a teammate-id list for a message, on the same terms as [`desk_list`].
-fn agent_list(ids: Vec<String>) -> Option<String> {
-    desk_list(ids)
-}
-
-/// The first desk `member` is on, so an invented teammate-as-desk target can be
-/// redirected at the desk that teammate actually sits on.
-///
-/// Naming one example desk is enough for this function's informational-message
-/// callers (`unknown_desk_message`) — the caller only needs *a* desk to point
-/// at. It is the wrong call for a value that gets **persisted**: see
-/// [`sole_desk_of_member`] for that case (issue #1882 review).
-pub(crate) fn desk_of_member(record: &CompanyRecord, member: &str) -> Option<String> {
-    desks_of_member(record, member).into_iter().next()
-}
-
 /// The desk `member` sits on, but only when unambiguous — `member` belongs to
 /// exactly one desk. `None` both when `member` is on no desk and when it is on
 /// two or more.
 ///
 /// `pub(crate)`: the issue #1862 prerequisite's default-owner lever —
 /// `apply_workflow_proposal` (`server/ops/tasks.rs`) fills a proposal's
-/// omitted `owner_desk` from the assignee's desk. Unlike [`desk_of_member`]'s
-/// informational-message use, that default gets written to disk, so picking
+/// omitted `owner_desk` from the assignee's desk. That default gets written to
+/// disk, so picking
 /// the first desk in manifest declaration order for a teammate who sits on
 /// several would silently misrepresent ownership (issue #1882 review) —
 /// leaving `owner_desk` unset is the same permissive "best-effort" stance the
@@ -456,20 +404,6 @@ pub(crate) fn sole_desk_of_member(record: &CompanyRecord, member: &str) -> Optio
         return None;
     }
     Some(first)
-}
-
-/// Renders a desk-id list for a message, capped at [`LISTED_DESKS`] with the
-/// remainder counted. `None` when there are no ids to list.
-fn desk_list(ids: Vec<String>) -> Option<String> {
-    if ids.is_empty() {
-        return None;
-    }
-    let shown = ids.len().min(LISTED_DESKS);
-    let mut list = ids[..shown].join(", ");
-    if ids.len() > shown {
-        list.push_str(&format!(" (+{} more)", ids.len() - shown));
-    }
-    Some(list)
 }
 
 /// Parsed `spawn_task` arguments: a required title, an optional brief note, and
