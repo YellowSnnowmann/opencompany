@@ -41,7 +41,7 @@ solved it alone, which is what a live run without this roster showed.
 Run it locally against the ladder router and a CortexDB memory instance:
 
 ```bash
-scripts/cortexdb-up.sh                     # prints the OPENCOMPANY_MEMORY_* exports
+scripts/cortexdb-up.sh                     # starts a local CortexDB (see its header: printed exports are legacy)
 OPENCOMPANY_INFERENCE_KEY=$LADDER_API_KEY OPENCOMPANY_AUTH_MODE=none \
   cargo run --features openhuman --bin opencompany -- serve --company companies/hive_math_lab
 python3 scripts/hive-euler.py --problems 1,5,12,31,60,100

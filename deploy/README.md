@@ -90,12 +90,10 @@ project-scoped containers and data volume on exit. Shared dependency caches are
 preserved. Run it with `./scripts/test-compose-e2e.sh`; on failure the script
 prints the Compose status and logs.
 
-For a selectable memory engine, make sure `OPENCOMPANY_FEATURES` carries
-`tinymemory` (it is a default feature; the hosted engines `cortexdb` and
-`tinyhumans`, plus the `null` engine), then select one with the
-`OPENCOMPANY_MEMORY*` variables (`.env.example` here has the block;
-`docs/spec/runtime/memory-engine.md` has the full guide and the
-engine-switch runbook).
+Company memory is OpenHuman memory v2: there is no `tinymemory` feature and no
+`OPENCOMPANY_MEMORY*` variable. The engine is OpenHuman's `[memory]` setting
+(`tinyhumans` with the runtime's TinyHumans credential, or `cortexdb`); with
+neither, memory is off. See `docs/spec/runtime/memory-engine.md`.
 
 The console upstream is configurable via `OC_UPSTREAM` (default
 `opencompany:8080`), so the console image is portable across every target here.

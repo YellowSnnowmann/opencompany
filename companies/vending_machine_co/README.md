@@ -130,29 +130,15 @@ operator later installs.
 ## Running it
 
 ```bash
-# 1. Memory. CortexDB is a standalone service on :3141, not the removed in-pod
-#    tinycortex engine. The script starts (or reuses) a local one and prints the
-#    exports:
-eval "$(./scripts/cortexdb-up.sh)"
+# 1. Memory. Company memory is OpenHuman memory v2
+#    (docs/spec/runtime/memory-engine.md): the `OPENCOMPANY_MEMORY*` variables
+#    and the host-side CortexDB driver are gone, so there is nothing to export.
+#    Sign in with a TinyHumans credential (or configure OpenHuman's
+#    `engine = "cortexdb"` with a stored key) and each seat gets a pack and logs
+#    its turns. With no engine, memory is off and the run still works.
+#    `scripts/cortexdb-up.sh` still starts a local CortexDB if you want one for
+#    the `cortexdb` engine; its printed exports are legacy.
 #
-#    …but prefer a shared instance that is actually provisioned. A local
-#    container started by that script has no LLM router and no embedding
-#    endpoint wired, and its ranked-recall index then lags the write by
-#    *minutes* — far past the driver's 4s read-after-write check
-#    (`INGEST_RECALL_VISIBILITY_TIMEOUT`), so every agent turn fails at its
-#    first `memory_store` and the desk reports every seat as unfinished. The
-#    failure names `/v1/recall` and looks like a driver bug; it is an
-#    unprovisioned instance. Point at one with an LLM/embedding endpoint
-#    instead — e.g. the shared box on the tailnet:
-#
-#      export OPENCOMPANY_MEMORY=remote
-#      export OPENCOMPANY_MEMORY_DRIVER=cortexdb
-#      export OPENCOMPANY_MEMORY_URL=http://<host>:3141
-#      export OPENCOMPANY_MEMORY_API_KEY=<that instance's CORTEX_API_KEY>
-#      export OPENCOMPANY_MEMORY_ACTOR=service:opencompany
-#
-#    Check before you run: a store→recall round trip has to complete in seconds.
-
 # 2. The company.
 OPENCOMPANY_INFERENCE_URL=http://127.0.0.1:6969/v1 \
 OPENCOMPANY_INFERENCE_KEY=$LADDER_API_KEY \
