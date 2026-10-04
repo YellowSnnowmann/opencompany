@@ -83,7 +83,7 @@ Rules every check follows:
 | Lane | What runs | Areas |
 | --- | --- | --- |
 | `static` | Pin and wiring guards, Markdown/Rust layout caps, version sync, the CI scripts' own tests. With a Rust change it adds the toolchain pin, vendored deps, lockfile, feature-lanes and `cargo fmt`. | always |
-| `gated` | The gated binary (`openhuman,mcp,composio`) first. Then the `openhuman` build, clippy, `--tests`, every scoped suite (acp/runner/tinymemory, mcp/media, chargebee/paypal/composio, …), integration targets, offline e2e, `--all-features`. | rust (binary: rust or frontend) |
+| `gated` | The gated binary (`openhuman,mcp,composio`) first. Then the `openhuman` build, clippy, `--tests`, every scoped suite (acp/runner, mcp/media, chargebee/paypal/composio, …), integration targets, offline e2e, `--all-features`. | rust (binary: rust or frontend) |
 | `core` | The default host binary first. Then clippy, `cargo test`, sqlite and the default-graph scoped suites, and the TUI. | rust (binary: rust or frontend) |
 | `console` | `npm ci`, the three typechecks, vitest, both builds, the frontend policy scripts, release-script tests, pnpm lockfiles. | frontend |
 | `e2e` | Playwright `e2e`, `e2e:analytics` and first-run, run against `ci-out/bin/opencompany`. | rust or frontend |
