@@ -265,10 +265,7 @@ use crate::ports::types::{
     Actor, ActorKind, AgentOverride, BudgetOverride, CompanyId, CompanyRecord, EventSeq,
     OverlayAgent, OverlayDesk, OverlayDeskMember, PolicyOverride, TurnStep,
 };
-use crate::ports::{
-    ArtifactStore, CompanyStore, ContextStore, EventLog, FactStore, SecretStore, TaskStore,
-    UsageMeter,
-};
+use crate::ports::{ArtifactStore, CompanyStore, EventLog, SecretStore, TaskStore, UsageMeter};
 use crate::runtime::builder::agent_scoped_grants;
 
 /// Shared dependencies every harness-built agent draws on.
@@ -301,8 +298,6 @@ pub struct HarnessDeps {
     /// every agent, so a ten-agent roster on three harnesses would stand up
     /// thirty live agents to use ten.
     pub serves: Option<std::collections::HashSet<String>>,
-    /// Context store backing every agent's memory tools and loop.
-    pub context: Arc<dyn ContextStore>,
 
     /// Company store the cost hook appends ledger entries to.
     pub store: Arc<dyn CompanyStore>,
@@ -411,11 +406,6 @@ pub struct HarnessDeps {
     /// layers the boot-time resolution did. Without it a console edit would
     /// re-resolve to manifest ∪ runtime and silently drop every default.
     pub default_mcp_servers: Vec<crate::company::McpServer>,
-    /// The company's durable [`FactStore`], surfaced to the orchestrator agent
-    /// through the `query_company` read tool (issue #53). `None` leaves the
-    /// orchestrator without the facts half of its insight surface (the chat path
-    /// off the orchestrator seam wires nothing).
-    pub facts: Option<Arc<dyn FactStore>>,
     /// The company's [`EventLog`], surfaced to the orchestrator agent through
     /// the `query_company` read tool for recent-activity context (issue #53).
     /// `None` leaves the orchestrator without the recent-events half.
