@@ -1,17 +1,17 @@
-//! The resolve path's fork for approvals a hive episode seat parked.
+//! The resolve path's fork for approvals a company-hive turn parked (OC-2).
 //!
-//! An episode seat is not a brain turn, so its decisions are never continued
-//! as one: no pooled turn redeems its grant and no chat cycle answers its
-//! request. Once the last decision the seat waits on lands, every decision is
-//! handed to the episode through [`EpisodeReleases`], and the seat, released,
-//! redeems an approved call itself under the single-use grant the approve
-//! minted. An episode no longer running in this process is resumed from its
-//! checkpoint by the brain.
+//! A coordinator turn is not a brain turn, so its decisions are never
+//! continued as one: no pooled turn redeems its grant and no chat cycle
+//! answers its request. The Coordinator holds the agent parked; once the last
+//! decision it waits on lands, every decision is rendered as one release note
+//! and the brain releases the agent with it (`Coordinator::release_with`). The
+//! agent, released, reads the note at the top of its next turn and redeems an
+//! approved call itself under the single-use grant the approve minted.
 
 use crate::error::Result;
 use crate::ports::types::{ApprovalId, CompanyEvent, Verdict};
 use crate::runtime::cycle::CycleRunner;
-use crate::runtime::episode_resume::{EpisodeSeat, SeatAsk, SeatDecision, SeatVerdict};
+use crate::runtime::hive_resume::{HiveSeat, SeatAsk, SeatDecision, SeatVerdict};
 use crate::runtime::types::CycleReport;
 
 use super::CompanyRuntime;
@@ -20,21 +20,21 @@ use super::CompanyRuntime;
 pub(crate) const EXPIRY_ACTOR: &str = "expiry";
 
 impl CompanyRuntime {
-    /// The episode seat that parked `id`, if a seat did.
+    /// The hive turn that parked `id`, if a coordinator turn did.
     #[cfg(feature = "openhuman")]
-    pub(crate) fn episode_seat_of(&self, id: &ApprovalId) -> Option<EpisodeSeat> {
+    pub(crate) fn hive_seat_of(&self, id: &ApprovalId) -> Option<HiveSeat> {
         self.journal
             .approval_cycle(id)
             .flatten()
             .as_deref()
-            .and_then(crate::runtime::episode_resume::parse)
+            .and_then(crate::runtime::hive_resume::parse)
     }
 
     /// Holds an escalation's answer for the seat's decision and retires it
     /// from the blocker queue, so a boot does not replay it into a blocker
     /// resume.
     #[cfg(feature = "openhuman")]
-    pub(crate) async fn hold_episode_answer(
+    pub(crate) async fn hold_hive_answer(
         &self,
         id: &ApprovalId,
         resolution: &crate::ports::blockers::BlockerResolution,
@@ -46,7 +46,7 @@ impl CompanyRuntime {
             BlockerVerdict::Cancel => SeatVerdict::Denied,
         };
         self.grants
-            .episode_releases()
+            .hive_answers()
             .answer(id, verdict, resolution.answer.clone());
         if let Err(error) = self.journal.record_blocker_resumed(id).await {
             tracing::warn!(
@@ -170,7 +170,7 @@ impl CompanyRuntime {
         };
         let (verdict, answer) = self
             .grants
-            .episode_releases()
+            .hive_answers()
             .take_answer(id)
             .unwrap_or_else(|| {
                 let verdict = match verdict {
