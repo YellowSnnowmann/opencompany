@@ -490,7 +490,7 @@ fn fold(cursor: &mut Cursor, seq: EventSeq, event: &CompanyEvent, roster: &HiveR
 }
 
 fn hive_error(error: tinyhivemind_hives::Error) -> crate::OpenCompanyError {
-    crate::OpenCompanyError::Harness(format!("company hive: {error}"))
+    crate::OpenCompanyError::Store(format!("company hive: {error}"))
 }
 
 #[cfg(test)]
