@@ -334,10 +334,6 @@ pub struct ConfigFile {
     pub setup_completed_at: Option<i64>,
     /// The `[workspace]` section: data-dir layout lifecycle knobs.
     pub workspace: WorkspaceSection,
-    /// The `[memory]` section: which memory engine this instance binds, when
-    /// the deployment has not named one through `OPENCOMPANY_MEMORY`
-    /// (`docs/spec/runtime/memory-engine.md`).
-    pub memory: MemorySection,
     /// `[[default_mcp_server]]` entries — MCP servers the packaged install
     /// registers and enables for every company, with no user setup (issue #527).
     ///
@@ -352,51 +348,6 @@ pub struct ConfigFile {
     /// compiled-in list to fall back to.
     #[serde(rename = "default_mcp_server")]
     pub default_mcp_servers: Vec<crate::company::McpServer>,
-}
-
-/// The `[memory]` section of `config.toml`: the memory engine an operator
-/// chose from the console, when the deployment did not inject one.
-///
-/// # Why this exists beside the env vars
-///
-/// The engine used to be selectable only through `OPENCOMPANY_MEMORY*`, which
-/// means only by whoever controls the process environment. A self-hosted
-/// operator who wants their company's memory in CortexDB had to
-/// edit a unit file and restart. This is the same second layer the rest of the
-/// instance's configuration already has (`docs/spec/runtime/config.md`), so
-/// the console can write the choice and
-/// [`crate::server::ops::memory_engine`] can bind it live.
-///
-/// # Precedence, and why it is not "last writer wins"
-///
-/// `env ⟵ config.toml`, exactly as every other key resolves. A hosted tenant
-/// has `OPENCOMPANY_MEMORY*` injected by the control plane, and a console that
-/// accepted an edit there would write a file, report success, and change
-/// nothing at the next boot — the silently-ignored-configuration failure the
-/// setup flow refuses for the same reason. So when the env names an engine
-/// this section is inert, the console renders read-only, and the write is
-/// refused rather than accepted-and-dropped.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct MemorySection {
-    /// `store` | `remote` | `null`, parsed by
-    /// [`MemoryBackend`](crate::store::MemoryBackend). Absent leaves the
-    /// default (`store` — the base backend's own memory).
-    pub backend: Option<String>,
-    /// The engine id for `remote` mode: `cortexdb` (alias `cortex`) or
-    /// `tinyhumans`, the registry TinyMemory v2 ships. Retired ids are refused
-    /// by name at open.
-    pub driver: Option<String>,
-    /// The hosted engine's endpoint.
-    pub url: Option<String>,
-    /// The hosted engine's credential.
-    ///
-    /// It lives in this file the same way `tinyhumans_api_key` and
-    /// `github_token` already do — the file is the instance's private
-    /// configuration, mode `0600` where the platform supports it — and it is
-    /// never read back out over HTTP: the engine route reports whether a key
-    /// is set, never its bytes.
-    pub api_key: Option<String>,
 }
 
 /// The `[workspace]` section of `config.toml`: lifecycle of the canonical
