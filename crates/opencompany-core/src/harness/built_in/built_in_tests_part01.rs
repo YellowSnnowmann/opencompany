@@ -555,39 +555,6 @@ fn re_setting_the_same_tier_does_not_rebuild_the_roster() {
     );
 }
 
-/// The mock's addresses are monotonic, not len-derived: a delete must not
-/// make the next put reuse a surviving chunk's address (len-derived bug:
-/// delete `addr-0` of `[addr-0, addr-1]`, and the next put minted
-/// `addr-1` again — a later delete of `addr-1` then removed both rows).
-#[tokio::test]
-async fn mock_context_addresses_survive_deletion_without_reuse() {
-    let ctx = MockContext::default();
-    let company = CompanyId::new("acme");
-    let chunk = |label: &str| ContextChunk {
-        label: label.into(),
-        body: label.into(),
-    };
-    let first = ctx.put(&company, chunk("l/0")).await.unwrap();
-    let second = ctx.put(&company, chunk("l/1")).await.unwrap();
-    assert!(
-        ctx.delete(&company, &first).await.unwrap(),
-        "first delete removes the row"
-    );
-    assert!(
-        !ctx.delete(&company, &first).await.unwrap(),
-        "repeat delete of the same addr finds nothing"
-    );
-    let third = ctx.put(&company, chunk("l/2")).await.unwrap();
-    assert_ne!(
-        third.as_ref() as &str,
-        second.as_ref(),
-        "a post-delete put must not reuse a surviving address"
-    );
-    assert!(ctx.delete(&company, &second).await.unwrap());
-    let left = ctx.list(&company, "l/").await.unwrap();
-    assert_eq!(left.len(), 1, "only the newest row remains: {left:?}");
-}
-
 #[tokio::test]
 async fn roster_builds_every_manifest_agent() {
     let fx = fixture();

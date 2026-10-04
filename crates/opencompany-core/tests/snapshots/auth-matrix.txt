@@ -138,6 +138,13 @@ DELETE /api/v1/companies/{id}/mcp/servers/{name}/tools/policy must-change-passwo
 DELETE /api/v1/companies/{id}/mcp/servers/{name}/tools/policy platform permitted source=ops access=admin features=openhuman blast=ordinary note="" wait=-
 DELETE /api/v1/companies/{id}/mcp/servers/{name}/tools/policy tenant-non-owner refused:403:forbidden source=ops access=admin features=openhuman blast=ordinary note="" wait=-
 DELETE /api/v1/companies/{id}/mcp/servers/{name}/tools/policy tenant-owner permitted source=ops access=admin features=openhuman blast=ordinary note="" wait=-
+DELETE /api/v1/companies/{id}/memory/agents/{agent_id} admin permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/companies/{id}/memory/agents/{agent_id} anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/companies/{id}/memory/agents/{agent_id} member permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/companies/{id}/memory/agents/{agent_id} must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/companies/{id}/memory/agents/{agent_id} platform permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/companies/{id}/memory/agents/{agent_id} tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/companies/{id}/memory/agents/{agent_id} tenant-owner permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
 DELETE /api/v1/companies/{id}/memory/document/{source} admin permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
 DELETE /api/v1/companies/{id}/memory/document/{source} anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
 DELETE /api/v1/companies/{id}/memory/document/{source} member permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
@@ -145,13 +152,13 @@ DELETE /api/v1/companies/{id}/memory/document/{source} must-change-password-admi
 DELETE /api/v1/companies/{id}/memory/document/{source} platform permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
 DELETE /api/v1/companies/{id}/memory/document/{source} tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
 DELETE /api/v1/companies/{id}/memory/document/{source} tenant-owner permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
-DELETE /api/v1/companies/{id}/memory/{fact_id} admin permitted source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/companies/{id}/memory/{fact_id} anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/companies/{id}/memory/{fact_id} member permitted source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/companies/{id}/memory/{fact_id} must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/companies/{id}/memory/{fact_id} platform permitted source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/companies/{id}/memory/{fact_id} tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/companies/{id}/memory/{fact_id} tenant-owner permitted source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
+DELETE /api/v1/companies/{id}/memory/{item_id} admin permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/companies/{id}/memory/{item_id} anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/companies/{id}/memory/{item_id} member permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/companies/{id}/memory/{item_id} must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/companies/{id}/memory/{item_id} platform permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/companies/{id}/memory/{item_id} tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/companies/{id}/memory/{item_id} tenant-owner permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
 DELETE /api/v1/companies/{id}/policy admin permitted source=ops access=admin features=openhuman blast=authority note="" wait=-
 DELETE /api/v1/companies/{id}/policy anonymous refused:401:unauthorized source=ops access=admin features=openhuman blast=authority note="" wait=-
 DELETE /api/v1/companies/{id}/policy member refused:403:forbidden source=ops access=admin features=openhuman blast=authority note="" wait=-
@@ -369,6 +376,13 @@ DELETE /api/v1/company/mcp/servers/{name}/tools/policy must-change-password-admi
 DELETE /api/v1/company/mcp/servers/{name}/tools/policy platform permitted source=ops access=admin features=openhuman blast=ordinary note="" wait=-
 DELETE /api/v1/company/mcp/servers/{name}/tools/policy tenant-non-owner refused:403:forbidden source=ops access=admin features=openhuman blast=ordinary note="" wait=-
 DELETE /api/v1/company/mcp/servers/{name}/tools/policy tenant-owner permitted source=ops access=admin features=openhuman blast=ordinary note="" wait=-
+DELETE /api/v1/company/memory/agents/{agent_id} admin permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/company/memory/agents/{agent_id} anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/company/memory/agents/{agent_id} member permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/company/memory/agents/{agent_id} must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/company/memory/agents/{agent_id} platform permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/company/memory/agents/{agent_id} tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
+DELETE /api/v1/company/memory/agents/{agent_id} tenant-owner permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a teammate's logged turns." wait=-
 DELETE /api/v1/company/memory/document/{source} admin permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
 DELETE /api/v1/company/memory/document/{source} anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
 DELETE /api/v1/company/memory/document/{source} member permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
@@ -376,13 +390,13 @@ DELETE /api/v1/company/memory/document/{source} must-change-password-admin refus
 DELETE /api/v1/company/memory/document/{source} platform permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
 DELETE /api/v1/company/memory/document/{source} tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
 DELETE /api/v1/company/memory/document/{source} tenant-owner permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget an ingested document." wait=-
-DELETE /api/v1/company/memory/{fact_id} admin permitted source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/company/memory/{fact_id} anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/company/memory/{fact_id} member permitted source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/company/memory/{fact_id} must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/company/memory/{fact_id} platform permitted source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/company/memory/{fact_id} tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
-DELETE /api/v1/company/memory/{fact_id} tenant-owner permitted source=ops access=scoped features=openhuman blast=destructive note="Members may delete company memory facts." wait=-
+DELETE /api/v1/company/memory/{item_id} admin permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/company/memory/{item_id} anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/company/memory/{item_id} member permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/company/memory/{item_id} must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/company/memory/{item_id} platform permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/company/memory/{item_id} tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
+DELETE /api/v1/company/memory/{item_id} tenant-owner permitted source=ops access=scoped features=openhuman blast=destructive note="Members may forget a company memory item." wait=-
 DELETE /api/v1/company/policy admin permitted source=ops access=admin features=openhuman blast=authority note="" wait=-
 DELETE /api/v1/company/policy anonymous refused:401:unauthorized source=ops access=admin features=openhuman blast=authority note="" wait=-
 DELETE /api/v1/company/policy member refused:403:forbidden source=ops access=admin features=openhuman blast=authority note="" wait=-
@@ -824,27 +838,27 @@ GET /api/v1/companies/{id}/memory must-change-password-admin refused:403:passwor
 GET /api/v1/companies/{id}/memory platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/memory tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/memory tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/archives admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/archives anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/archives member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/archives must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/archives platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/archives tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/archives tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/engine admin permitted source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/companies/{id}/memory/engine anonymous refused:401:unauthorized source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/companies/{id}/memory/engine member refused:403:forbidden source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/companies/{id}/memory/engine must-change-password-admin refused:403:password_change_required source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/companies/{id}/memory/engine platform permitted source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/companies/{id}/memory/engine tenant-non-owner refused:403:forbidden source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/companies/{id}/memory/engine tenant-owner permitted source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/companies/{id}/memory/stats admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/stats anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/stats member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/stats must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/stats platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/stats tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/memory/stats tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/agents admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/agents anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/agents member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/agents must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/agents platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/agents tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/agents tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/brain admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/brain anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/brain member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/brain must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/brain platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/brain tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/brain tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/status admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/status anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/status member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/status must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/status platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/status tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/memory/status tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/memory/traces admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/memory/traces anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/memory/traces member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
@@ -1461,27 +1475,27 @@ GET /api/v1/company/memory must-change-password-admin refused:403:password_chang
 GET /api/v1/company/memory platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/memory tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/memory tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/archives admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/archives anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/archives member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/archives must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/archives platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/archives tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/archives tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/engine admin permitted source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/company/memory/engine anonymous refused:401:unauthorized source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/company/memory/engine member refused:403:forbidden source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/company/memory/engine must-change-password-admin refused:403:password_change_required source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/company/memory/engine platform permitted source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/company/memory/engine tenant-non-owner refused:403:forbidden source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/company/memory/engine tenant-owner permitted source=ops access=admin features=openhuman blast=authority note="" wait=-
-GET /api/v1/company/memory/stats admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/stats anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/stats member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/stats must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/stats platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/stats tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/memory/stats tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/agents admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/agents anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/agents member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/agents must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/agents platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/agents tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/agents tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/brain admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/brain anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/brain member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/brain must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/brain platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/brain tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/brain tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/status admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/status anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/status member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/status must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/status platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/status tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/memory/status tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/memory/traces admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/memory/traces anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/memory/traces member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
@@ -2133,13 +2147,6 @@ POST /api/v1/companies/{id}/memory must-change-password-admin refused:403:passwo
 POST /api/v1/companies/{id}/memory platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 POST /api/v1/companies/{id}/memory tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 POST /api/v1/companies/{id}/memory tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-POST /api/v1/companies/{id}/memory/engine/test admin permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/companies/{id}/memory/engine/test anonymous refused:401:unauthorized source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/companies/{id}/memory/engine/test member refused:403:forbidden source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/companies/{id}/memory/engine/test must-change-password-admin refused:403:password_change_required source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/companies/{id}/memory/engine/test platform permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/companies/{id}/memory/engine/test tenant-non-owner refused:403:forbidden source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/companies/{id}/memory/engine/test tenant-owner permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
 POST /api/v1/companies/{id}/memory/ingest admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 POST /api/v1/companies/{id}/memory/ingest anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 POST /api/v1/companies/{id}/memory/ingest member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
@@ -2154,6 +2161,13 @@ POST /api/v1/companies/{id}/memory/ingest/links must-change-password-admin refus
 POST /api/v1/companies/{id}/memory/ingest/links platform permitted source=ops access=scoped features=openhuman blast=authority note="Members may submit URLs for server-side ingestion." wait=-
 POST /api/v1/companies/{id}/memory/ingest/links tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=authority note="Members may submit URLs for server-side ingestion." wait=-
 POST /api/v1/companies/{id}/memory/ingest/links tenant-owner permitted source=ops access=scoped features=openhuman blast=authority note="Members may submit URLs for server-side ingestion." wait=-
+POST /api/v1/companies/{id}/memory/recall admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/companies/{id}/memory/recall anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/companies/{id}/memory/recall member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/companies/{id}/memory/recall must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/companies/{id}/memory/recall platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/companies/{id}/memory/recall tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/companies/{id}/memory/recall tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 POST /api/v1/companies/{id}/pause admin permitted source=external access=admin features=openhuman blast=authority note="" wait=-
 POST /api/v1/companies/{id}/pause anonymous refused:401:unauthorized source=external access=admin features=openhuman blast=authority note="" wait=-
 POST /api/v1/companies/{id}/pause member refused:403:forbidden source=external access=admin features=openhuman blast=authority note="" wait=-
@@ -2693,13 +2707,6 @@ POST /api/v1/company/memory must-change-password-admin refused:403:password_chan
 POST /api/v1/company/memory platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 POST /api/v1/company/memory tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 POST /api/v1/company/memory tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-POST /api/v1/company/memory/engine/test admin permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/company/memory/engine/test anonymous refused:401:unauthorized source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/company/memory/engine/test member refused:403:forbidden source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/company/memory/engine/test must-change-password-admin refused:403:password_change_required source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/company/memory/engine/test platform permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/company/memory/engine/test tenant-non-owner refused:403:forbidden source=ops access=admin features=openhuman blast=credential note="" wait=-
-POST /api/v1/company/memory/engine/test tenant-owner permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
 POST /api/v1/company/memory/ingest admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 POST /api/v1/company/memory/ingest anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 POST /api/v1/company/memory/ingest member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
@@ -2714,6 +2721,13 @@ POST /api/v1/company/memory/ingest/links must-change-password-admin refused:403:
 POST /api/v1/company/memory/ingest/links platform permitted source=ops access=scoped features=openhuman blast=authority note="Members may submit URLs for server-side ingestion." wait=-
 POST /api/v1/company/memory/ingest/links tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=authority note="Members may submit URLs for server-side ingestion." wait=-
 POST /api/v1/company/memory/ingest/links tenant-owner permitted source=ops access=scoped features=openhuman blast=authority note="Members may submit URLs for server-side ingestion." wait=-
+POST /api/v1/company/memory/recall admin permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/company/memory/recall anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/company/memory/recall member permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/company/memory/recall must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/company/memory/recall platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/company/memory/recall tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+POST /api/v1/company/memory/recall tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 POST /api/v1/company/search/providers admin permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
 POST /api/v1/company/search/providers anonymous refused:401:unauthorized source=ops access=admin features=openhuman blast=credential note="" wait=-
 POST /api/v1/company/search/providers member refused:403:forbidden source=ops access=admin features=openhuman blast=credential note="" wait=-
@@ -3085,13 +3099,6 @@ PUT /api/v1/companies/{id}/mcp/servers/{name}/tools/policy must-change-password-
 PUT /api/v1/companies/{id}/mcp/servers/{name}/tools/policy platform permitted source=ops access=admin features=openhuman blast=ordinary note="" wait=-
 PUT /api/v1/companies/{id}/mcp/servers/{name}/tools/policy tenant-non-owner refused:403:forbidden source=ops access=admin features=openhuman blast=ordinary note="" wait=-
 PUT /api/v1/companies/{id}/mcp/servers/{name}/tools/policy tenant-owner permitted source=ops access=admin features=openhuman blast=ordinary note="" wait=-
-PUT /api/v1/companies/{id}/memory/engine admin permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/companies/{id}/memory/engine anonymous refused:401:unauthorized source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/companies/{id}/memory/engine member refused:403:forbidden source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/companies/{id}/memory/engine must-change-password-admin refused:403:password_change_required source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/companies/{id}/memory/engine platform permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/companies/{id}/memory/engine tenant-non-owner refused:403:forbidden source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/companies/{id}/memory/engine tenant-owner permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
 PUT /api/v1/companies/{id}/notifications admin permitted source=ops access=person features=openhuman blast=ordinary note="" wait=-
 PUT /api/v1/companies/{id}/notifications anonymous refused:401:unauthorized source=ops access=person features=openhuman blast=ordinary note="" wait=-
 PUT /api/v1/companies/{id}/notifications member permitted source=ops access=person features=openhuman blast=ordinary note="" wait=-
@@ -3358,13 +3365,6 @@ PUT /api/v1/company/mcp/servers/{name}/tools/policy must-change-password-admin r
 PUT /api/v1/company/mcp/servers/{name}/tools/policy platform permitted source=ops access=admin features=openhuman blast=ordinary note="" wait=-
 PUT /api/v1/company/mcp/servers/{name}/tools/policy tenant-non-owner refused:403:forbidden source=ops access=admin features=openhuman blast=ordinary note="" wait=-
 PUT /api/v1/company/mcp/servers/{name}/tools/policy tenant-owner permitted source=ops access=admin features=openhuman blast=ordinary note="" wait=-
-PUT /api/v1/company/memory/engine admin permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/company/memory/engine anonymous refused:401:unauthorized source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/company/memory/engine member refused:403:forbidden source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/company/memory/engine must-change-password-admin refused:403:password_change_required source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/company/memory/engine platform permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/company/memory/engine tenant-non-owner refused:403:forbidden source=ops access=admin features=openhuman blast=credential note="" wait=-
-PUT /api/v1/company/memory/engine tenant-owner permitted source=ops access=admin features=openhuman blast=credential note="" wait=-
 PUT /api/v1/company/notifications admin permitted source=ops access=person features=openhuman blast=ordinary note="" wait=-
 PUT /api/v1/company/notifications anonymous refused:401:unauthorized source=ops access=person features=openhuman blast=ordinary note="" wait=-
 PUT /api/v1/company/notifications member permitted source=ops access=person features=openhuman blast=ordinary note="" wait=-
