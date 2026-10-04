@@ -5832,7 +5832,7 @@ pub(crate) fn workflow_wiring_deps(
     plan: Option<capability_budget::CapabilityPlan>,
 ) -> HarnessDeps {
     HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         provider: Arc::new(provider::MockProvider::default()),
         provider_slug: "mock".to_string(),

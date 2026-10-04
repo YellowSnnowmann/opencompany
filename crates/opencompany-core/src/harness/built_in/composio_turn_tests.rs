@@ -345,7 +345,7 @@ async fn harness_with_composio(
     dir: &std::path::Path,
 ) -> (HarnessPool, HarnessDeps, CompanyRecord) {
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,

@@ -151,7 +151,7 @@ pub(super) fn brain_over_mock(dir: &std::path::Path) -> HarnessBrain {
 /// (and its `[[harness]]` block) without restating the whole deps literal.
 pub(super) fn brain_over_mock_with(dir: &std::path::Path, record: CompanyRecord) -> HarnessBrain {
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -311,7 +311,7 @@ pub(super) fn brain_with_tasks_notified_logging(
 ) -> (HarnessBrain, Arc<FsOps>) {
     let tasks = Arc::new(FsOps::new(dir));
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: if notify { Some(tasks.clone()) } else { None },
         ledgers: None,
@@ -409,7 +409,7 @@ pub(super) fn brain_with_tasks_and_budget_exhausted_provider(
 ) -> (HarnessBrain, Arc<FsOps>) {
     let tasks = Arc::new(FsOps::new(dir));
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -539,7 +539,7 @@ pub(super) fn brain_with_injected_artifacts(
     with_workspace: bool,
 ) -> (HarnessBrain, Arc<FsOps>) {
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,

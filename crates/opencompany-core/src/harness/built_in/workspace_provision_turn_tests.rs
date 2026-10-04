@@ -261,7 +261,7 @@ fn build_brain(
 ) -> (HarnessBrain, Arc<FsOps>) {
     let ops = Arc::new(FsOps::new(dir));
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,

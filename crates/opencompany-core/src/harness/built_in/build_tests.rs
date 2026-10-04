@@ -149,7 +149,7 @@ fn pin_deps(root: std::path::PathBuf) -> HarnessDeps {
     let mcp_home = Some(root.join("mcp"));
     let audit_root = root;
     HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,

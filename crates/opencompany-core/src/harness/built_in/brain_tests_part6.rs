@@ -309,7 +309,7 @@ async fn mcp_failures_surface_as_error_steps_and_event() {
     let events: Arc<dyn EventLog> = Arc::new(FsEventLog::new(dir.path()));
     let failures = crate::harness::mcp_probe::McpFailureQueue::default();
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -464,7 +464,7 @@ async fn a_failed_journal_write_does_not_swallow_the_rest_of_the_drain() {
     let log = Arc::new(FailFirstLog::default());
     let failures = crate::harness::mcp_probe::McpFailureQueue::default();
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,

@@ -429,7 +429,7 @@ async fn wire_company_agent(
     use crate::store::FsCompanyStore;
 
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,

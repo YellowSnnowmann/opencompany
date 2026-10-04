@@ -249,7 +249,7 @@ async fn harness(
 ) -> (HarnessPool, HarnessDeps, CompanyRecord, Arc<RecordingMeter>) {
     let meter = Arc::new(RecordingMeter::default());
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,
