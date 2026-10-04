@@ -403,29 +403,23 @@ fn mixed_batches_over_taint_and_an_unknown_row_is_internal() {
 }
 
 /// The routing the flag drives: an externally-triggered cycle's
-/// `ContextOp::Put` lands on the inbound (taint-stamping) port, an
-/// ordinary cycle's on the plain context port — proven with two disjoint
-/// stores, so a write to the wrong one is a visible row, not a guess.
+/// `ContextOp::Put` lands in the company's memory tagged inbound, an
+/// ordinary cycle's untagged — so what the outside world said stays
+/// distinguishable from the company's own conclusions (issue #1113).
+#[cfg(feature = "openhuman")]
 #[tokio::test]
-async fn external_cycles_put_through_the_inbound_port() {
-    use crate::ports::ContextStore;
-    use crate::store::FsContextStore;
+async fn external_cycles_tag_their_puts_inbound() {
+    use crate::memory::{CONTEXT_TAG, INBOUND_TAG, MemoryQuery};
+    use crate::ports::types::ContextOpResult;
 
     let home_dir = tmp_home();
-    let home = home_dir.path().to_path_buf();
-    let plain_dir = tempfile::tempdir().unwrap();
-    let inbound_dir = tempfile::tempdir().unwrap();
-    let plain: Arc<dyn ContextStore> =
-        Arc::new(FsContextStore::new(plain_dir.path().to_path_buf()));
-    let inbound: Arc<dyn ContextStore> =
-        Arc::new(FsContextStore::new(inbound_dir.path().to_path_buf()));
-    let rt = RuntimeBuilder::new(home, manifest("full"))
-        .with_context(plain.clone())
-        .with_inbound_context(inbound.clone())
+    let rt = RuntimeBuilder::new(home_dir.path().to_path_buf(), manifest("full"))
+        .with_id(CompanyId::new(format!("inbound-{}", uuid::Uuid::new_v4().simple())))
         .build()
         .await
         .unwrap();
 
+    let mut ids = Vec::new();
     for (external, cycle) in [(false, "cyc-int"), (true, "cyc-ext")] {
         let host = CycleHostImpl::new(
             rt.id().clone(),
@@ -435,157 +429,37 @@ async fn external_cycles_put_through_the_inbound_port() {
             external,
             ApprovalConversation::default(),
         );
-        host.context_op(ContextOp::Put(crate::ports::types::ContextChunk {
-            label: format!("probe/{cycle}"),
-            body: format!("body {cycle}"),
-        }))
-        .await
-        .unwrap();
+        let put = host
+            .context_op(ContextOp::Put(crate::ports::types::ContextChunk {
+                label: format!("probe/{cycle}"),
+                body: format!("body {cycle}"),
+            }))
+            .await
+            .unwrap();
+        let ContextOpResult::Addr(addr) = put else {
+            panic!("a put answers an address");
+        };
+        ids.push(addr.as_ref().to_string());
     }
 
-    let company = rt.id().clone();
-    let plain_rows = plain.list(&company, "probe/").await.unwrap();
-    let inbound_rows = inbound.list(&company, "probe/").await.unwrap();
-    assert_eq!(
-        plain_rows
-            .iter()
-            .map(|m| m.label.as_str())
-            .collect::<Vec<_>>(),
-        ["probe/cyc-int"],
-        "the ordinary cycle writes the plain port, and only it"
-    );
-    assert_eq!(
-        inbound_rows
-            .iter()
-            .map(|m| m.label.as_str())
-            .collect::<Vec<_>>(),
-        ["probe/cyc-ext"],
-        "the external cycle writes the inbound port, and only it"
-    );
-}
-
-/// The same routing guarantee through `with_memory_overlay`: the overlay
-/// carries the inbound port, and dropping it in the builder was the break
-/// that once left the whole firewall dead (issue #1113). An external
-/// cycle on an overlay-built runtime must still write the taint-stamping
-/// store.
-#[tokio::test]
-async fn overlay_built_runtimes_route_external_puts_through_the_inbound_port() {
-    use crate::ports::ContextStore;
-    use crate::store::{FsContextStore, FsTraceStore, MemoryOverlay};
-
-    let home_dir = tmp_home();
-    let plain_dir = tempfile::tempdir().unwrap();
-    let inbound_dir = tempfile::tempdir().unwrap();
-    let plain: Arc<dyn ContextStore> =
-        Arc::new(FsContextStore::new(plain_dir.path().to_path_buf()));
-    let inbound: Arc<dyn ContextStore> =
-        Arc::new(FsContextStore::new(inbound_dir.path().to_path_buf()));
-    let memory_dir = tempfile::tempdir().unwrap();
-    let overlay = MemoryOverlay::test_with_ports(
-        Arc::new(FsTraceStore::new(memory_dir.path().to_path_buf())),
-        plain.clone(),
-        Some(inbound.clone()),
-    );
-    let rt = RuntimeBuilder::new(home_dir.path().to_path_buf(), manifest("full"))
-        .with_memory_overlay(&overlay)
-        .build()
+    let rows = rt
+        .memory()
+        .list(MemoryQuery {
+            tags_any: vec![CONTEXT_TAG.to_string()],
+            ..MemoryQuery::default()
+        })
         .await
-        .unwrap();
-
-    let host = CycleHostImpl::new(
-        rt.id().clone(),
-        "cyc-overlay-ext".into(),
-        &rt,
-        None,
-        true,
-        ApprovalConversation::default(),
-    );
-    host.context_op(ContextOp::Put(crate::ports::types::ContextChunk {
-        label: "probe/overlay".into(),
-        body: "external body".into(),
-    }))
-    .await
-    .unwrap();
-
-    let company = rt.id().clone();
-    assert_eq!(
-        inbound
-            .list(&company, "probe/")
-            .await
-            .unwrap()
-            .iter()
-            .map(|m| m.label.as_str())
-            .collect::<Vec<_>>(),
-        ["probe/overlay"],
-        "the overlay's inbound port receives the external cycle's put"
-    );
-    assert!(
-        plain.list(&company, "probe/").await.unwrap().is_empty(),
-        "the plain port must not see the external put"
-    );
-}
-
-/// And through `RuntimeHandover`: a successor runtime adopts the
-/// predecessor's inbound port, so an external cycle after a live swap
-/// still writes taint-stamped. A handover that dropped the port would
-/// silently revert every post-swap external put to internal trust.
-#[tokio::test]
-async fn handover_preserves_the_inbound_port_for_external_puts() {
-    use crate::ports::ContextStore;
-    use crate::store::FsContextStore;
-
-    let home_dir = tmp_home();
-    let home = home_dir.path().to_path_buf();
-    let plain_dir = tempfile::tempdir().unwrap();
-    let inbound_dir = tempfile::tempdir().unwrap();
-    let plain: Arc<dyn ContextStore> =
-        Arc::new(FsContextStore::new(plain_dir.path().to_path_buf()));
-    let inbound: Arc<dyn ContextStore> =
-        Arc::new(FsContextStore::new(inbound_dir.path().to_path_buf()));
-    let first = RuntimeBuilder::new(home.clone(), manifest("full"))
-        .with_context(plain.clone())
-        .with_inbound_context(inbound.clone())
-        .build()
-        .await
-        .unwrap();
-    let successor = RuntimeBuilder::new(home, manifest("full"))
-        .with_handover(first.handover())
-        .build()
-        .await
-        .unwrap();
-
-    let host = CycleHostImpl::new(
-        successor.id().clone(),
-        "cyc-swap-ext".into(),
-        &successor,
-        None,
-        true,
-        ApprovalConversation::default(),
-    );
-    host.context_op(ContextOp::Put(crate::ports::types::ContextChunk {
-        label: "probe/swap".into(),
-        body: "external body".into(),
-    }))
-    .await
-    .unwrap();
-
-    let company = successor.id().clone();
-    assert_eq!(
-        inbound
-            .list(&company, "probe/")
-            .await
-            .unwrap()
-            .iter()
-            .map(|m| m.label.as_str())
-            .collect::<Vec<_>>(),
-        ["probe/swap"],
-        "the successor's external cycle writes the inherited inbound port"
-    );
-    assert!(
-        plain.list(&company, "probe/").await.unwrap().is_empty(),
-        "the successor's plain port must not see the external put"
-    );
+        .unwrap()
+        .items;
+    let tagged = |id: &str| {
+        rows.iter()
+            .find(|row| row.id == id)
+            .expect("the put is listed")
+            .tags
+            .contains(&INBOUND_TAG.to_string())
+    };
+    assert!(!tagged(&ids[0]), "the ordinary cycle's put is not inbound");
+    assert!(tagged(&ids[1]), "the external cycle's put is tagged inbound");
 }
 
 #[tokio::test]
