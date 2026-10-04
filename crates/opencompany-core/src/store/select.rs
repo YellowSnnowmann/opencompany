@@ -315,23 +315,13 @@ pub async fn open_storage(
 /// owner rows). Under the fs+store default every check passes and `--home`
 /// means exactly what it always has.
 pub fn refuse_bundle_env(settings: &StorageSettings, home_was_flagged: bool) -> crate::Result<()> {
-    let live = settings.kind != StorageKind::Fs || settings.memory_backend != MemoryBackend::Store;
-    if settings.memory_backend == MemoryBackend::Null {
-        return Err(crate::error::OpenCompanyError::Config(
-            "OPENCOMPANY_MEMORY=null retains nothing: an export would capture no memory and an \
-             import would discard every record while reporting success. Unset OPENCOMPANY_MEMORY \
-             for bundle operations."
-                .into(),
-        ));
-    }
+    let live = settings.kind != StorageKind::Fs;
     if live && home_was_flagged {
         return Err(crate::error::OpenCompanyError::Config(format!(
-            "--home names an fs data set, but this environment selects storage `{}` and memory \
-             `{}` — the bundle would mix two deployments. Unset OPENCOMPANY_STORAGE and \
-             OPENCOMPANY_MEMORY* to operate on the fs home, or drop --home to operate on the \
-             live deployment.",
+            "--home names an fs data set, but this environment selects storage `{}` — the \
+             bundle would mix two deployments. Unset OPENCOMPANY_STORAGE to operate on the fs \
+             home, or drop --home to operate on the live deployment.",
             settings.kind.as_str(),
-            settings.memory_backend.as_str()
         )));
     }
     if live
