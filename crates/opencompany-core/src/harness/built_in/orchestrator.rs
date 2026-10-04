@@ -1540,7 +1540,7 @@ impl Tool for QueryCompanyTool {
     }
 
     fn description(&self) -> &str {
-        "Read the company's durable facts, recent activity, saved workflows, team roster, desks, and a board summary to ground an answer in whole-company context — use this to answer \"what workflows do we have?\", \"who is on the team?\", \"which desks can take work?\", or \"what's in flight?\" instead of guessing, and to get the exact desk id `delegate_to_desk` needs. For a specific card's full attempt history and output, use `list_tasks` / `read_task` instead. Optionally pass a `query` to filter facts by a case-insensitive substring."
+        "Read the company's durable facts, recent activity, saved workflows, team roster, desks, and a board summary to ground an answer in whole-company context — use this to answer \"what workflows do we have?\", \"who is on the team?\", \"which desks can take work?\", or \"what's in flight?\" instead of guessing, and to get the exact desk id `delegate_to_desk` needs. For a specific card's full attempt history and output, use `list_tasks` / `read_task` instead. Optionally pass a `query` to search the facts for what is relevant to it."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -1549,7 +1549,7 @@ impl Tool for QueryCompanyTool {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Optional case-insensitive substring to filter facts by."
+                    "description": "Optional search over the facts; the most relevant come first."
                 }
             },
             "additionalProperties": false
@@ -1687,7 +1687,7 @@ impl Tool for QueryCompanyTool {
             if shown < facts.len() {
                 md.push_str(&format!(
                     "\n[TRUNCATED — {} more fact(s) not shown. This is NOT the whole record. \
-                     Narrow it with `{QUERY_COMPANY_TOOL}({{\"query\": \"<substring>\"}})` before \
+                     Narrow it with `{QUERY_COMPANY_TOOL}({{\"query\": \"<topic>\"}})` before \
                      concluding a fact is absent.]\n",
                     facts.len() - shown
                 ));
