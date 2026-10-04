@@ -61,7 +61,7 @@ use crate::ports::types::{
 };
 use crate::ports::users::{InviteRecord, UserRecord};
 
-fn mongo_err(e: impl std::fmt::Display) -> OpenCompanyError {
+pub(super) fn mongo_err(e: impl std::fmt::Display) -> OpenCompanyError {
     OpenCompanyError::Store(format!("mongodb error: {e}"))
 }
 
@@ -122,13 +122,13 @@ fn clamp_max_bytes(max_bytes: u64) -> i64 {
     max_bytes.min(i64::MAX as u64) as i64
 }
 
-fn get_str(doc: &Document, key: &str) -> Result<String> {
+pub(super) fn get_str(doc: &Document, key: &str) -> Result<String> {
     doc.get_str(key)
         .map(str::to_owned)
         .map_err(|e| mongo_err(format!("missing field {key}: {e}")))
 }
 
-fn get_i64(doc: &Document, key: &str) -> Result<i64> {
+pub(super) fn get_i64(doc: &Document, key: &str) -> Result<i64> {
     doc.get_i64(key)
         .map_err(|e| mongo_err(format!("missing field {key}: {e}")))
 }
@@ -551,7 +551,7 @@ impl MongoStore {
         /// observed.
         const INDEX_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_millis(100);
 
-        let extra: [(&str, IndexModel); 11] = [
+        let extra: [(&str, IndexModel); 12] = [
             ("owners", unique(doc! {"company_id": 1})),
             // Issue #241: the cross-replica arbiter. This unique compound index
             // is what turns two replicas racing one schedule minute into one
@@ -605,6 +605,14 @@ impl MongoStore {
             (
                 "notification_reads",
                 unique(doc! {"company_id": 1, "user_id": 1, "notification_id": 1}),
+            ),
+            // The hive message log's range read. Uniqueness is already the
+            // `_id = {c, s}` key's, which no failed index build can remove;
+            // this index makes the `(company_id, sequence < n)` scan cheap.
+            // The state document needs none: it is keyed `_id = company_id`.
+            (
+                crate::store::hive::HIVE_MESSAGES,
+                unique(doc! {"company_id": 1, "sequence": 1}),
             ),
         ];
 
@@ -700,7 +708,7 @@ impl MongoStore {
         Ok(())
     }
 
-    fn collection(&self, name: &str) -> Collection<Document> {
+    pub(super) fn collection(&self, name: &str) -> Collection<Document> {
         self.db.collection::<Document>(name)
     }
 
@@ -1626,7 +1634,7 @@ impl crate::ports::ledgers::LedgerStore for MongoStore {
 /// The unique email/token indexes are the real enforcement; this maps the
 /// driver's error onto the crate's `409 Conflict` so every backend reports a
 /// clash identically.
-fn is_duplicate_key(e: &mongodb::error::Error) -> bool {
+pub(super) fn is_duplicate_key(e: &mongodb::error::Error) -> bool {
     matches!(
         *e.kind,
         mongodb::error::ErrorKind::Write(mongodb::error::WriteFailure::WriteError(ref we))
@@ -4362,3 +4370,6 @@ mod tests_blob_sweep;
 #[cfg(test)]
 #[path = "mongodb_conformance_tests.rs"]
 mod tests_conformance;
+#[cfg(test)]
+#[path = "mongodb_hive_tests.rs"]
+mod tests_hive;
