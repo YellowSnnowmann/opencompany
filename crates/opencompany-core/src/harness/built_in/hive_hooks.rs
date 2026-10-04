@@ -248,32 +248,19 @@ impl HiveHooks {
         let Some((seat, chat, pump)) = taken else {
             return turn.await;
         };
-        let turn = settle::SettleTurn {
+        let settle = settle::SettleTurn {
             hooks: self,
             scope,
             seat: &seat,
             chat: &chat,
             operator: Self::answers_operator(scope),
         };
-        let (result, disposition) = turn.run(turn_future(turn_hosted(turn), pump)).await;
+        let (result, disposition) = settle.run(turn, pump).await;
         if let Some(slot) = self.slots().get_mut(&scope.agent_id) {
             slot.disposition = Some(disposition);
         }
         result
     }
-}
-
-/// Identity helpers that keep the borrow of the hosted turn explicit at the
-/// call site above.
-fn turn_hosted(turn: settle::SettleTurn<'_>) -> settle::SettleTurn<'_> {
-    turn
-}
-
-fn turn_future(
-    turn: settle::SettleTurn<'_>,
-    pump: Option<ProgressPump>,
-) -> (settle::SettleTurn<'_>, Option<ProgressPump>) {
-    (turn, pump)
 }
 
 #[cfg(test)]
