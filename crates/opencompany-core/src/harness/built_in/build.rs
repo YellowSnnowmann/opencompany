@@ -1744,26 +1744,22 @@ pub fn agent_spec_for(
                 crate::harness::built_in::tool_posture::RETIRED_COMPOSIO_TOOL_NAMES
                     .contains(&name)
             };
-            {
-                let visible: std::collections::HashSet<String> = tools
-                    .iter()
-                    .map(|tool| tool.name().to_owned())
-                    .filter(|name| !unadvertised.contains(name) && !is_legacy_composio(name))
-                    .collect();
-                let belt = openhuman_embed::HostTurnTools {
-                    tools,
-                    permanent: std::collections::HashSet::new(),
-                    visible,
-                    withheld: std::collections::HashSet::new(),
-                    policy: None,
-                };
-                return match &gate {
-                    Some(gate) => belt.with_policy(
-                        Arc::clone(gate) as Arc<dyn oh::agent::tool_policy::ToolPolicy>
-                    ),
-                    None => belt,
-                };
+            let visible: std::collections::HashSet<String> = tools
+                .iter()
+                .map(|tool| tool.name().to_owned())
+                .filter(|name| !unadvertised.contains(name) && !is_legacy_composio(name))
+                .collect();
+            let belt = openhuman_embed::HostTurnTools {
+                tools,
+                permanent: std::collections::HashSet::new(),
+                visible,
+                withheld: std::collections::HashSet::new(),
+                policy: None,
             };
+            match &gate {
+                Some(gate) => belt
+                    .with_policy(Arc::clone(gate) as Arc<dyn oh::agent::tool_policy::ToolPolicy>),
+                None => belt,
             }
         });
     }
