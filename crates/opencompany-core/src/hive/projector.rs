@@ -236,7 +236,7 @@ impl Projector {
                 break;
             };
             for row in &page {
-                fold(&mut cursor, row.seq, &row.event, &self.roster, &self.company);
+                fold(&mut cursor, row.seq, &row.event, &self.roster);
             }
             if page.len() < RECONCILE_PAGE {
                 break;
@@ -440,7 +440,7 @@ impl Projector {
 }
 
 /// Folds one journal row into the cursor at reconcile.
-fn fold(cursor: &mut Cursor, seq: EventSeq, event: &CompanyEvent, roster: &HiveRoster, company: &CompanyId) {
+fn fold(cursor: &mut Cursor, seq: EventSeq, event: &CompanyEvent, roster: &HiveRoster) {
     match event {
         CompanyEvent::HiveAccepted {
             sequence,
@@ -487,7 +487,6 @@ fn fold(cursor: &mut Cursor, seq: EventSeq, event: &CompanyEvent, roster: &HiveR
         CompanyEvent::HiveTurnInterrupted { .. } => cursor.interruptions += 1,
         _ => {}
     }
-    let _ = company;
 }
 
 fn hive_error(error: tinyhivemind_hives::Error) -> crate::OpenCompanyError {
