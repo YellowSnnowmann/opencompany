@@ -1619,251 +1619,92 @@ pub enum CompanyEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         by: Option<Actor>,
     },
-    /// A desk opened an episode: a message on a desk of two or more was
-    /// routed to seats, and those seats will now run in rounds until every
-    /// assigned one calls `complete_episode` (plan hive-desks, Phase 4).
+    /// The company hive accepted a host message (OC-2): an operator line on
+    /// a desk or in a direct message, or a card brief, sent through the
+    /// Coordinator's `send_as_host`. Journaled once the Coordinator committed
+    /// it, so the projector can thread later replies under the line they
+    /// answer and a reader can see which members were asked to start.
     ///
-    /// Every episode frame below carries `chat_id` — the desk — and
-    /// `episode_id`, so a console keys its round band on the same id its
-    /// transcript is keyed on. All are permanent: together with the
-    /// `AgentReply` rows they bracket they **are** the record of what the
-    /// room did, and `GET {scope}/episodes` is folded from them.
-    EpisodeOpened {
-        /// The desk.
+    /// Structural only, like [`TurnStarted`](Self::TurnStarted): the text is
+    /// already on the [`OperatorMessage`](Self::OperatorMessage) (or the
+    /// card) it carries.
+    HiveAccepted {
+        /// The Coordinator message id — `op:{seq}` for an operator line, so a
+        /// redelivered cycle resends idempotently.
+        message_id: String,
+        /// The hive transcript sequence it was accepted at.
+        sequence: u64,
+        /// The console chat it was said in: a desk id, or a direct-message
+        /// chat id.
         chat_id: String,
-        /// The episode's id.
-        episode_id: String,
-        /// The journal sequence of the message that opened it.
-        opened_by_seq: u64,
-        /// The thread root inside the desk, when the message was in one.
+        /// The journal line it was said as, for an operator message.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parent: Option<EventSeq>,
-        /// The seats assigned at opening, primary first.
-        participants: Vec<String>,
-        /// How the opening message was routed.
-        plan: crate::hive::routing::RoutingPlanDto,
-        /// The referral hop this episode runs at; zero for one an operator
-        /// opened. See [`ReferralEnqueued`](Self::ReferralEnqueued).
-        #[serde(default, skip_serializing_if = "is_zero_u32")]
-        hop: u32,
-    },
-    /// One round of an episode was proposed: these seats run now, at once.
-    RoundStarted {
-        /// The desk.
-        chat_id: String,
-        /// The episode.
-        episode_id: String,
-        /// The driver revision the round was proposed from (raw, 0-based).
-        revision: u64,
-        /// The seats running this round.
-        agent_ids: Vec<String>,
-    },
-    /// Every seat of a round has its one utterance on the desk and the driver
-    /// has folded them.
-    RoundCommitted {
-        /// The desk.
-        chat_id: String,
-        /// The episode.
-        episode_id: String,
-        /// The revision the round was proposed from; the driver's revision
-        /// afterwards is this plus the number of utterances.
-        revision: u64,
-        /// One entry per seat, in commit order.
-        utterances: Vec<RoundUtteranceRecord>,
-        /// The host actions the fold proposed (`run_agents`, `deliver_dm`),
-        /// kept loosely: the typed frames that follow them are what a console
-        /// renders.
+        source: Option<EventSeq>,
+        /// The hive members asked to start, in order. Empty for a direct
+        /// message.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        actions: Vec<serde_json::Value>,
-    },
-    /// A seat's `broadcast` was routed to the teammates best placed to take
-    /// it, reopening them in the episode.
-    BroadcastRouted {
-        /// The desk.
-        chat_id: String,
-        /// The episode.
-        episode_id: String,
-        /// The round the broadcast was committed in.
-        revision: u64,
-        /// The seat that broadcast.
-        agent_id: String,
-        /// The `AgentReply` row carrying the broadcast text.
-        message_seq: u64,
-        /// The accepted plan.
-        plan: crate::hive::routing::RoutingPlanDto,
-        /// Per-candidate Choice probabilities, when the System One router
-        /// answered.
+        starters: Vec<String>,
+        /// How the starters were chosen: `mention`, `jev` or `default`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        probabilities: Option<std::collections::BTreeMap<String, f64>>,
-        /// Which router chose.
-        router: crate::hive::routing::Router,
+        route: Option<String>,
     },
-    /// A seat's `dm` reached its named peers: the row is on the desk with its
-    /// audience narrowed, and the peers see it on their next turn.
-    DmDelivered {
-        /// The desk.
-        chat_id: String,
-        /// The episode.
-        episode_id: String,
-        /// The seat that wrote it.
-        from: String,
-        /// The peers it named.
-        to: Vec<String>,
-        /// The `AgentReply` row carrying the text.
-        message_seq: u64,
-    },
-    /// An episode closed — because every assigned seat called
-    /// `complete_episode`, or because the host stopped it.
-    EpisodeCompleted {
-        /// The desk.
-        chat_id: String,
-        /// The episode.
-        episode_id: String,
-        /// The driver's final revision.
-        revision: u64,
-        /// The seat whose `complete_episode` closed it, when one did.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        completed_by: Option<String>,
-        /// Rounds run.
-        rounds: u32,
-        /// Why it closed.
-        reason: EpisodeReason,
-        /// The reply that closed it, when `complete_episode` carried one.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        summary_seq: Option<u64>,
-    },
-    /// One seat opened a private conversation with another (`ask`).
-    ///
-    /// The **reference** row: it sits on the desk, names both seats, and
-    /// points at the exchange, which lives in the pair's own channel. An
-    /// operator reading the desk sees that two teammates are talking without
-    /// their conversation threaded through the room's own timeline, and the
-    /// console has a desk-channel frame to raise the live indicator from —
-    /// it is already subscribed to that stream, and would otherwise have to
-    /// watch every pair channel to notice one had started.
-    ConversationOpened {
-        /// The desk it was opened from.
-        chat_id: String,
-        /// The episode it belongs to.
-        episode_id: String,
-        /// The channel the exchange itself is written to.
-        conversation_id: String,
-        /// The `ask` row it is rooted at — the exchange is this row and
-        /// everything rooted at it.
-        root: u64,
-        /// The seat that asked.
-        asker: String,
-        /// The seat asked.
-        askee: String,
-    },
-    /// A committed row the driver then refused.
-    ///
-    /// `hive::host::commit` stamps a row's `episode.kind` from the utterance
-    /// it is given, and the driver folds that row *after* it is appended: a
-    /// seat still owed an answer has its `complete_episode` refused
-    /// (`AwaitingReply`) with the row already journaled, saying the seat
-    /// finished when it did not. The log is append-only, so the row cannot be
-    /// taken back -- this is the correction written beside it.
-    ///
-    /// Observed live (episode `277a4988`): a seat asked two teammates, called
-    /// `complete_episode` while both conversations were open, and was refused.
-    /// Its row carried `kind: "complete_episode"` at revision 3; the real
-    /// completion landed 32 seconds later at revision 9. A reader with only
-    /// the rows cannot tell them apart, and the console's history fallback
-    /// read the first as the end of the episode.
-    ///
-    /// The row keeps the seat's words -- it did say them, and an operator
-    /// should read them. What it loses is the claim that it finished.
-    UtteranceRefused {
-        /// The desk the row is on.
-        chat_id: String,
-        /// The episode it belongs to.
-        episode_id: String,
-        /// The seat whose call was refused.
-        seat: String,
-        /// The refused row's sequence.
-        at: u64,
-        /// Why, in the sentence the seat was given.
-        reason: String,
-    },
-    /// A private conversation ended, answered or not.
-    ///
-    /// The other half of the reference: what turns the indicator off. A
-    /// conversation that runs out of turns concludes `forced`, without an
-    /// answer, and an indicator that only watched for an answer would hang
-    /// on exactly that case.
-    ConversationConcluded {
-        /// The desk it was opened from.
-        chat_id: String,
-        /// The episode it belongs to.
-        episode_id: String,
-        /// The channel the exchange was written to.
-        conversation_id: String,
-        /// The `ask` row it was rooted at.
-        root: u64,
-        /// The seat that asked.
-        asker: String,
-        /// The seat asked.
-        askee: String,
-        /// Concluded without an answer: nothing was due, or it ran out of
-        /// turns.
-        forced: bool,
-    },
-    /// An episode seat's turn parked on the operator: the episode holds the
-    /// seat until every approval it raised is decided.
-    EpisodeSeatParked {
-        /// The desk.
-        chat_id: String,
-        /// The episode.
-        episode_id: String,
-        /// The seat that is waiting.
-        seat: String,
-        /// The conversation root the seat parked in, or `None` on the desk.
+    /// A hive row no operator chat shows as a reply (OC-2): a private
+    /// (`only_for`) line on a desk, or a direct message between two agents
+    /// (`hivemind_send_agent`, an `ask` conversation's rows). The console's
+    /// comms view folds who talked to whom from these.
+    HiveMessage {
+        /// The hive transcript sequence.
+        sequence: u64,
+        /// The manifest agent id that said it.
+        sender: String,
+        /// Where it was said.
+        destination: HiveDestination,
+        /// What was said.
+        text: String,
+        /// The hive conversation root, by hive sequence.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         thread: Option<u64>,
-        /// The approvals it waits on.
-        approval_ids: Vec<ApprovalId>,
-    },
-    /// A parked episode seat was released by the operator's decisions and
-    /// takes its turn again.
-    EpisodeSeatResumed {
-        /// The desk.
-        chat_id: String,
-        /// The episode.
-        episode_id: String,
-        /// The seat that resumed.
-        seat: String,
-    },
-    /// The driver's resumable state after a committed round (plan hive-desks,
-    /// Phase 4): what `hive::episode_store` reads back to resume an episode
-    /// the host died under.
-    ///
-    /// Not projected anywhere — it is the runtime's own checkpoint, not a
-    /// conversational line — and permanent, because an episode that cannot be
-    /// resumed is an operator question answered by silence.
-    EpisodeStateSaved {
-        /// The episode.
-        episode_id: String,
-        /// The desk.
-        desk: String,
-        /// The thread root the episode runs in.
+        /// The episode it belongs to.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        thread_root: Option<EventSeq>,
-        /// The driver revision the state is at.
-        revision: u64,
-        /// `tinyhivemind_driver::DriverState`, as serde wrote it.
-        state: serde_json::Value,
-        /// Per-agent `tinyhivemind::SharingState` — where each seat's
-        /// transcript delivery had reached.
-        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-        sharing: std::collections::BTreeMap<String, serde_json::Value>,
-        /// The referral hop the episode runs at.
-        #[serde(default, skip_serializing_if = "is_zero_u32")]
-        hop: u32,
-        /// The origin an answering episode returns its answer to, as serde
-        /// wrote `hive::referral::ReturnAddress`.
+        episode_id: Option<String>,
+        /// Its private readers, by manifest agent id; empty for a direct
+        /// message, whose reader is its destination.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        only_for: Vec<String>,
+    },
+    /// A conducted hive episode finished (OC-2): every started member
+    /// completed it, or it stopped on a wall, a conductor error or an
+    /// interrupted turn (`failure`). Projected once per episode from the
+    /// Coordinator's `episodes()`; a card room awaits it.
+    HiveEpisodeSettled {
+        /// The Coordinator's episode id.
+        episode_id: String,
+        /// The hive (desk) it ran in.
+        hive_id: String,
+        /// The hive sequence of the message that opened it.
+        opened_at: u64,
+        /// The hive conversation root it ran in.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        origin: Option<serde_json::Value>,
+        thread: Option<u64>,
+        /// Why it stopped, when it did not finish normally.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failure: Option<String>,
+    },
+    /// A coordinator turn was interrupted and will not be replayed (OC-2):
+    /// the process restarted under it, or its host finalization failed. The
+    /// messages it was delivering may have had effects already, so nothing
+    /// re-runs them; this row is the record that the question went unanswered.
+    HiveTurnInterrupted {
+        /// The manifest agent id whose turn it was.
+        agent_id: String,
+        /// The episode it ran for, when it ran in one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        episode_id: Option<String>,
+        /// The Coordinator message ids it was delivering.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        message_ids: Vec<String>,
+        /// Why, as the Coordinator recorded it.
+        reason: String,
     },
     /// A workflow was switched on or off (issue #276) — from the console's
     /// `PUT …/workflows/{wid}/enabled` route, or from the disarm rule that
@@ -2640,7 +2481,6 @@ impl CompanyEvent {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::OperatorMessage { .. } => "OperatorMessage",
-            Self::ReferralEnqueued { .. } => "ReferralEnqueued",
             Self::TurnStarted { .. } => "TurnStarted",
             Self::TurnFailed { .. } => "TurnFailed",
             Self::TurnSettled { .. } => "TurnSettled",
@@ -2668,18 +2508,10 @@ impl CompanyEvent {
             Self::DeskMembersChanged { .. } => "DeskMembersChanged",
             Self::DeskRoutingConfigured { .. } => "DeskRoutingConfigured",
             Self::SkillChanged { .. } => "SkillChanged",
-            Self::EpisodeOpened { .. } => "EpisodeOpened",
-            Self::RoundStarted { .. } => "RoundStarted",
-            Self::RoundCommitted { .. } => "RoundCommitted",
-            Self::BroadcastRouted { .. } => "BroadcastRouted",
-            Self::DmDelivered { .. } => "DmDelivered",
-            Self::EpisodeCompleted { .. } => "EpisodeCompleted",
-            Self::UtteranceRefused { .. } => "UtteranceRefused",
-            Self::ConversationOpened { .. } => "ConversationOpened",
-            Self::ConversationConcluded { .. } => "ConversationConcluded",
-            Self::EpisodeSeatParked { .. } => "EpisodeSeatParked",
-            Self::EpisodeSeatResumed { .. } => "EpisodeSeatResumed",
-            Self::EpisodeStateSaved { .. } => "EpisodeStateSaved",
+            Self::HiveAccepted { .. } => "HiveAccepted",
+            Self::HiveMessage { .. } => "HiveMessage",
+            Self::HiveEpisodeSettled { .. } => "HiveEpisodeSettled",
+            Self::HiveTurnInterrupted { .. } => "HiveTurnInterrupted",
             Self::TaskSteered { .. } => "TaskSteered",
             Self::TaskCardChanged { .. } => "TaskCardChanged",
             Self::WorkspaceChanged { .. } => "WorkspaceChanged",
@@ -2735,16 +2567,6 @@ impl CompanyEvent {
     pub fn retention_class(&self) -> crate::ports::events::RetentionClass {
         use crate::ports::events::RetentionClass::{Permanent, Prunable};
         match self {
-            // **Permanent, and this one is load-bearing** (tinyhivemind P15).
-            //
-            // It is the idempotency marker for a crossing referral: the queue
-            // refuses a second enqueue that finds it. Prune it and a replayed
-            // trigger stops finding it, so the target desk is asked twice —
-            // silently, and only for triggers old enough to have been swept.
-            // It passes the doc's three questions the other way round from its
-            // neighbours: nothing points at it, but something very much reads
-            // it back, and that read is the whole reason it exists.
-            Self::ReferralEnqueued { .. } => Permanent,
             Self::WorkflowRunStarted { .. }
             | Self::WorkflowRunFinished { .. }
             | Self::WorkflowNodeStarted { .. }
@@ -2841,29 +2663,15 @@ impl CompanyEvent {
             | Self::DeskMembersChanged { .. }
             | Self::DeskRoutingConfigured { .. }
             | Self::SkillChanged { .. }
-            // Plan hive-desks, Phase 4: the episode record. Together with the
-            // `AgentReply` rows they bracket these ARE what a room did, and
-            // `EpisodeStateSaved` is the checkpoint a resume reads.
-            | Self::EpisodeOpened { .. }
-            | Self::RoundStarted { .. }
-            | Self::RoundCommitted { .. }
-            | Self::BroadcastRouted { .. }
-            | Self::DmDelivered { .. }
-            | Self::EpisodeCompleted { .. }
-            // The desk's record that two seats talked, and where the
-            // exchange itself is. Without it the desk cannot say a private
-            // conversation happened at all.
-            | Self::ConversationOpened { .. }
-            | Self::ConversationConcluded { .. }
-            // The correction beside a row the driver refused. Prune it and the
-            // row it corrects outlives it, saying the seat finished when it
-            // did not -- so it keeps the retention its row has.
-            | Self::UtteranceRefused { .. }
-            // What a seat waited on and when it came back: the only record
-            // that an episode stood still on the operator.
-            | Self::EpisodeSeatParked { .. }
-            | Self::EpisodeSeatResumed { .. }
-            | Self::EpisodeStateSaved { .. }
+            // OC-2: the company hive's record. `HiveAccepted` threads replies
+            // under the line they answer and `HiveEpisodeSettled` is what a
+            // card room awaits; the private rows and the interruption record
+            // are the only account that two agents talked, or that a question
+            // went unanswered.
+            | Self::HiveAccepted { .. }
+            | Self::HiveMessage { .. }
+            | Self::HiveEpisodeSettled { .. }
+            | Self::HiveTurnInterrupted { .. }
             | Self::TaskSteered { .. }
             | Self::TaskCardChanged { .. }
             | Self::DeskTaskCompleted { .. }
