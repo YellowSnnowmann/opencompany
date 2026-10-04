@@ -1,7 +1,7 @@
 //! A shared tool handed out as an owned belt entry.
 //!
 //! This crate builds a teammate's belt **once**, when the roster is built, and
-//! shares it as `Arc<dyn Tool>` ([`share_belt`](super::tools::share_belt)).
+//! shares it as `Arc<dyn Tool>` ([`share_belt`](crate::hive::tools::share_belt)).
 //! `AgentSpec::tools` asks for an owned `Vec<Box<dyn Tool>>` and asks for it
 //! **once per turn**, because the session behind a spec is rebuilt from config
 //! every turn and a `Box<dyn Tool>` cannot survive in between.
