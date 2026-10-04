@@ -8,8 +8,7 @@
 //!   meta.json         # lifecycle state and other bundle metadata
 //!   events.jsonl      # append-only event log
 //!   ledger.jsonl      # append-only ledger
-//!   memory/           # compressed traces + task results
-//!   context/          # content-addressed context blobs + index
+//!   memory/           # compressed cycle traces + task results
 //!   secrets/          # per-company secret files (0700 on unix)
 //!   keys/             # Ed25519 identity seed (0700 dir, 0600 files)
 //! ```
@@ -601,7 +600,6 @@ impl Bundle {
         for dir in [
             self.dir.clone(),
             self.memory_dir(),
-            self.context_blobs_dir(),
             self.secrets_dir(),
             self.keys_dir(),
         ] {
