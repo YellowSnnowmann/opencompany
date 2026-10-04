@@ -115,13 +115,23 @@ fn rows_that_do_not_ascend_strictly_are_refused() {
 
 #[test]
 fn a_next_sequence_that_goes_backwards_is_refused() {
-    let message = refused(check_commit(Some(("r1", 5)), Some("r1"), &doc("r2", 4), &[]));
+    let message = refused(check_commit(
+        Some(("r1", 5)),
+        Some("r1"),
+        &doc("r2", 4),
+        &[],
+    ));
     assert!(message.contains("next_sequence"), "{message}");
 }
 
 #[test]
 fn a_commit_that_keeps_the_revision_is_refused() {
-    let message = refused(check_commit(Some(("r1", 2)), Some("r1"), &doc("r1", 2), &[]));
+    let message = refused(check_commit(
+        Some(("r1", 2)),
+        Some("r1"),
+        &doc("r1", 2),
+        &[],
+    ));
     assert!(message.contains("revision"), "{message}");
 }
 

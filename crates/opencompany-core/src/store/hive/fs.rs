@@ -102,7 +102,9 @@ impl HiveStore for FsHiveStore {
         let current_key = current
             .as_ref()
             .map(|on_disk| (on_disk.state.revision.as_str(), on_disk.state.next_sequence));
-        if let CommitCheck::Conflict(current) = check_commit(current_key, expected, &next, &appended)? {
+        if let CommitCheck::Conflict(current) =
+            check_commit(current_key, expected, &next, &appended)?
+        {
             return Ok(HiveCommit::Conflict { current });
         }
         let committed_len = current.as_ref().map_or(0, |on_disk| on_disk.messages_len);

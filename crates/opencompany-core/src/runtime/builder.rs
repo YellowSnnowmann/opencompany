@@ -48,9 +48,9 @@ use crate::ports::types::{
     SecretValue, TemplateProvenance, ToolGrantsOverride, effective_policy, effective_tool_allow,
 };
 use crate::ports::{
-    ArtifactStore, Brain, ChannelAdapter, CompanyStore, EventLog,
-    InboxStore, LoginCodeStore, TraceStore, RunStore, SecretStore, SessionStore, SkillStateStore,
-    TaskStore, ToolProvider, UsageMeter, UserStore, WorkflowRevisionStore, WorkspaceStore,
+    ArtifactStore, Brain, ChannelAdapter, CompanyStore, EventLog, InboxStore, LoginCodeStore,
+    RunStore, SecretStore, SessionStore, SkillStateStore, TaskStore, ToolProvider, TraceStore,
+    UsageMeter, UserStore, WorkflowRevisionStore, WorkspaceStore,
 };
 #[cfg(feature = "openhuman")]
 use crate::runtime::delegation::RunTurn;
@@ -66,9 +66,7 @@ use crate::runtime::journal::RuntimeJournal;
 use crate::runtime::tools::{StubToolProvider, grant_matches};
 use crate::runtime::workspace_events::WorkspaceAnnouncer;
 use crate::store::paths::Bundle;
-use crate::store::{
-    FsCompanyStore, FsEventLog, FsInboxStore, FsTraceStore, FsOps, FsSecretStore,
-};
+use crate::store::{FsCompanyStore, FsEventLog, FsInboxStore, FsOps, FsSecretStore, FsTraceStore};
 #[cfg(feature = "openhuman")]
 use crate::workflows::HarnessWorkflowRunner;
 
@@ -1721,9 +1719,10 @@ impl RuntimeBuilder {
                 users: self.users.unwrap_or_else(|| fs_ops.clone()),
                 sessions: self.sessions.unwrap_or_else(|| fs_ops.clone()),
                 login_codes: self.login_codes.unwrap_or_else(|| fs_ops.clone()),
-                hive: self.hive_store.clone().unwrap_or_else(|| {
-                    Arc::new(crate::store::FsHiveStore::new(home.clone()))
-                }),
+                hive: self
+                    .hive_store
+                    .clone()
+                    .unwrap_or_else(|| Arc::new(crate::store::FsHiveStore::new(home.clone()))),
             },
         };
 
@@ -4396,6 +4395,9 @@ mod tests_desk_tool_carry;
 #[path = "builder_tests_general_channel.rs"]
 mod tests_general_channel;
 #[cfg(test)]
+#[path = "builder_tests_hive_store.rs"]
+mod tests_hive_store;
+#[cfg(test)]
 #[path = "builder_tests_part1.rs"]
 mod tests_part1;
 #[cfg(test)]
@@ -4425,6 +4427,3 @@ mod tests_seed_cards;
 #[cfg(test)]
 #[path = "builder_tests_skill_scope.rs"]
 mod tests_skill_scope;
-#[cfg(test)]
-#[path = "builder_tests_hive_store.rs"]
-mod tests_hive_store;

@@ -109,7 +109,9 @@ impl HiveStore for MongoStore {
         let current_key = current
             .as_ref()
             .map(|stored| (stored.state.revision.as_str(), stored.state.next_sequence));
-        if let CommitCheck::Conflict(current) = check_commit(current_key, expected, &next, &appended)? {
+        if let CommitCheck::Conflict(current) =
+            check_commit(current_key, expected, &next, &appended)?
+        {
             return Ok(HiveCommit::Conflict { current });
         }
         // Step 2: the previous commit's rows must be in the collection before
@@ -203,7 +205,9 @@ async fn read_state(store: &MongoStore, company: &CompanyId) -> Result<Option<St
             .iter()
             .map(|item| match item {
                 Bson::Document(row) => decode_row(row),
-                other => Err(mongo_err(format!("hive pending row is not a document: {other}"))),
+                other => Err(mongo_err(format!(
+                    "hive pending row is not a document: {other}"
+                ))),
             })
             .collect::<Result<Vec<_>>>()?,
         Err(_) => Vec::new(),
@@ -220,7 +224,11 @@ async fn read_state(store: &MongoStore, company: &CompanyId) -> Result<Option<St
 
 /// Upserts `rows` into `hive_messages`, replacing whatever holds each key —
 /// which is how an orphan above the old `next_sequence` is overwritten.
-async fn materialize(store: &MongoStore, company: &CompanyId, rows: &[HiveMessageRow]) -> Result<()> {
+async fn materialize(
+    store: &MongoStore,
+    company: &CompanyId,
+    rows: &[HiveMessageRow],
+) -> Result<()> {
     let messages = store.collection(HIVE_MESSAGES);
     for row in rows {
         let sequence = to_i64(row.sequence)?;
@@ -257,8 +265,9 @@ fn decode_row(document: &Document) -> Result<HiveMessageRow> {
 /// BSON integers are signed; a sequence past `i64::MAX` is refused rather
 /// than wrapped into a negative that would sort first.
 fn to_i64(value: u64) -> Result<i64> {
-    i64::try_from(value)
-        .map_err(|_| OpenCompanyError::InvalidRequest(format!("hive sequence {value} is too large")))
+    i64::try_from(value).map_err(|_| {
+        OpenCompanyError::InvalidRequest(format!("hive sequence {value} is too large"))
+    })
 }
 
 fn from_i64(value: i64) -> Result<u64> {

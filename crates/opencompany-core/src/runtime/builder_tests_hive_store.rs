@@ -86,7 +86,13 @@ async fn a_swapped_hive_store_is_the_one_the_company_reaches() {
         .unwrap();
     commit_through(&runtime).await;
 
-    assert!(memory.load_hive(runtime.id(), None).await.unwrap().is_some());
+    assert!(
+        memory
+            .load_hive(runtime.id(), None)
+            .await
+            .unwrap()
+            .is_some()
+    );
     assert!(
         FsHiveStore::new(dir.path())
             .load_hive(runtime.id(), None)
@@ -112,7 +118,11 @@ async fn with_stores_hands_over_the_backends_hive_store() {
     commit_through(&runtime).await;
 
     assert!(
-        memory.load_hive(runtime.id(), None).await.unwrap().is_some(),
+        memory
+            .load_hive(runtime.id(), None)
+            .await
+            .unwrap()
+            .is_some(),
         "with_stores did not hand over the backend's hive store"
     );
 }

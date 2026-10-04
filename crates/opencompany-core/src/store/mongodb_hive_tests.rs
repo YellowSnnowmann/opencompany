@@ -82,7 +82,10 @@ async fn rows_only_in_pending_load_and_are_materialized_by_the_next_commit() {
         .count_documents(doc! {"company_id": company.as_ref()})
         .await
         .unwrap();
-    assert_eq!(materialized, 3, "the previous commit's rows were not written out");
+    assert_eq!(
+        materialized, 3,
+        "the previous commit's rows were not written out"
+    );
     let reloaded = hive.load_hive(&company, None).await.unwrap().unwrap();
     assert_eq!(reloaded.messages, loaded.messages);
     drop_db(&s).await;

@@ -110,7 +110,14 @@ pub async fn assert_hive_store(hive: Arc<dyn HiveStore>) {
 
     // A gap in the sequence is the caller's business, not a refusal.
     assert_eq!(
-        commit(&hive, &alpha, Some("r3"), state("r4", 9), vec![row(6), row(8)]).await,
+        commit(
+            &hive,
+            &alpha,
+            Some("r3"),
+            state("r4", 9),
+            vec![row(6), row(8)]
+        )
+        .await,
         HiveCommit::Committed
     );
     let gapped = hive.load_hive(&alpha, None).await.unwrap().unwrap();
@@ -206,7 +213,10 @@ pub async fn assert_hive_commit_race(hive: Arc<dyn HiveStore>) {
         match outcome {
             HiveCommit::Committed => winners.push(writer),
             HiveCommit::Conflict { current } => {
-                assert!(current.is_some(), "a conflict must name the stored revision");
+                assert!(
+                    current.is_some(),
+                    "a conflict must name the stored revision"
+                );
             }
         }
     }
@@ -238,7 +248,11 @@ pub async fn assert_orphans_ignored(hive: Arc<dyn HiveStore>, company: &CompanyI
     assert_eq!(loaded.state, state("r1", 3));
     assert_eq!(loaded.messages, rows(0..3), "an uncommitted row was loaded");
     let bounded = hive.load_hive(company, Some(99)).await.unwrap().unwrap();
-    assert_eq!(bounded.messages, rows(0..3), "`before` reached past the commit");
+    assert_eq!(
+        bounded.messages,
+        rows(0..3),
+        "`before` reached past the commit"
+    );
 
     let replacement: Vec<HiveMessageRow> = (3..5)
         .map(|sequence| HiveMessageRow {
@@ -247,13 +261,23 @@ pub async fn assert_orphans_ignored(hive: Arc<dyn HiveStore>, company: &CompanyI
         })
         .collect();
     assert_eq!(
-        commit(&hive, company, Some("r1"), state("r2", 5), replacement.clone()).await,
+        commit(
+            &hive,
+            company,
+            Some("r1"),
+            state("r2", 5),
+            replacement.clone()
+        )
+        .await,
         HiveCommit::Committed
     );
     let reloaded = hive.load_hive(company, None).await.unwrap().unwrap();
     let mut expected = rows(0..3);
     expected.extend(replacement);
-    assert_eq!(reloaded.messages, expected, "an orphan survived the next commit");
+    assert_eq!(
+        reloaded.messages, expected,
+        "an orphan survived the next commit"
+    );
 }
 
 /// Writes the committed half of the fixture [`assert_orphans_ignored`] expects:

@@ -93,7 +93,9 @@ impl HiveStore for SqliteStore {
         let current_key = current
             .as_ref()
             .map(|state| (state.revision.as_str(), state.next_sequence));
-        if let CommitCheck::Conflict(current) = check_commit(current_key, expected, &next, &appended)? {
+        if let CommitCheck::Conflict(current) =
+            check_commit(current_key, expected, &next, &appended)?
+        {
             return Ok(HiveCommit::Conflict { current });
         }
         for row in &appended {
@@ -170,8 +172,9 @@ fn read_state(conn: &Connection, company: &CompanyId) -> Result<Option<HiveState
 /// SQLite integers are signed; a sequence past `i64::MAX` is refused rather
 /// than wrapped into a negative that would sort first.
 fn to_i64(value: u64) -> Result<i64> {
-    i64::try_from(value)
-        .map_err(|_| OpenCompanyError::InvalidRequest(format!("hive sequence {value} is too large")))
+    i64::try_from(value).map_err(|_| {
+        OpenCompanyError::InvalidRequest(format!("hive sequence {value} is too large"))
+    })
 }
 
 fn from_i64(value: i64) -> Result<u64> {

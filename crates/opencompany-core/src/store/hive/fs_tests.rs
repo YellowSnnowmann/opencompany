@@ -11,7 +11,10 @@ fn store(root: &std::path::Path) -> Arc<dyn HiveStore> {
 }
 
 fn messages_path(root: &std::path::Path, company: &CompanyId) -> std::path::PathBuf {
-    Bundle::new(root, company).dir().join("hive").join("messages.jsonl")
+    Bundle::new(root, company)
+        .dir()
+        .join("hive")
+        .join("messages.jsonl")
 }
 
 fn append_raw(path: &std::path::Path, bytes: &[u8]) {
@@ -66,7 +69,10 @@ async fn rows_past_the_committed_length_are_ignored_and_overwritten() {
 
     conformance::assert_orphans_ignored(hive, &company).await;
     let log = std::fs::read_to_string(&path).unwrap();
-    assert!(!log.contains("orphan"), "the orphan tail was not truncated: {log}");
+    assert!(
+        !log.contains("orphan"),
+        "the orphan tail was not truncated: {log}"
+    );
     assert!(log.ends_with('\n'));
 }
 
