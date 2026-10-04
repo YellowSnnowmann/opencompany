@@ -1602,18 +1602,17 @@ impl CompanyAgent {
     /// dispatched card's trace is durable *during* the run rather than only
     /// after it (issue #242).
     ///
-    /// # Which session a turn resumes
+    /// # Every pool turn is isolated
     ///
-    /// A conversational turn — one on a chat, addressed by `chat` — resumes
-    /// this agent's one stable session ([`session_key`](Self::session_key)),
-    /// whatever chat it is on: OpenHuman owns the thread, and which
-    /// conversation a line belongs to is what the turn text says (the cue
-    /// below; the attributed desk delta in Phase 4). An **isolated** turn — a
-    /// dispatched card, a workflow node, a background task: anything that
-    /// names no chat, or that brings its own context — runs on a fresh
-    /// session of its own, so it neither drags the chat transcript in nor
-    /// leaves its working notes there; that is what the previous builder's
-    /// clear-and-suppress-autoload did.
+    /// Since the hive cutover (OC-2) every conversational turn — an operator
+    /// DM, a desk, a peer message — runs through the company hive's
+    /// Coordinator, which owns the agent's one continuing OpenHuman session.
+    /// What still runs here is isolated work: a dispatched card, a workflow
+    /// node, a copilot thread, a background task, a re-issued approved call.
+    /// Each runs on a fresh session of its own, so it neither drags the chat
+    /// transcript in nor writes into the session the Coordinator continues —
+    /// one writer per OpenHuman session. `chat` still names the conversation a
+    /// turn answers for the in-flight registry and the live stream.
     pub async fn run_with_steer(
         &self,
         message: &str,
@@ -1622,7 +1621,7 @@ impl CompanyAgent {
         run_sink: Option<Arc<run_trace::RunTraceSink>>,
         // The conversation this turn belongs to (#1890), carried in its own
         // right rather than read off `stream`: a turn that has a chat to
-        // resume on may still stream nowhere, and a workflow turn streams on
+        // answer on may still stream nowhere, and a workflow turn streams on
         // a route that is not a chat.
         chat: crate::runtime::delegation::ChatTarget<'_>,
     ) -> (crate::Result<TurnOutcome>, Vec<TurnUsage>) {
@@ -1633,45 +1632,8 @@ impl CompanyAgent {
                 crate::turn_stream::LiveRoute::Workflow { .. } => None,
             })
             .or_else(|| chat.chat_id.map(str::to_string));
-        // Isolated: a turn that names no conversation at all (a dispatched
-        // card, a workflow node, a background task), or one that brings its
-        // own context (`history_seed == false`). Everything else is a line
-        // in this agent's one conversation session.
-        let isolated = Self::isolated_session(turn_chat_id.as_deref(), chat.history_seed);
-        let session_id = if isolated {
-            format!("{}:run:{}", self.session_key, uuid::Uuid::new_v4().simple())
-        } else {
-            self.session_key.clone()
-        };
-
+        let session_id = format!("{}:run:{}", self.session_key, uuid::Uuid::new_v4().simple());
         let pump = progress_pump::ProgressPump::start(self.step_labels.clone(), stream, run_sink);
-
-        // Where this line was said, for a session that hears every chat. A
-        // single line rather than the `agent_session` cue block it replaces:
-        // the attributed delta that names the other speakers is Phase 4's.
-        let cued: std::borrow::Cow<'_, str> = match turn_chat_id.as_deref() {
-            Some(chat_id) if !isolated => std::borrow::Cow::Owned(match chat.thread_root {
-                Some(root) => format!(
-                    "[conversation: {chat_id}, thread {}]\n{message}",
-                    root.value()
-                ),
-                None => format!("[conversation: {chat_id}]\n{message}"),
-            }),
-            _ => std::borrow::Cow::Borrowed(message),
-        };
-        // A resumed session whose pinned prompt may name an older catalogue
-        // hears the current one on this turn — see `catalogue_brief_stale`.
-        // An isolated turn runs cold on a fresh session and needs nothing.
-        let rebrief = !isolated && self.catalogue_brief_pending();
-        let cued: std::borrow::Cow<'_, str> = if rebrief {
-            std::borrow::Cow::Owned(build::opencompany_mcp_rebrief(
-                &self.served_catalogue,
-                cued.as_ref(),
-            ))
-        } else {
-            cued
-        };
-        let message: &str = cued.as_ref();
 
         let chat_only = crate::runtime::delegation::is_chat_only_turn();
         if chat_only {
@@ -1681,91 +1643,13 @@ impl CompanyAgent {
             );
         }
 
-        let mut hooks: Vec<Arc<dyn oh::agent::stop_hooks::StopHook>> = Vec::new();
-        if let Some(control) = steer {
-            hooks.push(Arc::new(crate::harness::steer::SteerStopHook::new(
-                control.clone(),
-            )));
-        }
-        let mut spend_brake: Option<(f64, Arc<std::sync::atomic::AtomicBool>)> = None;
-        if let Some(cap) = self.turn_spend_cap_usd() {
-            let hook = crate::harness::spend::SpendStopHook::new(cap);
-            spend_brake = Some((cap, hook.halted()));
-            hooks.push(Arc::new(hook));
-        }
-
         let budget_pause_summary: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
         // Issue #1680, the sibling slot. Same idiom and same reason: the
         // classifier runs inside the stop-hook body and cannot return a second
         // value, so the one fact it learned travels out in a slot read below.
         let ceiling_pause: std::sync::Mutex<Option<(String, Duration)>> =
             std::sync::Mutex::new(None);
-
-        // A hive seat turn (plan hive-desks, Phase 4): the driver's episode
-        // coordinates ride on the in-flight registration below so the MCP
-        // server attributes the seat's speech to its round, the timeout is
-        // counted from the moment the lock is held, and the outbox is handed
-        // back through the scope when the turn returns.
-        let seat = crate::runtime::delegation::seat_turn();
-        let _turn = self.turn_lock.lock().await;
-        // An episode seat brackets its own turn, inside this same lock, from
-        // `hive::host`: the session it runs is the episode's, not this
-        // pool's, so the pool no longer has a bracket handed down to it.
-        let deadline = seat
-            .as_ref()
-            .map(|seat| tokio::time::Instant::now() + seat.timeout);
-        // Register the turn in flight so the `opencompany` MCP server can
-        // attribute this agent's tool calls to it (plan hive-desks Phase 3),
-        // and hand it the channel those calls come back on: the belt's tools
-        // file into task-local queues (approval scope, publish and delegation
-        // claims), so they must run on THIS task — `serve_jobs` below, joined
-        // with the turn. The lock is held, so nothing else of this agent's
-        // should be registered; a caller that registered first regardless
-        // keeps its own entry and this turn only lends it the executor.
-        let (job_tx, mut job_rx) = tokio::sync::mpsc::channel::<crate::hive::tools::ToolJob>(8);
-        let in_flight = self.mcp.in_flight();
-        let mut registration = crate::hive::tools::InFlight::new(
-            self.company.clone(),
-            self.runtime_id.clone(),
-            self.agent_id.clone(),
-            Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id),
-        )
-        .with_executor(job_tx.clone());
-        if let Some(seat) = seat.as_ref() {
-            registration = registration.with_hive(seat.hive.clone());
-        }
-        let _in_flight = match in_flight.begin(registration) {
-            Ok(ticket) => Some(ticket),
-            Err(_) => {
-                in_flight.with(&self.runtime_id, |turn| {
-                    turn.executor = Some(job_tx.clone())
-                });
-                None
-            }
-        };
-        drop(job_tx);
-        let served = self.mcp.agent(&self.runtime_id);
-        let serve_jobs = async {
-            while let Some(job) = job_rx.recv().await {
-                let turn = in_flight.snapshot(&self.runtime_id);
-                let result = match &served {
-                    Some(agent) => agent.serve_call(&job.tool, job.arguments, turn).await,
-                    None => serde_json::json!({
-                        "content": [{ "type": "text", "text": format!(
-                            "refused: '{}' is not served for this agent", job.tool
-                        ) }],
-                        "isError": true,
-                    }),
-                };
-                let _ = job.reply.send(result);
-            }
-            // The registry's sender outlives the turn, so this loop ends only
-            // if the entry was dropped under us; never let it end the select.
-            std::future::pending::<()>().await;
-        };
-        // Anything left on the taps belongs to no attempt of ours.
-        let _ = self.bridge.take_usage();
-        let _ = self.bridge.take_errors();
+        let envelope = turn_envelope::TurnEnvelope::new(self, steer);
         // `cwd` only where the workspace exists: the runtime refuses a turn
         // rooted at an inaccessible path, and a broken workspace root is a
         // reported-once condition the turn survives (issue #551) — relative
@@ -1780,64 +1664,39 @@ impl CompanyAgent {
             if let Some(cwd) = cwd {
                 turn = turn.cwd(cwd);
             }
-            let fut = turn.send();
-            let seat = seat.clone();
-            async move {
-                match deadline {
-                    Some(deadline) => match tokio::time::timeout_at(deadline, fut).await {
-                        Ok(outcome) => outcome,
-                        Err(_) => {
-                            let secs = seat
-                                .as_ref()
-                                .map(|seat| seat.timeout.as_secs())
-                                .unwrap_or_default();
-                            if let Some(seat) = seat.as_ref() {
-                                seat.timed_out
-                                    .store(true, std::sync::atomic::Ordering::Relaxed);
-                            }
-                            Err(openhuman_embed::CoreError::Rpc {
-                                method: "agent.turn",
-                                message: format!("the seat turn ran past its {secs}s timeout"),
-                            })
-                        }
-                    },
-                    None => fut.await,
-                }
-            }
+            turn.send()
         };
-
-        let turn_body = oh::agent::stop_hooks::with_stop_hooks(
-            hooks,
-            Box::pin(async {
-                let mut usages: Vec<TurnUsage> = Vec::new();
-                let started = std::time::Instant::now();
-                let first = send(pump.sender()).await.map(|outcome| outcome.reply);
-                let first_elapsed = started.elapsed();
-                usages.push(self.tapped_usage());
-                let reply: crate::Result<String> = match self
-                    .classify_turn(self.unmask(first), first_elapsed)
-                {
+        let slot_budget = |summary: String| {
+            let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+            if let Ok(mut slot) = budget_pause_summary.lock() {
+                *slot = Some(redacted.clone());
+            }
+            crate::harness::mcp_probe::scrub(&redacted, &[])
+        };
+        let slot_ceiling = |summary: String, elapsed: Duration| {
+            let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+            if let Ok(mut slot) = ceiling_pause.lock() {
+                *slot = Some((redacted.clone(), elapsed));
+            }
+            crate::harness::mcp_probe::scrub(&redacted, &[])
+        };
+        let turn_body = async {
+            let mut usages: Vec<TurnUsage> = Vec::new();
+            let started = std::time::Instant::now();
+            let first = send(pump.sender()).await.map(|outcome| outcome.reply);
+            let first_elapsed = started.elapsed();
+            usages.push(self.tapped_usage());
+            let reply: crate::Result<String> =
+                match self.classify_turn(self.unmask(first), first_elapsed) {
                     AttemptOutcome::Reply(reply) => Ok(reply),
                     AttemptOutcome::Hard(err) => Err(err),
-                    AttemptOutcome::BudgetPaused { summary } => {
-                        let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
-                        if let Ok(mut slot) = budget_pause_summary.lock() {
-                            *slot = Some(redacted.clone());
-                        }
-                        Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
-                    }
+                    AttemptOutcome::BudgetPaused { summary } => Ok(slot_budget(summary)),
                     AttemptOutcome::CeilingPaused { summary, elapsed } => {
-                        let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
-                        if let Ok(mut slot) = ceiling_pause.lock() {
-                            *slot = Some((redacted.clone(), elapsed));
-                        }
-                        Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
+                        Ok(slot_ceiling(summary, elapsed))
                     }
                     AttemptOutcome::Empty => {
-                        let spend_halted = spend_brake.as_ref().is_some_and(|(_, halted)| {
-                            halted.load(std::sync::atomic::Ordering::SeqCst)
-                        });
-                        if steer.map(|c| c.requested()).unwrap_or(false) || spend_halted {
+                        if steer.map(|c| c.requested()).unwrap_or(false) || envelope.spend_halted()
+                        {
                             Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
                         } else {
                             let retry_started = std::time::Instant::now();
@@ -1849,199 +1708,33 @@ impl CompanyAgent {
                                 AttemptOutcome::Empty => {
                                     Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
                                 }
-                                AttemptOutcome::BudgetPaused { summary } => {
-                                    let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
-                                    if let Ok(mut slot) = budget_pause_summary.lock() {
-                                        *slot = Some(redacted.clone());
-                                    }
-                                    Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
-                                }
-                                // A ceiling can fire on the retry too: the
-                                // first attempt returned the transient empty
-                                // class, the second worked until the budget ran
-                                // out. Terminal here as well -- this arm is the
-                                // end of the ladder, so there is nothing left
-                                // to re-enter.
+                                AttemptOutcome::BudgetPaused { summary } => Ok(slot_budget(summary)),
+                                // A ceiling can fire on the retry too: this arm
+                                // is the end of the ladder, so it is terminal.
                                 AttemptOutcome::CeilingPaused { summary, elapsed } => {
-                                    let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
-                                    if let Ok(mut slot) = ceiling_pause.lock() {
-                                        *slot = Some((redacted.clone(), elapsed));
-                                    }
-                                    Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
+                                    Ok(slot_ceiling(summary, elapsed))
                                 }
                                 AttemptOutcome::Hard(err) => Err(err),
                             }
                         }
                     }
                 };
-                (reply, usages)
-            }),
-        );
-        let (reply, mut usages): (crate::Result<String>, Vec<TurnUsage>) = tokio::select! {
-            biased;
-            outcome = turn_body => outcome,
-            () = serve_jobs => unreachable!("the tool-job loop never completes"),
+            (reply, usages)
         };
-        // The session heard the current catalogue; the next rebuild decides
-        // afresh. A failed turn commits nothing, so the brief stays owed.
-        if rebrief && reply.is_ok() {
-            self.catalogue_brief_stale
-                .store(false, std::sync::atomic::Ordering::Release);
-        }
-        match _in_flight {
-            // What the seat said, back to the caller, before the lock goes.
-            Some(ticket) => {
-                let finished = ticket.finish();
-                if let Some(seat) = seat.as_ref()
-                    && let Ok(mut outbox) = seat.outbox.lock()
-                {
-                    *outbox = finished.outbox;
-                }
-            }
-            None => {
-                in_flight.with(&self.runtime_id, |turn| turn.executor = None);
-            }
-        }
-        drop(_turn);
+        let surface = Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id);
+        let (reply, mut usages): (crate::Result<String>, Vec<TurnUsage>) =
+            envelope.run(surface, None, turn_body).await;
 
         let events = pump.finish().await;
-        // The bridge tap is authoritative for tokens and for a charged amount
-        // the provider reported. A provider that reports tokens but no price
-        // (the managed backend's billing meta is absent on a BYOK route, and
-        // on every scripted double) leaves the cost at zero there, while the
-        // runtime's own `TurnCostUpdated` carries its catalogue estimate — the
-        // figure the in-turn spend brake fired on — so that estimate stands
-        // in for the price, and for everything when the tap saw nothing.
-        if usages
-            .iter()
-            .any(|usage| usage.is_zero() || usage.cost_usd == 0.0)
-        {
-            let segments = progress_pump::attempt_event_segments(&events, usages.len());
-            // **The price when nothing marks where an attempt began.**
-            //
-            // `attempt_event_segments` splits on `AgentProgress::TurnStarted`,
-            // which is declared and never emitted -- a real stream opens
-            // `IterationStarted`. So every segment comes back empty and the
-            // `else { continue }` below skipped silently: a provider that
-            // reported tokens but no price (every scripted double, and a BYOK
-            // route per the note above) kept `cost_usd` at zero, and the spend
-            // a halt announced was zero with it.
-            //
-            // `TurnCostUpdated` is a cumulative rollup, so the stream's last
-            // one prices the turn. It supplies the **price only**, and only to
-            // an attempt that burned something: a turn that burned nothing must
-            // not inherit a total, which is what `zero_usage_turn_writes_nothing`
-            // and its two neighbours exist to hold.
-            let rollup = progress_pump::last_observed_turn_cost(&events);
-            for (usage, segment) in usages.iter_mut().zip(segments) {
-                let Some(observed) = progress_pump::last_observed_turn_cost(segment) else {
-                    if !usage.is_zero()
-                        && usage.cost_usd == 0.0
-                        && let Some(rollup) = rollup.as_ref()
-                        && rollup.cost_usd > 0.0
-                    {
-                        usage.cost_usd = rollup.cost_usd;
-                    }
-                    continue;
-                };
-                if usage.is_zero() {
-                    tracing::info!(
-                        agent = %self.agent_id,
-                        input_tokens = observed.input_tokens,
-                        output_tokens = observed.output_tokens,
-                        cost_usd = observed.cost_usd,
-                        "[turn] an attempt published no totals; metering the spend observed on \
-                         its own progress-stream segment"
-                    );
-                    *usage = observed;
-                } else if usage.cost_usd == 0.0 && observed.cost_usd > 0.0 {
-                    usage.cost_usd = observed.cost_usd;
-                }
-            }
-        }
-        let raw_iteration_cap = progress_pump::hit_iteration_cap(&events);
-        let halted_for_spend = spend_brake.and_then(|(cap_usd, halted)| {
-            halted
-                .load(std::sync::atomic::Ordering::SeqCst)
-                .then(|| SpendHalt {
-                    agent: self.agent_id.clone(),
-                    spent_usd: usages.iter().map(|usage| usage.cost_usd).sum(),
-                    cap_usd,
-                })
-        });
-        // #988: a spend halt reads `hit_iteration_cap == false`.
-        //
-        // `brain.rs` emits the step-pause notice and the spend notice from
-        // separate `if`s, on the stated grounds that one operator message can
-        // run several turns and both facts may be owed — but that the two
-        // "cannot both come from ONE turn" *because* this invariant holds.
-        // The predicate itself cannot see the halt: it reads only the progress
-        // stream, and a hook-driven halt is not in it. While the stream never
-        // reported a cap at all the invariant held for free; now that it does,
-        // it has to be stated here, where both facts are in hand, rather than
-        // re-checked at each notice site.
-        //
-        // The halt wins because it is the more specific account of why the
-        // turn stopped, and the two notices are not interchangeable: a step
-        // pause invites "continue", which on a spent budget would invite the
-        // operator to burn a cap that has already run out.
-        let hit_iteration_cap =
-            progress_pump::reportable_iteration_cap(raw_iteration_cap, halted_for_spend.is_some());
-        if hit_iteration_cap {
-            tracing::info!(
-                agent = %self.agent_id,
-                "[turn] paused at the tool-iteration cap; the reply is a resumable checkpoint, not a finished answer"
-            );
-        }
-        if raw_iteration_cap && !hit_iteration_cap {
-            tracing::info!(
-                agent = %self.agent_id,
-                "[turn] the iteration cap was reached on a turn already halted for spend; \
-                 reporting the halt, which is why it stopped"
-            );
-        }
-        if let Some(halt) = &halted_for_spend {
-            tracing::info!(
-                agent = %self.agent_id,
-                spent_usd = halt.spent_usd,
-                cap_usd = halt.cap_usd,
-                "[turn] halted at the in-turn spend cap; the reply stops short of the work it was doing"
-            );
-        }
-        let budget_paused = budget_pause_summary
-            .lock()
-            .ok()
-            .and_then(|mut slot| slot.take())
-            .map(|summary| BudgetPause {
-                agent: self.agent_id.clone(),
-                summary,
-            });
-        if let Some(pause) = &budget_paused {
-            tracing::info!(
-                agent = %self.agent_id,
-                "[turn] paused for lack of inference budget/credits: {}",
-                pause.summary
-            );
-        }
-        let ceiling_paused = ceiling_pause
-            .lock()
-            .ok()
-            .and_then(|mut slot| slot.take())
-            .map(|(summary, elapsed)| CeilingPause {
-                agent: self.agent_id.clone(),
-                elapsed,
-                summary,
-            });
-        if let Some(pause) = &ceiling_paused {
-            tracing::info!(
-                agent = %self.agent_id,
-                elapsed_ms = pause.elapsed.as_millis(),
-                progress_events = events.len(),
-                "[turn] hit the per-turn wall-clock ceiling; keeping the steps it had taken"
-            );
-        }
+        turn_envelope::price_usages(&self.agent_id, &mut usages, &events);
+        let findings = turn_envelope::turn_findings(
+            &self.agent_id,
+            &events,
+            envelope.halt(&usages),
+            budget_pause_summary.lock().ok().and_then(|mut slot| slot.take()),
+            ceiling_pause.lock().ok().and_then(|mut slot| slot.take()),
+        );
         let steps = steps::fold_steps(events);
-
         let outcome = reply.map(|reply| TurnOutcome {
             reply: if chat_only {
                 chat_only_guard::guard_suppressed_reply(reply)
@@ -2049,11 +1742,11 @@ impl CompanyAgent {
                 reply
             },
             steps,
-            hit_iteration_cap,
+            hit_iteration_cap: findings.hit_iteration_cap,
             abnormal_stop: None,
-            halted_for_spend,
-            budget_paused,
-            ceiling_paused,
+            halted_for_spend: findings.halted_for_spend,
+            budget_paused: findings.budget_paused,
+            ceiling_paused: findings.ceiling_paused,
         });
         (outcome, usages)
     }
@@ -2092,12 +1785,6 @@ impl CompanyAgent {
                 }
             }
         }
-    }
-
-    /// Whether a turn runs on a session of its own rather than the agent's
-    /// conversation session: it names no chat, or brings its own context.
-    fn isolated_session(turn_chat_id: Option<&str>, history_seed: bool) -> bool {
-        turn_chat_id.is_none() || !history_seed
     }
 
     /// Everything the bridge tapped since the previous attempt, summed.
