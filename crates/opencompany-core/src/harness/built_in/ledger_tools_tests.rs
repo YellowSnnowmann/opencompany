@@ -685,7 +685,7 @@ async fn a_write_the_store_refuses_is_reported_rather_than_receipted_as_recorded
 /// the first assertion is the contract: reformat the line there and the swap
 /// stops matching, silently, and the seat is shown `assign_task` again.
 #[test]
-fn the_boards_catalogue_line_is_replaceable_and_its_episode_form_promises_nothing() {
+fn the_boards_catalogue_line_is_rendered_through_one_helper() {
     let registry = Registry::build([]);
     let tasks = registry
         .specs()
@@ -696,8 +696,7 @@ fn the_boards_catalogue_line_is_replaceable_and_its_episode_form_promises_nothin
     let standing = written_by_note(tasks);
     assert!(
         ledger_brief(&registry).contains(&standing),
-        "the brief must render the board's line through `written_by_note`, or the episode \
-         seat's swap silently stops matching: {standing}"
+        "the brief must render the board's line through `written_by_note`: {standing}"
     );
     assert!(
         standing.contains("spawn_task"),

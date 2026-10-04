@@ -134,25 +134,6 @@ async fn the_adapter_runs_a_tool_under_the_in_flight_context() {
     );
 }
 
-#[tokio::test]
-async fn the_adapter_runs_a_tool_under_the_in_flight_context() {
-    let adapter = McpToolAdapter::new(Arc::new(ContextEcho));
-    let descriptor = adapter.descriptor();
-    assert_eq!(descriptor["name"], "context_echo");
-    assert_eq!(descriptor["inputSchema"]["type"], "object");
-
-    let context = InFlightContext::new(
-        Some(desk_turn("ceo")),
-        Some(PathBuf::from("/tmp/acme/ceo")),
-    );
-    let result = adapter.execute(json!({}), &context).await;
-    assert!(!result.is_error);
-    assert_eq!(
-        result.output(),
-        "thread=engineering agent=ceo workspace=/tmp/acme/ceo"
-    );
-}
-
 /// Every company tool is reached by its bare name: nothing is wrapped in
 /// `mcp_call_tool` any more, now that the served speech tools are gone.
 #[test]
