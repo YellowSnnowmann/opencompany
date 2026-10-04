@@ -15,14 +15,14 @@
 //! So of the belt assembled here, the OpenHuman-native tools (`shell`,
 //! `file_read`, `web_fetch`, …) are named in the spec's tool scope and reach
 //! the model directly, while this crate's own tools — ledger, tasks, pages,
-//! workspace, composio, hosting, memory, speech, approval — are carried on
+//! workspace, composio, hosting, speech, approval — are carried on
 //! the blueprint **unattached**: they become the catalogue the per-agent MCP
 //! server serves in Phase 3. Until then a turn has exactly the native subset.
 //!
-//! * **Tools**: [`memory_tools`] (`memory_store` + `memory_recall`) is called
-//!   but currently returns nothing — see its doc comment for why openhuman's
-//!   API no longer gives embedders a way to point either tool at a company's
-//!   own memory. **File tools** (read, write, edit, list, grep, glob) are
+//! * **Memory** is OpenHuman's: the spec binds the agent to its own node under
+//!   its company's root ([`AgentMemory`]) and names OpenHuman's `memory` tool
+//!   in its scope; the runtime runs recall and logging around every turn
+//!   (`crate::memory`). **File tools** (read, write, edit, list, grep, glob) are
 //!   granted per-agent when the effective `tools ∩ agent.tools` grants cover
 //!   the `files`/`docs` namespace, and are sandboxed to the agent's own
 //!   workspace via a `workspace_only` [`SecurityPolicy`] ([`file_tools`]).

@@ -308,6 +308,7 @@ pub fn build_confined_agent(
         workspace,
         policy: std::sync::Arc::new(policy),
         definition_name: CONFINED_AGENT_ID.to_string(),
+        memory: crate::harness::build::AgentMemory::inactive(company, CONFINED_AGENT_ID),
     })
 }
 
