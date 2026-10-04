@@ -41,10 +41,7 @@ use crate::ports::types::{
 };
 use crate::ports::{generate_id, now_millis};
 use crate::runtime::channel::OPERATOR_CHANNEL;
-use crate::runtime::delegation_tools::{
-    DELEGATE_TO_DESK_TOOL, DelegateArgs, SPAWN_TASK_TOOL, SpawnTaskArgs, chat_responder, desk_lead,
-    unknown_desk_message,
-};
+use crate::runtime::delegation_tools::{SPAWN_TASK_TOOL, SpawnTaskArgs, chat_responder, desk_lead};
 use crate::runtime::grants::{
     ApprovalContinuation, GrantId, GrantScope, GrantSubject, GrantedCall, StandingGrant,
 };
