@@ -6,66 +6,50 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { OpenCompanyClient } from "@/api/client";
 import { ApiError } from "@/api/types";
-import type { MemoryEntry, MemoryList, MemoryStats } from "@/api/memory";
+import type { MemoryEntry, MemoryList } from "@/api/memory";
 import { MemoryView } from "@/views/MemoryView";
 
 /**
- * `memory.rs`'s fact CRUD (`create_fact`, `delete_fact`, list, stats) is all
- * `ScopedCompany` — no admin gate, unlike the engine picker underneath it
- * (`memory_engine.rs`, `AdminScopedCompany`, covered separately). What this
- * file pins: a plain member gets the same create/delete affordances an admin
- * would, matching that route; and a delete that the host actually refuses
- * puts the card straight back and says so — it is never dropped for good on a
- * client that merely believed it worked.
+ * The memory routes are `ScopedCompany` — no admin gate. What this file pins:
+ * a plain member gets the same add-learning and delete affordances an admin
+ * would, the add form posts the `{ text, kind }` learning body, and a delete
+ * the host refuses puts the card straight back.
  */
-
-const STATS: MemoryStats = {
-  facts: 1,
-  factsUpdatedAtMillis: 1000,
-  lastUpdatedAtMillis: 1000,
-  totalItems: 1,
-  teammateMemory: 0,
-  documentMemory: 0,
-  taskOutcomes: 0,
-};
 
 function entry(over: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     id: "f1",
-    kind: "fact",
-    origin: "fact",
-    editable: true,
-    title: "Renewal window",
+    kind: "learning",
+    learningKind: "fact",
+    title: "Acme renews every March.",
     body: "Acme renews every March.",
-    source: "operator",
+    namespace: "team:acme",
+    tags: [],
     updatedAt: 1000,
+    editable: true,
     ...over,
   };
 }
 
-function clientAs(opts: {
-  del?: (path: string) => Promise<void>;
-  memoryList?: MemoryEntry[];
-}): OpenCompanyClient {
-  const list: MemoryList = {
-    items: opts.memoryList ?? [entry()],
-    totalContext: 0,
-    contextTruncated: false,
-  } as MemoryList;
-  return {
+function clientAs(opts: { del?: (path: string) => Promise<void> }) {
+  const list: MemoryList = { items: [entry()] };
+  const post = vi.fn(() => Promise.resolve(entry()));
+  const client = {
     scopeFor: () => "/api/v1/companies/acme",
     get: (path: string) => {
-      if (path.endsWith("/memory/stats")) return Promise.resolve(STATS);
-      if (path.endsWith("/memory/engine")) {
-        // Admin-only route; a member's own read fails, which `EngineSection`
-        // renders as its own error state — not this file's concern.
-        return Promise.reject(new ApiError(403, "forbidden", "only an admin can do that"));
+      if (path.endsWith("/memory/status")) {
+        return Promise.resolve({ root: "team:acme", on: true, engine: "local" });
+      }
+      if (path.endsWith("/memory/agents")) return Promise.resolve({ root: "team:acme", agents: [] });
+      if (path.endsWith("/memory/brain")) {
+        return Promise.resolve({ root: "team:acme", sources: [], unfiled: 0 });
       }
       return Promise.resolve(list);
     },
-    post: vi.fn(() => Promise.resolve(entry())),
+    post,
     del: vi.fn(opts.del ?? (() => Promise.resolve())),
   } as unknown as OpenCompanyClient;
+  return { client, post };
 }
 
 let container: HTMLDivElement;
@@ -75,6 +59,7 @@ async function show(element: React.ReactElement) {
   await act(async () => {
     root.render(element);
   });
+  await act(async () => {});
 }
 
 function at(testid: string): HTMLElement | null {
@@ -94,38 +79,47 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("MemoryView, fact CRUD with no admin gate", () => {
-  it("offers a plain member both New memory and per-card delete, matching the ungated fact routes", async () => {
-    const client = clientAs({});
+describe("MemoryView, learning CRUD with no admin gate", () => {
+  it("offers a plain member both Add learning and per-card delete", async () => {
+    const { client } = clientAs({});
     await show(createElement(MemoryView, { client, company: "acme", sub: "upload" }));
-    await act(async () => {});
     expect(at("memory-add"), "the add panel is on the Upload tab").not.toBeNull();
 
     await show(createElement(MemoryView, { client, company: "acme" }));
-    await act(async () => {});
-
-    // The add form is a panel on the Upload tab now, not a header button that
-    // stood on all three Brain views — so "can a plain member write?" is asked
-    // where the form actually is. The per-card delete stays on Overview, which
-    // is what this render lands on.
     const card = at("memory-card")!;
     expect(card.querySelector("button[aria-label='Delete memory']")).not.toBeNull();
   });
 
-  it("puts the card back and says why when the host refuses the delete", async () => {
-    const client = clientAs({
-      del: () => Promise.reject(new ApiError(409, "conflict", "this fact was already removed")),
+  it("posts the typed text as a learning with its kind", async () => {
+    const { client, post } = clientAs({});
+    await show(createElement(MemoryView, { client, company: "acme", sub: "upload" }));
+
+    const text = at("memory-text") as HTMLTextAreaElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      setter?.call(text, "Ship on Fridays.");
+      text.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      at("memory-save")!.click();
+    });
+
+    expect(post).toHaveBeenCalledWith("/api/v1/companies/acme/memory", {
+      text: "Ship on Fridays.",
+      kind: "fact",
+    });
+  });
+
+  it("puts the card back when the host refuses the delete", async () => {
+    const { client } = clientAs({
+      del: () => Promise.reject(new ApiError(409, "conflict", "this item was already removed")),
     });
     await show(createElement(MemoryView, { client, company: "acme" }));
-    await act(async () => {});
 
-    expect(container.textContent).toContain("Renewal window");
+    expect(container.textContent).toContain("Acme renews every March.");
     await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>("button[aria-label='Delete memory']")!
-        .click();
+      container.querySelector<HTMLButtonElement>("button[aria-label='Delete memory']")!.click();
     });
-    // The optimistic remove and the failed write both settle inside this act.
-    expect(container.textContent).toContain("Renewal window");
+    expect(container.textContent).toContain("Acme renews every March.");
   });
 });
