@@ -97,52 +97,6 @@ impl MemoryScopes for ArchiveScopes {
     }
 }
 
-#[tokio::test]
-async fn archive_traces_survive_bundle_roundtrip_in_the_archive_tier() {
-    let home1 = tmp_root("archive-src");
-    let home2 = tmp_root("archive-dst");
-    let dest = tmp_root("archive-bundle");
-    let id = CompanyId::new("archive-co");
-    let (s1, e1, m1, c1) = fs_ports(&home1);
-    s1.save(&company_record(&id)).await.unwrap();
-    let archived = vec![CompressedTrace {
-        cycle_id: "evicted-cycle".into(),
-        summary: "retained recovery trace".into(),
-        at_millis: 7,
-    }];
-    let source_scopes = Arc::new(ArchiveScopes {
-        archived: archived.clone(),
-        restored: Arc::new(std::sync::Mutex::new(Vec::new())),
-        context: Arc::new(FsContextStore::new(home1.clone())),
-    });
-    export_bundle_with_scopes(
-        &id,
-        &dest,
-        s1,
-        e1,
-        m1,
-        c1,
-        None,
-        Some(source_scopes),
-        ExportOpts::default(),
-    )
-    .await
-    .unwrap();
-    assert!(dest.join(MEMORY_DIR).join(ARCHIVES_JSONL).is_file());
-
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    let restored = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let target_scopes = Arc::new(ArchiveScopes {
-        archived: Vec::new(),
-        restored: restored.clone(),
-        context: Arc::new(FsContextStore::new(home2)),
-    });
-    import_bundle_with_scopes(&dest, s2, e2, m2, c2, None, Some(target_scopes))
-        .await
-        .unwrap();
-    assert_eq!(*restored.lock().unwrap(), archived);
-}
-
 /// The mandatory end-to-end round-trip: build a company, run a cycle to
 /// populate events/traces/ledger, seed a ledger entry and context chunk,
 /// export to a bundle directory, import into a *fresh* home through the fs
@@ -171,7 +125,7 @@ async fn export_import_roundtrip_fs() {
         .await
         .expect("cycle");
 
-    let (s1, e1, m1, c1) = fs_ports(&home1);
+    let (s1, e1, m1) = fs_ports(&home1);
     s1.append_ledger(
         &id,
         LedgerEntry {
@@ -208,15 +162,13 @@ async fn export_import_roundtrip_fs() {
         s1.clone(),
         e1.clone(),
         m1.clone(),
-        c1.clone(),
-        None,
         ExportOpts::default(),
     )
     .await
     .expect("export");
 
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    let imported_id = import_bundle(&dest, s2.clone(), e2.clone(), m2.clone(), c2.clone(), None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    let imported_id = import_bundle(&dest, s2.clone(), e2.clone(), m2.clone())
         .await
         .expect("import");
     assert_eq!(imported_id, id, "id preserved through the bundle");
@@ -285,7 +237,7 @@ async fn import_preserves_unseen_activation_gate() {
     // (`lifecycle: "running"`, no overlays), and its
     // `activation_gate_seen` reads the same absence as `false` — both
     // "never saved by activation-aware code".
-    let (s1, e1, m1, c1) = fs_ports(&home1);
+    let (s1, e1, m1) = fs_ports(&home1);
     let id = CompanyId::new("legacy-co");
     let bundle = Bundle::new(home1.clone(), &id);
     bundle.ensure_dirs().await.unwrap();
@@ -304,15 +256,13 @@ async fn import_preserves_unseen_activation_gate() {
         s1.clone(),
         e1.clone(),
         m1.clone(),
-        c1.clone(),
-        None,
         ExportOpts::default(),
     )
     .await
     .expect("export");
 
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    let imported_id = import_bundle(&dest, s2.clone(), e2.clone(), m2.clone(), c2.clone(), None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    let imported_id = import_bundle(&dest, s2.clone(), e2.clone(), m2.clone())
         .await
         .expect("import");
     assert_eq!(imported_id, id);
@@ -356,7 +306,7 @@ async fn secrets_excluded_by_default() {
         .await
         .unwrap();
 
-    let (s, e, m, c) = fs_ports(&home);
+    let (s, e, m) = fs_ports(&home);
 
     // Default: no secrets/ or keys/ in the export.
     let plain = tmp_root("sec-plain");
@@ -366,8 +316,6 @@ async fn secrets_excluded_by_default() {
         s.clone(),
         e.clone(),
         m.clone(),
-        c.clone(),
-        None,
         ExportOpts::default(),
     )
     .await
@@ -386,8 +334,6 @@ async fn secrets_excluded_by_default() {
         s,
         e,
         m,
-        c,
-        None,
         ExportOpts {
             include_secrets: true,
             fs_bundle: Some(bundle.dir().to_path_buf()),
@@ -415,7 +361,7 @@ async fn lifecycle_event_survives_roundtrip() {
     let dest = tmp_root("lc-bundle");
     let id = CompanyId::new("lc-co");
 
-    let (s1, e1, m1, c1) = fs_ports(&home1);
+    let (s1, e1, m1) = fs_ports(&home1);
     s1.save(&CompanyRecord {
         general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
@@ -457,11 +403,11 @@ async fn lifecycle_event_survives_roundtrip() {
     .await
     .unwrap();
 
-    export_bundle(&id, &dest, s1, e1, m1, c1, None, ExportOpts::default())
+    export_bundle(&id, &dest, s1, e1, m1, ExportOpts::default())
         .await
         .unwrap();
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    import_bundle(&dest, s2.clone(), e2.clone(), m2, c2, None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    import_bundle(&dest, s2.clone(), e2.clone(), m2)
         .await
         .unwrap();
 
@@ -504,7 +450,7 @@ async fn a_withdrawn_discussion_message_does_not_survive_export_import() {
     let id = CompanyId::new("redact-co");
     const SECRET: &str = "sk-live-DO-NOT-SHIP-THIS";
 
-    let (s1, e1, m1, c1) = fs_ports(&home1);
+    let (s1, e1, m1) = fs_ports(&home1);
     s1.save(&CompanyRecord {
         general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
@@ -569,7 +515,7 @@ async fn a_withdrawn_discussion_message_does_not_survive_export_import() {
     .await
     .unwrap();
 
-    export_bundle(&id, &dest, s1, e1, m1, c1, None, ExportOpts::default())
+    export_bundle(&id, &dest, s1, e1, m1, ExportOpts::default())
         .await
         .unwrap();
 
@@ -591,8 +537,8 @@ async fn a_withdrawn_discussion_message_does_not_survive_export_import() {
     );
 
     // 2 and 3. What the importing instance ends up holding.
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    import_bundle(&dest, s2, e2.clone(), m2, c2, None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    import_bundle(&dest, s2, e2.clone(), m2)
         .await
         .unwrap();
     let events = e2

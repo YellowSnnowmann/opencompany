@@ -15,7 +15,7 @@ async fn an_old_bundle_cannot_smuggle_a_withdrawn_message_back_in() {
     let id = CompanyId::new("smuggle-co");
     const SECRET: &str = "sk-live-SMUGGLED";
 
-    let (s1, e1, m1, c1) = fs_ports(&home1);
+    let (s1, e1, m1) = fs_ports(&home1);
     s1.save(&CompanyRecord {
         general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
@@ -65,7 +65,7 @@ async fn an_old_bundle_cannot_smuggle_a_withdrawn_message_back_in() {
     .await
     .unwrap();
 
-    export_bundle(&id, &dest, s1, e1, m1, c1, None, ExportOpts::default())
+    export_bundle(&id, &dest, s1, e1, m1, ExportOpts::default())
         .await
         .unwrap();
 
@@ -76,8 +76,8 @@ async fn an_old_bundle_cannot_smuggle_a_withdrawn_message_back_in() {
     assert!(old_shape.contains(SECRET), "the fixture did not rewrite");
     tokio::fs::write(&path, old_shape).await.unwrap();
 
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    import_bundle(&dest, s2, e2.clone(), m2, c2, None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    import_bundle(&dest, s2, e2.clone(), m2)
         .await
         .unwrap();
     let events = e2
@@ -115,7 +115,7 @@ async fn template_provenance_survives_roundtrip() {
     };
 
     // Register a company carrying template provenance in the source home.
-    let (s1, e1, m1, c1) = fs_ports(&home1);
+    let (s1, e1, m1) = fs_ports(&home1);
     s1.save(&CompanyRecord {
         general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
@@ -145,11 +145,11 @@ async fn template_provenance_survives_roundtrip() {
     .unwrap();
 
     // Export → import into a fresh home.
-    export_bundle(&id, &dest, s1, e1, m1, c1, None, ExportOpts::default())
+    export_bundle(&id, &dest, s1, e1, m1, ExportOpts::default())
         .await
         .unwrap();
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    let imported = import_bundle(&dest, s2.clone(), e2, m2, c2, None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    let imported = import_bundle(&dest, s2.clone(), e2, m2)
         .await
         .unwrap();
     assert_eq!(imported, id, "id preserved through the bundle");
@@ -259,7 +259,7 @@ async fn operator_overlays_including_desk_order_survive_roundtrip() {
             .into(),
     }];
 
-    let (s1, e1, m1, c1) = fs_ports(&home1);
+    let (s1, e1, m1) = fs_ports(&home1);
     s1.save(&CompanyRecord {
         general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
@@ -292,11 +292,11 @@ async fn operator_overlays_including_desk_order_survive_roundtrip() {
     let src_record = s1.load(&id).await.unwrap().unwrap();
     assert_eq!(src_record.effective_desk_members("eng")[0], "cto");
 
-    export_bundle(&id, &dest, s1, e1, m1, c1, None, ExportOpts::default())
+    export_bundle(&id, &dest, s1, e1, m1, ExportOpts::default())
         .await
         .unwrap();
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    import_bundle(&dest, s2.clone(), e2, m2, c2, None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    import_bundle(&dest, s2.clone(), e2, m2)
         .await
         .unwrap();
 
@@ -392,7 +392,7 @@ async fn budget_overrides_survive_roundtrip_including_zero_and_explicit_none() {
         },
     ];
 
-    let (s1, e1, m1, c1) = fs_ports(&home1);
+    let (s1, e1, m1) = fs_ports(&home1);
     s1.save(&CompanyRecord {
         general_channel: Default::default(),
         overlay_desk_hive: Vec::new(),
@@ -477,11 +477,11 @@ async fn budget_overrides_survive_roundtrip_including_zero_and_explicit_none() {
     assert_eq!(src_record.effective_budget("ceo"), Some(0.0));
     assert_eq!(src_record.effective_budget("cto"), None);
 
-    export_bundle(&id, &dest, s1, e1, m1, c1, None, ExportOpts::default())
+    export_bundle(&id, &dest, s1, e1, m1, ExportOpts::default())
         .await
         .unwrap();
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    import_bundle(&dest, s2.clone(), e2, m2, c2, None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    import_bundle(&dest, s2.clone(), e2, m2)
         .await
         .unwrap();
 

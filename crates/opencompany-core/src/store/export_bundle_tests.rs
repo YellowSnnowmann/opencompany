@@ -55,7 +55,7 @@ async fn a_console_tool_grant_survives_a_roundtrip_without_becoming_a_seed_grant
     let mut folded = manifest.clone();
     folded.tools.allow.push("chargebee".to_string());
 
-    let (s1, e1, m1, c1) = fs_ports(&home1);
+    let (s1, e1, m1) = fs_ports(&home1);
     s1.save(&CompanyRecord {
         general_channel: Default::default(),
         id: id.clone(),
@@ -84,7 +84,7 @@ async fn a_console_tool_grant_survives_a_roundtrip_without_becoming_a_seed_grant
     .await
     .unwrap();
 
-    export_bundle(&id, &dest, s1, e1, m1, c1, None, ExportOpts::default())
+    export_bundle(&id, &dest, s1, e1, m1, ExportOpts::default())
         .await
         .unwrap();
 
@@ -100,8 +100,8 @@ async fn a_console_tool_grant_survives_a_roundtrip_without_becoming_a_seed_grant
         "the exported seed must not carry the console's grant"
     );
 
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    import_bundle(&dest, s2.clone(), e2, m2, c2, None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    import_bundle(&dest, s2.clone(), e2, m2)
         .await
         .unwrap();
     let dst = s2.load(&id).await.unwrap().unwrap();
@@ -156,7 +156,7 @@ async fn a_bundle_with_duplicate_budget_overrides_is_rejected() {
     let dest = tmp_root("dup-bundle");
     let id = CompanyId::new("dup-co");
 
-    let (s1, e1, m1, c1) = fs_ports(&home1);
+    let (s1, e1, m1) = fs_ports(&home1);
     s1.save(&CompanyRecord {
         general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
@@ -184,7 +184,7 @@ async fn a_bundle_with_duplicate_budget_overrides_is_rejected() {
     })
     .await
     .unwrap();
-    export_bundle(&id, &dest, s1, e1, m1, c1, None, ExportOpts::default())
+    export_bundle(&id, &dest, s1, e1, m1, ExportOpts::default())
         .await
         .unwrap();
 
@@ -214,8 +214,8 @@ async fn a_bundle_with_duplicate_budget_overrides_is_rejected() {
         .await
         .unwrap();
 
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    let err = import_bundle(&dest, s2.clone(), e2, m2, c2, None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    let err = import_bundle(&dest, s2.clone(), e2, m2)
         .await
         .expect_err("import must refuse a bundle with two overrides for one teammate");
     let message = err.to_string();
@@ -250,7 +250,7 @@ async fn a_bundle_with_duplicate_agent_edits_is_rejected() {
     let dest = tmp_root("dupedit-bundle");
     let id = CompanyId::new("dupedit-co");
 
-    let (s1, e1, m1, c1) = fs_ports(&home1);
+    let (s1, e1, m1) = fs_ports(&home1);
     s1.save(&CompanyRecord {
         general_channel: Default::default(),
         overlay_retired_agents: Vec::new(),
@@ -278,7 +278,7 @@ async fn a_bundle_with_duplicate_agent_edits_is_rejected() {
     })
     .await
     .unwrap();
-    export_bundle(&id, &dest, s1, e1, m1, c1, None, ExportOpts::default())
+    export_bundle(&id, &dest, s1, e1, m1, ExportOpts::default())
         .await
         .unwrap();
 
@@ -305,8 +305,8 @@ async fn a_bundle_with_duplicate_agent_edits_is_rejected() {
         .await
         .unwrap();
 
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    let err = import_bundle(&dest, s2.clone(), e2, m2, c2, None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    let err = import_bundle(&dest, s2.clone(), e2, m2)
         .await
         .expect_err("import must refuse a bundle with two edits for one teammate");
     let message = err.to_string();
@@ -347,9 +347,9 @@ async fn tar_pack_unpack_roundtrip() {
         .await
         .unwrap();
 
-    let (s, e, m, c) = fs_ports(&home);
+    let (s, e, m) = fs_ports(&home);
     let bundle_dir = tmp_root("tar-bundle").join(id.as_ref());
-    export_bundle(&id, &bundle_dir, s, e, m, c, None, ExportOpts::default())
+    export_bundle(&id, &bundle_dir, s, e, m, ExportOpts::default())
         .await
         .unwrap();
 
@@ -366,8 +366,8 @@ async fn tar_pack_unpack_roundtrip() {
 
     // Import the unpacked bundle into a fresh home.
     let home2 = tmp_root("tar-dst");
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    let imported = import_bundle(&root, s2.clone(), e2, m2, c2, None)
+    let (s2, e2, m2) = fs_ports(&home2);
+    let imported = import_bundle(&root, s2.clone(), e2, m2)
         .await
         .unwrap();
     assert_eq!(imported, id);
@@ -383,257 +383,4 @@ async fn tar_pack_unpack_roundtrip() {
     ] {
         tokio::fs::remove_dir_all(&dir).await.ok();
     }
-}
-
-/// The third knowledge port finally travels: facts written on the source
-/// come back from the imported bundle, and the bundle carries them in
-/// `facts.jsonl (bundle root)` beside the traces they conceptually sit with.
-#[tokio::test]
-async fn operator_facts_travel_with_the_bundle() {
-    use crate::ports::facts::FactStore;
-    use crate::ports::{FactKind, FactRecord};
-    use crate::store::FsOps;
-
-    let home1 = tmp_root("facts-src");
-    let home2 = tmp_root("facts-dst");
-    let dest = tmp_root("facts-bundle");
-    let id = CompanyId::new("facts-co");
-
-    let (s1, e1, m1, c1) = fs_ports(&home1);
-    s1.save(&company_record(&id)).await.unwrap();
-    let f1: Arc<dyn FactStore> = Arc::new(FsOps::new(home1.clone()));
-    f1.upsert(
-        &id,
-        &FactRecord {
-            id: "supplier".into(),
-            kind: FactKind::Fact,
-            title: "supplier".into(),
-            body: "lathe parts come from Initech".into(),
-            source: "cto".into(),
-            updated_at_millis: 1,
-        },
-    )
-    .await
-    .unwrap();
-
-    export_bundle(&id, &dest, s1, e1, m1, c1, Some(f1), ExportOpts::default())
-        .await
-        .unwrap();
-    assert!(
-        dest.join(FACTS_JSONL).is_file(),
-        "the bundle must carry the facts file at the bundle root, where \
-             the live fs layout keeps it"
-    );
-
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    let f2: Arc<dyn FactStore> = Arc::new(FsOps::new(home2.clone()));
-    let imported = import_bundle(&dest, s2, e2, m2, c2, Some(f2.clone()))
-        .await
-        .unwrap();
-    let listed = f2.list(&imported, None, None).await.unwrap();
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].body, "lathe parts come from Initech");
-}
-
-/// Both compatibility directions: a bundle written without facts (an old
-/// host, or an export run without the port) imports clean into a target
-/// that has one — empty, never an error — and a bundle WITH facts refuses
-/// a target with no fact port rather than dropping them silently.
-#[tokio::test]
-async fn facts_compatibility_is_explicit_in_both_directions() {
-    use crate::ports::facts::FactStore;
-    use crate::ports::{FactKind, FactRecord};
-    use crate::store::FsOps;
-
-    // Old bundle (no facts file) into a facts-capable target: clean.
-    let home1 = tmp_root("factless-src");
-    let home2 = tmp_root("factless-dst");
-    let dest = tmp_root("factless-bundle");
-    let id = CompanyId::new("factless-co");
-    let (s1, e1, m1, c1) = fs_ports(&home1);
-    s1.save(&company_record(&id)).await.unwrap();
-    export_bundle(&id, &dest, s1, e1, m1, c1, None, ExportOpts::default())
-        .await
-        .unwrap();
-    assert!(!dest.join(FACTS_JSONL).exists());
-    let (s2, e2, m2, c2) = fs_ports(&home2);
-    let f2: Arc<dyn FactStore> = Arc::new(FsOps::new(home2.clone()));
-    let imported = import_bundle(&dest, s2, e2, m2, c2, Some(f2.clone()))
-        .await
-        .unwrap();
-    assert!(f2.list(&imported, None, None).await.unwrap().is_empty());
-
-    // Facts-bearing bundle into a target with no fact port: a refusal
-    // naming the loss, not a silent drop.
-    let home3 = tmp_root("factful-src");
-    let home4 = tmp_root("factful-dst");
-    let dest2 = tmp_root("factful-bundle");
-    let id2 = CompanyId::new("factful-co");
-    let (s3, e3, m3, c3) = fs_ports(&home3);
-    s3.save(&company_record(&id2)).await.unwrap();
-    let f3: Arc<dyn FactStore> = Arc::new(FsOps::new(home3.clone()));
-    f3.upsert(
-        &id2,
-        &FactRecord {
-            id: "f".into(),
-            kind: FactKind::Fact,
-            title: "t".into(),
-            body: "b".into(),
-            source: "s".into(),
-            updated_at_millis: 1,
-        },
-    )
-    .await
-    .unwrap();
-    export_bundle(
-        &id2,
-        &dest2,
-        s3,
-        e3,
-        m3,
-        c3,
-        Some(f3),
-        ExportOpts::default(),
-    )
-    .await
-    .unwrap();
-    let (s4, e4, m4, c4) = fs_ports(&home4);
-    let err = import_bundle(&dest2, s4.clone(), e4, m4, c4, None)
-        .await
-        .expect_err("facts with no target port must refuse");
-    assert!(err.to_string().contains("fact"), "{err}");
-    // The property the refuse-before-write ordering exists for: NOTHING
-    // landed. A refusal after `store.save` would leave a half-import
-    // whose append-only retry duplicates history.
-    assert!(
-        s4.load(&id2).await.unwrap().is_none(),
-        "the refusal must precede every write"
-    );
-}
-/// The fact-port failure case of the ordering guarantee: facts are the
-/// FIRST write, so a failing fact port leaves zero company state behind —
-/// the retry-safety claim, asserted rather than narrated.
-#[tokio::test]
-async fn a_failing_fact_port_leaves_nothing_written() {
-    use crate::ports::facts::FactStore;
-    use crate::ports::{FactKind, FactRecord};
-    use crate::store::FsOps;
-
-    struct FailingFacts;
-    #[async_trait::async_trait]
-    impl FactStore for FailingFacts {
-        async fn list(
-            &self,
-            _: &CompanyId,
-            _: Option<&str>,
-            _: Option<FactKind>,
-        ) -> crate::Result<Vec<FactRecord>> {
-            Ok(Vec::new())
-        }
-        async fn upsert(&self, _: &CompanyId, _: &FactRecord) -> crate::Result<()> {
-            Err(crate::error::OpenCompanyError::Store(
-                "injected fact-port failure".into(),
-            ))
-        }
-        async fn delete(&self, _: &CompanyId, _: &str) -> crate::Result<bool> {
-            Ok(false)
-        }
-    }
-
-    let home_src = tmp_root("factfail-src");
-    let home_dst = tmp_root("factfail-dst");
-    let dest = tmp_root("factfail-bundle");
-    let id = CompanyId::new("factfail-co");
-    let (s1, e1, m1, c1) = fs_ports(&home_src);
-    s1.save(&company_record(&id)).await.unwrap();
-    let f1: Arc<dyn FactStore> = Arc::new(FsOps::new(home_src.clone()));
-    f1.upsert(
-        &id,
-        &FactRecord {
-            id: "f".into(),
-            kind: FactKind::Fact,
-            title: "t".into(),
-            body: "b".into(),
-            source: "s".into(),
-            updated_at_millis: 1,
-        },
-    )
-    .await
-    .unwrap();
-    export_bundle(&id, &dest, s1, e1, m1, c1, Some(f1), ExportOpts::default())
-        .await
-        .unwrap();
-
-    let (s2, e2, m2, c2) = fs_ports(&home_dst);
-    let err = import_bundle(&dest, s2.clone(), e2, m2, c2, Some(Arc::new(FailingFacts)))
-        .await
-        .expect_err("the injected fact failure must surface");
-    assert!(err.to_string().contains("injected"), "{err}");
-    assert!(
-        s2.load(&id).await.unwrap().is_none(),
-        "a fact-port failure must precede every append-only write"
-    );
-}
-
-/// Re-exporting a now-factless company into the SAME directory must not
-/// leave the previous export's facts behind for a later import to
-/// resurrect.
-#[tokio::test]
-async fn a_factless_reexport_removes_the_stale_facts_file() {
-    use crate::ports::facts::FactStore;
-    use crate::ports::{FactKind, FactRecord};
-    use crate::store::FsOps;
-
-    let home = tmp_root("stale-src");
-    let dest = tmp_root("stale-bundle");
-    let id = CompanyId::new("stale-co");
-    let (s1, e1, m1, c1) = fs_ports(&home);
-    s1.save(&company_record(&id)).await.unwrap();
-    let facts: Arc<dyn FactStore> = Arc::new(FsOps::new(home.clone()));
-    facts
-        .upsert(
-            &id,
-            &FactRecord {
-                id: "f".into(),
-                kind: FactKind::Fact,
-                title: "t".into(),
-                body: "b".into(),
-                source: "s".into(),
-                updated_at_millis: 1,
-            },
-        )
-        .await
-        .unwrap();
-    export_bundle(
-        &id,
-        &dest,
-        s1.clone(),
-        e1.clone(),
-        m1.clone(),
-        c1.clone(),
-        Some(facts.clone()),
-        ExportOpts::default(),
-    )
-    .await
-    .unwrap();
-    assert!(dest.join(FACTS_JSONL).is_file());
-
-    // The operator deletes the fact, then re-exports into the same dir.
-    assert!(facts.delete(&id, "f").await.unwrap());
-    export_bundle(
-        &id,
-        &dest,
-        s1,
-        e1,
-        m1,
-        c1,
-        Some(facts),
-        ExportOpts::default(),
-    )
-    .await
-    .unwrap();
-    assert!(
-        !dest.join(FACTS_JSONL).exists(),
-        "a factless re-export must remove the stale facts file"
-    );
 }
