@@ -124,7 +124,7 @@ impl ConfinedToolPolicy {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ToolPolicy for ConfinedToolPolicy {
     fn name(&self) -> &str {
         "workflow_confined"

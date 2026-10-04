@@ -123,7 +123,7 @@ impl CompanyMemory {
                 namespace: self.root.clone(),
                 source: None,
                 tags: Vec::new(),
-                updated_at: chrono::Utc::now().timestamp_millis(),
+                updated_at: tm::chrono::Utc::now().timestamp_millis(),
                 score: 0.0,
                 editable: true,
             },
