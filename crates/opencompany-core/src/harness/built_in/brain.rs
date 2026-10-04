@@ -973,7 +973,6 @@ impl HarnessBrain {
                     .drain_and_execute(
                         grant.origin_thread.as_deref(),
                         delegation::MessageContext::default(),
-                        delegation::HandOffs::Run,
                     ),
             )
             .await
