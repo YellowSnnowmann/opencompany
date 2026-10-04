@@ -1893,26 +1893,17 @@ fn scope_tool_names(
             }
         }
     }
-    // **The scope has to allow what a seated turn may carry.**
+    // **The scope has to allow the hive's own tools.**
     //
     // `ToolScopeSpec::Named` is fixed when the agent is registered; the
-    // episode's belt arrives per turn. A name the scope does not list is
-    // dropped before the model sees it, so a seat was offered its teammate's
-    // belt and told to reach the room over MCP -- the envelope this work
-    // exists to remove, still there because the scope had never heard of
-    // `desk_complete_episode`.
-    //
-    // Listing them here costs nothing on an ordinary turn: the belt factory
-    // decides whether the tools exist at all, and the episode's own admission
-    // gates them when they do. The scope only stops being a reason they
-    // cannot.
-    for speech in crate::hive::tools::served_speech_tool_names()
-        .into_iter()
-        .chain([crate::hive::takeover::TAKE_OVER_TOOL])
-    {
-        let prefixed = format!("{}{speech}", crate::hive::host::TOOL_PREFIX);
-        if !tool_names.contains(&prefixed) {
-            tool_names.push(prefixed);
+    // `hivemind_*` tools arrive afterwards, attached to this same handle by the
+    // TinyHiveMind OpenHuman adapter when the company hive registers it. They
+    // are attached as permanent, and listing them here as well means a scope
+    // that would otherwise drop an unknown name cannot be the reason an agent
+    // is never offered the tools it speaks to its teammates with.
+    for name in crate::hive::HIVEMIND_TOOLS {
+        if !tool_names.iter().any(|held| held == name) {
+            tool_names.push((*name).to_string());
         }
     }
     if mcp_attached {

@@ -44,3 +44,21 @@ pub mod storage;
 /// The in-flight turn registry and the MCP tool adapter.
 #[cfg(feature = "openhuman")]
 pub mod tools;
+
+/// The permanent tools the TinyHiveMind OpenHuman adapter attaches to every
+/// registered agent (`docs/opencompany-migration.md` in `vendor/tinyhivemind`):
+/// how an agent reads hives, messages a teammate, posts, asks, broadcasts and
+/// completes its part of an episode. Named here so an agent's tool scope can
+/// admit them, and so no belt tool of this crate's can shadow one
+/// (`attach_tools` refuses a name collision).
+pub const HIVEMIND_TOOLS: &[&str] = &[
+    "hivemind_list_hives",
+    "hivemind_list_agents",
+    "hivemind_read",
+    "hivemind_send_hive",
+    "hivemind_send_agent",
+    "hivemind_post",
+    "hivemind_ask",
+    "hivemind_broadcast",
+    "hivemind_complete",
+];
