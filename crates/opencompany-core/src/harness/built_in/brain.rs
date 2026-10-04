@@ -970,10 +970,7 @@ impl HarnessBrain {
                     // exactly this reason, so a threaded approval resumes in its own
                     // thread rather than against the channel's unparented history.
                     .in_thread(grant.origin_parent)
-                    .drain_and_execute(
-                        grant.origin_thread.as_deref(),
-                        delegation::MessageContext::default(),
-                    ),
+                    .drain_and_execute(grant.origin_thread.as_deref()),
             )
             .await
         {
@@ -2971,7 +2968,7 @@ impl HarnessBrain {
         let run_turn = self.run_turn();
         let record = self.record();
         self.delegation_runner(run_turn.as_ref(), &record)
-            .run_delegation(delegation, chat_id, delegation::MessageContext::default())
+            .run_delegation(delegation, chat_id)
             .await
     }
 

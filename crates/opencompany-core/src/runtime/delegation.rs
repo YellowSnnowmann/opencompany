@@ -473,70 +473,6 @@ fn no_turn_error() -> crate::error::OpenCompanyError {
     )
 }
 
-/// What was already decided about the operator message a drain belongs to
-/// (issues #463, #267, #984).
-///
-/// Facts carried together because they answer the same question and because a
-/// run of bare `bool` parameters at a call site is a swap waiting to happen.
-/// All default to `false`, which is the honest reading for every drain with no
-/// operator message in scope — a dispatched card's turn, the approval
-/// re-dispatch — neither of which has a message to have carded or triaged.
-///
-/// Two of the three are settled before the model says anything; `chatter` is
-/// the exception (issue #984) and is the model's own verdict, which is why it
-/// is a separate field rather than another reading of `answering`.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct MessageContext {
-    /// The REST chat handler already opened a To-do card for this message
-    /// (issue #463), so no path below may open a second one.
-    ///
-    /// The handler has **two** roads to that card and this flag has to cover
-    /// both: the triage naming a title, and — since #580 — the operator's
-    /// composer asking for a workflow, which the handler takes as an override
-    /// and supplies a title for when the triage declined to. Re-deriving this
-    /// from the triage alone was true for the first road and false for the
-    /// second, so a workflow request the triage did not recognise as work
-    /// arrived here looking uncarded and got a second card (issue #1035).
-    pub(crate) carded_by_handler: bool,
-    /// The message triaged as
-    /// [`MessageTriage::Answer`](crate::company::task_intent::MessageTriage)
-    /// (issue #267). A hand-off still **runs** — consulting a desk is how a
-    /// question the orchestrator cannot answer alone gets answered — but it
-    /// opens no card, because nobody commissioned work.
-    pub(crate) answering: bool,
-    /// The lexical layer abstained and the **model** read this message as
-    /// conversation (issue #984).
-    ///
-    /// Distinct from [`answering`](Self::answering) on purpose. That flag also
-    /// narrows the model's own board tools; this one must not, because `Chatter`
-    /// is the ambiguous bucket and withdrawing tools on a maybe is the expensive
-    /// direction. All this does is stand the two deterministic card paths down —
-    /// the paths that would otherwise open a card because
-    /// [`is_trackable_work`]'s default is "everything is work".
-    ///
-    /// Only ever `true` where the lexical layer already abstained, so it can
-    /// **subtract** a card and never mint one. Every degraded path — no harness,
-    /// no escalation wired, an unparseable or slow verdict — leaves it `false`
-    /// and behaves exactly as before.
-    pub(crate) chatter: bool,
-    /// The **operator** said this message is not a request for work (issue
-    /// #1152) — they sent it under the composer's "Just chatting".
-    ///
-    /// A peer to [`chatter`](Self::chatter), never a reuse of it. That field is
-    /// documented as *the model's* verdict, set only where the lexical layer
-    /// abstained; this is a person's own statement about their own message,
-    /// settled before any model runs, and it holds whatever the triage read —
-    /// including a confident `Track`. Folding this into `chatter` would falsify
-    /// that doc, make the debug line attribute an operator's choice to a model
-    /// that was never asked, and put this change inside the field #984 owns.
-    ///
-    /// Subtractive only, like `chatter`: it stands the deterministic card paths
-    /// down and touches nothing else. The model's own board tools are NOT
-    /// narrowed — see [`open_work_card`](DelegationRunner::open_work_card) for
-    /// why, and what that means the label does and does not promise.
-    pub(crate) not_work: bool,
-}
-
 /// What one drain of the delegation queue produced (issue #453).
 ///
 /// Extracted so every path that runs a turn can reuse the *exact* execution
@@ -954,7 +890,7 @@ impl<'a> DelegationRunner<'a> {
             // The SAME arm the chat path runs — which is what makes the
             // no-column-move invariant inherited rather than re-promised here.
             let outcome = self
-                .run_delegation(delegation, None, MessageContext::default())
+                .run_delegation(delegation, None)
                 .await;
             let row = match (spawn, outcome) {
                 // A card id comes back only after the store took the write
@@ -1334,15 +1270,6 @@ impl<'a> DelegationRunner<'a> {
         let not_work = self
             .requested_intent
             .is_some_and(crate::ports::types::MessageIntent::is_chat);
-        // Everything below that could open a card reads these facts about the
-        // operator's message rather than re-deriving them from text that is no
-        // longer the operator's (issues #463, #267, #1152).
-        let ctx = MessageContext {
-            carded_by_handler,
-            answering,
-            chatter,
-            not_work,
-        };
         // …and *which* card that is, when it is still on the board. Adopting it
         // is what carries "one message, one card" through the publish drain too:
         // the caller files a published deliverable onto `spawned_task` rather
@@ -1491,7 +1418,7 @@ impl<'a> DelegationRunner<'a> {
         // settles *this* card, and it has to still be readable after
         // `spawned_task` takes it (issue #678).
         let mut spawned_task: Option<String> = handler_card.clone();
-        let drained = self.drain_and_execute(chat_id, ctx).await?;
+        let drained = self.drain_and_execute(chat_id).await?;
         if let Some(id) = drained.spawned_task {
             spawned_task.get_or_insert(id);
         }
@@ -1688,18 +1615,14 @@ impl<'a> DelegationRunner<'a> {
     /// on the card by [`handle_task_delegations`](Self::handle_task_delegations)
     /// and logged by the relay path, and those are two different treatments of
     /// one fact rather than something a shared drain can decide.
-    pub(crate) async fn drain_and_execute(
-        &self,
-        chat_id: Option<&str>,
-        ctx: MessageContext,
-    ) -> Result<Drained> {
+    pub(crate) async fn drain_and_execute(&self, chat_id: Option<&str>) -> Result<Drained> {
         let mut drained = Drained::default();
         for delegation in self.queue.drain(self.max_delegations) {
-            let out = self.run_delegation(delegation, chat_id, ctx).await?;
+            let out = self.run_delegation(delegation, chat_id).await?;
             drained.absorb(out);
         }
         if self.queue.has_queued() {
-            let nested = Box::pin(self.drain_and_execute(chat_id, ctx)).await?;
+            let nested = Box::pin(self.drain_and_execute(chat_id)).await?;
             drained.merge(nested);
         }
         Ok(drained)
@@ -1731,7 +1654,7 @@ impl<'a> DelegationRunner<'a> {
         );
         for delegation in queued {
             let outcome = self
-                .run_delegation(delegation, None, MessageContext::default())
+                .run_delegation(delegation, None)
                 .await?;
             if let Some(refused) = outcome.refused_card {
                 card.note = Some(append_note(
@@ -1745,165 +1668,6 @@ impl<'a> DelegationRunner<'a> {
             }
         }
         Ok(())
-    }
-
-    /// Opens the board card that tracks a piece of work, **before** the turn
-    /// that does it runs (issue #442).
-    ///
-    /// This is the whole fix in one method: the card is opened by the runner as
-    /// a structural consequence of work being handed to an agent, rather than
-    /// by the model happening to reach for the card-shaped tool. Every caller
-    /// that is about to run somebody's turn goes through here first, so there is
-    /// no path on which work starts and the board stays empty.
-    ///
-    /// Returns `None` — no card, nothing to settle — in exactly six cases:
-    ///
-    /// * **no task store wired**, the silent no-op every task path on this seam
-    ///   takes;
-    /// * **already inside a dispatched card** (`for_task`), which is the card;
-    ///   opening a second one would double-count one piece of work;
-    /// * **the operator said this is not work** (`not_work`, issue #1152) — they
-    ///   sent the message under "Just chatting";
-    /// * **the model read this as conversation** (`chatter`, issue #984);
-    /// * **the chat handler already carded this message** (`carded_by_handler`,
-    ///   issue #463) — see [`handle_operator_message`](Self::handle_operator_message);
-    /// * **nothing substantial was asked** — see [`is_trackable_work`]; this is
-    ///   the carve-out that keeps a trivial question from minting a card;
-    /// * the write failed, which propagates rather than returning `None`.
-    ///
-    /// # What `not_work` does NOT do (issue #1152)
-    ///
-    /// It stands down the paths that open a card **by construction**. The
-    /// orchestrator's own `spawn_task` tool is untouched: narrowing the board
-    /// tools would change which delegation-queue claim the turn runs under, and
-    /// "this is not a work request" is not a reason to take the company's tools
-    /// away mid-conversation. So it means the company will not *automatically*
-    /// card the message, not that a card can never appear.
-    ///
-    /// The write goes through the [`TaskStore`] port rather than
-    /// `CompanyRuntime::upsert_task`, so landing the card straight in
-    /// [`COLUMN_IN_PROGRESS`](lifecycle::COLUMN_IN_PROGRESS) cannot re-fire the
-    /// `column → in_progress` dispatch edge — the agent is already running it.
-    async fn open_work_card(
-        &self,
-        assignee: &str,
-        request: &str,
-        chat_id: Option<&str>,
-        ctx: MessageContext,
-    ) -> Result<Option<TaskRecord>> {
-        let Some(tasks) = self.tasks else {
-            return Ok(None);
-        };
-        if self.task.is_some() {
-            return Ok(None);
-        }
-        // Issue #1152: the operator said, on this message, that it is not a
-        // request for work. Nothing below gets a vote.
-        //
-        // **Above the `chatter` check on purpose.** When both are true they
-        // agree, so the order changes no outcome — but it changes what the log
-        // says happened, and the operator is the one who can be asked why. A
-        // line crediting the model for a stand-down a person asked for sends the
-        // next person debugging this to the escalation prompt instead of to the
-        // composer.
-        //
-        // One guard here rather than one per caller: all three card-opening
-        // paths funnel through this method, and #442's lesson is exactly that a
-        // stand-down placed in one caller leaves the others opening cards.
-        if ctx.not_work {
-            tracing::debug!(
-                company = %self.company,
-                assignee = %assignee,
-                "[delegation] not opening a card: the operator sent this message as chat, not work"
-            );
-            return Ok(None);
-        }
-        // Issue #984: the model already read this as conversation, so no card.
-        //
-        // Placed HERE, in the shared helper, rather than beside the `answering`
-        // check in each caller: `answering` differs between the two paths (a
-        // hand-off and a direct ask log different things about a question), but
-        // "the model called this chatter" is one fact about the message and both
-        // paths owe it the same answer. #442 put its stand-down in one caller
-        // only and the other path kept opening cards; this is that lesson.
-        //
-        // Below the `self.task.is_some()` guard deliberately: a dispatched
-        // card's turn has no operator message to have triaged, and `ctx`
-        // defaults to all-false there anyway.
-        if ctx.chatter {
-            tracing::debug!(
-                company = %self.company,
-                assignee = %assignee,
-                "[delegation] not opening a card: the model read this message as conversation"
-            );
-            return Ok(None);
-        }
-        // Issue #463: the REST chat handler read the operator's original words
-        // and already opened a To-do card for them. One message must not become
-        // two cards, whichever of the two card-opening paths below is running —
-        // #442 guarded only the direct path, and a recognised imperative that
-        // was handed off doubled through this one.
-        if ctx.carded_by_handler {
-            tracing::debug!(
-                company = %self.company,
-                assignee = %assignee,
-                "[delegation] not opening a card: the chat handler already opened one for this \
-                 message"
-            );
-            return Ok(None);
-        }
-        // What the operator actually asked for, without the open-work briefing
-        // the cycle appends to a desk-addressed message. Everything below reads
-        // this rather than `request`: the decision, the title, and the note —
-        // a card whose title was half a listing of other cards is the same bug
-        // wearing a different hat.
-        let request = operator_words(request).trim();
-        if !is_trackable_work(request) {
-            tracing::debug!(
-                company = %self.company,
-                assignee = %assignee,
-                "[delegation] not opening a card: nothing substantial was asked"
-            );
-            return Ok(None);
-        }
-        let card = TaskRecord {
-            opened_by: None,
-            id: generate_id(),
-            title: crate::ports::tasks::mint_task_title(request, None, self.titler).await,
-            note: Some(append_note(None, "operator", request)),
-            // The agent runs it in this turn, so the board shows it in progress
-            // while that happens — the same window `hand_card_over` opens for a
-            // dispatched card's delegate.
-            column: lifecycle::COLUMN_IN_PROGRESS.to_string(),
-            priority: "medium".to_string(),
-            assignee: assignee.to_string(),
-            updated_at_millis: now_millis(),
-            // Issue #1890 B: the conversation this card was raised in — the
-            // desk, and *which thread* inside it. The runner was bound to the
-            // raising turn's root by `in_thread`, so this is the same
-            // conversation the turn itself answers in, not a second reading of
-            // it. `None` for the thread is the channel-level conversation,
-            // which is what an unthreaded hand-off has always been.
-            origin: TaskOrigin::new(chat_id.map(str::to_string), self.thread_root),
-            parent_task_id: None,
-            output: None,
-            plan: None,
-            planning_attempts: Vec::new(),
-            deliverable: crate::ports::tasks::TaskDeliverable::Once,
-            workflow_proposal: None,
-            origin_run_id: None,
-            origin_workflow_id: None,
-            origin_message_seq: None,
-            bounced: None,
-        };
-        tasks.upsert(self.company, &card).await?;
-        tracing::debug!(
-            company = %self.company,
-            task_id = %card.id,
-            assignee = %assignee,
-            "[delegation] opened a card for work handed to an agent"
-        );
-        Ok(Some(card))
     }
 
     /// The card the REST chat handler opened for this message, when it opened
@@ -2030,21 +1794,10 @@ impl<'a> DelegationRunner<'a> {
     /// deeper answers are folded into this member's reply rather than relayed
     /// separately. Depth is bounded at the tool boundary by the scope chain, not
     /// by this function.
-    ///
-    /// `ctx` carries what
-    /// [`handle_operator_message`](Self::handle_operator_message) already
-    /// decided about the operator message this drain belongs to — whether the
-    /// REST chat handler carded it (issue #463) and whether it triaged as a
-    /// question (issue #267). Both are threaded in rather than recomputed
-    /// because the only text in scope here is the instruction the *model*
-    /// wrote, which is a different sentence from the one those decisions were
-    /// made about. A dispatched card's drain has no operator message and passes
-    /// [`MessageContext::default`].
     pub(crate) async fn run_delegation(
         &self,
         delegation: Delegation,
         chat_id: Option<&str>,
-        ctx: MessageContext,
     ) -> Result<DelegationOutcome> {
         match delegation {
             Delegation::SpawnTask {

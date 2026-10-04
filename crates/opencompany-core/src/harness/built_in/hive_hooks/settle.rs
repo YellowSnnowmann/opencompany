@@ -38,7 +38,7 @@ use crate::ports::types::{
     ApprovalOrigin, CompanyEvent, HiveTurnRef, OutboundMessage, TurnStep, TurnStepKind,
     TurnStepStatus,
 };
-use crate::runtime::delegation::{ChatTarget, DelegationRunner, MessageContext};
+use crate::runtime::delegation::{ChatTarget, DelegationRunner};
 use crate::runtime::journal::{ApprovalConversation, TaskLink};
 
 /// The cards one episode's agents may open between them, and the rule that a
