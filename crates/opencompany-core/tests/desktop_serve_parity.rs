@@ -152,19 +152,6 @@ const DELIBERATE_DIFFERENCES: &[(&str, &str)] = &[
          the safe answer rather than a live hole",
     ),
     (
-        "state.with_memory_overlay",
-        "deferred, tracked in #2320 — OPENCOMPANY_MEMORY and the `[memory]` \
-         section reach no desktop host",
-    ),
-    (
-        "builder.with_memory_overlay",
-        "deferred, tracked in #2320 — pairs with state.with_memory_overlay",
-    ),
-    (
-        "builder.with_memory_overlay_cleared",
-        "deferred, tracked in #2320 — the clear-on-rebuild half of the same seam",
-    ),
-    (
         "builder.with_task_seeding",
         "deferred, tracked in #2321 — desktop boards open with no baseline \
          setup cards. Turning it on adds cards to every board, which is a \
