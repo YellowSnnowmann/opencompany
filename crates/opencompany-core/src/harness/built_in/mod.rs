@@ -6013,9 +6013,6 @@ pub(crate) fn workflow_wiring_deps(
     }
 }
 
-#[cfg(test)]
-#[path = "built_in_read_retention_tests.rs"]
-mod built_in_read_retention_tests;
 /// Issue #1840: chat-turn history seeding, first half.
 /// `routed_context` fingerprint/resolution coverage.
 #[cfg(test)]
