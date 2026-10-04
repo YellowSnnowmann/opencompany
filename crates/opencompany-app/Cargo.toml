@@ -120,14 +120,6 @@ path = "src/main.rs"
 # what a desktop operator can hold, and the Connections card already asks them
 # for it.
 #
-# `tinymemory` IS here, in the features below. It is the cheap half of the
-# memory seam — TinyMemory v2's engine registry (CortexDB direct, CortexDB via
-# the TinyHumans backend), plus the host's own "No memory" engine — pure Rust and
-# already in the lockfile — and the memory-engine catalog is a console surface
-# the desktop serves too. Without it its tiles render disabled with "this build
-# was compiled without the `tinymemory` feature", an instruction no desktop user
-# can follow. There is no in-pod memory engine to exclude any more; the runtime
-# keeps its fs-backed memory stores.
 # `tinyhumans` is what makes this host able to ask the hub whose credential it
 # is holding. Without it `HttpHubIdentityExchange` and `HttpTinyHumansClient`
 # are not compiled, `hub_identity()` stays `None`, and the Account page reports
@@ -151,7 +143,7 @@ path = "src/main.rs"
 # `crash-reporting`, so dev, CI and release share one source rather than a
 # fourth copy of the feature string. `src/analytics.rs` supplies the deployment,
 # switch, client id and endpoint a double-clicked app has no environment for.
-opencompany-core = { path = "../opencompany-core", default-features = false, features = ["sqlite", "platform-jwt", "oauth", "mcp", "tinymemory", "tinyhumans", "crash-reporting", "analytics"] }
+opencompany-core = { path = "../opencompany-core", default-features = false, features = ["sqlite", "platform-jwt", "oauth", "mcp", "tinyhumans", "crash-reporting", "analytics"] }
 
 tauri = { version = "2", features = [] }
 # The OS credential store, so a device session token never has to live in the

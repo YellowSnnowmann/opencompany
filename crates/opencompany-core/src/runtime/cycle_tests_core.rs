@@ -132,12 +132,12 @@ pub(super) use crate::ports::types::{
     ActorKind, ChunkAddr, ChunkHit, ChunkMeta, CompressedTrace, ContextChunk, CycleResult,
     EffectGroup, EvictionPolicy, ReplyTo, TaskResult, TokenUsage,
 };
-pub(super) use crate::ports::{ContextStore, MemoryStore};
+pub(super) use crate::ports::{ContextStore, TraceStore};
 pub(super) use crate::runtime::RuntimeBuilder;
 pub(super) use crate::runtime::channel::OperatorChannel;
 pub(super) use crate::server::ops::mailer::RecordingMailSender;
 pub(super) use crate::store::paths::Bundle;
-pub(super) use crate::store::{FsContextStore, FsMemoryStore};
+pub(super) use crate::store::{FsContextStore, FsTraceStore};
 
 pub(super) fn tmp_home() -> tempfile::TempDir {
     tempfile::Builder::new()
@@ -438,16 +438,16 @@ pub(super) async fn pending_run(
         .id
 }
 
-/// A [`MemoryStore`] that counts the calls a cycle makes, delegating the
+/// A [`TraceStore`] that counts the calls a cycle makes, delegating the
 /// work to a real fs store so the runtime behaves normally around it.
 pub(super) struct CountingMemory {
-    inner: FsMemoryStore,
+    inner: FsTraceStore,
     pub(super) reads: AtomicUsize,
     pub(super) writes: AtomicUsize,
 }
 
 impl CountingMemory {
-    pub(super) fn new(inner: FsMemoryStore) -> Self {
+    pub(super) fn new(inner: FsTraceStore) -> Self {
         Self {
             inner,
             reads: AtomicUsize::new(0),
@@ -457,7 +457,7 @@ impl CountingMemory {
 }
 
 #[async_trait]
-impl MemoryStore for CountingMemory {
+impl TraceStore for CountingMemory {
     async fn save_trace(&self, id: &CompanyId, trace: CompressedTrace) -> Result<()> {
         self.writes.fetch_add(1, Ordering::SeqCst);
         self.inner.save_trace(id, trace).await

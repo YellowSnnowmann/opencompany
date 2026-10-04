@@ -545,7 +545,7 @@ async fn a_dispatch_naming_an_unknown_run_does_not_fail_the_cycle() {
 async fn a_cycle_reads_neither_recent_traces_nor_the_context_index() {
     let home_dir = tmp_home();
     let home = home_dir.path().to_path_buf();
-    let memory = Arc::new(CountingMemory::new(FsMemoryStore::new(home.clone())));
+    let memory = Arc::new(CountingMemory::new(FsTraceStore::new(home.clone())));
     let context = Arc::new(CountingContext::new(FsContextStore::new(home.clone())));
     let rt = RuntimeBuilder::new(home, manifest("full"))
         .with_memory(memory.clone())

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * The Settings → Brain (operator memory) surface, end to end against the real FactStore.
+ * The Brain (operator memory) surface, end to end against OpenHuman's memory engine.
  *
  * This flow exercises `…/memory` and needs no inference, so it runs on the
  * default Console E2E lane rather than the live-brain lane.
@@ -19,10 +19,10 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("operator adds a Brain memory that persists across reload and can be deleted", async ({
+test("operator adds a Brain learning that persists across reload and can be deleted", async ({
   page,
 }) => {
-  // Settings → Brain reads the real FactStore over `…/memory`; adding a note must
+  // Brain reads OpenHuman memory over `…/memory`; adding a learning must
   // survive a reload (proving it hit the backend, not localStorage) and delete
   // must remove it. The legacy `#/memory` address must land here too.
   await page.goto("/#/memory");
@@ -34,16 +34,14 @@ test("operator adds a Brain memory that persists across reload and can be delete
   // this bare arrival opens to its default (Overview).
   await page.getByRole("tab", { name: "Upload" }).click();
   await page.getByTestId("memory-add").click();
-  await page.getByTestId("memory-title").fill(title);
-  await page.getByTestId("memory-body").fill("recall me on the next turn");
+  await page.getByTestId("memory-text").fill(`${title} — recall me on the next turn`);
   await page.getByTestId("memory-save").click();
 
   await page.getByRole("tab", { name: "Overview" }).click();
   const card = page.getByTestId("memory-card").filter({ hasText: title });
   await expect(card).toBeVisible({ timeout: 30_000 });
 
-  // Reload: a localStorage stub would survive too, so also assert the health
-  // strip counts a real backend item.
+  // Reload: the card must come back from the host, not from page state.
   await page.reload();
   await page.goto("/#/settings/brain");
   await expect(page.getByTestId("memory-card").filter({ hasText: title })).toBeVisible({

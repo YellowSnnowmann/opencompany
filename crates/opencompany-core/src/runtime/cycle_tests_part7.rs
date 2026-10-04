@@ -472,7 +472,7 @@ async fn external_cycles_put_through_the_inbound_port() {
 #[tokio::test]
 async fn overlay_built_runtimes_route_external_puts_through_the_inbound_port() {
     use crate::ports::ContextStore;
-    use crate::store::{FsContextStore, FsMemoryStore, MemoryOverlay};
+    use crate::store::{FsContextStore, FsTraceStore, MemoryOverlay};
 
     let home_dir = tmp_home();
     let plain_dir = tempfile::tempdir().unwrap();
@@ -483,7 +483,7 @@ async fn overlay_built_runtimes_route_external_puts_through_the_inbound_port() {
         Arc::new(FsContextStore::new(inbound_dir.path().to_path_buf()));
     let memory_dir = tempfile::tempdir().unwrap();
     let overlay = MemoryOverlay::test_with_ports(
-        Arc::new(FsMemoryStore::new(memory_dir.path().to_path_buf())),
+        Arc::new(FsTraceStore::new(memory_dir.path().to_path_buf())),
         plain.clone(),
         Some(inbound.clone()),
     );

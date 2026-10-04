@@ -564,18 +564,6 @@ pub struct AppState {
     /// selected (`OPENCOMPANY_STORAGE`). Provisioning injects these into each
     /// new company's builder; `None` means fs defaults.
     stores: Option<crate::store::StorageHandles>,
-    /// The memory engine overlay selected by `OPENCOMPANY_MEMORY`, when it is
-    /// not the base store's own memory. Provisioning and boot apply it after
-    /// `stores` so a dedicated provider can back recall on top of any
-    /// base backend. `None` means the base backend's memory is used unchanged.
-    ///
-    /// Behind a lock because the engine is no longer decided only at boot: the
-    /// console's engine route opens a replacement overlay and swaps it in, then
-    /// rebuilds each registered company so the new ports are actually in force
-    /// (`crate::server::ops::memory_engine`). Same shape, and the same reason,
-    /// as [`Self::auth_mode_override`] — a choice an operator makes while the
-    /// process is running, which telling them to restart for would defeat.
-    memory_overlay: Arc<RwLock<Option<crate::store::MemoryOverlay>>>,
     /// The `companies/` directory whose bundles' `skills/` form the skill
     /// registry (`crate::company::load_catalog_skills`), set on the serve path.
     /// `None` in platform-provisioned mode (no repo checkout), where the
@@ -720,7 +708,6 @@ impl AppState {
             config_root: None,
             ownership: Arc::new(RwLock::new(HashMap::new())),
             stores: None,
-            memory_overlay: Arc::new(RwLock::new(None)),
             skills_root: None,
             skill_registry: Arc::new(OnceLock::new()),
             instance_id: Arc::new(OnceLock::new()),
@@ -853,8 +840,7 @@ impl AppState {
     /// (issue #290) — the capability behind every surface that offers to apply
     /// a configuration change without a process restart.
     ///
-    /// [`crate::server::setup`] and [`crate::server::ops::memory_engine`]
-    /// establish the same fact by *attempting* a rebuild and reporting the
+    /// [`crate::server::setup`] establishes the same fact by *attempting* a rebuild and reporting the
     /// failure. That is the right shape for an action already under way, and
     /// the wrong one for a surface deciding whether to *offer* the action at
     /// all: a console that cannot ask up front renders a control whose only
@@ -960,40 +946,6 @@ impl AppState {
     pub fn instance_id(&self) -> &str {
         self.instance_id
             .get_or_init(|| crate::app::instance::load_or_create(&self.home))
-    }
-
-    /// Installs the memory engine overlay selected at boot
-    /// (`OPENCOMPANY_MEMORY`, or `[memory]` in `config.toml`).
-    pub fn with_memory_overlay(self, overlay: crate::store::MemoryOverlay) -> Self {
-        self.set_memory_overlay(Some(overlay));
-        self
-    }
-
-    /// The bound memory engine overlay, if one is selected.
-    ///
-    /// Returns a clone rather than a borrow: the overlay can be replaced while
-    /// the process runs (see [`Self::set_memory_overlay`]), and every field of
-    /// it is an `Arc`, so the clone costs a handful of refcount bumps and
-    /// cannot observe a half-applied swap.
-    pub fn memory_overlay(&self) -> Option<crate::store::MemoryOverlay> {
-        self.memory_overlay
-            .read()
-            .expect("memory overlay poisoned")
-            .clone()
-    }
-
-    /// Replaces the bound memory engine overlay.
-    ///
-    /// `None` returns memory to the base storage backend's own ports. This
-    /// only changes what a company built *after* it will bind — companies
-    /// already in the registry hold the previous ports on their cached
-    /// runtime, so a caller that wants the swap in force must rebuild them
-    /// ([`crate::runtime::rebuild_company`]).
-    pub fn set_memory_overlay(&self, overlay: Option<crate::store::MemoryOverlay>) {
-        *self
-            .memory_overlay
-            .write()
-            .expect("memory overlay poisoned") = overlay;
     }
 
     /// The skill registry, loaded from the `companies/` directory `dir` and

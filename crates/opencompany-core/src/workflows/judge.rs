@@ -224,12 +224,11 @@ pub struct RecoveryResult {
 const MAX_FOCUS_TERMS: usize = 6;
 const MIN_FOCUS_TERM_LEN: usize = 4;
 
-/// Candidate single-word `FactStore` queries pulled out of a natural-language
-/// question (issue #1990 review, #3903591432): `FactStore::list`'s query is a
-/// case-insensitive substring match over a fact's title + body, so the whole
-/// question almost never appears verbatim even when a fact IS the answer — a
-/// fact titled "Renewal date" never matches the sentence "The answer must
-/// include the renewal date". Lowercased, deduplicated, common short/filler
+/// Candidate single-word memory queries pulled out of a natural-language
+/// question (issue #1990 review, #3903591432): a whole question ranks poorly
+/// against a short learning even when the learning IS the answer — "Renewal
+/// date: March 1" is a weak match for "The answer must include the renewal
+/// date" — so the ladder also searches its focus words. Lowercased, deduplicated, common short/filler
 /// words dropped, capped so the bounded recovery ladder stays bounded.
 fn focus_terms(question: &str) -> Vec<String> {
     const STOPWORDS: &[&str] = &[
@@ -439,20 +438,25 @@ pub async fn ask_around(
     let mut evidence = Vec::new();
     let mut log = Vec::new();
 
-    if let Some(facts) = deps.facts.as_ref() {
+    let memory = crate::memory::CompanyMemory::new(company);
+    {
+        use crate::memory::MemoryItemKind;
         let mut queries = vec![query.clone()];
         queries.extend(focus_terms(&query));
         let mut seen_ids = std::collections::HashSet::new();
         let mut query_errors = Vec::new();
         'queries: for q in &queries {
-            match facts.list(company, Some(q), None).await {
+            match memory
+                .search(q, Some(MemoryItemKind::Learning), MAX_RECOVERY_ITEMS)
+                .await
+            {
                 Ok(rows) => {
                     for row in rows {
                         if evidence.len() >= MAX_RECOVERY_ITEMS {
                             break 'queries;
                         }
                         if seen_ids.insert(row.id.clone()) {
-                            evidence.push(format!("fact: {} — {}", row.title, row.body));
+                            evidence.push(format!("fact: {}", row.body));
                         }
                     }
                 }
@@ -464,26 +468,20 @@ pub async fn ask_around(
         } else {
             log.push(format!("facts: {} match(es)", evidence.len()));
         }
-    } else {
-        log.push("facts: unavailable".to_string());
     }
 
     if evidence.is_empty() {
-        match deps
-            .context
-            .search(company, &query, MAX_RECOVERY_ITEMS)
-            .await
-        {
+        match memory.search(&query, None, MAX_RECOVERY_ITEMS).await {
             Ok(hits) => {
                 for hit in hits {
-                    evidence.push(format!("workspace: {}", hit.snippet));
+                    evidence.push(format!("memory: {}", hit.title));
                 }
-                log.push(format!("workspace: {} match(es)", evidence.len()));
+                log.push(format!("memory: {} match(es)", evidence.len()));
             }
-            Err(err) => log.push(format!("workspace: unavailable ({err})")),
+            Err(err) => log.push(format!("memory: unavailable ({err})")),
         }
     } else {
-        log.push("workspace: skipped after fact match".to_string());
+        log.push("memory: skipped after fact match".to_string());
     }
 
     if evidence.is_empty() {

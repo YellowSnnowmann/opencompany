@@ -7,11 +7,11 @@
 //!
 //! ## What a drop becomes
 //!
-//! Text, chunked, in the [`ContextStore`](crate::ports::ContextStore) the
-//! agents recall from — the same store an operator fact is mirrored into, so a
-//! dropped document reaches a teammate on its next turn with no further step.
-//! The extraction and chunking rules live in [`crate::ingest`]; this module is
-//! the transport and the reporting.
+//! Text, filed as one document in the company's **brain** — OpenHuman's
+//! memory under `team:<company>/source:<kind>` ([`crate::memory`]) — which
+//! every teammate's recall reaches, so a dropped document reaches a teammate on
+//! its next turn with no further step. The extraction rules live in
+//! [`crate::ingest`]; this module is the transport and the reporting.
 //!
 //! The original bytes are **not** kept. See [`crate::ingest`] for why that is
 //! the design and not an omission — in short, the workspace tree is where
@@ -36,7 +36,7 @@
 //! that is, or resolves to, a loopback, link-local, or private address, which
 //! is what stops "remember this page" from being a read primitive against the
 //! deployment's own network. The enforcing guard is TinyMemory's
-//! `sources::fetch::fetch_url`, which connects only to the addresses it vetted
+//! `sources::fetch::fetch_url` (`tinymemory-integrations`), which connects only to the addresses it vetted
 //! (closing DNS rebinding) and re-checks every redirect hop; the check in this
 //! module is an early, readable refusal in front of it.
 
@@ -50,8 +50,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::error::OpenCompanyError;
-use crate::ingest::{Extracted, MAX_DOCUMENT_BYTES, chunk_document, extract};
-use crate::ports::types::ContextChunk;
+use crate::ingest::{Extracted, MAX_DOCUMENT_BYTES, extract};
 use crate::server::error::ApiError;
 use crate::server::ops::scope::{ScopedCompany, scoped};
 
@@ -83,8 +82,11 @@ struct IngestedItem {
     source: String,
     /// `stored`, `empty`, `unsupported`, or `failed`.
     status: &'static str,
-    /// How many memory chunks it became.
+    /// How many brain documents it became: `1` when stored, else `0`.
     chunks: usize,
+    /// The brain source it was filed under (`pdf`, `markdown`, `web`, …).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    brain_source: Option<String>,
     /// Why it is not `stored`, when it is not.
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
@@ -96,6 +98,7 @@ impl IngestedItem {
             source,
             status: "failed",
             chunks: 0,
+            brain_source: None,
             detail: Some(detail),
         }
     }
@@ -107,7 +110,7 @@ impl IngestedItem {
 struct IngestedDto {
     /// One row per file or link, in the order they were sent.
     items: Vec<IngestedItem>,
-    /// Chunks written across the batch — what the Brain counter will move by.
+    /// Documents filed across the batch — what the Brain counter will move by.
     chunks: usize,
     /// How many sources actually landed in memory.
     stored: usize,
@@ -162,6 +165,7 @@ async fn store_source(
                 source,
                 status: "empty",
                 chunks: 0,
+                brain_source: None,
                 detail: Some(
                     "no text in it — a scanned document needs OCR before memory can hold it"
                         .to_string(),
@@ -173,95 +177,69 @@ async fn store_source(
                 source,
                 status: "unsupported",
                 chunks: 0,
+                brain_source: None,
                 detail: Some(reason),
             };
         }
     };
 
-    let chunks = chunk_document(&source, &text);
-    let mut written = 0;
-    for chunk in chunks {
-        let put = company
-            .runtime
-            .context
-            .put(
-                company.id(),
-                ContextChunk {
-                    label: chunk.label,
-                    body: chunk.body,
-                },
-            )
-            .await;
-        match put {
-            Ok(_) => written += 1,
-            // Reported as a partial store rather than a silent success: some
-            // of the document is in memory and the operator has to know which
-            // state they are in before deciding to re-drop it.
-            Err(error) => {
-                tracing::warn!(company = %company.id(), %source, %error, "memory ingest chunk failed");
-                return IngestedItem {
-                    source,
-                    status: "failed",
-                    chunks: written,
-                    detail: Some(format!(
-                        "stored {written} chunks, then memory refused the next one: {error}"
-                    )),
-                };
-            }
+    let kind = brain_source_of(&source, declared);
+    match company.runtime.memory().brain_file(&source, kind, &text).await {
+        Ok(filed) => IngestedItem {
+            source,
+            status: "stored",
+            chunks: 1,
+            brain_source: Some(filed.source),
+            detail: None,
+        },
+        Err(error) => {
+            tracing::warn!(company = %company.id(), %source, %error, "memory ingest failed");
+            IngestedItem::failed(source, format!("memory refused it: {error}"))
         }
-    }
-    IngestedItem {
-        source,
-        status: "stored",
-        chunks: written,
-        detail: None,
     }
 }
 
-/// The document whose chunks are to be forgotten, by its label slug.
+/// The brain source a dropped file or fetched link is filed under: its
+/// format, which is what an operator forgets by.
+fn brain_source_of(name: &str, declared: Option<&str>) -> &'static str {
+    let lower = name.to_ascii_lowercase();
+    let ext = lower.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
+    let html = declared.is_some_and(|mime| mime.contains("html"));
+    if lower.starts_with("http://") || lower.starts_with("https://") || html {
+        return "web";
+    }
+    match ext {
+        "pdf" => "pdf",
+        "md" | "markdown" | "txt" | "text" => "markdown",
+        "htm" | "html" => "web",
+        _ => "document",
+    }
+}
+
+/// The brain source whose documents are to be forgotten.
 #[derive(Debug, Deserialize)]
 struct DocumentPath {
-    /// The `document/{slug}` label's slug half, as
-    /// [`label_for`](crate::ingest::label_for) derived it.
+    /// The source id (`pdf`, `markdown`, `web`, `document`).
     source: String,
 }
 
-/// `DELETE …/memory/document/{source}` — forget one dropped document.
+/// `DELETE …/memory/document/{source}` — forget every dropped document of one
+/// source.
 ///
 /// The counterpart the drop zone needs to be usable: dropping the wrong folder
-/// is a mistake an operator makes once, and without this the only remedy is a
-/// company's whole memory. Scoped to `document/` labels alone — nothing here
-/// can reach an agent's own memory or a task outcome, which are records of
-/// what happened rather than material an operator supplied.
+/// is a mistake an operator makes once. Scoped to the brain alone — nothing
+/// here can reach a teammate's logged turns or the shared learnings.
 async fn forget_document(
     company: ScopedCompany,
     Path(DocumentPath { source }): Path<DocumentPath>,
 ) -> Result<Json<ForgottenDto>, ApiError> {
-    let prefix = format!("{}/{source}/", crate::ingest::DOCUMENT_LABEL_PREFIX);
-    let context = company.runtime.context.as_ref();
-    let all = context.list(company.id(), "").await?;
-    let mut forgotten = 0;
-    for meta in all.iter().filter(|m| m.label.starts_with(&prefix)) {
-        // Chunks are content-addressed, so one address can carry several
-        // labels: two identical paragraphs in one folder drop, or a document
-        // re-dropped under a new name. The delete is label-scoped (#1300):
-        // exactly this document's claim goes, any other label keeps the body,
-        // and the body is reaped with its last claim atomically inside the
-        // port — the same shape the fact mirror's reap uses, minus the old
-        // snapshot guard that skipped shared chunks entirely (which left a
-        // deleted document's claims listed forever).
-        if context
-            .delete_label(company.id(), &meta.addr, &meta.label)
-            .await?
-        {
-            forgotten += 1;
-        }
-    }
+    let forgotten = company.runtime.memory().brain_forget(&source).await?;
     if forgotten == 0 {
-        return Err(ApiError(OpenCompanyError::CompanyNotFound(format!(
-            "no document memory under `{source}`"
+        return Err(ApiError(OpenCompanyError::NotFound(format!(
+            "no documents in the brain under `{source}`"
         ))));
     }
+    super::memory::journal_forget(&company, format!("source:{source}")).await?;
     Ok(Json(ForgottenDto { forgotten }))
 }
 
@@ -269,7 +247,7 @@ async fn forget_document(
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ForgottenDto {
-    /// Chunks removed.
+    /// Documents removed.
     forgotten: usize,
 }
 
@@ -365,7 +343,7 @@ async fn ingest_links(
 /// other than http(s), a literal internal address, or an internal host name.
 ///
 /// A cheap early answer with a readable reason, not the guard itself. The
-/// guard is TinyMemory's fetcher ([`tinymemory::sources::fetch::fetch_url`]):
+/// guard is TinyMemory's fetcher (`tinymemory_integrations::sources::fetch::fetch_url`):
 /// its client resolves through a public-only resolver and connects to exactly
 /// the addresses it vetted, and re-checks every redirect hop. That is what
 /// closes DNS rebinding — the host's own resolve-then-connect check it
@@ -376,7 +354,7 @@ fn link_refusal(url: &str) -> Result<(), String> {
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err("only http:// and https:// links can be fetched".to_string());
     }
-    if !tinymemory::sources::readers::ssrf::is_url_allowed(&parsed) {
+    if !tinymemory_integrations::sources::fetch::ssrf::is_url_allowed(&parsed) {
         return Err("that host is inside this deployment's own network".to_string());
     }
     Ok(())
@@ -385,7 +363,7 @@ fn link_refusal(url: &str) -> Result<(), String> {
 /// Fetches one link and stores what it said.
 #[cfg(feature = "documents")]
 async fn fetch_link(company: &ScopedCompany, url: String) -> IngestedItem {
-    let document = match tinymemory::sources::fetch::fetch_url(&url).await {
+    let document = match tinymemory_integrations::sources::fetch::fetch_url(&url).await {
         Ok(document) => document,
         Err(error) => return IngestedItem::failed(url, format!("could not be fetched: {error}")),
     };

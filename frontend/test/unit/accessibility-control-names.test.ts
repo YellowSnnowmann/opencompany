@@ -15,11 +15,12 @@ describe("operator control names (issue #1395)", () => {
     expect(ledgers).toContain('aria-label="Filter by status"');
   });
 
-  it("names the memory search and type filter independently of their placeholders", () => {
+  it("names the memory search, kind and agent filters independently of their placeholders", () => {
     const memory = read("views/MemoryView.tsx");
 
     expect(memory).toContain('aria-label="Search memory"');
-    expect(memory).toContain('aria-label="Filter by memory type"');
+    expect(memory).toContain('aria-label="Filter by memory kind"');
+    expect(memory).toContain('aria-label="Filter by agent"');
   });
 
   it("names the usage range filter", () => {

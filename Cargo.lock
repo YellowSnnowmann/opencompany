@@ -1845,6 +1845,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "enumflags2"
+version = "0.7.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1027f7680c853e056ebcec683615fb6fbbc07dbaa13b4d5d9442b146ded4ecef"
+dependencies = [
+ "enumflags2_derive",
+]
+
+[[package]]
+name = "enumflags2_derive"
+version = "0.7.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67c78a4d8fdf9953a5c9d458f9efe940fd97a0cab0941c075a813ac594733827"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3174,6 +3194,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf36173d4167ed999940f804952e6b08197cae5ad5d572eb4db150ce8ad5d58f"
 
 [[package]]
+name = "landlock"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cca98e95f35b29d469dade6724c6f96cec9236640f745a0e99b0334ec320ab1"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3211,6 +3242,24 @@ name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+
+[[package]]
+name = "libdeflate-sys"
+version = "1.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7870e5fbd2766179a937c725fb11f4ca0ef025d982beb61bd3ce755425bd19c"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "libdeflater"
+version = "1.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cbb8285d2e2bd4b8d4155840ae81929354b4ba0d7b3c272c84761ffa2141e1f"
+dependencies = [
+ "libdeflate-sys",
+]
 
 [[package]]
 name = "libm"
@@ -4089,8 +4138,8 @@ dependencies = [
  "tinyinference-core",
  "tinyinference-llm",
  "tinymcp",
- "tinymemory",
- "tinymemory-conformance",
+ "tinymemory-api",
+ "tinymemory-integrations",
  "tinysearch-bus",
  "tinytools",
  "tinytools-agent",
@@ -4198,7 +4247,9 @@ dependencies = [
  "tinyjuice-bus",
  "tinymcp",
  "tinymcp-bus",
- "tinymemory",
+ "tinymemory-api",
+ "tinymemory-integrations",
+ "tinymemory-tools",
  "tinyruntime-bus",
  "tinyruntime-pyserver",
  "tinysearch-bus",
@@ -4227,12 +4278,16 @@ name = "openhuman-embed"
 version = "0.64.10"
 dependencies = [
  "anyhow",
+ "async-trait",
  "log",
  "openhuman",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.20",
+ "tinymcp-bus",
+ "tinymemory-api",
+ "tinymemory-tools",
  "tokio",
  "url",
  "uuid",
@@ -4334,6 +4389,20 @@ dependencies = [
  "objc2-ui-kit",
  "serde",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "oxipng"
+version = "9.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26c613f0f566526a647c7473f6a8556dbce22c91b13485ee4b4ec7ab648e4973"
+dependencies = [
+ "bitvec",
+ "indexmap",
+ "libdeflater",
+ "log",
+ "rgb",
+ "rustc-hash",
 ]
 
 [[package]]
@@ -5205,6 +5274,15 @@ name = "resolv-conf"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e061d1b48cb8d38042de4ae0a7a6401009d6143dc80d2e2d6f31f0bdd6470c7"
+
+[[package]]
+name = "rgb"
+version = "0.8.53"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "ring"
@@ -6659,7 +6737,7 @@ dependencies = [
 
 [[package]]
 name = "tinyagents-definition"
-version = "2.1.2"
+version = "2.1.3"
 dependencies = [
  "async-trait",
  "serde",
@@ -6667,7 +6745,7 @@ dependencies = [
 
 [[package]]
 name = "tinyagents-graph"
-version = "2.1.2"
+version = "2.1.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6684,7 +6762,7 @@ dependencies = [
 
 [[package]]
 name = "tinyagents-harness"
-version = "2.1.2"
+version = "2.1.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6694,6 +6772,7 @@ dependencies = [
  "dirs 6.0.0",
  "flate2",
  "futures",
+ "oxipng",
  "regex",
  "reqwest 0.12.28",
  "rusqlite",
@@ -6701,6 +6780,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "tar",
  "tempfile",
  "thiserror 2.0.20",
  "tinyagents-definition",
@@ -6715,11 +6795,12 @@ dependencies = [
  "tracing",
  "uuid",
  "wait-timeout",
+ "zip 2.4.2",
 ]
 
 [[package]]
 name = "tinyagents-orchestration"
-version = "2.1.2"
+version = "2.1.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6740,7 +6821,7 @@ dependencies = [
 
 [[package]]
 name = "tinyagents-registry"
-version = "2.1.2"
+version = "2.1.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6754,7 +6835,7 @@ dependencies = [
 
 [[package]]
 name = "tinyagents-runtime"
-version = "2.1.2"
+version = "2.1.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6772,7 +6853,7 @@ dependencies = [
 
 [[package]]
 name = "tinyagents-session"
-version = "2.1.2"
+version = "2.1.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6796,7 +6877,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-core"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "serde",
@@ -6805,7 +6886,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-docker"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "tinybox-core",
@@ -6814,8 +6895,9 @@ dependencies = [
 
 [[package]]
 name = "tinybox-jail"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
+ "landlock",
  "log",
  "serde",
  "serde_json",
@@ -7168,6 +7250,7 @@ name = "tinyinference-llm"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "bytes",
  "futures",
  "reqwest 0.12.28",
@@ -7312,22 +7395,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "tinymemory"
-version = "1.22.4"
-dependencies = [
- "serde",
- "tinymemory-api",
- "tinymemory-context",
- "tinymemory-cortex",
- "tinymemory-documents",
- "tinymemory-import",
- "tinymemory-safety",
- "tinymemory-sources",
-]
-
-[[package]]
 name = "tinymemory-api"
-version = "2.0.0"
+version = "1.23.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -7338,92 +7407,39 @@ dependencies = [
 ]
 
 [[package]]
-name = "tinymemory-conformance"
-version = "2.0.0"
+name = "tinymemory-integrations"
+version = "1.23.1"
 dependencies = [
  "async-trait",
- "thiserror 2.0.20",
- "tinymemory-api",
-]
-
-[[package]]
-name = "tinymemory-context"
-version = "2.0.0"
-dependencies = [
  "chrono",
- "log",
- "serde",
- "thiserror 2.0.20",
- "tinymemory-api",
-]
-
-[[package]]
-name = "tinymemory-cortex"
-version = "2.0.0"
-dependencies = [
- "async-trait",
  "futures",
+ "log",
+ "regex",
  "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tinymemory-api",
- "tokio",
-]
-
-[[package]]
-name = "tinymemory-documents"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tinymemory-api",
-]
-
-[[package]]
-name = "tinymemory-import"
-version = "0.1.0"
-dependencies = [
  "rusqlite",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tinymemory-api",
-]
-
-[[package]]
-name = "tinymemory-safety"
-version = "0.1.0"
-dependencies = [
- "log",
- "regex",
- "serde_json",
- "tinymemory-api",
-]
-
-[[package]]
-name = "tinymemory-sources"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "futures",
- "log",
- "regex",
- "reqwest 0.12.28",
  "schemars",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.20",
  "tinymemory-api",
- "tinymemory-documents",
+ "tinymemory-tools",
  "tokio",
- "toml",
  "tracing",
- "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "tinymemory-tools"
+version = "1.23.1"
+dependencies = [
+ "chrono",
+ "futures",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tinymemory-api",
 ]
 
 [[package]]

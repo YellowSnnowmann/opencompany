@@ -192,7 +192,7 @@ fn workspace_git_checkpoints_default_off_and_switchable() {
 /// scratch, scoped facades, or the archive reader.
 #[tokio::test]
 async fn memory_overlay_carries_scratch_scopes_and_archive_access_to_runtime() {
-    use crate::store::{FsContextStore, FsMemoryStore, MemoryOverlay};
+    use crate::store::{FsContextStore, FsTraceStore, MemoryOverlay};
 
     let home = tmp_home("opencompany-memory-overlay-");
     let memory = tempfile::tempdir().unwrap();
@@ -206,7 +206,7 @@ async fn memory_overlay_carries_scratch_scopes_and_archive_access_to_runtime() {
         context: Arc::new(FsContextStore::new(scoped.path().to_path_buf())),
     });
     let mut overlay = MemoryOverlay::test_with_ports(
-        Arc::new(FsMemoryStore::new(memory.path().to_path_buf())),
+        Arc::new(FsTraceStore::new(memory.path().to_path_buf())),
         plain,
         None,
     );
@@ -237,14 +237,14 @@ async fn memory_overlay_carries_scratch_scopes_and_archive_access_to_runtime() {
 /// selection was re-applied.
 #[tokio::test]
 async fn a_rebuild_reapplying_the_engine_replaces_the_handover_ports() {
-    use crate::store::{FsContextStore, FsMemoryStore, MemoryOverlay};
+    use crate::store::{FsContextStore, FsTraceStore, MemoryOverlay};
 
     // Engine A: plain ports, no decorator (the pre-swap engine).
     let home = tmp_home("opencompany-engine-swap-");
     let mem_a = tempfile::tempdir().unwrap();
     let ctx_a = tempfile::tempdir().unwrap();
     let overlay_a = MemoryOverlay::test_with_ports(
-        Arc::new(FsMemoryStore::new(mem_a.path().to_path_buf())),
+        Arc::new(FsTraceStore::new(mem_a.path().to_path_buf())),
         Arc::new(FsContextStore::new(ctx_a.path().to_path_buf())),
         None,
     );
@@ -267,7 +267,7 @@ async fn a_rebuild_reapplying_the_engine_replaces_the_handover_ports() {
     let scratch = tempfile::tempdir().unwrap();
     let scoped = tempfile::tempdir().unwrap();
     let mut overlay_b = MemoryOverlay::test_with_ports(
-        Arc::new(FsMemoryStore::new(mem_b.path().to_path_buf())),
+        Arc::new(FsTraceStore::new(mem_b.path().to_path_buf())),
         Arc::new(FsContextStore::new(ctx_b.path().to_path_buf())),
         None,
     );
@@ -439,7 +439,7 @@ async fn a_reboot_refuses_a_newly_introduced_reserved_agent_id() {
 /// backend's honest answer.
 #[tokio::test]
 async fn a_rebuild_clearing_the_engine_drops_the_handover_decorator() {
-    use crate::store::{FsContextStore, FsMemoryStore, MemoryOverlay};
+    use crate::store::{FsContextStore, FsTraceStore, MemoryOverlay};
 
     let home = tmp_home("opencompany-engine-clear-");
     let mem = tempfile::tempdir().unwrap();
@@ -447,7 +447,7 @@ async fn a_rebuild_clearing_the_engine_drops_the_handover_decorator() {
     let scratch = tempfile::tempdir().unwrap();
     let scoped = tempfile::tempdir().unwrap();
     let mut overlay = MemoryOverlay::test_with_ports(
-        Arc::new(FsMemoryStore::new(mem.path().to_path_buf())),
+        Arc::new(FsTraceStore::new(mem.path().to_path_buf())),
         Arc::new(FsContextStore::new(ctx.path().to_path_buf())),
         None,
     );
@@ -491,7 +491,7 @@ async fn a_rebuild_clearing_the_engine_drops_the_handover_decorator() {
 /// the override that keeps `facts` on the selected engine's port family.
 #[tokio::test]
 async fn a_rebuild_reapplying_the_engine_replaces_the_fact_store() {
-    use crate::store::{FsContextStore, FsMemoryStore, FsOps, MemoryOverlay};
+    use crate::store::{FsContextStore, FsTraceStore, FsOps, MemoryOverlay};
 
     // Engine A serves facts; the swap to B must re-point `ops.facts` at B's
     // store, not keep A's.
@@ -501,7 +501,7 @@ async fn a_rebuild_reapplying_the_engine_replaces_the_fact_store() {
     let facts_dir_a = tempfile::tempdir().unwrap();
     let facts_a: Arc<dyn FactStore> = Arc::new(FsOps::new(facts_dir_a.path().to_path_buf()));
     let mut overlay_a = MemoryOverlay::test_with_ports(
-        Arc::new(FsMemoryStore::new(mem_a.path().to_path_buf())),
+        Arc::new(FsTraceStore::new(mem_a.path().to_path_buf())),
         Arc::new(FsContextStore::new(ctx_a.path().to_path_buf())),
         None,
     );
@@ -523,7 +523,7 @@ async fn a_rebuild_reapplying_the_engine_replaces_the_fact_store() {
     let facts_dir_b = tempfile::tempdir().unwrap();
     let facts_b: Arc<dyn FactStore> = Arc::new(FsOps::new(facts_dir_b.path().to_path_buf()));
     let mut overlay_b = MemoryOverlay::test_with_ports(
-        Arc::new(FsMemoryStore::new(mem_b.path().to_path_buf())),
+        Arc::new(FsTraceStore::new(mem_b.path().to_path_buf())),
         Arc::new(FsContextStore::new(ctx_b.path().to_path_buf())),
         None,
     );
@@ -567,7 +567,7 @@ async fn a_rebuild_reapplying_the_engine_replaces_the_fact_store() {
 #[cfg(feature = "openhuman")]
 #[tokio::test]
 async fn a_rebuild_over_a_swapped_engine_rebinds_the_harness_pool() {
-    use crate::store::{FsContextStore, FsMemoryStore, MemoryOverlay};
+    use crate::store::{FsContextStore, FsTraceStore, MemoryOverlay};
 
     let home = tmp_home("opencompany-engine-pool-");
     let manifest: CompanyManifest =
@@ -577,7 +577,7 @@ async fn a_rebuild_over_a_swapped_engine_rebinds_the_harness_pool() {
     let mem_a = tempfile::tempdir().unwrap();
     let ctx_a = tempfile::tempdir().unwrap();
     let overlay_a = MemoryOverlay::test_with_ports(
-        Arc::new(FsMemoryStore::new(mem_a.path().to_path_buf())),
+        Arc::new(FsTraceStore::new(mem_a.path().to_path_buf())),
         Arc::new(FsContextStore::new(ctx_a.path().to_path_buf())),
         None,
     );
@@ -615,7 +615,7 @@ async fn a_rebuild_over_a_swapped_engine_rebinds_the_harness_pool() {
     let mem_b = tempfile::tempdir().unwrap();
     let ctx_b = tempfile::tempdir().unwrap();
     let overlay_b = MemoryOverlay::test_with_ports(
-        Arc::new(FsMemoryStore::new(mem_b.path().to_path_buf())),
+        Arc::new(FsTraceStore::new(mem_b.path().to_path_buf())),
         Arc::new(FsContextStore::new(ctx_b.path().to_path_buf())),
         None,
     );

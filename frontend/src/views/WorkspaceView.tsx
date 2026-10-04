@@ -2335,7 +2335,7 @@ function Tree(props: TreeProps) {
   );
 }
 
-/** Badge styling per origin, mirroring `ORIGIN_STYLES` in `api/memory.ts`. */
+/** Badge styling per origin, in the identity (`--tone-*`) palette. */
 const ORIGIN_STYLES: Record<WorkspaceOrigin["kind"], string> = {
   agent: "border-tone-3/30 bg-tone-3/10 text-tone-3-text",
   seed: "border-border bg-muted text-muted-foreground",

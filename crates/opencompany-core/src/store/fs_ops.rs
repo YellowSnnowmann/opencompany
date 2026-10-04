@@ -1,4 +1,4 @@
-//! Filesystem backends for the WS3 console ports: tasks, facts, usage,
+//! Filesystem backends for the WS3 console ports: tasks, usage,
 //! skill-state, the workspace file tree, and the human user directory.
 //!
 //! Each store owns a small file (or subtree) inside the company [`Bundle`]:
@@ -7,7 +7,6 @@
 //! - users → `users.json`, invites → `user-invites.json`
 //! - sessions → `user-sessions.json`, login codes → `login-codes.json`
 //!   (credential material: token/code *hashes* only, never plaintext)
-//! - facts → `facts.jsonl` (last-write-wins per id, rewritten on mutate)
 //! - runs → `runs.jsonl` (last-write-wins per id) + `run-steps.jsonl`
 //!   (append-only trace, last-write-wins per `(run_id, step_seq)`)
 //! - usage → `usage.jsonl` (append-only samples)
@@ -30,7 +29,6 @@ use crate::error::OpenCompanyError;
 use crate::ledger::{LedgerEvent, LedgerSpec};
 use crate::ports::artifacts::{ArtifactRecord, ArtifactStore};
 use crate::ports::deep_trace::{DeepTraceStore, MAX_DEEP_RUNS_PER_COMPANY, RunStepDetailRecord};
-use crate::ports::facts::{FactKind, FactRecord, FactStore};
 use crate::ports::ledgers::LedgerStore;
 use crate::ports::login_codes::{LoginCodeRecord, LoginCodeStore};
 use crate::ports::now_millis;
@@ -556,61 +554,6 @@ impl LoginCodeStore for FsOps {
             write_atomic(&path, &serde_json::to_string(&codes)?).await?;
         }
         Ok(removed)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// FactStore
-// ---------------------------------------------------------------------------
-
-#[async_trait]
-impl FactStore for FsOps {
-    async fn list(
-        &self,
-        company: &CompanyId,
-        query: Option<&str>,
-        kind: Option<FactKind>,
-    ) -> Result<Vec<FactRecord>> {
-        let mut facts =
-            dedup_latest(read_jsonl::<FactRecord>(&self.bundle(company).facts_jsonl()).await?);
-        if let Some(kind) = kind {
-            facts.retain(|f| f.kind == kind);
-        }
-        if let Some(q) = query.map(str::to_lowercase).filter(|q| !q.is_empty()) {
-            facts.retain(|f| {
-                f.title.to_lowercase().contains(&q) || f.body.to_lowercase().contains(&q)
-            });
-        }
-        facts.sort_by_key(|f| std::cmp::Reverse(f.updated_at_millis));
-        Ok(facts)
-    }
-
-    async fn upsert(&self, company: &CompanyId, fact: &FactRecord) -> Result<()> {
-        let bundle = self.bundle(company);
-        bundle.ensure_dirs().await?;
-        let path = bundle.facts_jsonl();
-        let lock = path_lock(&path);
-        let _guard = lock.lock().await;
-        let mut facts = dedup_latest(read_jsonl::<FactRecord>(&path).await?);
-        match facts.iter_mut().find(|f| f.id == fact.id) {
-            Some(existing) => *existing = fact.clone(),
-            None => facts.push(fact.clone()),
-        }
-        rewrite_jsonl(&path, &facts).await
-    }
-
-    async fn delete(&self, company: &CompanyId, id: &str) -> Result<bool> {
-        let path = self.bundle(company).facts_jsonl();
-        let lock = path_lock(&path);
-        let _guard = lock.lock().await;
-        let mut facts = dedup_latest(read_jsonl::<FactRecord>(&path).await?);
-        let before = facts.len();
-        facts.retain(|f| f.id != id);
-        if facts.len() == before {
-            return Ok(false);
-        }
-        rewrite_jsonl(&path, &facts).await?;
-        Ok(true)
     }
 }
 
@@ -2399,16 +2342,10 @@ where
 /// Something a JSONL log keys its last-write-wins dedupe on.
 ///
 /// Kept as a trait rather than a closure so [`dedup_latest`] reads identically
-/// at every call site; the two implementors below are the only record types
+/// at every call site; the implementors below are the only record types
 /// stored in an id-keyed JSONL log.
 trait HasId {
     fn record_id(&self) -> &str;
-}
-
-impl HasId for FactRecord {
-    fn record_id(&self) -> &str {
-        &self.id
-    }
 }
 
 impl HasId for ArtifactRecord {

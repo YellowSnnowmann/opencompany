@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-// Guards the Brain "New memory" flow against the save-vs-reload masquerade:
+// Guards the Brain "Add learning" flow against the save-vs-reload masquerade:
 // the write and the post-write reload are two separate operations, and only a
-// failed WRITE may surface the "could not save the memory" toast or leave the
+// failed WRITE may surface the "could not save the learning" toast or leave the
 // operator looking at what they typed. A reload that hangs or fails must never
 // be reported as a save failure — that is what invites a retry and a duplicate
 // memory.
@@ -10,8 +10,7 @@
 // # The form is inline now, not a dialog
 //
 // It was a dialog opened from a button in the Brain header. The header is
-// shared by all three Brain views, so the control stood on Overview and
-// Settings too, while the one page whose whole job is adding had no visible way
+// shared by every Brain view, so the control stood on Overview too, while the one page whose whole job is adding had no visible way
 // to do it by hand. The form is a panel on the Upload tab now.
 //
 // So "the dialog closed" is no longer the observable. The panel has nothing to
@@ -24,19 +23,21 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { MemoryList, MemoryStats } from "@/api/memory";
+import type { MemoryList, MemoryStatus } from "@/api/memory";
 import type { OpenCompanyClient } from "@/api/client";
 
 // Partial mock: keep every constant the view and its dialog render from
-// (kinds, styles, labels, origins, documentSlug), stub only the three network
-// calls the add flow and the initial load touch.
+// (kinds, styles, labels), stub only the network calls the add flow and the
+// initial load touch.
 const createMemory = vi.fn();
 const listMemory = vi.fn();
-const memoryStats = vi.fn();
+const memoryStatus = vi.fn();
+const memoryAgents = vi.fn();
+const brainSources = vi.fn();
 
 vi.mock("@/api/memory", async (importActual) => {
   const actual = await importActual<typeof import("@/api/memory")>();
-  return { ...actual, createMemory, listMemory, memoryStats };
+  return { ...actual, createMemory, listMemory, memoryStatus, memoryAgents, brainSources };
 });
 
 vi.mock("sonner", () => ({
@@ -47,20 +48,11 @@ vi.mock("sonner", () => ({
 const { MemoryView } = await import("@/views/MemoryView");
 const { toast } = await import("sonner");
 
-const EMPTY_LIST: MemoryList = { items: [], totalContext: 0, contextTruncated: false };
-const EMPTY_STATS: MemoryStats = {
-  facts: 0,
-  factsUpdatedAtMillis: 0,
-  lastUpdatedAtMillis: 0,
-  totalItems: 0,
-  teammateMemory: 0,
-  documentMemory: 0,
-  taskOutcomes: 0,
-};
+const EMPTY_LIST: MemoryList = { items: [] };
+const ON: MemoryStatus = { root: "team:acme", on: true, engine: "local" };
 
-// A client whose only reachable call from this view (after the api mock) is
-// EngineSection's `memoryEngine` → `client.get`; leave it pending so the panel
-// sits in its skeleton and never drives state we are not testing.
+// A client the view never reaches past the api mock; every call stays pending
+// so nothing drives state we are not testing.
 function stubClient(): OpenCompanyClient {
   const pending = () => new Promise<never>(() => {});
   return {
@@ -83,6 +75,9 @@ beforeEach(() => {
     root = createRoot(container);
   });
   vi.clearAllMocks();
+  memoryStatus.mockResolvedValue(ON);
+  memoryAgents.mockResolvedValue({ root: "team:acme", agents: [] });
+  brainSources.mockResolvedValue({ root: "team:acme", sources: [], unfiled: 0 });
 });
 
 afterEach(() => {
@@ -102,18 +97,18 @@ function query(testid: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-testid="${testid}"]`);
 }
 
-/** What the title box currently holds — empty once a save is confirmed. */
+/** What the text box currently holds — empty once a save is confirmed. */
 function titleValue(): string | null {
-  const el = query("memory-title") as HTMLInputElement | null;
+  const el = query("memory-text") as HTMLTextAreaElement | null;
   return el ? el.value : null;
 }
 
-// Type a title into the Upload tab's panel and click Save.
+// Type a learning into the Upload tab's panel and click Save.
 async function openAndSave(): Promise<void> {
-  const title = query("memory-title") as HTMLInputElement | null;
+  const title = query("memory-text") as HTMLTextAreaElement | null;
   expect(title).not.toBeNull();
   act(() => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
     setter?.call(title, "Client prefers Friday reviews");
     title?.dispatchEvent(new Event("input", { bubbles: true }));
   });
@@ -132,7 +127,6 @@ describe("MemoryView add: save vs reload", () => {
     // indistinguishable from a save that did not happen.
     createMemory.mockResolvedValue({ id: "m1" });
     listMemory.mockReturnValue(new Promise<MemoryList>(() => {})); // never settles
-    memoryStats.mockReturnValue(new Promise<MemoryStats>(() => {}));
 
     act(() => {
       root.render(
@@ -150,7 +144,6 @@ describe("MemoryView add: save vs reload", () => {
   it("does not report a failed reload as a failed save", async () => {
     createMemory.mockResolvedValue({ id: "m1" });
     listMemory.mockRejectedValue(new Error("reload boom"));
-    memoryStats.mockResolvedValue(EMPTY_STATS);
 
     act(() => {
       root.render(
@@ -162,14 +155,13 @@ describe("MemoryView add: save vs reload", () => {
     await openAndSave();
 
     expect(titleValue()).toBe("");
-    expect(toast.error).not.toHaveBeenCalledWith("could not save the memory");
+    expect(toast.error).not.toHaveBeenCalledWith("could not save the learning");
   });
 
   it("still reports a genuine save failure, and keeps what was typed", async () => {
     // Reject with a non-Error so the dialog's fallback copy is used verbatim.
     createMemory.mockRejectedValue("write failed");
     listMemory.mockResolvedValue(EMPTY_LIST);
-    memoryStats.mockResolvedValue(EMPTY_STATS);
 
     act(() => {
       root.render(
@@ -180,7 +172,7 @@ describe("MemoryView add: save vs reload", () => {
 
     await openAndSave();
 
-    expect(toast.error).toHaveBeenCalledWith("could not save the memory");
+    expect(toast.error).toHaveBeenCalledWith("could not save the learning");
     // Kept, so Save is a retry rather than a re-type.
     expect(titleValue()).toBe("Client prefers Friday reviews");
   });

@@ -3,7 +3,7 @@
 //! Tasks are the operator-visible work items the console's board renders (see
 //! [`BOARD_COLUMNS`]). They are hand-curated state, not cycle working memory —
 //! the brain's per-cycle task results live in
-//! [`MemoryStore`](crate::ports::MemoryStore). Each record is keyed by a stable
+//! [`TraceStore`](crate::ports::TraceStore). Each record is keyed by a stable
 //! id within the company.
 
 use async_trait::async_trait;

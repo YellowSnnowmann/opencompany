@@ -5,61 +5,70 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { OpenCompanyClient } from "@/api/client";
-import type { MemoryEntry, MemoryStats } from "@/api/memory";
+import type {
+  BrainSources,
+  MemoryAgents,
+  MemoryEntry,
+  MemoryList,
+  MemoryStatus,
+} from "@/api/memory";
 import { MemoryView } from "@/views/MemoryView";
 
 /**
- * The Brain's fact CRUD has zero role gate of its own — `POST`/`DELETE
- * …/memory` are `ScopedCompany`, not admin-only — so the authority this axis
- * actually tests is per-row: `editable` (`api/memory.ts`) is what separates an
- * operator's own fact, which Delete may touch, from the agents' own read-only
- * memory, which must never offer one. Paired with the CRUD path itself, which
- * had no test at all: a delete that the host refuses must put the card back,
- * not leave it silently gone.
+ * The Brain over the OpenHuman memory v2 contract: status first (the one route
+ * that answers when memory is off), then one page of items plus the agents and
+ * brain sources beside it. Pins delete-per-item with an honest rollback,
+ * cursor paging, the per-agent filter and forget, the per-source forget, and
+ * the memory-off state that must not touch any other route.
  */
 
 function entry(over: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     id: "m1",
-    origin: "fact",
-    kind: "fact",
-    editable: true,
+    kind: "learning",
+    learningKind: "fact",
     title: "Client prefers Friday reviews",
-    body: "Always confirm before Thursday.",
-    source: "operator",
+    body: "Client prefers Friday reviews",
+    namespace: "team:acme",
+    tags: [],
     updatedAt: 0,
+    editable: true,
     ...over,
   };
 }
 
-const STATS: MemoryStats = {
-  facts: 1,
-  factsUpdatedAtMillis: 0,
-  lastUpdatedAtMillis: 0,
-  totalItems: 1,
-  teammateMemory: 0,
-  documentMemory: 0,
-  taskOutcomes: 0,
+const ON: MemoryStatus = { root: "team:acme", on: true, engine: "local" };
+const AGENTS: MemoryAgents = { root: "team:acme", agents: [{ agentId: "ceo", turns: 4 }] };
+const BRAIN: BrainSources = {
+  root: "team:acme",
+  sources: [{ source: "markdown", documents: 2 }],
+  unfiled: 0,
 };
 
 function clientWith(opts: {
-  entries: MemoryEntry[];
-  del?: () => Promise<void>;
-}): OpenCompanyClient {
+  status?: MemoryStatus;
+  pages?: Record<string, MemoryList>;
+  del?: (path: string) => Promise<unknown>;
+}) {
+  const pages = opts.pages ?? { first: { items: [entry()] } };
   const get = vi.fn((path: string) => {
-    if (path.endsWith("/memory/stats")) return Promise.resolve(STATS);
-    if (path.endsWith("/memory/engine")) return Promise.reject(new Error("no engine route"));
+    if (path.endsWith("/memory/status")) return Promise.resolve(opts.status ?? ON);
+    if (path.endsWith("/memory/agents")) return Promise.resolve(AGENTS);
+    if (path.endsWith("/memory/brain")) return Promise.resolve(BRAIN);
     if (path.includes("/memory")) {
-      return Promise.resolve({ items: opts.entries, totalContext: 0, contextTruncated: false });
+      const cursor = new URLSearchParams(path.split("?")[1] ?? "").get("cursor");
+      return Promise.resolve(pages[cursor ?? "first"] ?? { items: [] });
     }
     return Promise.reject(new Error(`unexpected GET ${path}`));
   });
-  return {
+  const del = vi.fn(opts.del ?? (() => Promise.resolve({ forgotten: 2 })));
+  const client = {
     scopeFor: () => "/api/v1/company/acme",
     get,
     post: vi.fn(() => Promise.resolve(entry())),
-    del: vi.fn(opts.del ?? (() => Promise.resolve())),
+    del,
   } as unknown as OpenCompanyClient;
+  return { client, get, del };
 }
 
 let container: HTMLDivElement;
@@ -69,6 +78,7 @@ async function show(client: OpenCompanyClient) {
   await act(async () => {
     root.render(createElement(MemoryView, { client, company: "acme" }));
   });
+  await act(async () => {});
 }
 
 function cards(): HTMLElement[] {
@@ -92,31 +102,36 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("delete is offered per row, by what the row itself is", () => {
-  it("offers no delete control on the agents' own read-only memory", async () => {
-    const client = clientWith({
-      entries: [entry({ id: "ctx1", origin: "agent-memory", editable: false, title: "Learned fact" })],
+describe("every item may be forgotten", () => {
+  it("offers delete on learnings and conversations alike", async () => {
+    const { client } = clientWith({
+      pages: {
+        first: {
+          items: [
+            entry(),
+            entry({ id: "c1", kind: "conversation", agentId: "ceo", title: "user: hi" }),
+          ],
+        },
+      },
     });
     await show(client);
 
-    const card = cards()[0];
-    expect(card).toBeTruthy();
-    expect(deleteButtonIn(card)).toBeNull();
+    expect(cards()).toHaveLength(2);
+    for (const card of cards()) expect(deleteButtonIn(card)).not.toBeNull();
   });
 
-  it("offers delete on an operator-authored fact", async () => {
-    const client = clientWith({ entries: [entry()] });
+  it("deletes by id through the item route", async () => {
+    const { client, del } = clientWith({});
     await show(client);
 
-    const card = cards()[0];
-    expect(deleteButtonIn(card)).not.toBeNull();
+    await act(async () => {
+      deleteButtonIn(cards()[0])!.click();
+    });
+    expect(del).toHaveBeenCalledWith("/api/v1/company/acme/memory/m1");
   });
-});
 
-describe("a refused delete puts the card back, honestly", () => {
-  it("re-inserts the entry and reports the failure when the host refuses the delete", async () => {
-    const client = clientWith({
-      entries: [entry()],
+  it("re-inserts the entry when the host refuses the delete", async () => {
+    const { client } = clientWith({
       del: () => Promise.reject(new Error("memory engine is unreachable")),
     });
     await show(client);
@@ -125,9 +140,59 @@ describe("a refused delete puts the card back, honestly", () => {
       deleteButtonIn(cards()[0])!.click();
     });
 
-    // A false success is exactly what this file exists to catch: the card
-    // must come back once the host has actually refused the write.
     expect(cards()).toHaveLength(1);
     expect(container.textContent).toContain("Client prefers Friday reviews");
+  });
+});
+
+describe("paging", () => {
+  it("offers Load more while there is a cursor, and appends the next page", async () => {
+    const { client, get } = clientWith({
+      pages: {
+        first: { items: [entry()], nextCursor: "c2" },
+        c2: { items: [entry({ id: "m2", title: "Second page", body: "Second page" })] },
+      },
+    });
+    await show(client);
+
+    const more = container.querySelector<HTMLButtonElement>('[data-testid="memory-load-more"]');
+    expect(more).not.toBeNull();
+    await act(async () => {
+      more!.click();
+    });
+
+    expect(get).toHaveBeenCalledWith("/api/v1/company/acme/memory?cursor=c2");
+    expect(cards()).toHaveLength(2);
+    expect(container.querySelector('[data-testid="memory-load-more"]')).toBeNull();
+  });
+});
+
+describe("status, agents and sources", () => {
+  it("shows the engine, the agents' turns and the brain's sources", async () => {
+    const { client } = clientWith({});
+    await show(client);
+
+    expect(container.querySelector('[data-testid="memory-status-badge"]')?.textContent).toBe(
+      "memory: local",
+    );
+    const health = container.querySelector('[data-testid="memory-health"]')!.textContent;
+    expect(health).toContain("Conversation turns4");
+    expect(health).toContain("Documents2");
+    expect(container.querySelector('[data-testid="memory-brain-source"]')?.textContent).toContain(
+      "markdown",
+    );
+  });
+
+  it("reports memory off with its reason and reads no other route", async () => {
+    const { client, get } = clientWith({
+      status: { root: "team:acme", on: false, reason: "no engine configured" },
+    });
+    await show(client);
+
+    expect(container.querySelector('[data-testid="memory-off"]')?.textContent).toContain(
+      "no engine configured",
+    );
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(cards()).toHaveLength(0);
   });
 });

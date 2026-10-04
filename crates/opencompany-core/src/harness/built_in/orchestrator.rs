@@ -14,7 +14,7 @@
 //! `delegate_to_teammate` — also onto every other roster agent, scoped; see
 //! [`member_delegation_tools`]):
 //!
-//! * [`QueryCompanyTool`] — a read surface over the company's [`FactStore`],
+//! * [`QueryCompanyTool`] — a read surface over the company's learnings,
 //!   recent [`EventLog`] history, and (issue #1859) a `## Board` summary of
 //!   open task cards.
 //! * [`ListTasksTool`] / [`ReadTaskTool`] / [`ReadRunTool`] (issue #1859) —
@@ -88,7 +88,6 @@ use crate::harness::lifecycle::ReviewDecision;
 use crate::harness::workflow_refs::WorkflowRefQueue;
 use crate::ports::artifacts::ArtifactStore;
 use crate::ports::events::EventLog;
-use crate::ports::facts::FactStore;
 use crate::ports::notifications::NotificationStore;
 use crate::ports::runs::{RunFilter, RunRecord, RunStore};
 use crate::ports::tasks::{
@@ -1437,11 +1436,49 @@ impl Drop for ScopeGuard {
 // Tools
 // ---------------------------------------------------------------------------
 
+/// Most learnings `query_company` reads before its own cut: enough past
+/// [`FACT_LIMIT`] that the truncation marker still has something to count.
+const FACT_READ_LIMIT: usize = FACT_LIMIT * 5;
+
+/// The company's shared learnings — operator facts and what its agents
+/// learned — newest first, or the ones matching `query`, best first.
+///
+/// Memory being off is not an unreadable section: there are simply no
+/// learnings to show, the same answer an empty company gives.
+async fn company_learnings(
+    memory: &crate::memory::CompanyMemory,
+    query: Option<&str>,
+) -> crate::Result<Vec<crate::memory::MemoryItem>> {
+    use crate::memory::{MemoryItemKind, MemoryQuery};
+    let read = match query {
+        Some(query) => {
+            memory
+                .search(query, Some(MemoryItemKind::Learning), FACT_READ_LIMIT)
+                .await
+        }
+        None => memory
+            .list(MemoryQuery {
+                kind: Some(MemoryItemKind::Learning),
+                limit: Some(FACT_READ_LIMIT),
+                ..MemoryQuery::default()
+            })
+            .await
+            .map(|page| page.items),
+    };
+    match read {
+        Err(crate::error::OpenCompanyError::NotConfigured(_))
+        | Err(crate::error::OpenCompanyError::NotInBuild(_)) => Ok(Vec::new()),
+        other => other,
+    }
+}
+
 /// A read surface over the company's durable facts and recent event history, so
 /// the orchestrator can ground its answers in whole-company context.
 pub struct QueryCompanyTool {
     company: CompanyId,
-    facts: Option<Arc<dyn FactStore>>,
+    /// The company's memory, whose shared learnings are the `## Facts`
+    /// section. `None` renders the section empty.
+    facts: Option<crate::memory::CompanyMemory>,
     events: Option<Arc<dyn EventLog>>,
     /// The company's source directory, so the tool can enumerate saved
     /// `workflows/*.toml` graphs — the same on-disk list the REST picker reads.
@@ -1465,7 +1502,7 @@ impl QueryCompanyTool {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         company: CompanyId,
-        facts: Option<Arc<dyn FactStore>>,
+        facts: Option<crate::memory::CompanyMemory>,
         events: Option<Arc<dyn EventLog>>,
         workflow_source_dir: Option<PathBuf>,
         store: Option<Arc<dyn CompanyStore>>,
@@ -1503,7 +1540,7 @@ impl Tool for QueryCompanyTool {
     }
 
     fn description(&self) -> &str {
-        "Read the company's durable facts, recent activity, saved workflows, team roster, desks, and a board summary to ground an answer in whole-company context — use this to answer \"what workflows do we have?\", \"who is on the team?\", \"which desks can take work?\", or \"what's in flight?\" instead of guessing, and to get the exact desk id `delegate_to_desk` needs. For a specific card's full attempt history and output, use `list_tasks` / `read_task` instead. Optionally pass a `query` to filter facts by a case-insensitive substring."
+        "Read the company's durable facts, recent activity, saved workflows, team roster, desks, and a board summary to ground an answer in whole-company context — use this to answer \"what workflows do we have?\", \"who is on the team?\", \"which desks can take work?\", or \"what's in flight?\" instead of guessing, and to get the exact desk id `delegate_to_desk` needs. For a specific card's full attempt history and output, use `list_tasks` / `read_task` instead. Optionally pass a `query` to search the facts for what is relevant to it."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -1512,7 +1549,7 @@ impl Tool for QueryCompanyTool {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Optional case-insensitive substring to filter facts by."
+                    "description": "Optional search over the facts; the most relevant come first."
                 }
             },
             "additionalProperties": false
@@ -1533,8 +1570,8 @@ impl Tool for QueryCompanyTool {
 
         let mut unreadable: Vec<&'static str> = Vec::new();
         let facts = match &self.facts {
-            Some(store) => insight_reads::section(
-                store.list(&self.company, query, None).await,
+            Some(memory) => insight_reads::section(
+                company_learnings(memory, query).await,
                 "facts",
                 &self.company,
                 &mut unreadable,
@@ -1650,7 +1687,7 @@ impl Tool for QueryCompanyTool {
             if shown < facts.len() {
                 md.push_str(&format!(
                     "\n[TRUNCATED — {} more fact(s) not shown. This is NOT the whole record. \
-                     Narrow it with `{QUERY_COMPANY_TOOL}({{\"query\": \"<substring>\"}})` before \
+                     Narrow it with `{QUERY_COMPANY_TOOL}({{\"query\": \"<topic>\"}})` before \
                      concluding a fact is absent.]\n",
                     facts.len() - shown
                 ));
@@ -4464,7 +4501,7 @@ impl Tool for AddAgentTool {
 #[allow(clippy::too_many_arguments)]
 pub fn orchestrator_tools(
     company: CompanyId,
-    facts: Option<Arc<dyn FactStore>>,
+    facts: Option<crate::memory::CompanyMemory>,
     events: Option<Arc<dyn EventLog>>,
     // Issue #1859: the board + run-history read surface. See the doc comment
     // above for why any of the three may be `None`.
