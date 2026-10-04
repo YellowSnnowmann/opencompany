@@ -68,9 +68,9 @@ pub use ids::{
 };
 pub use inbox::{EmailRecord, InboxMeta, InboxStore};
 pub use journal::{Durability, JournalStore};
-pub use traces::TraceStore;
 pub use ledgers::LedgerStore;
 pub use login_codes::{LoginCodeRecord, LoginCodeStore};
+pub use traces::TraceStore;
 pub use notifications::{Notification, NotificationStore, NotificationView, Subject, SubjectKind};
 pub use read_state::{ChannelRead, ReadStateStore};
 pub use run_output::{
