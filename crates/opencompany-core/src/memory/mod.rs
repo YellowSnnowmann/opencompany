@@ -43,7 +43,7 @@ use crate::ports::CompanyId;
 /// company id kept as is when it is a valid namespace id and otherwise
 /// sanitized with a hash suffix so distinct ids stay distinct.
 pub fn memory_root(company: &CompanyId) -> String {
-    format!("team:{}", segment_id(company.as_str()))
+    format!("team:{}", segment_id(company.as_ref()))
 }
 
 /// A namespace segment id for `raw`: `[A-Za-z0-9_-]{1,128}` kept as is,
