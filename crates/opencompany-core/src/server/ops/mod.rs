@@ -64,7 +64,6 @@ pub mod mcp_config;
 pub mod mcp_registry;
 pub mod mcp_tool_policy;
 pub mod memory;
-pub mod memory_engine;
 pub mod memory_ingest;
 /// The `@` picker's directory: every teammate, person, desk and broadcast token
 /// a mention can name, in one member-safe read. See [`mentions`].
@@ -168,8 +167,6 @@ mod tests_mcp_manifest;
 #[path = "write_mcp_probed_identity_tests.rs"]
 mod tests_mcp_probed_identity;
 #[cfg(test)]
-#[path = "write_memory_stats_last_updated_tests.rs"]
-mod tests_memory_stats_last_updated;
 #[cfg(test)]
 #[path = "write_parent_task_id_rejects_tests.rs"]
 mod tests_parent_task_id_rejects;
@@ -327,7 +324,6 @@ pub fn router() -> Router<AppState> {
         .merge(artifacts::router())
         .merge(avatars::router())
         .merge(memory::router())
-        .merge(memory_engine::router())
         .merge(memory_ingest::router())
         .merge(workspace::router())
         .merge(pages::router())

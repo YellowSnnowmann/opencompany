@@ -424,9 +424,6 @@ async fn provision(
     if let Some(stores) = state.stores() {
         builder = builder.with_stores(stores);
     }
-    if let Some(overlay) = state.memory_overlay() {
-        builder = builder.with_memory_overlay(&overlay);
-    }
     // Issue #1050: the durable owner row is written BEFORE the company exists.
     //
     // It used to be written after, best-effort, and a failure was logged and

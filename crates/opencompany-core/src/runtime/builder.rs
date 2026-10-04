@@ -933,9 +933,8 @@ impl RuntimeBuilder {
     /// bundle's `journal.jsonl`).
     ///
     /// [`with_stores`](Self::with_stores) sets this alongside every other port,
-    /// so production never calls it. It exists for the same reason
-    /// [`with_memory_overlay`](Self::with_memory_overlay) does — one port,
-    /// swapped on its own — and it is what lets a test put the at-most-once set
+    /// so production never calls it. It exists to swap one port on its own,
+    /// and it is what lets a test put the at-most-once set
     /// somewhere the company bundle is not.
     pub fn with_journal_store(
         mut self,
