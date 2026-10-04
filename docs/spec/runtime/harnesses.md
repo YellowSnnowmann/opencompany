@@ -405,7 +405,7 @@ key as its credential, `TINYHUMANS_API_URL` as its backend), and
 | the OpenHuman-native subset of its grants (`shell`, `file_*`, `web_fetch`, …) | `.definition(AgentDefinitionSpec::new().tools(ToolScopeSpec::Named(..)).disallow_tools(..).max_iterations(25))` |
 | `[inference]` / the agent's own `{provider, model}` pair (`company/inference.rs`), BYOK included | `.provider(Provider::openai_compatible(url, key).model(m))`, served through the loopback model bridge so usage is metered |
 | the approval policy | `.access(Access::full())` — OpenHuman's runtime-wide gate stays off; OpenCompany decides allow / deny / park in its own MCP handler |
-| every OpenCompany tool (ledger, tasks, pages, workspace, memory, composio, hosting, approvals) and the speech tools | `.mcp(McpServer::http("opencompany", url).auth(BearerToken).allow_tools(..))` — see [hive.md](hive.md#speaking) |
+| every OpenCompany tool (ledger, tasks, pages, workspace, composio, hosting, approvals) and the speech tools | `.mcp(McpServer::http("opencompany", url).auth(BearerToken).allow_tools(..))` — see [hive.md](hive.md#speaking) |
 | each `mcp:*` grant | one more `.mcp(..)` |
 | the company's skills, the company workspace | `.skills_dir(<home>/skills)`, `.action_dir(<workspace>)` |
 
@@ -431,8 +431,9 @@ never overlaps another turn of the same agent. `opencompany measure` and
 `companies/hive_demo`; the second must be zero.
 
 What is deliberately not on the spec: a host-built tool vector (OpenHuman has
-no seam for one, hence the MCP server), a host `Memory` (the company's
-`ContextStore` is reached as the `memory_*` MCP tools) and a host
+no seam for one, hence the MCP server), a host `Memory` (company memory is
+OpenHuman's own: each agent is bound with `MemoryBinding` and uses OpenHuman's
+single `memory` tool, [memory-engine.md](memory-engine.md)) and a host
 `ToolPolicy` (the approval decision is made where the tool is served). The
 legacy out-of-process JSON-RPC path (`src/openhuman/`, feature
 `openhuman-rpc`) is gone.
@@ -481,7 +482,7 @@ pack-disclosure override could avoid them in a future change.
 A delegated colleague receives its assigned brief with `history_seed: false`.
 Its live history, transcript autoload, and active goal from an unrelated turn
 must not enter that work. The pool also skips automatic retrieval of prior task
-outcomes for this explicit context mode; the agent's memory tools remain
+outcomes for this explicit context mode; the agent's `memory` tool remains
 available for deliberate recall. The parent and its final relay keep their
 normal conversation context.
 

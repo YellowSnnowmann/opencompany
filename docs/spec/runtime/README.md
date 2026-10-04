@@ -14,7 +14,7 @@ Supporting docs:
   - [ports-cognition.md](ports-cognition.md) — `Brain`, `CycleHost`,
     `ChannelAdapter` and the `TurnStep` activity trace
   - [ports-state.md](ports-state.md) — `CompanyStore`, `EventLog`,
-    `MemoryStore`, `ContextStore`, `SecretStore`, and the identity trio
+    `TraceStore`, `SecretStore`, and the identity trio
   - [ports-effects.md](ports-effects.md) — `ToolProvider`, `ApprovalGate`
   - [ports-console.md](ports-console.md) — the WS3 console-surface stores
     - [ports-console-workspace.md](ports-console-workspace.md) — `WorkspaceStore`,
@@ -34,9 +34,9 @@ Supporting docs:
   - [workspace-names.md](workspace-names.md) — the one naming rule for
     everything the runtime puts in a workspace (lowercase, dashed), where it is
     applied, and how a company created before it keeps working
-  - [memory-engine.md](memory-engine.md) — the `OPENCOMPANY_MEMORY` overlay,
-    the TinyMemory v2 engines (`cortexdb`, `tinyhumans`), the boot probe and
-    the engine-switch runbook
+  - [memory-engine.md](memory-engine.md) — company memory as
+    OpenHuman memory v2: the per-company root, agent binding, the engine,
+    `crate::memory::CompanyMemory` and the console routes
   - [data-root.md](data-root.md) — the root itself: resolution order, ownership,
     and two processes wanting the same directory
   - [offline.md](offline.md) — running with no network at all: the documented
@@ -107,12 +107,9 @@ Supporting docs:
   primitive, and containerised code tools. Also the three entities this removes
   — the kanban board as the work model, desks, and two of the three memory
   backends
-  - [orchestration/memory.md](orchestration/memory.md) — the one engine
-    contract replacing the bespoke `CortexClient` backend (written against
-    TinyMemory v1, since migrated to v2), with `MemoryStore`,
-    `ContextStore` and `FactStore` kept as typed facades over the one
-    engine rather than as three independent backends, and why the host
-    decorator is the only safe constructor
+  - [orchestration/memory.md](orchestration/memory.md) — **superseded**: the plan
+    to keep `MemoryStore`, `ContextStore` and `FactStore` as facades over one
+    TinyMemory engine, retired by the OpenHuman memory v2 cutover
   - [orchestration/context-routing.md](orchestration/context-routing.md) — what
     each role is told, why the exclusions matter as much as the entries, and
     why assembly order is a prompt-cache decision
@@ -236,7 +233,6 @@ port returns the crate `Result<T>`.
 | *(default)* | kernel, fs store, hosted brain client, operator API |
 | `tiny` | TinyAgents embedding (existing flag; used by stub brain and local workers) |
 | `sqlite` | SQLite store implementations |
-| `tinymemory` | Hosted/null memory engine seam (TinyMemory v2 `MemoryEngine` contract) |
 | `sidecar` | Node sidecar brain for self-hosters |
 
 The default build MUST stay small and compile offline; every feature degrades
@@ -244,8 +240,8 @@ to a stub or a clear "not enabled" error, never a panic.
 
 ## DB-agnosticism
 
-No storage engine appears in the kernel. The four storage ports
-(`CompanyStore`, `EventLog`, `MemoryStore`, `ContextStore`) each ship a
+No storage engine appears in the kernel. The three storage ports
+(`CompanyStore`, `EventLog`, `TraceStore`) each ship a
 file-based default (a human-inspectable bundle under
 `~/.opencompany/companies/<slug>/` — see [lifecycle.md](lifecycle.md)), and a
 platform operator implements the same traits over Postgres, S3, or anything

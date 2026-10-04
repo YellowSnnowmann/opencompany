@@ -1,5 +1,4 @@
 use super::*;
-use crate::ports::facts::FactKind;
 use crate::ports::skills_state::SkillSource;
 use crate::ports::usage::SampleKind;
 use crate::store::conformance;
@@ -207,14 +206,6 @@ async fn conformance_login_code_store() {
     let root_dir = tmp_root();
     let root = root_dir.path().to_path_buf();
     conformance::assert_login_code_store(Arc::new(FsOps::new(&root))).await;
-}
-
-#[tokio::test]
-async fn conformance_fact_store() {
-    let root_dir = tmp_root();
-    let root = root_dir.path().to_path_buf();
-    conformance::assert_fact_store(Arc::new(FsOps::new(&root))).await;
-    conformance::assert_artifact_store(Arc::new(FsOps::new(&root))).await;
 }
 
 #[tokio::test]
@@ -591,5 +582,5 @@ async fn workspace_files_land_on_disk_under_folders() {
     assert!(tokio::fs::try_exists(&moved).await.unwrap());
     assert!(!tokio::fs::try_exists(&disk).await.unwrap());
 
-    let _ = (FactKind::Fact, SkillSource::Company, SampleKind::Inference);
+    let _ = (SkillSource::Company, SampleKind::Inference);
 }

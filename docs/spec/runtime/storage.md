@@ -1,10 +1,12 @@
 # Storage backends
 
 The storage ports (see [ports.md](ports.md)) are the entire persistence
-contract. The five core ports — `CompanyStore`, `EventLog`, `MemoryStore`,
-`ContextStore`, `SecretStore` — plus the six console-surface stores added in
-WS3 — `TaskStore`, `WorkspaceStore`, `FactStore`, `UsageMeter`,
-`SkillStateStore`, `InboxStore` — are all that a backend must implement. The
+contract. The core ports — `CompanyStore`, `EventLog`, `TraceStore`, `SecretStore` —
+plus the console-surface stores added in WS3 — `TaskStore`, `WorkspaceStore`,
+`UsageMeter`, `SkillStateStore`, `InboxStore` — are all that a backend must
+implement. Company memory is **not** a storage port: it lives in the OpenHuman
+memory engine ([memory-engine.md](memory-engine.md)); `ContextStore` and
+`FactStore` were deleted in the memory v2 cutover. The
 kernel never names an engine; a backend is anything that implements those
 traits and passes the conformance suite (`src/store/conformance.rs`). This file
 documents the shipped backends and how one is selected at boot.
@@ -22,25 +24,25 @@ aborts boot — there is never a silent fallback to the filesystem.
 | `sqlite` | One SQLite file under the data dir | `sqlite` | Single-file, offline |
 | `mongodb` | A MongoDB database on a shared cluster | `mongodb` | The multi-tenant platform backend |
 
-Each backend implements **all fourteen** ports. The fs backend keeps the core
+Each backend implements **all twelve** ports. The fs backend keeps the core
 records as inspectable TOML/JSONL bundles and the WS3 console-surface stores
 under a sibling `ops/` layout (`src/store/fs_ops.rs`); sqlite and mongodb add
 one collection/table per store.
 
-A fifteenth, `JournalStore`, joined them in issue #726. The runtime journal was
+A thirteenth, `JournalStore`, joined them in issue #726. The runtime journal was
 built on the filesystem unconditionally until then, so on a mongodb tenant the
 at-most-once effect set and the parked-approval queue lived on `/data` —
 ephemeral scratch, discarded on every container replacement. It is now selected
 from the same handles as every other store, with a one-time receipt-gated import
 off the old file: [journal.md](journal.md).
 
-A sixteenth, `HiveStore`, holds the hive coordinator's durable state — one
+A fourteenth, `HiveStore`, holds the hive coordinator's durable state — one
 compare-and-swap state document and an append-only message log per company,
 opaque JSON bodies ([contract](ports-state.md#hivestore)). It rides the same
 handles (`StorageHandles::hive`), so a mongodb tenant's coordination state is
 never left on `/data`; see [Hive store](#hive-store) for each backend.
 
-Three of those fourteen — `UserStore`, `SessionStore`, `LoginCodeStore` — back
+Three of the twelve — `UserStore`, `SessionStore`, `LoginCodeStore` — back
 [human user authentication](users.md). Sessions and login codes are credential
 material: they hold **hashes only**, and they must never be added to the
 export path below.
@@ -97,23 +99,16 @@ How the data root is resolved, why only one process may write it, and what
 
 Moved to [`workspace-layout.md`](workspace-layout.md) — this file was over the repository's 500-line limit. See that page for the full detail.
 
-## Memory engine overlay (`OPENCOMPANY_MEMORY`)
+## Memory
 
-Moved to [`memory-engine.md`](memory-engine.md) — this file was over the repository's 500-line limit. See that page for the full detail.
-
-`OPENCOMPANY_MEMORY` selects `store` (default), `remote`, or `null`. A hosted engine additionally needs
-`OPENCOMPANY_MEMORY_DRIVER` (`cortexdb` or `tinyhumans`) and
-`OPENCOMPANY_MEMORY_API_KEY`; `OPENCOMPANY_MEMORY_URL` is optional (each engine
-has a default endpoint). A missing driver or key refuses at boot, naming the
-knob, and never falls back to the base store's memory. The in-pod
-`embedded`/`tinycortex` engine was
-removed in #1568 and refuse at boot if still selected. The credential and the
-endpoint never appear in logs, `/healthz`, `/spec`, status output, or an export
-— `/spec` reports the engine's id and the retrieval modes it serves only.
+Not a storage concern since the memory v2 cutover. The backend holds no memory
+records, and `OPENCOMPANY_MEMORY*` no longer exists. The OpenHuman memory
+engine owns them: [`memory-engine.md`](memory-engine.md). The backend keeps
+`TraceStore` (cycle traces and task results), which is not memory.
 
 ## MongoDB backend (`src/store/mongodb.rs`)
 
-One `MongoStore` wraps a single database and implements all five ports.
+One `MongoStore` wraps a single database and implements every port.
 Payloads are stored as the same JSON strings the fs/sqlite backends persist,
 so records round-trip byte-identically across backends and `export`/`import`
 migrate between any two backends unchanged. Monotonic 0-based sequences come
@@ -121,10 +116,10 @@ from a `counters` collection via atomic `findOneAndUpdate {$inc}`.
 
 Collections (all uniquely indexed on `company_id` + their key):
 `companies`, `ledger`, `events`, `memory_traces`, `memory_tasks`,
-`context_chunks`, `secrets`, `journal` and `journal_imports`, `hive_state` and
-`hive_messages`, plus `counters`
+`secrets`, `journal` and `journal_imports`, `hive_state` and `hive_messages`,
+plus `counters`
 and `owners`; and the WS3 console-surface collections `tasks`, `workspace`,
-`facts`, `usage`, `skills`, and `inboxes`. The `usage` collection is trimmed to the 90-day retention window
+`usage`, `skills`, and `inboxes`. The `usage` collection is trimmed to the 90-day retention window
 on each `record` (see [`UsageMeter`](ports-console.md#usagemeter)).
 
 **Path-uniqueness indexes on `workspace_nodes`.** This backend has neither a
@@ -225,7 +220,7 @@ changes.
 `src/store/conformance.rs` is the backend-agnostic suite every backend runs.
 Beyond the core assertions (per-company isolation, append-only event/ledger,
 monotonic event sequence, export totality) it exercises each WS3 store —
-`assert_task_store`, `assert_workspace_store`, `assert_fact_store`,
+`assert_task_store`, `assert_workspace_store`,
 `assert_skill_state_store`, `assert_inbox_store`, `assert_usage_meter`,
 `assert_secret_store` — plus a dedicated `assert_usage_retention` that verifies
 samples older than the 90-day window are evicted on write. A new backend passes

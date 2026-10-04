@@ -48,7 +48,7 @@ use crate::harness::{HarnessDeps, HarnessPool};
 use crate::ports::types::{CompanyId, CompanyRecord};
 use crate::ports::types::{TurnStep, TurnStepFailure, TurnStepStatus};
 use crate::ports::usage::{SampleKind, UsageMeter, UsageSample};
-use crate::store::{FsCompanyStore, FsContextStore};
+use crate::store::FsCompanyStore;
 
 // ---------------------------------------------------------------------------
 // The scripted model

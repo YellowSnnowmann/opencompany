@@ -12,7 +12,7 @@ pub(super) use crate::ports::types::{
     ApprovalId, CompanyId, ContextOp, ContextOpResult, Effect, EffectDisposition, OverlayAgent,
     ToolCall, ToolResult,
 };
-pub(super) use crate::store::{FsCompanyStore, FsContextStore, FsOps};
+pub(super) use crate::store::{FsCompanyStore, FsOps};
 
 /// A minimal card, used across the brain tests wherever the assertion is
 /// about dispatch/lifecycle plumbing rather than the card's own content.

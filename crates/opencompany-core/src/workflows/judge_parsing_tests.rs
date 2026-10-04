@@ -147,40 +147,16 @@ fn focus_terms_is_capped_and_deduplicated() {
     assert_eq!(unique.len(), terms.len(), "no duplicate terms: {terms:?}");
 }
 
-/// A [`crate::ports::FactStore`] whose `list` only matches an EXACT query
-/// string — standing in for the real substring-match store closely enough
-/// to prove whether a whole-sentence query alone can ever reach a fact
-/// keyed on one of its content words.
-pub(super) struct ExactMatchFactStore {
-    pub(super) matches: &'static str,
-    pub(super) fact: crate::ports::FactRecord,
-}
-
-#[async_trait::async_trait]
-impl crate::ports::FactStore for ExactMatchFactStore {
-    async fn list(
-        &self,
-        _company: &CompanyId,
-        query: Option<&str>,
-        _kind: Option<crate::ports::FactKind>,
-    ) -> crate::Result<Vec<crate::ports::FactRecord>> {
-        Ok(match query {
-            Some(q) if q == self.matches => vec![self.fact.clone()],
-            _ => Vec::new(),
-        })
-    }
-
-    async fn upsert(
-        &self,
-        _company: &CompanyId,
-        _fact: &crate::ports::FactRecord,
-    ) -> crate::Result<()> {
-        unreachable!("not exercised by this test")
-    }
-
-    async fn delete(&self, _company: &CompanyId, _id: &str) -> crate::Result<bool> {
-        unreachable!("not exercised by this test")
-    }
+/// A fresh company whose memory holds the learning `text`, so the judge's
+/// fact rung has something to find. Unique per call: every test shares the
+/// one in-process memory engine.
+pub(super) async fn company_remembering(text: &str) -> CompanyId {
+    let company = CompanyId::new(format!("judge-{}", uuid::Uuid::new_v4().simple()));
+    crate::memory::CompanyMemory::new(&company)
+        .learn(text, crate::memory::LearningKind::Fact, Vec::new())
+        .await
+        .expect("learn");
+    company
 }
 
 /// Codex review on #1990 (#3903591432): the whole-sentence query used to
@@ -194,23 +170,12 @@ async fn ask_around_finds_a_fact_reachable_only_by_a_focused_term() {
         .prefix("oc-1990-focused-query-")
         .tempdir()
         .expect("tempdir");
-    let (mut deps, _journal) =
-        crate::workflows::gated_tool_turn_tests::deps(String::new(), dir.path());
-    deps.facts = Some(std::sync::Arc::new(ExactMatchFactStore {
-        matches: "renewal",
-        fact: crate::ports::FactRecord {
-            id: "f1".to_string(),
-            kind: crate::ports::FactKind::Fact,
-            title: "Renewal date".to_string(),
-            body: "The contract renews on March 1st.".to_string(),
-            source: "test".to_string(),
-            updated_at_millis: 0,
-        },
-    }));
+    let (deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(String::new(), dir.path());
+    let company = company_remembering("Renewal date: the contract renews on March 1st.").await;
 
     let result = ask_around(
         &deps,
-        &CompanyId::new("acme"),
+        &company,
         "The answer must include the renewal date",
         None,
     )

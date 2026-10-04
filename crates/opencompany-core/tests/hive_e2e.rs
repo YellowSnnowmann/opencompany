@@ -38,7 +38,7 @@
 //! | `a_cross_desk_referral_crosses_only_the_answer_back` | **ignored**: referral is not reconnected to the conductor |
 //! | `a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice` | `companies/hive_demo`: both episodes complete, brackets overlap across desks, never for the same agent |
 //! | `a_checkpoint_replays_the_rows_after_it_as_a_no_op` | the round-0 checkpoint plus the rows after it fold to the final state; folding them again changes nothing |
-//! | `a_desk_remembers_across_episodes_through_its_memory_tools` | `memory_store` on the seat's own belt in one episode, `memory_recall` in the next, the recorded part cites what came back |
+//! | `a_desk_remembers_across_episodes_through_its_memory_tools` | OpenHuman's `memory` tool (`learn`) in one episode, `fetch` in the next, the recorded part cites what came back |
 //! | `a_seat_publishes_a_deliverable_the_operator_can_edit` | a seat's `publish_artifact` is filed on a card, its recorded part links the artifact, and an operator edit lands as version 2 |
 //! | `a_turn_that_only_publishes_hands_over_on_a_row_of_its_own` | a turn that published and said nothing hands the artifact over on an outputs-only row when its wave ends |
 //!
@@ -1865,7 +1865,7 @@ async fn a_shared_agent_on_two_desks_runs_both_rooms_without_running_twice() {
 // snapshot and resume; there is nothing left here for this test to assert.
 
 // ---------------------------------------------------------------------------
-// 8: memory over the MCP memory tool
+// 8: memory over OpenHuman's memory tool
 // ---------------------------------------------------------------------------
 
 const FACT: &str = "The rollout window is Tuesday 09:00 UTC, agreed with support.";
@@ -1876,6 +1876,11 @@ const ASK_TWO: &str = "When is the rollout window?";
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
     let _runtime_guard = lock_e2e_runtime().await;
+    // The test binary has no TinyHumans credential, so memory needs an engine
+    // of its own: TinyMemory's in-memory reference engine, process-wide.
+    openhuman_embed::memory::install_host_engine(std::sync::Arc::new(
+        tinymemory_api::conformance::ReferenceEngine::new(),
+    ));
     let home = tempfile::tempdir().unwrap();
     let (base_url, script) = spawn_script_with_latency(
         seat_script("Noted.", |seat| {
@@ -1885,14 +1890,11 @@ async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
             let memory = seat.last_tool_result();
             if seat.operator_asked() == ASK_ONE {
                 return match memory {
-                    // The memory tools are on the seat's own belt now, called
-                    // by name. They reached the pooled agent over the
-                    // `opencompany` MCP server because `openhuman_embed::Agent`
-                    // has no seam for an in-process host tool; a session host
-                    // does, and an episode seat is one.
+                    // OpenHuman's own `memory` tool, bound to the company's
+                    // root and this teammate's node.
                     None => Reply::Call {
-                        tool: "memory_store",
-                        args: json!({ "title": "rollout window", "body": FACT }),
+                        tool: "memory",
+                        args: json!({ "action": "learn", "text": FACT }),
                     },
                     Some(_) => complete(seat, "Window fixed and written down."),
                 };
@@ -1900,8 +1902,8 @@ async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
             if seat.operator_asked() == ASK_TWO {
                 return match memory {
                     None => Reply::Call {
-                        tool: "memory_recall",
-                        args: json!({ "query": "rollout window" }),
+                        tool: "memory",
+                        args: json!({ "action": "fetch", "query": "rollout window" }),
                     },
                     // Cite what memory handed back, never a constant.
                     Some(recalled) if recalled.contains(FACT_KEY) => {
@@ -1937,7 +1939,7 @@ async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
         .collect::<Vec<_>>();
     assert!(
         stored.iter().any(|output| !is_refused(output)),
-        "memory_store answered over MCP: {stored:?}"
+        "the memory learn answered: {stored:?}"
     );
 
     client.say(ENGINEERING, ASK_TWO).await;
@@ -1950,7 +1952,7 @@ async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
         .expect("the engineer's second-episode recorded part");
     assert!(
         cited.text.contains(FACT_KEY),
-        "the recorded part cites what memory_recall returned: {}",
+        "the recorded part cites what the memory fetch returned: {}",
         cited.text
     );
     let recalled = script
@@ -1962,7 +1964,7 @@ async fn a_desk_remembers_across_episodes_through_its_memory_tools() {
         .collect::<Vec<_>>();
     assert!(
         recalled.iter().any(|output| output.contains(FACT_KEY)),
-        "memory_recall came back with the fact: {recalled:?}"
+        "the memory fetch came back with the fact: {recalled:?}"
     );
     every_seat_turn_is_grounded_and_styled(&script.asks());
     assert_eq!(report(&runtime).await.episodes_completed, 2);

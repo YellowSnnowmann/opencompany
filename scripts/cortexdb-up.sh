@@ -1,21 +1,26 @@
 #!/bin/sh
-# Starts (or reuses) a local CortexDB instance for the `cortexdb` memory
-# driver (`src/store/memory/cortexdb.rs`) — a standalone service, NOT the
+# Starts (or reuses) a local CortexDB instance — a standalone service, NOT the
 # removed in-pod tinycortex engine.
+#
+# STALE PRINTED EXPORTS: the host-side `cortexdb` driver
+# (`src/store/memory/cortexdb.rs`) and the `OPENCOMPANY_MEMORY*` variables were
+# deleted in the OpenHuman memory v2 cutover (docs/spec/runtime/memory-engine.md).
+# Company memory now runs on OpenHuman's own `[memory]` engine; to point it at
+# this instance use `engine = "cortexdb"` with
+# `[memory.engines.cortexdb] endpoint = "http://127.0.0.1:3141"` and the key
+# stored as "memory-cortexdb". The exports this script prints at the end are
+# no longer read by the host.
 #
 # Binds 127.0.0.1:3141, persists to a named Docker volume, and points
 # embeddings/LLM at the local ladder router. Enrichment, layers and graph
-# extraction are OFF by default: this driver only ever writes
-# `Content::Json` envelopes under the `tool_result` modality and reads them
-# back with `view=raw`, so the extra pipelines would cost a model call per
-# write for a feature this driver never uses.
+# extraction are OFF by default; they were only ever unused by the removed
+# driver and cost a model call per write.
 #
 # Usage:
 #   ./scripts/cortexdb-up.sh
 #   CORTEX_API_KEY=... LADDER_API_KEY=... ./scripts/cortexdb-up.sh
 #
-# On success, prints the OPENCOMPANY_MEMORY_* exports to run `serve` against
-# this instance.
+# On success, prints (legacy) OPENCOMPANY_MEMORY_* exports; see the note above.
 set -eu
 
 CONTAINER_NAME=${CORTEXDB_CONTAINER_NAME:-opencompany-cortexdb}

@@ -23,7 +23,6 @@
 //! `Send`.
 
 use std::collections::HashMap;
-use std::ops::Range;
 use std::path::Path;
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 
@@ -37,15 +36,14 @@ use crate::company::CompanyManifest;
 use crate::error::OpenCompanyError;
 use crate::ports::events::{EventLog, EventStreamItem, PruneReport, RetentionPolicy, plan_prune};
 use crate::ports::login_codes::LoginCodeRecord;
-use crate::ports::traces::TraceStore;
 use crate::ports::now_millis;
 use crate::ports::secrets::SecretStore;
 use crate::ports::sessions::SessionRecord;
 use crate::ports::store::CompanyStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::types::{
     CompanyEvent, CompanyId, CompanyRecord, CompanySummary, CompressedTrace, EventSeq,
-    EvictionPolicy, LedgerEntry, OverlayBlob, SecretValue,
-    StoredEvent, TaskResult,
+    EvictionPolicy, LedgerEntry, OverlayBlob, SecretValue, StoredEvent, TaskResult,
 };
 use crate::ports::users::{InviteRecord, UserRecord};
 

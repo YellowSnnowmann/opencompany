@@ -3,13 +3,6 @@ use super::*;
 use crate::store::conformance;
 
 #[tokio::test]
-async fn conformance_isolation_by_company() {
-    let Some(s) = store().await else { return };
-    conformance::assert_isolation_by_company(s.clone(), s.clone(), s.clone(), s.clone()).await;
-    drop_db(&s).await;
-}
-
-#[tokio::test]
 async fn conformance_paused_ordinary_save_preserves_activation_gate() {
     let Some(s) = store().await else { return };
     conformance::assert_paused_ordinary_save_preserves_activation_gate(s.clone()).await;
@@ -69,13 +62,6 @@ async fn conformance_event_read_before() {
 async fn conformance_event_retention() {
     let Some(s) = store().await else { return };
     conformance::assert_event_retention(s.clone()).await;
-    drop_db(&s).await;
-}
-
-#[tokio::test]
-async fn conformance_export_totality() {
-    let Some(s) = store().await else { return };
-    conformance::assert_export_totality(s.clone(), s.clone(), s.clone(), s.clone()).await;
     drop_db(&s).await;
 }
 
@@ -160,207 +146,6 @@ async fn conformance_secret_store() {
 async fn conformance_task_store() {
     let Some(s) = store().await else { return };
     conformance::assert_task_store(s.clone()).await;
-    drop_db(&s).await;
-}
-
-#[tokio::test]
-async fn conformance_fact_store() {
-    let Some(s) = store().await else { return };
-    conformance::assert_fact_store(s.clone()).await;
-    conformance::assert_artifact_store(s.clone()).await;
-    drop_db(&s).await;
-}
-
-#[tokio::test]
-async fn conformance_context_chunk_stamps() {
-    let Some(s) = store().await else { return };
-    conformance::assert_context_chunk_stamps(s.clone()).await;
-    drop_db(&s).await;
-}
-
-// Exercises this backend's single-`$in`-find `peek_many` override against
-// the same positional contract the default implementation gives.
-#[tokio::test]
-async fn conformance_context_peek_many() {
-    let Some(s) = store().await else { return };
-    conformance::assert_context_peek_many_answers_positionally(s.clone()).await;
-    drop_db(&s).await;
-}
-
-#[tokio::test]
-async fn conformance_context_multibyte_bodies() {
-    let Some(s) = store().await else { return };
-    conformance::assert_multibyte_bodies_survive_search_and_ranged_peek(s.clone()).await;
-    drop_db(&s).await;
-}
-
-#[tokio::test]
-async fn conformance_context_identical_body_two_labels() {
-    let Some(s) = store().await else { return };
-    conformance::assert_identical_body_two_labels(s.clone()).await;
-    drop_db(&s).await;
-}
-
-#[tokio::test]
-async fn conformance_context_delete_label_scoped() {
-    let Some(s) = store().await else { return };
-    conformance::assert_delete_label_scoped(s.clone()).await;
-    drop_db(&s).await;
-}
-
-#[tokio::test]
-async fn conformance_context_delete_label_survives_a_concurrent_identical_put() {
-    let Some(s) = store().await else { return };
-    conformance::assert_delete_label_survives_a_concurrent_identical_put(s.clone()).await;
-    drop_db(&s).await;
-}
-
-/// The legacy scalar-`label` document shape (written before the `labels`
-/// set existed) keeps working through every read and through the
-/// label-scoped delete — `doc_labels` unions the two shapes, and the
-/// `$unset` leg of `delete_label` is what removes a scalar claim.
-#[tokio::test]
-async fn legacy_scalar_label_documents_list_and_label_delete() {
-    let Some(s) = store().await else { return };
-    let id = CompanyId::new("acme");
-    let body = "written before the labels set";
-    // Seed the pre-#1300 shape directly: scalar label, no labels array —
-    // at the body's real content address, so a later put folds into it.
-    s.collection("context_chunks")
-        .insert_one(doc! {
-            "company_id": id.as_ref(),
-            "addr": content_address(body),
-            "label": "agent/ceo",
-            "body": body,
-            "len": body.len() as i64,
-            "ord": 1_i64,
-            "stored_ms": 7_i64,
-        })
-        .await
-        .expect("seed a legacy document");
-
-    let metas = ContextStore::list(s.as_ref(), &id, "").await.expect("list");
-    assert_eq!(
-        metas.iter().map(|m| m.label.as_str()).collect::<Vec<_>>(),
-        ["agent/ceo"],
-        "the scalar label is a claim"
-    );
-
-    // A second label on the same body folds into the set beside it.
-    let addr = s
-        .put(
-            &id,
-            ContextChunk {
-                label: "agent/ops".to_string(),
-                body: body.to_string(),
-            },
-        )
-        .await
-        .expect("put an identical body under a new label");
-    let mut labels: Vec<String> = ContextStore::list(s.as_ref(), &id, "")
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|m| m.addr == addr)
-        .map(|m| m.label)
-        .collect();
-    labels.sort();
-    assert_eq!(labels, ["agent/ceo", "agent/ops"]);
-
-    // Deleting the scalar claim leaves the set claim and the body.
-    assert!(
-        s.delete_label(&id, &addr, "agent/ceo")
-            .await
-            .expect("delete the scalar claim")
-    );
-    let after: Vec<String> = ContextStore::list(s.as_ref(), &id, "")
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|m| m.addr == addr)
-        .map(|m| m.label)
-        .collect();
-    assert_eq!(after, ["agent/ops"]);
-    s.peek(&id, &addr, None).await.expect("the body survives");
-
-    // The rollback contract, read from the raw document: while any claim
-    // remains the scalar `label` is present AND names a live claim. A
-    // pre-#1300 binary reads that field with a hard error on absence, so
-    // a document left without one would fail its whole `list`.
-    let raw = s
-        .collection("context_chunks")
-        .find_one(doc! {"company_id": id.as_ref(), "addr": addr.as_ref()})
-        .await
-        .unwrap()
-        .expect("the document survives");
-    assert_eq!(
-        raw.get_str("label").ok(),
-        Some("agent/ops"),
-        "the scalar must re-point at a surviving claim: {raw:?}"
-    );
-
-    // And the last claim takes the document with it.
-    assert!(s.delete_label(&id, &addr, "agent/ops").await.unwrap());
-    assert!(s.peek(&id, &addr, None).await.is_err());
-    drop_db(&s).await;
-}
-
-/// A document carrying claims but no scalar `label` heals on the next
-/// `put`, rather than gaining a claim and staying unreadable to a
-/// pre-#1300 `list` (which reads that field with a hard error on
-/// absence). `$setOnInsert` could not do this — it is skipped entirely on
-/// a document that already exists — which is why `put` is a pipeline.
-///
-/// Seeded directly rather than raced for: `delete_label` no longer leaves
-/// this state (it either deletes the document atomically or re-points the
-/// scalar in the same update), so the only honest way to test the healing
-/// is to construct the state a rollback or an older build could leave.
-#[tokio::test]
-async fn a_put_restores_a_missing_scalar_label_and_keeps_first_write_wins() {
-    let Some(s) = store().await else { return };
-    let id = CompanyId::new("acme");
-    let body = "a document that lost its scalar label";
-    s.collection("context_chunks")
-        .insert_one(doc! {
-            "company_id": id.as_ref(),
-            "addr": content_address(body),
-            "body": body,
-            "len": body.len() as i64,
-            "ord": 1_i64,
-            "stored_ms": 7_i64,
-            "labels": [],
-        })
-        .await
-        .expect("seed a scalar-less document");
-
-    let addr = s
-        .put(
-            &id,
-            ContextChunk {
-                label: "agent/ops".to_string(),
-                body: body.to_string(),
-            },
-        )
-        .await
-        .expect("put onto the scalar-less document");
-
-    let raw = s
-        .collection("context_chunks")
-        .find_one(doc! {"company_id": id.as_ref(), "addr": addr.as_ref()})
-        .await
-        .unwrap()
-        .expect("the document is still there");
-    assert_eq!(
-        raw.get_str("label").ok(),
-        Some("agent/ops"),
-        "the write restores the scalar it found missing: {raw:?}"
-    );
-    assert_eq!(doc_labels(&raw), ["agent/ops"], "and claims it once");
-    assert_eq!(
-        raw.get_i64("stored_ms").ok(),
-        Some(7),
-        "first-write-wins still holds for the fields that were present"
-    );
     drop_db(&s).await;
 }
 
@@ -455,15 +240,6 @@ async fn deep_trace_prune_keeps_the_newest_runs_and_spares_a_refreshed_one() {
 async fn conformance_run_store_workflow_join() {
     let Some(s) = store().await else { return };
     conformance::assert_run_store_workflow_join(s.clone()).await;
-    drop_db(&s).await;
-}
-
-/// The same search semantics as every other backend. This is the production
-/// backend, so this is the row that matters most.
-#[tokio::test]
-async fn conformance_context_search_ranking() {
-    let Some(s) = store().await else { return };
-    conformance::assert_context_search_ranking(s.clone()).await;
     drop_db(&s).await;
 }
 
@@ -717,5 +493,19 @@ async fn durable_ownership_round_trip() {
     assert_eq!(owners, vec![(id.clone(), "tenant-b".to_string())]);
     s.remove_owner(&id).await.expect("remove owner");
     assert!(s.owners().await.expect("owners").is_empty());
+    drop_db(&s).await;
+}
+
+#[tokio::test]
+async fn conformance_isolation_by_company() {
+    let Some(s) = store().await else { return };
+    conformance::assert_isolation_by_company(s.clone(), s.clone(), s.clone()).await;
+    drop_db(&s).await;
+}
+
+#[tokio::test]
+async fn conformance_export_totality() {
+    let Some(s) = store().await else { return };
+    conformance::assert_export_totality(s.clone(), s.clone(), s.clone()).await;
     drop_db(&s).await;
 }

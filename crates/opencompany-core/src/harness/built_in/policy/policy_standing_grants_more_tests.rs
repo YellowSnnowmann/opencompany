@@ -23,7 +23,6 @@ async fn a_workspace_read_runs_without_asking_whatever_its_name_begins_with() {
         "grep",
         "image_info",
         "list",
-        "memory_recall",
     ] {
         assert_eq!(
             p.check(&request(tool, serde_json::json!({}))).await,

@@ -295,9 +295,9 @@ type Company {
 	"""
 	workspaceSearch(query: String!, prefix: String, limit: Int): WorkspaceSearchResults!
 	"""
-	The company-brain memory facts.
+	The company's memory: learnings, logged turns and brain documents.
 	"""
-	memory(query: String, kind: MemoryKind, first: Int! = 50, offset: Int! = 0): MemoryFactPage!
+	memory(query: String, kind: MemoryKind, first: Int! = 50, offset: Int! = 0): MemoryItemPage!
 	"""
 	The company's saved workflows, as one-line summaries — seed graphs and
 	runtime-authored ones alike. Each carries an `enabled` flag reporting
@@ -625,43 +625,51 @@ A scalar that can represent any JSON value.
 scalar JSON
 
 """
-One remembered fact. Mirrors [`FactRecord`].
+One memory item. Mirrors [`MemoryItem`].
 """
-type MemoryFact {
+type MemoryItem {
 	"""
-	The fact id.
+	The item id.
 	"""
 	id: ID!
 	"""
-	The fact's kind.
+	The item's kind.
 	"""
 	kind: MemoryKind!
 	"""
-	A short title.
+	A short title: the first line.
 	"""
 	title: String!
 	"""
-	The fact body.
+	The item's text.
 	"""
 	body: String!
 	"""
-	Which desk/teammate captured it.
+	The teammate whose node holds it, for a teammate's item.
 	"""
-	source: String!
+	agentId: String
 	"""
-	When it was last updated, ISO-8601 UTC.
+	The namespace node it lives at.
 	"""
-	updatedAt: String!
+	namespace: String!
+	"""
+	For a brain document, the source it is filed under.
+	"""
+	source: String
+	"""
+	When it was observed, ISO-8601 UTC; absent when the engine has no stamp.
+	"""
+	updatedAt: String
 }
 
 """
 A single page of `T`: the requested slice plus the unpaginated total.
 """
-type MemoryFactPage {
+type MemoryItemPage {
 	"""
 	The items on this page.
 	"""
-	items: [MemoryFact!]!
+	items: [MemoryItem!]!
 	"""
 	The total number of items across all pages (before offset/limit).
 	"""
@@ -669,29 +677,21 @@ type MemoryFactPage {
 }
 
 """
-The kind of a remembered fact, in the console's memory taxonomy.
+The kind of a memory item: TinyMemory's three item kinds.
 """
 enum MemoryKind {
 	"""
-	A plain fact.
+	A statement: an operator fact, or something an agent learned.
 	"""
-	FACT
+	LEARNING
 	"""
-	An operator preference.
+	One logged agent turn.
 	"""
-	PREFERENCE
+	CONVERSATION
 	"""
-	A person the company knows.
+	A brain document.
 	"""
-	PERSON
-	"""
-	A project the company tracks.
-	"""
-	PROJECT
-	"""
-	A reference document or link.
-	"""
-	REFERENCE
+	DOCUMENT
 }
 
 """

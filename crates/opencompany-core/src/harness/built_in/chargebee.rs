@@ -117,7 +117,6 @@ mod live {
         CreateCustomerArgs, GetCustomerArgs, GetInvoiceArgs, ListInvoicesArgs, SendInvoiceArgs,
     };
 
-    use openhuman_core as oh;
     use tinytools::{PermissionLevel, Tool, ToolResult};
 
     /// Builds the five per-tenant Chargebee tools over a resolved connection.
@@ -161,6 +160,9 @@ mod live {
 
     /// Parses tool arguments, reporting a bad shape as a tool error rather than
     /// failing the turn.
+    // `ToolResult` is the tool's own answer, returned as-is; boxing it would
+    // only move the size to the caller.
+    #[allow(clippy::result_large_err)]
     fn parse<T: serde::de::DeserializeOwned>(args: Value) -> std::result::Result<T, ToolResult> {
         serde_json::from_value(args)
             .map_err(|e| ToolResult::error(format!("invalid arguments: {e}")))

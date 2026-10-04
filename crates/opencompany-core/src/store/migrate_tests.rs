@@ -34,7 +34,7 @@ impl TempHome {
     /// manifest on the filesystem at all.
     fn marker_less_bundle(&self, relative: &str) -> PathBuf {
         let dir = self.0.join(relative);
-        for sub in ["memory", "context/blobs", "secrets", "keys"] {
+        for sub in ["memory", "secrets", "keys"] {
             std::fs::create_dir_all(dir.join(sub)).expect("bundle subdir");
         }
         std::fs::write(dir.join("keys/agent.ed25519"), "seed").expect("identity seed");

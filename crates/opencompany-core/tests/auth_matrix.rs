@@ -713,18 +713,24 @@ const OPS_SCOPED_ROUTES: &[Route] = &[
     r!(Post, "/memory", Scoped, Ordinary, ""),
     r!(Get, "/memory", Scoped, Ordinary, ""),
     r!(Get, "/memory/traces", Scoped, Ordinary, ""),
-    r!(Get, "/memory/stats", Scoped, Ordinary, ""),
-    r!(Get, "/memory/archives", Scoped, Ordinary, ""),
+    r!(Get, "/memory/status", Scoped, Ordinary, ""),
+    r!(Get, "/memory/agents", Scoped, Ordinary, ""),
+    r!(Get, "/memory/brain", Scoped, Ordinary, ""),
+    r!(Post, "/memory/recall", Scoped, Ordinary, ""),
     r!(
         Delete,
-        "/memory/{fact_id}",
+        "/memory/{item_id}",
         Scoped,
         Destructive,
-        "Members may delete company memory facts."
+        "Members may forget a company memory item."
     ),
-    r!(Get, "/memory/engine", Admin, Authority, ""),
-    r!(Put, "/memory/engine", Admin, Credential, ""),
-    r!(Post, "/memory/engine/test", Admin, Credential, ""),
+    r!(
+        Delete,
+        "/memory/agents/{agent_id}",
+        Scoped,
+        Destructive,
+        "Members may forget a teammate's logged turns."
+    ),
     r!(Post, "/memory/ingest", Scoped, Ordinary, ""),
     r!(
         Post,
@@ -1814,7 +1820,7 @@ fn table_counts_and_intentional_widenings_are_explicit() {
             .map(|route| route.path)
             .collect::<BTreeSet<_>>()
             .len(),
-        172,
+        173,
     );
     assert_eq!(OPS_EXACT_ROUTES.len(), 3);
     assert_eq!(
@@ -1843,7 +1849,7 @@ fn table_counts_and_intentional_widenings_are_explicit() {
             .flat_map(route_patterns)
             .collect::<BTreeSet<_>>()
             .len(),
-        390,
+        392,
         "concrete paths",
     );
     assert_eq!(render_snapshot().lines().count(), 3_479);
@@ -1865,8 +1871,9 @@ fn table_counts_and_intentional_widenings_are_explicit() {
             .iter()
             .filter(|route| route.access == Access::Admin)
             .count(),
-        87,
-        "72 signature-admin, seven body-admin, and eight aspirational authority rows",
+        84,
+        "signature-admin, seven body-admin, and aspirational authority rows (the three \
+         memory-engine admin routes went with the OpenHuman memory cutover)",
     );
     assert_eq!(
         OPS_SCOPED_ROUTES

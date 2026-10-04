@@ -213,9 +213,7 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
   // `pages_read` never reach an approval card.
   pages_write: "Publish a dashboard page",
   pages_delete: "Delete a dashboard page",
-  memory_store: "Save something to its memory",
-  memory_forget: "Discard one of its own saved memories",
-  memory_recall: "Look something up in its memory",
+  memory: "Save to or forget from the company's memory",
   web_fetch: "Fetch a web page",
   query_company: "Look up something about the company",
   // Issue #701 — the rest of the gated surface, found the way #671 was: by

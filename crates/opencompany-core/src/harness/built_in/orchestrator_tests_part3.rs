@@ -543,40 +543,10 @@ async fn query_company_announces_the_dropped_event_tail() {
 /// happened and names the argument that narrows it.
 #[tokio::test]
 async fn query_company_says_when_the_fact_list_was_cut() {
-    use crate::ports::FactStore;
-    use crate::ports::facts::{FactKind, FactRecord};
-
-    struct ManyFacts(usize);
-    #[async_trait]
-    impl FactStore for ManyFacts {
-        async fn list(
-            &self,
-            _company: &CompanyId,
-            _query: Option<&str>,
-            _kind: Option<FactKind>,
-        ) -> crate::Result<Vec<FactRecord>> {
-            Ok((0..self.0)
-                .map(|i| FactRecord {
-                    id: format!("f-{i}"),
-                    kind: FactKind::Fact,
-                    title: format!("Fact {i}"),
-                    body: format!("Body {i}"),
-                    source: "ceo".to_string(),
-                    updated_at_millis: i as u64,
-                })
-                .collect())
-        }
-        async fn upsert(&self, _c: &CompanyId, _f: &FactRecord) -> crate::Result<()> {
-            Ok(())
-        }
-        async fn delete(&self, _c: &CompanyId, _id: &str) -> crate::Result<bool> {
-            Ok(false)
-        }
-    }
-
     // Exactly at the cap: complete, so no notice.
-    let exact: Arc<dyn FactStore> = Arc::new(ManyFacts(FACT_LIMIT));
-    let out = QueryCompanyTool::new(CompanyId::new("acme"), Some(exact), None, None, None, None)
+    let (company, memory) =
+        seeded_memory("cut-exact", (0..FACT_LIMIT).map(|i| format!("Fact {i}"))).await;
+    let out = QueryCompanyTool::new(company, Some(memory), None, None, None, None)
         .execute(json!({}))
         .await
         .expect("execute")
@@ -584,8 +554,9 @@ async fn query_company_says_when_the_fact_list_was_cut() {
     assert!(!out.contains("TRUNCATED"), "nothing was cut: {out}");
 
     // Past the cap: the cut is announced, counted, and points at `query`.
-    let many: Arc<dyn FactStore> = Arc::new(ManyFacts(FACT_LIMIT + 7));
-    let out = QueryCompanyTool::new(CompanyId::new("acme"), Some(many), None, None, None, None)
+    let (company, memory) =
+        seeded_memory("cut-many", (0..FACT_LIMIT + 7).map(|i| format!("Fact {i}"))).await;
+    let out = QueryCompanyTool::new(company, Some(memory), None, None, None, None)
         .execute(json!({}))
         .await
         .expect("execute")
@@ -598,6 +569,22 @@ async fn query_company_says_when_the_fact_list_was_cut() {
     assert!(out.contains("query_company"), "{out}");
 }
 
+/// A fresh company whose memory holds one learning per text.
+async fn seeded_memory(
+    tag: &str,
+    texts: impl Iterator<Item = String>,
+) -> (CompanyId, crate::memory::CompanyMemory) {
+    let company = CompanyId::new(format!("{tag}-{}", uuid::Uuid::new_v4().simple()));
+    let memory = crate::memory::CompanyMemory::new(&company);
+    for text in texts {
+        memory
+            .learn(&text, crate::memory::LearningKind::Fact, Vec::new())
+            .await
+            .expect("learn");
+    }
+    (company, memory)
+}
+
 /// Issue #420, the residual: the whole insight document is handed to the
 /// model through the harness tool-result path, which hard-cuts anything past
 /// its byte budget — blindly. A facts list long enough would carry that cut
@@ -608,53 +595,24 @@ async fn query_company_says_when_the_fact_list_was_cut() {
 /// bytes, so a multibyte body cannot panic mid-codepoint.
 #[tokio::test]
 async fn query_company_bounds_the_insight_document_size() {
-    use crate::ports::FactStore;
-    use crate::ports::facts::{FactKind, FactRecord};
-
-    struct Facts(Vec<FactRecord>);
-    #[async_trait]
-    impl FactStore for Facts {
-        async fn list(
-            &self,
-            _c: &CompanyId,
-            _q: Option<&str>,
-            _k: Option<FactKind>,
-        ) -> crate::Result<Vec<FactRecord>> {
-            Ok(self.0.clone())
-        }
-        async fn upsert(&self, _c: &CompanyId, _f: &FactRecord) -> crate::Result<()> {
-            Ok(())
-        }
-        async fn delete(&self, _c: &CompanyId, _id: &str) -> crate::Result<bool> {
-            Ok(false)
-        }
-    }
-
-    let mk = |i: usize, body: String| FactRecord {
-        id: format!("f-{i}"),
-        kind: FactKind::Fact,
-        title: format!("Fact {i}"),
-        body,
-        source: "ceo".to_string(),
-        updated_at_millis: i as u64,
-    };
-    let render = |facts: Vec<FactRecord>| async move {
-        let store: Arc<dyn FactStore> = Arc::new(Facts(facts));
-        QueryCompanyTool::new(CompanyId::new("acme"), Some(store), None, None, None, None)
+    let render = |tag: &'static str, texts: Vec<String>| async move {
+        let (company, memory) = seeded_memory(tag, texts.into_iter()).await;
+        QueryCompanyTool::new(company, Some(memory), None, None, None, None)
             .execute(json!({}))
             .await
             .expect("execute")
             .output_for_llm(true)
     };
+    let fact_body = |line: &str| -> Option<String> {
+        line.strip_prefix("- **")
+            .and_then(|rest| rest.split_once("**: "))
+            .map(|(_, body)| body.to_string())
+    };
 
     // (e) A single multi-KB multibyte body: cut on a char boundary, marked
     // with an ellipsis, exactly the cap wide, and no panic.
-    let out = render(vec![mk(0, "é".repeat(5_000))]).await;
-    let line = out
-        .lines()
-        .find(|l| l.starts_with("- **Fact 0**: "))
-        .expect("fact line");
-    let body = line.strip_prefix("- **Fact 0**: ").unwrap();
+    let out = render("bounds-one", vec!["é".repeat(5_000)]).await;
+    let body = out.lines().find_map(fact_body).expect("fact line");
     assert!(body.ends_with('…'), "a cut body is marked: {body:?}");
     assert_eq!(
         body.chars().count(),
@@ -669,11 +627,15 @@ async fn query_company_bounds_the_insight_document_size() {
     // (f) Enough capped bodies to blow the section byte budget. The count
     // reflects the budget cut, not merely FACT_LIMIT, and the marker plus
     // every section below Facts survives the outer tool-result cut.
-    let heavy: Vec<FactRecord> = (0..FACT_LIMIT)
-        .map(|i| mk(i, "é".repeat(MAX_FACT_BODY_CHARS)))
+    let heavy: Vec<String> = (0..FACT_LIMIT)
+        .map(|i| format!("{i}{}", "é".repeat(MAX_FACT_BODY_CHARS)))
         .collect();
-    let out = render(heavy).await;
-    let shown = out.matches("- **Fact ").count();
+    let out = render("bounds-heavy", heavy).await;
+    let shown = out
+        .lines()
+        .filter_map(fact_body)
+        .filter(|body| body.contains('é'))
+        .count();
     assert!(
         (1..FACT_LIMIT).contains(&shown),
         "the byte budget must cut before FACT_LIMIT yet keep at least one: shown={shown}"
@@ -695,17 +657,15 @@ async fn query_company_bounds_the_insight_document_size() {
         );
     }
 
-    // (g) A small document is byte-for-byte the pre-guard behavior: bodies
-    // under the cap render verbatim and nothing is announced.
-    let out = render(vec![
-        mk(0, "Body 0".to_string()),
-        mk(1, "Body 1".to_string()),
-    ])
+    // (g) A small document renders its learnings verbatim and announces
+    // nothing.
+    let out = render(
+        "bounds-small",
+        vec!["Body 0".to_string(), "Body 1".to_string()],
+    )
     .await;
-    assert!(
-        out.contains("## Facts\n- **Fact 0**: Body 0\n- **Fact 1**: Body 1\n"),
-        "the small-document path is unchanged: {out}"
-    );
+    assert!(out.contains("- **Body 0**: Body 0\n"), "{out}");
+    assert!(out.contains("- **Body 1**: Body 1\n"), "{out}");
     assert!(!out.contains("TRUNCATED"), "nothing was cut: {out}");
     assert!(!out.contains('…'), "nothing was truncated: {out}");
 }

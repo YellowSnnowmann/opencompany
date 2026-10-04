@@ -127,17 +127,17 @@ pub(super) use crate::company::CompanyManifest;
 pub(super) use crate::company::runtime::CompanyMail;
 pub(super) use crate::policy::ManifestApprovalGate;
 pub(super) use crate::ports::ChannelAdapter;
+pub(super) use crate::ports::TraceStore;
 pub(super) use crate::ports::brain::Brain;
 pub(super) use crate::ports::types::{
-    ActorKind, ChunkAddr, ChunkHit, ChunkMeta, CompressedTrace, ContextChunk, CycleResult,
-    EffectGroup, EvictionPolicy, ReplyTo, TaskResult, TokenUsage,
+    ActorKind, CompressedTrace, CycleResult, EffectGroup, EvictionPolicy, ReplyTo, TaskResult,
+    TokenUsage,
 };
-pub(super) use crate::ports::{ContextStore, TraceStore};
 pub(super) use crate::runtime::RuntimeBuilder;
 pub(super) use crate::runtime::channel::OperatorChannel;
 pub(super) use crate::server::ops::mailer::RecordingMailSender;
+pub(super) use crate::store::FsTraceStore;
 pub(super) use crate::store::paths::Bundle;
-pub(super) use crate::store::{FsContextStore, FsTraceStore};
 
 pub(super) fn tmp_home() -> tempfile::TempDir {
     tempfile::Builder::new()
@@ -474,54 +474,6 @@ impl TraceStore for CountingMemory {
 
     async fn evict(&self, id: &CompanyId, policy: EvictionPolicy) -> Result<u64> {
         self.inner.evict(id, policy).await
-    }
-}
-
-/// The [`ContextStore`] half of the same instrument.
-pub(super) struct CountingContext {
-    inner: FsContextStore,
-    pub(super) lists: AtomicUsize,
-}
-
-impl CountingContext {
-    pub(super) fn new(inner: FsContextStore) -> Self {
-        Self {
-            inner,
-            lists: AtomicUsize::new(0),
-        }
-    }
-}
-
-#[async_trait]
-impl ContextStore for CountingContext {
-    async fn put(&self, id: &CompanyId, chunk: ContextChunk) -> Result<ChunkAddr> {
-        self.inner.put(id, chunk).await
-    }
-
-    async fn list(&self, id: &CompanyId, prefix: &str) -> Result<Vec<ChunkMeta>> {
-        self.lists.fetch_add(1, Ordering::SeqCst);
-        self.inner.list(id, prefix).await
-    }
-
-    async fn peek(
-        &self,
-        id: &CompanyId,
-        addr: &ChunkAddr,
-        range: Option<std::ops::Range<usize>>,
-    ) -> Result<String> {
-        self.inner.peek(id, addr, range).await
-    }
-
-    async fn search(&self, id: &CompanyId, query: &str, limit: usize) -> Result<Vec<ChunkHit>> {
-        self.inner.search(id, query, limit).await
-    }
-
-    async fn delete(&self, id: &CompanyId, addr: &ChunkAddr) -> Result<bool> {
-        self.inner.delete(id, addr).await
-    }
-
-    async fn delete_label(&self, id: &CompanyId, addr: &ChunkAddr, label: &str) -> Result<bool> {
-        self.inner.delete_label(id, addr, label).await
     }
 }
 

@@ -182,14 +182,17 @@ repo's 500-line cap for a Markdown file, and the event vocabulary is the half
 that keeps growing: these files own the port *traits*, that one owns the
 *payloads* they carry.
 
-## MemoryStore
+## TraceStore
 
-The equivalent of Medulla's `CyclePersistence`; a hosted provider is the
-target backend ([memory-engine.md](memory-engine.md)).
+Renamed from `MemoryStore` in the memory v2 cutover. It holds compressed cycle
+traces and task results only. It is **not** memory: nothing recalls from it.
+Company memory is OpenHuman's engine ([memory-engine.md](memory-engine.md)),
+and the old `ContextStore` port (the RLM chunk store) is gone; the brain's
+`context_*` device tools now ride on `crate::memory::CompanyMemory::context_op`.
 
 ```rust
-// src/ports/memory.rs
-pub trait MemoryStore: Send + Sync {
+// src/ports/traces.rs
+pub trait TraceStore: Send + Sync {
     async fn save_trace(&self, id: &CompanyId, trace: CompressedTrace) -> Result<()>;
     async fn recent_traces(&self, id: &CompanyId, limit: usize)
         -> Result<Vec<CompressedTrace>>;
@@ -197,38 +200,6 @@ pub trait MemoryStore: Send + Sync {
     async fn evict(&self, id: &CompanyId, policy: EvictionPolicy) -> Result<u64>;
 }
 ```
-
-## ContextStore
-
-The RLM environment: addressable chunks the brain queries lazily. Mirrors
-Medulla's `ContextStore` port.
-
-```rust
-// src/ports/context.rs
-pub trait ContextStore: Send + Sync {
-    async fn put(&self, id: &CompanyId, chunk: ContextChunk) -> Result<ChunkAddr>;
-    async fn list(&self, id: &CompanyId, prefix: &str) -> Result<Vec<ChunkMeta>>;
-    async fn peek(&self, id: &CompanyId, addr: &ChunkAddr, range: Option<Range<usize>>)
-        -> Result<String>;
-    async fn peek_many(&self, id: &CompanyId, addrs: &[ChunkAddr])
-        -> Result<Vec<Option<String>>>; // defaulted: loops peek
-    async fn search(&self, id: &CompanyId, query: &str, limit: usize)
-        -> Result<Vec<ChunkHit>>;
-    async fn delete(&self, id: &CompanyId, addr: &ChunkAddr) -> Result<bool>;
-    async fn delete_label(&self, id: &CompanyId, addr: &ChunkAddr, label: &str)
-        -> Result<bool>;
-}
-```
-
-Chunks are content-addressed: byte-identical bodies share one address, and
-every backend keeps one claim per `(addr, label)` (issue #1300 — a re-`put`
-of an identical body under a new label lands that label's claim; under an
-identical label it is a no-op). `delete` is address-level and takes every
-claim with the body — the operator's hard-delete. `delete_label` removes one
-claim and reaps the body only with the last one, decided atomically inside
-the backend, which is what lets `memory_forget` and the fact-mirror reap
-remove their own claim on a shared address without racing a concurrent
-identical-content write.
 
 ## SecretStore
 
