@@ -128,3 +128,51 @@ fn an_off_engine_is_a_configuration_not_a_failure() {
         OpenCompanyError::Store(_)
     ));
 }
+
+#[tokio::test]
+async fn the_brain_context_ops_round_trip_through_memory() {
+    use crate::ports::types::{ContextChunk, ContextOp, ContextOpResult};
+    let memory = memory("context").await;
+    let put = memory
+        .context_op(
+            ContextOp::Put(ContextChunk {
+                label: "notes/q4".into(),
+                body: "Ship the Q4 report on Friday".into(),
+            }),
+            true,
+        )
+        .await
+        .expect("put");
+    let ContextOpResult::Addr(addr) = put else {
+        panic!("a put answers an address")
+    };
+    let row = memory.get(vec![addr.as_ref().to_string()]).await.unwrap();
+    assert!(row[0].tags.contains(&super::super::INBOUND_TAG.to_string()));
+
+    let ContextOpResult::Metas(metas) = memory
+        .context_op(ContextOp::List { prefix: "notes/".into() }, false)
+        .await
+        .unwrap()
+    else {
+        panic!("a list answers metas")
+    };
+    assert_eq!(metas.len(), 1);
+    assert_eq!(metas[0].label, "notes/q4");
+    let ContextOpResult::Metas(none) = memory
+        .context_op(ContextOp::List { prefix: "other/".into() }, false)
+        .await
+        .unwrap()
+    else {
+        panic!("a list answers metas")
+    };
+    assert!(none.is_empty());
+
+    let ContextOpResult::Text(text) = memory
+        .context_op(ContextOp::Peek { addr, range: None }, false)
+        .await
+        .unwrap()
+    else {
+        panic!("a peek answers text")
+    };
+    assert_eq!(text, "Ship the Q4 report on Friday");
+}

@@ -269,7 +269,7 @@ pub(crate) async fn sweep_company(
         tracing::warn!(%company, %err, "[maintenance] pruning fire claims failed");
     }
     if let Err(err) = runtime
-        .memory
+        .traces
         .evict(
             company,
             EvictionPolicy::KeepRecent {
