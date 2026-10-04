@@ -1598,92 +1598,6 @@ fn project_event_for_viewer(
             }
             o
         }
-        // The dispatch terminal (#185), narrowed and widened by #377.
-        //
-        // **Widened** with `chatId`: the conversation the card was raised from,
-        // which is what lets a console file the settle into the channel the
-        // work came from instead of guessing at one. Omitted rather than null
-        // when the card names none — mirroring `approval_parked` below, so "no
-        // conversation raised this" is a presence check on the console rather
-        // than a null check, and a board-created card is board-only on the wire
-        // too.
-        //
-        // **Narrowed** by dropping `output`. The run's prose already reaches
-        // the operator as the orchestrator's relay bubble (#151); what the
-        // channel was missing is the structural fact that the card *settled*
-        // and *where*, which is `column`. Carrying the prose here as well would
-        // put one run's words into the same channel twice, so it is dropped at
-        // the projection — the one place that can guarantee no later reader
-        // reintroduces the duplicate. Nothing in the console read it. `desk`
-        // stays for wire compatibility.
-        // **A crossing happened; the thread it belongs to must be re-read.**
-        //
-        // A crossing renders as a collapsed `referralConversation` folded onto
-        // the asking row, and `attach_referral_origins` — which builds it — runs
-        // in `history_for_desk` and nowhere else. So a crossing was invisible
-        // live and appeared only once something re-read the thread, which for a
-        // desk crossing meant waiting for the turn to settle and for a pair DM
-        // meant never: its rows are journaled in the pair's own `dm:<a>+<b>`
-        // conversation, which no desk view is watching.
-        //
-        // This frame carries no crossing content, on purpose. Rebuilding the
-        // fold here would be a second implementation of a rule this subsystem
-        // has already had to fix in two places four separate times; the reload
-        // projection is the authority and this only tells the console to ask it
-        // again. Same shape as #2329's remedy for the grammar split: add to the
-        // stream rather than teach it to recompute.
-        CompanyEvent::ReferralEnqueued {
-            from_desk,
-            trigger_sequence,
-            to_desk,
-            target,
-            asker,
-            conversation,
-            returning,
-            episode_id,
-            to_episode_id,
-            ..
-        } => {
-            let mut o = envelope("referral");
-            // **The desk whose transcript gains the fold, which is not the same
-            // field on both legs.**
-            //
-            // The fold lands on the ASKING row, and a return leg is addressed
-            // the other way round: `mark` builds it from the answering desk, so
-            // its `from_desk` is the far desk and `to_desk` is the desk that
-            // asked. Emitting `from_desk` unconditionally pointed the console at
-            // the far desk exactly on the leg that carries the answer — and
-            // since the forward frame goes out before an answer exists, a
-            // cross-desk crossing was never refreshed on the desk waiting for it
-            // (Codex, #2341).
-            o["chatId"] = json!(match returning {
-                true => to_desk,
-                false => from_desk,
-            });
-            // The row it folds onto, so a console need not re-read a whole desk
-            // to find what changed.
-            o["sequence"] = json!(trigger_sequence);
-            o["toDesk"] = json!(to_desk);
-            o["target"] = json!(target);
-            o["asker"] = json!(asker);
-            // A pair thread exists only for a person-to-person crossing; on a
-            // desk crossing `target` is merely the room's first eligible seat.
-            o["direct"] = json!(conversation.is_some());
-            // Which leg this is, read the same way `ReferredFrom::returning`
-            // is: a return is the one that completes the exchange, so a console
-            // that only wants to re-read once can wait for it.
-            o["returning"] = json!(returning);
-            // The episode on the asking desk that raised the crossing, and
-            // the one opened on the far desk to answer it (plan hive-desks,
-            // Phase 6). Omitted on a pair DM and on older markers.
-            if let Some(episode_id) = episode_id {
-                o["episodeId"] = json!(episode_id);
-            }
-            if let Some(to_episode_id) = to_episode_id {
-                o["toEpisodeId"] = json!(to_episode_id);
-            }
-            o
-        }
         CompanyEvent::DeskTaskCompleted {
             task_id,
             desk,
@@ -1729,6 +1643,7 @@ fn project_event_for_viewer(
             approval_id,
             effect_kind,
             thread,
+            origin,
         } => {
             let mut o = envelope("approval_parked");
             o["approvalId"] = json!(approval_id.as_ref());
@@ -1737,6 +1652,15 @@ fn project_event_for_viewer(
             // is page-only on the wire too.
             if let Some(thread) = thread {
                 o["chatId"] = json!(thread);
+            }
+            // OC-2: whose coordinator turn is held on it, so the console can
+            // show that teammate as waiting. Omitted for a cycle park.
+            if let Some(crate::ports::types::ApprovalOrigin::Hive {
+                agent_id,
+                episode_id,
+            }) = origin
+            {
+                o["hive"] = json!({ "agentId": agent_id, "episodeId": episode_id });
             }
             o
         }
@@ -1879,206 +1803,88 @@ fn project_event_for_viewer(
             o["reset"] = json!(reset);
             o
         }
-        // Plan hive-desks, Phase 4: the episode record, projected one frame
-        // per journal row so a console draws the round band live and rebuilds
-        // the same shape from `chat/history`'s `episode` field on reload.
-        // Every frame carries `chatId` (the desk) and `episodeId`.
-        CompanyEvent::EpisodeOpened {
+        // OC-2: the company hive's record, one frame per journal row. The
+        // console groups a desk's lines by `hive.episodeId` from the
+        // `agent_reply` frames; these say when an operator line was accepted
+        // (and who starts it), when an episode settled, when two agents spoke
+        // privately, and when a turn was lost to a restart.
+        CompanyEvent::HiveAccepted {
+            message_id,
+            sequence,
             chat_id,
-            episode_id,
-            opened_by_seq,
-            parent,
-            participants,
-            plan,
-            ..
+            source,
+            starters,
+            route,
         } => {
-            let mut o = envelope("episode_opened");
+            let mut o = envelope("hive_accepted");
+            o["messageId"] = json!(message_id);
+            o["sequence"] = json!(sequence);
             o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["openedBySeq"] = json!(opened_by_seq);
-            if let Some(parent) = parent {
-                o["parentId"] = json!(parent.value().to_string());
+            if let Some(source) = source {
+                o["sourceId"] = json!(source.value().to_string());
             }
-            o["participants"] = json!(participants);
-            o["plan"] = json!(plan);
-            o
-        }
-        CompanyEvent::RoundStarted {
-            chat_id,
-            episode_id,
-            revision,
-            agent_ids,
-        } => {
-            let mut o = envelope("round_started");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["revision"] = json!(revision);
-            o["agentIds"] = json!(agent_ids);
-            o
-        }
-        CompanyEvent::RoundCommitted {
-            chat_id,
-            episode_id,
-            revision,
-            utterances,
-            actions,
-        } => {
-            let mut o = envelope("round_committed");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["revision"] = json!(revision);
-            o["utterances"] = json!(
-                utterances
-                    .iter()
-                    .map(|utterance| {
-                        let mut u = json!({
-                            "agentId": utterance.agent_id,
-                            "sequence": utterance.sequence,
-                            "kind": utterance.kind,
-                        });
-                        if let Some(message_seq) = utterance.message_seq {
-                            u["messageSeq"] = json!(message_seq);
-                        }
-                        if !utterance.to.is_empty() {
-                            u["to"] = json!(utterance.to);
-                        }
-                        u
-                    })
-                    .collect::<Vec<_>>()
-            );
-            o["actions"] = json!(actions);
-            o
-        }
-        CompanyEvent::BroadcastRouted {
-            chat_id,
-            episode_id,
-            revision,
-            agent_id,
-            message_seq,
-            plan,
-            probabilities,
-            router,
-        } => {
-            let mut o = envelope("broadcast_routed");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["revision"] = json!(revision);
-            o["agentId"] = json!(agent_id);
-            o["messageSeq"] = json!(message_seq);
-            o["plan"] = json!(plan);
-            if let Some(probabilities) = probabilities {
-                o["probabilities"] = json!(probabilities);
-            }
-            o["router"] = json!(router);
-            o
-        }
-        CompanyEvent::DmDelivered {
-            chat_id,
-            episode_id,
-            from,
-            to,
-            message_seq,
-        } => {
-            let mut o = envelope("dm_delivered");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["from"] = json!(from);
-            o["to"] = json!(to);
-            o["messageSeq"] = json!(message_seq);
-            o
-        }
-        // The desk's reference to a private exchange. Deliberately carries
-        // no text: the question and the answer live in the pair channel, and
-        // this row exists so the desk can say two seats are talking and
-        // where, not so it can quote them.
-        CompanyEvent::ConversationOpened {
-            chat_id,
-            episode_id,
-            conversation_id,
-            root,
-            asker,
-            askee,
-        } => {
-            let mut o = envelope("conversation_opened");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["conversationId"] = json!(conversation_id);
-            o["root"] = json!(root);
-            o["asker"] = json!(asker);
-            o["askee"] = json!(askee);
-            o
-        }
-        CompanyEvent::ConversationConcluded {
-            chat_id,
-            episode_id,
-            conversation_id,
-            root,
-            asker,
-            askee,
-            forced,
-        } => {
-            let mut o = envelope("conversation_concluded");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["conversationId"] = json!(conversation_id);
-            o["root"] = json!(root);
-            o["asker"] = json!(asker);
-            o["askee"] = json!(askee);
-            // A conversation that ran out of turns concluded without an
-            // answer. An indicator that only watched for one would hang on
-            // exactly this case.
-            o["forced"] = json!(forced);
-            o
-        }
-        CompanyEvent::EpisodeCompleted {
-            chat_id,
-            episode_id,
-            revision,
-            completed_by,
-            rounds,
-            reason,
-            summary_seq,
-        } => {
-            let mut o = envelope("episode_completed");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["revision"] = json!(revision);
-            if let Some(completed_by) = completed_by {
-                o["completedBy"] = json!(completed_by);
-            }
-            o["rounds"] = json!(rounds);
-            o["reason"] = json!(reason);
-            if let Some(summary_seq) = summary_seq {
-                o["summarySeq"] = json!(summary_seq);
+            o["starters"] = json!(starters);
+            if let Some(route) = route {
+                o["route"] = json!(route);
             }
             o
         }
-        CompanyEvent::EpisodeSeatParked {
-            chat_id,
-            episode_id,
-            seat,
+        CompanyEvent::HiveMessage {
+            sequence,
+            sender,
+            destination,
+            text,
             thread,
-            approval_ids,
+            episode_id,
+            only_for,
         } => {
-            let mut o = envelope("episode_seat_parked");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["seat"] = json!(seat);
+            let mut o = envelope("hive_message");
+            o["sequence"] = json!(sequence);
+            o["sender"] = json!(sender);
+            o["destination"] = json!(destination);
+            o["text"] = json!(text);
             if let Some(thread) = thread {
                 o["thread"] = json!(thread);
             }
-            o["approvalIds"] = json!(approval_ids);
+            if let Some(episode_id) = episode_id {
+                o["episodeId"] = json!(episode_id);
+            }
+            if !only_for.is_empty() {
+                o["onlyFor"] = json!(only_for);
+            }
             o
         }
-        CompanyEvent::EpisodeSeatResumed {
-            chat_id,
+        CompanyEvent::HiveEpisodeSettled {
             episode_id,
-            seat,
+            hive_id,
+            opened_at,
+            thread,
+            failure,
         } => {
-            let mut o = envelope("episode_seat_resumed");
-            o["chatId"] = json!(chat_id);
+            let mut o = envelope("hive_episode_settled");
             o["episodeId"] = json!(episode_id);
-            o["seat"] = json!(seat);
+            o["chatId"] = json!(hive_id);
+            o["openedAt"] = json!(opened_at);
+            if let Some(thread) = thread {
+                o["thread"] = json!(thread);
+            }
+            if let Some(failure) = failure {
+                o["failure"] = json!(failure);
+            }
+            o
+        }
+        CompanyEvent::HiveTurnInterrupted {
+            agent_id,
+            episode_id,
+            reason,
+            ..
+        } => {
+            let mut o = envelope("hive_turn_interrupted");
+            o["agentId"] = json!(agent_id);
+            if let Some(episode_id) = episode_id {
+                o["episodeId"] = json!(episode_id);
+            }
+            o["reason"] = json!(reason);
             o
         }
         // Issue #276: a workflow armed or paused, so a console holding the
