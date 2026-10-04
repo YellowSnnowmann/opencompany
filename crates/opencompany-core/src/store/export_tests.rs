@@ -3,7 +3,7 @@ use crate::ports::SecretStore;
 use crate::ports::types::{Actor, ActorKind, CompanyEvent};
 use crate::runtime::RuntimeBuilder;
 use crate::store::paths::Bundle;
-use crate::store::{FsCompanyStore, FsContextStore, FsEventLog, FsTraceStore, FsSecretStore};
+use crate::store::{FsCompanyStore, FsEventLog, FsSecretStore, FsTraceStore};
 
 pub(super) fn tmp_root(tag: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -63,42 +63,11 @@ pub(super) fn fs_ports(root: &Path) -> Ports {
         Arc::new(FsCompanyStore::new(root.to_path_buf())),
         Arc::new(FsEventLog::new(root.to_path_buf())),
         Arc::new(FsTraceStore::new(root.to_path_buf())),
-        Arc::new(FsContextStore::new(root.to_path_buf())),
     )
 }
 
-struct ArchiveScopes {
-    archived: Vec<CompressedTrace>,
-    restored: Arc<std::sync::Mutex<Vec<CompressedTrace>>>,
-    context: Arc<FsContextStore>,
-}
-
-#[async_trait::async_trait]
-impl MemoryScopes for ArchiveScopes {
-    fn agent_context(&self, _agent_id: &str) -> Arc<dyn ContextStore> {
-        self.context.clone()
-    }
-
-    fn desk_context(&self, _desk_id: &str) -> Arc<dyn ContextStore> {
-        self.context.clone()
-    }
-
-    async fn archived_traces(&self, _company: &CompanyId) -> Result<Vec<CompressedTrace>> {
-        Ok(self.archived.clone())
-    }
-
-    async fn restore_archived_traces(
-        &self,
-        _company: &CompanyId,
-        traces: &[CompressedTrace],
-    ) -> Result<()> {
-        self.restored.lock().unwrap().extend_from_slice(traces);
-        Ok(())
-    }
-}
-
 /// The mandatory end-to-end round-trip: build a company, run a cycle to
-/// populate events/traces/ledger, seed a ledger entry and context chunk,
+/// populate events/traces/ledger, seed a ledger entry,
 /// export to a bundle directory, import into a *fresh* home through the fs
 /// ports, and assert the charter + event log + ledger survive intact.
 #[tokio::test]
@@ -133,15 +102,6 @@ async fn export_import_roundtrip_fs() {
             kind: "inference.spend".into(),
             amount_usd: 1.25,
             memo: "seed".into(),
-        },
-    )
-    .await
-    .unwrap();
-    c1.put(
-        &id,
-        ContextChunk {
-            label: "notes/intro".into(),
-            body: "the quick brown fox".into(),
         },
     )
     .await
@@ -198,16 +158,10 @@ async fn export_import_roundtrip_fs() {
         assert_eq!(a.event, b.event);
     }
 
-    // Traces + context round-trip through the ports.
+    // Traces round-trip through the ports.
     let src_traces = m1.recent_traces(&id, usize::MAX).await.unwrap();
     let dst_traces = m2.recent_traces(&id, usize::MAX).await.unwrap();
     assert_eq!(src_traces, dst_traces);
-    let chunk = c2.list(&id, "notes/").await.unwrap();
-    assert_eq!(chunk.len(), 1);
-    assert_eq!(
-        c2.peek(&id, &chunk[0].addr, None).await.unwrap(),
-        "the quick brown fox"
-    );
 
     for dir in [home1, home2, dest] {
         tokio::fs::remove_dir_all(&dir).await.ok();

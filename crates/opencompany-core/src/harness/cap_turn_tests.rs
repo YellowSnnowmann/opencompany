@@ -38,12 +38,10 @@ use crate::company::CompanyManifest;
 use crate::company::credentials::Credential;
 use crate::harness::brain::iteration_cap_pause_notice;
 use crate::harness::mcp_probe::McpFailureQueue;
-use crate::harness::memory_loop;
 use crate::harness::orchestrator::{DelegationQueue, WorkflowRunnerHandle};
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{HarnessBrain, HarnessDeps, HarnessPool};
-use crate::ports::ContextStore;
 use crate::ports::brain::{Brain, CycleHost};
 use crate::ports::types::{
     ApprovalId, CompanyEvent, CompanyId, CompanyRecord, ContextOp, ContextOpResult, CycleRequest,
@@ -381,24 +379,6 @@ fn chat(text: &str) -> CycleRequest {
     }
 }
 
-/// Everything the turn wrote back to memory, newest-agnostic.
-async fn memory_bodies(context: &FsContextStore) -> Vec<String> {
-    let metas = context
-        .list(&company(), memory_loop::OUTCOME_LABEL_PREFIX)
-        .await
-        .expect("list memory");
-    let mut bodies = Vec::new();
-    for meta in metas {
-        bodies.push(
-            context
-                .peek(&company(), &meta.addr, None)
-                .await
-                .expect("peek memory"),
-        );
-    }
-    bodies
-}
-
 /// The operator-channel bubbles a cycle produced.
 fn operator_bubbles(responses: &[OutboundMessage]) -> Vec<&OutboundMessage> {
     responses
@@ -611,40 +591,3 @@ async fn an_uncapped_chat_turn_says_nothing_extra() {
 // ---------------------------------------------------------------------------
 // What memory keeps
 // ---------------------------------------------------------------------------
-
-/// The turn's memory write carries the agent's checkpoint and **not** the
-/// platform's notice.
-///
-/// This is why the notice is a sibling bubble rather than text appended to the
-/// reply. `HarnessPool::run` persists `outcome.reply` to the context store, so
-/// appending would file "you hit the step limit" as something the agent said —
-/// and the memory loop would recall it into a later turn as prior work.
-#[tokio::test]
-#[ignore = "TODO(hive-desks follow-up): scripts the exact model-call sequence of the previous in-crate agent loop (its empty-reply retry, its iteration-cap wrap-up call, its provider-outage failure). Since plan hive-desks Phase 2 the loop is OpenHuman's own, with its own empty/cap/outage protocol; re-base the expectations on that loop once its protocol is pinned."]
-async fn the_pause_notice_never_reaches_memory() {
-    let (base_url, _script) = spawn_script(capped_script()).await;
-    let dir = tempfile::tempdir().unwrap();
-    let (deps, ops) = deps_for(base_url, dir.path());
-    let context = FsContextStore::new(dir.path());
-    let brain = HarnessBrain::new(Arc::new(HarnessPool::new()), deps, record()).with_runs(ops);
-
-    brain
-        .run_cycle(chat("Write a short feature spec."), &NoopHost)
-        .await
-        .expect("cycle runs");
-
-    let bodies = memory_bodies(&context).await;
-    assert!(
-        !bodies.is_empty(),
-        "the turn must have written its outcome back, or this proves nothing"
-    );
-    assert!(
-        bodies.iter().any(|b| b.contains(CHECKPOINT)),
-        "the agent's checkpoint is what compounds into later turns: {bodies:?}"
-    );
-    assert!(
-        bodies.iter().all(|b| !b.contains(NOTICE_MARKER)),
-        "the platform's pause notice must never be recalled as something the agent \
-         said: {bodies:?}"
-    );
-}
