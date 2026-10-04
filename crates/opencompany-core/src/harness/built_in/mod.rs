@@ -253,7 +253,7 @@ use crate::harness::provider::HarnessModel;
 use crate::company::Agent as ManifestAgent;
 use crate::company::Policy;
 use crate::company::mcp::McpServerDecl;
-use crate::company::steer::{SteerAction, SteerControl};
+use crate::company::steer::SteerControl;
 use crate::error::OpenCompanyError;
 use crate::harness::cost::{TurnUsage, record_turn_cost};
 use crate::harness::mcp_probe::McpFailureQueue;
