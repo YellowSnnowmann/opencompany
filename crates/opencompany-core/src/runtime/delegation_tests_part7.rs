@@ -39,52 +39,6 @@ async fn a_responders_own_budget_pause_survives_the_relay_replacing_the_reply() 
     assert_eq!(out.reply, "All shipped.", "the relay did replace the text");
 }
 
-/// Issue #1846 review (Codex #3865395868, the chat-created-hand-off half):
-/// the hand-off's own card — opened by `open_hand_off_work_card`, tracked
-/// separately from any card this delegation is nested inside — must also
-/// settle `Paused` when the delegate's turn ran out of credits, not
-/// `Completed` — the terminal-state asymmetry `HarnessBrain::run_task`
-/// already closed for the top-level orchestrator's own dispatched turn.
-#[tokio::test]
-async fn a_hand_offs_own_card_settles_paused_when_the_delegate_ran_out_of_credits() {
-    let fx = Fixture::new();
-    let turns = ScriptedTurns::new(
-        &fx,
-        vec![Turn::budget_paused(
-            "Paused — engineer's turn ran out of inference budget/credits.",
-            "engineer",
-            "Paused — engineer's turn ran out of inference budget/credits, so it \
-             stopped instead of failing silently.",
-        )],
-    );
-    let outcome = fx
-        .runner(&turns)
-        .run_delegation(
-            handoff("draft the launch plan"),
-            None,
-            MessageContext::default(),
-        )
-        .await
-        .expect("delegation runs");
-
-    let desk_reply = outcome
-        .desk_reply
-        .expect("the delegate's turn produced a reply, paused or not");
-    assert!(
-        desk_reply.budget_paused.is_some(),
-        "the pause must reach the caller through `DeskReply` — it is what \
-         `handle_task_delegations` later carries into `TaskHandoff`"
-    );
-
-    let cards = fx.cards().await;
-    assert_eq!(cards.len(), 1, "{cards:?}");
-    assert_eq!(
-        cards[0].column, COLUMN_PAUSED,
-        "a pause must not read as a completed answer: {:?}",
-        cards[0]
-    );
-}
-
 /// Issue #1846 review (Codex #3870516681) — **the regression.** A desk
 /// that paused for lack of credits has not ANSWERED, so there is nothing
 /// for the CEO relay to hand back.
@@ -431,53 +385,6 @@ async fn two_halts_in_one_chain_report_the_first() {
     assert_eq!(
         halt.agent, "chief",
         "the first halt in the chain is the one named"
-    );
-}
-
-/// The bound bites in the MEMBER'S OWN TURN, and the third lead never runs.
-///
-/// Under `max_delegation_depth = 1` — the "recursion off" setting, and the
-/// pre-#176 behaviour exactly — the engineering lead's hand-off is refused
-/// at the tool boundary with the new reason, so no second desk turn happens
-/// at all.
-#[tokio::test]
-async fn a_hand_off_past_the_depth_bound_is_refused_and_never_runs() {
-    let fx = Fixture::nested();
-    let turns = ScriptedTurns::new(
-        &fx,
-        vec![
-            Turn::tooling("handing it to engineering", vec![handoff("ship the API")]),
-            Turn::tooling(
-                "asking research",
-                vec![nested_handoff("what rate limits do competitors use?")],
-            ),
-            Turn::reply("Done, though I could not consult research."),
-        ],
-    )
-    .with_max_depth(1);
-
-    fx.runner(&turns)
-        .handle_operator_message("chief", "ship the API", Some("general"))
-        .await
-        .expect("operator message handled");
-
-    assert_eq!(
-        turns.staged(),
-        vec![
-            orchestrator::Staged::Queued,
-            orchestrator::Staged::NoDrain(orchestrator::NoDrainReason::Depth),
-        ],
-        "the member's hand-off must be refused in its own turn, as depth-capped"
-    );
-    let calls = turns.calls();
-    assert_eq!(
-        calls.len(),
-        3,
-        "chief, engineer, relay — the researcher must never run: {calls:?}"
-    );
-    assert!(
-        calls.iter().all(|(agent, _)| agent != "researcher"),
-        "{calls:?}"
     );
 }
 

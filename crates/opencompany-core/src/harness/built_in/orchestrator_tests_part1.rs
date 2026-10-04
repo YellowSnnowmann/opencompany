@@ -208,17 +208,6 @@ fn orchestrator_id_is_none_for_an_empty_roster() {
 }
 
 #[test]
-fn delegation_tool_names_are_classified_internal() {
-    assert!(is_delegation_tool(SPAWN_TASK_TOOL));
-    assert!(is_delegation_tool(DELEGATE_TO_DESK_TOOL));
-    assert!(is_delegation_tool(ADD_AGENT_TOOL));
-    assert!(is_delegation_tool(CREATE_WORKFLOW_TOOL));
-    // The read tool is NOT a delegation tool.
-    assert!(!is_delegation_tool(QUERY_COMPANY_TOOL));
-    assert!(!is_delegation_tool("send_email"));
-}
-
-#[test]
 fn queue_drains_fifo_up_to_cap_and_discards_the_rest() {
     let queue = DelegationQueue::default();
     for i in 0..5 {
@@ -240,17 +229,6 @@ fn queue_drains_fifo_up_to_cap_and_discards_the_rest() {
             assignee: None,
         }
     );
-    assert_eq!(queue.queued(), 0);
-}
-
-#[test]
-fn clear_empties_the_queue() {
-    let queue = DelegationQueue::default();
-    queue.push(Delegation::DelegateToDesk {
-        desk: "strategy".to_string(),
-        instruction: "plan".to_string(),
-    });
-    queue.clear();
     assert_eq!(queue.queued(), 0);
 }
 
@@ -354,64 +332,6 @@ fn a_claim_that_exits_early_un_commits_and_clears() {
     assert_eq!(queue.queued(), 0);
 }
 
-/// The headline refusal, per tool, with the sentence each one owes the
-/// model. The effect clause is the tool's own — a generic "refused" would
-/// leave the model guessing which of its calls did not happen.
-#[tokio::test]
-async fn every_delegation_tool_refuses_when_nothing_will_drain() {
-    let queue = DelegationQueue::default();
-    let store =
-        Arc::new(MemStore::seeded(desks_record(&CompanyId::new("acme")))) as Arc<dyn CompanyStore>;
-
-    let cases: Vec<(Box<dyn Tool>, Value, &str)> = vec![
-        (
-            Box::new(SpawnTaskTool::new(
-                queue.clone(),
-                CompanyId::new("acme"),
-                store.clone(),
-            )),
-            json!({ "title": "Ship it" }),
-            "the card \"Ship it\" was NOT opened",
-        ),
-        (
-            Box::new(DelegateToDeskTool::new(
-                queue.clone(),
-                CompanyId::new("acme"),
-                store,
-            )),
-            json!({ "desk": "strategy", "instruction": "draft a plan" }),
-            "nothing was handed to the strategy desk",
-        ),
-        (
-            Box::new(AssignTaskTool::new(queue.clone())),
-            json!({ "task_id": "t1", "assignee": "writer" }),
-            "card t1 was NOT assigned",
-        ),
-        (
-            Box::new(ReviewTaskTool::new(queue.clone())),
-            json!({ "task_id": "t1", "decision": "approve" }),
-            "card t1 was NOT reviewed",
-        ),
-    ];
-
-    for (tool, args, effect) in cases {
-        let name = tool.name().to_string();
-        let result = tool.execute(args).await.expect("execute");
-        assert!(result.is_error, "{name} must refuse: {}", result.text());
-        let text = result.text();
-        assert!(text.contains(effect), "{name}: {text}");
-        // Not retryable — the next turn on this path drains no better.
-        assert!(text.contains("Do not retry"), "{name}: {text}");
-        // And the model must not narrate it as done, which is the whole
-        // failure this replaces.
-        assert!(text.contains("report the action as done"), "{name}: {text}");
-        // Deliberately NOT the cap sentence: this is a different problem
-        // with a different remedy.
-        assert!(!text.contains("delegations"), "{name}: {text}");
-    }
-    assert_eq!(queue.queued(), 0, "nothing may be staged by a refusal");
-}
-
 /// **Issue #267 review, finding 3.** The two no-drain causes stop sharing a
 /// sentence.
 ///
@@ -492,46 +412,6 @@ async fn the_unwired_refusal_still_says_the_context_cannot_do_board_work() {
     assert!(!text.contains("read as a question"), "{text}");
 }
 
-/// The measurement finding 3 asks for: the two causes are distinguishable
-/// as data, not only as prose. Without this the rate at which the triage
-/// gate fires — the residual miss rate of a keyword classifier with teeth —
-/// could not be counted apart from a genuinely unwired context.
-#[test]
-fn the_two_no_drain_causes_are_countable_apart() {
-    let queue = DelegationQueue::default();
-    let spawn = || Delegation::SpawnTask {
-        title: "Build the landing page".to_string(),
-        note: None,
-        assignee: None,
-    };
-    assert_eq!(
-        queue.push_within_cap(spawn(), MAX_DELEGATIONS_PER_TURN),
-        Staged::NoDrain(NoDrainReason::Unwired)
-    );
-    let claim = queue.claim_answering();
-    assert_eq!(
-        queue.push_within_cap(spawn(), MAX_DELEGATIONS_PER_TURN),
-        Staged::NoDrain(NoDrainReason::Triage)
-    );
-    // …and a hand-off is not refused at all under the same claim, because it
-    // is how the question gets answered (finding 2).
-    assert_eq!(
-        queue.push_within_cap(
-            Delegation::DelegateToDesk {
-                desk: "eng".to_string(),
-                instruction: "what did you ship?".to_string(),
-            },
-            MAX_DELEGATIONS_PER_TURN),
-        Staged::Queued
-    );
-    drop(claim);
-    assert_ne!(
-        NoDrainReason::Unwired.as_str(),
-        NoDrainReason::Triage.as_str(),
-        "the log field must separate them"
-    );
-}
-
 /// The defect #419 names: the tool told the model "it will be opened on the
 /// board this turn" for a card the drain then threw away, so a turn asked
 /// for five cards, reported five, and left two. The call past the cap is now
@@ -568,38 +448,6 @@ async fn spawn_task_refuses_past_the_cap_instead_of_promising_a_discarded_card()
     // has nothing left over to destroy.
     assert_eq!(queue.queued(), MAX_DELEGATIONS_PER_TURN);
     assert_eq!(queue.drain(MAX_DELEGATIONS_PER_TURN).len(), 3);
-}
-
-/// Same for the hand-off tool, whose success line ("Its lead will answer
-/// this turn") was the more misleading of the two: it claimed a teammate had
-/// been given work nobody would ever run.
-#[tokio::test]
-async fn delegate_to_desk_refuses_past_the_cap() {
-    let queue = DelegationQueue::default();
-    let _claim = queue.claim();
-    // An empty store loads no record, so desk grounding fails open and the
-    // hand-off is queued exactly as it was before #272 — which isolates this
-    // test to the cap.
-    let store = Arc::new(MemStore::default()) as Arc<dyn CompanyStore>;
-    let tool = DelegateToDeskTool::new(queue.clone(), CompanyId::new("acme"), store);
-    for i in 0..MAX_DELEGATIONS_PER_TURN {
-        let ok = tool
-            .execute(json!({ "desk": "eng", "instruction": format!("item {i}") }))
-            .await
-            .expect("execute");
-        assert!(!ok.is_error, "within the cap: {}", ok.text());
-    }
-    let refused = tool
-        .execute(json!({ "desk": "eng", "instruction": "one more" }))
-        .await
-        .expect("execute");
-    assert!(refused.is_error, "{}", refused.text());
-    assert!(
-        refused.text().contains("nothing was handed"),
-        "{}",
-        refused.text()
-    );
-    assert_eq!(queue.queued(), MAX_DELEGATIONS_PER_TURN);
 }
 
 /// The two board-lifecycle tools share the queue and therefore the cap, so

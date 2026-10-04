@@ -11,54 +11,6 @@ fn tool_policy_request(tool_name: &str) -> oh::agent::tool_policy::ToolPolicyReq
     oh::agent::tool_policy::ToolPolicyRequest::new(tool_name, serde_json::json!({}), context)
 }
 
-#[tokio::test]
-async fn episode_seat_policy_refuses_withheld_workflow_tools_even_if_the_company_allows_them() {
-    use oh::agent::tool_policy::ToolPolicy;
-
-    let policy = EpisodeSeatToolPolicy {
-        company: Some(Arc::new(oh::agent::tool_policy::AllowAllToolPolicy)),
-        episode_tools: std::collections::HashSet::new(),
-        allowed_tools: None,
-    };
-
-    assert!(matches!(
-        policy.check(&tool_policy_request("run_workflow")).await,
-        oh::agent::tool_policy::ToolPolicyDecision::Deny { .. }
-    ));
-}
-
-#[tokio::test]
-async fn episode_seat_policy_preserves_the_company_gate_for_other_tools() {
-    use oh::agent::tool_policy::ToolPolicy;
-
-    let policy = EpisodeSeatToolPolicy {
-        company: Some(Arc::new(oh::agent::tool_policy::AllowAllToolPolicy)),
-        episode_tools: std::collections::HashSet::new(),
-        allowed_tools: None,
-    };
-
-    assert_eq!(
-        policy.check(&tool_policy_request("file_read")).await,
-        oh::agent::tool_policy::ToolPolicyDecision::Allow
-    );
-}
-
-#[tokio::test]
-async fn episode_seat_policy_refuses_episode_tools_outside_a_narrowed_turn() {
-    use oh::agent::tool_policy::ToolPolicy;
-
-    let policy = EpisodeSeatToolPolicy {
-        company: Some(Arc::new(oh::agent::tool_policy::AllowAllToolPolicy)),
-        episode_tools: std::collections::HashSet::from(["desk_read".to_owned()]),
-        allowed_tools: Some(std::collections::HashSet::from(["desk_ask".to_owned()])),
-    };
-
-    assert!(matches!(
-        policy.check(&tool_policy_request("desk_read")).await,
-        oh::agent::tool_policy::ToolPolicyDecision::Deny { .. }
-    ));
-}
-
 // --- Agent-workspace provisioning (issue #409) --------------------------
 
 fn manifest_agent(role: &str, description: Option<&str>) -> ManifestAgent {

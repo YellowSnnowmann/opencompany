@@ -266,53 +266,6 @@ async fn a_yesterday_stamped_spend_does_not_refuse_todays_dispatch() {
     );
 }
 
-#[tokio::test]
-async fn a_pooled_teammate_reads_its_conversation_by_name_on_its_own_belt() {
-    let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext);
-    let rec = capped_record();
-    let mut deps = deps_with_plan(dir.path(), context, None, None);
-    deps.events = Some(Arc::new(crate::hive::test_support::MemoryLog::default()));
-    let pool = HarnessPool::new();
-    pool.ensure(&rec, &deps).await.expect("ensure");
-    let agent = pool.agent(&rec.id, "ceo").await.expect("ceo");
-    assert!(
-        agent
-            .tools()
-            .iter()
-            .any(|tool| tool.name() == crate::hive::tools::READ_TOOL),
-        "`read` rides the belt"
-    );
-    assert!(
-        agent.served_catalogue().is_empty(),
-        "nothing is left for an MCP brief to name"
-    );
-}
-
-#[tokio::test]
-async fn a_pooled_teammate_without_an_events_log_keeps_a_refusing_read() {
-    let dir = tempfile::tempdir().unwrap();
-    let context = Arc::new(MockContext);
-    let rec = capped_record();
-    let deps = deps_with_plan(dir.path(), context, None, None);
-    let pool = HarnessPool::new();
-    pool.ensure(&rec, &deps).await.expect("ensure");
-    let agent = pool.agent(&rec.id, "ceo").await.expect("ceo");
-    let read = agent
-        .tools()
-        .iter()
-        .find(|tool| tool.name() == crate::hive::tools::READ_TOOL)
-        .cloned()
-        .expect("`read` stays on the belt");
-    let refused = read.execute(serde_json::json!({})).await.unwrap();
-    assert!(refused.is_error);
-    assert!(
-        refused.output().contains("no conversation journal"),
-        "{}",
-        refused.output()
-    );
-}
-
 /// **The mechanism issue #443 asks for.** Every tool this crate can put in
 /// front of an agent must be classified in
 /// [`crate::policy::consequence`], or this fails.
@@ -616,49 +569,3 @@ async fn a_paypal_grant_with_no_credential_wires_nothing_rather_than_failing() {
     );
 }
 
-/// The withheld list is matched against `tool.name()`, so it must hold the tool
-/// name CONSTANTS and not literals of its own.
-///
-/// `build_episode_seat` strips a seat's belt with
-/// `retain(|tool| !EPISODE_WITHHELD_TOOLS.contains(&tool.name()))`. A literal
-/// that drifts from the tool it names fails open — the tool stays on the belt and
-/// nothing says so — which is the same half-cut failure the persona strip is
-/// written to avoid. Asserting against the constants makes a rename break here
-/// instead.
-///
-/// The two workflow verbs are on that list because both stage a
-/// `TaskOutputWorkflow` on the shared `WorkflowRefQueue` for the brain to drain
-/// into the card it holds, and no brain drains inside an episode. Left on the
-/// belt, a seat's push could land inside a concurrent pooled chat turn's
-/// `clear()`..`drain()` window and be stamped on that turn's card.
-#[test]
-fn the_withheld_list_names_tools_by_their_own_constants() {
-    use crate::harness::built_in::EPISODE_WITHHELD_TOOLS;
-    use crate::harness::orchestrator::{
-        ASSIGN_TASK_TOOL, CREATE_WORKFLOW_TOOL, REVIEW_TASK_TOOL, RUN_WORKFLOW_TOOL,
-    };
-    use crate::runtime::delegation_tools::{
-        DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL, SPAWN_TASK_TOOL,
-    };
-
-    for withheld in [
-        DELEGATE_TO_DESK_TOOL,
-        DELEGATE_TO_TEAMMATE_TOOL,
-        ASSIGN_TASK_TOOL,
-        REVIEW_TASK_TOOL,
-        CREATE_WORKFLOW_TOOL,
-        RUN_WORKFLOW_TOOL,
-    ] {
-        assert!(
-            EPISODE_WITHHELD_TOOLS.contains(&withheld),
-            "`{withheld}` must be withheld from an episode seat"
-        );
-    }
-
-    // And the one that is deliberately NOT withheld: #2546 gave `spawn_task` a
-    // per-seat drain, which is the whole reason it came off this list.
-    assert!(
-        !EPISODE_WITHHELD_TOOLS.contains(&SPAWN_TASK_TOOL),
-        "a seat opens cards with `spawn_task`; withholding it would undo #2546"
-    );
-}

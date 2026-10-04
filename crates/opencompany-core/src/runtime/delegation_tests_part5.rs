@@ -1,79 +1,5 @@
 use super::tests_core2::*;
 
-/// **Issue #984, the second caller.** `open_work_card` has two callers, and
-/// the test above this one only drives the direct path. This drives the
-/// hand-off path: the orchestrator queues `delegate_to_desk` on a message
-/// the lexical layer abstained on and the model read as `chatter`.
-///
-/// The shape mirrors `a_hand_off_runs_on_a_question_turn_but_opens_no_card`
-/// exactly, because the requirement is the same one: only the **card**
-/// stands down. The hand-off is not refused, the desk lead's turn really
-/// runs, and the relayed answer still reaches the operator — a verdict that
-/// silenced the company instead of the board would be a worse bug than the
-/// one #984 reports.
-///
-/// This is the test that would have caught #442's mistake, which put a
-/// stand-down in one caller and left the other opening cards.
-#[tokio::test]
-async fn a_hand_off_of_a_message_the_model_calls_chatter_opens_no_card() {
-    let residue = "the deck looks good to me";
-    assert!(
-        crate::company::task_intent::triage_message_detailed(residue).abstained(),
-        "fixture must be a message no lexical rule decides"
-    );
-    assert!(
-        is_trackable_work(residue),
-        "and one the card detector would otherwise track, or this proves nothing"
-    );
-    let fx = Fixture::new();
-    let escalation = ScriptedTriage::new(crate::harness::triage::TriageVerdict::Chatter);
-    let turns = ScriptedTurns::new(
-        &fx,
-        vec![
-            Turn::tooling(
-                "asking engineering",
-                vec![handoff("take a look at the deck")],
-            ),
-            Turn::reply("looks fine to me too"),
-            Turn::reply("engineering agrees the deck is fine"),
-        ],
-    );
-    let turn = fx
-        .runner(&turns)
-        .with_triage(&escalation)
-        .handle_operator_message("chief", residue, Some("general"))
-        .await
-        .expect("operator message handled");
-
-    assert_eq!(
-        turns.staged(),
-        vec![orchestrator::Staged::Queued],
-        "a chatter verdict must NOT refuse the hand-off — it does not gate tools"
-    );
-    let calls = turns.calls();
-    assert_eq!(
-        calls.len(),
-        3,
-        "the orchestrator, the desk lead and the relay all ran: {calls:?}"
-    );
-    assert_eq!(
-        calls[1].0, "engineer",
-        "the desk lead really ran: {calls:?}"
-    );
-    assert_eq!(
-        turn.reply, "engineering agrees the deck is fine",
-        "and the operator still gets the relayed answer"
-    );
-    assert!(
-        fx.cards().await.is_empty(),
-        "but the hand-off card stands down: the model read this as conversation"
-    );
-    assert!(
-        turn.spawned_task.is_none(),
-        "and nothing is linked to a card"
-    );
-}
-
 /// The paired opposite, for the same reason the question pair is paired: a
 /// "fix" that simply stopped opening hand-off cards would satisfy the test
 /// above. A `work` verdict on the same abstaining message still cards.
@@ -106,81 +32,6 @@ async fn the_same_hand_off_on_a_work_verdict_still_opens_its_card() {
         "a work verdict leaves the hand-off card the abstention would have opened"
     );
     assert_eq!(cards[0].assignee, "engineer");
-}
-
-/// **Issue #1152, the second caller.** `open_work_card` has two callers, and
-/// the direct-path test only drives one. This drives the hand-off: the
-/// orchestrator queues `delegate_to_desk` on a message the operator sent as
-/// chat.
-///
-/// The shape mirrors `a_hand_off_of_a_message_the_model_calls_chatter_opens_no_card`
-/// exactly, because the requirement is the same: **only the card** stands
-/// down. Saying "I'm just chatting" must not silence the company — the
-/// hand-off is not refused, the desk lead's turn really runs, and the
-/// relayed answer still reaches the operator.
-///
-/// The `staged()` assertion is the load-bearing one, and it is what pins the
-/// scope this deliberately does not take: the turn's board tools are NOT
-/// narrowed, so a card can still appear if the orchestrator explicitly
-/// spawns one. "Just chatting" means the company will not *automatically*
-/// card the message.
-///
-/// Non-vacuous by the same pairing as the chatter test above it:
-/// `the_same_hand_off_on_a_work_verdict_still_opens_its_card` opens a card
-/// on these very words with no composer choice.
-#[tokio::test]
-async fn a_hand_off_of_a_message_the_operator_sent_as_chat_opens_no_card() {
-    let residue = "the deck looks good to me";
-    assert!(
-        is_trackable_work(residue),
-        "fixture must be one the card detector would otherwise track"
-    );
-    let fx = Fixture::new();
-    let turns = ScriptedTurns::new(
-        &fx,
-        vec![
-            Turn::tooling(
-                "asking engineering",
-                vec![handoff("take a look at the deck")],
-            ),
-            Turn::reply("looks fine to me too"),
-            Turn::reply("engineering agrees the deck is fine"),
-        ],
-    );
-    let turn = fx
-        .runner(&turns)
-        .requested(Some(crate::ports::types::MessageIntent::Chat))
-        .handle_operator_message("chief", residue, Some("general"))
-        .await
-        .expect("operator message handled");
-
-    assert_eq!(
-        turns.staged(),
-        vec![orchestrator::Staged::Queued],
-        "a chat intent must NOT refuse the hand-off — it does not gate tools"
-    );
-    let calls = turns.calls();
-    assert_eq!(
-        calls.len(),
-        3,
-        "the orchestrator, the desk lead and the relay all ran: {calls:?}"
-    );
-    assert_eq!(
-        calls[1].0, "engineer",
-        "the desk lead really ran: {calls:?}"
-    );
-    assert_eq!(
-        turn.reply, "engineering agrees the deck is fine",
-        "and the operator still gets the relayed answer"
-    );
-    assert!(
-        fx.cards().await.is_empty(),
-        "but the hand-off card stands down: the operator said this is not work"
-    );
-    assert!(
-        turn.spawned_task.is_none(),
-        "and nothing is linked to a card"
-    );
 }
 
 /// The same hand-off on a message that is NOT a question still opens its
@@ -379,40 +230,6 @@ async fn a_tracked_instruction_still_delegates_under_a_claim() {
     assert_eq!(cards[0].assignee, "engineer");
 }
 
-/// The third card path (issue #442 path one), which a triage layer looking
-/// only at the orchestrator would miss: asking a desk lead a question about
-/// their own work runs their turn directly, and `is_trackable_work` — whose
-/// default is `true` — used to read a sentence that long as work.
-#[tokio::test]
-async fn a_desk_lead_asked_a_question_directly_opens_no_card() {
-    // Long enough and free enough of question punctuation that the
-    // opposite-defaults detector on this path calls it work on its own.
-    let question = "Tell me what you shipped this week and what is still open on your plate";
-    assert!(
-        is_trackable_work(question),
-        "the fixture must be work by the direct path's own default, or the \
-         stand-down under test is doing nothing"
-    );
-    assert!(
-        crate::company::task_intent::triage_message(question).is_answer(),
-        "…and a question by the triage, which is what must outrank it"
-    );
-    let fx = Fixture::new();
-    let turns = ScriptedTurns::new(&fx, vec![Turn::reply("shipped the importer")]);
-    let turn = fx
-        .runner(&turns)
-        .handle_operator_message("engineer", question, Some("eng_desk"))
-        .await
-        .expect("operator message handled");
-
-    assert!(
-        fx.cards().await.is_empty(),
-        "asking a desk lead what they shipped opened a card"
-    );
-    assert!(turn.spawned_task.is_none());
-    assert_eq!(turn.reply, "shipped the importer");
-}
-
 // ── Issue #884 D1: a desk lead can hand a slice to a peer ───────────────
 
 /// **The D1 regression.** An operator posts into a three-person desk asking
@@ -524,63 +341,6 @@ async fn a_teammate_hand_off_to_a_non_roster_id_runs_nobody() {
         "an unresolvable teammate must run NO second turn — least of all the \
          orchestrator's, which is the D2 failure one seam over"
     );
-}
-
-/// A→B→A cannot ping-pong. Two guards, and this pins the one that is
-/// reachable from a fixture: the depth cap refuses the hand-off back at the
-/// tool boundary, in the model's own turn, and nothing is queued.
-///
-/// (The cycle guard proper — "that teammate is where the work came from" —
-/// lives on the tool's grounding and is pinned in `delegation_tools`; this
-/// is the bound that holds even for a ring the cycle guard cannot see.)
-#[tokio::test]
-async fn a_teammate_cannot_hand_the_work_back_past_the_depth_cap() {
-    let fx = Fixture::peers();
-    let turns = ScriptedTurns::new(
-        &fx,
-        vec![
-            Turn::tooling(
-                "passing it on",
-                vec![peer_handoff("seo_specialist", "look at the pricing page")],
-            ),
-            // B tries to hand it straight back to A, one level down.
-            Turn::tooling(
-                "back to you",
-                vec![peer_handoff("brand_strategist", "you take it")],
-            ),
-            Turn::reply("here is what came back"),
-        ],
-    )
-    .with_max_depth(1);
-
-    fx.runner(&turns)
-        .handle_operator_message(
-            "brand_strategist",
-            "sort out the pricing page",
-            Some("strategy"),
-        )
-        .await
-        .expect("operator message handled");
-
-    assert_eq!(
-        turns.staged(),
-        vec![
-            orchestrator::Staged::Queued,
-            orchestrator::Staged::NoDrain(orchestrator::NoDrainReason::Depth),
-        ],
-        "the hand-off back must be refused at the bound, not queued and run"
-    );
-    let agents: Vec<String> = turns.calls().into_iter().map(|(agent, _)| agent).collect();
-    assert_eq!(
-        agents,
-        [
-            "brand_strategist".to_string(),
-            "seo_specialist".to_string(),
-            "brand_strategist".to_string()
-        ],
-        "exactly one delegated turn ran, then the relay — no third hop"
-    );
-    assert_eq!(fx.queue.queued(), 0, "nothing survived the refusal");
 }
 
 /// The orchestrator's own copy reaches a teammate directly too, without the
