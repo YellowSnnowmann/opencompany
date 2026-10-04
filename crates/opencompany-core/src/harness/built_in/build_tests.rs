@@ -509,8 +509,8 @@ fn git_log(workspace: &std::path::Path) -> String {
     .unwrap()
 }
 
-#[path = "build_seat_persona_tests.rs"]
-mod seat_persona_tests;
+#[path = "build_reader_brief_tests.rs"]
+mod reader_brief_tests;
 #[path = "build_tests_part1.rs"]
 mod tests_part1;
 #[path = "build_tests_part2.rs"]

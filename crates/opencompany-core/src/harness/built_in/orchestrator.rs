@@ -5497,7 +5497,3 @@ pub(crate) fn create_workflow_parameters_schema() -> Value {
 #[cfg(test)]
 #[path = "orchestrator_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "task_handoff_receipt_tests.rs"]
-mod task_handoff_receipt_tests;
