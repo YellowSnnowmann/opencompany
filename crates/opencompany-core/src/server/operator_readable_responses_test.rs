@@ -76,7 +76,7 @@ fn stored() -> StoredEvent {
         company: CompanyId::new("acme"),
         event: CompanyEvent::AgentReply {
             audience: Vec::new(),
-            episode: None,
+            hive: None,
             chat_id: "engineering".to_string(),
             agent_id: "software_engineer".to_string(),
             text: BODY.to_string(),

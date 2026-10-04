@@ -38,7 +38,7 @@ fn projects_agent_reply_omits_empty_steps() {
         agent_id: "ceo".into(),
         text: "hi".into(),
         steps: Vec::new(),
-        episode: None,
+        hive: None,
     }))
     .expect("agent_reply is an attention signal");
     // A tool-less reply keeps the legacy wire shape — no `steps` key.

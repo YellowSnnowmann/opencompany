@@ -260,7 +260,7 @@ fn a_message_with_no_mentions_serializes_as_it_did_before_the_field() {
 fn a_reply_with_no_mentions_serializes_as_it_did_before_the_fields() {
     let event = CompanyEvent::AgentReply {
         audience: Vec::new(),
-        episode: None,
+        hive: None,
         chat_id: "general".to_string(),
         agent_id: "ceo".to_string(),
         text: "hi".to_string(),
@@ -565,7 +565,7 @@ fn agent_reply_steps_are_additive_and_omitted_when_empty() {
     // A tool-less reply serializes without the `steps` key.
     let tool_less = CompanyEvent::AgentReply {
         audience: Vec::new(),
-        episode: None,
+        hive: None,
         mentions: Vec::new(),
         mention_depth: 0,
         parent: None,
@@ -582,7 +582,7 @@ fn agent_reply_steps_are_additive_and_omitted_when_empty() {
     // A reply with a timeline round-trips it.
     let with_steps = CompanyEvent::AgentReply {
         audience: Vec::new(),
-        episode: None,
+        hive: None,
         mentions: Vec::new(),
         mention_depth: 0,
         parent: None,

@@ -48,7 +48,7 @@ fn reply_naming(task_id: &str) -> CompanyEvent {
         agent_id: "ceo".to_string(),
         text: "Opened a card for that.".to_string(),
         steps: Vec::new(),
-        episode: None,
+        hive: None,
     }
 }
 
@@ -185,7 +185,7 @@ async fn a_transcript_with_no_cards_is_untouched() {
                 agent_id: "ceo".to_string(),
                 text: "just talking".to_string(),
                 steps: Vec::new(),
-                episode: None,
+                hive: None,
             },
         )
         .await
@@ -235,7 +235,7 @@ async fn an_owner_fallback_row_is_hidden_from_a_non_admin_viewer() {
                 agent_id: crate::runtime::OWNER_FALLBACK_REPORT_AUTHOR.to_string(),
                 text: "admin-only owner report".to_string(),
                 steps: Vec::new(),
-                episode: None,
+                hive: None,
             },
         )
         .await
@@ -255,7 +255,7 @@ async fn an_owner_fallback_row_is_hidden_from_a_non_admin_viewer() {
                 agent_id: crate::runtime::WORKFLOW_REPLY_AUTHOR.to_string(),
                 text: "ordinary workflow report".to_string(),
                 steps: Vec::new(),
-                episode: None,
+                hive: None,
             },
         )
         .await
@@ -326,7 +326,7 @@ async fn a_non_admin_page_fills_past_an_admin_only_row_instead_of_coming_back_sh
                 agent_id: crate::runtime::WORKFLOW_REPLY_AUTHOR.to_string(),
                 text: "visible report".to_string(),
                 steps: Vec::new(),
-                episode: None,
+                hive: None,
             },
         )
         .await
@@ -346,7 +346,7 @@ async fn a_non_admin_page_fills_past_an_admin_only_row_instead_of_coming_back_sh
                 agent_id: crate::runtime::OWNER_FALLBACK_REPORT_AUTHOR.to_string(),
                 text: "admin-only report".to_string(),
                 steps: Vec::new(),
-                episode: None,
+                hive: None,
             },
         )
         .await
@@ -401,7 +401,7 @@ async fn total_excludes_the_owner_fallback_row_for_a_non_admin_but_counts_it_for
                 agent_id: crate::runtime::OWNER_FALLBACK_REPORT_AUTHOR.to_string(),
                 text: "admin-only owner report".to_string(),
                 steps: Vec::new(),
-                episode: None,
+                hive: None,
             },
         )
         .await
@@ -421,7 +421,7 @@ async fn total_excludes_the_owner_fallback_row_for_a_non_admin_but_counts_it_for
                 agent_id: crate::runtime::WORKFLOW_REPLY_AUTHOR.to_string(),
                 text: "ordinary workflow report".to_string(),
                 steps: Vec::new(),
-                episode: None,
+                hive: None,
             },
         )
         .await
@@ -488,7 +488,7 @@ async fn attribution_audit_excludes_the_owner_fallback_row_for_a_non_admin_but_c
                 agent_id: crate::runtime::OWNER_FALLBACK_REPORT_AUTHOR.to_string(),
                 text: "admin-only owner report".to_string(),
                 steps: Vec::new(),
-                episode: None,
+                hive: None,
             },
         )
         .await
@@ -508,7 +508,7 @@ async fn attribution_audit_excludes_the_owner_fallback_row_for_a_non_admin_but_c
                 agent_id: crate::runtime::WORKFLOW_REPLY_AUTHOR.to_string(),
                 text: "ordinary workflow report".to_string(),
                 steps: Vec::new(),
-                episode: None,
+                hive: None,
             },
         )
         .await
