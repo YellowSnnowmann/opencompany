@@ -281,9 +281,9 @@ below, whose migration step is the only thing that moves records.
 Four determinations from the depth pass (issue #1113), recorded so nobody
 re-derives them:
 
-- **Provenance routing is by trigger, at the cycle.** A cycle triggered by
-  `WebhookReceived` or `A2aTaskReceived` — outside content: a channel
-  message, an email, a third-party callback, a remote agent's payload —
+- **Taint routing is by trigger, at the cycle.** A cycle triggered by
+  `WebhookReceived` — outside content: a channel message, an email, a
+  third-party callback —
   writes its brain-chosen context puts through the overlay's inbound port,
   which stamps `SourceKind::Link` and the `oc:provenance:external` tag;
   everything else (`OperatorMessage`, `FeedbackFiled`, `PaymentReceived`, the

@@ -27,13 +27,13 @@ Dependencies point strictly downward. OpenCompany owns the kernel; every
 neighbor sits behind a Rust trait ("port") and is swappable.
 
 ```text
-L4  Surfaces        Axum HTTP (operator API, A2A, webhooks), CLI, future UI
+L4  Surfaces        Axum HTTP (operator API, webhooks), CLI, future UI
 L3  Company Brain   cycle loop, approvals, effect routing, feedback loop
 L2  Kernel ports    Brain, CompanyStore, EventLog, MemoryStore, ContextStore,
-                    ChannelAdapter, ToolProvider, AgentEconomy, ApprovalGate
+                    ChannelAdapter, ToolProvider, ApprovalGate
 L1  Adapters        hosted-medulla | openhuman (embedded) | tinyhivemind |
-                    hosted-memory | tinyplace | fs (default)
-L0  Substrate       api.tinyhumans.ai, openhuman-core, tiny.place, filesystem
+                    hosted-memory | fs (default)
+L0  Substrate       api.tinyhumans.ai, openhuman-core, filesystem
 ```
 
 | Concern | Owner | OpenCompany's role |
@@ -44,7 +44,6 @@ L0  Substrate       api.tinyhumans.ai, openhuman-core, tiny.place, filesystem
 | Desk deliberation: episodes, rounds, speech, Jev routing, referral | tinyhivemind | hosted over the embedded agents (`tinyhivemind-openhuman`); the host commits, the library folds |
 | In-process LLM sub-work | TinyAgents | embedded library behind `ToolProvider` |
 | Long-term memory | TinyMemory v2 engines (CortexDB) | behind `MemoryStore`; default is file-based |
-| Identity, discovery, payments, A2A | tiny.place | behind `AgentEconomy` |
 | Company definition, brain state, lifecycle, approvals, HTTP surface | **OpenCompany** | owned outright |
 
 ## Reading Paths
@@ -173,7 +172,7 @@ what the console ships *today*, because their source of truth is a stylesheet
 
 - Make simple company workflows concise; make complex workflows explicit,
   inspectable, and testable.
-- Reuse Medulla, OpenHuman, TinyAgents, TinyMemory, and tiny.place instead of
+- Reuse Medulla, OpenHuman, TinyAgents and TinyMemory instead of
   reimplementing them; changes those layers need go upstream as PRs.
 - Keep the default build small; deeper integrations are feature-gated.
 - One required credential; everything else optional and gracefully degrading.

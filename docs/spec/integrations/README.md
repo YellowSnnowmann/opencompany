@@ -23,12 +23,10 @@ being *required*.
 | OpenHuman | [openhuman.md](openhuman.md) | default tools/channels | built-in tools; extra channels disabled |
 | TinyAgents | [tinyagents.md](tinyagents.md) | default harness (feature `tiny`) | stub brain and local workers unavailable |
 | Hosted memory | [memory-engine.md](../runtime/memory-engine.md) | optional memory backend (feature `tinymemory`) | fs memory bundle |
-| tiny.place | [tinyplace.md](tinyplace.md) | optional economy (feature `tinyplace`) | company runs privately |
 
 ## Vendoring and versioning
 
-- `vendor/openhuman` is a git submodule; OpenHuman nests TinyAgents, TinyMemory,
-  and the tiny.place SDK as its own submodules.
+- `vendor/openhuman` is a git submodule; OpenHuman nests TinyAgents and TinyMemory as its own submodules.
 - Published crates are preferred where they exist: `tinyagents = "2.1"`
   (path-patched to OpenHuman's nested submodule via `[patch.crates-io]`),
   `tinyplace = "2.0"`.
