@@ -380,7 +380,7 @@ pub fn build_agent_with_model(
 
     let mut tools: Vec<Box<dyn Tool>> = Vec::new();
     // Belt tools this agent keeps but is not offered — see AgentBlueprint::unadvertised.
-    let mut unadvertised: Vec<String> = Vec::new();
+    let unadvertised: Vec<String> = Vec::new();
     // Approvals are an explicit agent action, not a policy side effect. Every
     // roster agent gets this intrinsic tool regardless of external grants.
     tools.push(Box::new(
@@ -1275,20 +1275,15 @@ pub fn build_agent_with_model(
             deps.notifications.clone(),
         ));
     }
-    // Every OTHER roster agent gets the three hand-off tools — `spawn_task`,
-    // `delegate_to_desk` and `delegate_to_teammate` — and the brief that goes
-    // with them, whatever its manifest entry says. Issue #176 wired these only
-    // onto a member that opted in with a `delegates_to` allowlist, so a desk
-    // lead or a specialist with no such line had no way to reach the colleague
-    // sitting beside it, and no way to track anything either; the runtime
-    // covered the second gap by carding every message for it, which is how
-    // the board filled with cards nobody asked for. Now the reach is decided
-    // by the list (empty = everyone, see
-    // `delegation_tools::reach_is_unrestricted`) and the tool is always there.
+    // Every OTHER roster agent gets `spawn_task` and the brief that says how to
+    // reach a colleague (the permanent `hivemind_*` tools) and when to track
+    // work, whatever its manifest entry says. Who it may message directly is
+    // decided by the company hive's send policy from its `delegates_to` list
+    // (empty = everyone, see `delegation_tools::reach_is_unrestricted`).
     //
-    // `else`, not a second `if`: the orchestrator already has all three from
-    // `orchestrator_tools` above, and wiring a second, scoped copy beside its
-    // unrestricted one would put two tools with the same name on one belt.
+    // `else`, not a second `if`: the orchestrator already has `spawn_task`
+    // from `orchestrator_tools` above, and a second copy would put two tools
+    // with the same name on one belt.
     else {
         persona.push_str(&orchestrator::member_delegation_brief());
         tools.extend(orchestrator::member_delegation_tools(
