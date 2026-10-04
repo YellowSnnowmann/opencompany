@@ -8,6 +8,7 @@
 use super::built_in_test_fixtures::*;
 use super::built_in_test_fixtures_2::*;
 use super::*;
+use crate::company::steer::SteerAction;
 
 /// Codex review (PR #2053): an earlier version of the reused-agent fix
 /// above compared each `read_turn_usage` against the value seen before

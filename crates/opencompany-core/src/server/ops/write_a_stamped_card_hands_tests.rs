@@ -1,4 +1,4 @@
-//! Integration tests for the `ops` write plane: tasks, memory, workspace,
+//! Integration tests for the `ops` write plane: tasks, traces, workspace,
 //! skills, team, inbox-read, and desk chat — exercised end-to-end over the
 //! router against a real fs-backed company.
 
@@ -7,7 +7,7 @@ use serde_json::json;
 
 use super::write_test_support::*;
 use crate::company::steer::{InflightEntry, InflightKind};
-use crate::ports::facts::{FactKind, FactRecord};
+
 use crate::ports::tasks::{TaskRecord, TaskTitle};
 use crate::ports::types::{CompanyId, CompressedTrace};
 
@@ -299,33 +299,6 @@ async fn steer_task_validates_statuses_and_journals_acceptance() {
 }
 
 #[tokio::test]
-async fn memory_create_and_delete_journals_event() {
-    let home_dir = home();
-    let home = home_dir.path().to_path_buf();
-    let state = state_with_company(&home).await;
-
-    let (status, fact) = send(
-        &state,
-        "POST",
-        "/api/v1/company/memory",
-        Some(json!({"kind": "preference", "title": "Tone", "body": "Warm"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(fact["kind"], "preference");
-    let id = fact["id"].as_str().unwrap().to_string();
-
-    let (status, _) = send(
-        &state,
-        "DELETE",
-        &format!("/api/v1/company/memory/{id}"),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-}
-
-#[tokio::test]
 async fn memory_traces_are_inspectable_newest_last() {
     let home_dir = home();
     let home = home_dir.path().to_path_buf();
@@ -337,7 +310,7 @@ async fn memory_traces_are_inspectable_newest_last() {
         ("cycle-2", "second completed cycle", 2_000),
     ] {
         runtime
-            .memory
+            .traces
             .save_trace(
                 runtime.id(),
                 CompressedTrace {
@@ -358,111 +331,4 @@ async fn memory_traces_are_inspectable_newest_last() {
     assert_eq!(traces[0]["summary"], "first completed cycle");
     assert_eq!(traces[0]["atMillis"], 1_000);
     assert_eq!(traces[1]["cycleId"], "cycle-2");
-}
-
-#[tokio::test]
-async fn memory_list_filters_stats_and_dual_write() {
-    let home_dir = home();
-    let home = home_dir.path().to_path_buf();
-    let state = state_with_company(&home).await;
-    let runtime = state.registry().get(&CompanyId::new("acme")).unwrap();
-
-    // Seed three facts with controlled, distinct timestamps so newest-first is
-    // deterministic (the HTTP create path stamps `now_millis`, which can tie
-    // across rapid inserts). Seeding straight into the FactStore also means
-    // these do NOT create ContextStore mirrors — only the HTTP create path does.
-    let seed = [
-        ("f-old", FactKind::Fact, "Alpha channel report", 1_000u64),
-        ("f-mid", FactKind::Preference, "Warm tone", 2_000),
-        ("f-new", FactKind::Person, "Priya contact", 3_000),
-    ];
-    for (id, kind, title, ts) in seed {
-        runtime
-            .facts()
-            .upsert(
-                runtime.id(),
-                &FactRecord {
-                    id: id.into(),
-                    kind,
-                    title: title.into(),
-                    body: "detail".into(),
-                    source: "Seed".into(),
-                    updated_at_millis: ts,
-                },
-            )
-            .await
-            .unwrap();
-    }
-
-    // List reflects the store, newest-first.
-    let (status, rows) = send(&state, "GET", "/api/v1/company/memory", None).await;
-    assert_eq!(status, StatusCode::OK);
-    let rows = rows["items"].as_array().unwrap();
-    assert_eq!(rows.len(), 3);
-    assert_eq!(rows[0]["id"], "f-new");
-    assert_eq!(rows[2]["id"], "f-old");
-
-    // `?kind=` narrows to one taxonomy.
-    let (status, pref) = send(
-        &state,
-        "GET",
-        "/api/v1/company/memory?kind=preference",
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let pref = pref["items"].as_array().unwrap();
-    assert_eq!(pref.len(), 1);
-    assert_eq!(pref[0]["id"], "f-mid");
-
-    // `?query=` is a case-insensitive substring over title + body.
-    let (status, hit) = send(&state, "GET", "/api/v1/company/memory?query=priya", None).await;
-    assert_eq!(status, StatusCode::OK);
-    let hit = hit["items"].as_array().unwrap();
-    assert_eq!(hit.len(), 1);
-    assert_eq!(hit[0]["id"], "f-new");
-
-    // Stats over the seeded facts: 3 display items, freshest timestamp, no
-    // teammate memory yet (seeding bypassed the mirror), and 0 task outcomes.
-    let (status, stats) = send(&state, "GET", "/api/v1/company/memory/stats", None).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(stats["facts"], 3);
-    assert_eq!(stats["factsUpdatedAtMillis"], 3_000);
-    assert_eq!(stats["totalItems"], 3);
-    assert_eq!(stats["teammateMemory"], 0);
-    assert_eq!(stats["taskOutcomes"], 0);
-    assert_eq!(stats["documentMemory"], 0);
-    // Nothing but facts so far, so "Last updated" tracks the newest fact.
-    assert_eq!(stats["lastUpdatedAtMillis"], 3_000);
-
-    // Dual-write: the HTTP create path mirrors the fact into the ContextStore so
-    // the agent can recall it. A direct search finds the mirrored text — the
-    // fix that closes the operator manual-ingest loop.
-    let (status, _) = send(
-        &state,
-        "POST",
-        "/api/v1/company/memory",
-        Some(json!({"kind": "fact", "title": "Launch date", "body": "ships on Friday"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let hits = runtime
-        .context
-        .search(runtime.id(), "Friday", 5)
-        .await
-        .unwrap();
-    assert!(
-        hits.iter().any(|h| h.snippet.contains("ships on Friday")),
-        "an operator fact must be mirrored into the ContextStore for agent recall"
-    );
-
-    // The mirror stays agent-recallable but is not a display item of teammate
-    // memory — the fact is the one row the operator sees.
-    let (status, stats) = send(&state, "GET", "/api/v1/company/memory/stats", None).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(stats["facts"], 4);
-    assert_eq!(stats["totalItems"], 4);
-    assert_eq!(stats["teammateMemory"], 0);
-    assert_eq!(stats["taskOutcomes"], 0);
-    assert_eq!(stats["documentMemory"], 0);
 }
