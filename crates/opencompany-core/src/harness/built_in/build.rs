@@ -1290,31 +1290,11 @@ pub fn build_agent_with_model(
     // `orchestrator_tools` above, and wiring a second, scoped copy beside its
     // unrestricted one would put two tools with the same name on one belt.
     else {
-        // **Kept on the belt, withheld from the model.**
-        //
-        // `ask` replaced these for a teammate, and they were never honestly
-        // available to one: a hive seat has them stripped per turn
-        // (`EPISODE_WITHHELD_TOOLS`), because the queue they fill is drained
-        // by a brain that does not run inside an episode — while the prompt
-        // went on naming them. Observed live: a copywriter read "Never tell
-        // anyone a teammate is out of reach — you can, with
-        // `delegate_to_teammate`" on a turn where the tool was not on its
-        // belt, and answered by broadcasting a hand-off that transferred
-        // nothing to a teammate that never ran.
-        //
-        // The orchestrator and workflow nodes are untouched: they delegate by
-        // design, and this is the member branch.
-        unadvertised.push(crate::runtime::delegation_tools::DELEGATE_TO_DESK_TOOL.to_owned());
-        unadvertised.push(crate::runtime::delegation_tools::DELEGATE_TO_TEAMMATE_TOOL.to_owned());
         persona.push_str(&orchestrator::member_delegation_brief());
         tools.extend(orchestrator::member_delegation_tools(
             &deps.delegations,
             company.clone(),
             deps.store.clone(),
-            orchestrator::MemberScope {
-                member: manifest_agent.id.clone(),
-                delegates_to: manifest_agent.delegates_to.clone(),
-            },
         ));
     }
 
