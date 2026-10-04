@@ -1681,7 +1681,6 @@ pub fn agent_spec_for(
     if blueprint.memory.active {
         tool_names.push(oh::memory::MEMORY_TOOL_NAME.to_string());
     }
-    let turn_scope_names = tool_names.clone();
     let mut system_prompt = blueprint.system_prompt.clone();
     if let Some(mcp) = mcp {
         system_prompt.push_str(&opencompany_mcp_brief(&mcp.allow_tools));
