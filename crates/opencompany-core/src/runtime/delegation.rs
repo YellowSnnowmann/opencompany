@@ -1242,15 +1242,9 @@ impl<'a> DelegationRunner<'a> {
         // handler had carded, and stand down the paths that were the only ones
         // left to open one. The two conditions travel together or the signal
         // lies.
-        let workflow_requested = self.requested_intent
-            == Some(crate::ports::types::MessageIntent::Workflow)
-            && !crate::company::copilot::is_copilot_thread(chat_id);
-        // Issue #463: did the REST chat handler already card this message?
-        //
-        // A card actually persisted by the handler is the authority here.
-        // Intent alone must not suppress a later tool-driven delegation.
+        // Issue #463: the card the REST chat handler already opened for this
+        // message, which the bubble reports as the turn's first card.
         let handler_card = self.chat_handler_card().await?;
-        let carded_by_handler = workflow_requested || handler_card.is_some();
         // Issue #1152: the mirror image of `workflow_requested` — the operator
         // said this message is not a request for work at all.
         //
@@ -2180,10 +2174,6 @@ pub(crate) fn append_note(prev: Option<&str>, responder: &str, body: &str) -> St
 // prerequisite check, the gate, the settled-run mover, the deliverable link)
 // hangs off it.
 
-/// Past this many words, a request is substantial no matter what it says. A
-/// genuinely trivial question is short; nothing this long is "just asking".
-const TRACK_ALWAYS_WORDS: usize = 25;
-
 /// The longest an utterance opening with small talk may run before it stops
 /// being small talk. "thanks!" is chatter; "thanks — now pull together the Q3
 /// numbers, the deck and the board memo" is not.
@@ -2360,46 +2350,6 @@ pub(crate) fn operator_words(message: &str) -> &str {
         Some(at) => &message[..at],
         None => message,
     }
-}
-
-/// Whether `text` asks for something substantial enough that the board should
-/// carry it — the single decision behind every card this seam opens by
-/// construction (issue #442).
-///
-/// Reads as a ladder of carve-outs over a `true` default:
-///
-/// 1. **Nothing was said** — empty, or punctuation/emoji only. No work.
-/// 2. **Long** — past [`TRACK_ALWAYS_WORDS`]. Work.
-/// 3. **Names a deliverable** — any [`WORK_VERBS`] entry appears. Work.
-/// 4. **A plain question** — ends in `?`, or opens with a wh-word. No work.
-/// 5. **Small talk** — opens with a greeting/acknowledgement and stays short.
-///    No work.
-/// 6. **Anything else** — work.
-///
-/// Rung 3 runs before rung 4 on purpose: "can you write up the Q3 numbers?" is
-/// a question in shape and a request for work in substance, and the substance
-/// wins. The known cost is that a genuine question *about* a deliverable
-/// ("what should I write here?") is tracked. That is the bias pointing the way
-/// it was chosen to point.
-pub(crate) fn is_trackable_work(text: &str) -> bool {
-    let trimmed = text.trim();
-    let words = work_words(trimmed);
-    if words.is_empty() {
-        return false;
-    }
-    if words.len() > TRACK_ALWAYS_WORDS {
-        return true;
-    }
-    if words.iter().any(|w| WORK_VERBS.contains(&w.as_str())) {
-        return true;
-    }
-    if trimmed.ends_with('?') || INTERROGATIVE_OPENERS.contains(&words[0].as_str()) {
-        return false;
-    }
-    if words.len() <= SMALLTALK_MAX_WORDS && SMALLTALK_OPENERS.contains(&words[0].as_str()) {
-        return false;
-    }
-    true
 }
 
 /// Whether `text` is HIGH-CONFIDENCE small talk — a greeting or acknowledgement
