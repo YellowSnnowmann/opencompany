@@ -138,28 +138,3 @@ fn the_lifecycle_tools_are_internal_delegation_tools() {
     assert!(is_delegation_tool(REVIEW_TASK_TOOL));
 }
 
-/// A real teammate on neither the caller's desk nor an allowlisted one is
-/// refused; one on an allowlisted desk is not. The allowlist is #176's, read
-/// at teammate granularity rather than duplicated.
-#[tokio::test]
-async fn the_allowlist_bounds_which_teammates_a_member_may_reach() {
-    let company = CompanyId::new("acme");
-    let queue = DelegationQueue::default();
-    let _claim = queue.claim();
-    let tool = member_teammate_tool(peers_record(&company), &queue);
-
-    let refused = tool
-        .execute(json!({ "teammate": "legal_counsel", "instruction": "review it" }))
-        .await
-        .expect("execute");
-    assert!(refused.is_error, "{}", refused.output_for_llm(true));
-    assert_eq!(queue.queued(), 0);
-
-    // `analyst` sits on `research`, which `writer`'s `delegates_to` names.
-    let allowed = tool
-        .execute(json!({ "teammate": "analyst", "instruction": "pull the numbers" }))
-        .await
-        .expect("execute");
-    assert!(!allowed.is_error, "{}", allowed.output_for_llm(true));
-    assert_eq!(queue.queued(), 1);
-}

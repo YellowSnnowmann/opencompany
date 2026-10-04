@@ -508,14 +508,6 @@ members = ["designer"]
     }
 }
 
-/// The hand-off the engineering lead makes one level down (issue #176).
-pub(super) fn nested_handoff(instruction: &str) -> Delegation {
-    Delegation::DelegateToDesk {
-        desk: "research_desk".to_string(),
-        instruction: instruction.to_string(),
-    }
-}
-
 /// The company shape issue #884 D1 was observed on: ONE desk with three
 /// members, so the lead has peers beside it that `delegate_to_desk` — which
 /// only ever resolves to the lead — could never reach.
@@ -552,14 +544,6 @@ members = ["brand_strategist", "seo_specialist", "copywriter"]
     CompanyRecord {
         manifest,
         ..record()
-    }
-}
-
-/// A hand-off to a named teammate (issue #884).
-pub(super) fn peer_handoff(teammate: &str, instruction: &str) -> Delegation {
-    Delegation::DelegateToTeammate {
-        teammate: teammate.to_string(),
-        instruction: instruction.to_string(),
     }
 }
 
@@ -624,13 +608,6 @@ impl Fixture {
 
     pub(super) async fn cards(&self) -> Vec<TaskRecord> {
         self.tasks.list(&self.record.id).await.expect("list cards")
-    }
-}
-
-pub(super) fn handoff(instruction: &str) -> Delegation {
-    Delegation::DelegateToDesk {
-        desk: "eng_desk".to_string(),
-        instruction: instruction.to_string(),
     }
 }
 

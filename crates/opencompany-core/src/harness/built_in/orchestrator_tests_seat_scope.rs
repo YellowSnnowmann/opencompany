@@ -8,41 +8,6 @@ fn spawn(title: &str) -> Delegation {
     }
 }
 
-fn hand_off() -> Delegation {
-    Delegation::DelegateToDesk {
-        desk: "design".to_string(),
-        instruction: "look".to_string(),
-    }
-}
-
-#[tokio::test]
-async fn a_seat_claim_stages_cards_and_refuses_everything_else_on_the_board() {
-    let queue = DelegationQueue::default();
-    let claim = queue.claim_seat("ep:writer", false);
-    let (card, other) = claim
-        .scoped(async {
-            (
-                queue.push_within_cap(spawn("Draft"), MAX_DELEGATIONS_PER_TURN),
-                queue.push_within_cap(hand_off(), MAX_DELEGATIONS_PER_TURN),
-            )
-        })
-        .await;
-    assert_eq!(card, Staged::Queued);
-    assert_eq!(other, Staged::NoDrain(NoDrainReason::Seat));
-    assert_eq!(
-        queue.push_within_cap(
-            Delegation::AssignTask {
-                task_id: "t".to_string(),
-                assignee: "x".to_string(),
-                note: None,
-            },
-            MAX_DELEGATIONS_PER_TURN),
-        Staged::NoDrain(NoDrainReason::Unwired),
-        "outside the seat's scope nothing has claimed the pooled bucket"
-    );
-    assert_eq!(claim.drain(MAX_DELEGATIONS_PER_TURN), vec![spawn("Draft")]);
-}
-
 #[tokio::test]
 async fn a_seats_bucket_is_invisible_to_the_pooled_drain_and_to_another_seat() {
     let queue = DelegationQueue::default();

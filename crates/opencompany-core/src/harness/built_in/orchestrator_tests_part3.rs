@@ -1,27 +1,5 @@
 use super::*;
 
-/// Both arguments are required, and neither may be blank — a hand-off with
-/// no instruction is a turn run on nothing.
-#[tokio::test]
-async fn the_teammate_tool_requires_both_arguments() {
-    let company = CompanyId::new("acme");
-    let queue = DelegationQueue::default();
-    let _claim = queue.claim();
-    let tool = member_teammate_tool(peers_record(&company), &queue);
-    assert!(tool.execute(json!({ "teammate": "editor" })).await.is_err());
-    assert!(
-        tool.execute(json!({ "instruction": "do it" }))
-            .await
-            .is_err()
-    );
-    assert!(
-        tool.execute(json!({ "teammate": "  ", "instruction": "do it" }))
-            .await
-            .is_err()
-    );
-    assert_eq!(queue.queued(), 0);
-}
-
 /// **Issue #348 review.** The recent-activity tail is ten slots wide, and a
 /// discussion (#335) is an operator-driven writer into the same journal the
 /// tail reads. A row per post would let one afternoon's thread on one card

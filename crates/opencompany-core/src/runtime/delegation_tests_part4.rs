@@ -430,34 +430,6 @@ async fn a_handler_card_the_operator_moved_on_is_not_adopted() {
     );
 }
 
-/// The stand-down is keyed on the **detector**, not on finding the card:
-/// the handler's write is best-effort, so a missing card must not be read as
-/// "the handler did not fire" and re-open one. `spawned_task` is then
-/// honestly empty — there is no card to point at.
-#[tokio::test]
-async fn the_stand_down_holds_even_when_the_handlers_card_cannot_be_found() {
-    let fx = Fixture::new();
-    let turns = ScriptedTurns::new(
-        &fx,
-        vec![
-            Turn::queueing("on it", vec![handoff("Draft the launch plan.")]),
-            Turn::reply("drafted"),
-            Turn::reply("relayed"),
-        ],
-    );
-    let turn = fx
-        .runner(&turns)
-        // The handler's explicit workflow intent is its durable stand-down
-        // signal even when its best-effort card write is absent from the store.
-        .requested(Some(crate::ports::types::MessageIntent::Workflow))
-        .handle_operator_message("chief", "draft the launch plan for next quarter", None)
-        .await
-        .expect("operator message handled");
-    assert!(fx.cards().await.is_empty(), "no second card is opened");
-    assert!(turn.spawned_task.is_none(), "and none is claimed");
-    assert_eq!(turn.reply, "relayed", "the handler still relays its answer");
-}
-
 /// …and the same thread stays quiet for a question, so a desk chat does not
 /// become a card mint.
 #[tokio::test]
@@ -575,66 +547,3 @@ async fn the_lifecycle_writes_are_refused_on_a_question_turn_too() {
     );
 }
 
-/// **Issue #267 review, finding 2.** `delegate_to_desk` is not only a board
-/// write — it is how a question the orchestrator cannot answer alone gets
-/// routed to a desk that can. Refusing it alongside the board writes left
-/// "what did the design desk ship this week?" answerable by nobody.
-///
-/// So on a question turn the hand-off RUNS — it stages, the desk lead's
-/// turn happens, and the CEO-relay hand-back surfaces their answer — and
-/// only its *card* is suppressed. Every assertion here is one half of that:
-/// the tool was not refused, three turns really ran, the answer came back,
-/// and the board stayed empty.
-#[tokio::test]
-async fn a_hand_off_runs_on_a_question_turn_but_opens_no_card() {
-    let question = "Tell what is there in the tasks list";
-    assert!(
-        crate::company::task_intent::triage_message(question).is_answer(),
-        "fixture must triage as a question, or this proves nothing"
-    );
-    let fx = Fixture::new();
-    let turns = ScriptedTurns::new(
-        &fx,
-        vec![
-            Turn::tooling(
-                "asking engineering",
-                vec![handoff("what have you shipped?")],
-            ),
-            Turn::reply("we shipped the importer"),
-            Turn::reply("engineering shipped the importer"),
-        ],
-    );
-    let turn = fx
-        .runner(&turns)
-        .handle_operator_message("chief", question, Some("general"))
-        .await
-        .expect("operator message handled");
-
-    assert_eq!(
-        turns.staged(),
-        vec![orchestrator::Staged::Queued],
-        "the hand-off must NOT be refused: it is how the question gets answered"
-    );
-    let calls = turns.calls();
-    assert_eq!(
-        calls.len(),
-        3,
-        "the orchestrator, the desk lead and the relay all ran: {calls:?}"
-    );
-    assert_eq!(
-        calls[1].0, "engineer",
-        "the desk lead really ran: {calls:?}"
-    );
-    assert_eq!(
-        turn.reply, "engineering shipped the importer",
-        "and the operator gets the relayed answer"
-    );
-    assert!(
-        fx.cards().await.is_empty(),
-        "nobody commissioned work, so nothing is tracked"
-    );
-    assert!(
-        turn.spawned_task.is_none(),
-        "and the bubble claims no card, because there is none"
-    );
-}

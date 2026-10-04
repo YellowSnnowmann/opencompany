@@ -192,24 +192,6 @@ members = ["legal_counsel"]
     }
 }
 
-/// `writer`'s copy of the teammate tool: a desk lead with one peer on its
-/// own desk and a `research` allowlist.
-pub(super) fn member_teammate_tool(
-    record: CompanyRecord,
-    queue: &DelegationQueue,
-) -> DelegateToTeammateTool {
-    let company = record.id.clone();
-    DelegateToTeammateTool::for_member(
-        queue.clone(),
-        company,
-        Arc::new(MemStore::seeded(record)) as Arc<dyn CompanyStore>,
-        MemberScope {
-            member: "writer".to_string(),
-            delegates_to: vec!["research".to_string()],
-        },
-    )
-}
-
 // --- add_agent (issue #71) ----------------------------------------------
 
 /// An in-memory `CompanyStore` so `AddAgentTool` can be exercised without a

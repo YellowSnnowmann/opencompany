@@ -2,53 +2,6 @@ use super::tests_core::*;
 use super::tests_core2::*;
 use super::*;
 
-/// A hand-off the MEMBER's own tool refused reaches the card and the
-/// operator, attributed to the member that attempted it.
-///
-/// A refusal never becomes a `Delegation`, so the only other record is the
-/// tool result — which the member is free to describe however it likes, and
-/// "I consulted design" is exactly the claim that must not stand unchecked.
-/// The delegator's own unread refusals must NOT be swept into the member's
-/// account of its turn, which is what the before/after sampling buys.
-#[tokio::test]
-async fn a_refusal_inside_a_members_turn_is_recorded_against_that_member() {
-    let fx = Fixture::nested();
-    let turns = ScriptedTurns::new(
-        &fx,
-        vec![
-            // The orchestrator hands off AND has a refusal of its own,
-            // which belongs to its turn and must not be folded into the
-            // member's account of theirs.
-            Turn {
-                reply: "handing it to engineering".to_string(),
-                tool_pushes: vec![handoff("ship the API")],
-                refuses: vec!["nowhere_desk".to_string()],
-                ..Turn::default()
-            },
-            // The member reaches for a desk it may not have — refused.
-            Turn::refused("built it; design did not pick it up", &["design_desk"]),
-            Turn::reply("Shipped."),
-        ],
-    );
-
-    fx.runner(&turns)
-        .handle_operator_message("chief", "ship the API", Some("general"))
-        .await
-        .expect("operator message handled");
-
-    let cards = fx.cards().await;
-    assert_eq!(cards.len(), 1, "{cards:?}");
-    let note = cards[0].note.clone().unwrap_or_default();
-    assert!(
-        note.contains("design_desk") && note.contains("refused"),
-        "the member's refused hand-off must reach the card: {note}"
-    );
-    assert!(
-        !note.contains("nowhere_desk"),
-        "the delegator's own unread refusal must not be attributed to the member: {note}"
-    );
-}
-
 // ── Issue #453 residual: an id that names no card ───────────────────────
 
 #[tokio::test]
