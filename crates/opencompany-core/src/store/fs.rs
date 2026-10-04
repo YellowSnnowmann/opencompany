@@ -18,21 +18,18 @@ use tokio::sync::{Mutex as TokioMutex, broadcast};
 
 use crate::Result;
 use crate::error::OpenCompanyError;
-use crate::ports::context::ContextStore;
 use crate::ports::events::{EventLog, EventStreamItem, PruneReport, RetentionPolicy, plan_prune};
 use crate::ports::inbox::{EmailRecord, InboxMeta, InboxStore};
-use crate::ports::memory::MemoryStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::secrets::SecretStore;
 use crate::ports::store::CompanyStore;
 use crate::ports::types::{
-    ChunkAddr, ChunkHit, ChunkMeta, CompanyEvent, CompanyId, CompanyRecord, CompanySummary,
-    CompressedTrace, ContextChunk, EventSeq, EvictionPolicy, LedgerEntry, SecretValue, StoredEvent,
+    CompanyEvent, CompanyId, CompanyRecord, CompanySummary, CompressedTrace, EventSeq,
+    EvictionPolicy, LedgerEntry, SecretValue, StoredEvent,
     TaskResult,
 };
 use crate::ports::{generate_id, now_millis};
-use crate::store::content_address;
 use crate::store::paths::Bundle;
-use crate::store::text::slice_on_char_boundaries;
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -63,7 +60,7 @@ impl PathLocks {
 /// process (issue #388).
 ///
 /// The locks these replaced were **fields** on `FsCompanyStore`, `FsEventLog`,
-/// `FsMemoryStore`, `FsContextStore`, `FsInboxStore` and `FsOps` — so two stores
+/// `FsTraceStore`, `FsInboxStore` and `FsOps` — so two stores
 /// over one bundle serialised against nothing, which is the state those types
 /// have always been in and which nothing stopped a caller reaching: each
 /// constructor takes a root and builds a fresh registry. A `static` is the only
@@ -73,7 +70,7 @@ impl PathLocks {
 /// derives the next sequence from the current line count and then appends, so
 /// two unsynchronised instances hand out the **same** `seq` — breaking every
 /// consumer that treats it as an identity. And the read-modify-write sites
-/// (`FsMemoryStore::evict`, `FsInboxStore::mark_read`, and the whole-file
+/// (`FsTraceStore::evict`, `FsInboxStore::mark_read`, and the whole-file
 /// rewrites in [`FsOps`](crate::store::fs_ops::FsOps)) replace the file with a
 /// snapshot, so an append that raced one of them was simply erased.
 ///
@@ -620,7 +617,7 @@ pub(crate) struct SkippedLine {
 /// then rewrites the file atomically would write back exactly the lines that
 /// parsed, deleting the damaged one for good — converting a recoverable fault
 /// into silent, permanent data loss, which is strictly worse than the failed
-/// boot this function exists to prevent. Rewriters ([`FsMemoryStore::evict`],
+/// boot this function exists to prevent. Rewriters ([`FsTraceStore::evict`],
 /// [`FsInboxStore::mark_read`]) stay on strict [`read_jsonl`], where a damaged
 /// line aborts the rewrite instead of laundering it.
 ///
@@ -2180,16 +2177,16 @@ impl EventLog for FsEventLog {
 }
 
 // ---------------------------------------------------------------------------
-// MemoryStore
+// TraceStore
 // ---------------------------------------------------------------------------
 
-/// Filesystem [`MemoryStore`]: compressed traces and task results as JSONL.
+/// Filesystem [`TraceStore`]: compressed traces and task results as JSONL.
 #[derive(Clone)]
-pub struct FsMemoryStore {
+pub struct FsTraceStore {
     root: PathBuf,
 }
 
-impl FsMemoryStore {
+impl FsTraceStore {
     /// Creates a memory store rooted at `root` (the OpenCompany home).
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -2201,7 +2198,7 @@ impl FsMemoryStore {
 }
 
 #[async_trait]
-impl MemoryStore for FsMemoryStore {
+impl TraceStore for FsTraceStore {
     async fn save_trace(&self, id: &CompanyId, trace: CompressedTrace) -> Result<()> {
         let bundle = self.bundle(id);
         bundle.ensure_dirs().await?;
@@ -2258,243 +2255,6 @@ impl MemoryStore for FsMemoryStore {
             write_atomic(&path, &body).await?;
         }
         Ok(removed)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ContextStore
-// ---------------------------------------------------------------------------
-
-/// A context index line pairing an address with its label, length, and the
-/// epoch-millis it was first stored.
-///
-/// `stored_at_millis` defaults to `0` so index lines written before the field
-/// existed still deserialize — they simply report an unknown store time.
-#[derive(serde::Serialize, serde::Deserialize)]
-struct IndexEntry {
-    addr: String,
-    label: String,
-    len: usize,
-    #[serde(default)]
-    stored_at_millis: u64,
-}
-
-/// Filesystem [`ContextStore`]: content-addressed blobs plus a JSONL index.
-///
-/// Phase 1 uses a non-cryptographic [`DefaultHasher`] content id; a real
-/// content hash (sha-256) is a documented follow-up.
-#[derive(Clone)]
-pub struct FsContextStore {
-    root: PathBuf,
-}
-
-impl FsContextStore {
-    /// Creates a context store rooted at `root` (the OpenCompany home).
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
-    }
-
-    fn bundle(&self, id: &CompanyId) -> Bundle {
-        Bundle::new(self.root.clone(), id)
-    }
-}
-
-/// Removes the unreferenced blob for `addr`, best-effort: the index rows are
-/// already gone, so a blob that will not delete is orphaned and invisible
-/// (list and search are index-driven) rather than turned into an error that
-/// would tell the caller nothing was deleted after the index half already was.
-async fn reap_blob(bundle: &Bundle, addr: &str) {
-    let blob_path = bundle.context_blob(addr);
-    match tokio::fs::remove_file(&blob_path).await {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => tracing::warn!(
-            addr = %addr,
-            path = %blob_path.display(),
-            error = %e,
-            "context index rows removed but the blob would not delete; \
-             leaving an orphaned, unreferenced blob"
-        ),
-    }
-}
-
-#[async_trait]
-impl ContextStore for FsContextStore {
-    async fn put(&self, id: &CompanyId, chunk: ContextChunk) -> Result<ChunkAddr> {
-        let bundle = self.bundle(id);
-        bundle.ensure_dirs().await?;
-        let addr = content_address(&chunk.body);
-
-        // Blob write INSIDE the index lock: `delete` removes blob and index
-        // rows under this lock, and a same-address put racing it from another
-        // task (fact mirroring runs outside the cycle serial) could otherwise
-        // interleave as write-blob / delete-both / append-index — an index
-        // row pointing at a missing blob, where peek fails while list still
-        // answers.
-        let index_path = bundle.context_index_jsonl();
-        let lock = path_lock(&index_path);
-        let _guard = lock.lock().await;
-        let blob_path = bundle.context_blob(&addr);
-        // A re-`put` of an identical body rewrites an already-indexed blob
-        // while a concurrent peek/search may be mid-read; only the tmp-then-
-        // rename publish guarantees the reader full old bytes or full new
-        // bytes, never a truncated file.
-        write_atomic(&blob_path, &chunk.body).await?;
-        // A plain append, deliberately: the (addr, label) set semantics #1300
-        // pins are applied when the index is READ (see `list`), not by
-        // checking membership here. Checking here would read and parse the
-        // whole index on every write — and the ingest path writes one chunk
-        // per document fragment, so a single folder drop would turn into a
-        // quadratic scan. Appending keeps a write O(1), as it has always
-        // been; a duplicate line costs one row and reads back as one claim.
-        let entry = IndexEntry {
-            addr: addr.clone(),
-            label: chunk.label,
-            len: chunk.body.len(),
-            stored_at_millis: now_millis(),
-        };
-        append_line(&index_path, &serde_json::to_string(&entry)?).await?;
-        Ok(ChunkAddr::new(addr))
-    }
-
-    async fn list(&self, id: &CompanyId, prefix: &str) -> Result<Vec<ChunkMeta>> {
-        let index = read_jsonl::<IndexEntry>(&self.bundle(id).context_index_jsonl()).await?;
-        // One claim per (addr, label) — the set semantics #1300 pins on every
-        // backend — applied here rather than in `put`, which stays an O(1)
-        // append (see its comment). The FIRST row for a pair wins, so the
-        // stamp reported is the first write's, matching the other backends'
-        // first-write-wins; later duplicate rows are a re-`put` of content
-        // already claimed under that label and carry nothing new.
-        let mut seen: HashSet<(String, String)> = HashSet::new();
-        let mut out = Vec::new();
-        for entry in index {
-            if !entry.label.starts_with(prefix) {
-                continue;
-            }
-            if !seen.insert((entry.addr.clone(), entry.label.clone())) {
-                continue;
-            }
-            out.push(ChunkMeta {
-                addr: ChunkAddr::new(entry.addr),
-                label: entry.label,
-                len: entry.len,
-                stored_at_millis: entry.stored_at_millis,
-            });
-        }
-        Ok(out)
-    }
-
-    async fn peek(
-        &self,
-        id: &CompanyId,
-        addr: &ChunkAddr,
-        range: Option<Range<usize>>,
-    ) -> Result<String> {
-        let path = self.bundle(id).context_blob(addr.as_ref());
-        let body = tokio::fs::read_to_string(&path)
-            .await
-            .map_err(|e| io_err(&path, e))?;
-        match range {
-            None => Ok(body),
-            // Byte offsets from the caller can land mid-codepoint; widen to
-            // the boundary rather than panic the slice.
-            Some(r) => Ok(slice_on_char_boundaries(&body, r)),
-        }
-    }
-
-    async fn delete(&self, id: &CompanyId, addr: &ChunkAddr) -> Result<bool> {
-        let bundle = self.bundle(id);
-        let index_path = bundle.context_index_jsonl();
-        let lock = path_lock(&index_path);
-        let _guard = lock.lock().await;
-        // Strict read on purpose: this is a read-modify-write, and
-        // `read_jsonl_lenient` is forbidden to rewriters — a damaged line must
-        // abort the rewrite, not be laundered out of the file for good.
-        let index = read_jsonl::<IndexEntry>(&index_path).await?;
-        let before = index.len();
-        let kept: Vec<IndexEntry> = index
-            .into_iter()
-            .filter(|e| e.addr != addr.as_ref())
-            .collect();
-        if kept.len() == before {
-            return Ok(false);
-        }
-        crate::store::fs_ops::rewrite_jsonl(&index_path, &kept).await?;
-        // The blob is shared by every index entry bearing this address (put
-        // appends an entry per label, all pointing at one content-addressed
-        // file). The filter above removed all of them, so the blob is
-        // unreferenced and goes too — best-effort, because the index is the
-        // source of truth and its rows are already gone: an orphaned blob is
-        // invisible to list and search (both index-driven), and while a
-        // direct `peek` of the exact addr can still read it until the file is
-        // reclaimed (peek is blob-path-driven), a caller holding that addr
-        // already held the body — nothing new is reachable. An `Err` here
-        // would instead tell the caller nothing was deleted after the index
-        // half already was.
-        reap_blob(&bundle, addr.as_ref()).await;
-        Ok(true)
-    }
-
-    async fn delete_label(&self, id: &CompanyId, addr: &ChunkAddr, label: &str) -> Result<bool> {
-        let bundle = self.bundle(id);
-        let index_path = bundle.context_index_jsonl();
-        let lock = path_lock(&index_path);
-        let _guard = lock.lock().await;
-        // Strict read, same rule as `delete`: this is a read-modify-write, and
-        // a damaged line must abort the rewrite, not be laundered out.
-        let index = read_jsonl::<IndexEntry>(&index_path).await?;
-        let before = index.len();
-        let kept: Vec<IndexEntry> = index
-            .into_iter()
-            .filter(|e| !(e.addr == addr.as_ref() && e.label == label))
-            .collect();
-        if kept.len() == before {
-            return Ok(false);
-        }
-        crate::store::fs_ops::rewrite_jsonl(&index_path, &kept).await?;
-        // Label-scoped (#1300): only this label's row went. The blob is reaped
-        // exactly when no row references the address any more — decided under
-        // the same lock every put and delete holds, so a concurrent put of
-        // identical content under another label either lands its row before
-        // this read (and keeps the blob) or after this call completes (and
-        // rewrites the blob it needs). Best-effort, per `delete`'s reasoning.
-        if !kept.iter().any(|e| e.addr == addr.as_ref()) {
-            reap_blob(&bundle, addr.as_ref()).await;
-        }
-        Ok(true)
-    }
-
-    /// Weighted token overlap rather than `body.find(query)` — see
-    /// [`crate::store::lexical`]. One implementation for every backend, because
-    /// these three stood here three times over with the same defect, and that is
-    /// exactly the kind of thing that drifts apart again.
-    ///
-    /// Blobs are read one at a time and weighed immediately; only the snippets
-    /// of candidates *with* overlap are kept.
-    async fn search(&self, id: &CompanyId, query: &str, limit: usize) -> Result<Vec<ChunkHit>> {
-        let mut ranker = crate::store::lexical::Ranker::new(query);
-        if ranker.matches_nothing() {
-            return Ok(Vec::new());
-        }
-        let bundle = self.bundle(id);
-        let index = read_jsonl::<IndexEntry>(&bundle.context_index_jsonl()).await?;
-        // One hit per ADDRESS, not per index row: a hit carries no label, and
-        // one address can be claimed by several labels (#1300) — or repeated
-        // by a duplicate row, since `put` appends without reading. Without
-        // this, recall would report the same body once per claim, where every
-        // other backend (which scans bodies, not claims) reports it once.
-        let mut seen: HashSet<String> = HashSet::new();
-        for entry in index {
-            if !seen.insert(entry.addr.clone()) {
-                continue;
-            }
-            let blob_path = bundle.context_blob(&entry.addr);
-            let Ok(body) = tokio::fs::read_to_string(&blob_path).await else {
-                continue;
-            };
-            ranker.offer(&entry.addr, &body);
-        }
-        Ok(ranker.best(limit))
     }
 }
 

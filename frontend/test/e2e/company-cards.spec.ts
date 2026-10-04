@@ -137,10 +137,10 @@ async function mockApi(page: Page) {
         ],
       });
     if (path.endsWith("/memory"))
-      // `GET /memory` answers with `{ items, totalContext, contextTruncated }`
+      // `GET /memory` answers with `{ items, nextCursor? }`
       // — the Overview's constellation reads the rows from `items`, and a bare
       // array would leave it `undefined` and crash the graph render.
-      return json({ items: [], totalContext: 0, contextTruncated: false });
+      return json({ items: [] });
     if (path.endsWith("/team")) return json(ROSTER);
     const agent = path.match(/\/team\/([^/]+)$/);
     if (agent) {

@@ -41,7 +41,7 @@ vi.mock("@/product-scope", async (importOriginal) => ({
  * 3879183959) against the repo's "every behavior change gets a focused test"
  * rule (AGENTS.md "Testing Guidelines"). `LifecycleControls` is exported from
  * `SettingsView.tsx` for exactly this: rendering the full `SettingsView` would
- * also pull in `ExternalHarnesses`/`PolicySettings`/`MemoryEngineCard`, none of
+ * also pull in `ExternalHarnesses`/`PolicySettings`/`MemoryStatusCard`, none of
  * which this behavior touches.
  *
  * Covers the three-way gate the button renders behind (`onReset && platform &&

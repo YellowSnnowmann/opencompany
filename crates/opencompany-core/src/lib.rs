@@ -59,14 +59,17 @@ pub mod harness;
 /// folds are read by the default build (manifest, `ports::types`,
 /// `chat_history`); the modules that drive a runtime are gated inside it.
 pub mod hive;
-/// Turning dropped files and links into memory: extraction, then chunking.
-/// The console's Brain drop zone is the caller; the ports are unchanged.
+/// Turning dropped files and links into text the company brain files. The
+/// console's Brain drop zone is the caller.
 pub mod ingest;
 /// Dynamic ledgers: the company's own record — goals, decisions, and whatever
 /// axis a workspace declares — as a folded append-only log rendered into the
 /// `derived/` folder. The task board is registered here as a native ledger so
 /// one discovery surface reaches every one of them.
 pub mod ledger;
+/// A company's memory: OpenHuman's memory engine scoped to the company's root,
+/// one node per teammate (`docs/spec/runtime/memory-engine.md`).
+pub mod memory;
 /// WS5: pure Usage & Finances projections over the runtime's accounting data
 /// (usage samples, ledger, `[budget]`). No I/O; WS2 wraps these in GraphQL.
 pub mod metering;
@@ -125,7 +128,7 @@ pub use feedback::{
 pub use policy::ManifestApprovalGate;
 pub use ports::{CompanyEvent, CompanyId, Effect, EffectDisposition, PolicyDecision, Verdict};
 pub use runtime::{CompanyRegistry, CompanyRuntime, CycleReport, RuntimeBuilder};
-pub use store::{FsCompanyStore, FsContextStore, FsEventLog, FsMemoryStore, FsSecretStore};
+pub use store::{FsCompanyStore, FsEventLog, FsSecretStore, FsTraceStore};
 
 /// Current crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

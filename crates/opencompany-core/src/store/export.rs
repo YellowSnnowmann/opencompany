@@ -1,8 +1,8 @@
 //! Store-agnostic bundle export and import.
 //!
-//! Export reads *everything* for a company through the four durable storage
-//! ports ([`CompanyStore`], [`EventLog`], [`MemoryStore`], [`ContextStore`]) and
-//! writes the canonical filesystem [`Bundle`](crate::store::paths::Bundle)
+//! Export reads *everything* for a company through the three durable storage
+//! ports ([`CompanyStore`], [`EventLog`], [`TraceStore`]) and writes the
+//! canonical filesystem [`Bundle`](crate::store::paths::Bundle)
 //! layout. Because it drives the ports rather than a backend's private files, an
 //! export is *total by construction* for any backend — the fs and sqlite stores
 //! produce identical bundles. Import is the exact inverse: it reads a bundle
@@ -12,6 +12,10 @@
 //! The dep-free core operates on an *unpacked bundle directory*. A single-file
 //! `.tar` wrapper ([`pack_tar`]/[`unpack_tar`]) is gated behind the `export`
 //! feature so the default build links no archive crate.
+//!
+//! Company memory is not in a bundle: it is OpenHuman's (`crate::memory`),
+//! held by the memory engine rather than by any storage port, and a restored
+//! company starts with the memory its engine already holds for its root.
 //!
 //! `secrets/` and `keys/` are fs-only artifacts (the builder keeps them on the
 //! filesystem even under a non-fs store) with no enumeration port, so they are
@@ -26,18 +30,15 @@ use serde::{Deserialize, Serialize};
 use crate::Result;
 use crate::company::CompanyManifest;
 use crate::error::OpenCompanyError;
-use crate::ports::context::ContextStore;
 use crate::ports::events::EventLog;
-use crate::ports::facts::{FactRecord, FactStore};
-use crate::ports::memory::MemoryStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::store::CompanyStore;
 use crate::ports::types::{
     AgentOverride, BudgetOverride, CompanyEvent, CompanyId, CompanyRecord, CompressedTrace,
-    ContextChunk, DeskHiveOverride, EventSeq, LedgerEntry, OverlayAgent, OverlayDesk,
+    DeskHiveOverride, EventSeq, LedgerEntry, OverlayAgent, OverlayDesk,
     OverlayDeskMember, OverlayDeskOrder, OverlayWorkflow, PolicyOverride, StoredEvent,
     TemplateProvenance, ToolGrantsOverride,
 };
-use crate::store::select::MemoryScopes;
 
 /// Canonical bundle file and directory names, matching the fs
 /// [`Bundle`](crate::store::paths::Bundle) layout.
@@ -47,29 +48,12 @@ const EVENTS_JSONL: &str = "events.jsonl";
 const LEDGER_JSONL: &str = "ledger.jsonl";
 const MEMORY_DIR: &str = "memory";
 const TRACES_JSONL: &str = "traces.jsonl";
-const ARCHIVES_JSONL: &str = "archives.jsonl";
-/// Operator facts, at the bundle ROOT — the same place the live fs bundle
-/// keeps them (`paths::Bundle::facts_jsonl`), so an export stays diffable
-/// against a live home and a direct reader finds them where the canonical
-/// layout says. Absent from bundles written before facts joined the export;
-/// `read_jsonl` treats an absent file as empty, so both directions stay
-/// compatible — an old importer ignores the new file, a new importer accepts
-/// an old bundle.
-const FACTS_JSONL: &str = "facts.jsonl";
-const CONTEXT_DIR: &str = "context";
-const CONTEXT_INDEX_JSONL: &str = "index.jsonl";
-const CONTEXT_BLOBS_DIR: &str = "blobs";
 const SECRETS_DIR: &str = "secrets";
 const KEYS_DIR: &str = "keys";
 
-/// The four durable storage ports as trait objects, in export/import order
-/// (`CompanyStore`, `EventLog`, `MemoryStore`, `ContextStore`).
-pub type Ports = (
-    Arc<dyn CompanyStore>,
-    Arc<dyn EventLog>,
-    Arc<dyn MemoryStore>,
-    Arc<dyn ContextStore>,
-);
+/// The three durable storage ports as trait objects, in export/import order
+/// (`CompanyStore`, `EventLog`, `TraceStore`).
+pub type Ports = (Arc<dyn CompanyStore>, Arc<dyn EventLog>, Arc<dyn TraceStore>);
 
 /// Options controlling what an export includes.
 #[derive(Clone, Debug, Default)]
@@ -229,22 +213,6 @@ struct BundleMeta {
     general_channel: Option<crate::ports::types::GeneralChannel>,
 }
 
-/// One exported context chunk: its content address, label, and body.
-struct ExportedChunk {
-    addr: String,
-    label: String,
-    body: String,
-}
-
-/// A context-index line pairing an address with its label and length. Matches the
-/// fs [`ContextStore`] index shape.
-#[derive(Serialize, Deserialize)]
-struct IndexEntry {
-    addr: String,
-    label: String,
-    len: usize,
-}
-
 /// Everything an export carries for one company, read through the ports.
 struct BundleContents {
     id: CompanyId,
@@ -255,13 +223,6 @@ struct BundleContents {
     ledger: Vec<LedgerEntry>,
     events: Vec<StoredEvent>,
     traces: Vec<CompressedTrace>,
-    /// Traces retained in a provider's archive tier. Empty for base stores and
-    /// bundles written before archive export was introduced.
-    archived_traces: Vec<CompressedTrace>,
-    /// Operator facts. Empty when the source served no fact port (an old
-    /// bundle, or an export run without one) — never a failure.
-    facts: Vec<FactRecord>,
-    context: Vec<ExportedChunk>,
     /// The operator team overlay (operator-added teammates), carried through the
     /// bundle so export→import preserves the operator roster.
     overlay_agents: Vec<OverlayAgent>,
@@ -326,15 +287,12 @@ struct BundleContents {
 }
 
 impl BundleContents {
-    /// Reads the complete company state through the four durable ports.
+    /// Reads the complete company state through the three durable ports.
     async fn read_via_ports(
         id: &CompanyId,
         store: Arc<dyn CompanyStore>,
         events: Arc<dyn EventLog>,
-        memory: Arc<dyn MemoryStore>,
-        context: Arc<dyn ContextStore>,
-        facts: Option<Arc<dyn FactStore>>,
-        scopes: Option<Arc<dyn MemoryScopes>>,
+        traces: Arc<dyn TraceStore>,
     ) -> Result<Self> {
         let record = store
             .load(id)
@@ -352,26 +310,7 @@ impl BundleContents {
         // failure of the two.
         let events =
             scrub_redacted_discussion(events.read_from(id, EventSeq::new(0), usize::MAX).await?);
-        let traces = memory.recent_traces(id, usize::MAX).await?;
-        let archived_traces = match scopes {
-            Some(scopes) => scopes.archived_traces(id).await?,
-            None => Vec::new(),
-        };
-        let facts = match facts {
-            Some(port) => port.list(id, None, None).await?,
-            None => Vec::new(),
-        };
-
-        let metas = context.list(id, "").await?;
-        let mut chunks = Vec::with_capacity(metas.len());
-        for meta in metas {
-            let body = context.peek(id, &meta.addr, None).await?;
-            chunks.push(ExportedChunk {
-                addr: meta.addr.as_ref().to_string(),
-                label: meta.label,
-                body,
-            });
-        }
+        let traces = traces.recent_traces(id, usize::MAX).await?;
 
         // Issue #1796: the bundle carries the **seed's** `[tools].allow`, not the
         // record's materialised one.
@@ -401,9 +340,6 @@ impl BundleContents {
             ledger: record.ledger,
             events,
             traces,
-            archived_traces,
-            facts,
-            context: chunks,
             overlay_agents: record.overlay_agents,
             overlay_desk_members: record.overlay_desk_members,
             overlay_desk_order: record.overlay_desk_order,
@@ -424,50 +360,15 @@ impl BundleContents {
         })
     }
 
-    /// Replays the complete company state through the four durable ports. Events
-    /// are appended in order, so a fresh target log reproduces the original
-    /// 0-based sequence numbers; context chunks re-derive their original content
-    /// address from the body.
+    /// Replays the complete company state through the three durable ports.
+    /// Events are appended in order, so a fresh target log reproduces the
+    /// original 0-based sequence numbers.
     async fn write_via_ports(
         &self,
         store: Arc<dyn CompanyStore>,
         events: Arc<dyn EventLog>,
-        memory: Arc<dyn MemoryStore>,
-        context: Arc<dyn ContextStore>,
-        facts: Option<Arc<dyn FactStore>>,
-        scopes: Option<Arc<dyn MemoryScopes>>,
+        traces: Arc<dyn TraceStore>,
     ) -> Result<()> {
-        // Archived traces must remain in their recovery tier. Refuse before any
-        // append-only writes when the import target cannot restore that tier.
-        if !self.archived_traces.is_empty() && scopes.is_none() {
-            return Err(OpenCompanyError::Store(format!(
-                "bundle carries {} archived traces but the import target serves no archive tier",
-                self.archived_traces.len()
-            )));
-        }
-        // append-only, so a refusal after `store.save`/`append` would leave a
-        // half-imported company whose retry duplicates history.
-        if facts.is_none() && !self.facts.is_empty() {
-            return Err(OpenCompanyError::Store(format!(
-                "bundle carries {} operator facts but the import target serves no fact port",
-                self.facts.len()
-            )));
-        }
-        // Facts land FIRST, for the same append-only reason the refusal above
-        // fires first: `upsert` is idempotent, so a failure here leaves a
-        // retry-safe state — whereas a fact failure AFTER `store.save` and the
-        // ledger/event appends would leave a half-import whose retry
-        // duplicates history.
-        if let Some(port) = &facts {
-            for fact in &self.facts {
-                port.upsert(&self.id, fact).await?;
-            }
-        }
-        if let Some(scopes) = scopes {
-            scopes
-                .restore_archived_traces(&self.id, &self.archived_traces)
-                .await?;
-        }
         // The manifest + lifecycle; ledger is appended separately so the store's
         // append-only ledger stays authoritative.
         // The mirror of the strip in `read_via_ports`: the bundle holds the seed,
@@ -526,18 +427,7 @@ impl BundleContents {
             events.append(&self.id, stored.event.clone()).await?;
         }
         for trace in &self.traces {
-            memory.save_trace(&self.id, trace.clone()).await?;
-        }
-        for chunk in &self.context {
-            context
-                .put(
-                    &self.id,
-                    ContextChunk {
-                        label: chunk.label.clone(),
-                        body: chunk.body.clone(),
-                    },
-                )
-                .await?;
+            traces.save_trace(&self.id, trace.clone()).await?;
         }
         Ok(())
     }
@@ -589,63 +479,6 @@ impl BundleContents {
             jsonl(&self.traces)?.as_bytes(),
         )
         .await?;
-        if !self.archived_traces.is_empty() {
-            write_file(
-                &memory_dir.join(ARCHIVES_JSONL),
-                jsonl(&self.archived_traces)?.as_bytes(),
-            )
-            .await?;
-        } else {
-            match tokio::fs::remove_file(memory_dir.join(ARCHIVES_JSONL)).await {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => {
-                    return Err(OpenCompanyError::Store(format!(
-                        "cannot remove a stale archive file from the bundle: {e}"
-                    )));
-                }
-            }
-        }
-        // Only when there are any: an empty file would make every new export
-        // differ from an old host's byte-for-byte for no information. At the
-        // bundle root, matching `paths::Bundle::facts_jsonl`. A factless
-        // export must also REMOVE a stale file a previous export left in the
-        // same directory — otherwise a later import resurrects facts that are
-        // absent from the selected source.
-        if !self.facts.is_empty() {
-            write_file(&dest.join(FACTS_JSONL), jsonl(&self.facts)?.as_bytes()).await?;
-        } else {
-            match tokio::fs::remove_file(dest.join(FACTS_JSONL)).await {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => {
-                    return Err(OpenCompanyError::Store(format!(
-                        "cannot remove a stale facts file from the bundle: {e}"
-                    )));
-                }
-            }
-        }
-
-        let context_dir = dest.join(CONTEXT_DIR);
-        let blobs_dir = context_dir.join(CONTEXT_BLOBS_DIR);
-        create_dir(&blobs_dir).await?;
-        let index: Vec<IndexEntry> = self
-            .context
-            .iter()
-            .map(|c| IndexEntry {
-                addr: c.addr.clone(),
-                label: c.label.clone(),
-                len: c.body.len(),
-            })
-            .collect();
-        write_file(
-            &context_dir.join(CONTEXT_INDEX_JSONL),
-            jsonl(&index)?.as_bytes(),
-        )
-        .await?;
-        for chunk in &self.context {
-            write_file(&blobs_dir.join(&chunk.addr), chunk.body.as_bytes()).await?;
-        }
         Ok(())
     }
 
@@ -700,23 +533,6 @@ impl BundleContents {
             scrub_redacted_discussion(read_jsonl::<StoredEvent>(&src.join(EVENTS_JSONL)).await?);
         let traces =
             read_jsonl::<CompressedTrace>(&src.join(MEMORY_DIR).join(TRACES_JSONL)).await?;
-        let archived_traces =
-            read_jsonl::<CompressedTrace>(&src.join(MEMORY_DIR).join(ARCHIVES_JSONL)).await?;
-        // Absent on bundles that predate facts-in-the-bundle: empty, not an error.
-        let facts = read_jsonl::<FactRecord>(&src.join(FACTS_JSONL)).await?;
-
-        let context_dir = src.join(CONTEXT_DIR);
-        let index = read_jsonl::<IndexEntry>(&context_dir.join(CONTEXT_INDEX_JSONL)).await?;
-        let blobs_dir = context_dir.join(CONTEXT_BLOBS_DIR);
-        let mut context = Vec::with_capacity(index.len());
-        for entry in index {
-            let body = read_to_string(&blobs_dir.join(&entry.addr)).await?;
-            context.push(ExportedChunk {
-                addr: entry.addr,
-                label: entry.label,
-                body,
-            });
-        }
 
         Ok(Self {
             id: CompanyId::new(meta.id),
@@ -727,9 +543,6 @@ impl BundleContents {
             ledger,
             events,
             traces,
-            archived_traces,
-            facts,
-            context,
             overlay_agents: meta.overlay_agents,
             overlay_desk_members: meta.overlay_desk_members,
             overlay_desk_order: meta.overlay_desk_order,
@@ -813,43 +626,19 @@ fn scrub_redacted_discussion(events: Vec<StoredEvent>) -> Vec<StoredEvent> {
 /// directory at `dest`.
 ///
 /// Total by construction: every port is drained (`read_from(0, MAX)`,
-/// `recent_traces(MAX)`, `list("")` + `peek`), so an export never depends on a
-/// backend's private on-disk shape. When [`ExportOpts::include_secrets`] is set
-/// and [`ExportOpts::fs_bundle`] points at the source fs bundle, the fs-only
+/// `recent_traces(MAX)`), so an export never depends on a backend's private
+/// on-disk shape. When [`ExportOpts::include_secrets`] is set and
+/// [`ExportOpts::fs_bundle`] points at the source fs bundle, the fs-only
 /// `secrets/` and `keys/` directories are copied verbatim.
-// Eight arguments is over clippy's default ceiling, taken knowingly: five of
-// them are the durable ports, and folding them into a struct is a wider
-// refactor than this addition warrants (the repo carries the same allow at
-// its other port-heavy seams).
-#[allow(clippy::too_many_arguments)]
 pub async fn export_bundle(
     id: &CompanyId,
     dest: &Path,
     store: Arc<dyn CompanyStore>,
     events: Arc<dyn EventLog>,
-    memory: Arc<dyn MemoryStore>,
-    context: Arc<dyn ContextStore>,
-    facts: Option<Arc<dyn FactStore>>,
+    traces: Arc<dyn TraceStore>,
     opts: ExportOpts,
 ) -> Result<()> {
-    export_bundle_with_scopes(id, dest, store, events, memory, context, facts, None, opts).await
-}
-
-/// Exports a bundle while preserving an optional provider archive tier.
-#[allow(clippy::too_many_arguments)]
-pub async fn export_bundle_with_scopes(
-    id: &CompanyId,
-    dest: &Path,
-    store: Arc<dyn CompanyStore>,
-    events: Arc<dyn EventLog>,
-    memory: Arc<dyn MemoryStore>,
-    context: Arc<dyn ContextStore>,
-    facts: Option<Arc<dyn FactStore>>,
-    scopes: Option<Arc<dyn MemoryScopes>>,
-    opts: ExportOpts,
-) -> Result<()> {
-    let contents =
-        BundleContents::read_via_ports(id, store, events, memory, context, facts, scopes).await?;
+    let contents = BundleContents::read_via_ports(id, store, events, traces).await?;
     contents.write_to_dir(dest).await?;
 
     if opts.include_secrets
@@ -866,35 +655,18 @@ pub async fn export_bundle_with_scopes(
 /// restored company id.
 ///
 /// The inverse of [`export_bundle`] for the port-driven records: the manifest,
-/// lifecycle, ledger, events, traces, and context are replayed through the
-/// supplied ports. `secrets/`/`keys/` are fs artifacts restored separately via
+/// lifecycle, ledger, events and traces are replayed through the supplied
+/// ports. `secrets/`/`keys/` are fs artifacts restored separately via
 /// [`restore_fs_artifacts`].
 pub async fn import_bundle(
     src: &Path,
     store: Arc<dyn CompanyStore>,
     events: Arc<dyn EventLog>,
-    memory: Arc<dyn MemoryStore>,
-    context: Arc<dyn ContextStore>,
-    facts: Option<Arc<dyn FactStore>>,
-) -> Result<CompanyId> {
-    import_bundle_with_scopes(src, store, events, memory, context, facts, None).await
-}
-
-/// Imports a bundle while restoring its optional provider archive tier.
-pub async fn import_bundle_with_scopes(
-    src: &Path,
-    store: Arc<dyn CompanyStore>,
-    events: Arc<dyn EventLog>,
-    memory: Arc<dyn MemoryStore>,
-    context: Arc<dyn ContextStore>,
-    facts: Option<Arc<dyn FactStore>>,
-    scopes: Option<Arc<dyn MemoryScopes>>,
+    traces: Arc<dyn TraceStore>,
 ) -> Result<CompanyId> {
     let contents = BundleContents::read_from_dir(src).await?;
     let id = contents.id.clone();
-    contents
-        .write_via_ports(store, events, memory, context, facts, scopes)
-        .await?;
+    contents.write_via_ports(store, events, traces).await?;
     Ok(id)
 }
 

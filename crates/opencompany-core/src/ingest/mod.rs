@@ -1,19 +1,17 @@
 //! Turning dropped files and links into memory.
 //!
 //! One question, asked of arbitrary operator-supplied bytes: *what text is in
-//! here, and how should memory hold it?* The answer has three parts, and they
-//! are deliberately separate:
+//! here?* The answer has two parts, and they are deliberately separate:
 //!
 //! - [`extract`] — bytes to text, per format ([`documents`] for the ones that
 //!   need a parser).
-//! - [`chunk`] — text to the sized, labelled pieces a
-//!   [`ContextStore`](crate::ports::ContextStore) actually holds.
-//! - `crate::server::ops::memory_ingest` — the route that puts them there.
+//! - `crate::server::ops::memory_ingest` — the route that files the text as
+//!   one document in the company's brain (`crate::memory`).
 //!
 //! ## What is stored, and what is not
 //!
-//! **The text, not the file.** A dropped document is extracted, chunked, and
-//! written to memory; the original bytes are not retained anywhere. That is a
+//! **The text, not the file.** A dropped document is extracted and filed in
+//! memory; the original bytes are not retained anywhere. That is a
 //! deliberate answer to "where should this live", not an oversight: the
 //! workspace tree is the place for files an operator wants back
 //! (`ops::workspace`), and duplicating every upload into it would make the
@@ -25,17 +23,14 @@
 //!
 //! A format this build cannot read produces [`Extracted::Unsupported`], which
 //! the route reports per file. It does **not** fall back to storing the raw
-//! bytes as if they were text: a chunk of decoded PDF operators would recall
-//! as noise, count as a memory, and be indistinguishable from a real one.
+//! bytes as if they were text: decoded PDF operators would recall as noise,
+//! count as a memory, and be indistinguishable from a real one.
 
-pub mod chunk;
 pub mod documents;
 #[cfg(test)]
 #[path = "ingest_tests.rs"]
 mod tests;
 pub mod text;
-
-pub use chunk::{DOCUMENT_LABEL_PREFIX, DocumentChunk, chunk_document, label_for};
 
 /// What extraction made of one file.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { OpenCompanyClient } from "@/api/client";
-import type { MemoryEntry, MemoryList, MemoryStats } from "@/api/memory";
+import type { MemoryEntry, MemoryList } from "@/api/memory";
 import { MemoryView } from "@/views/MemoryView";
 
 let container: HTMLDivElement;
@@ -16,37 +16,25 @@ const ROW = 132;
 function entries(count: number): MemoryEntry[] {
   return Array.from({ length: count }, (_, i) => ({
     id: `m-${i}`,
-    kind: "fact" as const,
-    origin: "fact" as const,
-    editable: true,
+    kind: "learning" as const,
+    learningKind: "fact" as const,
     title: `memory ${i}`,
     body: "",
-    source: "operator",
+    namespace: "team:acme",
+    tags: [],
     updatedAt: 0,
+    editable: true,
   }));
 }
 
-function stats(total: number): MemoryStats {
-  return {
-    facts: total,
-    factsUpdatedAtMillis: 0,
-    lastUpdatedAtMillis: 0,
-    totalItems: total,
-    teammateMemory: 0,
-    documentMemory: 0,
-    taskOutcomes: 0,
-  };
-}
-
 function clientFor(count: number): OpenCompanyClient {
-  const list: MemoryList = { items: entries(count), totalContext: 0, contextTruncated: false };
+  const list: MemoryList = { items: entries(count) };
   return {
     scopeFor: () => "/api/v1/companies/acme",
     get: async (path: string) => {
-      if (path.endsWith("/memory/stats")) return stats(count);
-      // The engine surface is exercised by its own suite; here it may fail —
-      // EngineSection renders its own alert and the memory list still mounts.
-      if (path.endsWith("/memory/engine")) throw new Error("engine unavailable in unit");
+      if (path.endsWith("/memory/status")) return { root: "team:acme", on: true };
+      if (path.endsWith("/memory/agents")) return { root: "team:acme", agents: [] };
+      if (path.endsWith("/memory/brain")) return { root: "team:acme", sources: [], unfiled: 0 };
       if (path.endsWith("/memory")) return list;
       throw new Error(`unexpected GET ${path}`);
     },

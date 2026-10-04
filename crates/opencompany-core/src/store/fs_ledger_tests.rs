@@ -282,7 +282,7 @@ async fn event_log_subscribe_delivers_new_event() {
 async fn memory_store_traces_tail_and_evict() {
     let root_dir = tmp_root();
     let root = root_dir.path().to_path_buf();
-    let mem = FsMemoryStore::new(&root);
+    let mem = FsTraceStore::new(&root);
     let id = CompanyId::new("acme");
     for i in 0..5 {
         mem.save_trace(&id, CompressedTrace::now(format!("c{i}"), format!("s{i}")))

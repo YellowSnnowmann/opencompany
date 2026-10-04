@@ -1,8 +1,8 @@
 //! SQLite-backed implementations of the storage ports.
 //!
 //! One [`SqliteStore`] opens a single bundled-SQLite connection and implements
-//! every durable port — [`CompanyStore`], [`EventLog`], [`MemoryStore`],
-//! [`ContextStore`], and [`SecretStore`] — sharing that connection behind an
+//! every durable port — [`CompanyStore`], [`EventLog`], [`TraceStore`],
+//! [`SecretStore`] and the rest — sharing that connection behind an
 //! `Arc<Mutex<_>>`. The same `Arc<SqliteStore>` can therefore be injected into
 //! all four `RuntimeBuilder::with_*` setters so one database file serves the
 //! whole company.
@@ -35,22 +35,19 @@ use tokio::sync::broadcast;
 use crate::Result;
 use crate::company::CompanyManifest;
 use crate::error::OpenCompanyError;
-use crate::ports::context::ContextStore;
 use crate::ports::events::{EventLog, EventStreamItem, PruneReport, RetentionPolicy, plan_prune};
 use crate::ports::login_codes::LoginCodeRecord;
-use crate::ports::memory::MemoryStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::now_millis;
 use crate::ports::secrets::SecretStore;
 use crate::ports::sessions::SessionRecord;
 use crate::ports::store::CompanyStore;
 use crate::ports::types::{
-    ChunkAddr, ChunkHit, ChunkMeta, CompanyEvent, CompanyId, CompanyRecord, CompanySummary,
-    CompressedTrace, ContextChunk, EventSeq, EvictionPolicy, LedgerEntry, OverlayBlob, SecretValue,
+    CompanyEvent, CompanyId, CompanyRecord, CompanySummary, CompressedTrace, EventSeq,
+    EvictionPolicy, LedgerEntry, OverlayBlob, SecretValue,
     StoredEvent, TaskResult,
 };
 use crate::ports::users::{InviteRecord, UserRecord};
-use crate::store::content_address;
-use crate::store::text::slice_on_char_boundaries;
 
 /// Schema for every port table. Idempotent: safe to run on each `open`.
 const MIGRATIONS: &str = r#"
@@ -89,27 +86,11 @@ CREATE TABLE IF NOT EXISTS memory_tasks (
     at_ms       INTEGER NOT NULL,
     PRIMARY KEY (company_id, id)
 );
-CREATE TABLE IF NOT EXISTS context_chunks (
-    company_id TEXT NOT NULL,
-    addr       TEXT NOT NULL,
-    label      TEXT NOT NULL,
-    body       TEXT NOT NULL,
-    len        INTEGER NOT NULL,
-    stored_ms  INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (company_id, addr)
-);
--- The context index: one row per (addr, label) claim, the shape the fs
--- backend's JSONL index always had (issue #1300). `context_chunks` keeps one
--- body row per address (its `label` column stays the first write's label so a
--- downgraded binary keeps reading what it always read); this table is what
--- `list` and the label-scoped delete read and mutate.
-CREATE TABLE IF NOT EXISTS context_chunk_labels (
-    company_id TEXT NOT NULL,
-    addr       TEXT NOT NULL,
-    label      TEXT NOT NULL,
-    stored_ms  INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (company_id, addr, label)
-);
+-- Company memory moved to OpenHuman (`crate::memory`): the context and fact
+-- tables are gone, and a database from before the cutover drops them.
+DROP TABLE IF EXISTS context_chunk_labels;
+DROP TABLE IF EXISTS context_chunks;
+DROP TABLE IF EXISTS facts;
 CREATE TABLE IF NOT EXISTS secrets (
     company_id TEXT NOT NULL,
     key        TEXT NOT NULL,
@@ -154,13 +135,6 @@ CREATE TABLE IF NOT EXISTS ledger_events (
 );
 CREATE INDEX IF NOT EXISTS ledger_events_by_ledger
     ON ledger_events (company_id, ledger, seq);
-CREATE TABLE IF NOT EXISTS facts (
-    company_id TEXT NOT NULL,
-    id         TEXT NOT NULL,
-    fact_json  TEXT NOT NULL,
-    updated_ms INTEGER NOT NULL,
-    PRIMARY KEY (company_id, id)
-);
 CREATE TABLE IF NOT EXISTS artifacts (
     company_id    TEXT NOT NULL,
     id            TEXT NOT NULL,
@@ -537,40 +511,6 @@ fn relax_runs_task_id_nullability(conn: &Connection) -> Result<()> {
     .map_err(sql_err)
 }
 
-/// Heals `context_chunk_labels` against `context_chunks` at open (issue #1300).
-///
-/// Two idempotent steps, one transaction, covering every mixed-version
-/// history a database can have:
-///
-/// - **Backfill**: a body row whose (addr, label) has no index row — a
-///   database from before the labels table existed, or a row an older binary
-///   wrote since — gets one, carrying the body row's stamp. `INSERT OR
-///   IGNORE` on the full primary key makes re-running a no-op, and a
-///   label-scoped delete can never be undone by it: when the last label goes
-///   the body row goes in the same transaction, so there is nothing left to
-///   backfill from.
-/// - **Orphan sweep**: an index row whose body row is gone — an older
-///   binary's address-level delete removed only `context_chunks` — is
-///   dropped, so `list` never names a chunk `peek` cannot read.
-///
-/// Both run on every open rather than behind a version flag, matching the
-/// other heals in this file, which read the live schema instead of trusting a
-/// stamp. The cost is two anti-joins against a primary-key index, once per
-/// process, and neither writes anything on an already-healed database.
-fn sync_context_chunk_labels(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "BEGIN;
-         INSERT OR IGNORE INTO context_chunk_labels (company_id, addr, label, stored_ms)
-             SELECT company_id, addr, label, stored_ms FROM context_chunks;
-         DELETE FROM context_chunk_labels WHERE NOT EXISTS (
-             SELECT 1 FROM context_chunks c
-             WHERE c.company_id = context_chunk_labels.company_id
-               AND c.addr = context_chunk_labels.addr);
-         COMMIT;",
-    )
-    .map_err(sql_err)
-}
-
 /// Runs `write` with `synchronous=FULL`, so its commit is fsynced, and restores
 /// `NORMAL` afterwards no matter how `write` ended.
 ///
@@ -634,12 +574,6 @@ impl SqliteStore {
         conn.execute_batch(MIGRATIONS).map_err(sql_err)?;
         // `CREATE TABLE IF NOT EXISTS` is a no-op on a database that predates a
         // column, so additive columns need their own idempotent step.
-        add_column_if_missing(
-            &conn,
-            "context_chunks",
-            "stored_ms",
-            "INTEGER NOT NULL DEFAULT 0",
-        )?;
         // Issue #553: a workspace node may hold bytes. Nullable and with no
         // default, so every existing prose note keeps `blob IS NULL` — which is
         // exactly the "this node is not binary" test the reads use, and needs no
@@ -674,10 +608,6 @@ impl SqliteStore {
         // After the rebuild above, which owns the table's shape on the one path
         // that replaces it wholesale.
         heal_runs_agent_id(&conn)?;
-        // Issue #1300: the context index moved into `context_chunk_labels`
-        // (one row per (addr, label) claim). Runs after the `stored_ms`
-        // column heal above, whose column it reads.
-        sync_context_chunk_labels(&conn)?;
         Ok(Self {
             conn: Arc::new(StdMutex::new(conn)),
             senders: Arc::new(StdMutex::new(HashMap::new())),
@@ -1129,11 +1059,11 @@ impl EventLog for SqliteStore {
 }
 
 // ---------------------------------------------------------------------------
-// MemoryStore
+// TraceStore
 // ---------------------------------------------------------------------------
 
 #[async_trait]
-impl MemoryStore for SqliteStore {
+impl TraceStore for SqliteStore {
     async fn save_trace(&self, id: &CompanyId, trace: CompressedTrace) -> Result<()> {
         let trace_json = serde_json::to_string(&trace)?;
         let conn = self.conn();
@@ -1205,221 +1135,6 @@ impl MemoryStore for SqliteStore {
                 .map_err(sql_err)?,
         };
         Ok(removed as u64)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ContextStore
-// ---------------------------------------------------------------------------
-
-#[async_trait]
-impl ContextStore for SqliteStore {
-    async fn put(&self, id: &CompanyId, chunk: ContextChunk) -> Result<ChunkAddr> {
-        let addr = content_address(&chunk.body);
-        // One clock read for both rows: a body row and the claim that lands
-        // with it describe the same write and must not disagree by a
-        // millisecond the caller can observe through `list`.
-        let stored_ms = now_millis() as i64;
-        let mut conn = self.conn();
-        // Body row first-write-wins per address; the labels index accumulates
-        // one row per (addr, label) — set semantics, so a byte-identical body
-        // stored under a second label keeps both claims, and a re-put of an
-        // identical (body, label) is a no-op (#1300). One transaction, so a
-        // body row can never land without its index row.
-        let tx = conn.transaction().map_err(sql_err)?;
-        tx.execute(
-            "INSERT OR IGNORE INTO context_chunks (company_id, addr, label, body, len, stored_ms) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                id.as_ref(),
-                addr,
-                chunk.label,
-                chunk.body,
-                chunk.body.len() as i64,
-                stored_ms
-            ],
-        )
-        .map_err(sql_err)?;
-        tx.execute(
-            "INSERT OR IGNORE INTO context_chunk_labels (company_id, addr, label, stored_ms) \
-             VALUES (?1, ?2, ?3, ?4)",
-            params![id.as_ref(), addr, chunk.label, stored_ms],
-        )
-        .map_err(sql_err)?;
-        tx.commit().map_err(sql_err)?;
-        Ok(ChunkAddr::new(addr))
-    }
-
-    async fn list(&self, id: &CompanyId, prefix: &str) -> Result<Vec<ChunkMeta>> {
-        let conn = self.conn();
-        // The labels table is the index (#1300); the join carries each claim's
-        // body length from the one body row. `l.rowid` keeps insertion order,
-        // the same order the single-table `rowid` scan used to give.
-        let mut stmt = conn
-            .prepare(
-                "SELECT l.addr, l.label, c.len, l.stored_ms \
-                 FROM context_chunk_labels l \
-                 JOIN context_chunks c ON c.company_id = l.company_id AND c.addr = l.addr \
-                 WHERE l.company_id = ?1 ORDER BY l.rowid",
-            )
-            .map_err(sql_err)?;
-        let rows = stmt
-            .query_map(params![id.as_ref()], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, i64>(2)?,
-                    r.get::<_, i64>(3)?,
-                ))
-            })
-            .map_err(sql_err)?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (addr, label, len, stored_ms) = row.map_err(sql_err)?;
-            if label.starts_with(prefix) {
-                out.push(ChunkMeta {
-                    addr: ChunkAddr::new(addr),
-                    label,
-                    len: len as usize,
-                    stored_at_millis: stored_ms.max(0) as u64,
-                });
-            }
-        }
-        Ok(out)
-    }
-
-    async fn peek(
-        &self,
-        id: &CompanyId,
-        addr: &ChunkAddr,
-        range: Option<Range<usize>>,
-    ) -> Result<String> {
-        let conn = self.conn();
-        let body: Option<String> = conn
-            .query_row(
-                "SELECT body FROM context_chunks WHERE company_id = ?1 AND addr = ?2",
-                params![id.as_ref(), addr.as_ref()],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(sql_err)?;
-        let body = body.ok_or_else(|| {
-            OpenCompanyError::Store(format!("context chunk not found: {}", addr.as_ref()))
-        })?;
-        match range {
-            None => Ok(body),
-            // Byte offsets from the caller can land mid-codepoint; widen to
-            // the boundary rather than panic the slice.
-            Some(r) => Ok(slice_on_char_boundaries(&body, r)),
-        }
-    }
-
-    async fn peek_many(&self, id: &CompanyId, addrs: &[ChunkAddr]) -> Result<Vec<Option<String>>> {
-        // One connection acquisition and one prepared statement for the whole
-        // batch, instead of the default's lock-per-chunk loop.
-        let conn = self.conn();
-        let mut stmt = conn
-            .prepare("SELECT body FROM context_chunks WHERE company_id = ?1 AND addr = ?2")
-            .map_err(sql_err)?;
-        let mut bodies = Vec::with_capacity(addrs.len());
-        for addr in addrs {
-            // Per-addr degrade, per the port contract: a row that fails to
-            // read (corrupt decode included) answers `None` like a missing
-            // one — only failing to prepare the statement fails the batch.
-            let body: Option<String> = match stmt
-                .query_row(params![id.as_ref(), addr.as_ref()], |r| r.get(0))
-                .optional()
-            {
-                Ok(body) => body,
-                Err(error) => {
-                    tracing::warn!(addr = %addr.as_ref(), %error, "context row failed to read");
-                    None
-                }
-            };
-            bodies.push(body);
-        }
-        Ok(bodies)
-    }
-
-    async fn delete(&self, id: &CompanyId, addr: &ChunkAddr) -> Result<bool> {
-        let mut conn = self.conn();
-        // Address-level: the body row and every label claim go together, in
-        // one transaction so no half can survive the other.
-        let tx = conn.transaction().map_err(sql_err)?;
-        let removed_labels = tx
-            .execute(
-                "DELETE FROM context_chunk_labels WHERE company_id = ?1 AND addr = ?2",
-                params![id.as_ref(), addr.as_ref()],
-            )
-            .map_err(sql_err)?;
-        let removed = tx
-            .execute(
-                "DELETE FROM context_chunks WHERE company_id = ?1 AND addr = ?2",
-                params![id.as_ref(), addr.as_ref()],
-            )
-            .map_err(sql_err)?;
-        tx.commit().map_err(sql_err)?;
-        Ok(removed > 0 || removed_labels > 0)
-    }
-
-    async fn delete_label(&self, id: &CompanyId, addr: &ChunkAddr, label: &str) -> Result<bool> {
-        let mut conn = self.conn();
-        // Label-scoped (#1300): remove exactly one (addr, label) claim, and
-        // reap the body row when — and only when — no claim remains. The
-        // check and both deletes are one transaction, so a concurrent put of
-        // identical content under another label either commits its claim
-        // before this transaction (and keeps the body) or after it.
-        let tx = conn.transaction().map_err(sql_err)?;
-        let removed = tx
-            .execute(
-                "DELETE FROM context_chunk_labels \
-                 WHERE company_id = ?1 AND addr = ?2 AND label = ?3",
-                params![id.as_ref(), addr.as_ref(), label],
-            )
-            .map_err(sql_err)?;
-        if removed > 0 {
-            let remaining: i64 = tx
-                .query_row(
-                    "SELECT COUNT(*) FROM context_chunk_labels \
-                     WHERE company_id = ?1 AND addr = ?2",
-                    params![id.as_ref(), addr.as_ref()],
-                    |r| r.get(0),
-                )
-                .map_err(sql_err)?;
-            if remaining == 0 {
-                tx.execute(
-                    "DELETE FROM context_chunks WHERE company_id = ?1 AND addr = ?2",
-                    params![id.as_ref(), addr.as_ref()],
-                )
-                .map_err(sql_err)?;
-            }
-        }
-        tx.commit().map_err(sql_err)?;
-        Ok(removed > 0)
-    }
-
-    /// Weighted token overlap rather than `body.find(query)` — see
-    /// [`crate::store::lexical`]. The same ranker as fs and mongo, so the
-    /// conformance suite can demand one search semantics from all three.
-    async fn search(&self, id: &CompanyId, query: &str, limit: usize) -> Result<Vec<ChunkHit>> {
-        let mut ranker = crate::store::lexical::Ranker::new(query);
-        if ranker.matches_nothing() {
-            return Ok(Vec::new());
-        }
-        let conn = self.conn();
-        let mut stmt = conn
-            .prepare("SELECT addr, body FROM context_chunks WHERE company_id = ?1 ORDER BY rowid")
-            .map_err(sql_err)?;
-        let rows = stmt
-            .query_map(params![id.as_ref()], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-            })
-            .map_err(sql_err)?;
-        for row in rows {
-            let (addr, body) = row.map_err(sql_err)?;
-            ranker.offer(&addr, &body);
-        }
-        Ok(ranker.best(limit))
     }
 }
 
@@ -2241,74 +1956,6 @@ impl crate::ports::login_codes::LoginCodeStore for SqliteStore {
             )
             .map_err(sql_err)?;
         Ok(n as u64)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// FactStore
-// ---------------------------------------------------------------------------
-
-#[async_trait]
-impl crate::ports::facts::FactStore for SqliteStore {
-    async fn list(
-        &self,
-        company: &CompanyId,
-        query: Option<&str>,
-        kind: Option<crate::ports::facts::FactKind>,
-    ) -> Result<Vec<crate::ports::facts::FactRecord>> {
-        let conn = self.conn();
-        let mut stmt = conn
-            .prepare("SELECT fact_json FROM facts WHERE company_id = ?1 ORDER BY updated_ms DESC")
-            .map_err(sql_err)?;
-        let rows = stmt
-            .query_map(params![company.as_ref()], |r| r.get::<_, String>(0))
-            .map_err(sql_err)?;
-        let mut out: Vec<crate::ports::facts::FactRecord> = Vec::new();
-        for row in rows {
-            out.push(serde_json::from_str(&row.map_err(sql_err)?)?);
-        }
-        if let Some(kind) = kind {
-            out.retain(|f| f.kind == kind);
-        }
-        if let Some(q) = query.map(str::to_lowercase).filter(|q| !q.is_empty()) {
-            out.retain(|f| {
-                f.title.to_lowercase().contains(&q) || f.body.to_lowercase().contains(&q)
-            });
-        }
-        Ok(out)
-    }
-
-    async fn upsert(
-        &self,
-        company: &CompanyId,
-        fact: &crate::ports::facts::FactRecord,
-    ) -> Result<()> {
-        let json = serde_json::to_string(fact)?;
-        let conn = self.conn();
-        conn.execute(
-            "INSERT INTO facts (company_id, id, fact_json, updated_ms) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(company_id, id) DO UPDATE SET fact_json = excluded.fact_json, \
-             updated_ms = excluded.updated_ms",
-            params![
-                company.as_ref(),
-                fact.id,
-                json,
-                fact.updated_at_millis as i64
-            ],
-        )
-        .map_err(sql_err)?;
-        Ok(())
-    }
-
-    async fn delete(&self, company: &CompanyId, id: &str) -> Result<bool> {
-        let conn = self.conn();
-        let n = conn
-            .execute(
-                "DELETE FROM facts WHERE company_id = ?1 AND id = ?2",
-                params![company.as_ref(), id],
-            )
-            .map_err(sql_err)?;
-        Ok(n > 0)
     }
 }
 

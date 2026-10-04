@@ -3,7 +3,7 @@
 //! The console renders full lists, so this is deliberately **not** Relay:
 //! [`Page`] carries the requested slice and the unpaginated `total`. Each
 //! concrete instantiation is registered with an explicit SDL name
-//! (`TaskPage`, `MemoryFactPage`, `EmailPage`, `MessagePage`). The one cursor
+//! (`TaskPage`, `MemoryItemPage`, `EmailPage`, `MessagePage`). The one cursor
 //! exception — `Chat.history`'s opaque `before` — is an argument, not a page
 //! shape, so it lives on the field, not here.
 
@@ -11,13 +11,13 @@ use async_graphql::{OutputType, SimpleObject};
 
 use super::company::MessageGql;
 use super::inbox::EmailMessageGql;
-use super::memory_facts::MemoryFactGql;
+use super::memory_facts::MemoryItemGql;
 use super::tasks::TaskGql;
 
 /// A single page of `T`: the requested slice plus the unpaginated total.
 #[derive(SimpleObject)]
 #[graphql(concrete(name = "TaskPage", params(TaskGql)))]
-#[graphql(concrete(name = "MemoryFactPage", params(MemoryFactGql)))]
+#[graphql(concrete(name = "MemoryItemPage", params(MemoryItemGql)))]
 #[graphql(concrete(name = "EmailPage", params(EmailMessageGql)))]
 #[graphql(concrete(name = "MessagePage", params(MessageGql)))]
 pub struct Page<T: OutputType> {

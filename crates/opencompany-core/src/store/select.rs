@@ -10,23 +10,21 @@
 //! Backends behind disabled cargo features fail loudly at open time rather
 //! than silently falling back to the filesystem.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::Result;
-use crate::app::config::{EnvSource, ProcessEnv, data_dir_from_source};
+use crate::app::config::{EnvSource, ProcessEnv};
 use crate::error::OpenCompanyError;
 use crate::ports::artifacts::ArtifactStore;
-use crate::ports::context::ContextStore;
 use crate::ports::events::EventLog;
-use crate::ports::facts::FactStore;
 use crate::ports::inbox::InboxStore;
 use crate::ports::journal::JournalStore;
 use crate::ports::ledgers::LedgerStore;
 use crate::ports::login_codes::LoginCodeStore;
-use crate::ports::memory::MemoryStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::notifications::NotificationStore;
 use crate::ports::read_state::ReadStateStore;
 use crate::ports::run_output::WorkflowRunOutputStore;
@@ -42,41 +40,6 @@ use crate::ports::usage::UsageMeter;
 use crate::ports::users::UserStore;
 use crate::ports::workflow_revisions::WorkflowRevisionStore;
 use crate::ports::workspace::WorkspaceStore;
-
-/// Safe access to the provider-only context partitions.
-///
-/// This is deliberately a facade, not the underlying `MemoryEngine`: every
-/// method still derives the company namespace from a [`CompanyId`], so wiring
-/// it onto a runtime cannot reopen the raw-namespace escape hatch.
-#[async_trait]
-pub trait MemoryScopes: Send + Sync {
-    /// One agent's private context partition.
-    fn agent_context(&self, agent_id: &str) -> Arc<dyn ContextStore>;
-    /// One desk's shared context partition.
-    fn desk_context(&self, desk_id: &str) -> Arc<dyn ContextStore>;
-    /// Traces retained when normal trace eviction archives them.
-    async fn archived_traces(
-        &self,
-        company: &CompanyId,
-    ) -> Result<Vec<crate::ports::CompressedTrace>>;
-    /// Restores traces directly into the archive tier during bundle import.
-    ///
-    /// Implementations that expose only the inspection surface reject this
-    /// operation rather than silently moving retained traces back into the
-    /// live window.
-    async fn restore_archived_traces(
-        &self,
-        _company: &CompanyId,
-        traces: &[crate::ports::CompressedTrace],
-    ) -> Result<()> {
-        if traces.is_empty() {
-            return Ok(());
-        }
-        Err(OpenCompanyError::Store(
-            "the selected memory engine cannot restore archived traces".into(),
-        ))
-    }
-}
 
 /// Which storage backend hosts the durable ports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -172,408 +135,6 @@ impl std::str::FromStr for StorageKind {
     }
 }
 
-/// Which engine backs the memory + context ports, independent of the base
-/// [`StorageKind`].
-///
-/// Memory is a separable concern: `OPENCOMPANY_STORAGE` picks the durable base
-/// (companies, events, secrets, …) while `OPENCOMPANY_MEMORY` can swap the
-/// knowledge ports onto a hosted provider.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum MemoryBackend {
-    /// Memory + context come from the base [`StorageKind`] (the default; fs
-    /// substring recall, or the sqlite/mongodb store).
-    #[default]
-    Store,
-    /// A hosted memory service behind a URL and a credential, bound through the
-    /// `MemoryEngine` contract (`tinymemory` feature).
-    ///
-    /// Missing credentials refuse at boot: a company that believes it is writing
-    /// to hosted memory and is not is worse off than one that fails to start.
-    Remote,
-    /// Writes accepted and discarded, reads empty (`tinymemory` feature).
-    Null,
-}
-
-impl MemoryBackend {
-    /// The stable wire string for status output.
-    ///
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Store => "store",
-            Self::Remote => "remote",
-            Self::Null => "null",
-        }
-    }
-}
-
-impl std::str::FromStr for MemoryBackend {
-    type Err = OpenCompanyError;
-    /// Parses `OPENCOMPANY_MEMORY`.
-    ///
-    fn from_str(value: &str) -> Result<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "store" | "" => Ok(Self::Store),
-            "remote" => Ok(Self::Remote),
-            "null" => Ok(Self::Null),
-            other => Err(OpenCompanyError::Config(format!(
-                "OPENCOMPANY_MEMORY must be 'store', 'remote', or 'null', got '{other}'"
-            ))),
-        }
-    }
-}
-
-/// The memory + context ports of a selected memory engine, ready to overlay
-/// onto a company's builder after the base [`StorageHandles`] via
-/// [`RuntimeBuilder::with_memory_overlay`](crate::runtime::RuntimeBuilder::with_memory_overlay).
-#[derive(Clone)]
-pub struct MemoryOverlay {
-    pub memory: Arc<dyn MemoryStore>,
-    pub context: Arc<dyn ContextStore>,
-    /// The operator's facts, when the selected engine serves them too.
-    ///
-    /// A provider-backed engine covers all three ports, so this is populated
-    /// whenever an overlay is active.
-    pub facts: Option<Arc<dyn FactStore>>,
-    /// The inbound-content partition: writes land taint-stamped
-    /// `ExternalSync`, so third-party content can never launder into
-    /// internal-trust memory. Carried on the overlay so the runtime can route
-    /// channel/web ingestion through it the day such a path exists — no
-    /// production writer yet, and that absence is tracked in #1113.
-    pub inbound_context: Option<Arc<dyn ContextStore>>,
-    /// The scratch firewall: working-out that durable recall can never reach.
-    pub scratch: Option<Arc<dyn ContextStore>>,
-    /// Provider-only scoped partitions and archive reads, with no raw
-    /// provider exposed to runtime consumers.
-    pub scopes: Option<Arc<dyn MemoryScopes>>,
-    /// What is bound, for status output.
-    pub descriptor: MemoryDescriptor,
-    /// The bound provider, kept solely so [`Self::refresh_health`] can probe
-    /// it at boot and for operator status reads. `None` on a bare test overlay,
-    /// which has no provider to ask.
-    ///
-    /// Private on purpose: a public engine handle here would let anything
-    /// holding an `AppState` call `store` with any workspace directly —
-    /// re-opening exactly the cross-tenant door `store::memory`'s module docs
-    /// promise is closed by construction. The ports above are the only data
-    /// path.
-    #[cfg(feature = "tinymemory")]
-    probe: Option<Arc<dyn tinymemory::MemoryEngine>>,
-    /// The last probe's answer, shared by every clone of this overlay.
-    ///
-    /// [`AppState::memory_overlay`](crate::AppState::memory_overlay) hands out
-    /// a clone, so a probe run on one clone would otherwise be dropped with it
-    /// and the next console read would pay for the whole round again, against
-    /// an engine that may meter every call. An `Arc` here means
-    /// the answer outlives the clone that fetched it.
-    ///
-    /// Deliberately *not* stored on [`AppState`]: writing a probed clone back
-    /// there would race a concurrent apply and could restore the engine the
-    /// operator just replaced. The cache belongs to the overlay it describes,
-    /// which also means a newly applied engine starts with an empty one rather
-    /// than inheriting the previous engine's verdict.
-    #[cfg(feature = "tinymemory")]
-    probe_cache: Arc<std::sync::Mutex<Option<CachedProbe>>>,
-}
-
-/// One probe answer, with when it was taken.
-#[cfg(feature = "tinymemory")]
-#[derive(Clone, Debug)]
-struct CachedProbe {
-    at: std::time::Instant,
-    healthy: bool,
-    unreachable: Vec<String>,
-    degraded: Vec<String>,
-    slow: Vec<String>,
-}
-
-impl MemoryOverlay {
-    /// Bare overlay for wiring tests: the given ports, no facts, no scratch,
-    /// no probe. Lives here because `probe` is private by design (see the
-    /// field doc) — tests outside this module cannot construct the struct.
-    #[cfg(test)]
-    pub(crate) fn test_with_ports(
-        memory: Arc<dyn MemoryStore>,
-        context: Arc<dyn ContextStore>,
-        inbound_context: Option<Arc<dyn ContextStore>>,
-    ) -> Self {
-        Self {
-            memory,
-            context,
-            facts: None,
-            inbound_context,
-            scratch: None,
-            scopes: None,
-            descriptor: MemoryDescriptor {
-                backend: MemoryBackend::Store,
-                driver_id: "test".into(),
-                capabilities: Vec::new(),
-                healthy: None,
-                unreachable_families: None,
-                degraded_families: None,
-                slow_families: None,
-            },
-            #[cfg(feature = "tinymemory")]
-            probe: None,
-            #[cfg(feature = "tinymemory")]
-            probe_cache: Arc::default(),
-        }
-    }
-
-    /// Probes the bound engine and records the answer on the descriptor, so the
-    /// authenticated engine endpoint can tell an operator "bound but unreachable"
-    /// before the first cycle finds out — until this ran, a hosted engine with a dead
-    /// endpoint or a revoked key bound cleanly and failed days later, on a
-    /// path nobody was watching.
-    ///
-    /// Bounded by `timeout`, and advisory by design: a probe
-    /// failure logs loudly and records `healthy: Some(false)`, it never
-    /// refuses the boot. Configuration errors already refuse at open; a
-    /// transient vendor outage must not crash-loop a tenant that could serve
-    /// everything else. `healthy: None` means "not probed" — the engine
-    /// overlay path, or a build without the provider seam.
-    #[cfg(feature = "tinymemory")]
-    pub async fn refresh_health(&mut self, timeout: std::time::Duration) {
-        self.refresh_health_within(timeout, std::time::Duration::ZERO)
-            .await;
-    }
-
-    /// [`Self::refresh_health`], reusing an answer younger than `max_age`
-    /// instead of asking the engine again.
-    ///
-    /// For read paths that run on every page load. The boot and apply paths
-    /// pass `ZERO` and always ask: both are acting on the answer, and an
-    /// operator who has just fixed a credential must not be shown the verdict
-    /// from before the fix.
-    ///
-    /// Reusing changes what the caller *pays*, never what it is told: a reused
-    /// answer is written onto the descriptor exactly as a fresh one would be.
-    /// It is not re-logged, because nothing new was observed — a warning per
-    /// console poll would bury the boot line that says the engine is broken.
-    #[cfg(feature = "tinymemory")]
-    pub async fn refresh_health_within(
-        &mut self,
-        timeout: std::time::Duration,
-        max_age: std::time::Duration,
-    ) {
-        if self.probe.is_none() {
-            return;
-        }
-        if !max_age.is_zero()
-            && let Some(cached) = self.cached_probe(max_age)
-        {
-            self.record_probe(&cached);
-            return;
-        }
-        self.probe_now(timeout).await;
-    }
-
-    /// The cached answer, if one was taken inside `max_age`.
-    #[cfg(feature = "tinymemory")]
-    fn cached_probe(&self, max_age: std::time::Duration) -> Option<CachedProbe> {
-        self.probe_cache
-            .lock()
-            .ok()?
-            .as_ref()
-            .filter(|cached| cached.at.elapsed() <= max_age)
-            .cloned()
-    }
-
-    /// Copies a probe answer onto the descriptor. The one place the two
-    /// agree, so a reused answer and a fresh one cannot report differently.
-    #[cfg(feature = "tinymemory")]
-    fn record_probe(&mut self, probed: &CachedProbe) {
-        self.descriptor.healthy = Some(probed.healthy);
-        self.descriptor.unreachable_families = Some(probed.unreachable.clone());
-        self.descriptor.degraded_families = Some(probed.degraded.clone());
-        self.descriptor.slow_families = Some(probed.slow.clone());
-    }
-
-    /// Asks the engine, warns about whatever it found, and records the answer
-    /// in the cache and on the descriptor.
-    #[cfg(feature = "tinymemory")]
-    async fn probe_now(&mut self, timeout: std::time::Duration) {
-        let Some(probe) = self.probe.clone() else {
-            return;
-        };
-        // Health and every family read go out together under one deadline. Run
-        // in sequence they would cost one timeout per leg before the listener
-        // binds, and `/healthz` has to answer before the wake proxy gives up.
-        let outcome = probe_engine(probe.as_ref(), timeout).await;
-
-        if !outcome.healthy {
-            tracing::warn!(
-                driver_id = %self.descriptor.driver_id,
-                timeout_secs = timeout.as_secs(),
-                "memory engine bound but its health probe did not answer Ready or Degraded; \
-                 cycles that need memory will fail until the endpoint or credential is fixed"
-            );
-        }
-        if !outcome.unreachable.is_empty() {
-            tracing::warn!(
-                driver_id = %self.descriptor.driver_id,
-                operations = ?outcome.unreachable,
-                "memory engine reports healthy but refused a live read; cycles that need memory \
-                 will fail until the endpoint or credential is fixed"
-            );
-        }
-        if !outcome.slow.is_empty() {
-            tracing::warn!(
-                driver_id = %self.descriptor.driver_id,
-                operations = ?outcome.slow,
-                timeout_secs = timeout.as_secs(),
-                "memory engine did not answer inside the probe budget. Slow is not the same \
-                 verdict as refused -- the engine may be fine and merely loaded"
-            );
-        }
-        let probed = CachedProbe {
-            at: std::time::Instant::now(),
-            healthy: outcome.healthy,
-            unreachable: outcome.unreachable,
-            degraded: outcome.degraded,
-            slow: outcome.slow,
-        };
-        if let Ok(mut cache) = self.probe_cache.lock() {
-            *cache = Some(probed.clone());
-        }
-        self.record_probe(&probed);
-    }
-
-    /// Without the provider seam there is nothing to probe; `healthy` stays
-    /// `None` ("not probed"), which is the truth.
-    #[cfg(not(feature = "tinymemory"))]
-    pub async fn refresh_health(&mut self, _timeout: std::time::Duration) {}
-
-    /// Nothing to probe, so nothing to reuse either.
-    #[cfg(not(feature = "tinymemory"))]
-    pub async fn refresh_health_within(
-        &mut self,
-        _timeout: std::time::Duration,
-        _max_age: std::time::Duration,
-    ) {
-    }
-}
-
-/// What one round of engine probing found.
-///
-/// The lists are different verdicts and are kept apart deliberately.
-/// `unreachable` is an operation answering *no*; `slow` is one not answering
-/// inside the budget. Only the first justifies refusing a bind. `degraded`
-/// carries an engine's own `Degraded` reason, so an operator sees what it said.
-#[cfg(feature = "tinymemory")]
-#[derive(Debug, Default)]
-pub struct EngineProbeOutcome {
-    /// `Ok` or `Degraded` — reachable and serving, possibly reduced.
-    pub healthy: bool,
-    /// Operations whose live read returned an error.
-    pub unreachable: Vec<String>,
-    /// The engine's own reason when it reported itself degraded.
-    pub degraded: Vec<String>,
-    /// Operations that did not return inside the budget.
-    pub slow: Vec<String>,
-}
-
-/// A workspace no company can produce: [`CompanyId`] namespaces are
-/// `oc/`-rooted and hash-suffixed, so the probe's read is a miss on a live
-/// store and touches no tenant's records.
-#[cfg(feature = "tinymemory")]
-const PROBE_WORKSPACE: &str = "__host_probe__";
-
-/// Probes the engine's own health and one live read, concurrently, under one
-/// deadline each.
-///
-/// `health()` is the engine's self-report, which is exactly what a revoked
-/// credential or a dead endpoint can get wrong — an engine is free to answer
-/// `Ok` from local state. So a bounded, read-only `list` against a workspace
-/// no tenant owns goes out beside it: the one call every engine must serve,
-/// and the one every port read is built on (issue #1968).
-///
-/// An empty answer is success. A freshly provisioned engine holds nothing, and
-/// treating "no rows" as "broken" would refuse it on day one.
-#[cfg(feature = "tinymemory")]
-pub async fn probe_engine(
-    engine: &dyn tinymemory::MemoryEngine,
-    timeout: std::time::Duration,
-) -> EngineProbeOutcome {
-    use tinymemory::{EngineHealth, ListRequest, MetaFilter};
-
-    let read = ListRequest::new(
-        MetaFilter {
-            workspace: Some(PROBE_WORKSPACE.to_string()),
-            ..MetaFilter::default()
-        },
-        1,
-    );
-    let (health, listed) = tokio::join!(
-        tokio::time::timeout(timeout, engine.health()),
-        tokio::time::timeout(timeout, engine.list(read)),
-    );
-    let mut outcome = EngineProbeOutcome::default();
-    match health {
-        Ok(EngineHealth::Ok) => outcome.healthy = true,
-        Ok(EngineHealth::Degraded(reason)) => {
-            outcome.healthy = true;
-            outcome.degraded.push(reason);
-        }
-        Ok(EngineHealth::Down(_)) => {}
-        Err(_elapsed) => outcome.slow.push("health".to_string()),
-    }
-    match listed {
-        Ok(Ok(_)) => {}
-        Ok(Err(_)) => outcome.unreachable.push("list".to_string()),
-        Err(_elapsed) => outcome.slow.push("list".to_string()),
-    }
-    outcome
-}
-
-impl std::fmt::Debug for MemoryOverlay {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MemoryOverlay")
-            .field("descriptor", &self.descriptor)
-            .finish_non_exhaustive()
-    }
-}
-
-/// What memory engine is live, in terms safe to show an operator.
-///
-/// Deliberately carries no endpoint and no credential. `driver_id` is safe to
-/// surface — the contract's own docs treat it as an identity, not a secret —
-/// while the URL and the key are not, and this type is what reaches `/spec`,
-/// which is unauthenticated.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MemoryDescriptor {
-    /// The selected mode (`store`, `remote`, `null`).
-    pub backend: MemoryBackend,
-    /// The bound engine's own name, when one is bound.
-    pub driver_id: String,
-    /// The retrieval modes the bound engine serves (`keyword`, `vector`,
-    /// `hybrid`), so an operator can see how search will rank.
-    pub capabilities: Vec<String>,
-    /// Whether the boot-time reachability probe found the engine usable:
-    /// `Ok`, or `Degraded` — reachable and serving, possibly reduced.
-    /// Only `Down` maps to `Some(false)`.
-    ///
-    /// `None` means the engine was never probed — a boot path that skipped
-    /// [`MemoryOverlay::refresh_health`]. `Some(false)` is a bound engine
-    /// whose probe failed: still bound and loudly warned.
-    pub healthy: Option<bool>,
-    /// Operations that refused a live read at probe time (see
-    /// [`probe_engine`]). Empty is the healthy case; `None` means "not probed".
-    ///
-    /// **An empty result is success.** A freshly provisioned engine holds
-    /// nothing, so "returned no rows" must not be read as "does not work";
-    /// only an error is a failure.
-    pub unreachable_families: Option<Vec<String>>,
-    /// The engine's own reason when it reported itself `Degraded`. Reported,
-    /// never refused on: a degraded engine still serves.
-    pub degraded_families: Option<Vec<String>>,
-    /// Operations whose read did not return inside the probe budget.
-    ///
-    /// Separate from [`Self::unreachable_families`] on purpose: an engine that
-    /// is merely loaded has not told us it cannot serve, and refusing a bind
-    /// over a slow afternoon is a worse failure than binding a slow engine.
-    pub slow_families: Option<Vec<String>>,
-}
-
 /// Durable company → tenant ownership, for shared-database platform mode.
 /// Backends that can persist ownership (MongoDB today) expose it here so the
 /// in-memory `AppState` map can be hydrated at boot and updated on provision.
@@ -590,15 +151,14 @@ pub trait OwnershipStore: Send + Sync {
 pub struct StorageHandles {
     pub company: Arc<dyn CompanyStore>,
     pub events: Arc<dyn EventLog>,
-    pub memory: Arc<dyn MemoryStore>,
-    pub context: Arc<dyn ContextStore>,
+    /// Compressed cycle traces and task results (not memory: `crate::memory`).
+    pub traces: Arc<dyn TraceStore>,
     pub secrets: Arc<dyn SecretStore>,
     pub inbox: Arc<dyn InboxStore>,
     pub tasks: Arc<dyn TaskStore>,
     /// The company's declared ledgers and their append-only event logs.
     pub ledgers: Arc<dyn LedgerStore>,
     pub workspace: Arc<dyn WorkspaceStore>,
-    pub facts: Arc<dyn FactStore>,
     pub artifacts: Arc<dyn ArtifactStore>,
     /// First-class task-run records and their step traces (#242).
     pub runs: Arc<dyn RunStore>,
@@ -660,74 +220,20 @@ pub struct StorageSettings {
     /// collide on the `companies` unique index. Unset means the id-namespacing
     /// no-op: single-tenant / db-per-tenant behavior is unchanged.
     pub tenant_id: Option<String>,
-    /// Which engine backs the memory + context ports (`OPENCOMPANY_MEMORY`),
-    /// overlaid on top of `kind`. Defaults to [`MemoryBackend::Store`] (the base
-    /// backend's own memory), so unset changes nothing.
-    pub memory_backend: MemoryBackend,
-    /// The instance workspace root (`OPENCOMPANY_DATA_DIR`), when known. Threaded
-    /// through so a persistent memory engine can root each company's storage
-    /// under `<data_dir>/memory/`. `None` (the [`Default`]) selects the offline
-    /// in-memory engine — the shape tests and no-data-dir callers get.
-    pub data_dir: Option<PathBuf>,
-    /// Operator's explicit durability assertion for the data dir
-    /// (`OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL`). Retained from the removed embedded-engine
-    /// era, when the in-pod engine was refused by default under
-    /// `OPENCOMPANY_STORAGE=mongodb` because the hosted model treats `/data` as
-    /// ephemeral scratch. The in-pod engine is gone, so the flag is currently a
-    /// no-op kept for deployment compatibility; `false` (the [`Default`]) stays
-    /// the safe default.
-    pub allow_ephemeral_memory: bool,
-    /// Which engine to bind for `OPENCOMPANY_MEMORY=remote`
-    /// (`OPENCOMPANY_MEMORY_DRIVER`): `cortexdb` or `tinyhumans`.
-    ///
-    /// Instance-level, never per-company: one engine per instance, like
-    /// `OPENCOMPANY_STORAGE`, while manifests are per-company — a
-    /// company-scoped knob for an instance-wide choice would be incoherent.
-    /// This deliberately differs from `[inference].provider`, which *is*
-    /// per-company and rightly lives in the manifest.
-    ///
-    /// Two channels, in the usual order: the environment, and — when the
-    /// deployment names no engine — the `[memory]` section of `config.toml`,
-    /// which is what lets an operator choose one from the console
-    /// ([`MemorySelection`], [`StorageSettings::with_memory_config`]).
-    pub memory_driver: Option<String>,
-    pub memory_url: Option<String>,
-    /// The hosted engine's credential (`OPENCOMPANY_MEMORY_API_KEY`).
-    ///
-    /// A raw credential, so it is kept out of [`Debug`] — see the impl below.
-    ///
-    /// Env is the only supported channel. A
-    /// [`SecretStore`](crate::ports::SecretStore) key — the convention every
-    /// other integration follows, and the one that would keep this out of the
-    /// process environment — is deliberately *not* accepted here: the store is
-    /// per-company and opened from the storage layer this setting is used to
-    /// build, so reading the memory credential out of it would be circular.
-    /// The hosted manager injects environment rather than manifests, which is
-    /// what makes env sufficient.
-    pub memory_api_key: Option<String>,
 }
 
 impl std::fmt::Debug for StorageSettings {
-    /// Renders everything except the two credentials.
+    /// Renders everything except the MongoDB connection string.
     ///
     /// `StorageSettings` is printed at boot (`src/bin/opencompany.rs`), so a
-    /// derived `Debug` would put a memory credential and a MongoDB connection
-    /// string into the startup log of every tenant container.
+    /// derived `Debug` would put a credential-bearing connection string into
+    /// the startup log of every tenant container.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StorageSettings")
             .field("kind", &self.kind)
             .field("mongodb_uri", &self.mongodb_uri.as_ref().map(|_| "<set>"))
             .field("mongodb_db", &self.mongodb_db)
             .field("tenant_id", &self.tenant_id)
-            .field("memory_backend", &self.memory_backend)
-            .field("data_dir", &self.data_dir)
-            .field("allow_ephemeral_memory", &self.allow_ephemeral_memory)
-            .field("memory_driver", &self.memory_driver)
-            .field("memory_url", &self.memory_url.as_ref().map(|_| "<set>"))
-            .field(
-                "memory_api_key",
-                &self.memory_api_key.as_ref().map(|_| "<set>"),
-            )
             .finish()
     }
 }
@@ -750,24 +256,10 @@ where
     }
 }
 
-/// Reads a boolean opt-in env flag. Truthy values (case-insensitive, trimmed):
-/// `1`, `true`, `yes`, `on`. Anything else — including unset — is `false`.
-fn env_flag(env: &dyn EnvSource, key: &str) -> bool {
-    env.get(key)
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(false)
-}
-
 impl StorageSettings {
     /// Reads the CLI-surface storage env vars (`OPENCOMPANY_STORAGE`,
     /// `OPENCOMPANY_MONGODB_URI`, `OPENCOMPANY_MONGODB_DB`,
-    /// `OPENCOMPANY_TENANT_ID`, `OPENCOMPANY_MEMORY`, `OPENCOMPANY_DATA_DIR`,
-    /// `OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL`).
+    /// `OPENCOMPANY_TENANT_ID`).
     pub fn from_env() -> Result<Self> {
         Self::from_env_source(&ProcessEnv)
     }
@@ -775,141 +267,13 @@ impl StorageSettings {
     /// Resolves storage settings from an injected environment source.
     pub fn from_env_source(env: &dyn EnvSource) -> Result<Self> {
         let kind: StorageKind = parse_env(env, "OPENCOMPANY_STORAGE")?.unwrap_or_default();
-        let memory_backend: MemoryBackend =
-            parse_env(env, "OPENCOMPANY_MEMORY")?.unwrap_or_default();
         let non_empty = |key: &str| env.get(key);
         Ok(Self {
             kind,
             mongodb_uri: non_empty("OPENCOMPANY_MONGODB_URI"),
             mongodb_db: non_empty("OPENCOMPANY_MONGODB_DB"),
             tenant_id: non_empty("OPENCOMPANY_TENANT_ID"),
-            memory_backend,
-            data_dir: Some(data_dir_from_source(env)),
-            allow_ephemeral_memory: env_flag(env, "OPENCOMPANY_MEMORY_ALLOW_EPHEMERAL"),
-            memory_driver: non_empty("OPENCOMPANY_MEMORY_DRIVER"),
-            memory_url: non_empty("OPENCOMPANY_MEMORY_URL"),
-            memory_api_key: non_empty("OPENCOMPANY_MEMORY_API_KEY"),
         })
-    }
-
-    /// Whether the *deployment* named the memory engine
-    /// (`OPENCOMPANY_MEMORY`), in which case the `[memory]` section of
-    /// `config.toml` is inert and the console renders the engine read-only.
-    ///
-    /// Presence, not value: a control plane that injects `OPENCOMPANY_MEMORY`
-    /// owns the choice whichever engine it names, including `store`.
-    pub fn memory_is_env_owned() -> bool {
-        Self::memory_is_env_owned_by(&ProcessEnv)
-    }
-
-    /// Whether `env` explicitly owns the memory-engine choice.
-    pub fn memory_is_env_owned_by(env: &dyn EnvSource) -> bool {
-        env.get("OPENCOMPANY_MEMORY")
-            .is_some_and(|value| !value.trim().is_empty())
-    }
-
-    /// Layers a `config.toml` `[memory]` section under the process
-    /// environment.
-    ///
-    /// A no-op when [`Self::memory_is_env_owned`] — see [`MemorySection`] for
-    /// why the env layer wins rather than the more recent write.
-    ///
-    /// [`MemorySection`]: crate::app::config::MemorySection
-    pub fn with_memory_config(self, section: &crate::app::config::MemorySection) -> Result<Self> {
-        self.with_memory_config_from(&ProcessEnv, section)
-    }
-
-    /// Like [`Self::with_memory_config`], but resolves the ownership check from
-    /// the injected `env` source rather than the ambient process environment.
-    ///
-    /// A caller that built the settings with [`Self::from_env_source`] must
-    /// layer through here: the plain variant reads `ProcessEnv`, so a `MapEnv`
-    /// carrying `OPENCOMPANY_MEMORY` would be overridden by the file, and an
-    /// absent injected value would wrongly appear env-owned when the ambient
-    /// process sets it.
-    pub fn with_memory_config_from(
-        mut self,
-        env: &dyn EnvSource,
-        section: &crate::app::config::MemorySection,
-    ) -> Result<Self> {
-        if Self::memory_is_env_owned_by(env) {
-            return Ok(self);
-        }
-        let selection = MemorySelection::from_section(section)?;
-        self.memory_backend = selection.backend;
-        self.memory_driver = selection.driver;
-        self.memory_url = selection.url;
-        self.memory_api_key = selection.api_key;
-        Ok(self)
-    }
-
-    /// Replaces the memory selection with `selection`, leaving the base
-    /// backend, data dir and durability assertion untouched.
-    ///
-    /// This is what a live engine swap rebinds through
-    /// ([`crate::server::ops::memory_engine`]): the rest of a running
-    /// instance's storage settings must survive a memory change unchanged.
-    pub fn with_memory_selection(mut self, selection: MemorySelection) -> Self {
-        self.memory_backend = selection.backend;
-        self.memory_driver = selection.driver;
-        self.memory_url = selection.url;
-        self.memory_api_key = selection.api_key;
-        self
-    }
-}
-
-/// One instance's memory-engine choice: everything `OPENCOMPANY_MEMORY*`
-/// names, parsed and validated, independent of where it came from (the
-/// environment, `config.toml`, or a console write that has not been persisted
-/// yet).
-#[derive(Clone, Default, PartialEq, Eq)]
-pub struct MemorySelection {
-    pub backend: MemoryBackend,
-    pub driver: Option<String>,
-    pub url: Option<String>,
-    pub api_key: Option<String>,
-}
-
-impl MemorySelection {
-    /// Parses a `config.toml` `[memory]` section.
-    ///
-    /// Blank strings are treated as absent — a TOML key written and then
-    /// emptied means "not set", the same rule `non_empty` applies to the
-    /// environment, and routing on bare presence would send `""` down a path
-    /// that binds nothing.
-    pub fn from_section(section: &crate::app::config::MemorySection) -> Result<Self> {
-        let trimmed = |value: &Option<String>| {
-            value
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_string)
-        };
-        let backend = match trimmed(&section.backend) {
-            Some(raw) => raw.parse()?,
-            None => MemoryBackend::default(),
-        };
-        Ok(Self {
-            backend,
-            driver: trimmed(&section.driver),
-            url: trimmed(&section.url),
-            api_key: trimmed(&section.api_key),
-        })
-    }
-}
-
-/// Renders the credential as `<set>`, never its bytes — the same hand-written
-/// `Debug` [`StorageSettings`] carries, and for the same reason: this type is
-/// reachable from boot logging and from a route's error path, where a bare
-/// `{:?}` is one keystroke away.
-impl std::fmt::Debug for MemorySelection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MemorySelection")
-            .field("backend", &self.backend.as_str())
-            .field("driver", &self.driver)
-            .field("url", &self.url)
-            .field("api_key", &self.api_key.as_ref().map(|_| "<set>"))
-            .finish()
     }
 }
 
@@ -933,28 +297,18 @@ pub async fn open_storage(
 /// mutation (`if false &&`) went green (the #1279 review's finding).
 ///
 /// One deployment per bundle: with a non-default environment an explicit
-/// `--home` is refused rather than mixed in; `null` is refused in both
-/// directions; shared-single-DB tenant mode is refused (bundle ops write no
-/// owner rows). Under the fs+store default every check passes and `--home`
+/// `--home` is refused rather than mixed in; shared-single-DB tenant mode is
+/// refused (bundle ops write no owner rows). Under the fs default every check
+/// passes and `--home`
 /// means exactly what it always has.
 pub fn refuse_bundle_env(settings: &StorageSettings, home_was_flagged: bool) -> crate::Result<()> {
-    let live = settings.kind != StorageKind::Fs || settings.memory_backend != MemoryBackend::Store;
-    if settings.memory_backend == MemoryBackend::Null {
-        return Err(crate::error::OpenCompanyError::Config(
-            "OPENCOMPANY_MEMORY=null retains nothing: an export would capture no memory and an \
-             import would discard every record while reporting success. Unset OPENCOMPANY_MEMORY \
-             for bundle operations."
-                .into(),
-        ));
-    }
+    let live = settings.kind != StorageKind::Fs;
     if live && home_was_flagged {
         return Err(crate::error::OpenCompanyError::Config(format!(
-            "--home names an fs data set, but this environment selects storage `{}` and memory \
-             `{}` — the bundle would mix two deployments. Unset OPENCOMPANY_STORAGE and \
-             OPENCOMPANY_MEMORY* to operate on the fs home, or drop --home to operate on the \
-             live deployment.",
+            "--home names an fs data set, but this environment selects storage `{}` — the \
+             bundle would mix two deployments. Unset OPENCOMPANY_STORAGE to operate on the fs \
+             home, or drop --home to operate on the live deployment.",
             settings.kind.as_str(),
-            settings.memory_backend.as_str()
         )));
     }
     if live
@@ -973,98 +327,6 @@ pub fn refuse_bundle_env(settings: &StorageSettings, home_was_flagged: bool) -> 
     Ok(())
 }
 
-/// Opens the memory + context overlay selected by `OPENCOMPANY_MEMORY`.
-///
-/// `Ok(None)` means [`MemoryBackend::Store`] — the base backend keeps its own
-/// memory, no overlay. A selected-but-unavailable engine (feature disabled) is
-/// an error, never a silent fallback, mirroring [`open_storage`].
-pub fn open_memory_overlay(settings: &StorageSettings) -> Result<Option<MemoryOverlay>> {
-    match settings.memory_backend {
-        MemoryBackend::Store => Ok(None),
-        MemoryBackend::Remote | MemoryBackend::Null => open_provider(settings),
-    }
-}
-
-/// Opens a [`MemoryEngine`](tinymemory::MemoryEngine)-backed overlay: the
-/// `remote` and `null` modes. One engine covers all three memory ports, so a
-/// company never splits its memory across engines.
-#[cfg(feature = "tinymemory")]
-fn open_provider(settings: &StorageSettings) -> Result<Option<MemoryOverlay>> {
-    use crate::store::memory::{BoundMemory, MemoryDriverConfig, MemoryMode, open_driver};
-
-    let mode = match settings.memory_backend {
-        MemoryBackend::Remote => MemoryMode::Remote,
-        MemoryBackend::Null => MemoryMode::Null,
-        // Unreachable: the caller never routes `store` here.
-        MemoryBackend::Store => return Ok(None),
-    };
-    let config = MemoryDriverConfig {
-        mode,
-        driver_id: settings.memory_driver.clone(),
-        url: settings.memory_url.clone(),
-        api_key: settings.memory_api_key.clone(),
-        data_dir: settings.data_dir.clone(),
-    };
-    let engine = open_driver(&config)?;
-    // Kept aside for the boot-time health probe; `BoundMemory` deliberately
-    // exposes no engine accessor (the ports are the only data path). Clone is
-    // an `Arc` bump.
-    let probe = engine.clone();
-    let bound = BoundMemory::bind(engine);
-    // Announce the bind: which engine and how it ranks — never the endpoint or
-    // the credential.
-    tracing::info!(
-        engine_id = bound.engine_id(),
-        fetch_modes = ?bound.capability_names(),
-        "memory engine bound"
-    );
-    if settings.memory_backend == MemoryBackend::Null {
-        // Loud, once, at open: `null` is a legitimate choice but a surprising
-        // one to inherit from a stale environment, and every read returning
-        // empty is indistinguishable from a company that has not learned
-        // anything yet.
-        tracing::warn!(
-            "OPENCOMPANY_MEMORY=null is bound: memory writes are accepted and discarded, and \
-             every read is empty. Nothing this company is told will be remembered."
-        );
-    }
-    Ok(Some(MemoryOverlay {
-        memory: bound.memory(),
-        context: bound.context(),
-        facts: Some(bound.facts()),
-        inbound_context: Some(bound.inbound_context()),
-        scratch: Some(bound.scratch()),
-        scopes: Some(Arc::new(bound.clone())),
-        descriptor: MemoryDescriptor {
-            backend: settings.memory_backend,
-            driver_id: bound.engine_id().to_string(),
-            capabilities: bound
-                .capability_names()
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
-            // Not probed yet: binding is offline by design, and the probe is
-            // the caller's boot-time step (`refresh_health`).
-            healthy: None,
-            unreachable_families: None,
-            degraded_families: None,
-            slow_families: None,
-        },
-        probe: Some(probe),
-        probe_cache: Arc::default(),
-    }))
-}
-
-/// Without the `tinymemory` feature the two engine-backed modes cannot be
-/// served, so they refuse rather than silently resolving to something else.
-#[cfg(not(feature = "tinymemory"))]
-fn open_provider(settings: &StorageSettings) -> Result<Option<MemoryOverlay>> {
-    Err(OpenCompanyError::Config(format!(
-        "OPENCOMPANY_MEMORY={} requires a build with the `tinymemory` feature",
-        settings.memory_backend.as_str()
-    )))
-}
-
 #[cfg(feature = "sqlite")]
 fn open_sqlite(data_dir: &Path) -> Result<Option<StorageHandles>> {
     let store = Arc::new(crate::store::SqliteStore::open(
@@ -1073,14 +335,12 @@ fn open_sqlite(data_dir: &Path) -> Result<Option<StorageHandles>> {
     Ok(Some(StorageHandles {
         company: store.clone(),
         events: store.clone(),
-        memory: store.clone(),
-        context: store.clone(),
+        traces: store.clone(),
         secrets: store.clone(),
         inbox: store.clone(),
         tasks: store.clone(),
         ledgers: store.clone(),
         workspace: store.clone(),
-        facts: store.clone(),
         artifacts: store.clone(),
         runs: store.clone(),
         workflow_revisions: store.clone(),
@@ -1118,14 +378,12 @@ async fn open_mongodb(settings: &StorageSettings) -> Result<Option<StorageHandle
     Ok(Some(StorageHandles {
         company: store.clone(),
         events: store.clone(),
-        memory: store.clone(),
-        context: store.clone(),
+        traces: store.clone(),
         secrets: store.clone(),
         inbox: store.clone(),
         tasks: store.clone(),
         ledgers: store.clone(),
         workspace: store.clone(),
-        facts: store.clone(),
         artifacts: store.clone(),
         runs: store.clone(),
         workflow_revisions: store.clone(),
@@ -1164,9 +422,6 @@ impl OwnershipStore for crate::store::MongoStore {
         crate::store::MongoStore::owners(self).await
     }
 }
-#[cfg(all(test, feature = "tinymemory"))]
-#[path = "select_health_tests.rs"]
-mod tests;
 #[cfg(test)]
 #[path = "select_config_tests.rs"]
 mod tests_config;

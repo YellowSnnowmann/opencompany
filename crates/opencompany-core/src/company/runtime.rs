@@ -33,8 +33,8 @@ use crate::ports::types::{
     Actor, ActorKind, ApprovalId, CompanyEvent, CompanyId, EventSeq, Mention, Verdict,
 };
 use crate::ports::{
-    ApprovalGate, ArtifactStore, Brain, ChannelAdapter, CompanyStore, ContextStore, EventLog,
-    FactStore, InboxStore, LoginCodeStore, MemoryStore, NotificationStore, ReadStateStore,
+    ApprovalGate, ArtifactStore, Brain, ChannelAdapter, CompanyStore, EventLog, InboxStore,
+    LoginCodeStore, NotificationStore, ReadStateStore, TraceStore,
     RunStore, SecretStore, SessionStore, SkillStateStore, TaskRecord, TaskStore, ToolProvider,
     UsageMeter, UserStore, WorkflowRevisionStore, WorkspaceStore,
 };
@@ -197,8 +197,6 @@ pub struct OpsStores {
     pub ledgers: Arc<dyn crate::ports::ledgers::LedgerStore>,
     /// The durable workspace file tree.
     pub workspace: Arc<dyn WorkspaceStore>,
-    /// The durable memory-facts view.
-    pub facts: Arc<dyn FactStore>,
     /// Versioned task artifacts and their human-edit history (#187).
     pub artifacts: Arc<dyn ArtifactStore>,
     /// First-class records of each task attempt: status, trace, cost (#242).
@@ -248,16 +246,9 @@ pub struct CompanyRuntime {
     pub(crate) brain: Arc<dyn Brain>,
     pub(crate) store: Arc<dyn CompanyStore>,
     pub(crate) events: Arc<dyn EventLog>,
-    pub(crate) memory: Arc<dyn MemoryStore>,
-    pub(crate) context: Arc<dyn ContextStore>,
-    /// The taint-stamping context port for external content (issue #1113);
-    /// resolved at build time — same store as `context` when the engine
-    /// cannot represent taint.
-    pub(crate) inbound_context: Arc<dyn ContextStore>,
-    /// Isolated provisional working context from a provider-backed overlay.
-    pub(crate) scratch_context: Option<Arc<dyn ContextStore>>,
-    /// Safe agent/desk partitions and archive reads from that overlay.
-    pub(crate) memory_scopes: Option<Arc<dyn crate::store::MemoryScopes>>,
+    /// Compressed cycle traces and task results. Not memory: company memory
+    /// is OpenHuman's, reached through [`Self::memory`].
+    pub(crate) traces: Arc<dyn TraceStore>,
     pub(crate) tools: Arc<dyn ToolProvider>,
     pub(crate) channels: Vec<Arc<dyn ChannelAdapter>>,
     pub(crate) approvals: Arc<dyn ApprovalGate>,
@@ -300,7 +291,7 @@ pub struct CompanyRuntime {
     /// wired via [`RuntimeBuilder::with_mail`](crate::runtime::RuntimeBuilder::with_mail).
     /// `None` when email send isn't wired.
     pub(crate) mail: Option<CompanyMail>,
-    /// The WS3 console ports (tasks, workspace, facts, usage, skills).
+    /// The WS3 console ports (tasks, workspace, usage, skills).
     pub(crate) ops: OpsStores,
     /// Durable store of feedback items (the "feedback family").
     pub(crate) feedback: Arc<FeedbackStore>,
@@ -569,9 +560,7 @@ impl CompanyRuntime {
         brain: Arc<dyn Brain>,
         store: Arc<dyn CompanyStore>,
         events: Arc<dyn EventLog>,
-        memory: Arc<dyn MemoryStore>,
-        context: Arc<dyn ContextStore>,
-        inbound_context: Arc<dyn ContextStore>,
+        traces: Arc<dyn TraceStore>,
         tools: Arc<dyn ToolProvider>,
         channels: Vec<Arc<dyn ChannelAdapter>>,
         approval_gate: Arc<ManifestApprovalGate>,
@@ -599,11 +588,7 @@ impl CompanyRuntime {
             brain,
             store,
             events,
-            memory,
-            context,
-            inbound_context,
-            scratch_context: None,
-            memory_scopes: None,
+            traces,
             tools,
             channels,
             approvals,
@@ -660,45 +645,15 @@ impl CompanyRuntime {
         self.source_dir = dir;
     }
 
-    /// Installs the provider-backed memory decorators selected at boot.
-    ///
-    /// These are optional because the base store and the legacy embedded engine
-    /// do not have the provider contract's isolated partitions or archive tier.
-    pub(crate) fn set_memory_decorators(
-        &mut self,
-        scratch_context: Option<Arc<dyn ContextStore>>,
-        memory_scopes: Option<Arc<dyn crate::store::MemoryScopes>>,
-    ) {
-        self.scratch_context = scratch_context;
-        self.memory_scopes = memory_scopes;
+    /// This company's memory: OpenHuman's engine, scoped to the company's
+    /// root (`crate::memory`).
+    pub fn memory(&self) -> crate::memory::CompanyMemory {
+        crate::memory::CompanyMemory::new(&self.id)
     }
 
-    /// The isolated working-memory partition, when the selected engine serves
-    /// the provider-backed decorator contract.
-    pub fn scratch_context(&self) -> Option<Arc<dyn ContextStore>> {
-        self.scratch_context.clone()
-    }
-
-    /// One agent's private context partition, without exposing namespaces.
-    pub fn agent_context(&self, agent_id: &str) -> Option<Arc<dyn ContextStore>> {
-        self.memory_scopes
-            .as_ref()
-            .map(|scopes| scopes.agent_context(agent_id))
-    }
-
-    /// One desk's shared context partition, without exposing namespaces.
-    pub fn desk_context(&self, desk_id: &str) -> Option<Arc<dyn ContextStore>> {
-        self.memory_scopes
-            .as_ref()
-            .map(|scopes| scopes.desk_context(desk_id))
-    }
-
-    /// Traces preserved by the provider decorator's archive-on-evict policy.
-    pub async fn archived_traces(&self) -> Result<Option<Vec<crate::ports::CompressedTrace>>> {
-        match &self.memory_scopes {
-            Some(scopes) => scopes.archived_traces(&self.id).await.map(Some),
-            None => Ok(None),
-        }
+    /// This company's compressed cycle traces.
+    pub fn traces(&self) -> &Arc<dyn TraceStore> {
+        &self.traces
     }
 
     /// The company's on-disk source directory, when built on the serve path.
@@ -1964,11 +1919,6 @@ impl CompanyRuntime {
     /// This company's workspace file tree.
     pub fn workspace(&self) -> &Arc<dyn WorkspaceStore> {
         &self.ops.workspace
-    }
-
-    /// This company's durable memory-facts view.
-    pub fn facts(&self) -> &Arc<dyn FactStore> {
-        &self.ops.facts
     }
 
     /// This company's versioned task artifacts (#187).

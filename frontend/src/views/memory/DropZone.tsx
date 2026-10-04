@@ -42,8 +42,8 @@ interface Props {
   company: string | null;
   /** Called after a drop lands, so the page can re-read memory. */
   onIngested: () => void;
-  /** Whether the bound engine keeps anything; a null engine takes no drops. */
-  discarding: boolean;
+  /** Whether memory is off; with no engine there is nowhere to put a drop. */
+  off: boolean;
 }
 
 /**
@@ -133,7 +133,7 @@ async function readDrop(transfer: DataTransfer): Promise<{ files: DroppedFile[];
   return { files, urls };
 }
 
-export function DropZone({ client, company, onIngested, discarding }: Props) {
+export function DropZone({ client, company, onIngested, off }: Props) {
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [report, setReport] = useState<IngestedItem[] | null>(null);
@@ -199,8 +199,8 @@ export function DropZone({ client, company, onIngested, discarding }: Props) {
         e.preventDefault();
         depth.current = 0;
         setOver(false);
-        if (discarding) {
-          toast.error("this engine discards every write — nothing dropped here would be kept");
+        if (off) {
+          toast.error("memory is off — nothing dropped here would be kept");
           return;
         }
         const transfer = e.dataTransfer;
@@ -209,7 +209,7 @@ export function DropZone({ client, company, onIngested, discarding }: Props) {
       className={cn(
         "border-dashed transition-colors",
         over && "border-primary bg-primary/5",
-        discarding && "opacity-60",
+        off && "opacity-60",
       )}
       data-testid="memory-dropzone"
     >
@@ -235,7 +235,7 @@ export function DropZone({ client, company, onIngested, discarding }: Props) {
             <Button
               variant="outline"
               size="sm"
-              disabled={busy !== null || discarding}
+              disabled={busy !== null || off}
               onClick={() => picker.current?.click()}
             >
               <FileUp className="size-4" /> Choose files
@@ -243,7 +243,7 @@ export function DropZone({ client, company, onIngested, discarding }: Props) {
             <Button
               variant="outline"
               size="sm"
-              disabled={busy !== null || discarding}
+              disabled={busy !== null || off}
               onClick={() => {
                 const typed = window.prompt("Link to remember");
                 const url = typed?.trim();

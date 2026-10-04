@@ -8,13 +8,11 @@ import type { OpenCompanyClient } from "@/api/client";
 import { DropZone } from "@/views/memory/DropZone";
 
 /**
- * MEM-003's backend half (`memory_ingest.rs`) accepts and discards every
- * write while the null engine is bound — the host has no lever to refuse an
- * ingest into a sink that keeps nothing. The console's own lever is
- * `discarding`, and `DropZone` is where it has to hold: a raw drag-and-drop
- * bypasses the two buttons' `disabled` prop entirely, so the guard inside
- * `onDrop` is the only thing standing between an operator's drop and a write
- * that would confer nothing while looking like it worked.
+ * With memory off the host refuses every ingest (`409 not_configured`), but
+ * the console's own lever is `off`, and `DropZone` is where it has to hold: a
+ * raw drag-and-drop bypasses the two buttons' `disabled` prop entirely, so the
+ * guard inside `onDrop` is the only thing standing between an operator's drop
+ * and a request that can only fail.
  */
 
 function dataTransferWith(files: File[]): DataTransfer {
@@ -36,13 +34,13 @@ function dataTransferWith(files: File[]): DataTransfer {
 let container: HTMLDivElement;
 let root: Root;
 
-async function show(client: OpenCompanyClient, discarding: boolean) {
+async function show(client: OpenCompanyClient, off: boolean) {
   await act(async () => {
     root.render(
       createElement(DropZone, {
         client,
         company: "acme",
-        discarding,
+        off,
         onIngested: () => {},
       }),
     );
@@ -66,7 +64,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("a drop onto a discarding engine ingests nothing", () => {
+describe("a drop while memory is off ingests nothing", () => {
   it("refuses a raw drop, which the two disabled buttons cannot stop", async () => {
     const postForm = vi.fn(() => Promise.resolve({ items: [] }));
     const client = {
@@ -91,7 +89,7 @@ describe("a drop onto a discarding engine ingests nothing", () => {
     expect(postForm).not.toHaveBeenCalled();
   });
 
-  it("ingests normally once the engine actually retains what is dropped", async () => {
+  it("ingests normally once memory is on", async () => {
     const postForm = vi.fn(() => Promise.resolve({ items: [{ source: "note.txt", status: "stored" }] }));
     const client = {
       scopeFor: () => "/api/v1/company/acme",

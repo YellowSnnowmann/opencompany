@@ -1,178 +1,184 @@
-// The live memory API: the console reads and writes the company's real durable
-// facts through the host's `…/memory` routes (REST, camelCase over the wire),
-// and reads a `…/memory/stats` health snapshot. Replaces the client-side
-// `lib/memory` localStorage stub, so a backend failure can never be masked by
-// fake seeded data.
+// The live memory API: the console reads and writes the company's memory
+// through the host's `…/memory` routes (REST, camelCase over the wire).
+//
+// OpenHuman's memory v2 engine backs every route, scoped to the company root
+// (`team:<company>`). Each teammate's conversations live under
+// `team:<company>/agent:<id>`, learnings at the root, and brain documents under
+// `team:<company>/source:<kind>`. When no engine is configured every route but
+// `/memory/status` answers `409 not_configured`, so the console reads status
+// first.
 
 import type { OpenCompanyClient } from "./client";
-
-/** The taxonomy of a durable fact — mirrors the host's `FactKind`. */
-export type MemoryKind = "fact" | "preference" | "person" | "project" | "reference";
+import { ApiError } from "./types";
 
 /**
- * Where a memory row came from — the host's `MemoryOrigin` discriminator.
- * `fact` rows are operator-authored and `document` rows are files or links an
- * operator dropped — both deletable; `agent-memory` and `task-outcome` rows
- * are the agents' own runtime memory and are read-only.
+ * Whether an error is the host saying memory is off — `409` with the
+ * standard `not_configured` code. The page then renders from `/memory/status`
+ * rather than showing the refusal as a failure.
  */
-export type MemoryOrigin = "fact" | "agent-memory" | "task-outcome" | "document";
+export function isMemoryOff(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 409 && e.code === "not_configured";
+}
 
-/** One memory row as the host returns it (an operator fact OR an agent chunk). */
+/** What a memory item is: a learning, a conversation turn, or a brain document. */
+export type ItemKind = "learning" | "conversation" | "document";
+
+/** The taxonomy of a learning — what sort of thing the company learned. */
+export type LearningKind = "preference" | "fact" | "procedure" | "correction" | "other";
+
+/** One memory item as the host returns it. */
 export interface MemoryEntry {
   id: string;
-  /** The fact taxonomy — present only on `fact` rows (omitted for context). */
-  kind?: MemoryKind;
-  /** Which backend the row came from; drives editable-vs-read-only rendering. */
-  origin: MemoryOrigin;
-  /**
-   * Whether the operator may delete this row: `fact` rows, and `document`
-   * rows they dropped themselves. The agents' own memory is read-only.
-   */
-  editable: boolean;
+  kind: ItemKind;
+  /** Present on learnings only. */
+  learningKind?: LearningKind;
+  /** The document title, or the first line of the text. */
   title: string;
+  /** The text; conversation turns render as `role: text` lines. */
   body: string;
-  /** Which desk/teammate/agent captured it. */
-  source: string;
-  /**
-   * Epoch-millis of the last update. For context rows this is when the chunk
-   * was stored; `0` only when the backend has no stamp for it (chunks written
-   * before store times were recorded), which still renders as `—`.
-   */
-  updatedAt: number;
-}
-
-/** The create-a-memory body; the host mints the id and timestamp. */
-export interface CreateMemory {
-  kind: MemoryKind;
-  title: string;
-  body: string;
+  /** The memory agent id, for items stored under an agent node. */
+  agentId?: string;
+  /** The OpenHuman namespace, e.g. `team:acme/agent:ceo`. */
+  namespace: string;
+  /** The brain source kind, for documents (`markdown`, `pdf`, `link`…). */
   source?: string;
+  tags: string[];
+  /** Epoch millis the item was observed, `0` when unknown. */
+  updatedAt: number;
+  /** Whether the operator may forget it — always true today. */
+  editable: boolean;
 }
 
-/**
- * The Brain health snapshot: durable facts plus the agents' runtime context
- * chunks. Lets the console prove the store is live at a glance.
- */
-export interface MemoryStats {
-  /** Number of durable operator facts. */
-  facts: number;
-  /** The newest fact's last-updated epoch-millis (`0` when there are none). */
-  factsUpdatedAtMillis: number;
-  /**
-   * The newest epoch-millis across *every* memory source — operator facts and
-   * the agents' context chunks alike (`0` when nothing is remembered yet).
-   *
-   * This, not `factsUpdatedAtMillis`, is what the "Last updated" stat renders:
-   * agents only ever write context chunks, so the facts-only figure sits at `0`
-   * for any company whose operator has not hand-authored a fact.
-   */
-  lastUpdatedAtMillis: number;
-  /** All displayable memory: facts plus non-mirrored context chunks. */
-  totalItems: number;
-  /** Context written by teammates, excluding outcomes, documents, and mirrors. */
-  teammateMemory: number;
-  /** Context chunks from operator-dropped documents/links, disjoint from teammate memory. */
-  documentMemory: number;
-  /** Stored task outcomes, disjoint from teammate memory. */
-  taskOutcomes: number;
-}
-
-/**
- * `GET /memory` — the rows plus the context-truncation metadata for the SAME
- * read, so the "showing the newest N of M" notice never compares the capped
- * rows against a count taken at a different moment. The metadata describes the
- * unqueried browse list; a `?query=` request reports it as not applicable.
- */
+/** One page of `GET /memory`. A `query` gives ranked matches and no cursor. */
 export interface MemoryList {
-  /** The rows: operator facts, then the newest non-mirror context chunks. */
   items: MemoryEntry[];
-  /**
-   * The non-mirror context chunk population before the 500-row display cap —
-   * the "M" in the notice. Facts are never capped, so they are not counted.
-   * `0` for `?query=` requests, whose rows are search matches the metadata
-   * does not describe.
-   */
-  totalContext: number;
-  /**
-   * Whether `items` dropped context rows to the cap, from this same read.
-   * Always `false` for `?query=` requests.
-   */
-  contextTruncated: boolean;
+  /** The cursor for the next page, absent on the last one. */
+  nextCursor?: string;
 }
 
-/** The kinds in display order, for filters and the add form. */
-export const MEMORY_KINDS: MemoryKind[] = ["fact", "preference", "person", "project", "reference"];
+/** Whether memory is on, and which engine serves it. */
+export interface MemoryStatus {
+  /** The company's memory root namespace. */
+  root: string;
+  on: boolean;
+  engine?: string;
+  endpoint?: string;
+  /** Why memory is off, when it is. */
+  reason?: string;
+}
 
-/**
- * Per-kind badge styling — identity, not state.
- *
- * The identity palette (`--tone-*`): a memory's kind says what sort of thing
- * it is, never how it is doing. `reference` stays neutral on purpose, as the
- * kind with nothing to distinguish.
- */
-export const KIND_STYLES: Record<MemoryKind, string> = {
-  fact: "border-tone-2/30 bg-tone-2/10 text-tone-2-text",
-  preference: "border-tone-1/30 bg-tone-1/10 text-tone-1-text",
-  person: "border-tone-4/30 bg-tone-4/10 text-tone-4-text",
-  project: "border-tone-3/30 bg-tone-3/10 text-tone-3-text",
-  reference: "border-border bg-muted text-muted-foreground",
-};
+/** One teammate with memory under the company root. */
+export interface MemoryAgent {
+  agentId: string;
+  turns: number;
+}
 
-/** The read-only context origins, in display order (facts filter by kind). */
-export const CONTEXT_ORIGINS: Exclude<MemoryOrigin, "fact">[] = [
-  "agent-memory",
-  "task-outcome",
-  "document",
-];
+/** `GET /memory/agents` — the teammates that have conversation memory. */
+export interface MemoryAgents {
+  root: string;
+  agents: MemoryAgent[];
+}
 
-/** Human labels for each origin, for badges and the type filter. */
-export const ORIGIN_LABELS: Record<MemoryOrigin, string> = {
-  fact: "Fact",
-  "agent-memory": "Agent memory",
-  "task-outcome": "Task outcome",
+/** A recall answer, with the items it drew on. */
+export interface Recall {
+  answer: string;
+  citations: { id: string; text: string; score?: number }[];
+}
+
+/** One brain source kind and how many documents it holds. */
+export interface BrainSource {
+  source: string;
+  documents: number;
+}
+
+/** `GET /memory/brain` — documents grouped by source kind. */
+export interface BrainSources {
+  root: string;
+  sources: BrainSource[];
+  /** Documents with no source kind. */
+  unfiled: number;
+}
+
+/** The create-a-learning body; the host mints the id and timestamp. */
+export interface CreateLearning {
+  text: string;
+  kind?: LearningKind;
+}
+
+/** Filters and paging for `GET /memory`. */
+export interface ListMemoryOptions {
+  query?: string;
+  kind?: ItemKind;
+  agent?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** The item kinds in display order, for the kind filter. */
+export const ITEM_KINDS: ItemKind[] = ["learning", "conversation", "document"];
+
+/** Human labels for each item kind. */
+export const ITEM_KIND_LABELS: Record<ItemKind, string> = {
+  learning: "Learning",
+  conversation: "Conversation",
   document: "Document",
 };
 
-/** Per-origin badge styling for the read-only context rows. */
-export const ORIGIN_STYLES: Record<Exclude<MemoryOrigin, "fact">, string> = {
-  "agent-memory": "border-tone-3/30 bg-tone-3/10 text-tone-3-text",
-  // Identity, not status. A task-outcome memory records what happened; it is
-  // not itself a failure, which is what the rose it used to wear implied of
-  // every one of them.
-  "task-outcome": "border-tone-5/30 bg-tone-5/10 text-tone-5-text",
-  // Identity, like every other row here: a document memory says where the
-  // knowledge came from, not how it is doing. It shares `fact`'s blue on
-  // purpose — both are knowledge the operator supplied, as against the two
-  // origins beside it, which are the agents' own record of their work.
-  document: "border-tone-2/30 bg-tone-2/10 text-tone-2-text",
+/**
+ * Per-kind badge styling — identity, not state (the `--tone-*` palette).
+ * Documents share a learning's blue on purpose: both are knowledge the
+ * operator supplied, as against the agents' own conversations.
+ */
+export const ITEM_KIND_STYLES: Record<ItemKind, string> = {
+  learning: "border-tone-2/30 bg-tone-2/10 text-tone-2-text",
+  conversation: "border-tone-3/30 bg-tone-3/10 text-tone-3-text",
+  document: "border-tone-4/30 bg-tone-4/10 text-tone-4-text",
 };
 
-/**
- * The company's memory, newest-first, optionally filtered server-side. The
- * rows come back wrapped with the truncation metadata for the same read.
- */
+/** The learning kinds in display order, for the add form. */
+export const LEARNING_KINDS: LearningKind[] = [
+  "fact",
+  "preference",
+  "procedure",
+  "correction",
+  "other",
+];
+
+/** Human labels for each learning kind. */
+export const LEARNING_KIND_LABELS: Record<LearningKind, string> = {
+  fact: "Fact",
+  preference: "Preference",
+  procedure: "Procedure",
+  correction: "Correction",
+  other: "Other",
+};
+
+/** The company's memory, one page at a time, optionally filtered server-side. */
 export function listMemory(
   client: OpenCompanyClient,
   company: string | null,
-  opts?: { query?: string; kind?: MemoryKind },
+  opts?: ListMemoryOptions,
 ): Promise<MemoryList> {
   const params = new URLSearchParams();
   if (opts?.query) params.set("query", opts.query);
   if (opts?.kind) params.set("kind", opts.kind);
+  if (opts?.agent) params.set("agent", opts.agent);
+  if (opts?.cursor) params.set("cursor", opts.cursor);
+  if (opts?.limit) params.set("limit", String(opts.limit));
   const qs = params.toString();
   return client.get<MemoryList>(`${client.scopeFor(company)}/memory${qs ? `?${qs}` : ""}`);
 }
 
-/** Add a durable fact (also mirrored into the agents' recallable context). */
+/** Stores a learning at the company root. */
 export function createMemory(
   client: OpenCompanyClient,
   company: string | null,
-  body: CreateMemory,
+  body: CreateLearning,
 ): Promise<MemoryEntry> {
   return client.post<MemoryEntry>(`${client.scopeFor(company)}/memory`, body);
 }
 
-/** Delete a fact by id. */
+/** Forgets one memory item by id. */
 export function deleteMemory(
   client: OpenCompanyClient,
   company: string | null,
@@ -181,140 +187,52 @@ export function deleteMemory(
   return client.del<void>(`${client.scopeFor(company)}/memory/${encodeURIComponent(id)}`);
 }
 
-/** The Brain health snapshot. */
-export function memoryStats(
+/** Whether memory is on — the one route that answers when it is off. */
+export function memoryStatus(
   client: OpenCompanyClient,
   company: string | null,
-): Promise<MemoryStats> {
-  return client.get<MemoryStats>(`${client.scopeFor(company)}/memory/stats`);
+): Promise<MemoryStatus> {
+  return client.get<MemoryStatus>(`${client.scopeFor(company)}/memory/status`);
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// The memory engine
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** One engine the host offers, from `GET …/memory/engine`. */
-export interface EngineOption {
-  /** `store`, a hosted engine id (`cortexdb`, `tinyhumans`), or `null`. */
-  id: string;
-  label: string;
-  description: string;
-  /** Whether this build can bind it. A `false` tile renders disabled. */
-  available: boolean;
-  /** Which feature it needs, when it is not available. */
-  unavailableReason?: string;
-  requiresUrl: boolean;
-  /** Whether the engine takes an endpoint at all (optional when `requiresUrl` is false). */
-  acceptsUrl: boolean;
-  /** The endpoint used when none is given. */
-  defaultUrl?: string;
-  requiresKey: boolean;
-  /** `false` only for the null engine, which the picker warns on. */
-  durable: boolean;
-}
-
-/** The engine surface: bound, saved, and selectable. */
-export interface MemoryEngineState {
-  /** The engine actually in force right now. */
-  active: string;
-  capabilities: string[];
-  healthy?: boolean;
-  /**
-   * Mandatory families the engine advertised but did not answer at boot.
-   * Empty is healthy; absent means it was never probed.
-   *
-   * `capabilities` is what the driver claims. This is what the engine
-   * answered — the two can disagree, and the bind-time audit cannot catch it
-   * for the mandatory families.
-   */
-  unreachableFamilies?: string[];
-  /**
-   * Optional families the engine advertised and refused when probed.
-   *
-   * Reported, never blocking: an engine that cannot serve `people` still
-   * serves every cycle. What it does cost is real — the agent tools those
-   * families back are offered and fail on their first call — so it belongs on
-   * the page rather than only in a log.
-   */
-  degradedFamilies?: string[];
-  /**
-   * Families that did not answer inside the probe budget. Not the same verdict
-   * as refused — the engine may simply be loaded.
-   */
-  slowFamilies?: string[];
-  /** The engine the saved selection names. */
-  selected: string;
-  url?: string;
-  /** Whether a credential is stored. The bytes never come back. */
-  apiKeySet: boolean;
-  /** `env` | `config.toml` | `default` — which layer owns the choice. */
-  layer: string;
-  /** Whether this console may change it (false when the deployment owns it). */
-  editable: boolean;
-  configPath: string;
-  options: EngineOption[];
-}
-
-/** What an engine apply did. */
-export interface EngineApplied {
-  engine: string;
-  healthy?: boolean;
-  /** Companies still holding the previous engine until a restart. */
-  restartRequiredFor: string[];
-  configPath: string;
-  engineState: MemoryEngineState;
-}
-
-/** A probe of a candidate engine, saving nothing. */
-export interface EngineProbe {
-  /**
-   * Whether the candidate can actually be bound. False when it did not answer
-   * a health check *or* refused a mandatory family — apply rejects both, so
-   * this has to agree with apply rather than only reporting reachability.
-   */
-  healthy: boolean;
-  capabilities: string[];
-  /** Mandatory families the candidate refused. Apply will reject these. */
-  unreachableFamilies?: string[];
-  /** Optional families it refused. Reported, but does not block a bind. */
-  degradedFamilies?: string[];
-  /** Families that were merely slow. Reported, but does not block a bind. */
-  slowFamilies?: string[];
-  detail?: string;
-}
-
-/** A submitted engine choice. Omit `apiKey` to keep the stored one. */
-export interface EngineChoice {
-  engine: string;
-  url?: string;
-  apiKey?: string;
-}
-
-/** The engine surface. */
-export function memoryEngine(
+/** The teammates that have conversation memory, with their turn counts. */
+export function memoryAgents(
   client: OpenCompanyClient,
   company: string | null,
-): Promise<MemoryEngineState> {
-  return client.get<MemoryEngineState>(`${client.scopeFor(company)}/memory/engine`);
+): Promise<MemoryAgents> {
+  return client.get<MemoryAgents>(`${client.scopeFor(company)}/memory/agents`);
 }
 
-/** Probes a candidate engine without saving it. */
-export function testMemoryEngine(
+/** Forgets everything one teammate remembers of its conversations. */
+export function forgetAgentMemory(
   client: OpenCompanyClient,
   company: string | null,
-  choice: EngineChoice,
-): Promise<EngineProbe> {
-  return client.post<EngineProbe>(`${client.scopeFor(company)}/memory/engine/test`, choice);
+  agentId: string,
+): Promise<{ forgotten: number }> {
+  return client.del<{ forgotten: number }>(
+    `${client.scopeFor(company)}/memory/agents/${encodeURIComponent(agentId)}`,
+  );
 }
 
-/** Saves an engine, binds it, and puts it in force. */
-export function applyMemoryEngine(
+/** Asks memory a question, optionally as one teammate. */
+export function recallMemory(
   client: OpenCompanyClient,
   company: string | null,
-  choice: EngineChoice,
-): Promise<EngineApplied> {
-  return client.put<EngineApplied>(`${client.scopeFor(company)}/memory/engine`, choice);
+  question: string,
+  agent?: string,
+): Promise<Recall> {
+  return client.post<Recall>(
+    `${client.scopeFor(company)}/memory/recall`,
+    agent ? { question, agent } : { question },
+  );
+}
+
+/** The brain's documents, grouped by source kind. */
+export function brainSources(
+  client: OpenCompanyClient,
+  company: string | null,
+): Promise<BrainSources> {
+  return client.get<BrainSources>(`${client.scopeFor(company)}/memory/brain`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -373,35 +291,17 @@ export function ingestLinks(
 }
 
 /**
- * Forgets every chunk of one dropped document.
+ * Forgets every brain document of one source kind (`markdown`, `pdf`, `link`…).
  *
- * Keyed by the label slug the host derived, which is what a document row's
- * `id` carries — see `documentSlug`.
+ * OpenHuman files brain documents under `team:<company>/source:<kind>`, so a
+ * source kind is the unit the host can forget in one call.
  */
 export function forgetDocument(
   client: OpenCompanyClient,
   company: string | null,
-  slug: string,
+  source: string,
 ): Promise<{ forgotten: number }> {
   return client.del<{ forgotten: number }>(
-    `${client.scopeFor(company)}/memory/document/${encodeURIComponent(slug)}`,
+    `${client.scopeFor(company)}/memory/document/${encodeURIComponent(source)}`,
   );
-}
-
-/**
- * The label slug the host derived for a source name.
- *
- * A copy of the backend's `ingest::label_for`, because a document row carries
- * its chunk address rather than its label and the forget route addresses
- * documents by slug. Kept deliberately narrow — same character class, same
- * 96-character tail — and covered by `memory-slug.test.ts` against the cases
- * the Rust test pins.
- */
-export function documentSlug(source: string): string {
-  const slug = Array.from(source)
-    .map((c) => (/[A-Za-z0-9._-]/.test(c) ? c.toLowerCase() : "-"))
-    .join("")
-    .replace(/^-+|-+$/g, "");
-  const safe = slug || "document";
-  return Array.from(safe).length > 96 ? Array.from(safe).slice(-96).join("") : safe;
 }

@@ -589,7 +589,6 @@ async fn a_top_level_budget_exhaustion_pauses_gracefully_and_parks_a_reissue_mar
         ])),
         provider_slug: "scripted".to_string(),
         serves: None,
-        context: Arc::new(MockContext::default()),
         store: Arc::new(RecordingStore::default()),
         // No meter: the pre-flight budget gates (total ceiling, per-agent
         // cap) fail OPEN with none configured, so this dispatch reaches
@@ -609,7 +608,6 @@ async fn a_top_level_budget_exhaustion_pauses_gracefully_and_parks_a_reissue_mar
         skills_registry: std::sync::Arc::from([]),
         default_mcp_servers: Vec::new(),
         mcp_servers: Vec::new(),
-        facts: None,
         events: None,
         delegations: DelegationQueue::default(),
         workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle::default(),

@@ -16,24 +16,26 @@ const COUNT = 1000;
 interface WireEntry {
   id: string;
   kind: string;
-  origin: string;
-  editable: boolean;
+  learningKind: string;
   title: string;
   body: string;
-  source: string;
+  namespace: string;
+  tags: string[];
   updatedAt: number;
+  editable: boolean;
 }
 
 function entries(count: number): WireEntry[] {
   return Array.from({ length: count }, (_, i) => ({
     id: `m-${i}`,
-    kind: "fact",
-    origin: "fact",
-    editable: true,
+    kind: "learning",
+    learningKind: "fact",
     title: `memory ${i}`,
     body: "",
-    source: "operator",
+    namespace: `team:${COMPANY}`,
+    tags: [],
     updatedAt: 0,
+    editable: true,
   }));
 }
 
@@ -54,32 +56,14 @@ async function mockApi(page: Page) {
     if (path === "/api/v1/companies") return json([status]);
     if (path === `/api/v1/companies/${COMPANY}`) return json(status);
 
-    if (path.endsWith("/memory/stats")) {
-      return json({
-        facts: COUNT,
-        factsUpdatedAtMillis: 0,
-        lastUpdatedAtMillis: 0,
-        totalItems: COUNT,
-        teammateMemory: 0,
-        documentMemory: 0,
-        taskOutcomes: 0,
-      });
+    if (path.endsWith("/memory/status")) {
+      return json({ root: `team:${COMPANY}`, on: true, engine: "local" });
     }
-    if (path.endsWith("/memory/engine")) {
-      return json({
-        active: "store",
-        capabilities: [],
-        selected: "store",
-        apiKeySet: false,
-        layer: "default",
-        editable: false,
-        configPath: "",
-        options: [],
-      });
+    if (path.endsWith("/memory/agents")) return json({ root: `team:${COMPANY}`, agents: [] });
+    if (path.endsWith("/memory/brain")) {
+      return json({ root: `team:${COMPANY}`, sources: [], unfiled: 0 });
     }
-    if (path.endsWith("/memory")) {
-      return json({ items: entries(COUNT), totalContext: 0, contextTruncated: false });
-    }
+    if (path.endsWith("/memory")) return json({ items: entries(COUNT) });
 
     if (path.endsWith("/me")) return json({ id: "op", email: "op@example.com", role: "member" });
     return json([]);

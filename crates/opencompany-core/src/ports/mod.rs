@@ -15,16 +15,13 @@ pub mod artifacts;
 pub mod blockers;
 pub mod brain;
 pub mod channel;
-pub mod context;
 pub mod deep_trace;
 pub mod events;
-pub mod facts;
 pub mod general_channel;
 pub mod inbox;
 pub mod journal;
 pub mod ledgers;
 pub mod login_codes;
-pub mod memory;
 pub mod notifications;
 pub mod read_state;
 pub mod run_output;
@@ -36,6 +33,7 @@ pub mod skills_state;
 pub mod store;
 pub mod tasks;
 pub mod tools;
+pub mod traces;
 pub mod types;
 pub mod usage;
 pub mod users;
@@ -55,14 +53,12 @@ pub use blockers::{
 };
 pub use brain::{Brain, Cognition, CycleHost, UsageMetering};
 pub use channel::ChannelAdapter;
-pub use context::ContextStore;
 pub use deep_trace::{
     DEEP_ARGUMENTS_CHAR_CAP, DEEP_OUTPUT_CHAR_CAP, DEEP_REASONING_CHAR_CAP, DeepTraceStore,
     MAX_DEEP_RUNS_PER_COMPANY, MAX_DEEP_STEPS_PER_RUN, RunStepDetailRecord, TurnStepDetail,
     bound_detail,
 };
 pub use events::{EventLog, PruneReport, RetentionClass, RetentionPolicy, plan_prune};
-pub use facts::{FactKind, FactRecord, FactStore};
 pub(crate) use ids::MILLIS_PER_DAY;
 pub use ids::{
     AGENT_SLUG_FALLBACK, CONFINED_AGENT_ID, SYSTEM_AUTHOR, agent_slug, generate_id, iso8601,
@@ -72,7 +68,7 @@ pub use inbox::{EmailRecord, InboxMeta, InboxStore};
 pub use journal::{Durability, JournalStore};
 pub use ledgers::LedgerStore;
 pub use login_codes::{LoginCodeRecord, LoginCodeStore};
-pub use memory::MemoryStore;
+pub use traces::TraceStore;
 pub use notifications::{Notification, NotificationStore, NotificationView, Subject, SubjectKind};
 pub use read_state::{ChannelRead, ReadStateStore};
 pub use run_output::{

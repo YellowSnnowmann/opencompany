@@ -31,14 +31,10 @@ fn an_unset_workspace_is_ephemeral() {
 }
 
 #[test]
-fn the_shared_runtime_never_registers_openhumans_memory_domain() {
-    // One runtime serves every company; its memory domain would ingest every
-    // company's turns into one engine under one credential.
+fn the_shared_runtime_registers_openhumans_memory_domain() {
+    // Company memory is OpenHuman's, each agent bound to its company's root.
     let domains = super::host_domains();
-    assert!(
-        !domains.memory,
-        "memory must stay off on the shared runtime"
-    );
+    assert!(domains.memory, "memory is OpenHuman's domain");
     assert!(
         domains.agent,
         "the agent domain is what a company turn runs on"

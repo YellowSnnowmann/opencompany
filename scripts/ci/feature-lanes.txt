@@ -49,14 +49,13 @@ oauth          | tested       | (default)                       | In the default
 platform-jwt   | tested       | (default)                       | In the default set (see Cargo.toml for why it ships by default).
 documents      | tested       | (default)                       | In the default set: the Brain drop zone is a console surface, so a shipped build must read a dropped PDF (see Cargo.toml).
 openhuman      | tested       | openhuman                       | the `gated` lane runs `--tests`, which selects lib+bin units and every tests/ target.
-tinymemory     | tested       | (default)                       | In the default set, so the bare `cargo test --locked` runs its tests unfiltered (see Cargo.toml for why the memory-engine catalog must not ship half-disabled).
 
 # --- Partial: a lane exists, but filtered ----------------------------------
 
 sqlite         | partial      | sqlite                          | store::sqlite
 mongodb        | partial      | mongodb                         | store::mongodb store::select
-acp            | partial      | acp,runner,tinymemory | server::acp harness::acp::run_turn server::routes harness::lanes
-runner         | partial      | acp,runner,tinymemory | runner
+acp            | partial      | acp,runner | server::acp harness::acp::run_turn server::routes harness::lanes
+runner         | partial      | acp,runner | runner
 mcp            | partial      | openhuman,mcp,media    | harness::built_in::build::tests app::types hive::mcp_server hive::tools
 media          | partial      | openhuman,mcp,media    | harness::built_in::build::tests harness::built_in::toolbelt
 composio       | partial      | openhuman,chargebee,paypal,composio | composio

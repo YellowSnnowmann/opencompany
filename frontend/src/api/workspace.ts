@@ -40,7 +40,7 @@ const NO_ROSTER_NAMES: RosterNames = new Map();
 /**
  * A short human label for an origin, or `null` for a plain operator note.
  *
- * Mirrors `ORIGIN_LABELS` in `api/memory.ts`, but returns `null` rather than
+ * A label per origin, but returning `null` rather than
  * "Operator" for the operator case: in the Brain every row has an interesting
  * origin, whereas here the operator is the unremarkable default and badging it
  * would put a chip on nearly every note while saying nothing.

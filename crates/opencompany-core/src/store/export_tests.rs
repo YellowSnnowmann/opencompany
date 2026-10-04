@@ -3,7 +3,7 @@ use crate::ports::SecretStore;
 use crate::ports::types::{Actor, ActorKind, CompanyEvent};
 use crate::runtime::RuntimeBuilder;
 use crate::store::paths::Bundle;
-use crate::store::{FsCompanyStore, FsContextStore, FsEventLog, FsMemoryStore, FsSecretStore};
+use crate::store::{FsCompanyStore, FsContextStore, FsEventLog, FsTraceStore, FsSecretStore};
 
 pub(super) fn tmp_root(tag: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -62,7 +62,7 @@ pub(super) fn fs_ports(root: &Path) -> Ports {
     (
         Arc::new(FsCompanyStore::new(root.to_path_buf())),
         Arc::new(FsEventLog::new(root.to_path_buf())),
-        Arc::new(FsMemoryStore::new(root.to_path_buf())),
+        Arc::new(FsTraceStore::new(root.to_path_buf())),
         Arc::new(FsContextStore::new(root.to_path_buf())),
     )
 }

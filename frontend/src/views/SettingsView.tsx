@@ -15,7 +15,7 @@ import { toast } from "sonner";
 
 import { fetchAuthConfig, logout, me as fetchMe, type Me, type UserRole } from "@/api/auth";
 import type { LifecycleAction, OpenCompanyClient } from "@/api/client";
-import { memoryEngine, type MemoryEngineState } from "@/api/memory";
+import { memoryStatus, type MemoryStatus } from "@/api/memory";
 import { ApiError } from "@/api/types";
 import { PageHeader } from "@/components/page-header";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -61,18 +61,6 @@ interface Props {
   /** Start the reset (archive + start clean) flow for the active company (#1807). */
   onResetCompany?: (id: string, name: string) => void;
 }
-
-// These are the optional capability families closest to the mandatory core /
-// recall / portability path. Remote providers commonly omit them, so merely
-// listing what answered leaves an operator to infer a material limitation.
-const MANDATORY_ADJACENT_MEMORY_FAMILIES = [
-  "tree",
-  "entities",
-  "graph",
-  "diff",
-  "goals",
-  "tool_memory",
-];
 
 /** Connection details, lifecycle controls, and the feedback entry point. */
 export function SettingsView({ client, company, feed, onFlag, onResetCompany }: Props) {
@@ -165,7 +153,7 @@ export function SettingsView({ client, company, feed, onFlag, onResetCompany }: 
             the company controls below. */}
         <AccountCard client={client} company={company} connectionId={scope.connection} />
 
-        <MemoryEngineCard client={client} company={company} />
+        <MemoryStatusCard client={client} company={company} />
 
         {/* Lifecycle */}
         {scoped ? (
@@ -638,133 +626,65 @@ export function AccountCard({
 }
 
 /**
- * Read-only: which memory engine this instance is bound to, from the
- * `…/memory/engine` surface.
+ * Read-only: whether memory is on and which OpenHuman engine serves it, from
+ * `…/memory/status`.
  *
- * Deliberately carries no setter. Engine selection is instance-wide and
- * belongs to the infra operator or the company configuration, depending on
- * the reported layer. A console admin can see the engine but never repoint a
- * deployment's storage from here. The switch runbook lives in
- * `docs/spec/runtime/memory-engine.md`. Renders nothing on the `store`
- * default and on a host predating the engine route.
+ * Deliberately carries no setter: the engine is OpenHuman's `[memory]` config,
+ * owned by whoever deploys the instance. Renders nothing on a host that does
+ * not answer the status route.
  */
-function MemoryEngineCard({
+function MemoryStatusCard({
   client,
   company,
 }: {
   client: OpenCompanyClient;
   company: string | null;
 }) {
-  const [engine, setEngine] = useState<MemoryEngineState | undefined>(undefined);
+  const [status, setStatus] = useState<MemoryStatus | undefined>(undefined);
   useEffect(() => {
     let live = true;
-    setEngine(undefined);
-    memoryEngine(client, company)
-      .then((state) => {
-        if (live) setEngine(state);
+    setStatus(undefined);
+    memoryStatus(client, company)
+      .then((next) => {
+        if (live) setStatus(next);
       })
       .catch(() => {
-        /* best-effort: the settings page works without the engine route */
+        /* best-effort: the settings page works without the memory route */
       });
     return () => {
       live = false;
     };
   }, [client, company]);
 
-  if (!engine || engine.active === "store") return null;
-  const discarding = engine.active === "null";
-  const unservedFamilies = MANDATORY_ADJACENT_MEMORY_FAMILIES.filter(
-    (family) => !engine.capabilities.includes(family),
-  );
+  if (!status) return null;
   return (
-    <Card data-testid="settings-memory-engine">
+    <Card data-testid="settings-memory-status">
       <CardHeader>
-        <CardTitle className="text-base">Memory engine</CardTitle>
+        <CardTitle className="text-base">Memory</CardTitle>
         <CardDescription>
-          {engine.editable ? (
-            engine.layer === "config.toml" ? (
-              <>Selected in the company configuration. You can change it here.</>
-            ) : (
-              <>Using the default engine. You can change it here.</>
-            )
-          ) : (
-            <>
-              Set by the infra operator (<code className="text-xs">OPENCOMPANY_MEMORY*</code>, read
-              at boot). Instance-wide; read-only here by design.
-            </>
-          )}
-          {discarding &&
-            " This engine accepts and discards every write — nothing this company is told will be remembered."}
+          Served by OpenHuman's memory engine, set in its <code className="text-xs">[memory]</code>{" "}
+          configuration. Read-only here by design.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-0 divide-y">
-        <InfoRow label="Engine">
-          <span className="font-mono text-xs">{engine.active}</span>
-        </InfoRow>
-        <InfoRow label="Layer">
-          <span className="font-mono text-xs">{engine.layer}</span>
-        </InfoRow>
-        <InfoRow label="Capabilities">
+        <InfoRow label="Status">
           <span className="text-sm">
-            {engine.capabilities.length > 0
-              ? engine.capabilities.join(", ")
-              : "not negotiated"}
+            {status.on ? "on" : `off${status.reason ? ` — ${status.reason}` : ""}`}
           </span>
         </InfoRow>
-        <InfoRow label="Not served">
-          <span className="text-sm">
-            {unservedFamilies.length > 0 ? unservedFamilies.join(", ") : "none in this set"}
-          </span>
-        </InfoRow>
-        <InfoRow label="Boot probe">
-          <span className="text-sm">
-            {engine.healthy === true
-              ? "reachable"
-              : engine.healthy === false
-                ? "unreachable — check the endpoint and credential"
-                : "not probed"}
-          </span>
-        </InfoRow>
-        {/*
-          Distinct from "Not served" above, which is derived client-side from
-          what the driver *claims*. This is what the engine actually answered
-          when read at boot: a family can be advertised, pass the bind-time
-          audit, and still return nothing.
-        */}
-        <InfoRow label="Refused at probe">
-          <span className="text-sm">
-            {engine.unreachableFamilies === undefined
-              ? "not probed"
-              : engine.unreachableFamilies.length === 0
-                ? // Naming what was probed matters: portability is mandatory and
-                  // deliberately never probed, so a bare "none" would imply more
-                  // coverage than there is.
-                  "none — core and recall both answered (portability is not probed)"
-                : `${engine.unreachableFamilies.join(", ")} — reads against these will fail`}
-          </span>
-        </InfoRow>
-        {/*
-          The optional half of the same observation, shown only when there is
-          something to show: an engine serving everything it advertises would
-          otherwise carry a permanent "none" row for a check most operators
-          never think about. A refusal here is not a reason to replace the
-          engine — every cycle still runs — but it is the reason a tool will
-          fail, which is worth having on the page before it does.
-        */}
-        {engine.degradedFamilies !== undefined && engine.degradedFamilies.length > 0 && (
-          <InfoRow label="Optional families refused">
-            <span className="text-sm">
-              {`${engine.degradedFamilies.join(", ")} — advertised, but the engine refused a read; the tools these back will fail`}
-            </span>
+        {status.engine && (
+          <InfoRow label="Engine">
+            <span className="font-mono text-xs">{status.engine}</span>
           </InfoRow>
         )}
-        {engine.slowFamilies !== undefined && engine.slowFamilies.length > 0 && (
-          <InfoRow label="Slow at probe">
-            <span className="text-sm">
-              {`${engine.slowFamilies.join(", ")} — did not answer in time; the engine may just be loaded`}
-            </span>
+        {status.endpoint && (
+          <InfoRow label="Endpoint">
+            <span className="font-mono text-xs">{status.endpoint}</span>
           </InfoRow>
         )}
+        <InfoRow label="Root">
+          <span className="font-mono text-xs">{status.root}</span>
+        </InfoRow>
       </CardContent>
     </Card>
   );

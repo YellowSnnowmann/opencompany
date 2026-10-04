@@ -21,7 +21,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-if ! report="$(cargo tree --locked -p opencompany-core -e normal --features openhuman,mcp,tinymemory -d)"; then
+if ! report="$(cargo tree --locked -p opencompany-core -e normal --features openhuman,mcp,documents -d)"; then
   echo "::error::cargo tree failed to resolve the graph" >&2
   exit 1
 fi
