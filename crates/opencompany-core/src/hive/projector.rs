@@ -270,6 +270,20 @@ impl Projector {
         }
     }
 
+    /// The hive sequence a journal line was projected from (or, for an
+    /// operator line, accepted as) — how a reply in a console thread finds the
+    /// hive conversation root it continues. `None` for a line the hive never
+    /// saw.
+    pub async fn hive_sequence_of(&self, seq: EventSeq) -> Option<u64> {
+        self.cursor
+            .lock()
+            .await
+            .landed
+            .iter()
+            .find(|(_, landed)| landed.seq == seq)
+            .map(|(sequence, _)| *sequence)
+    }
+
     /// Projects everything the Coordinator committed since the cursor.
     /// Returns how many journal rows it appended.
     pub async fn project(&self) -> crate::Result<usize> {
