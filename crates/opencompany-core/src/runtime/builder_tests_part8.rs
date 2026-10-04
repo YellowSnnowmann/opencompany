@@ -385,7 +385,7 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
         "the stored record must resolve the new desk, or this test proves nothing"
     );
 
-    runtime
+    let report = runtime
         .run_cycle(vec![CompanyEvent::OperatorMessage {
             mentions: Vec::new(),
             parent: None,
