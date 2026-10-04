@@ -18,6 +18,7 @@ pub mod channel;
 pub mod deep_trace;
 pub mod events;
 pub mod general_channel;
+pub mod hive;
 pub mod inbox;
 pub mod journal;
 pub mod ledgers;
@@ -64,6 +65,7 @@ pub use ids::{
     AGENT_SLUG_FALLBACK, CONFINED_AGENT_ID, SYSTEM_AUTHOR, agent_slug, generate_id, iso8601,
     now_millis,
 };
+pub use hive::{HiveCommit, HiveMessageRow, HiveSnapshot, HiveStateDoc, HiveStore};
 pub use inbox::{EmailRecord, InboxMeta, InboxStore};
 pub use journal::{Durability, JournalStore};
 pub use ledgers::LedgerStore;

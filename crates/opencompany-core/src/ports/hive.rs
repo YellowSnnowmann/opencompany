@@ -151,8 +151,43 @@ pub(crate) fn check_commit(
     next: &HiveStateDoc,
     appended: &[HiveMessageRow],
 ) -> Result<CommitCheck> {
-    let _ = (current, expected, next, appended);
-    todo!("check_commit")
+    let stored = current.map(|(revision, _)| revision);
+    if stored != expected {
+        return Ok(CommitCheck::Conflict(stored.map(str::to_owned)));
+    }
+    if next.revision.is_empty() {
+        return Err(invalid("the new revision is empty".into()));
+    }
+    if stored == Some(next.revision.as_str()) {
+        return Err(invalid(format!(
+            "the new revision `{}` is the stored one; a commit must change it",
+            next.revision
+        )));
+    }
+    let floor = current.map_or(0, |(_, next_sequence)| next_sequence);
+    if next.next_sequence < floor {
+        return Err(invalid(format!(
+            "next_sequence {} is below the stored {floor}",
+            next.next_sequence
+        )));
+    }
+    let mut previous: Option<u64> = None;
+    for row in appended {
+        if row.sequence < floor || row.sequence >= next.next_sequence {
+            return Err(invalid(format!(
+                "row sequence {} is outside [{floor}, {})",
+                row.sequence, next.next_sequence
+            )));
+        }
+        if previous.is_some_and(|previous| row.sequence <= previous) {
+            return Err(invalid(format!(
+                "row sequence {} does not ascend strictly",
+                row.sequence
+            )));
+        }
+        previous = Some(row.sequence);
+    }
+    Ok(CommitCheck::Proceed)
 }
 
 /// The `$lt` bound a load reads rows under: the caller's `before`, clipped to
