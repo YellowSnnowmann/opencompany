@@ -1,34 +1,22 @@
-//! The in-flight turn registry, the speech fold and the tool adapter behind
-//! the hive MCP server (plan `hive-desks`, Phase 3).
+//! The in-flight turn registry and the tool adapter behind the
+//! `opencompany` MCP server.
 //!
 //! # Attribution
 //!
-//! An `openhuman_embed::Agent` reaches OpenCompany's tools over MCP, so the
-//! server receives a bearer and a tool call and nothing else — no episode, no
-//! round, no conversation. What ties the call back to the turn it belongs to
-//! is this registry: **one agent runs at most one turn at a time** (the pool's
-//! `turn_lock`), so `runtime_agent_id → exactly one [`InFlight`]` is a total
-//! function for the life of the turn, and the bearer names the agent. The
-//! driver registers an [`InFlight`] before it calls `agent.turn(..)`, the
-//! handler looks it up on every call, and the driver takes the outbox back
-//! when the turn settles.
+//! An `openhuman_embed::Agent` may reach OpenCompany's tools over MCP, where
+//! the server receives a bearer and a tool call and nothing else. What ties
+//! the call back to the turn it belongs to is this registry: **one agent runs
+//! at most one turn at a time** (its `turn_lock`), so `runtime_agent_id →
+//! exactly one [`InFlight`]` is a total function for the life of the turn.
+//! The turn envelope (`harness::built_in::turn_envelope`) registers an
+//! [`InFlight`] before it runs the turn and hands it an executor, so a native
+//! belt tool's call runs on the turn's own task, where its task-local queues
+//! (approval scope, publish and delegation claims) live.
 //!
-//! # One action per turn
-//!
-//! A seat says exactly one thing per turn. The first speech call is folded
-//! through [`tinyhivemind::speech::interpret`] and recorded on the outbox; a
-//! second is refused with a tool error the seat can read inside its own turn
-//! (the wording is pinned by Track B's mock brain, see [`speak`](InFlight::speak)).
-//! `read` is not an action and never counts.
-//!
-//! # `dm` recipients
-//!
-//! A `dm` is checked against the desk membership the driver captured at turn
-//! start ([`HiveTurn::members`]). A refused `dm` is a tool ERROR whose text
-//! says `refused` — Track B's mock brain matches that. Phase 4's `DeskHive`
-//! carries the authoritative `resolve_dm`; until it installs a
-//! [`DmResolver`](crate::hive::mcp_server::DmResolver) on the host, the
-//! membership snapshot is the rule.
+//! The speech half this file used to carry — the one-action-per-turn fold over
+//! tinyhivemind's `speech` vocabulary — is gone with the conducted episode
+//! (OC-2): agents now speak through the permanent `hivemind_*` tools the
+//! TinyHiveMind OpenHuman adapter attaches.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -36,67 +24,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
 use serde_json::{Value, json};
-use tinyhivemind::speech::{
-    self, CallArguments, ParameterKind, ToolCall, ToolSpec, Utterance, UtteranceRejection,
-};
-use tinyhivemind_embed::ConversationRef;
+use tinyhivemind_core::embed::ConversationRef;
 use tinytools::{Tool, ToolCallOptions, ToolResult, ToolRunContext, WorkspaceDescriptor};
 
 use crate::ports::types::CompanyId;
-
-mod read;
-
-pub use read::{ConversationReadTool, READ_TOOL, read_conversation};
-
-/// The bare speech tool names, in the order [`speech::tool_specs`] presents
-/// them. Every other name the server serves is an OpenCompany tool.
-#[must_use]
-pub fn speech_tool_names() -> Vec<&'static str> {
-    speech::tool_specs().iter().map(|spec| spec.name).collect()
-}
-
-/// The speech tools a room actually offers a seat.
-///
-/// Narrower than [`speech_tool_names`], which is the whole vocabulary. `post`
-/// and `dm` are defined and deliberately withheld: `post` is text with no
-/// consequence, and five live runs spent it on status, on restating findings
-/// the seat completed with anyway, and on describing calls it had not made;
-/// `dm` beside `ask` is two ways to say nearly the same thing.
-///
-/// Use this wherever this crate **advertises** the vocabulary -- the MCP
-/// brief's `Tools:` line, the definition's tool scope -- so a seat is never
-/// told about a tool the room will refuse. Classification stays on the wider
-/// list: a call to a withheld name is still a speech call, and still the
-/// room's to refuse rather than the company's to mistake for one of its own.
-#[must_use]
-pub fn served_speech_tool_names() -> Vec<&'static str> {
-    tinyhivemind_tools::served_specs()
-        .map(|spec| spec.name)
-        .collect()
-}
-
-/// Whether `name` is one of the room's speech tools.
-#[must_use]
-pub fn is_speech_tool(name: &str) -> bool {
-    speech_tool_names().contains(&name)
-}
-
-/// The hive coordinates of a desk turn: which episode and round the seat is
-/// answering in, and who else is on the desk.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HiveTurn {
-    /// The desk whose hive runs this episode.
-    pub desk_id: String,
-    /// The episode the round belongs to.
-    pub episode_id: String,
-    /// The round revision (raw, 0-based — displayed 1-based by the console).
-    pub revision: u64,
-    /// The turn id the `turn_started` / `turn_settled` frames are keyed by.
-    pub turn_id: String,
-    /// The desk's current members, the `dm` recipient rule until Phase 4's
-    /// `resolve_dm` is installed. The speaker may be in the list.
-    pub members: Vec<String>,
-}
 
 /// One turn in flight for one agent: what the MCP handler needs to attribute a
 /// call and where the seat's one utterance lands.
