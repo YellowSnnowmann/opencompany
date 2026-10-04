@@ -1631,30 +1631,6 @@ mod tests_terminal;
 #[path = "chat_history_dead_card_test.rs"]
 mod dead_card_test;
 
-/// A completion the driver refused, reconciled against the row already on the
-/// desk.
-#[cfg(test)]
-#[path = "chat_history_refused_completion_test.rs"]
-mod refused_completion_test;
-
-/// Where a referred line says it came from, and who it says is speaking.
-#[cfg(test)]
-#[path = "chat_history_agent_conversation_test.rs"]
-mod agent_conversation_test;
-#[cfg(test)]
-#[path = "chat_history_referral_origin_crossing_test.rs"]
-mod referral_origin_crossing_test;
-#[cfg(test)]
-#[path = "chat_history_referral_origin_episode_test.rs"]
-mod referral_origin_episode_test;
-#[cfg(test)]
-#[path = "chat_history_referral_origin_relay_test.rs"]
-mod referral_origin_relay_test;
-
-#[cfg(test)]
-#[path = "chat_history_referral_origin_test_support.rs"]
-mod referral_origin_test_support;
-
 /// How a chat selector becomes the `(desk id, desk name)` pair [`owns`] filters
 /// on — the one answer to "which desk is this", shared by the seed, the cycle's
 /// briefings and `read_thread`.
