@@ -2,7 +2,7 @@
 //!
 //! One [`MongoStore`] wraps a single [`mongodb::Database`] and implements
 //! every durable port — [`CompanyStore`], [`EventLog`], [`TraceStore`],
-//! [`ContextStore`], and [`SecretStore`] — so the same `Arc<MongoStore>` can
+//! [`SecretStore`] and the rest — so the same `Arc<MongoStore>` can
 //! be injected into all of the `RuntimeBuilder::with_*` setters.
 //!
 //! ## Multi-tenancy
@@ -55,8 +55,8 @@ use crate::ports::secrets::SecretStore;
 use crate::ports::sessions::SessionRecord;
 use crate::ports::store::CompanyStore;
 use crate::ports::types::{
-    ChunkAddr, ChunkHit, ChunkMeta, CompanyEvent, CompanyId, CompanyRecord, CompanySummary,
-    CompressedTrace, ContextChunk, EventSeq, EvictionPolicy, LedgerEntry, OverlayBlob, SecretValue,
+    CompanyEvent, CompanyId, CompanyRecord, CompanySummary, CompressedTrace, EventSeq,
+    EvictionPolicy, LedgerEntry, OverlayBlob, SecretValue,
     StoredEvent, TaskResult,
 };
 use crate::ports::users::{InviteRecord, UserRecord};
@@ -423,18 +423,16 @@ impl MongoStore {
         // address may have several login codes over time.
         let nonunique = |keys: Document| IndexModel::builder().keys(keys).build();
         // See `unique_partial`.
-        let plans: [(&str, IndexModel); 37] = [
+        let plans: [(&str, IndexModel); 35] = [
             ("companies", unique(doc! {"company_id": 1})),
             ("ledger", unique(doc! {"company_id": 1, "idx": 1})),
             ("events", unique(doc! {"company_id": 1, "seq": 1})),
             ("memory_traces", unique(doc! {"company_id": 1, "seq": 1})),
             ("memory_tasks", unique(doc! {"company_id": 1, "task_id": 1})),
-            ("context_chunks", unique(doc! {"company_id": 1, "addr": 1})),
             ("secrets", unique(doc! {"company_id": 1, "key": 1})),
             ("inbox", unique(doc! {"company_id": 1, "seq": 1})),
             ("inbox_meta", unique(doc! {"company_id": 1, "key": 1})),
             ("tasks", unique(doc! {"company_id": 1, "task_id": 1})),
-            ("facts", unique(doc! {"company_id": 1, "fact_id": 1})),
             ("ledger_specs", unique(doc! {"company_id": 1, "slug": 1})),
             // Not unique on the entry: many events fold into one row.
             // `seq` is the fold's ordering, so it is unique per company.

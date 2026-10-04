@@ -2,7 +2,7 @@
 //!
 //! One [`SqliteStore`] opens a single bundled-SQLite connection and implements
 //! every durable port — [`CompanyStore`], [`EventLog`], [`TraceStore`],
-//! [`ContextStore`], and [`SecretStore`] — sharing that connection behind an
+//! [`SecretStore`] and the rest — sharing that connection behind an
 //! `Arc<Mutex<_>>`. The same `Arc<SqliteStore>` can therefore be injected into
 //! all four `RuntimeBuilder::with_*` setters so one database file serves the
 //! whole company.
@@ -43,8 +43,8 @@ use crate::ports::secrets::SecretStore;
 use crate::ports::sessions::SessionRecord;
 use crate::ports::store::CompanyStore;
 use crate::ports::types::{
-    ChunkAddr, ChunkHit, ChunkMeta, CompanyEvent, CompanyId, CompanyRecord, CompanySummary,
-    CompressedTrace, ContextChunk, EventSeq, EvictionPolicy, LedgerEntry, OverlayBlob, SecretValue,
+    CompanyEvent, CompanyId, CompanyRecord, CompanySummary, CompressedTrace, EventSeq,
+    EvictionPolicy, LedgerEntry, OverlayBlob, SecretValue,
     StoredEvent, TaskResult,
 };
 use crate::ports::users::{InviteRecord, UserRecord};
