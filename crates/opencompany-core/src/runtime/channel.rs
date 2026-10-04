@@ -116,7 +116,7 @@ impl ChannelAdapter for DeskChannel {
                 &self.company,
                 CompanyEvent::AgentReply {
                     audience: Vec::new(),
-                    episode: None,
+                    hive: None,
                     chat_id: self.desk_id.clone(),
                     agent_id: WORKFLOW_REPLY_AUTHOR.to_string(),
                     text: msg.text,

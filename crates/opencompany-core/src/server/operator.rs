@@ -2984,7 +2984,7 @@ async fn run_chat(
             // through history like any other reply.
             let notice = CompanyEvent::AgentReply {
                 audience: Vec::new(),
-                episode: None,
+                hive: None,
                 parent: reply_thread(accepted.thread_root(), accepted.message_seq),
                 chat_id: message.chat.clone().unwrap_or_else(|| {
                     crate::server::ops::language::GENERAL_CHANNEL_ID.to_string()
@@ -4274,7 +4274,7 @@ pub(crate) async fn journal_chat_replies(
                 id,
                 CompanyEvent::AgentReply {
                     audience: Vec::new(),
-                    episode: None,
+                    hive: None,
                     // Who this reply names. Rendered as chips and — unlike an
                     // operator message's — never consulted by dispatch, which
                     // is the mention-loop fuse.

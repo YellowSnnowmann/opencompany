@@ -523,7 +523,7 @@ pub struct CompanyRuntime {
 fn continuation_failure_notice(thread: String, parent: Option<EventSeq>) -> CompanyEvent {
     CompanyEvent::AgentReply {
         audience: Vec::new(),
-        episode: None,
+        hive: None,
         parent,
         chat_id: thread,
         agent_id: crate::ports::SYSTEM_AUTHOR.to_string(),
@@ -4951,7 +4951,7 @@ impl CompanyRuntime {
                     &self.id,
                     CompanyEvent::AgentReply {
                         audience: Vec::new(),
-                        episode: None,
+                        hive: None,
                         parent,
                         chat_id: chat_id.clone(),
                         // Issue #885: the author, not the destination. Same
@@ -6848,7 +6848,7 @@ impl CompanyRuntime {
                     // notice is that everyone reading the channel — including
                     // whoever the ping failed to reach — can see it.
                     audience: Vec::new(),
-                    episode: None,
+                    hive: None,
                 },
             )
             .await
