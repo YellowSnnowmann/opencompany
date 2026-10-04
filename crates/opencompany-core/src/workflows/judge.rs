@@ -224,12 +224,11 @@ pub struct RecoveryResult {
 const MAX_FOCUS_TERMS: usize = 6;
 const MIN_FOCUS_TERM_LEN: usize = 4;
 
-/// Candidate single-word `FactStore` queries pulled out of a natural-language
-/// question (issue #1990 review, #3903591432): `FactStore::list`'s query is a
-/// case-insensitive substring match over a fact's title + body, so the whole
-/// question almost never appears verbatim even when a fact IS the answer — a
-/// fact titled "Renewal date" never matches the sentence "The answer must
-/// include the renewal date". Lowercased, deduplicated, common short/filler
+/// Candidate single-word memory queries pulled out of a natural-language
+/// question (issue #1990 review, #3903591432): a whole question ranks poorly
+/// against a short learning even when the learning IS the answer — "Renewal
+/// date: March 1" is a weak match for "The answer must include the renewal
+/// date" — so the ladder also searches its focus words. Lowercased, deduplicated, common short/filler
 /// words dropped, capped so the bounded recovery ladder stays bounded.
 fn focus_terms(question: &str) -> Vec<String> {
     const STOPWORDS: &[&str] = &[
