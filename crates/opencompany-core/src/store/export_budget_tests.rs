@@ -77,9 +77,7 @@ async fn an_old_bundle_cannot_smuggle_a_withdrawn_message_back_in() {
     tokio::fs::write(&path, old_shape).await.unwrap();
 
     let (s2, e2, m2) = fs_ports(&home2);
-    import_bundle(&dest, s2, e2.clone(), m2)
-        .await
-        .unwrap();
+    import_bundle(&dest, s2, e2.clone(), m2).await.unwrap();
     let events = e2
         .read_from(&id, EventSeq::new(0), usize::MAX)
         .await
@@ -149,9 +147,7 @@ async fn template_provenance_survives_roundtrip() {
         .await
         .unwrap();
     let (s2, e2, m2) = fs_ports(&home2);
-    let imported = import_bundle(&dest, s2.clone(), e2, m2)
-        .await
-        .unwrap();
+    let imported = import_bundle(&dest, s2.clone(), e2, m2).await.unwrap();
     assert_eq!(imported, id, "id preserved through the bundle");
 
     // The imported record carries the identical provenance — all three fields.
@@ -296,9 +292,7 @@ async fn operator_overlays_including_desk_order_survive_roundtrip() {
         .await
         .unwrap();
     let (s2, e2, m2) = fs_ports(&home2);
-    import_bundle(&dest, s2.clone(), e2, m2)
-        .await
-        .unwrap();
+    import_bundle(&dest, s2.clone(), e2, m2).await.unwrap();
 
     // Every overlay came across intact — not reset to an empty list.
     let dst_record = s2.load(&id).await.unwrap().unwrap();
@@ -481,9 +475,7 @@ async fn budget_overrides_survive_roundtrip_including_zero_and_explicit_none() {
         .await
         .unwrap();
     let (s2, e2, m2) = fs_ports(&home2);
-    import_bundle(&dest, s2.clone(), e2, m2)
-        .await
-        .unwrap();
+    import_bundle(&dest, s2.clone(), e2, m2).await.unwrap();
 
     let dst_record = s2.load(&id).await.unwrap().unwrap();
     assert_eq!(

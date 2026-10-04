@@ -34,9 +34,9 @@ use crate::ports::types::{
 };
 use crate::ports::{
     ApprovalGate, ArtifactStore, Brain, ChannelAdapter, CompanyStore, EventLog, InboxStore,
-    LoginCodeStore, NotificationStore, ReadStateStore, TraceStore,
-    RunStore, SecretStore, SessionStore, SkillStateStore, TaskRecord, TaskStore, ToolProvider,
-    UsageMeter, UserStore, WorkflowRevisionStore, WorkspaceStore,
+    LoginCodeStore, NotificationStore, ReadStateStore, RunStore, SecretStore, SessionStore,
+    SkillStateStore, TaskRecord, TaskStore, ToolProvider, TraceStore, UsageMeter, UserStore,
+    WorkflowRevisionStore, WorkspaceStore,
 };
 // Separate line (#241) so this addition is a pure append, not a reflow of the
 // grouped import that sibling store-seam branches (#274, #596) also edit.

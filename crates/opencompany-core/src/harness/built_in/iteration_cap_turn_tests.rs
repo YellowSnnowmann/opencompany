@@ -57,7 +57,7 @@ use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{CompanyAgent, HarnessDeps};
 use crate::ports::types::CompanyId;
 use crate::runtime::delegation::ChatTarget;
-use crate::store::{FsCompanyStore};
+use crate::store::FsCompanyStore;
 
 /// The vendored `AgentConfig::default().max_tool_iterations` this crate used to
 /// inherit by omission — the number #988 exists to leave behind.

@@ -170,8 +170,7 @@ async fn ask_around_finds_a_fact_reachable_only_by_a_focused_term() {
         .prefix("oc-1990-focused-query-")
         .tempdir()
         .expect("tempdir");
-    let (deps, _journal) =
-        crate::workflows::gated_tool_turn_tests::deps(String::new(), dir.path());
+    let (deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(String::new(), dir.path());
     let company = company_remembering("Renewal date: the contract renews on March 1st.").await;
 
     let result = ask_around(

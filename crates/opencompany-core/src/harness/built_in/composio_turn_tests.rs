@@ -60,7 +60,7 @@ use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{HarnessDeps, HarnessPool};
 use crate::ports::types::CompanyRecord;
-use crate::store::{FsCompanyStore};
+use crate::store::FsCompanyStore;
 
 /// The harness's shared per-tool-result byte budget
 /// (`openhuman::context::DEFAULT_TOOL_RESULT_BUDGET_BYTES`). A Composio result

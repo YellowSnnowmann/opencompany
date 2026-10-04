@@ -46,7 +46,7 @@ use crate::harness::search::SearchBackend;
 use crate::harness::{HarnessDeps, HarnessPool};
 use crate::ports::types::{CompanyId, CompanyRecord};
 use crate::ports::usage::{SampleKind, UsageMeter, UsageSample};
-use crate::store::{FsCompanyStore};
+use crate::store::FsCompanyStore;
 
 // ---------------------------------------------------------------------------
 // The scripted model

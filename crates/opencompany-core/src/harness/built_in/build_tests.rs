@@ -115,7 +115,6 @@ use crate::harness::provider::MockProvider;
 use crate::ports::CompanyStore;
 use crate::ports::types::{CompanyRecord, CompanySummary, LedgerEntry};
 
-
 /// A no-op company store — `build_agent` only needs a handle; nothing here
 /// loads or persists.
 struct PinStore;

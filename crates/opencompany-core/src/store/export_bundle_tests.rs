@@ -101,9 +101,7 @@ async fn a_console_tool_grant_survives_a_roundtrip_without_becoming_a_seed_grant
     );
 
     let (s2, e2, m2) = fs_ports(&home2);
-    import_bundle(&dest, s2.clone(), e2, m2)
-        .await
-        .unwrap();
+    import_bundle(&dest, s2.clone(), e2, m2).await.unwrap();
     let dst = s2.load(&id).await.unwrap().unwrap();
 
     // The grant itself survives, still attributed to the operator...
@@ -367,9 +365,7 @@ async fn tar_pack_unpack_roundtrip() {
     // Import the unpacked bundle into a fresh home.
     let home2 = tmp_root("tar-dst");
     let (s2, e2, m2) = fs_ports(&home2);
-    let imported = import_bundle(&root, s2.clone(), e2, m2)
-        .await
-        .unwrap();
+    let imported = import_bundle(&root, s2.clone(), e2, m2).await.unwrap();
     assert_eq!(imported, id);
     let rec = s2.load(&id).await.unwrap().unwrap();
     assert_eq!(rec.manifest.company.name, "Export Co");

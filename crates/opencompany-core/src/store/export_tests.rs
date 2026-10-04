@@ -463,9 +463,7 @@ async fn a_withdrawn_discussion_message_does_not_survive_export_import() {
 
     // 2 and 3. What the importing instance ends up holding.
     let (s2, e2, m2) = fs_ports(&home2);
-    import_bundle(&dest, s2, e2.clone(), m2)
-        .await
-        .unwrap();
+    import_bundle(&dest, s2, e2.clone(), m2).await.unwrap();
     let events = e2
         .read_from(&id, EventSeq::new(0), usize::MAX)
         .await

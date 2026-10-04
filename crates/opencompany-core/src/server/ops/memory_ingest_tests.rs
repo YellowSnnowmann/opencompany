@@ -99,7 +99,10 @@ async fn drop_files(state: &AppState, files: &[(&str, &str, &[u8])]) -> (StatusC
     let request = Request::builder()
         .method("POST")
         .uri("/api/v1/company/memory/ingest")
-        .header("cookie", crate::server::test_support::fixed_cookie(&company()))
+        .header(
+            "cookie",
+            crate::server::test_support::fixed_cookie(&company()),
+        )
         .header(
             "content-type",
             format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -121,7 +124,10 @@ async fn brain_rows(state: &AppState) -> Vec<Value> {
     let request = Request::builder()
         .method("GET")
         .uri("/api/v1/company/memory")
-        .header("cookie", crate::server::test_support::fixed_cookie(&company()))
+        .header(
+            "cookie",
+            crate::server::test_support::fixed_cookie(&company()),
+        )
         .body(Body::empty())
         .unwrap();
     let response = router(state.clone()).oneshot(request).await.unwrap();
@@ -315,7 +321,10 @@ async fn a_request_over_the_body_limit_is_refused_as_413_not_malformed() {
     let request = Request::builder()
         .method("POST")
         .uri("/api/v1/company/memory/ingest")
-        .header("cookie", crate::server::test_support::fixed_cookie(&company()))
+        .header(
+            "cookie",
+            crate::server::test_support::fixed_cookie(&company()),
+        )
         .header(
             "content-type",
             format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -395,7 +404,10 @@ async fn a_dropped_document_can_be_forgotten_again() {
         // A CSV is filed under the generic `document` source, the Markdown
         // file under `markdown`.
         .uri("/api/v1/company/memory/document/document")
-        .header("cookie", crate::server::test_support::fixed_cookie(&company()))
+        .header(
+            "cookie",
+            crate::server::test_support::fixed_cookie(&company()),
+        )
         .body(Body::empty())
         .unwrap();
     let response = router(state.clone()).oneshot(request).await.unwrap();
@@ -424,7 +436,10 @@ async fn forgetting_an_unknown_document_is_a_not_found() {
     let request = Request::builder()
         .method("DELETE")
         .uri("/api/v1/company/memory/document/never-uploaded")
-        .header("cookie", crate::server::test_support::fixed_cookie(&company()))
+        .header(
+            "cookie",
+            crate::server::test_support::fixed_cookie(&company()),
+        )
         .body(Body::empty())
         .unwrap();
     let response = router(state.clone()).oneshot(request).await.unwrap();

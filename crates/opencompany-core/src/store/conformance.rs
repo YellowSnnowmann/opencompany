@@ -29,7 +29,6 @@ use crate::ports::artifacts::{ArtifactAuthor, ArtifactKind, ArtifactRecord, Arti
 use crate::ports::events::{EventLog, EventStreamItem};
 use crate::ports::inbox::{EmailRecord, InboxMeta, InboxStore};
 use crate::ports::login_codes::{LoginCodeRecord, LoginCodeStore};
-use crate::ports::traces::TraceStore;
 use crate::ports::notifications::{Notification, NotificationStore, Subject, SubjectKind};
 use crate::ports::now_millis;
 use crate::ports::run_output::{
@@ -39,9 +38,10 @@ use crate::ports::sessions::{SessionKind, SessionRecord, SessionStore};
 use crate::ports::skills_state::{SkillInstall, SkillSource, SkillState, SkillStateStore};
 use crate::ports::store::CompanyStore;
 use crate::ports::tasks::{TaskOrigin, TaskRecord, TaskStore, TaskTitle};
+use crate::ports::traces::TraceStore;
 use crate::ports::types::{
-    Attachment, CompanyEvent, CompanyId, CompanyRecord, CompressedTrace,
-    EventSeq, LedgerEntry, SecretValue, TemplateProvenance,
+    Attachment, CompanyEvent, CompanyId, CompanyRecord, CompressedTrace, EventSeq, LedgerEntry,
+    SecretValue, TemplateProvenance,
 };
 use crate::ports::usage::{SampleKind, UsageMeter, UsageSample};
 use crate::ports::users::{InviteRecord, UserRecord, UserRole, UserStatus, UserStore};

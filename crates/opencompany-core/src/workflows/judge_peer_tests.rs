@@ -481,9 +481,9 @@ async fn a_fact_match_never_asks_a_peer() {
         .prefix("oc-1866-peer-last-")
         .tempdir()
         .expect("tempdir");
-    let (deps, _journal) =
-        crate::workflows::gated_tool_turn_tests::deps(String::new(), dir.path());
-    let company = company_remembering("Renewal pricing: enterprise renewals carry a 12% uplift.").await;
+    let (deps, _journal) = crate::workflows::gated_tool_turn_tests::deps(String::new(), dir.path());
+    let company =
+        company_remembering("Renewal pricing: enterprise renewals carry a 12% uplift.").await;
     let stub = PeerStub::answering("should never be reached");
     let record = roster(THREE_DESKS);
 

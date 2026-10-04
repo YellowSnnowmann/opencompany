@@ -16,9 +16,9 @@ use serde_json::json;
 use tower::ServiceExt;
 
 use crate::company::CompanyManifest;
-use crate::ports::types::{CompanyId, CompressedTrace};
 #[cfg(feature = "openhuman")]
 use crate::ports::types::{CompanyEvent, EventSeq};
+use crate::ports::types::{CompanyId, CompressedTrace};
 use crate::runtime::RuntimeBuilder;
 use crate::server::router;
 use crate::{AppConfig, AppState};
@@ -39,7 +39,9 @@ async fn state_over(home: &std::path::Path, ids: &[&str]) -> AppState {
             .build()
             .await
             .unwrap();
-        state.registry().insert(CompanyId::new(*id), Arc::new(runtime));
+        state
+            .registry()
+            .insert(CompanyId::new(*id), Arc::new(runtime));
         crate::server::test_support::seed_fixed_admin(&state, id).await;
     }
     state
@@ -115,7 +117,10 @@ async fn without_the_runtime_status_reports_off_and_reads_refuse() {
     assert_eq!(body["on"], false);
     assert_eq!(body["root"], format!("team:{id}"));
     let (status, _) = call(&state, &id, "GET", "/memory", None).await;
-    assert!(status.is_client_error() || status.is_server_error(), "{status}");
+    assert!(
+        status.is_client_error() || status.is_server_error(),
+        "{status}"
+    );
 }
 
 #[cfg(feature = "openhuman")]
@@ -130,7 +135,14 @@ async fn an_operator_learning_is_listed_searched_and_forgotten() {
     assert_eq!(body["on"], true, "{body}");
     assert_eq!(body["root"], format!("team:{id}"));
 
-    let (status, _) = call(&state, &id, "POST", "/memory", Some(json!({ "text": "  " }))).await;
+    let (status, _) = call(
+        &state,
+        &id,
+        "POST",
+        "/memory",
+        Some(json!({ "text": "  " })),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "blank text is refused");
 
     let (status, created) = call(
@@ -152,7 +164,12 @@ async fn an_operator_learning_is_listed_searched_and_forgotten() {
     let items = page["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], item_id.as_str());
-    assert!(items[0]["tags"].as_array().unwrap().contains(&json!("operator")));
+    assert!(
+        items[0]["tags"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("operator"))
+    );
 
     let (status, found) = call(&state, &id, "GET", "/memory?query=invoices", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -161,7 +178,11 @@ async fn an_operator_learning_is_listed_searched_and_forgotten() {
     let (status, _) = call(&state, &id, "DELETE", &format!("/memory/{item_id}"), None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (status, _) = call(&state, &id, "DELETE", &format!("/memory/{item_id}"), None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "a second forget finds nothing");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a second forget finds nothing"
+    );
     let (_, page) = call(&state, &id, "GET", "/memory", None).await;
     assert!(page["items"].as_array().unwrap().is_empty());
 
@@ -199,7 +220,14 @@ async fn one_company_cannot_read_or_forget_anothers_memory() {
 
     let (_, page) = call(&state, &globex, "GET", "/memory", None).await;
     assert!(page["items"].as_array().unwrap().is_empty());
-    let (status, _) = call(&state, &globex, "DELETE", &format!("/memory/{item_id}"), None).await;
+    let (status, _) = call(
+        &state,
+        &globex,
+        "DELETE",
+        &format!("/memory/{item_id}"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let (_, page) = call(&state, &acme, "GET", "/memory", None).await;
     assert_eq!(page["items"].as_array().unwrap().len(), 1, "acme keeps it");
@@ -225,6 +253,13 @@ async fn the_agents_brain_and_recall_routes_answer() {
     assert_eq!(status, StatusCode::OK, "{brain}");
     assert!(brain["sources"].as_array().unwrap().is_empty());
 
-    let (status, _) = call(&state, &id, "POST", "/memory/recall", Some(json!({ "question": " " }))).await;
+    let (status, _) = call(
+        &state,
+        &id,
+        "POST",
+        "/memory/recall",
+        Some(json!({ "question": " " })),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }

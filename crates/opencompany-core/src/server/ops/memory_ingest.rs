@@ -184,7 +184,12 @@ async fn store_source(
     };
 
     let kind = brain_source_of(&source, declared);
-    match company.runtime.memory().brain_file(&source, kind, &text).await {
+    match company
+        .runtime
+        .memory()
+        .brain_file(&source, kind, &text)
+        .await
+    {
         Ok(filed) => IngestedItem {
             source,
             status: "stored",

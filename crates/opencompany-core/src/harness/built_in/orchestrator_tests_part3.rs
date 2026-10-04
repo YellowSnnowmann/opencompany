@@ -544,7 +544,8 @@ async fn query_company_announces_the_dropped_event_tail() {
 #[tokio::test]
 async fn query_company_says_when_the_fact_list_was_cut() {
     // Exactly at the cap: complete, so no notice.
-    let (company, memory) = seeded_memory("cut-exact", (0..FACT_LIMIT).map(|i| format!("Fact {i}"))).await;
+    let (company, memory) =
+        seeded_memory("cut-exact", (0..FACT_LIMIT).map(|i| format!("Fact {i}"))).await;
     let out = QueryCompanyTool::new(company, Some(memory), None, None, None, None)
         .execute(json!({}))
         .await
@@ -611,10 +612,7 @@ async fn query_company_bounds_the_insight_document_size() {
     // (e) A single multi-KB multibyte body: cut on a char boundary, marked
     // with an ellipsis, exactly the cap wide, and no panic.
     let out = render("bounds-one", vec!["é".repeat(5_000)]).await;
-    let body = out
-        .lines()
-        .find_map(fact_body)
-        .expect("fact line");
+    let body = out.lines().find_map(fact_body).expect("fact line");
     assert!(body.ends_with('…'), "a cut body is marked: {body:?}");
     assert_eq!(
         body.chars().count(),
@@ -661,7 +659,11 @@ async fn query_company_bounds_the_insight_document_size() {
 
     // (g) A small document renders its learnings verbatim and announces
     // nothing.
-    let out = render("bounds-small", vec!["Body 0".to_string(), "Body 1".to_string()]).await;
+    let out = render(
+        "bounds-small",
+        vec!["Body 0".to_string(), "Body 1".to_string()],
+    )
+    .await;
     assert!(out.contains("- **Body 0**: Body 0\n"), "{out}");
     assert!(out.contains("- **Body 1**: Body 1\n"), "{out}");
     assert!(!out.contains("TRUNCATED"), "nothing was cut: {out}");

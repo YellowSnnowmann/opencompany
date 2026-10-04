@@ -414,7 +414,10 @@ async fn external_cycles_tag_their_puts_inbound() {
 
     let home_dir = tmp_home();
     let rt = RuntimeBuilder::new(home_dir.path().to_path_buf(), manifest("full"))
-        .with_id(CompanyId::new(format!("inbound-{}", uuid::Uuid::new_v4().simple())))
+        .with_id(CompanyId::new(format!(
+            "inbound-{}",
+            uuid::Uuid::new_v4().simple()
+        )))
         .build()
         .await
         .unwrap();
@@ -459,7 +462,10 @@ async fn external_cycles_tag_their_puts_inbound() {
             .contains(&INBOUND_TAG.to_string())
     };
     assert!(!tagged(&ids[0]), "the ordinary cycle's put is not inbound");
-    assert!(tagged(&ids[1]), "the external cycle's put is tagged inbound");
+    assert!(
+        tagged(&ids[1]),
+        "the external cycle's put is tagged inbound"
+    );
 }
 
 #[tokio::test]

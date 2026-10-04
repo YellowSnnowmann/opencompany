@@ -377,7 +377,8 @@ async fn an_oversized_note_reaches_the_model_whole_and_read_only() {
         .rsplit_once("\n\n[took ")
         .map_or(read.trim_end(), |(text, _)| text);
     assert!(
-        tool_text.trim_end()
+        tool_text
+            .trim_end()
             .ends_with(&format!("--- END WORKSPACE NOTE {nonce} ---")),
         "the model never received the closing fence, so the untrusted-content region it was \
          warned about was left open: {read}"

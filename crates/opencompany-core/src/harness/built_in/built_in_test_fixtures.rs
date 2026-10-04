@@ -13,9 +13,7 @@ pub(super) use tinyinference::model::{ChatModel, ModelRequest, ModelResponse};
 pub(super) use crate::company::CompanyManifest;
 pub(super) use crate::harness::provider::MockProvider;
 pub(super) use crate::ports::UsageSample;
-pub(super) use crate::ports::types::{
-    ChunkAddr, CompanySummary, ContextChunk, LedgerEntry,
-};
+pub(super) use crate::ports::types::{CompanySummary, LedgerEntry};
 // The two-level resolver. Test-only now: the roster build goes through
 // `agent_scoped_grants`, and these tests assert the desk-less case still
 // resolves identically to what shipped before desks could scope tools.
@@ -52,14 +50,10 @@ pub(super) fn fp_policy(mode: &str, always: &[&str], cap: Option<f64>, ttl: Opti
     }
 }
 
-/// In-memory `ContextStore` so the memory tools have somewhere to land.
+/// A placeholder the fixtures still thread through `deps_with_plan`. Company
+/// memory is OpenHuman's now (`crate::memory`), so it holds nothing.
 #[derive(Default)]
-pub(super) struct MockContext {
-    pub(super) chunks: StdMutex<Vec<(ChunkAddr, ContextChunk)>>,
-    // Monotonic, NOT chunks.len(): a delete shrinks the vec, and a
-    // len-derived addr would then collide with a surviving chunk's.
-    pub(super) next_addr: std::sync::atomic::AtomicUsize,
-}
+pub(super) struct MockContext;
 
 /// `CompanyStore` that records what the cost hook appends.
 #[derive(Default)]

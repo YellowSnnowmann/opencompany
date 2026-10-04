@@ -3553,7 +3553,6 @@ impl HarnessPool {
         Ok(())
     }
 
-
     /// Re-resolves the company's capability filter (issue #108): with a plan
     /// wired ([`HarnessDeps::plan`]), a per-tenant, per-period, fail-closed
     /// budget read from the [`UsageMeter`] via
