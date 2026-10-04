@@ -228,11 +228,6 @@ fn dispatched_desk_agent_tool_belt_is_pinned() {
         "http_request",
         "image_info",
         "list",
-        // The deliberate-memory trio (issue #1113): intrinsic, on every
-        // belt — company-scoped by construction, see memory_tools.rs.
-        "memory_forget",
-        "memory_recall",
-        "memory_store",
         "read_workspace_state",
         "request_approval",
         "shell",

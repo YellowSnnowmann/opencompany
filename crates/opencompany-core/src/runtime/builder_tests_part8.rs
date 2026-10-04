@@ -404,9 +404,12 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
         .await
         .unwrap()
         .into_iter()
-        .filter_map(|stored| match stored.event {
-            CompanyEvent::AgentReply { agent_id, .. } => Some(agent_id),
-            _ => None,
+        .filter_map(|stored| {
+            eprintln!("EVENT {}", serde_json::to_string(&stored.event).unwrap_or_default());
+            match stored.event {
+                CompanyEvent::AgentReply { agent_id, .. } => Some(agent_id),
+                _ => None,
+            }
         })
         .collect();
     assert!(
