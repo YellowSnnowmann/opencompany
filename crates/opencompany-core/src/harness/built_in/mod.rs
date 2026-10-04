@@ -5655,7 +5655,10 @@ impl RosterBlueprint {
     }
 }
 
-/// Builds and registers every teammate this pool serves.
+/// Builds and registers every teammate this pool serves — the whole roster
+/// at once, with no company hive in the way. The pool itself registers
+/// through [`roster_blueprints`] so a hive can rebuild each handle in place.
+#[cfg(test)]
 pub(crate) fn build_roster(
     runtime: &openhuman_embed::Runtime,
     company: &CompanyRecord,
