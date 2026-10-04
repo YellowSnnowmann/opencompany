@@ -135,7 +135,13 @@ async function downloadThroughChip(page: Page, name: string, nodeId: string): Pr
     response.ok(),
     `the chip's download failed: ${response.status()} ${await response.text()}`,
   ).toBeTruthy();
-  return await response.body();
+  // Chromium may discard a completed fetch's body before Playwright asks CDP
+  // for it (notably after many sequential browser tests). Re-read the same
+  // authenticated blob URL through the context request client for a stable
+  // byte assertion.
+  const stored = await page.context().request.get(response.url());
+  expect(stored.ok(), `the blob could not be read again: ${stored.status()}`).toBeTruthy();
+  return await stored.body();
 }
 
 test("a note uploaded through the Files tab attaches to a message and downloads", async ({
@@ -249,7 +255,9 @@ test("a file picked with the paperclip still attaches, previews and downloads", 
   await chip(page, name).click();
   const response = await served;
   expect(response.ok()).toBeTruthy();
-  expect((await response.body()).equals(png)).toBeTruthy();
+  const stored = await page.context().request.get(response.url());
+  expect(stored.ok(), `the blob could not be read again: ${stored.status()}`).toBeTruthy();
+  expect((await stored.body()).equals(png)).toBeTruthy();
 });
 
 test("a folder is refused, and the refusal names the reason", async ({ page, request }) => {

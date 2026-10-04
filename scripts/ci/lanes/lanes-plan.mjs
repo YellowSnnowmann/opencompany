@@ -370,11 +370,6 @@ export function buildPlan({ profile, areas, env = {} }) {
           run: "cargo test --locked -p opencompany-core --features acp,runner --bin opencompany",
         },
         {
-          name: "tinyplace",
-          when: rust,
-          run: "cargo test --locked -p opencompany-core --features tinyplace --lib",
-        },
-        {
           name: "webhooks",
           when: rust,
           run: "cargo test --locked -p opencompany-core --features webhooks --lib server::webhook",

@@ -72,13 +72,7 @@ fn reads_searches_and_drafts_do_not_stop() {
 /// so the judgement arm adds no stop of its own where a tier allowed them.
 #[test]
 fn the_agents_own_drafts_do_not_stop() {
-    for tool in [
-        "file_write",
-        "edit",
-        "apply_patch",
-        "csv_export",
-        "memory",
-    ] {
+    for tool in ["file_write", "edit", "apply_patch", "csv_export", "memory"] {
         assert_eq!(judge_bare(tool), Judgement::Silent, "`{tool}` is a draft");
     }
 }

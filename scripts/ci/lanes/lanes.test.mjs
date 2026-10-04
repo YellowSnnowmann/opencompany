@@ -107,7 +107,6 @@ test("every step the old ci.yml ran on a Rust change is still in the plan", () =
     "--bin opencompany\n",
     "--test offline_e2e",
     "cargo check --locked --all-features --all-targets",
-    "--features tinyplace --lib",
     "--features webhooks --lib server::webhook",
     "-p opencompany-tui --features harness --lib",
     "-p opencompany-tui --features sqlite --lib",

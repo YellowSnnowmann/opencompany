@@ -228,7 +228,8 @@ async fn run_refuses_dispatch_once_the_total_ceiling_is_crossed() {
         Some(plan),
     );
     let pool = HarnessPool::new();
-    let rec = record();
+    let mut rec = record();
+    rec.id = crate::test_support::per_test_company_id("total-ceiling");
     pool.ensure(&rec, &deps).await.expect("ensure");
 
     // Under the ceiling (0 spend < 100): the turn runs and echoes the prompt.
