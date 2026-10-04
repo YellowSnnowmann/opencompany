@@ -41,13 +41,6 @@ pub const DEFAULT_CHOICE_OPTION_LIMIT: usize = 8;
 pub const DEFAULT_MAX_ROUNDS: u32 = 12;
 /// Seconds one seat turn may take, counted from the moment it holds its lock.
 pub const DEFAULT_TURN_TIMEOUT_SECS: u64 = 600;
-/// Referral hops allowed when `[group_chat.routing.referral]` enables crossing
-/// without saying how far.
-pub const DEFAULT_REFERRAL_MAX_HOPS: u32 = 1;
-
-/// The words `referral.reach` accepts, in the manifest's own spelling.
-pub const REACH_WORDS: &[&str] = &["local", "channels", "desks"];
-
 /// The `[group_chat.routing]` block as authored.
 ///
 /// Snake_case on every wire on purpose: this **is** the manifest block, the
@@ -80,32 +73,12 @@ pub struct RoutingConfig {
     /// Seconds one seat turn may take once it holds its turn lock.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_timeout_secs: Option<u64>,
-    /// Whether and how far a seat may put a question to another desk.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub referral: Option<ReferralConfig>,
 }
 
 // Probabilities are `f64`, which is not `Eq`; the record types that hold a
 // block derive `Eq`, and validation refuses `NaN`, so total equality holds for
 // every value a block can carry.
 impl Eq for RoutingConfig {}
-
-/// The `[group_chat.routing.referral]` block as authored.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReferralConfig {
-    /// Whether a seat's `@#desk` / `@agent` may open an episode elsewhere.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
-    /// How many crossings one question may make.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_hops: Option<u32>,
-    /// `local` | `channels` | `desks` — see [`REACH_WORDS`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reach: Option<String>,
-    /// Whether the far desk's answer is carried back to the asking desk.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub returns: Option<bool>,
-}
 
 impl RoutingConfig {
     /// Whether nothing was said — the serializer's skip rule and the
@@ -157,20 +130,6 @@ impl RoutingConfig {
             problems.push(format!(
                 "{label} sets `routing.turn_timeout_secs = 0` — every seat would time out before it spoke; omit the key for the default of {DEFAULT_TURN_TIMEOUT_SECS}."
             ));
-        }
-        if let Some(referral) = &self.referral {
-            if let Some(reach) = referral.reach.as_deref()
-                && !REACH_WORDS.contains(&reach)
-            {
-                problems.push(format!(
-                    "{label} `routing.referral.reach` must be one of {REACH_WORDS:?}; got `{reach}`."
-                ));
-            }
-            if referral.max_hops == Some(0) && referral.enabled != Some(false) {
-                problems.push(format!(
-                    "{label} sets `routing.referral.max_hops = 0` — a referral budget of nothing never asks anybody anything; omit `routing.referral` to keep the desk inside its own room."
-                ));
-            }
         }
         problems
     }
