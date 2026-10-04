@@ -210,6 +210,12 @@ openhuman = { path = "../../vendor/openhuman/crates/openhuman-core" }
 tinytools = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/tinytools/crates/tinytools" }
 tinytools-agent = { path = "../../vendor/openhuman/vendor/tinyagents/vendor/tinytools/crates/tinytools-agent" }
 
+# Same one-copy reason for the memory contract `tinyhivemind-openhuman` names
+# by git URL; mirrors the root manifest's tinymemory patch.
+[patch."https://github.com/tinyhumansai/tinymemory"]
+tinymemory-api = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory-api" }
+tinymemory-tools = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory-tools" }
+
 [patch.crates-io]
 tinyflows = { path = "../../vendor/openhuman/vendor/tinyflows/crates/tinyflows" }
 tinychannels = { path = "../../vendor/openhuman/vendor/tinychannels" }
