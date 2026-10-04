@@ -591,8 +591,8 @@ fn dispatched_belt_excludes_every_deferred_family() {
         "memory_tree",
         "memory_tree_search",
         "memory_tree_get",
-        // destructive memory: upstream's raw `forget` stays out; the
-        // scoped oc-authored `memory_forget` is a real belt tool now.
+        // destructive memory: upstream's raw `forget` stays out; memory
+        // is OpenHuman's single `memory` tool, scoped to the company.
         "forget",
     ];
     for tool in forbidden {

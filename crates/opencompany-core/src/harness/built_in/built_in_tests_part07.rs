@@ -485,12 +485,9 @@ async fn ensure_gates_shell_tools_once_the_token_budget_is_crossed() {
         before.contains(&"read_workspace_state".to_string()),
         "got {before:?}"
     );
-    // `memory_store`/`memory_recall` are currently withheld altogether
-    // (see `harness::build::memory_tools`'s doc comment) — openhuman
-    // removed the constructor seam that let either tool act on a
-    // company's own `ContextStore` rather than one shared,
-    // unconfigured store. `file_read` is this test's example of an
-    // intrinsic, ungated tool instead.
+    // Memory is OpenHuman's own `memory` tool, named in the spec's scope
+    // rather than carried on the belt. `file_read` is this test's example
+    // of an intrinsic, ungated tool.
     assert!(
         before.contains(&"file_read".to_string()),
         "ungated files namespace must be present: {before:?}"

@@ -390,7 +390,7 @@ fn every_registered_tool_is_declared() {
 ///
 /// A tool's own `permission_level()` is NOT trustworthy as the authority —
 /// it defaults to `ReadOnly`, and upstream tools that plainly mutate
-/// (`git_operations`, `memory_store`) never override it, so believing a
+/// (`git_operations`) never override it, so believing a
 /// `ReadOnly` claim would wave a write straight through the gate. But the
 /// claims in the *other* direction are deliberate: nothing declares itself
 /// `Execute` or `Dangerous` by accident. So those are checked, and a
