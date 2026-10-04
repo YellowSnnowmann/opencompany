@@ -23,7 +23,6 @@
 //! `Send`.
 
 use std::collections::HashMap;
-use std::ops::Range;
 use std::path::Path;
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 
