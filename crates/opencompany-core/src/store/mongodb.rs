@@ -60,7 +60,6 @@ use crate::ports::types::{
     StoredEvent, TaskResult,
 };
 use crate::ports::users::{InviteRecord, UserRecord};
-use crate::store::text::slice_on_char_boundaries;
 
 fn mongo_err(e: impl std::fmt::Display) -> OpenCompanyError {
     OpenCompanyError::Store(format!("mongodb error: {e}"))

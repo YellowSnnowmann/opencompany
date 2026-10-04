@@ -30,7 +30,6 @@ use crate::ports::types::{
 };
 use crate::ports::{generate_id, now_millis};
 use crate::store::paths::Bundle;
-use crate::store::text::slice_on_char_boundaries;
 
 // ---------------------------------------------------------------------------
 // Shared helpers

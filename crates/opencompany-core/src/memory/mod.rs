@@ -26,11 +26,13 @@
 //! TinyHumans credential, no CortexDB key) memory is off and calls are
 //! [`NotConfigured`](crate::error::OpenCompanyError::NotConfigured).
 
+mod context_op;
 mod types;
 
 #[cfg(feature = "openhuman")]
 mod engine;
 
+pub use context_op::{CONTEXT_TAG, INBOUND_TAG};
 pub use types::{
     BrainFiled, BrainSource, BrainSources, LearningKind, MemoryAgent, MemoryAgents, MemoryItem,
     MemoryItemKind, MemoryPage, MemoryQuery, MemoryStatus, RecallAnswer, RecallCitation,

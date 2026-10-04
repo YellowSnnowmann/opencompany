@@ -3384,9 +3384,8 @@ struct CycleHostImpl<'a> {
     /// a `WebhookReceived` (a channel message, an email, a third-party
     /// callback) in its trigger batch. Computed once, like `task_id`. A brain-chosen
     /// `ContextOp::Put` in such a cycle can be (and on the medulla path
-    /// routinely is) the raw inbound payload echoed back, so the write goes
-    /// through the taint-stamping inbound port instead of the internal one
-    /// (issue #1113). Coarse by design: the host cannot see which put quoted
+    /// routinely is) the raw inbound payload echoed back, so the write is
+    /// tagged inbound (`crate::memory::INBOUND_TAG`, issue #1113). Coarse by design: the host cannot see which put quoted
     /// the payload, so every put of an externally-triggered cycle carries the
     /// external stamp — over-tainting is safe, under-tainting is the leak.
     external_trigger: bool,
@@ -4141,27 +4140,12 @@ impl CycleHost for CycleHostImpl<'_> {
     }
 
     async fn context_op(&self, op: ContextOp) -> Result<ContextOpResult> {
-        match op {
-            ContextOp::Put(chunk) => Ok(ContextOpResult::Addr({
-                // External-triggered cycles write through the taint-stamping
-                // port; see `external_trigger` on this struct.
-                let port = if self.external_trigger {
-                    &self.rt.inbound_context
-                } else {
-                    &self.rt.context
-                };
-                port.put(&self.company, chunk).await?
-            })),
-            ContextOp::List { prefix } => Ok(ContextOpResult::Metas(
-                self.rt.context.list(&self.company, &prefix).await?,
-            )),
-            ContextOp::Peek { addr, range } => Ok(ContextOpResult::Text(
-                self.rt.context.peek(&self.company, &addr, range).await?,
-            )),
-            ContextOp::Search { query, limit } => Ok(ContextOpResult::Hits(
-                self.rt.context.search(&self.company, &query, limit).await?,
-            )),
-        }
+        // External-triggered cycles tag their puts inbound; see
+        // `external_trigger` on this struct.
+        self.rt
+            .memory()
+            .context_op(op, self.external_trigger)
+            .await
     }
 
     async fn emit_effect(&self, effect: Effect) -> Result<EffectDisposition> {

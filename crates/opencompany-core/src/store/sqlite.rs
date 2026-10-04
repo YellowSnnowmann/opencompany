@@ -48,7 +48,6 @@ use crate::ports::types::{
     StoredEvent, TaskResult,
 };
 use crate::ports::users::{InviteRecord, UserRecord};
-use crate::store::text::slice_on_char_boundaries;
 
 /// Schema for every port table. Idempotent: safe to run on each `open`.
 const MIGRATIONS: &str = r#"

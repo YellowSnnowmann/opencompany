@@ -100,7 +100,7 @@ fn meta(item: &MemoryItem, label: String) -> ChunkMeta {
 /// `text`, or the byte `range` of it widened to char boundaries.
 fn slice(text: &str, range: Option<Range<usize>>) -> String {
     match range {
-        Some(range) => crate::store::text::slice_on_char_boundaries(text, range).to_string(),
+        Some(range) => crate::store::text::slice_on_char_boundaries(text, range),
         None => text.to_string(),
     }
 }
