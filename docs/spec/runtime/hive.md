@@ -423,7 +423,7 @@ scripted OpenAI-compatible model that answers `tool_calls` for
 | a cross-desk referral | only the answer crosses, under `hive-referral` |
 | **a shared agent on two desks** | both episodes complete; `turn_started` brackets overlap across desks and never for the same agent |
 | crash after `RoundCommitted` | resume replays as a no-op |
-| memory over MCP | `memory_store` in one episode, `memory_recall` in the next |
+| memory over MCP | `memory` tool `learn` in one episode, `recall` in the next |
 
 `src/hive/*_tests.rs` pin each seam without a model; `hive::jev` tests stand
 up a fake proxy and assert the bearer, the URL rule, the one retry and the
