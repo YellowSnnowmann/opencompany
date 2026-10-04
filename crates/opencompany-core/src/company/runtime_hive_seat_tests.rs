@@ -1,8 +1,14 @@
-//! Runtime tests: approvals a hive episode seat parked under its own turn key.
+//! Runtime tests: approvals a company-hive turn parked under its own turn key
+//! release the agent with the operator's decisions rather than running a chat
+//! cycle (OC-2).
 
-use crate::ports::types::{ApprovalId, Effect, EffectGroup};
+use std::sync::{Arc, Mutex};
+
+use crate::ports::types::{
+    Actor, ActorKind, ApprovalId, ApprovalOrigin, CompanyEvent, Effect, EffectGroup, Verdict,
+};
 use crate::runtime::approval_park::{ApprovalParker, ParkSite};
-use crate::runtime::episode_resume::turn_key;
+use crate::runtime::hive_resume::turn_key;
 use crate::runtime::journal::{ApprovalConversation, TaskLink};
 
 use super::tests_approval::runtime_with_events;
@@ -20,10 +26,10 @@ pub(super) fn seat_effect(kind: &str, agent: &str, payload: serde_json::Value) -
     }
 }
 
-pub(super) async fn park_for_seat(
+pub(super) async fn park_for_turn(
     rt: &crate::company::runtime::CompanyRuntime,
-    episode: &str,
-    seat: &str,
+    episode: Option<&str>,
+    agent: &str,
     effect: Effect,
 ) -> ApprovalId {
     ApprovalParker::new(
@@ -42,7 +48,11 @@ pub(super) async fn park_for_seat(
                 thread: Some("engineering".to_owned()),
                 parent: None,
             },
-            turn: Some(turn_key(episode, seat)),
+            turn: Some(turn_key(agent, episode)),
+            origin: Some(ApprovalOrigin::Hive {
+                agent_id: agent.to_owned(),
+                episode_id: episode.map(str::to_owned),
+            }),
         },
     )
     .await
@@ -50,59 +60,65 @@ pub(super) async fn park_for_seat(
 }
 
 #[tokio::test]
-async fn a_seat_approval_names_its_episode_and_seat() {
+async fn a_hive_approval_names_its_agent_and_episode() {
     let (rt, _home) = runtime_with_events().await;
-    park_for_seat(
+    park_for_turn(
         &rt,
-        "ep1",
+        Some("ep1"),
         "ceo",
         seat_effect("shell", "ceo", serde_json::json!({ "cmd": "ls" })),
     )
     .await;
     let summary = &rt.pending_approvals()[0];
-    let episode = summary
-        .episode
-        .as_ref()
-        .expect("an episode seat's approval");
-    assert_eq!(episode.id, "ep1");
-    assert_eq!(episode.seat, "ceo");
+    let hive = summary.hive.as_ref().expect("a hive turn's approval");
+    assert_eq!(hive.agent_id, "ceo");
+    assert_eq!(hive.episode_id.as_deref(), Some("ep1"));
     assert_eq!(summary.thread.as_deref(), Some("engineering"));
     let wire = serde_json::to_value(summary).unwrap();
     assert_eq!(
-        wire["episode"],
-        serde_json::json!({ "id": "ep1", "seat": "ceo" })
+        wire["hive"],
+        serde_json::json!({ "agentId": "ceo", "episodeId": "ep1" })
+    );
+    let parked = rt
+        .events
+        .read_from(&rt.id, crate::ports::types::EventSeq::new(0), usize::MAX)
+        .await
+        .unwrap()
+        .into_iter()
+        .find_map(|row| match row.event {
+            CompanyEvent::ApprovalParked { origin, .. } => origin,
+            _ => None,
+        });
+    assert_eq!(
+        parked,
+        Some(ApprovalOrigin::Hive {
+            agent_id: "ceo".into(),
+            episode_id: Some("ep1".into()),
+        }),
+        "the park row says whose turn is held"
     );
 }
 
 #[tokio::test]
-async fn an_ordinary_approval_names_no_episode() {
+async fn an_ordinary_approval_names_no_hive_turn() {
     let (rt, _home) = runtime_with_events().await;
     super::tests_approval::seed_parked(&rt, "plain", 5_000).await;
     let summary = &rt.pending_approvals()[0];
-    assert!(summary.episode.is_none());
-    assert!(
-        serde_json::to_value(summary)
-            .unwrap()
-            .get("episode")
-            .is_none()
-    );
+    assert!(summary.hive.is_none());
+    assert!(serde_json::to_value(summary).unwrap().get("hive").is_none());
 }
 
-use std::sync::{Arc, Mutex};
-
-use crate::ports::types::{Actor, ActorKind, CompanyEvent, Verdict};
-use crate::runtime::episode_resume::{SeatAsk, SeatVerdict};
-
-/// A brain that records the episodes it is asked to resume and fails any
-/// cycle, so a seat's decision that fell through to a chat turn shows up.
+/// A brain that records the releases it is asked for and fails any cycle, so
+/// a hive turn's decision that fell through to a chat turn shows up.
 #[derive(Default)]
-struct ResumeRecorder {
-    resumed: Mutex<Vec<String>>,
+struct ReleaseRecorder {
+    released: Mutex<Vec<(String, Option<String>)>>,
     cycles: Mutex<usize>,
+    refuse: bool,
 }
 
 #[async_trait::async_trait]
-impl crate::ports::Brain for ResumeRecorder {
+impl crate::ports::Brain for ReleaseRecorder {
     async fn run_cycle(
         &self,
         _req: crate::ports::types::CycleRequest,
@@ -110,18 +126,21 @@ impl crate::ports::Brain for ResumeRecorder {
     ) -> crate::Result<crate::ports::types::CycleResult> {
         *self.cycles.lock().unwrap() += 1;
         Err(crate::error::OpenCompanyError::InvalidRequest(
-            "an episode seat's decision must not run a chat cycle".into(),
+            "a hive turn's decision must not run a chat cycle".into(),
         ))
     }
 
-    async fn resume_episode(&self, episode_id: &str) -> bool {
-        self.resumed.lock().unwrap().push(episode_id.to_owned());
-        true
+    async fn release_hive_agent(&self, agent_id: &str, note: Option<String>) -> bool {
+        self.released
+            .lock()
+            .unwrap()
+            .push((agent_id.to_owned(), note));
+        !self.refuse
     }
 }
 
 async fn runtime_with_brain(
-    brain: Arc<ResumeRecorder>,
+    brain: Arc<ReleaseRecorder>,
 ) -> (
     Arc<crate::company::runtime::CompanyRuntime>,
     tempfile::TempDir,
@@ -156,28 +175,13 @@ fn operator() -> Actor {
     }
 }
 
-async fn resolved_events(rt: &crate::company::runtime::CompanyRuntime) -> Vec<Verdict> {
-    rt.events
-        .read_from(&rt.id, crate::ports::types::EventSeq::new(0), usize::MAX)
-        .await
-        .unwrap()
-        .into_iter()
-        .filter_map(|stored| match stored.event {
-            CompanyEvent::ApprovalResolved { verdict, .. } => Some(verdict),
-            _ => None,
-        })
-        .collect()
-}
-
 #[tokio::test]
-async fn an_approved_seat_call_goes_to_its_running_episode_not_a_chat_cycle() {
-    let brain = Arc::new(ResumeRecorder::default());
+async fn an_approved_call_releases_its_agent_with_the_decision_not_a_chat_cycle() {
+    let brain = Arc::new(ReleaseRecorder::default());
     let (rt, _home) = runtime_with_brain(brain.clone()).await;
-    let releases = rt.grants.episode_releases();
-    releases.start("ep1");
-    let id = park_for_seat(
+    let id = park_for_turn(
         &rt,
-        "ep1",
+        Some("ep1"),
         "ceo",
         seat_effect("send_email", "ceo", serde_json::json!({ "to": "a@b.c" })),
     )
@@ -185,64 +189,33 @@ async fn an_approved_seat_call_goes_to_its_running_episode_not_a_chat_cycle() {
     rt.resolve_approval(&id, Verdict::Approve, operator())
         .await
         .expect("resolved");
-    let released = releases.take("ep1", &["ceo".to_owned()]);
-    let decision = &released["ceo"][0];
-    assert_eq!(decision.verdict, SeatVerdict::Approved);
-    assert_eq!(
-        decision.ask,
-        SeatAsk::Call {
-            tool: "send_email".into(),
-            args: serde_json::json!({ "to": "a@b.c" }),
-        }
-    );
+    let released = brain.released.lock().unwrap().clone();
+    assert_eq!(released.len(), 1);
+    assert_eq!(released[0].0, "ceo");
+    let note = released[0].1.as_deref().expect("a release note");
+    assert!(note.contains("approved your `send_email` call"), "{note}");
+    assert!(note.contains("a@b.c"), "the note carries the arguments: {note}");
     assert!(
         rt.grants.peek(&id).is_some(),
-        "the seat redeems the single-use grant itself"
+        "the agent redeems the single-use grant itself"
     );
     assert_eq!(*brain.cycles.lock().unwrap(), 0, "no chat cycle ran");
-    assert!(brain.resumed.lock().unwrap().is_empty());
-    assert_eq!(resolved_events(&rt).await, vec![Verdict::Approve]);
 }
 
 #[tokio::test]
-async fn a_decision_for_an_episode_not_running_resumes_it() {
-    let brain = Arc::new(ResumeRecorder::default());
+async fn an_agent_waits_for_every_decision_before_it_is_released() {
+    let brain = Arc::new(ReleaseRecorder::default());
     let (rt, _home) = runtime_with_brain(brain.clone()).await;
-    let id = park_for_seat(
+    let first = park_for_turn(
         &rt,
-        "ep1",
-        "ceo",
-        seat_effect("send_email", "ceo", serde_json::json!({})),
-    )
-    .await;
-    rt.resolve_approval(&id, Verdict::Deny, operator())
-        .await
-        .expect("resolved");
-    assert_eq!(*brain.resumed.lock().unwrap(), vec!["ep1".to_owned()]);
-    assert_eq!(*brain.cycles.lock().unwrap(), 0);
-    let banked = rt
-        .grants
-        .episode_releases()
-        .take("ep1", &["ceo".to_owned()]);
-    assert_eq!(banked["ceo"][0].verdict, SeatVerdict::Denied);
-}
-
-#[tokio::test]
-async fn a_seat_waits_for_every_decision_before_it_is_released() {
-    let brain = Arc::new(ResumeRecorder::default());
-    let (rt, _home) = runtime_with_brain(brain.clone()).await;
-    let releases = rt.grants.episode_releases();
-    releases.start("ep1");
-    let first = park_for_seat(
-        &rt,
-        "ep1",
+        None,
         "ceo",
         seat_effect("send_email", "ceo", serde_json::json!({ "n": 1 })),
     )
     .await;
-    let second = park_for_seat(
+    let second = park_for_turn(
         &rt,
-        "ep1",
+        None,
         "ceo",
         seat_effect("send_email", "ceo", serde_json::json!({ "n": 2 })),
     )
@@ -250,22 +223,23 @@ async fn a_seat_waits_for_every_decision_before_it_is_released() {
     rt.resolve_approval(&first, Verdict::Approve, operator())
         .await
         .unwrap();
-    assert!(releases.take("ep1", &["ceo".to_owned()]).is_empty());
+    assert!(brain.released.lock().unwrap().is_empty());
     rt.resolve_approval(&second, Verdict::Deny, operator())
         .await
         .unwrap();
-    assert_eq!(releases.take("ep1", &["ceo".to_owned()])["ceo"].len(), 2);
+    let released = brain.released.lock().unwrap().clone();
+    assert_eq!(released.len(), 1);
+    let note = released[0].1.as_deref().unwrap();
+    assert_eq!(note.lines().count(), 2, "both decisions in one note: {note}");
 }
 
 #[tokio::test]
 async fn an_explicit_request_decision_retires_its_continuation() {
-    let brain = Arc::new(ResumeRecorder::default());
+    let brain = Arc::new(ReleaseRecorder::default());
     let (rt, _home) = runtime_with_brain(brain.clone()).await;
-    let releases = rt.grants.episode_releases();
-    releases.start("ep1");
-    let id = park_for_seat(
+    let id = park_for_turn(
         &rt,
-        "ep1",
+        Some("ep1"),
         "ceo",
         seat_effect(
             crate::ports::types::REQUEST_APPROVAL_EFFECT_KIND,
@@ -277,13 +251,8 @@ async fn an_explicit_request_decision_retires_its_continuation() {
     rt.resolve_approval(&id, Verdict::Approve, operator())
         .await
         .unwrap();
-    let released = releases.take("ep1", &["ceo".to_owned()]);
-    assert_eq!(
-        released["ceo"][0].ask,
-        SeatAsk::Request {
-            title: "email the client".into()
-        }
-    );
+    let note = brain.released.lock().unwrap()[0].1.clone().unwrap();
+    assert!(note.contains("email the client"), "{note}");
     assert!(
         rt.grants.peek_continuation(&id).is_none(),
         "the continuation is retired, so nothing replays it as a chat turn"
@@ -293,14 +262,12 @@ async fn an_explicit_request_decision_retires_its_continuation() {
 }
 
 #[tokio::test]
-async fn an_expired_seat_approval_releases_the_seat_as_denied() {
-    let brain = Arc::new(ResumeRecorder::default());
+async fn an_expired_hive_approval_releases_the_agent_as_denied() {
+    let brain = Arc::new(ReleaseRecorder::default());
     let (rt, _home) = runtime_with_brain(brain.clone()).await;
-    let releases = rt.grants.episode_releases();
-    releases.start("ep1");
-    let id = park_for_seat(
+    let id = park_for_turn(
         &rt,
-        "ep1",
+        Some("ep1"),
         "ceo",
         seat_effect("send_email", "ceo", serde_json::json!({})),
     )
@@ -312,67 +279,45 @@ async fn an_expired_seat_approval_releases_the_seat_as_denied() {
     )
     .await
     .expect("retired");
-    let released = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        releases.released("ep1", &["ceo".to_owned()]),
-    )
-    .await
-    .expect("an expiry releases the seat");
-    assert_eq!(released["ceo"][0].verdict, SeatVerdict::Denied);
-    assert_eq!(
-        resolved_events(&rt).await,
-        vec![Verdict::Deny],
-        "the expiry is journaled once"
-    );
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if !brain.released.lock().unwrap().is_empty() {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "an expiry releases the agent");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let note = brain.released.lock().unwrap()[0].1.clone().unwrap();
+    assert!(note.contains("did not approve"), "{note}");
     assert_eq!(*brain.cycles.lock().unwrap(), 0);
 }
 
-#[cfg(feature = "openhuman")]
 #[tokio::test]
-async fn an_escalation_answer_goes_to_the_episode_not_a_blocker_resume() {
-    use crate::ports::blockers::{BlockerKind, BlockerPayload, BlockerSource, BlockerVerdict};
-    let brain = Arc::new(ResumeRecorder::default());
+async fn a_release_nobody_takes_tells_the_operator() {
+    let brain = Arc::new(ReleaseRecorder {
+        refuse: true,
+        ..ReleaseRecorder::default()
+    });
     let (rt, _home) = runtime_with_brain(brain.clone()).await;
-    let releases = rt.grants.episode_releases();
-    releases.start("ep1");
-    let payload = BlockerPayload {
-        kind: BlockerKind::Information,
-        source: BlockerSource::AgentQuestion,
-        step: None,
-        reason: "two regions are configured".into(),
-        needed: "which region to deploy to".into(),
-        group_key: None,
-    };
-    let id = park_for_seat(
+    let id = park_for_turn(
         &rt,
-        "ep1",
+        None,
         "ceo",
-        seat_effect(
-            &payload.effect_kind(),
-            "ceo",
-            serde_json::to_value(&payload).unwrap(),
-        ),
+        seat_effect("send_email", "ceo", serde_json::json!({})),
     )
     .await;
-    let (_, follow_up) = rt
-        .apply_blocker_reply_spawned(
-            std::slice::from_ref(&id),
-            &id,
-            BlockerVerdict::Amend,
-            "eu-west",
-            None,
-        )
+    rt.resolve_approval(&id, Verdict::Approve, operator())
         .await
-        .expect("answered");
-    super::join_follow_up(follow_up).await.expect("followed up");
-    let released = releases.take("ep1", &["ceo".to_owned()]);
-    let decision = &released["ceo"][0];
-    assert_eq!(decision.verdict, SeatVerdict::Approved);
-    assert_eq!(decision.answer, "eu-west");
-    assert!(matches!(decision.ask, SeatAsk::Question { .. }));
-    assert!(
-        rt.journal.replayed_blocker_resolutions().is_empty(),
-        "the answer is retired, so no boot replays it into a blocker resume"
-    );
-    assert_eq!(*brain.cycles.lock().unwrap(), 0);
+        .unwrap();
+    let announced = rt
+        .events
+        .read_from(&rt.id, crate::ports::types::EventSeq::new(0), usize::MAX)
+        .await
+        .unwrap()
+        .into_iter()
+        .any(|row| {
+            matches!(&row.event, CompanyEvent::AgentReply { text, .. }
+                if text.contains("no longer waiting"))
+        });
+    assert!(announced, "the operator is told the decision went nowhere");
 }
