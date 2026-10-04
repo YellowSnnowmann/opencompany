@@ -235,12 +235,6 @@ pub fn orchestrator_id(agents: &[ManifestAgent]) -> Option<String> {
 /// internal — never an external effect to park or deny.
 pub fn is_delegation_tool(tool: &str) -> bool {
     tool == SPAWN_TASK_TOOL
-        || tool == DELEGATE_TO_DESK_TOOL
-        // Issue #884: not optional. This predicate is what keeps a hand-off
-        // classified as internal work rather than an external effect to park —
-        // and, downstream, what keeps the new edge inside the loop checks
-        // everything else on this seam already passes through.
-        || tool == DELEGATE_TO_TEAMMATE_TOOL
         || tool == ADD_AGENT_TOOL
         || tool == CREATE_WORKFLOW_TOOL
         || tool == ASSIGN_TASK_TOOL
@@ -309,17 +303,16 @@ company's durable facts, recent activity, saved workflows, team roster and desks
 before answering rather than guessing, then answer directly. A board write is the \
 exception and needs a reason. \
 When there IS work, two decisions come up and they are INDEPENDENT — do not collapse them into \
-one. (1) WHO SHOULD DO THIS: when a request belongs to a specialist desk, hand it to that desk \
-with `delegate_to_desk`; when it names one PERSON, hand it to them with `delegate_to_teammate`; \
-either way pass the id listed beside the name under Your team — a desk is not a person, \
-so pick the tool that matches the target; when it is yours to answer, answer it. Your teammates \
-are one call away: never say you cannot reach one. (2) SHOULD THIS BE TRACKED: you do not have to decide this, and you must not pick a \
-tool in order to influence it. Anything substantial handed to a desk or a teammate is opened as a board card \
-automatically — the hand-off IS the card, so never call `spawn_task` alongside a `delegate_to_desk` \
-for the same work. Nothing else said in chat is tracked unless an agent tracks it: reach for \
-`spawn_task` for work that belongs on the board but must NOT start in this turn — something for \
-later, or for somebody else — and for real work you take on yourself that outlasts this reply. Work that is waiting on a PERSON is not a card — a card notifies nobody and resumes \
-nothing. When you cannot proceed without something only the operator can give you, call \
+one. (1) WHO SHOULD DO THIS: when a request belongs to a specialist desk, post it in that desk's \
+hive with `hivemind_send_hive`; when it is for one PERSON, message them with \
+`hivemind_send_agent` — either way pass the id listed beside the name under Your team; when it \
+is yours to answer, answer it. A message is delivered, not answered in this turn: their reply \
+reaches you later, so say you have asked rather than writing as though you had the answer. Your \
+teammates are one message away: never say you cannot reach one. (2) SHOULD THIS BE TRACKED: \
+nothing said in chat is tracked unless an agent tracks it. Reach for `spawn_task` for work that \
+belongs on the board — something for later, or for somebody else, naming them as its assignee \
+— and for real work you take on yourself that outlasts this reply. Work that is waiting on a \
+PERSON is not a card — a card notifies nobody and resumes nothing. When you cannot proceed without something only the operator can give you, call \
 `escalate_to_human` with the question; the work parks and their answer restarts it. \
 WHEN YOU CAN DO THE WORK IN THIS TURN, DO IT — do not park it as a card for later. Asked to \
 capture a repeatable process (\"create a workflow that…\"), author it NOW with `create_workflow` — \
