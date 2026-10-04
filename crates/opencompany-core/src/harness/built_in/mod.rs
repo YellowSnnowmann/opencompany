@@ -121,8 +121,6 @@ pub mod ledger_tools;
 pub mod lifecycle;
 pub mod mcp;
 pub mod mcp_probe;
-pub mod memory_loop;
-pub mod memory_tools;
 /// Recovering a tool call that a model on the **native** transport wrote into
 /// its message body as prose instead of emitting it through the structured
 /// channel. Validated against the tools the turn itself offered — the marker a
@@ -176,7 +174,6 @@ mod publish_turn_dispatch_tests;
 mod publish_turn_helpers_tests;
 #[cfg(test)]
 mod publish_turn_link_tests;
-pub mod redact;
 pub mod run_origin;
 pub mod run_trace;
 pub mod run_turn;
@@ -4942,40 +4939,10 @@ impl HarnessPool {
             }
         }
 
-        // Retrieve→inject: pull the top-K prior task outcomes relevant to this
-        // message and prepend them as context. On a cold store this yields no
-        // hits and the message is passed through unchanged.
-        //
-        // Skipped entirely for a chat-only turn (issue #1725): a greeting /
-        // "Just chatting" reply must not be grounded in prior task outcomes, and
-        // pulling them is the exact context leak the fast path exists to stop.
-        let augmented = if crate::runtime::delegation::is_chat_only_turn() || !chat.history_seed {
-            message.to_string()
-        } else {
-            // **Retrieved on the operator's own words, injected into the
-            // composed message** (#1890 review). `message` may already carry
-            // this turn's in-memory briefings — open work, the settled-work
-            // digest, the thread index, attachment markers — and those are for
-            // the model to read, not for the store to search on. Retrieving on
-            // them made the query drift toward whatever the briefings happened
-            // to name: the settled digest is a list of finished card titles, so
-            // a conversation that had just closed some work recalled *that*
-            // work rather than what the operator was asking about, and grew
-            // more biased with every card that finished.
-            //
-            // `operator_words` is the existing seam for this — the same cut the
-            // triage decision takes, and for the same reason its docs give: the
-            // annotations are not something anybody typed.
-            let hits = deps
-                .context
-                .search(
-                    company,
-                    crate::runtime::delegation::operator_words(message),
-                    memory_loop::RETRIEVE_TOP_K,
-                )
-                .await?;
-            memory_loop::inject(message, &hits)
-        };
+        // Memory is OpenHuman's: the runtime recalls a pack for this agent and
+        // logs the turn under its own node (`crate::memory`), so the message
+        // goes through as composed.
+        let augmented = message.to_string();
 
         // Run the turn and record its real cost. `CompanyAgent::run` reads each
         // attempt's token/cost totals from the bridge's usage tap
@@ -5236,51 +5203,6 @@ impl HarnessPool {
             }
         }
         let outcome = turn_result_after_metering(outcome, metered, company, agent_id)?;
-        // Store: persist the outcome (original task + reply) so it compounds
-        // into later turns. Without this the harness never writes memory back.
-        // SECURITY: the reply **text only** — the scrubbed `outcome.steps` never
-        // enter the memory store, so a step detail can never be retrieved and
-        // re-injected into a later turn.
-        //
-        // TAINT (issue #1113): deliberately `deps.context` (Internal), not
-        // the runtime's inbound port. Harness turns are operator-triggered —
-        // `OperatorMessage` is operator speech, the same authorship precedent
-        // that stamps operator facts Internal — while channel/webhook content
-        // enters through the cycle path, which routes its puts through the
-        // inbound port (`CycleHostImpl::external_trigger`). If a harness turn
-        // ever takes a webhook trigger, that turn must route its store half
-        // through the runtime's inbound port — the cycle path shows the shape.
-        // Issue #1846: a budget-paused turn's `reply` is the actionable "add
-        // credits" halt copy, not an answer the teammate produced — the
-        // pre-flight refusals above (`total_ceiling_refusal`, the per-agent
-        // cap) already skip this writeback entirely by returning early, before
-        // ever reaching it. This turn does not return early (the model call
-        // was actually attempted and failed), so it has to be excluded here
-        // instead. Writing it back would recall "you are out of credits" as
-        // prior context in the NEXT turn, and — worse — as something this
-        // teammate is on record having said.
-        if !matches!(
-            steer.and_then(SteerControl::pending),
-            Some(SteerAction::Cancel)
-        ) && outcome.budget_paused.is_none()
-            // Issue #1680 -- CodeRabbit on PR #2554, and the guard's own
-            // reasoning above applies verbatim. A ceiling-paused turn's `reply`
-            // is the scrubbed `wall_clock_ceiling_message`: host-authored, not
-            // an answer the teammate produced. Writing it back would recall
-            // "you hit the wall-clock ceiling" as prior context in the NEXT
-            // turn, and on record as something this teammate said. The steps
-            // this pause preserves are the turn's real work and travel on the
-            // outcome; the diagnosis is not memory.
-            && outcome.ceiling_paused.is_none()
-        {
-            deps.context
-                .put(
-                    company,
-                    memory_loop::outcome_chunk(agent_id, message, &outcome.reply),
-                )
-                .await?;
-        }
-
         Ok(outcome)
     }
 
