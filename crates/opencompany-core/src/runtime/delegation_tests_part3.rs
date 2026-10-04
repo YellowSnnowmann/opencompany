@@ -132,7 +132,7 @@ async fn a_hand_off_card_is_named_after_the_work_not_the_instruction() {
 
     fx.runner(&turns)
         .with_titler(&titler)
-        .run_delegation(handoff(rambling), None, MessageContext::default())
+        .run_delegation(handoff(rambling), None)
         .await
         .expect("delegation runs");
 
@@ -166,7 +166,7 @@ async fn without_a_titler_a_hand_off_card_is_still_opened_and_still_named() {
     let turns = ScriptedTurns::new(&fx, vec![Turn::reply("on it")]);
 
     fx.runner(&turns)
-        .run_delegation(handoff(request), None, MessageContext::default())
+        .run_delegation(handoff(request), None)
         .await
         .expect("delegation runs");
 

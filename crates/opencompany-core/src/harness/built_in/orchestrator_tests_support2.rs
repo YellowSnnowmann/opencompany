@@ -34,7 +34,7 @@ pub(super) fn titles(drained: Vec<Delegation>) -> Vec<String> {
 }
 
 pub(super) fn stage(queue: &DelegationQueue, d: Delegation) -> Staged {
-    queue.push_within_cap(d, MAX_DELEGATIONS_PER_TURN, NO_DEPTH_BOUND)
+    queue.push_within_cap(d, MAX_DELEGATIONS_PER_TURN)
 }
 
 // -----------------------------------------------------------------------

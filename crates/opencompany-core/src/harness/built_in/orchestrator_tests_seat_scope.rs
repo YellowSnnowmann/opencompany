@@ -22,8 +22,8 @@ async fn a_seat_claim_stages_cards_and_refuses_everything_else_on_the_board() {
     let (card, other) = claim
         .scoped(async {
             (
-                queue.push_within_cap(spawn("Draft"), MAX_DELEGATIONS_PER_TURN, NO_DEPTH_BOUND),
-                queue.push_within_cap(hand_off(), MAX_DELEGATIONS_PER_TURN, NO_DEPTH_BOUND),
+                queue.push_within_cap(spawn("Draft"), MAX_DELEGATIONS_PER_TURN),
+                queue.push_within_cap(hand_off(), MAX_DELEGATIONS_PER_TURN),
             )
         })
         .await;
@@ -36,9 +36,7 @@ async fn a_seat_claim_stages_cards_and_refuses_everything_else_on_the_board() {
                 assignee: "x".to_string(),
                 note: None,
             },
-            MAX_DELEGATIONS_PER_TURN,
-            NO_DEPTH_BOUND
-        ),
+            MAX_DELEGATIONS_PER_TURN),
         Staged::NoDrain(NoDrainReason::Unwired),
         "outside the seat's scope nothing has claimed the pooled bucket"
     );
@@ -53,7 +51,7 @@ async fn a_seats_bucket_is_invisible_to_the_pooled_drain_and_to_another_seat() {
     let analyst = queue.claim_seat("ep:analyst", false);
     writer
         .scoped(async {
-            let _ = queue.push_within_cap(spawn("Mine"), MAX_DELEGATIONS_PER_TURN, NO_DEPTH_BOUND);
+            let _ = queue.push_within_cap(spawn("Mine"), MAX_DELEGATIONS_PER_TURN);
         })
         .await;
     assert!(queue.drain(MAX_DELEGATIONS_PER_TURN).is_empty());
@@ -68,7 +66,7 @@ async fn a_seat_answering_a_question_refuses_cards_as_a_pooled_question_turn_doe
     let claim = queue.claim_seat("ep:writer", true);
     let staged = claim
         .scoped(async {
-            queue.push_within_cap(spawn("Draft"), MAX_DELEGATIONS_PER_TURN, NO_DEPTH_BOUND)
+            queue.push_within_cap(spawn("Draft"), MAX_DELEGATIONS_PER_TURN)
         })
         .await;
     assert_eq!(staged, Staged::NoDrain(NoDrainReason::Triage));
