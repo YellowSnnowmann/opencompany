@@ -146,12 +146,6 @@ pub(crate) fn project_history(messages: &mut [MessageView], names: &DisplayNames
             }
             view.text = projected.text;
         }
-        if let Some(conversation) = view.referral_conversation.as_mut() {
-            project_lines(&mut conversation.lines, names);
-        }
-        for conversation in &mut view.agent_conversations {
-            project_lines(&mut conversation.lines, names);
-        }
     }
 }
 

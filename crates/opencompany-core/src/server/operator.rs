@@ -126,7 +126,6 @@ pub fn router() -> Router<AppState> {
         ))
         // The episodes a desk ran or is running (plan hive-desks, Phase 4),
         // newest first, folded from the journal's episode record.
-        .merge(scoped("/episodes", get(list_episodes)))
         // Desk member ordering / hierarchy (issue #131): set the operator's
         // explicit member order for a desk. Registered under both scope forms.
         .merge(scoped("/desks/{desk_id}/order", put(set_desk_order)))
@@ -590,69 +589,6 @@ async fn reset_desk_routing(
     )))
 }
 
-/// `GET {scope}/episodes?desk&status&limit` — the episodes a company ran or
-/// is running, newest first (plan hive-desks, Phase 4).
-///
-/// Folded from the journal's episode record on every call; the room does not
-/// read this (it folds episodes out of the transcript and the live frames),
-/// the measurement script and a reloaded Observatory do.
-async fn list_episodes(
-    scope: ScopedCompany,
-    Query(query): Query<EpisodesQuery>,
-) -> Result<Json<Vec<crate::hive::episode_store::EpisodeDto>>, ApiError> {
-    let status = match query.status.as_deref().map(str::trim) {
-        None | Some("") => None,
-        Some("open") => Some(crate::hive::episode_store::EpisodeStatus::Open),
-        Some("completed") => Some(crate::hive::episode_store::EpisodeStatus::Completed),
-        Some(other) => {
-            return Err(ApiError(OpenCompanyError::InvalidRequest(format!(
-                "`status` must be `open` or `completed`, not `{other}`"
-            ))));
-        }
-    };
-    let desk = match query.desk.as_deref().map(str::trim) {
-        None | Some("") => None,
-        Some(key) => {
-            let record = scope
-                .runtime
-                .store()
-                .load(scope.id())
-                .await?
-                .ok_or_else(|| OpenCompanyError::CompanyNotFound(scope.id().to_string()))?;
-            Some(
-                record
-                    .resolve_desk_id(key)
-                    .unwrap_or_else(|| key.to_string()),
-            )
-        }
-    };
-    let limit = query
-        .limit
-        .unwrap_or(EPISODES_DEFAULT_LIMIT)
-        .clamp(1, EPISODES_MAX_LIMIT);
-    let episodes = crate::hive::episode_store::list_episodes(
-        scope.runtime.events().as_ref(),
-        scope.id(),
-        desk.as_deref(),
-        status,
-        limit,
-    )
-    .await?;
-    Ok(Json(episodes))
-}
-
-/// Episodes returned when `limit` is not given.
-const EPISODES_DEFAULT_LIMIT: usize = 50;
-/// The most episodes one call returns.
-const EPISODES_MAX_LIMIT: usize = 500;
-
-/// `GET {scope}/episodes` query.
-#[derive(Debug, Deserialize)]
-struct EpisodesQuery {
-    desk: Option<String>,
-    status: Option<String>,
-    limit: Option<usize>,
-}
 
 /// `PUT {scope}/desks/{desk_id}/order` — set the operator's explicit member
 /// order (the desk hierarchy) for a desk through the overlay (issue #131). The
@@ -1506,7 +1442,7 @@ fn project_event_for_viewer(
             parent,
             mentions,
             audience,
-            episode,
+            hive,
             ..
         } => {
             // See this fn's doc: an owner-fallback report is admin-only, live
@@ -1546,21 +1482,11 @@ fn project_event_for_viewer(
             if let Some(parent) = parent {
                 o["parentId"] = json!(parent.value().to_string());
             }
-            // **The episode this row belongs to**, when it belongs to one.
-            //
-            // The episode fold drops any frame that does not name an episode.
-            // That is right for an ordinary chat reply and wrong for this
-            // one: a row in a pair channel is a line of an exchange two seats
-            // are having inside an episode, and this frame is the only
-            // carrier those lines have -- the desk never shows them, so a
-            // reload was the only way to see what had been said. Without it
-            // the indicator can say an exchange opened and never that
-            // anything was said in it.
-            if let Some(episode) = episode.as_ref() {
-                o["episodeId"] = json!(episode.id);
-                // What the row committed, for the fold to tell a line of an
-                // exchange from the conclusion that restates its last one.
-                o["utteranceKind"] = json!(episode.kind);
+            // **The episode this row belongs to**, when it belongs to one, so
+            // the console groups a desk's lines by episode live exactly as it
+            // does on reload.
+            if let Some(episode) = hive.as_ref().and_then(|hive| hive.episode_id.as_ref()) {
+                o["episodeId"] = json!(episode);
             }
             // Scrubbed timeline (same shape the POST body carries); omitted
             // when empty so a tool-less reply's wire form is unchanged.
@@ -1590,12 +1516,12 @@ fn project_event_for_viewer(
                         .collect::<Vec<_>>()
                 );
             }
-            // Plan hive-desks, Phase 4: the same `episode` and `audience` the
-            // reload projects, so a live row and its rehydrated twin fold into
-            // the same round. Omitted outside an episode, so the legacy frame
-            // is unchanged for every other reply.
-            if let Some(episode) = episode {
-                o["episode"] = episode_json(episode);
+            // OC-2: the same `hive` and `audience` the reload projects, so a
+            // live row and its rehydrated twin fold into the same episode.
+            // Omitted outside the hive, so the legacy frame is unchanged for
+            // every other reply.
+            if let Some(hive) = hive {
+                o["hive"] = hive_json(hive);
             }
             if !audience.is_empty() {
                 o["audience"] = json!(audience);
@@ -4525,147 +4451,35 @@ struct ChatHistoryQuery {
 
 /// One desk-history message, as the console renders it. Mirrors `ChatMessage`
 /// in `frontend/src/lib/chat.ts`.
-/// Where a crossing referral came from, when another desk caused this message
-/// (tinyhivemind P15).
-///
-/// Mirrors `ReferredFromDto` in `frontend/src/api/types.ts`.
-///
-/// The labels are **captured with the row** rather than resolved when the
-/// transcript is read, for the reason [`SessionAuthor`] captures its own: a
-/// desk renamed later must not rewrite what the conversation said at the time.
-///
-/// [`SessionAuthor`]: tinyhivemind::session::SessionAuthor
-/// One line of a crossing, as the console renders it.
+/// Where a reply sits in the company hive's transcript (OC-2). Mirrors
+/// `MessageHiveDto` in `frontend/src/api/types.ts`; the same shape rides on the
+/// `agent_reply` SSE frame as `hive`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ReferralLineDto {
-    /// Who wrote it, by id.
-    author_id: String,
-    /// Their display label when the referral was made; empty for this desk's
-    /// own agent, whom the console already names.
-    author_label: String,
-    /// What they said.
-    text: String,
-    /// True for the question leaving this desk, false for the answer coming
-    /// back — which is what lets the console show the two sides differently.
-    outbound: bool,
-}
-
-/// One agent-to-agent exchange, as the console renders it.
-///
-/// Mirrors [`ReferralConversationDto`] below, and carries the same
-/// `ReferralLineDto` rows: to a reader the two are the same thing — an
-/// exchange somebody on this desk had that the desk itself cannot show — and
-/// a second line shape would be a second thing to keep in step.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentConversationDto {
-    /// The `ask` row it is rooted at: its identity, and the only thing that
-    /// tells two exchanges between the same pair apart.
-    root: u64,
-    asker_id: String,
-    askee_id: String,
-    conversation_id: String,
-    concluded: bool,
-    forced: bool,
-    lines: Vec<ReferralLineDto>,
-}
-
-/// A crossing folded onto the report that brought it home, so the console can
-/// render it as one collapsed line naming both parties and counting the
-/// messages.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ReferralConversationDto {
-    /// The agent on this desk that asked.
-    asker_id: String,
-    /// Who they asked.
-    other_id: String,
-    /// And where that person sits — id for the link, name for the label.
-    other_desk_id: String,
-    other_desk_name: String,
-    /// Whether a person was asked rather than a desk — `@name` vs `#desk`.
-    direct: bool,
-    /// Whether this desk was ASKED rather than doing the asking. Every other
-    /// field is named from the asker's side, so without this the label renders
-    /// an answering desk's crossing backwards.
-    inbound: bool,
-    /// The exchange, oldest first. Its length is the count in the label.
-    lines: Vec<ReferralLineDto>,
-}
-
-/// What a journaled reply was inside the episode that produced it. Mirrors
-/// `MessageEpisodeDto` in `frontend/src/api/types.ts`; the same shape rides
-/// on the `agent_reply` SSE frame as `episode`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageEpisodeDto {
-    /// The episode.
-    id: String,
-    /// The round it was committed in (raw revision).
-    revision: u64,
-    /// The speech act.
-    kind: crate::ports::types::UtteranceKind,
-    /// A `dm`'s recipients.
+pub(crate) struct MessageHiveDto {
+    /// The hive transcript sequence.
+    sequence: u64,
+    /// The episode the row belongs to.
     #[serde(skip_serializing_if = "Option::is_none")]
-    to: Option<Vec<String>>,
-    /// How a `broadcast` was routed on.
+    episode_id: Option<String>,
+    /// The hive conversation root, by hive sequence.
     #[serde(skip_serializing_if = "Option::is_none")]
-    routed_by: Option<RoutedByDto>,
+    thread: Option<u64>,
 }
 
-/// `MessageEpisodeDto.routedBy`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RoutedByDto {
-    plan: crate::hive::routing::RoutingPlanDto,
-    router: crate::hive::routing::Router,
-}
-
-impl From<crate::ports::types::ReplyEpisode> for MessageEpisodeDto {
-    fn from(episode: crate::ports::types::ReplyEpisode) -> Self {
+impl From<crate::ports::types::HiveRef> for MessageHiveDto {
+    fn from(hive: crate::ports::types::HiveRef) -> Self {
         Self {
-            id: episode.id,
-            revision: episode.revision,
-            kind: episode.kind,
-            to: (!episode.to.is_empty()).then_some(episode.to),
-            routed_by: episode.routed_by.map(|routed| RoutedByDto {
-                plan: routed.plan,
-                router: routed.router,
-            }),
+            sequence: hive.sequence,
+            episode_id: hive.episode_id,
+            thread: hive.thread,
         }
     }
 }
 
-/// The `episode` object an `agent_reply` frame carries, as JSON.
-pub(crate) fn episode_json(episode: &crate::ports::types::ReplyEpisode) -> serde_json::Value {
-    serde_json::to_value(MessageEpisodeDto::from(episode.clone())).unwrap_or_default()
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ReferredFromDto {
-    /// The desk that asked, by id — for the link, never for display.
-    desk_id: String,
-    /// The desk's display name as it stood when the referral was made.
-    desk_name: String,
-    /// The agent that asked, by id.
-    asker_id: String,
-    /// That agent's display label as it stood when the referral was made.
-    asker_label: String,
-    /// The asking message, so the chip links straight to it.
-    sequence: u64,
-    /// Whether a person was asked rather than a desk, so the chip can name
-    /// whoever was actually addressed.
-    direct: bool,
-    /// Which word the chip uses. `"asked"` on the outbound leg, `"answered"`
-    /// when the answer has come home.
-    ///
-    /// Sent as the word rather than a bool because the console renders it and
-    /// nothing else: a `returning: true` would have the render side translating
-    /// a host decision back into English, which is how it came to guess in the
-    /// first place.
-    direction: &'static str,
+/// The `hive` object an `agent_reply` frame carries, as JSON.
+pub(crate) fn hive_json(hive: &crate::ports::types::HiveRef) -> serde_json::Value {
+    serde_json::to_value(MessageHiveDto::from(hive.clone())).unwrap_or_default()
 }
 
 #[derive(Debug, Serialize)]
@@ -4694,23 +4508,10 @@ struct ChatHistoryMessageDto {
     /// every desk that does not deliberate.
     #[serde(skip_serializing_if = "Option::is_none")]
     cue_text: Option<String>,
-    /// Set only when another desk's referral caused this line. Absent on every
-    /// ordinary message, so the wire shape is unchanged for them.
+    /// Where this reply sits in the company hive (OC-2). Absent for every
+    /// row that did not come through the hive.
     #[serde(skip_serializing_if = "Option::is_none")]
-    referred_from: Option<ReferredFromDto>,
-    /// The crossing this report brought home, when it brought one. Absent on
-    /// every ordinary message, so the wire shape is unchanged for them.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    referral_conversation: Option<ReferralConversationDto>,
-    /// The agent-to-agent exchanges this row reported, oldest first. Empty on
-    /// every ordinary message, and skipped then, so the wire shape is
-    /// unchanged for them.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    agent_conversations: Vec<AgentConversationDto>,
-    /// What this reply was inside the episode that produced it (plan
-    /// hive-desks, Phase 4). Absent for every reply outside an episode.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    episode: Option<MessageEpisodeDto>,
+    hive: Option<MessageHiveDto>,
     /// Who may read this line, when the host narrowed it (a desk `dm`).
     /// Absent means everyone on the desk.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -4895,63 +4696,8 @@ impl From<MessageView> for ChatHistoryMessageDto {
         let cue_text = (view.cue_text != view.text).then(|| view.cue_text.clone());
         Self {
             cue_text,
-            episode: view.episode.map(MessageEpisodeDto::from),
+            hive: view.hive.map(MessageHiveDto::from),
             audience: view.aside_audience,
-            agent_conversations: view
-                .agent_conversations
-                .into_iter()
-                .map(|exchange| AgentConversationDto {
-                    root: exchange.root,
-                    asker_id: exchange.asker_id,
-                    askee_id: exchange.askee_id,
-                    conversation_id: exchange.conversation_id,
-                    concluded: exchange.concluded,
-                    forced: exchange.forced,
-                    lines: exchange
-                        .lines
-                        .into_iter()
-                        .map(|line| ReferralLineDto {
-                            author_id: line.author_id,
-                            author_label: line.author_label,
-                            text: line.text,
-                            outbound: line.outbound,
-                        })
-                        .collect(),
-                })
-                .collect(),
-            referral_conversation: view.referral_conversation.map(|crossing| {
-                ReferralConversationDto {
-                    asker_id: crossing.asker_id,
-                    other_id: crossing.other_id,
-                    other_desk_id: crossing.other_desk_id,
-                    other_desk_name: crossing.other_desk_name,
-                    direct: crossing.direct,
-                    inbound: crossing.inbound,
-                    lines: crossing
-                        .lines
-                        .into_iter()
-                        .map(|line| ReferralLineDto {
-                            author_id: line.author_id,
-                            author_label: line.author_label,
-                            text: line.text,
-                            outbound: line.outbound,
-                        })
-                        .collect(),
-                }
-            }),
-            referred_from: view.referred_from.map(|origin| ReferredFromDto {
-                desk_id: origin.desk_id,
-                desk_name: origin.desk_name,
-                asker_id: origin.asker_id,
-                asker_label: origin.asker_label,
-                sequence: origin.sequence,
-                direct: origin.direct,
-                direction: if origin.returning {
-                    "answered"
-                } else {
-                    "asked"
-                },
-            }),
             id: view.id,
             channel: view.channel,
             author: view.author,
