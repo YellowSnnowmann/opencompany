@@ -147,6 +147,47 @@ fn focus_terms_is_capped_and_deduplicated() {
     assert_eq!(unique.len(), terms.len(), "no duplicate terms: {terms:?}");
 }
 
+/// A fresh company whose memory holds the learning `text`, so the judge's
+/// fact rung has something to find. Unique per call: every test shares the
+/// one in-process memory engine.
+pub(super) async fn company_remembering(text: &str) -> CompanyId {
+    let company = CompanyId::new(format!("judge-{}", uuid::Uuid::new_v4().simple()));
+    crate::memory::CompanyMemory::new(&company)
+        .learn(text, crate::memory::LearningKind::Fact, Vec::new())
+        .await
+        .expect("learn");
+    company
+}
+
+/// Codex review on #1990 (#3903591432): a whole success-criteria sentence
+/// pulls out its content words as focused single-term queries, dropping
+/// short/filler words, so a fact titled on ONE of those words is
+/// reachable even though it never contained the sentence verbatim.
+#[test]
+fn focus_terms_extracts_content_words_from_a_criteria_sentence() {
+    let terms = focus_terms("The answer must include the renewal date");
+    assert!(
+        terms.contains(&"renewal".to_string()),
+        "expected \"renewal\" among {terms:?}"
+    );
+    assert!(
+        terms.contains(&"date".to_string()),
+        "expected \"date\" among {terms:?}"
+    );
+    assert!(
+        !terms.contains(&"the".to_string()) && !terms.contains(&"must".to_string()),
+        "filler words must be dropped: {terms:?}"
+    );
+}
+
+#[test]
+fn focus_terms_is_capped_and_deduplicated() {
+    let terms = focus_terms("alpha alpha bravo charlie delta echo foxtrot golf hotel india juliet");
+    assert!(terms.len() <= MAX_FOCUS_TERMS, "{terms:?}");
+    let unique: std::collections::HashSet<_> = terms.iter().collect();
+    assert_eq!(unique.len(), terms.len(), "no duplicate terms: {terms:?}");
+}
+
 /// A [`crate::ports::FactStore`] whose `list` only matches an EXACT query
 /// string — standing in for the real substring-match store closely enough
 /// to prove whether a whole-sentence query alone can ever reach a fact
@@ -194,23 +235,13 @@ async fn ask_around_finds_a_fact_reachable_only_by_a_focused_term() {
         .prefix("oc-1990-focused-query-")
         .tempdir()
         .expect("tempdir");
-    let (mut deps, _journal) =
+    let (deps, _journal) =
         crate::workflows::gated_tool_turn_tests::deps(String::new(), dir.path());
-    deps.facts = Some(std::sync::Arc::new(ExactMatchFactStore {
-        matches: "renewal",
-        fact: crate::ports::FactRecord {
-            id: "f1".to_string(),
-            kind: crate::ports::FactKind::Fact,
-            title: "Renewal date".to_string(),
-            body: "The contract renews on March 1st.".to_string(),
-            source: "test".to_string(),
-            updated_at_millis: 0,
-        },
-    }));
+    let company = company_remembering("Renewal date: the contract renews on March 1st.").await;
 
     let result = ask_around(
         &deps,
-        &CompanyId::new("acme"),
+        &company,
         "The answer must include the renewal date",
         None,
     )
