@@ -45,18 +45,14 @@ async fn two_concurrent_assignments_of_the_same_card_admit_exactly_one_writer() 
                 assignee: "chief".to_string(),
                 note: Some("from A".to_string()),
             },
-            None,
-            MessageContext::default(),
-        ),
+            None),
         runner_b.run_delegation(
             Delegation::AssignTask {
                 task_id: "card-real".to_string(),
                 assignee: "engineer".to_string(),
                 note: Some("from B".to_string()),
             },
-            None,
-            MessageContext::default(),
-        ),
+            None),
     );
     let a = a.expect("A's assignment completes");
     let b = b.expect("B's assignment completes");
@@ -123,18 +119,14 @@ async fn two_concurrent_reviews_of_the_same_card_admit_exactly_one_writer() {
                 decision: lifecycle::ReviewDecision::Approve,
                 note: Some("approved by A".to_string()),
             },
-            None,
-            MessageContext::default(),
-        ),
+            None),
         runner_b.run_delegation(
             Delegation::ReviewTask {
                 task_id: "card-real".to_string(),
                 decision: lifecycle::ReviewDecision::Revise,
                 note: Some("sent back by B".to_string()),
             },
-            None,
-            MessageContext::default(),
-        ),
+            None),
     );
     let a = a.expect("A's review completes");
     let b = b.expect("B's review completes");
@@ -201,18 +193,14 @@ async fn a_same_column_assignment_cannot_be_overwritten_by_a_stale_review() {
                 assignee: "chief".to_string(),
                 note: Some("assigned concurrently".to_string()),
             },
-            None,
-            MessageContext::default(),
-        ),
+            None),
         reviewer.run_delegation(
             Delegation::ReviewTask {
                 task_id: "card-real".to_string(),
                 decision: lifecycle::ReviewDecision::Approve,
                 note: Some("reviewed concurrently".to_string()),
             },
-            None,
-            MessageContext::default(),
-        ),
+            None),
     );
     let assigned = assigned.expect("assignment completes");
     let reviewed = reviewed.expect("review completes");

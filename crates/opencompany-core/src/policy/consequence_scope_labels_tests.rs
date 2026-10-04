@@ -187,17 +187,13 @@ pub(super) fn without_the_catalogue_nothing_carries_a_scope() {
 #[cfg(feature = "openhuman")]
 pub(super) fn the_declared_names_are_the_names_the_tools_return() {
     use crate::harness::{orchestrator, publish, search, workflow_admin, workspace_tools};
-    use crate::runtime::delegation_tools::{
-        DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL, SPAWN_TASK_TOOL,
-    };
+    use crate::runtime::delegation_tools::SPAWN_TASK_TOOL;
     for name in [
         workflow_admin::READ_WORKFLOW_TOOL,
         workflow_admin::UPDATE_WORKFLOW_TOOL,
         workflow_admin::DELETE_WORKFLOW_TOOL,
         orchestrator::QUERY_COMPANY_TOOL,
         SPAWN_TASK_TOOL,
-        DELEGATE_TO_DESK_TOOL,
-        DELEGATE_TO_TEAMMATE_TOOL,
         orchestrator::ADD_AGENT_TOOL,
         orchestrator::CREATE_WORKFLOW_TOOL,
         orchestrator::ASSIGN_TASK_TOOL,

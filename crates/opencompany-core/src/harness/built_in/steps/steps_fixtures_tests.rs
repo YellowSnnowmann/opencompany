@@ -40,16 +40,12 @@ fn intrinsic_tools_covers_every_oc_authored_tool() {
         WORKSPACE_CREATE_TOOL, WORKSPACE_DELETE_TOOL, WORKSPACE_LIST_TOOL, WORKSPACE_READ_TOOL,
         WORKSPACE_RENAME_TOOL, WORKSPACE_SEARCH_TOOL, WORKSPACE_WRITE_TOOL,
     };
-    use crate::runtime::delegation_tools::{
-        DELEGATE_TO_DESK_TOOL, DELEGATE_TO_TEAMMATE_TOOL, SPAWN_TASK_TOOL,
-    };
+    use crate::runtime::delegation_tools::SPAWN_TASK_TOOL;
 
     let expected = [
         REQUEST_APPROVAL_TOOL,
         QUERY_COMPANY_TOOL,
         SPAWN_TASK_TOOL,
-        DELEGATE_TO_DESK_TOOL,
-        DELEGATE_TO_TEAMMATE_TOOL,
         RUN_WORKFLOW_TOOL,
         READ_RUN_OUTPUT_TOOL,
         CREATE_WORKFLOW_TOOL,
