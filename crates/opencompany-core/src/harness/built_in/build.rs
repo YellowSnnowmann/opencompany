@@ -1286,7 +1286,7 @@ pub fn build_agent_with_model(
         persona.push_str(&orchestrator::orchestrator_brief());
         tools.extend(orchestrator::orchestrator_tools(
             company.clone(),
-            deps.facts.clone(),
+            Some(crate::memory::CompanyMemory::new(company)),
             deps.events.clone(),
             // Issue #1859: the board + run-history read surface `list_tasks` /
             // `read_task` / `read_run` need, and `query_company`'s `## Board`
