@@ -370,8 +370,14 @@ async fn an_oversized_note_reaches_the_model_whole_and_read_only() {
         .split_whitespace()
         .next()
         .expect("the fence carries a nonce");
+    // OpenHuman appends its own timing line (`[took 0.1s]`) after a tool's
+    // output; the fence must close the tool's own text.
+    let body = read
+        .trim_end()
+        .rsplit_once("\n\n[took ")
+        .map_or(read.trim_end(), |(body, _)| body);
     assert!(
-        read.trim_end()
+        body.trim_end()
             .ends_with(&format!("--- END WORKSPACE NOTE {nonce} ---")),
         "the model never received the closing fence, so the untrusted-content region it was \
          warned about was left open: {read}"
