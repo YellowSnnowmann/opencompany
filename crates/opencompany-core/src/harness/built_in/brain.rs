@@ -687,6 +687,18 @@ impl HarnessBrain {
         match self.deps.store.load(&id).await? {
             Some(fresh) => {
                 *self.record.write().expect("harness brain record poisoned") = Arc::new(fresh);
+                // OC-2: a desk created, renamed or re-seated through the
+                // console reaches the company hive's memberships before this
+                // cycle routes on it.
+                if let Some(hive) = self.pool.hive(&id).await
+                    && let Err(error) = hive.sync(&self.record()).await
+                {
+                    tracing::warn!(
+                        company = %id,
+                        %error,
+                        "[hive] the company hive's desks could not be brought in line with the record"
+                    );
+                }
             }
             None => {
                 tracing::warn!(
@@ -2779,61 +2791,6 @@ impl HarnessBrain {
         }
     }
 
-    /// The first active teammate the message named, in reading order —
-    /// `tinyhivemind_core::mention::direct_responder` over the live roster.
-    fn mentioned_responder(&self, mentions: &[crate::ports::types::Mention]) -> Option<String> {
-        if mentions.is_empty() {
-            return None;
-        }
-        let record = self.record();
-        let members = crate::runtime::delegation_tools::tinyhivemind_roster(&record);
-        let retired = record.overlay_retired_agents.clone();
-        let roster = tinyhivemind_core::roster::Roster::new(&members, &[], &retired);
-        let mentions: Vec<tinyhivemind_core::mention::Mention> = mentions
-            .iter()
-            .map(crate::hive::dispatch::tinyhivemind_mention)
-            .collect();
-        tinyhivemind_core::mention::direct_responder(&mentions, &roster).map(str::to_string)
-    }
-
-    /// Everyone else the message named, expanded against the addressed desk
-    /// — `tinyhivemind_core::mention::mentioned_members` over the live
-    /// roster and desks, excluding `responder`.
-    fn mentioned_members(
-        &self,
-        addressed_desk: &str,
-        mentions: &[crate::ports::types::Mention],
-        responder: Option<&str>,
-    ) -> Vec<String> {
-        if mentions.is_empty() {
-            return Vec::new();
-        }
-        let record = self.record();
-        let members = crate::runtime::delegation_tools::tinyhivemind_roster(&record);
-        let retired = record.overlay_retired_agents.clone();
-        let roster = tinyhivemind_core::roster::Roster::new(&members, &[], &retired);
-        let snapshots = crate::runtime::delegation_tools::tinyhivemind_desks(&record);
-        let desks = snapshots.set();
-        let mentions: Vec<tinyhivemind_core::mention::Mention> = mentions
-            .iter()
-            .map(crate::hive::dispatch::tinyhivemind_mention)
-            .collect();
-        tinyhivemind_core::mention::mentioned_members(
-            &mentions,
-            Some(addressed_desk),
-            responder,
-            &roster,
-            &desks,
-        )
-    }
-
-    /// The desk key `@everyone` expands against for a message addressed to
-    /// `chat`; an unaddressed message expands against #general.
-    fn everyone_desk(chat: Option<&str>) -> String {
-        chat.unwrap_or(crate::ports::general_channel::GENERAL_CHANNEL_ID)
-            .to_string()
-    }
-
     /// Drains the MCP failure queue **onto the operator bubble's step timeline**
     /// as error steps (the Activity-trace re-skin of the error-hardening cell's
     /// original fallback bubble), and journals a scrubbed
@@ -3381,8 +3338,23 @@ impl Brain for HarnessBrain {
         Some(self.title_pass(&self.record().id))
     }
 
-    async fn resume_episode(&self, episode_id: &str) -> bool {
-        self.resume_desk_episode(episode_id).await
+    async fn release_hive_agent(&self, agent_id: &str, note: Option<String>) -> bool {
+        let company = self.record().id.clone();
+        let Some(hive) = self.pool.hive(&company).await else {
+            return false;
+        };
+        match hive.release(agent_id, note).await {
+            Ok(released) => released,
+            Err(error) => {
+                tracing::error!(
+                    %company,
+                    agent = %agent_id,
+                    %error,
+                    "[hive] a parked agent could not be released"
+                );
+                false
+            }
+        }
     }
 
     async fn run_cycle(&self, req: CycleRequest, host: &dyn CycleHost) -> Result<CycleResult> {
@@ -3582,45 +3554,24 @@ impl HarnessBrain {
                         channel_responses.push(confined_turn_bubble(outcome));
                         continue;
                     }
-                    // Plan hive-desks, Phase 4/5: a desk with somebody to
-                    // deliberate WITH answers as a room. The message opens
-                    // (or joins) an episode on that desk's hive; the seats run
-                    // in concurrent rounds until every assigned one calls
-                    // `complete_episode`; every utterance is journaled by the
-                    // driver as an `AgentReply` with its episode metadata, so
-                    // no bubble goes back through `channel_responses` — the
-                    // REST route would journal it a second time.
+                    // OC-2: every conversation goes through the company hive.
+                    // The message is accepted by the Coordinator — on the
+                    // addressed desk's hive, started by the members the
+                    // mention / Jev / default ladder chose, or on the
+                    // teammate's direct line — and the turns that answer it
+                    // run on the hive's own task. Their replies reach the
+                    // journal through the projector, so no bubble goes back
+                    // through `channel_responses`: the REST route would
+                    // journal it a second time.
                     //
-                    // Every other surface — a DM, `#general`, a workflow
-                    // thread, a desk of one — takes the single-turn path
-                    // below. A copilot thread returned above.
-                    //
-                    // The episode runs on its own task: the cycle accepted the
-                    // message, the request is journaled, and the console
-                    // follows the rounds live. Skipped when the journal is not
-                    // wired: the driver reads its own rows back.
-                    if let Some(events) = self.deps.events.clone() {
-                        let record = self.record();
-                        let hives = self.desk_hives(&record).await;
-                        if let crate::hive::dispatch::Surface::Room { desk_id } =
-                            crate::hive::dispatch::surface_of(&record, &hives, chat.as_deref())
-                        {
-                            let dispatcher = crate::hive::dispatch::dispatcher(
-                                record,
-                                events,
-                                hives,
-                                Arc::new(HarnessDeps::clone(&self.deps)),
-                                Arc::clone(&self.pool),
-                                self.mentions.clone(),
-                            )
-                            .await;
-                            let trigger = crate::hive::dispatch::trigger_for(
-                                event_seq, &composed, *parent, mentions,
-                            );
-                            crate::hive::dispatch::spawn_episode(dispatcher, desk_id, trigger);
-                            room_answered = true;
-                            continue;
-                        }
+                    // A host with no hive (no store wired: most unit tests)
+                    // takes the single isolated turn below instead.
+                    if self
+                        .send_to_hive(event_seq, &composed, chat.as_deref(), *parent, mentions)
+                        .await?
+                    {
+                        room_answered = true;
+                        continue;
                     }
                     // Route to the teammate the message named, else to the
                     // addressed desk's default responder, else the
@@ -3636,9 +3587,18 @@ impl HarnessBrain {
                     // One thread, one card: a follow-up joins the work its
                     // thread already opened instead of opening another.
                     let thread_card = self.thread_card(chat.as_deref(), *parent).await;
-                    let responder = self
-                        .mentioned_responder(mentions)
-                        .unwrap_or_else(|| self.responder_for(chat.as_deref()));
+                    let record_now = self.record();
+                    let addressed = chat
+                        .as_deref()
+                        .unwrap_or(crate::ports::general_channel::GENERAL_CHANNEL_ID);
+                    let responder = crate::hive::route::mentioned_starters(
+                        &record_now,
+                        addressed,
+                        mentions,
+                    )
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| self.responder_for(chat.as_deref()));
                     // Everyone else the message named, for the answering turn's
                     // context. A list, not a fan-out: one operator message still
                     // spawns exactly one turn, and this teammate spreads the
@@ -3646,9 +3606,11 @@ impl HarnessBrain {
                     // delegation seam rather than through a new uncontrolled
                     // one. `@everyone` expands here, against the addressed
                     // desk's membership.
-                    let addressed_desk = Self::everyone_desk(chat.as_deref());
-                    let also_mentioned =
-                        self.mentioned_members(&addressed_desk, mentions, Some(&responder));
+                    let also_mentioned: Vec<String> =
+                        crate::hive::route::mentioned_starters(&record_now, addressed, mentions)
+                            .into_iter()
+                            .filter(|member| member != &responder)
+                            .collect();
                     // The chat/desk thread this turn answers — the same id the
                     // reply is journaled under (`AgentReply.chat_id`). Passed into
                     // the pool so the live turn-stream frames carry it and the
@@ -4113,15 +4075,14 @@ impl HarnessBrain {
                     verdict,
                     ..
                 } => {
-                    if let Some(seat) = self.episode_seat_of(approval_id) {
+                    if let Some(seat) = self.hive_seat_of(approval_id) {
                         tracing::warn!(
                             %approval_id,
-                            episode = %seat.episode_id,
-                            seat = %seat.seat,
-                            "[hive] an episode seat's decision reached a chat cycle; handing it to \
-                             its episode instead of re-running the call here"
+                            agent = %seat.agent_id,
+                            "[hive] a hive turn's decision reached a chat cycle; releasing the \
+                             agent instead of re-running the call here"
                         );
-                        self.resume_episode(&seat.episode_id).await;
+                        self.release_hive_agent(&seat.agent_id, None).await;
                     } else if let Some(message) =
                         self.redispatch_granted_call(approval_id, *verdict).await?
                     {
