@@ -26,6 +26,10 @@ pub struct ParkSite {
     pub conversation: ApprovalConversation,
     /// The continuation key of the turn blocked on this decision, if one is.
     pub turn: Option<String>,
+    /// What raised it, when not an ordinary cycle turn — a coordinator turn
+    /// the resolution has to release (OC-2). Rides on the `ApprovalParked`
+    /// event so a reader can tell whose turn is held.
+    pub origin: Option<ApprovalOrigin>,
 }
 
 /// The handles one park needs, bundled so a caller holds all of them or none.
@@ -74,6 +78,7 @@ impl ApprovalParker {
             task,
             conversation,
             turn,
+            origin,
         } = site;
         if let Some(turn) = turn.as_deref() {
             self.continuations.arm(turn);
@@ -119,6 +124,7 @@ impl ApprovalParker {
                     approval_id: approval_id.clone(),
                     effect_kind: effect.kind.clone(),
                     thread,
+                    origin,
                 },
             )
             .await
