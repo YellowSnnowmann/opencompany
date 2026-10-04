@@ -200,13 +200,6 @@ export function MemoryView({ client, company, sub }: Props) {
     [client, company, filters],
   );
 
-  useEffect(() => {
-    void load();
-    return () => {
-      gen.current++;
-    };
-  }, [load]);
-
   // A new company scope starts from a blank page rather than the last one's rows.
   useEffect(() => {
     setStatus(null);
@@ -216,6 +209,13 @@ export function MemoryView({ client, company, sub }: Props) {
     setBrain(null);
     setAgent("all");
   }, [client, company]);
+
+  useEffect(() => {
+    void load();
+    return () => {
+      gen.current++;
+    };
+  }, [load]);
 
   async function loadMore() {
     if (!nextCursor) return;
