@@ -79,39 +79,6 @@ fn the_persona_allows_proposing_and_forbids_claiming_to_have_applied() {
     );
 }
 
-/// The confined context is a hole: nothing written to it can be read back,
-/// by this turn or any later one.
-#[tokio::test]
-async fn the_confined_context_stores_nothing() {
-    let store = ConfinedContext;
-    let company = CompanyId::new("acme");
-    store
-        .put(
-            &company,
-            ContextChunk {
-                label: "k".into(),
-                body: "the company's private note".into(),
-            },
-        )
-        .await
-        .expect("a confined put is accepted");
-    assert!(
-        store
-            .search(&company, "private", 10)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(store.list(&company, "").await.unwrap().is_empty());
-    assert!(
-        store
-            .peek(&company, &ChunkAddr::new("confined/k"), None)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-}
-
 fn request(tool_name: &str) -> ToolPolicyRequest {
     let context = oh::agent::tool_policy::ToolCallContext::session(
         "copilot-session",

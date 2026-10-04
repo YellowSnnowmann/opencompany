@@ -113,48 +113,8 @@ use crate::harness::orchestrator::{DelegationQueue, WorkflowRunnerHandle};
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::MockProvider;
 use crate::ports::CompanyStore;
-use crate::ports::types::{
-    ChunkAddr, ChunkHit, ChunkMeta, CompanyRecord, CompanySummary, ContextChunk, LedgerEntry,
-};
+use crate::ports::types::{CompanyRecord, CompanySummary, LedgerEntry};
 
-/// A no-op context store — the belt tests never exercise memory, they only
-/// assert the wired tool surface.
-struct PinContext;
-#[async_trait::async_trait]
-impl crate::ports::ContextStore for PinContext {
-    async fn put(&self, _: &CompanyId, _: ContextChunk) -> crate::Result<ChunkAddr> {
-        Ok(ChunkAddr::new("x"))
-    }
-    async fn list(&self, _: &CompanyId, _: &str) -> crate::Result<Vec<ChunkMeta>> {
-        Ok(Vec::new())
-    }
-    async fn peek(
-        &self,
-        _: &CompanyId,
-        _: &ChunkAddr,
-        _: Option<std::ops::Range<usize>>,
-    ) -> crate::Result<String> {
-        Ok(String::new())
-    }
-    async fn search(&self, _: &CompanyId, _: &str, _: usize) -> crate::Result<Vec<ChunkHit>> {
-        Ok(Vec::new())
-    }
-    async fn delete(
-        &self,
-        _: &CompanyId,
-        _: &crate::ports::types::ChunkAddr,
-    ) -> crate::Result<bool> {
-        Ok(false)
-    }
-    async fn delete_label(
-        &self,
-        _: &CompanyId,
-        _: &crate::ports::types::ChunkAddr,
-        _: &str,
-    ) -> crate::Result<bool> {
-        Ok(false)
-    }
-}
 
 /// A no-op company store — `build_agent` only needs a handle; nothing here
 /// loads or persists.

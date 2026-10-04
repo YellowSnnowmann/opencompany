@@ -29,35 +29,6 @@ pub(super) fn manifest() -> CompanyManifest {
     toml::from_str(toml_src).expect("parse manifest")
 }
 
-/// A minimal running company record for tests that only need one to exist.
-pub(super) fn company_record(id: &CompanyId) -> CompanyRecord {
-    CompanyRecord {
-        general_channel: Default::default(),
-        overlay_retired_agents: Vec::new(),
-        overlay_agent_edits: Vec::new(),
-        overlay_desk_hive: Vec::new(),
-        id: id.clone(),
-        manifest: manifest(),
-        ledger: Vec::new(),
-        lifecycle: "running".into(),
-        overlay_agents: Vec::new(),
-        overlay_desk_members: Vec::new(),
-        overlay_desk_order: Vec::new(),
-        overlay_desks: Vec::new(),
-        overlay_workflows: Vec::new(),
-        overlay_budgets: Vec::new(),
-        overlay_policy: None,
-        overlay_tool_grants: None,
-        overlay_desk_tools: Default::default(),
-        disabled_workflows: Vec::new(),
-        template_provenance: None,
-        setup: None,
-        name_confirmed: false,
-        activation_completed_at: None,
-        created_at_millis: None,
-    }
-}
-
 pub(super) fn fs_ports(root: &Path) -> Ports {
     (
         Arc::new(FsCompanyStore::new(root.to_path_buf())),
