@@ -1473,31 +1473,13 @@ impl<'a> DelegationRunner<'a> {
         )
         .await?;
         let parked = self.approvals_queued().saturating_sub(approvals_before);
-        // The responder's own steps ride on the operator bubble; its reply is the
-        // operator-facing text UNLESS a synchronous desk delegation runs, in which
-        // case the relay turn's reply replaces it (below).
-        let mut operator_steps = outcome.steps;
+        // The responder's own steps and reply are the operator bubble.
+        let operator_steps = outcome.steps;
         let mut operator_reply = outcome.reply;
-        // Issue #926: sticky from here to the `OperatorTurn` below — never
-        // reassigned, only OR'd — so a cap the responder hit survives the relay
-        // turn replacing the reply text.
-        let mut hit_iteration_cap = outcome.hit_iteration_cap;
-        // Issue #1032: sticky the same way, kept as first-wins — never
-        // overwritten, only filled when still empty — so a spend halt the
-        // responder hit survives the relay turn replacing the reply text.
-        let mut halted_for_spend = outcome.halted_for_spend;
-        // Issue #1846: sticky the same way, first-wins — the top-level fix
-        // this issue adds. A responder whose own turn paused for lack of
-        // inference budget/credits must survive the relay turn replacing the
-        // reply text, exactly like a spend halt.
-        let mut budget_paused = outcome.budget_paused;
-        // Issue #1680: sticky the same way, first-wins. A responder whose own
-        // turn ran out of wall-clock time must survive the relay turn replacing
-        // the reply text, exactly like a spend halt or a budget pause. No
-        // re-park sibling is needed below, unlike #1846's: a ceiling pause has
-        // no redeem path at all -- there is nothing to top up and no
-        // checkpoint, so nothing is ever replayed on the operator's behalf.
-        let mut ceiling_paused = outcome.ceiling_paused;
+        let hit_iteration_cap = outcome.hit_iteration_cap;
+        let halted_for_spend = outcome.halted_for_spend;
+        let budget_paused = outcome.budget_paused;
+        let ceiling_paused = outcome.ceiling_paused;
         // A `spawn_task` opens a card silently; any future delegation that
         // surfaces its own bubble lands in `bubbles`.
         let mut bubbles = Vec::new();
