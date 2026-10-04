@@ -1,7 +1,7 @@
 use super::tests_core::*;
 
-/// The allowlist refusal must name what the member CAN reach: the model has
-/// no other way to learn its own `delegates_to`.
+/// Issue #1835: an `auto` channel has no lead, but the shared seam still
+/// answers its deterministic responder.
 #[test]
 fn an_auto_channel_has_no_lead_but_a_deterministic_responder() {
     let mut record = record();
