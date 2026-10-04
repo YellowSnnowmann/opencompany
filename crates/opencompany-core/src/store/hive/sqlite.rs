@@ -9,6 +9,9 @@
 //! rule exists for cannot open here. The load still clips to `next_sequence`,
 //! and rows are written `INSERT OR REPLACE`, so the port's contract holds even
 //! for rows that reached the table some other way.
+//!
+//! Tests live with the store's own (`store/sqlite_hive_tests.rs`), where the
+//! `sqlite` CI lane's `store::sqlite` filter selects them.
 
 use async_trait::async_trait;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -175,7 +178,3 @@ fn from_i64(value: i64) -> Result<u64> {
     u64::try_from(value)
         .map_err(|_| OpenCompanyError::Store(format!("negative hive sequence {value} in sqlite")))
 }
-
-#[cfg(test)]
-#[path = "sqlite_tests.rs"]
-mod tests;

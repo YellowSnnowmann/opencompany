@@ -3867,3 +3867,6 @@ mod tests;
 #[cfg(test)]
 #[path = "sqlite_ledger_tests.rs"]
 mod tests_ledger;
+#[cfg(test)]
+#[path = "sqlite_hive_tests.rs"]
+mod tests_hive;

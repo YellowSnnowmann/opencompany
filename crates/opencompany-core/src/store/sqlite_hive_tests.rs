@@ -6,6 +6,7 @@ use std::sync::Arc;
 use rusqlite::params;
 
 use super::*;
+use crate::ports::hive::HiveStore;
 use crate::store::hive::conformance;
 
 fn store() -> Arc<SqliteStore> {
