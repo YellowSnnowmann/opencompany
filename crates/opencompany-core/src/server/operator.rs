@@ -2096,8 +2096,7 @@ fn project_event_for_viewer(
             chat_id,
             parent,
             agent_id,
-            episode_id,
-            round_revision,
+            hive,
             ..
         } => {
             let mut o = envelope("turn_started");
@@ -2114,11 +2113,8 @@ fn project_event_for_viewer(
             if let Some(agent_id) = agent_id {
                 o["agentId"] = json!(agent_id);
             }
-            if let Some(episode_id) = episode_id {
-                o["episodeId"] = json!(episode_id);
-            }
-            if let Some(round_revision) = round_revision {
-                o["roundRevision"] = json!(round_revision);
+            if let Some(hive) = hive {
+                o["hive"] = json!(hive);
             }
             o
         }
@@ -2131,8 +2127,7 @@ fn project_event_for_viewer(
             turn_id,
             agent_id,
             chat_id,
-            episode_id,
-            round_revision,
+            hive,
             outcome,
             ..
         } => {
@@ -2149,11 +2144,8 @@ fn project_event_for_viewer(
             if let Some(chat_id) = chat_id {
                 o["chatId"] = json!(chat_id);
             }
-            if let Some(episode_id) = episode_id {
-                o["episodeId"] = json!(episode_id);
-            }
-            if let Some(round_revision) = round_revision {
-                o["roundRevision"] = json!(round_revision);
+            if let Some(hive) = hive {
+                o["hive"] = json!(hive);
             }
             o
         }
@@ -2163,8 +2155,7 @@ fn project_event_for_viewer(
             turn_id,
             agent_id,
             chat_id,
-            episode_id,
-            round_revision,
+            hive,
             outcome,
         } => {
             let mut o = envelope("turn_settled");
@@ -2176,11 +2167,8 @@ fn project_event_for_viewer(
             if let Some(chat_id) = chat_id {
                 o["chatId"] = json!(chat_id);
             }
-            if let Some(episode_id) = episode_id {
-                o["episodeId"] = json!(episode_id);
-            }
-            if let Some(round_revision) = round_revision {
-                o["roundRevision"] = json!(round_revision);
+            if let Some(hive) = hive {
+                o["hive"] = json!(hive);
             }
             o
         }
