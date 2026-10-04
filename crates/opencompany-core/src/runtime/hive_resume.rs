@@ -1,52 +1,49 @@
-//! Handing an operator's decision back to the hive episode seat that asked.
+//! Handing an operator's decision back to the company-hive agent that asked
+//! (OC-2).
 //!
-//! A seat turn parks its approvals under a turn key of its own,
-//! `episode-seat:{episode}:{seat}`, so the resolve path can tell an episode's
-//! approval from a chat cycle's or a workflow run's by the key alone. When
-//! the last decision a seat waits on lands, the runtime hands every decision
-//! to [`EpisodeReleases`]; the running episode takes them in its `released`
-//! wait, tells the seat what was decided, and lets it take its turn again.
-//!
-//! A decision for an episode that is not running in this process is banked
-//! here and the episode is resumed from its checkpoint, whose `released` wait
-//! then finds it at once.
+//! A coordinator turn parks its approvals under a turn key of its own,
+//! `hive-turn:{agent}:{episode}`, so the resolve path can tell a hive turn's
+//! approval from a chat cycle's or a workflow run's by the key alone. The
+//! Coordinator holds that agent parked until the host releases it; when the
+//! last decision it waits on lands, the runtime renders every decision as a
+//! [`SeatDecision::note`] and releases the agent with it
+//! (`Coordinator::release_with`), which the agent reads at the top of its next
+//! turn.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
-
-use tokio::sync::Notify;
 
 use crate::ports::types::ApprovalId;
 
-/// The prefix of every hive episode seat's approval turn key.
-pub const EPISODE_SEAT_TURN_PREFIX: &str = "episode-seat:";
+/// The prefix of every coordinator turn's approval turn key.
+pub const HIVE_TURN_PREFIX: &str = "hive-turn:";
 
-/// One seat of one episode, as its turn key names it.
+/// One coordinator turn's agent and episode, as its turn key names them.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EpisodeSeat {
-    /// The episode.
-    pub episode_id: String,
-    /// The seat.
-    pub seat: String,
+pub struct HiveSeat {
+    /// The manifest agent id whose turn parked.
+    pub agent_id: String,
+    /// The episode the turn ran for; `None` for a direct message.
+    pub episode_id: Option<String>,
 }
 
-/// The approval turn key a seat's parks are recorded under.
+/// The approval turn key a coordinator turn's parks are recorded under.
 #[must_use]
-pub fn turn_key(episode_id: &str, seat: &str) -> String {
-    format!("{EPISODE_SEAT_TURN_PREFIX}{episode_id}:{seat}")
+pub fn turn_key(agent_id: &str, episode_id: Option<&str>) -> String {
+    format!("{HIVE_TURN_PREFIX}{agent_id}:{}", episode_id.unwrap_or_default())
 }
 
-/// The episode and seat a turn key names, or `None` for any other key.
+/// The agent and episode a turn key names, or `None` for any other key.
 #[must_use]
-pub fn parse(turn: &str) -> Option<EpisodeSeat> {
-    let rest = turn.strip_prefix(EPISODE_SEAT_TURN_PREFIX)?;
-    let (episode_id, seat) = rest.split_once(':')?;
-    if episode_id.is_empty() || seat.is_empty() {
+pub fn parse(turn: &str) -> Option<HiveSeat> {
+    let rest = turn.strip_prefix(HIVE_TURN_PREFIX)?;
+    let (agent_id, episode_id) = rest.split_once(':')?;
+    if agent_id.is_empty() {
         return None;
     }
-    Some(EpisodeSeat {
-        episode_id: episode_id.to_owned(),
-        seat: seat.to_owned(),
+    Some(HiveSeat {
+        agent_id: agent_id.to_owned(),
+        episode_id: (!episode_id.is_empty()).then(|| episode_id.to_owned()),
     })
 }
 
@@ -144,130 +141,50 @@ impl SeatDecision {
     }
 }
 
-#[derive(Default)]
-struct Registry {
-    running: BTreeSet<String>,
-    banked: BTreeMap<String, BTreeMap<String, Vec<SeatDecision>>>,
-    answers: HashMap<ApprovalId, (SeatVerdict, String)>,
-}
-
-/// The decisions each running or resumable episode's seats are owed.
+/// The operator's own answers to escalations a hive agent raised, held until
+/// the decision that carries them is assembled — which is after the answer has
+/// left the blocker queue.
 ///
-/// One per company, shared by the runtime that resolves approvals and the
-/// episode hosts that wait on them. Cloning shares the state.
+/// One per company, shared by the runtime that resolves approvals. Cloning
+/// shares the state.
 #[derive(Clone, Default)]
-pub struct EpisodeReleases {
-    registry: Arc<Mutex<Registry>>,
-    changed: Arc<Notify>,
+pub struct HiveAnswers {
+    answers: Arc<Mutex<HashMap<ApprovalId, (SeatVerdict, String)>>>,
 }
 
-impl std::fmt::Debug for EpisodeReleases {
+impl std::fmt::Debug for HiveAnswers {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("EpisodeReleases")
-            .finish_non_exhaustive()
+        formatter.debug_struct("HiveAnswers").finish_non_exhaustive()
     }
 }
 
-impl EpisodeReleases {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Registry> {
-        self.registry.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Banks `decisions` for `seat` of `episode_id`, answering whether that
-    /// episode is running in this process and so will take them. `false`
-    /// means the caller owes the episode a resume.
-    pub fn deliver(&self, episode_id: &str, seat: &str, decisions: Vec<SeatDecision>) -> bool {
-        let running = {
-            let mut registry = self.lock();
-            registry
-                .banked
-                .entry(episode_id.to_owned())
-                .or_default()
-                .entry(seat.to_owned())
-                .or_default()
-                .extend(decisions);
-            registry.running.contains(episode_id)
-        };
-        tracing::debug!(
-            episode = %episode_id,
-            %seat,
-            running,
-            "[hive] a parked seat's decisions were delivered"
-        );
-        self.changed.notify_waiters();
-        running
-    }
-
-    /// Holds the operator's own answer to an escalation until its decision is
-    /// assembled, which is after the answer has left the blocker queue.
+impl HiveAnswers {
+    /// Holds the operator's answer to `approval_id`.
     pub fn answer(&self, approval_id: &ApprovalId, verdict: SeatVerdict, answer: String) {
-        self.lock()
-            .answers
+        self.answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
             .insert(approval_id.clone(), (verdict, answer));
     }
 
     /// Takes the answer [`answer`](Self::answer) held for `approval_id`.
     #[must_use]
     pub fn take_answer(&self, approval_id: &ApprovalId) -> Option<(SeatVerdict, String)> {
-        self.lock().answers.remove(approval_id)
-    }
-
-    /// Marks `episode_id` as running here. `false` when it already is, so a
-    /// second resume of the same episode starts nothing.
-    pub fn start(&self, episode_id: &str) -> bool {
-        self.lock().running.insert(episode_id.to_owned())
-    }
-
-    /// The episode stopped running here, finished or failed.
-    pub fn finish(&self, episode_id: &str) {
-        let mut registry = self.lock();
-        registry.running.remove(episode_id);
-        registry.banked.remove(episode_id);
-    }
-
-    /// Whether `episode_id` is running in this process.
-    #[must_use]
-    pub fn is_running(&self, episode_id: &str) -> bool {
-        self.lock().running.contains(episode_id)
-    }
-
-    /// Takes the decisions banked for any of `parked`, without waiting.
-    #[must_use]
-    pub fn take(&self, episode_id: &str, parked: &[String]) -> BTreeMap<String, Vec<SeatDecision>> {
-        let mut registry = self.lock();
-        let Some(seats) = registry.banked.get_mut(episode_id) else {
-            return BTreeMap::new();
-        };
-        let mut released = BTreeMap::new();
-        for seat in parked {
-            if let Some(decisions) = seats.remove(seat) {
-                released.insert(seat.clone(), decisions);
-            }
-        }
-        released
-    }
-
-    /// Waits until at least one of `parked` has decisions, and takes every
-    /// parked seat's that has.
-    pub async fn released(
-        &self,
-        episode_id: &str,
-        parked: &[String],
-    ) -> BTreeMap<String, Vec<SeatDecision>> {
-        loop {
-            let changed = self.changed.notified();
-            tokio::pin!(changed);
-            changed.as_mut().enable();
-            let released = self.take(episode_id, parked);
-            if !released.is_empty() {
-                return released;
-            }
-            changed.await;
-        }
+        self.answers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(approval_id)
     }
 }
 
+/// Every decision a parked agent waits on, rendered as the one release note
+/// it reads at the top of its next turn.
+#[must_use]
+pub fn release_note(decisions: &[SeatDecision]) -> Option<String> {
+    let notes: Vec<String> = decisions.iter().map(SeatDecision::note).collect();
+    (!notes.is_empty()).then(|| notes.join("\n"))
+}
+
 #[cfg(test)]
-#[path = "episode_resume_tests.rs"]
+#[path = "hive_resume_tests.rs"]
 mod tests;
