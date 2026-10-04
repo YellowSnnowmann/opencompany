@@ -3606,148 +3606,6 @@ impl<'a> CycleHostImpl<'a> {
         })
     }
 
-    /// Services the `delegate_to_desk` tool (issue #176) on the hosted path: a
-    /// *durable, asynchronous* hand-off. Resolves the target desk, writes a task
-    /// card assigned to that desk (so a later direct query to the desk surfaces
-    /// the handed work), and returns a summary the remote cognition relays to
-    /// the operator.
-    ///
-    /// This deliberately does NOT run the desk lead's turn: a hosted build has
-    /// no in-process cognition pool. The synchronous, one-voice relay the
-    /// harness performs needs Medulla multi-agent support and is tracked in
-    /// #176; the durable hand-off is the brain-agnostic capability that ships
-    /// now. An unknown desk is a clean tool error, not a lost hand-off.
-    async fn delegate_to_desk(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let Some(parsed) = DelegateArgs::parse(&args) else {
-            return Ok(ToolResult {
-                ok: false,
-                output: serde_json::json!({
-                    "error": "delegate_to_desk requires a desk and an instruction"
-                }),
-            });
-        };
-        let record = self.rt.store.load(&self.company).await?;
-        let Some(desk_id) = record
-            .as_ref()
-            .and_then(|r| r.resolve_desk_id(&parsed.desk))
-        else {
-            // Issue #272: the refusal now carries the company's real desk ids
-            // (and, when the invented target names a teammate, the desk that
-            // teammate is on), so the remote cognition can correct itself in the
-            // same turn rather than only learning that its pick was wrong. The
-            // message is the one the harness tool's boundary check uses, so the
-            // two paths cannot drift.
-            //
-            // Only the *unknown* desk is refused here. A real desk with no
-            // roster lead is left alone on this path: the hosted hand-off is a
-            // durable card assigned to the desk, which is visible on the board
-            // whether or not anyone leads it yet — there is nothing silent
-            // about it.
-            let error = match record.as_ref() {
-                Some(record) => unknown_desk_message(record, &parsed.desk),
-                None => format!("no desk matches \"{}\"", parsed.desk),
-            };
-            return Ok(ToolResult {
-                ok: false,
-                output: serde_json::json!({
-                    "status": "unknown_desk",
-                    "error": error,
-                }),
-            });
-        };
-        // An `auto` channel is refused here even though an ordinary leadless
-        // desk is not (issue #1835, codex on #1872). The carve-out above is
-        // about a desk that has no lead *yet* — a card on the board is visible
-        // work either way. An auto channel has no lead by design and never
-        // will, so accepting one wrote a card noting "no lead member on the
-        // roster yet": false about a staffed channel, and permanently so. The
-        // reason comes from `reject_auto_channel_target`, the same definition
-        // the harness tool refuses through, so the two paths cannot drift.
-        if let Some(reason) = record
-            .as_ref()
-            .and_then(|r| crate::runtime::delegation_tools::reject_auto_channel_target(r, &desk_id))
-        {
-            return Ok(ToolResult {
-                ok: false,
-                output: serde_json::json!({
-                    "status": "no_lead",
-                    "error": reason,
-                }),
-            });
-        }
-        // The desk's lead, when it has a roster-backed one, is recorded in the
-        // note; the card is assigned to the DESK so an operator asking the desk
-        // directly (chat targets the desk) sees the hand-off.
-        let lead = record.as_ref().and_then(|r| desk_lead(r, &parsed.desk));
-        let note = match &lead {
-            Some(member) => format!(
-                "Delegated to the {desk_id} desk (lead: {member}).\n\n{instruction}",
-                instruction = parsed.instruction
-            ),
-            None => format!(
-                "Delegated to the {desk_id} desk (no lead member on the roster yet).\n\n{instruction}",
-                instruction = parsed.instruction
-            ),
-        };
-        let card = TaskRecord {
-            opened_by: None,
-            id: generate_id(),
-            title: crate::ports::tasks::mint_task_title(
-                &parsed.instruction,
-                None,
-                self.rt.titler(),
-            )
-            .await,
-            note: Some(note),
-            column: COLUMN_TODO.to_string(),
-            priority: "medium".to_string(),
-            assignee: desk_id.clone(),
-            updated_at_millis: now_millis(),
-            // The conversation this card answers back into, on the same terms
-            // the harness path already stamps it (`runtime::delegation`'s
-            // `SpawnTask` arm). Read off the cycle, which computed the channel
-            // and the thread root inside it in one pass, so the two can never
-            // describe different messages.
-            //
-            // This used to be `None, None`, justified as "this tool surface
-            // never recorded the channel". It is the surface a hosted company's
-            // orchestrator spawns every card through, and `run_task` returns
-            // early when `origin_chat_id()` is absent -- so a hosted card could
-            // never report back anywhere, while the same card opened on the
-            // harness path could. The values were in scope the whole time.
-            //
-            // `None` is still the right answer for a cycle with no conversation
-            // behind it (a scheduler tick, a dispatch): `TaskOrigin::new` maps
-            // an absent channel to an absent origin, and the card then behaves
-            // exactly as every card raised straight on the board does.
-            origin: TaskOrigin::new(self.thread_id.clone(), self.thread_parent),
-            // No parent (#185), for the same reason as the harness path: this
-            // is a chat-turn delegation, so no task is in scope to be the
-            // parent. Lineage is set through the task API's `parentTaskId`.
-            parent_task_id: None,
-            // Nothing has run yet, so there is no deliverable to point at
-            // (issue #339). The first successful settle stamps it.
-            output: None,
-            plan: None,
-            planning_attempts: Vec::new(),
-            deliverable: crate::ports::tasks::TaskDeliverable::Once,
-            workflow_proposal: None,
-            origin_run_id: None,
-            origin_workflow_id: None,
-            origin_message_seq: None,
-            bounced: None,
-        };
-        self.rt.tasks().upsert(&self.company, &card).await?;
-        Ok(ToolResult {
-            ok: true,
-            output: serde_json::json!({
-                "status": "handed_off",
-                "desk": desk_id,
-                "lead": lead,
-                "task_id": card.id,
-            }),
-        })
-    }
 }
 
 /// The first non-empty line of `text`, trimmed and capped to `max` chars — the
@@ -4101,18 +3959,10 @@ impl CycleHost for CycleHostImpl<'_> {
         if call.tool == SEND_EMAIL_TOOL {
             return self.send_email(call.args).await;
         }
-        // Issue #176: service the delegation tools device-side so the hosted
-        // (Medulla) path can delegate. Unlike the harness path — which runs the
-        // desk lead's turn in-process and relays it in one voice — a hosted
-        // build has no local cognition pool, so the hand-off is *durable and
-        // asynchronous*: a board card the desk sees when asked directly. (The
-        // synchronous cross-agent cognition relay needs Medulla multi-agent
-        // support; tracked in #176.)
+        // Issue #176: service `spawn_task` device-side so the hosted (Medulla)
+        // path can open a board card.
         if call.tool == SPAWN_TASK_TOOL {
             return self.spawn_task(call.args).await;
-        }
-        if call.tool == DELEGATE_TO_DESK_TOOL {
-            return self.delegate_to_desk(call.args).await;
         }
         // The provider enforces the manifest grant before any side effect.
         self.rt.tools.invoke(&self.company, call).await
