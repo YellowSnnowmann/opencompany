@@ -152,24 +152,6 @@ destroying the diff.
 
 Moved to [`ports-console-workspace.md`](ports-console-workspace.md) — this file was over the repository's 500-line limit. See that page for the full detail.
 
-### FactStore
-
-The operator's durable, hand-curated Memory view — distinct from the two
-cognition-facing memory ports (see
-[company-brain/memory.md](../company-brain/memory.md)).
-
-```rust
-pub trait FactStore: Send + Sync {
-    async fn list(&self, company: &CompanyId, /* query, kind, page */)
-        -> Result<Vec<FactRecord>>;
-    async fn upsert(&self, company: &CompanyId, fact: &FactRecord) -> Result<()>;
-    async fn delete(&self, company: &CompanyId, id: &str) -> Result<bool>;
-}
-```
-
-`FactRecord` carries `{id, kind, title, body, source, updated_at}`; `FactKind`
-∈ `fact|preference|person|project|reference`.
-
 ### UsageMeter
 
 Durable per-company usage accounting (`src/ports/usage.rs`); the WS5
