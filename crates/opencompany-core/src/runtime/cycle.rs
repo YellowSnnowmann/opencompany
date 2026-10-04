@@ -1055,7 +1055,7 @@ impl<'a> CycleRunner<'a> {
 
         // 6. Persist output.
         for trace in &result.new_traces {
-            self.rt.memory.save_trace(&company, trace.clone()).await?;
+            self.rt.traces.save_trace(&company, trace.clone()).await?;
         }
         for delta in &result.ledger_deltas {
             self.rt.store.append_ledger(&company, delta.clone()).await?;
