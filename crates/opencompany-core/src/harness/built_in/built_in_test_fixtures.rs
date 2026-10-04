@@ -14,7 +14,7 @@ pub(super) use crate::company::CompanyManifest;
 pub(super) use crate::harness::provider::MockProvider;
 pub(super) use crate::ports::UsageSample;
 pub(super) use crate::ports::types::{
-    ChunkAddr, ChunkHit, ChunkMeta, CompanySummary, ContextChunk, LedgerEntry,
+    ChunkAddr, CompanySummary, ContextChunk, LedgerEntry,
 };
 // The two-level resolver. Test-only now: the roster build goes through
 // `agent_scoped_grants`, and these tests assert the desk-less case still
