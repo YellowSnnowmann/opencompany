@@ -256,26 +256,6 @@ where
     }
 }
 
-/// Reads a boolean opt-in env flag. Truthy values (case-insensitive, trimmed):
-/// `1`, `true`, `yes`, `on`. Anything else — including unset — is `false`.
-fn env_flag(env: &dyn EnvSource, key: &str) -> bool {
-    env.get(key)
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(false)
-}
-
-impl StorageSettings {
-    /// Reads the CLI-surface storage env vars (`OPENCOMPANY_STORAGE`,
-    /// `OPENCOMPANY_MONGODB_URI`, `OPENCOMPANY_MONGODB_DB`,
-    /// `OPENCOMPANY_TENANT_ID`).
-    pub fn from_env() -> Result<Self> {
-        Self::from_env_source(&ProcessEnv)
-    }
 
     /// Resolves storage settings from an injected environment source.
     pub fn from_env_source(env: &dyn EnvSource) -> Result<Self> {
@@ -310,9 +290,9 @@ pub async fn open_storage(
 /// mutation (`if false &&`) went green (the #1279 review's finding).
 ///
 /// One deployment per bundle: with a non-default environment an explicit
-/// `--home` is refused rather than mixed in; `null` is refused in both
-/// directions; shared-single-DB tenant mode is refused (bundle ops write no
-/// owner rows). Under the fs+store default every check passes and `--home`
+/// `--home` is refused rather than mixed in; shared-single-DB tenant mode is
+/// refused (bundle ops write no owner rows). Under the fs default every check
+/// passes and `--home`
 /// means exactly what it always has.
 pub fn refuse_bundle_env(settings: &StorageSettings, home_was_flagged: bool) -> crate::Result<()> {
     let live = settings.kind != StorageKind::Fs;
