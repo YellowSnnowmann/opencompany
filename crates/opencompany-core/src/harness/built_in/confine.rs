@@ -21,13 +21,11 @@
 //!   every roster agent carries, and none of the orchestrator's `query_company`
 //!   / `spawn_task` / `delegate_to_desk`. It cannot read the board, the roster,
 //!   the workspace tree, another workflow, an MCP server, the web, or a file.
-//! * **No company memory.** No memory tool is wired, and [`ConfinedContext`]
-//!   — an in-process store that holds nothing and answers every read empty —
-//!   is what any later memory seam must be pointed at, so the company
-//!   [`ContextStore`] is not reachable through recall. The pool
-//!   additionally skips the retrieve→inject step and the memory writeback for a
-//!   confined turn, so no prior task outcome is prepended to the message and the
-//!   exchange leaves nothing behind for a later turn to retrieve.
+//! * **No company memory.** The agent is bound to its company's memory root
+//!   (an unbound agent would land at the engine's shared default root) but with
+//!   memory switched off ([`AgentMemory::inactive`](crate::harness::build::AgentMemory::inactive)):
+//!   no `memory` tool, no recalled pack prepended to the message, and nothing
+//!   logged for a later turn to retrieve.
 //! * **Enforced, not requested.** [`ConfinedToolPolicy`] denies **every** tool
 //!   call by name whatever the belt holds. An empty belt already means the model
 //!   is offered nothing; the policy is what makes that a boundary rather than an
@@ -48,9 +46,6 @@
 //!
 //! Compiled only under `feature = "openhuman"`, with the rest of the harness.
 
-use std::ops::Range;
-
-use async_trait::async_trait;
 use openhuman_core as oh;
 
 use oh::agent::tool_policy::{ToolPolicy, ToolPolicyDecision, ToolPolicyRequest};
@@ -59,8 +54,7 @@ use tinytools::Tool;
 use crate::harness::HarnessDeps;
 use crate::harness::build::{AgentBlueprint, ensure_agent_workspace, model_for_tier};
 use crate::harness::policy::ApprovalPolicy;
-use crate::ports::ContextStore;
-use crate::ports::types::{ChunkAddr, ChunkHit, ChunkMeta, CompanyId, ContextChunk};
+use crate::ports::types::CompanyId;
 
 /// The agent id a confined turn runs under. Deliberately not a roster id: it
 /// names no teammate, carries no manifest grants, and cannot be addressed.
@@ -93,69 +87,6 @@ impl Confinement {
         match self {
             Self::Workflow { id } => id,
         }
-    }
-}
-
-/// A [`ContextStore`] that stores nothing and finds nothing.
-///
-/// Stands in for the company's real store so a confined agent's memory is
-/// structurally present (openhuman requires one) and substantively empty. Reads
-/// answer empty rather than erroring: a confined turn that *fails* on recall
-/// would be a turn whose confinement is visible to the model as a fault, and
-/// "there is nothing here" is the truth anyway.
-#[derive(Debug, Default)]
-pub struct ConfinedContext;
-
-#[async_trait]
-impl ContextStore for ConfinedContext {
-    async fn put(&self, _id: &CompanyId, chunk: ContextChunk) -> crate::Result<ChunkAddr> {
-        // Accepted and dropped. The address is derived from the label so a
-        // caller that stores and immediately re-reads gets a coherent answer
-        // (nothing), rather than a store that refuses writes and turns a
-        // confined turn into an error path.
-        Ok(ChunkAddr::new(format!("confined/{}", chunk.label)))
-    }
-
-    async fn list(&self, _id: &CompanyId, _prefix: &str) -> crate::Result<Vec<ChunkMeta>> {
-        Ok(Vec::new())
-    }
-
-    async fn delete(
-        &self,
-        _id: &CompanyId,
-        _addr: &crate::ports::types::ChunkAddr,
-    ) -> crate::Result<bool> {
-        // Nothing is ever stored, so there is never anything to delete —
-        // `false` is the truth, same as the empty reads above.
-        Ok(false)
-    }
-
-    async fn delete_label(
-        &self,
-        _id: &CompanyId,
-        _addr: &crate::ports::types::ChunkAddr,
-        _label: &str,
-    ) -> crate::Result<bool> {
-        // Same truth as `delete`: no claim was ever stored.
-        Ok(false)
-    }
-
-    async fn peek(
-        &self,
-        _id: &CompanyId,
-        _addr: &ChunkAddr,
-        _range: Option<Range<usize>>,
-    ) -> crate::Result<String> {
-        Ok(String::new())
-    }
-
-    async fn search(
-        &self,
-        _id: &CompanyId,
-        _query: &str,
-        _limit: usize,
-    ) -> crate::Result<Vec<ChunkHit>> {
-        Ok(Vec::new())
     }
 }
 
@@ -247,8 +178,8 @@ pub fn confined_persona(company_name: &str, confinement: &Confinement) -> String
 /// Builds the ephemeral agent a confined turn runs on.
 ///
 /// Deliberately **not** [`build_agent`](crate::harness::build::build_agent) with
-/// empty grants: that path wires the intrinsic memory tools onto every agent
-/// regardless of grants, and even an empty-grants call still gets the approval,
+/// empty grants: that path binds the agent's memory active, and even an
+/// empty-grants call still gets the approval,
 /// thread-read, and escalate-to-human tools — reach this turn must not have.
 /// Nothing is cached — the agent is built per turn and dropped with it, so a
 /// confined turn cannot accumulate state that a later one reads.
@@ -284,8 +215,8 @@ pub fn build_confined_agent(
 
     // An empty belt renders as an empty `ToolScopeSpec::Named`, so the runtime
     // offers the model nothing — the boundary [`ConfinedToolPolicy`] enforced
-    // in-process is now the runtime's own tool scope, and the confined
-    // context store is simply never wired (no memory tool reaches this turn).
+    // in-process is now the runtime's own tool scope, and memory is bound
+    // inactive below (no memory tool reaches this turn).
     // The policy type stays for the Phase 3 tool handler, which is where a
     // host-served tool would otherwise reach this turn.
     let tools: Vec<Box<dyn Tool>> = Vec::new();
