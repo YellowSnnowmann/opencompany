@@ -1,10 +1,10 @@
 //! The starter ladder: mention, then Jev, then the hive's default responder,
 //! every starter a member of the hive.
 
-use std::future::Future;
-use std::pin::Pin;
-
-use tinyhivemind_core::embed::{EvaluationDisposition, RoutingEvaluation};
+use tinyhivemind_core::embed::{
+    CandidateProbability, ContributionProbability, EvaluationDisposition, RoutingEvaluation,
+};
+use tinyhivemind_core::responder::Probability;
 
 use super::*;
 use crate::ports::types::CompanyId;
@@ -79,36 +79,63 @@ async fn general_is_answered_by_the_fallback_when_it_sits_there() {
     assert_eq!(starters.members, vec!["ceo".to_string()]);
 }
 
-/// A router that always picks one candidate with certainty.
+/// A router that picks one candidate with certainty, or says `none`.
 struct Picks(&'static str);
 
 impl Router for Picks {
-    fn evaluate<'a>(
-        &'a self,
-        request: &'a RoutingRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<RoutingEvaluation, tinyhivemind_core::embed::RouterError>> + Send + 'a>>
-    {
+    fn evaluate<'a>(&'a self, request: &'a RoutingRequest) -> tinyhivemind_core::embed::RouterFuture<'a> {
         let pick = self.0;
         Box::pin(async move {
-            let mut evaluation: RoutingEvaluation = serde_json::from_value(serde_json::json!({
-                "primary": [],
-                "contributions": [],
-                "clarification_needed": 0,
-                "high_impact": 0,
-                "disposition": "accepted"
-            }))
-            .unwrap_or_else(|_| panic!("evaluation shape for {}", request.message));
-            evaluation.disposition = EvaluationDisposition::Accepted;
-            let _ = pick;
-            Ok(evaluation)
+            let scale = tinyhivemind_core::responder::PROBABILITY_SCALE;
+            let probability = |parts: u32| Probability::new(parts).expect("in range");
+            let mut primary: Vec<CandidateProbability> = request
+                .candidates
+                .iter()
+                .map(|candidate| CandidateProbability {
+                    candidate_id: candidate.id.clone(),
+                    probability: probability(if candidate.id == pick { scale } else { 0 }),
+                })
+                .collect();
+            primary.push(CandidateProbability {
+                candidate_id: "none".into(),
+                probability: probability(if pick == "none" { scale } else { 0 }),
+            });
+            Ok(RoutingEvaluation {
+                primary_responder: pick.to_string(),
+                primary_probabilities: primary,
+                confidence: probability(scale),
+                needs_collaboration: probability(0),
+                needs_clarification: probability(0),
+                contributions: request
+                    .candidates
+                    .iter()
+                    .map(|candidate| ContributionProbability {
+                        candidate_id: candidate.id.clone(),
+                        probability: probability(0),
+                    })
+                    .collect(),
+                high_impact: probability(0),
+                model_identity: "test".into(),
+                question_schema_version: 1,
+                roster_version: request.roster_version,
+                disposition: EvaluationDisposition::Unchecked,
+            })
         })
     }
 }
 
 #[tokio::test]
-async fn an_unusable_jev_plan_falls_back_to_the_lead() {
+async fn jev_starts_the_member_it_routed_to() {
     let router = Picks("editor");
-    let starters = choose(&record(), "content", "draft a post", &[], Some(&router), "ceo").await;
-    assert_eq!(starters.members, vec!["writer".to_string()]);
+    let starters = choose(&record(), "content", "copy-edit this", &[], Some(&router), "ceo").await;
+    assert_eq!(starters.route, StarterRoute::Jev);
+    assert_eq!(starters.members, vec!["editor".to_string()]);
+}
+
+#[tokio::test]
+async fn an_unclear_jev_plan_falls_back_to_the_lead() {
+    let router = Picks("none");
+    let starters = choose(&record(), "content", "hmm", &[], Some(&router), "ceo").await;
     assert_eq!(starters.route, StarterRoute::Default);
+    assert_eq!(starters.members, vec!["writer".to_string()]);
 }
