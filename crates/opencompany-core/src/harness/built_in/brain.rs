@@ -1416,142 +1416,38 @@ impl HarnessBrain {
                                 // The card keeps the delegate as its assignee on the
                                 // way to `todo` — the hand-off did happen, and a
                                 // re-dispatch should start from who it was given to.
-                                let handoff = match publish_claim
+                                if let Err(err) = publish_claim
                                     .scoped(Box::pin(
                                         self.delegation_runner(run_turn.as_ref(), &record)
                                             .for_task(&card.id)
-                                            // The delegate's turn is part of THIS attempt —
-                                            // its steps and its spend belong to the card's
-                                            // run, not to nothing (#242).
                                             .for_run(sink.clone())
-                                            // Issue #1846 review (Codex #3864988176): the
-                                            // card's own (possibly redirect-augmented)
-                                            // instruction — the closest thing a dispatched
-                                            // task has to "the operator's own words" — so a
-                                            // delegate's budget-pause marker re-parks with
-                                            // the brief this attempt is actually running,
-                                            // not the hand-off instruction the model wrote.
                                             .reissue_message(instruction.clone())
                                             .handle_task_delegations(&mut card, &responder),
                                     ))
                                     .await
                                 {
-                                    Ok(handoff) => handoff,
-                                    Err(err) => {
-                                        let result = format!("hand-off failed: {err}");
-                                        // Issue #1861: a hand-off that failed on a
-                                        // rejected model id or a dead integration
-                                        // is as answerable as a direct dispatch
-                                        // that did — the delegate hit the same
-                                        // wall, so it asks the same question.
-                                        let end = self.settle_as_blocker_or_failure(
-                                            &card.id,
-                                            &result,
-                                            sink.as_ref().map(|s| s.run_id()),
-                                        );
-                                        settle(&mut card, end, &responder, &result);
-                                        break (end, result);
-                                    }
-                                };
+                                    let result = format!("board writes failed: {err}");
+                                    // Issue #1861: a failure on a rejected model id
+                                    // or a dead integration is as answerable here
+                                    // as on a direct dispatch.
+                                    let end = self.settle_as_blocker_or_failure(
+                                        &card.id,
+                                        &result,
+                                        sink.as_ref().map(|s| s.run_id()),
+                                    );
+                                    settle(&mut card, end, &responder, &result);
+                                    break (end, result);
+                                }
                                 // `settle` writes the note (attributed to whoever
                                 // actually produced the text) and the landing column
                                 // via the #186 lifecycle seam; the loop still yields
                                 // the reply so the #185/#190 completion events
                                 // report the same text that landed in the note.
-                                let (end, result) = match handoff {
-                                    // The delegate answered: they own the card, and
-                                    // every downstream write credits them.
-                                    // SPIKE: handed over, delegate not yet run.
-                                    // Settles `Delegated` — which
-                                    // `settled_landing_column` keeps in
-                                    // `in_progress` precisely because a hand-off is
-                                    // "not an ending" — and the runtime re-fires
-                                    // dispatch for the card's new owner.
-                                    Some(handoff) if handoff.pending => {
-                                        let delegate = handoff.delegate.clone();
-                                        // The DELEGATOR is who handed it over, so
-                                        // the note is theirs. Reading `responder`
-                                        // after the swap credits the delegate with
-                                        // handing work to itself.
-                                        let delegator =
-                                            std::mem::replace(&mut responder, handoff.delegate);
-                                        let result =
-                                            format!("handed off to {delegate}; awaiting their run");
-                                        settle(
-                                            &mut card,
-                                            TaskRunEnd::Delegated,
-                                            &delegator,
-                                            &result,
-                                        );
-                                        prior_responders.push(delegator);
-                                        (TaskRunEnd::Delegated, result)
-                                    }
-                                    Some(handoff) => {
-                                        prior_responders.push(std::mem::replace(
-                                            &mut responder,
-                                            handoff.delegate,
-                                        ));
-                                        let budget_paused = handoff.budget_paused;
-                                        match handoff.reply {
-                                            Some(reply) => {
-                                                // Issue #1846 review (Codex
-                                                // #3865395868): `TaskHandoff` now
-                                                // carries the delegate's own
-                                                // budget pause through from
-                                                // `DeskReply` — this is the other
-                                                // half of the asymmetry the
-                                                // top-level orchestrator's own
-                                                // dispatched call already closed
-                                                // above (`outcome.budget_paused`).
-                                                // Without it a delegate that ran
-                                                // out of credits still settled
-                                                // `Completed`, landing the pause
-                                                // notice in In Review as though it
-                                                // were a finished answer.
-                                                let end = if budget_paused.is_some() {
-                                                    TaskRunEnd::Paused
-                                                } else {
-                                                    TaskRunEnd::Completed
-                                                };
-                                                settle(&mut card, end, &responder, &reply);
-                                                (end, reply)
-                                            }
-                                            // The hand-off ran and an operator
-                                            // CANCELLED it in flight, so it produced
-                                            // nothing. Naming the cancellation here
-                                            // is safe because `TaskHandoff` only
-                                            // carries `reply: None` for a run
-                                            // `run_delegation` reported as cancelled
-                                            // — a hand-off that ends empty for any
-                                            // other reason reports no hand-off at
-                                            // all and never reaches this arm (issue
-                                            // #213 review).
-                                            //
-                                            // Partial work is discarded and the card
-                                            // returns to To-do, exactly as a
-                                            // cancelled dispatch does — it must not
-                                            // read as finished, and it must not
-                                            // strand in `in_progress` either.
-                                            None => {
-                                                let reply =
-                                                    "the delegated run was cancelled before it \
-                                                 produced anything"
-                                                        .to_string();
-                                                settle(
-                                                    &mut card,
-                                                    TaskRunEnd::Cancelled,
-                                                    &responder,
-                                                    &reply,
-                                                );
-                                                (TaskRunEnd::Cancelled, reply)
-                                            }
-                                        }
-                                    }
-                                    // Nothing was handed off — the responder did the
-                                    // work itself, as before. A ceiling pause can happen
-                                    // after tool calls, so settle it only after draining
-                                    // the staged hand-off queue above (issue #1680).
-                                    None if outcome.ceiling_paused.is_some() => {
+                                let (end, result) = match () {
+                                    // A ceiling pause can happen after tool calls, so
+                                    // settle it only after draining the staged board
+                                    // writes above (issue #1680).
+                                    () if outcome.ceiling_paused.is_some() => {
                                         let pause = outcome
                                             .ceiling_paused
                                             .as_ref()
@@ -1560,7 +1456,7 @@ impl HarnessBrain {
                                         settle(&mut card, TaskRunEnd::Paused, &responder, &result);
                                         (TaskRunEnd::Paused, result)
                                     }
-                                    None => {
+                                    () => {
                                         let result = outcome.reply;
                                         settle(
                                             &mut card,
