@@ -18,19 +18,17 @@ use tokio::sync::{Mutex as TokioMutex, broadcast};
 
 use crate::Result;
 use crate::error::OpenCompanyError;
-use crate::ports::context::ContextStore;
 use crate::ports::events::{EventLog, EventStreamItem, PruneReport, RetentionPolicy, plan_prune};
 use crate::ports::inbox::{EmailRecord, InboxMeta, InboxStore};
 use crate::ports::traces::TraceStore;
 use crate::ports::secrets::SecretStore;
 use crate::ports::store::CompanyStore;
 use crate::ports::types::{
-    ChunkAddr, ChunkHit, ChunkMeta, CompanyEvent, CompanyId, CompanyRecord, CompanySummary,
-    CompressedTrace, ContextChunk, EventSeq, EvictionPolicy, LedgerEntry, SecretValue, StoredEvent,
+    CompanyEvent, CompanyId, CompanyRecord, CompanySummary, CompressedTrace, EventSeq,
+    EvictionPolicy, LedgerEntry, SecretValue, StoredEvent,
     TaskResult,
 };
 use crate::ports::{generate_id, now_millis};
-use crate::store::content_address;
 use crate::store::paths::Bundle;
 use crate::store::text::slice_on_char_boundaries;
 
@@ -63,7 +61,7 @@ impl PathLocks {
 /// process (issue #388).
 ///
 /// The locks these replaced were **fields** on `FsCompanyStore`, `FsEventLog`,
-/// `FsTraceStore`, `FsContextStore`, `FsInboxStore` and `FsOps` — so two stores
+/// `FsTraceStore`, `FsInboxStore` and `FsOps` — so two stores
 /// over one bundle serialised against nothing, which is the state those types
 /// have always been in and which nothing stopped a caller reaching: each
 /// constructor takes a root and builds a fresh registry. A `static` is the only
