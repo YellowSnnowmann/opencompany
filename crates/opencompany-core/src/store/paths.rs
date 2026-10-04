@@ -344,26 +344,6 @@ impl Bundle {
         self.memory_dir().join("tasks.jsonl")
     }
 
-    /// The context subdirectory.
-    pub fn context_dir(&self) -> PathBuf {
-        self.dir.join("context")
-    }
-
-    /// The content-addressed blob subdirectory.
-    pub fn context_blobs_dir(&self) -> PathBuf {
-        self.context_dir().join("blobs")
-    }
-
-    /// Path to a single context blob by address.
-    pub fn context_blob(&self, addr: &str) -> PathBuf {
-        self.context_blobs_dir().join(addr)
-    }
-
-    /// Path to the context index.
-    pub fn context_index_jsonl(&self) -> PathBuf {
-        self.context_dir().join("index.jsonl")
-    }
-
     /// The per-company feedback subdirectory (the "feedback family").
     pub fn feedback_dir(&self) -> PathBuf {
         self.dir.join("feedback")
@@ -421,12 +401,6 @@ impl Bundle {
     /// Path to the per-ledger event log directory.
     pub fn ledgers_dir(&self) -> PathBuf {
         self.dir.join("ledgers")
-    }
-
-    /// Path to the durable facts log (`facts.jsonl`, one fact per line;
-    /// last-write-wins per id).
-    pub fn facts_jsonl(&self) -> PathBuf {
-        self.dir.join("facts.jsonl")
     }
 
     /// Path to the versioned task-artifact log (`artifacts.jsonl`, one artifact
