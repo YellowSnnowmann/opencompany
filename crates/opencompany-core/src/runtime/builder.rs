@@ -623,6 +623,9 @@ pub struct RuntimeBuilder {
     /// left there loses every committed effect key and every parked approval on
     /// the next container replacement.
     journal_store: Option<Arc<dyn crate::ports::journal::JournalStore>>,
+    /// The hive coordinator's durable state. `None` selects the company
+    /// bundle's `hive/` directory ([`crate::store::FsHiveStore`]).
+    hive_store: Option<Arc<dyn crate::ports::hive::HiveStore>>,
     seed_dir: Option<PathBuf>,
     /// Whether this company's board is seeded with setup cards on first boot.
     ///
@@ -759,6 +762,7 @@ impl RuntimeBuilder {
             sessions: None,
             login_codes: None,
             journal_store: None,
+            hive_store: None,
             seed_dir: None,
             seed_tasks: false,
             skills_registry: Arc::from([]),
@@ -941,6 +945,14 @@ impl RuntimeBuilder {
         store: Arc<dyn crate::ports::journal::JournalStore>,
     ) -> Self {
         self.journal_store = Some(store);
+        self
+    }
+
+    /// Swaps just the hive coordinator's store (default: the company bundle's
+    /// `hive/` directory). [`with_stores`](Self::with_stores) sets it from the
+    /// opened backend; this swaps it alone, which is what a test needs.
+    pub fn with_hive_store(mut self, store: Arc<dyn crate::ports::hive::HiveStore>) -> Self {
+        self.hive_store = Some(store);
         self
     }
 
@@ -1708,6 +1720,9 @@ impl RuntimeBuilder {
                 users: self.users.unwrap_or_else(|| fs_ops.clone()),
                 sessions: self.sessions.unwrap_or_else(|| fs_ops.clone()),
                 login_codes: self.login_codes.unwrap_or_else(|| fs_ops.clone()),
+                hive: self.hive_store.clone().unwrap_or_else(|| {
+                    Arc::new(crate::store::FsHiveStore::new(home.clone()))
+                }),
             },
         };
 
@@ -4409,3 +4424,6 @@ mod tests_seed_cards;
 #[cfg(test)]
 #[path = "builder_tests_skill_scope.rs"]
 mod tests_skill_scope;
+#[cfg(test)]
+#[path = "builder_tests_hive_store.rs"]
+mod tests_hive_store;

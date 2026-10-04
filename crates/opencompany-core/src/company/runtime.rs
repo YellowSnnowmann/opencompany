@@ -224,6 +224,8 @@ pub struct OpsStores {
     pub sessions: Arc<dyn SessionStore>,
     /// Pending magic-link login codes.
     pub login_codes: Arc<dyn LoginCodeStore>,
+    /// The hive coordinator's compare-and-swap state document and message log.
+    pub hive: Arc<dyn crate::ports::hive::HiveStore>,
 }
 
 /// The company's own outbound-mail handle: a sender + its SMTP credentials
@@ -1936,6 +1938,12 @@ impl CompanyRuntime {
     /// raw tool I/O, kept beside the scrubbed skeleton in [`Self::runs`].
     pub fn deep_trace(&self) -> &Arc<dyn crate::ports::deep_trace::DeepTraceStore> {
         &self.ops.deep_trace
+    }
+
+    /// The durable state under this company's hive coordinator: one
+    /// compare-and-swap state document and an append-only message log.
+    pub fn hive_store(&self) -> &Arc<dyn crate::ports::hive::HiveStore> {
+        &self.ops.hive
     }
 
     /// This company's per-workflow edit history (#274), the snapshot ring a
