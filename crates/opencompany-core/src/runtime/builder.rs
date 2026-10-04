@@ -1634,10 +1634,7 @@ impl RuntimeBuilder {
             // A rebuild inherits the ops it was handed, announcer and all — the
             // wrap below happens once, at first construction. Re-wrapping an
             // inherited board would announce every write twice.
-            Some(h) => {
-                let ops = h.ops.clone();
-                ops
-            }
+            Some(h) => h.ops.clone(),
             None => OpsStores {
                 // Issue #464: the board announces its own writes. Wrapped here,
                 // at the single place the store is chosen, so *every* writer —
