@@ -35,7 +35,6 @@ use tokio::sync::broadcast;
 use crate::Result;
 use crate::company::CompanyManifest;
 use crate::error::OpenCompanyError;
-use crate::ports::context::ContextStore;
 use crate::ports::events::{EventLog, EventStreamItem, PruneReport, RetentionPolicy, plan_prune};
 use crate::ports::login_codes::LoginCodeRecord;
 use crate::ports::traces::TraceStore;
@@ -49,7 +48,6 @@ use crate::ports::types::{
     StoredEvent, TaskResult,
 };
 use crate::ports::users::{InviteRecord, UserRecord};
-use crate::store::content_address;
 use crate::store::text::slice_on_char_boundaries;
 
 /// Schema for every port table. Idempotent: safe to run on each `open`.
@@ -89,27 +87,11 @@ CREATE TABLE IF NOT EXISTS memory_tasks (
     at_ms       INTEGER NOT NULL,
     PRIMARY KEY (company_id, id)
 );
-CREATE TABLE IF NOT EXISTS context_chunks (
-    company_id TEXT NOT NULL,
-    addr       TEXT NOT NULL,
-    label      TEXT NOT NULL,
-    body       TEXT NOT NULL,
-    len        INTEGER NOT NULL,
-    stored_ms  INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (company_id, addr)
-);
--- The context index: one row per (addr, label) claim, the shape the fs
--- backend's JSONL index always had (issue #1300). `context_chunks` keeps one
--- body row per address (its `label` column stays the first write's label so a
--- downgraded binary keeps reading what it always read); this table is what
--- `list` and the label-scoped delete read and mutate.
-CREATE TABLE IF NOT EXISTS context_chunk_labels (
-    company_id TEXT NOT NULL,
-    addr       TEXT NOT NULL,
-    label      TEXT NOT NULL,
-    stored_ms  INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (company_id, addr, label)
-);
+-- Company memory moved to OpenHuman (`crate::memory`): the context and fact
+-- tables are gone, and a database from before the cutover drops them.
+DROP TABLE IF EXISTS context_chunk_labels;
+DROP TABLE IF EXISTS context_chunks;
+DROP TABLE IF EXISTS facts;
 CREATE TABLE IF NOT EXISTS secrets (
     company_id TEXT NOT NULL,
     key        TEXT NOT NULL,
@@ -154,13 +136,6 @@ CREATE TABLE IF NOT EXISTS ledger_events (
 );
 CREATE INDEX IF NOT EXISTS ledger_events_by_ledger
     ON ledger_events (company_id, ledger, seq);
-CREATE TABLE IF NOT EXISTS facts (
-    company_id TEXT NOT NULL,
-    id         TEXT NOT NULL,
-    fact_json  TEXT NOT NULL,
-    updated_ms INTEGER NOT NULL,
-    PRIMARY KEY (company_id, id)
-);
 CREATE TABLE IF NOT EXISTS artifacts (
     company_id    TEXT NOT NULL,
     id            TEXT NOT NULL,
@@ -537,40 +512,6 @@ fn relax_runs_task_id_nullability(conn: &Connection) -> Result<()> {
     .map_err(sql_err)
 }
 
-/// Heals `context_chunk_labels` against `context_chunks` at open (issue #1300).
-///
-/// Two idempotent steps, one transaction, covering every mixed-version
-/// history a database can have:
-///
-/// - **Backfill**: a body row whose (addr, label) has no index row — a
-///   database from before the labels table existed, or a row an older binary
-///   wrote since — gets one, carrying the body row's stamp. `INSERT OR
-///   IGNORE` on the full primary key makes re-running a no-op, and a
-///   label-scoped delete can never be undone by it: when the last label goes
-///   the body row goes in the same transaction, so there is nothing left to
-///   backfill from.
-/// - **Orphan sweep**: an index row whose body row is gone — an older
-///   binary's address-level delete removed only `context_chunks` — is
-///   dropped, so `list` never names a chunk `peek` cannot read.
-///
-/// Both run on every open rather than behind a version flag, matching the
-/// other heals in this file, which read the live schema instead of trusting a
-/// stamp. The cost is two anti-joins against a primary-key index, once per
-/// process, and neither writes anything on an already-healed database.
-fn sync_context_chunk_labels(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "BEGIN;
-         INSERT OR IGNORE INTO context_chunk_labels (company_id, addr, label, stored_ms)
-             SELECT company_id, addr, label, stored_ms FROM context_chunks;
-         DELETE FROM context_chunk_labels WHERE NOT EXISTS (
-             SELECT 1 FROM context_chunks c
-             WHERE c.company_id = context_chunk_labels.company_id
-               AND c.addr = context_chunk_labels.addr);
-         COMMIT;",
-    )
-    .map_err(sql_err)
-}
-
 /// Runs `write` with `synchronous=FULL`, so its commit is fsynced, and restores
 /// `NORMAL` afterwards no matter how `write` ended.
 ///
@@ -634,12 +575,6 @@ impl SqliteStore {
         conn.execute_batch(MIGRATIONS).map_err(sql_err)?;
         // `CREATE TABLE IF NOT EXISTS` is a no-op on a database that predates a
         // column, so additive columns need their own idempotent step.
-        add_column_if_missing(
-            &conn,
-            "context_chunks",
-            "stored_ms",
-            "INTEGER NOT NULL DEFAULT 0",
-        )?;
         // Issue #553: a workspace node may hold bytes. Nullable and with no
         // default, so every existing prose note keeps `blob IS NULL` — which is
         // exactly the "this node is not binary" test the reads use, and needs no
@@ -674,10 +609,6 @@ impl SqliteStore {
         // After the rebuild above, which owns the table's shape on the one path
         // that replaces it wholesale.
         heal_runs_agent_id(&conn)?;
-        // Issue #1300: the context index moved into `context_chunk_labels`
-        // (one row per (addr, label) claim). Runs after the `stored_ms`
-        // column heal above, whose column it reads.
-        sync_context_chunk_labels(&conn)?;
         Ok(Self {
             conn: Arc::new(StdMutex::new(conn)),
             senders: Arc::new(StdMutex::new(HashMap::new())),

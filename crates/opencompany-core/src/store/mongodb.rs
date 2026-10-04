@@ -47,7 +47,6 @@ use tokio::sync::broadcast;
 use crate::Result;
 use crate::company::CompanyManifest;
 use crate::error::OpenCompanyError;
-use crate::ports::context::ContextStore;
 use crate::ports::events::{EventLog, EventStreamItem, PruneReport, RetentionPolicy, plan_prune};
 use crate::ports::login_codes::LoginCodeRecord;
 use crate::ports::traces::TraceStore;
@@ -61,7 +60,6 @@ use crate::ports::types::{
     StoredEvent, TaskResult,
 };
 use crate::ports::users::{InviteRecord, UserRecord};
-use crate::store::content_address;
 use crate::store::text::slice_on_char_boundaries;
 
 fn mongo_err(e: impl std::fmt::Display) -> OpenCompanyError {
