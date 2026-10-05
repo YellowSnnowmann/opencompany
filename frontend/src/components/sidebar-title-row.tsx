@@ -48,6 +48,16 @@ interface Props {
  * alone, is what actually wins here: `WindowDragBar` carries its own
  * positive `z-index`, so nothing below that level can out-paint it no
  * matter where it sits in the markup.
+ *
+ * That `z-30` layer is `pointer-events-none`, with `pointer-events-auto` put
+ * back on each button individually (tinysweeper, medium). The layer spans
+ * every pixel right of the lights' inset, not just the two buttons — it is a
+ * `flex-1` wrapper so `justify-end` can pack the buttons against the right
+ * edge — and an ordinary `auto` layer there would win every hit test in its
+ * bounding box against `WindowDragBar` underneath, for exactly the reason
+ * the paragraph above explains the buttons need `z-30` to begin with. Left
+ * at the default, the blank space between the inset and the buttons stops
+ * the window from being draggable from most of its own title row.
  */
 export function SidebarTitleRow({ onComposeMessage, onAddAgent }: Props) {
   if (!usesOverlayTitleBar()) return null;
@@ -59,13 +69,13 @@ export function SidebarTitleRow({ onComposeMessage, onAddAgent }: Props) {
     >
       <WindowDragBar />
       <WindowControlsInset />
-      <div className="relative z-30 flex min-w-0 flex-1 items-center justify-end gap-0.5 pr-1.5">
+      <div className="pointer-events-none relative z-30 flex min-w-0 flex-1 items-center justify-end gap-0.5 pr-1.5">
         <button
           type="button"
           onClick={onComposeMessage}
           aria-label="Start a conversation"
           title="Start a conversation"
-          className={TITLE_BAR_ICON_BUTTON}
+          className={`pointer-events-auto ${TITLE_BAR_ICON_BUTTON}`}
         >
           <SquarePen aria-hidden="true" className="size-4" />
         </button>
@@ -74,7 +84,7 @@ export function SidebarTitleRow({ onComposeMessage, onAddAgent }: Props) {
           onClick={onAddAgent}
           aria-label="Add"
           title="Add"
-          className={TITLE_BAR_ICON_BUTTON}
+          className={`pointer-events-auto ${TITLE_BAR_ICON_BUTTON}`}
         >
           <Plus aria-hidden="true" className="size-4" />
         </button>

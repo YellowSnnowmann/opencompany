@@ -1168,6 +1168,15 @@ export function AppShell({
     // without this an id captured off a fresh frame on the new company would
     // resolve through the previous company's roster until it answers.
     setAgentNames((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+    // The title row's pencil and `NewMessageDialog` build their choices from
+    // this list directly, and both stay mounted and clickable across a
+    // company switch (tinysweeper, medium — critique and security lanes).
+    // Left uncleared, opening either during the gap before the roster read
+    // below resolves offers the previous company's teammates and can
+    // navigate to one of their DM ids in the new company. Cleared
+    // synchronously here for the same reason `agentNames` above is, rather
+    // than left to that same async read.
+    setTeammates((prev) => (prev.length === 0 ? prev : []));
 
     // How far each channel's cold hydration has got, and which thread's
     // request is still in flight, so the 5-second poll below (`rehydrateAll`
@@ -2934,8 +2943,22 @@ export function AppShell({
    * reason the org chart has none: a local-only row has no host id, and this
    * surface keeps no roster of its own for a fabricated one to appear in —
    * it would exist for the length of this dialog and nowhere after.
+   *
+   * Guarded against a company switch mid-request the same way
+   * `refreshMentions`/the chat-history re-read above are: `company` here is
+   * the scope this call started in, and `scopeRef` is where the shell's scope
+   * has actually landed by the time both awaits settle. Without the check, a
+   * create started in company A that resolves after the operator has already
+   * switched to company B would still close B's dialog, toast B with A's
+   * teammate, and navigate B to a `team/<id>` route that only exists in A
+   * (tinysweeper, high). The write itself is not undone — it already
+   * happened in A — only the UI consequences tied to the scope that requested
+   * it are skipped.
    */
   async function addTeammateFromTitleBar(fields: NewMemberFields): Promise<boolean> {
+    const requestCompany = company;
+    const requestConnection = scope.connection;
+    const requestClient = client;
     let created: TeamMemberDto;
     try {
       created = await client.addTeamMember(
@@ -2955,6 +2978,21 @@ export function AppShell({
     }
     // Only what a host that predates the look did not echo is written now.
     const looked = await writeUnechoedLook(client, company, created, fields);
+    if (
+      scopeRef.current.company !== requestCompany ||
+      scopeRef.current.connection !== requestConnection ||
+      scopeRef.current.client !== requestClient
+    ) {
+      // The operator has moved on to a different company; the write landed
+      // (returning true is accurate), but closing the dialog, toasting, and
+      // navigating all belong to the scope that is no longer on screen.
+      return true;
+    }
+    // The desks/roster effect has no idea this teammate exists until its next
+    // run (a company switch, or the next poll) — without this, the pencil's
+    // picker cannot offer them until then (CodeRabbit). Scope-guarded above,
+    // so a stale create never injects into the wrong company's roster.
+    setTeammates((prev) => [...prev, fromDto({ ...created, ...(looked ? birthLook(fields) : {}) })]);
     setTitleAddOpen(false);
     reportAddMember(
       looked

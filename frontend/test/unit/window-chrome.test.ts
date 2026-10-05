@@ -4,7 +4,12 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { WindowControlsInset, WindowDragBar } from "@/components/window-chrome";
+import {
+  WINDOW_CHROME_HEIGHT,
+  WINDOW_CONTROLS_WIDTH,
+  WindowControlsInset,
+  WindowDragBar,
+} from "@/components/window-chrome";
 
 /**
  * The desktop window's own chrome.
@@ -75,7 +80,12 @@ describe("the window drag band", () => {
     // into being draggable.
     asDesktop("MacIntel");
     render(createElement(WindowDragBar));
-    expect(host.querySelector("[data-tauri-drag-region]")).not.toBeNull();
+    const band = host.querySelector("[data-tauri-drag-region]");
+    expect(band).not.toBeNull();
+    // Existence alone would still pass if the band rendered at zero height or
+    // the wrong one — assert the inline style actually reserves the
+    // documented `WINDOW_CHROME_HEIGHT` (tinysweeper, medium).
+    expect((band as HTMLElement).style.height).toBe(`${WINDOW_CHROME_HEIGHT}px`);
   });
 });
 
@@ -94,6 +104,10 @@ describe("the traffic-light inset", () => {
     // has to exist and has to be draggable rather than a dead hole in the row.
     asDesktop("MacIntel");
     render(createElement(WindowControlsInset));
-    expect(host.querySelector("[data-tauri-drag-region]")).not.toBeNull();
+    const inset = host.querySelector("[data-tauri-drag-region]");
+    expect(inset).not.toBeNull();
+    // Same gap as the drag band above: assert the reserved width itself, not
+    // just that some drag region exists (tinysweeper, medium).
+    expect((inset as HTMLElement).style.width).toBe(`${WINDOW_CONTROLS_WIDTH}px`);
   });
 });
