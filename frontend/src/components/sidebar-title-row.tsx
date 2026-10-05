@@ -1,26 +1,26 @@
-//! The floating sidebar's own title row — the overlay title bar's payload.
+//! The floating sidebar's own title row — the overlay title bar's payload on
+//! macOS desktop, and the pencil/`+` actions' only home on every platform.
 //!
 //! `window-chrome.tsx` reserves the strip the traffic lights float over
 //! (`WindowControlsInset`) and makes the rest of it draggable
-//! (`WindowDragBar`); neither renders anything to look at. This is what sits
-//! beside them: a pencil ("start a conversation") and a `+` ("add"), the two
+//! (`WindowDragBar`); neither renders anything to look at, and both already
+//! gate themselves on `usesOverlayTitleBar()`. The pencil ("start a
+//! conversation") and the `+` ("add") beside them do **not** gate on it
+//! (tinysweeper, high — `cross-platform-functionality`): these are the two
 //! actions that used to live in `ChannelRail`'s own header before the
-//! sidebar's sections lost their captions (see that file's history). They
-//! move here rather than back onto the rail because the rail is one of
-//! several things this sidebar shows now — Company, Connections and
-//! Notifications get the same floating card — and both actions apply
-//! regardless of which of those is on screen.
+//! sidebar's sections lost their captions (see that file's history), and
+//! that header was not macOS-overlay-only. Folding the overlay check into
+//! this component's own early return, rather than leaving it to the two
+//! window-chrome pieces that actually need it, would silently take
+//! compose-message and add-agent away from the web console, Windows, and
+//! Linux — every platform except the one this PR's title bar change happens
+//! to be about.
 //!
 //! Mounted once, at the head of the sidebar card, by `app-shell.tsx`.
 
 import { Plus, SquarePen } from "lucide-react";
 
-import {
-  WINDOW_CHROME_HEIGHT,
-  WindowControlsInset,
-  WindowDragBar,
-  usesOverlayTitleBar,
-} from "@/components/window-chrome";
+import { WINDOW_CHROME_HEIGHT, WindowControlsInset, WindowDragBar } from "@/components/window-chrome";
 import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
 
 interface Props {
@@ -34,11 +34,13 @@ interface Props {
  * The sidebar's title row: a {@link WindowDragBar} and a
  * {@link WindowControlsInset} under the hood, a pencil and a `+` on top.
  *
- * `usesOverlayTitleBar()` already folds in the desktop-runtime and
- * macOS-platform checks `WindowDragBar`/`WindowControlsInset` gate on
- * themselves, so this renders nothing anywhere the overlay title bar itself
- * does not apply — Windows, Linux, the web console, and the desktop app
- * before the traffic lights are known to be floating.
+ * Always renders the row and its two buttons — `WindowDragBar` and
+ * {@link WindowControlsInset} are each already gated on
+ * `usesOverlayTitleBar()` internally and simply render nothing anywhere the
+ * overlay title bar does not apply, so the row becomes a plain 28px header
+ * strip with two right-aligned buttons there instead of disappearing.
+ * Gating the actions themselves on the same check — the bug this replaces —
+ * would take them away from every platform except macOS desktop.
  *
  * The two buttons sit in a `relative z-30` layer **after** the drag band in
  * the DOM. `WindowDragBar` is `absolute … z-20` over the whole row on
@@ -60,7 +62,6 @@ interface Props {
  * the window from being draggable from most of its own title row.
  */
 export function SidebarTitleRow({ onComposeMessage, onAddAgent }: Props) {
-  if (!usesOverlayTitleBar()) return null;
   return (
     <div
       data-testid="sidebar-title-row"

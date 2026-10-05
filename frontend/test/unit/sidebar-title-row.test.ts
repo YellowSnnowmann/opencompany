@@ -1,18 +1,27 @@
 // @vitest-environment jsdom
 //
-// `SidebarTitleRow` is the overlay title bar's payload — the drag band and
-// the traffic-light inset from `window-chrome.tsx`, plus the pencil and `+`
-// buttons that sit beside them. Both are gated on the same
-// `usesOverlayTitleBar()` check, so this pins the two things that check does
-// not already cover on its own: that the row renders nothing where the
-// overlay title bar does not apply, and that each button is wired to its own
-// callback rather than the other's (a copy-paste `onClick` would still render
-// correctly and only fail at the click).
+// `SidebarTitleRow` is the pencil/`+` actions' only home, on every platform,
+// plus the overlay title bar's payload (the drag band and traffic-light
+// inset from `window-chrome.tsx`) on macOS desktop specifically. The two
+// buttons must not disappear anywhere the overlay title bar does not apply —
+// that was the bug (tinysweeper, high — `cross-platform-functionality`): an
+// early `if (!usesOverlayTitleBar()) return null` took compose-message and
+// add-agent away from the web console, Windows, and Linux, since
+// `WindowDragBar`/`WindowControlsInset` already gate themselves and need no
+// help from this component to disappear off-overlay.
+//
+// This pins: the row (and both buttons) rendering identically off the
+// overlay platform, with only the drag band/inset absent there; render order
+// on macOS, where all four pieces are present; the pointer-events split that
+// lets blank title-row space fall through to the drag band while the
+// buttons stay clickable (tinysweeper, medium); and that each button is
+// wired to its own callback rather than the other's.
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { WINDOW_CHROME_HEIGHT } from "@/components/window-chrome";
 import { SidebarTitleRow } from "@/components/sidebar-title-row";
 
 let host: HTMLDivElement;
@@ -52,15 +61,35 @@ function click(el: Element | null) {
   });
 }
 
-describe("SidebarTitleRow", () => {
-  it("renders nothing where the overlay title bar does not apply", () => {
-    // No `__TAURI__`: a browser console, same as `WindowDragBar`/
-    // `WindowControlsInset` on their own.
+describe("SidebarTitleRow off the overlay platform", () => {
+  it("still renders the row and both buttons — only the drag band and inset are absent", () => {
+    // No `__TAURI__`: a browser console, same precondition
+    // `WindowDragBar`/`WindowControlsInset` each check for themselves.
     render(createElement(SidebarTitleRow, { onComposeMessage: vi.fn(), onAddAgent: vi.fn() }));
-    expect(host.querySelector('[data-testid="sidebar-title-row"]')).toBeNull();
+
+    const row = host.querySelector('[data-testid="sidebar-title-row"]');
+    expect(row).not.toBeNull();
+    expect((row as HTMLElement).style.height).toBe(`${WINDOW_CHROME_HEIGHT}px`);
+    expect(host.querySelector('[data-testid="window-drag-bar"]')).toBeNull();
+    expect(host.querySelector('[data-testid="window-controls-inset"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Start a conversation"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label="Add"]')).not.toBeNull();
   });
 
-  it("renders the drag band, the inset, and both buttons, in that order, on macOS desktop", () => {
+  it("still wires both buttons to their callbacks off the overlay platform", () => {
+    const onComposeMessage = vi.fn();
+    const onAddAgent = vi.fn();
+    render(createElement(SidebarTitleRow, { onComposeMessage, onAddAgent }));
+
+    click(host.querySelector('[aria-label="Start a conversation"]'));
+    expect(onComposeMessage).toHaveBeenCalledTimes(1);
+    click(host.querySelector('[aria-label="Add"]'));
+    expect(onAddAgent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SidebarTitleRow on macOS desktop, where the title bar is an overlay", () => {
+  it("renders the drag band, the inset, and both buttons, in that order", () => {
     asDesktop("MacIntel");
     render(createElement(SidebarTitleRow, { onComposeMessage: vi.fn(), onAddAgent: vi.fn() }));
 
@@ -89,5 +118,24 @@ describe("SidebarTitleRow", () => {
     click(host.querySelector('[aria-label="Add"]'));
     expect(onAddAgent).toHaveBeenCalledTimes(1);
     expect(onComposeMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets blank title-row space fall through to the drag band while the buttons stay clickable", () => {
+    // Pins the two concrete, falsifiable claims the component's doc comment
+    // makes (tinysweeper, medium — "pin the z-30 and pointer-events claims"):
+    // the buttons' layer is pointer-events-none so hit testing on its own
+    // blank space does not win against `WindowDragBar` underneath, with
+    // pointer-events-auto restored on each button individually so they stay
+    // clickable despite that.
+    asDesktop("MacIntel");
+    render(createElement(SidebarTitleRow, { onComposeMessage: vi.fn(), onAddAgent: vi.fn() }));
+
+    const buttonsLayer = host.querySelector('[aria-label="Start a conversation"]')!.parentElement!;
+    expect(buttonsLayer.className).toContain("pointer-events-none");
+    expect(buttonsLayer.className).toContain("z-30");
+    for (const label of ["Start a conversation", "Add"]) {
+      const button = host.querySelector(`[aria-label="${label}"]`)!;
+      expect(button.className).toContain("pointer-events-auto");
+    }
   });
 });

@@ -149,4 +149,33 @@ describe("NewMessageDialog, controlled by a caller-held open", () => {
     // `onOpenChange` and not `setOpenLocal`.
     expect(document.body.textContent).toContain("Theo");
   });
+
+  it("still reports the pick when `open` is controlled with no `onOpenChange` (tinysweeper)", () => {
+    // `open = openProp ?? openLocal` always resolves to the prop once it is
+    // given, but `setOpen = onOpenChange ?? setOpenLocal` falls back to
+    // `setOpenLocal` when there is no callback — so `select()`'s
+    // `setOpen(false)` here updates state nothing reads, and the caller's
+    // fixed `open` keeps the dialog open. This is the exact mixed-props
+    // shape the component's own doc warns a caller not to create; pinned so
+    // a regression does not instead make the dialog throw, or silently stop
+    // calling `onSelect`, when a caller does.
+    const onSelect = vi.fn();
+
+    act(() => {
+      root.render(
+        createElement(NewMessageDialog, {
+          directMessages: DIRECT_MESSAGES,
+          onSelect,
+          open: true,
+        }),
+      );
+    });
+
+    click(channelButton("Maya"));
+    expect(onSelect).toHaveBeenCalledWith("dm-maya");
+    // `openLocal` flipped to `false`, but `open` is still the fixed `true`
+    // prop — the dialog cannot close itself out from under a caller that
+    // gave it one without the other.
+    expect(document.body.textContent).toContain("Maya");
+  });
 });
