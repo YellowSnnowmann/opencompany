@@ -163,7 +163,7 @@ fn brackets(rows: &[StoredEvent]) -> Vec<(String, String, u64, Option<u64>)> {
             } => open.push((
                 turn_id.clone(),
                 agent.clone(),
-                hive.hive_id.clone(),
+                hive.hive_id.clone().unwrap_or_default(),
                 row.seq.value(),
             )),
             CompanyEvent::TurnSettled { turn_id, .. } | CompanyEvent::TurnFailed { turn_id, .. } => {
@@ -187,11 +187,11 @@ fn replies(rows: &[StoredEvent], chat: &str, agent: &str) -> Vec<String> {
     rows.iter()
         .filter_map(|row| match &row.event {
             CompanyEvent::AgentReply {
-                chat: Some(c),
-                agent: Some(a),
+                chat_id,
+                agent_id,
                 text,
                 ..
-            } if c == chat && a == agent => Some(text.clone()),
+            } if chat_id == chat && agent_id == agent => Some(text.clone()),
             _ => None,
         })
         .collect()
