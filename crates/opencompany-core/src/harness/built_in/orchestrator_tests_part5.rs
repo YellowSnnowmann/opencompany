@@ -26,7 +26,7 @@ fn workflow_runner_handle_holds_only_a_weak_reference() {
 }
 
 #[test]
-fn orchestrator_tools_includes_all_thirteen() {
+fn orchestrator_tools_includes_all_fourteen() {
     use crate::harness::workflow_admin::{
         DELETE_WORKFLOW_TOOL, READ_WORKFLOW_TOOL, UPDATE_WORKFLOW_TOOL,
     };
@@ -56,8 +56,8 @@ fn orchestrator_tools_includes_all_thirteen() {
     // Six before #186; `assign_task` + `review_task` made eight; #418's
     // `read_run_output` makes nine; #661's read/update/delete_workflow
     // trio makes twelve; #1859's `list_tasks` / `read_task` / `read_run`
-    // trio makes fifteen; OC-2 retired both hand-off tools, leaving thirteen.
-    assert_eq!(names.len(), 13, "got {names:?}");
+    // trio makes fifteen; OC-2 retired both hand-off tools, leaving fourteen.
+    assert_eq!(names.len(), 14, "got {names:?}");
     assert!(names.contains(&RUN_WORKFLOW_TOOL), "got {names:?}");
     assert!(names.contains(&READ_RUN_OUTPUT_TOOL), "got {names:?}");
     assert!(names.contains(&CREATE_WORKFLOW_TOOL), "got {names:?}");

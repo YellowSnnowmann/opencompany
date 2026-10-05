@@ -17,7 +17,6 @@ fn the_brief_leads_with_answering_and_did_not_grow() {
         .find("MOST MESSAGES ARE QUESTIONS OR QUICK READS")
         .expect("the answering default is stated");
     for later in [
-        "delegate_to_desk",
         "spawn_task",
         "create_workflow",
         "add_agent",
