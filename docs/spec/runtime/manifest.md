@@ -120,14 +120,6 @@ turn_timeout_secs = 600            # one seat turn, from holding its turn_lock
                                    # refused at load with a migration hint.
                                    # See runtime/hive.md
 
-[group_chat.routing.referral]      # may this desk ask ANOTHER desk?
-enabled = true                     # off unless this says so; the whole block
-                                   # defaults to referring nothing
-max_hops = 1                       # chain depth; 2 is one round trip
-reach = "desks"                    # local | channels | desks — widens strictly
-returns = true                     # carry the answer back to the desk that asked
-                                   # See runtime/hive.md#referral
-
 [tools]
 provider = "openhuman"             # openhuman (default) | builtin
 allow = ["web.*", "docs.*", "search"]  # company-wide ceiling. Desks and agents
