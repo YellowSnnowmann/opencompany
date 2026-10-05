@@ -119,3 +119,7 @@ pub const HIVEMIND_TOOLS: &[&str] = &[
     "hivemind_broadcast",
     "hivemind_complete",
 ];
+
+#[cfg(test)]
+#[path = "hive_tests.rs"]
+mod tests;
