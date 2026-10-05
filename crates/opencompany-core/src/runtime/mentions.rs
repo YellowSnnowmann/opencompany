@@ -128,8 +128,7 @@ pub fn directory(record: &CompanyRecord, users: &[UserRecord]) -> Vec<MentionAli
     }
 
     // Desks, by id and by name — the two spellings `resolve_desk_id` already
-    // accepts, so `@#engineering` and `@#Engineering` behave the way
-    // `delegate_to_desk` does.
+    // accepts, so `@#engineering` and `@#Engineering` both name the desk.
     for chat in &record.manifest.group_chats {
         let mut aliases = vec![chat.id.to_lowercase()];
         let name = chat.name.to_lowercase();

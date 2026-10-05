@@ -1197,20 +1197,13 @@ impl HarnessAgentRunner {
     /// Drains this run's delegation bucket after a node's turn and records what it
     /// did (issue #661 / M5).
     ///
-    /// Runs inside the run's board scope, so both drains read **this run's**
-    /// bucket rather than whatever `Unscoped` happens to hold.
-    ///
-    /// Two drains, in this order and both mandatory:
-    ///
-    /// 1. **Refusals** — desks a `delegate_to_desk` named that the company does not
-    ///    have. This is the live half of the defect PR #771 identified: the tool
-    ///    pushes these *before* consulting the claim, so before the scoped claim
-    ///    they landed in the shared bucket and a concurrent chat turn recorded them
-    ///    on its own card. Surfaced as a run notice — the run's own surface, and the
-    ///    only one it has.
-    /// 2. **Board writes** — executed through
-    ///    [`DelegationRunner::execute_board_writes`](crate::runtime::delegation),
-    ///    which is infallible by signature, so this cannot fail the node.
+    /// Runs inside the run's board scope, so the drain reads **this run's**
+    /// bucket rather than whatever `Unscoped` happens to hold. Board writes are
+    /// executed through
+    /// [`DelegationRunner::execute_board_writes`](crate::runtime::delegation),
+    /// which is infallible by signature, so this cannot fail the node. (The
+    /// refusal drain that ran first went with the desk hand-off it recorded,
+    /// OC-2.)
     ///
     /// # Never fails the node
     ///

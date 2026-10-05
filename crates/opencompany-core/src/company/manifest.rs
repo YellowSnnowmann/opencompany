@@ -698,8 +698,8 @@ impl CompanyManifest {
         // one agent field whose target lives in a *later* section — the desks
         // are only fully known once `[[group_chat]]` has been walked. An entry
         // that resolves to nothing would otherwise fail silently at runtime:
-        // the member would carry `delegate_to_desk`, every call would be
-        // refused as off-allowlist, and the manifest would look fine.
+        // every `hivemind_send_agent` to that desk would be refused as
+        // off-allowlist, and the manifest would look fine.
         for agent in &self.agents {
             let label = if agent.id.is_empty() {
                 "an agent".to_string()

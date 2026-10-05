@@ -66,12 +66,12 @@
 //!   `is_orchestrator` — they are the company's *authority* (who owns a card,
 //!   what passes review, who is on the roster) and no desk agent gets them.
 //!
-//!   The three **hand-off** tools, `spawn_task`, `delegate_to_desk` and
-//!   `delegate_to_teammate`, are wired onto every other roster agent too,
-//!   scoped by its manifest [`delegates_to`](crate::company::Agent::delegates_to):
-//!   unrestricted when the list is empty, narrowed to the named desks when it
-//!   is not. Every agent is also briefed on its team
-//!   (`company::team_brief::team_section`) so it knows who those tools reach.
+//!   `spawn_task` is wired onto every other roster agent too, and every agent
+//!   carries the company hive's `hivemind_*` tools (admitted by its scope,
+//!   attached by the OpenHuman host), whose direct sends its manifest
+//!   [`delegates_to`](crate::company::Agent::delegates_to) narrows. Every
+//!   agent is also briefed on its team (`company::team_brief::team_section`)
+//!   so it knows whom it can reach.
 //!
 //!   Recursion is bounded **dynamically**, not by which tools were wired: belts
 //!   are cached per roster and rebuilt rarely, so the tool cannot be withheld

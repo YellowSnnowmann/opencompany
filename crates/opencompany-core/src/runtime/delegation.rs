@@ -405,11 +405,9 @@ pub(crate) struct WorkflowRunRef {
 
 /// The [`RunTurn`] a workflow-run drain is wired with: one that cannot run a turn.
 ///
-/// A board drain never needs one. The only delegation that runs a turn is
-/// [`Delegation::DelegateToDesk`], and a run holds a
-/// [`DrainClaim::Board`](crate::harness::orchestrator::DrainClaim) claim, under
-/// which a hand-off is refused at the tool boundary and can never be staged — so
-/// nothing this drain executes reaches these methods.
+/// A board drain never needs one: no [`Delegation`] runs a turn (the desk
+/// hand-off that did went with OC-2), so nothing this drain executes reaches
+/// these methods.
 ///
 /// **It errors rather than returning an empty turn**, and that is the point of
 /// having it at all. A silent empty `TurnOutcome` would make a future path that
@@ -1763,18 +1761,9 @@ impl<'a> DelegationRunner<'a> {
     /// #246) — it surfaces no bubble of its own, which is a different thing
     /// from the nothing it used to surface. A missing task store or a failed
     /// write comes back as a [`RefusedCardWrite`], so the rest of the drain
-    /// still runs.
-    /// `delegate_to_desk` runs a single turn on the desk's lead member and
-    /// **returns its reply for the orchestrator to relay** (a [`DeskReply`]). An
-    /// unknown desk (no roster-backed lead) or a cancelled run yields nothing to
-    /// relay.
-    ///
-    /// Since issue #176 a desk member the manifest opted in with `delegates_to`
-    /// carries the hand-off tools itself, so its turn may queue too. That queue
-    /// is drained **here**, recursively, inside this hand-off's scope — and the
-    /// deeper answers are folded into this member's reply rather than relayed
-    /// separately. Depth is bounded at the tool boundary by the scope chain, not
-    /// by this function.
+    /// still runs. The lifecycle delegations (`assign_task`, `review_task`,
+    /// `start_task`) write the card they name. Nothing here runs another
+    /// agent's turn: agent-to-agent work is a hive message since OC-2.
     pub(crate) async fn run_delegation(
         &self,
         delegation: Delegation,

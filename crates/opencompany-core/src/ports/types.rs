@@ -4100,7 +4100,7 @@ pub type DeskRoutingOverride = DeskHiveOverride;
 /// `Lead` is the model every desk has always had: `members[0]` is the desk
 /// lead, made explicit by #1827, and `responder_for` hands the lead every
 /// message that names nobody. `Auto` is the channel model: **no lead exists**
-/// — no crown, no hierarchy, no `delegate_to_desk` target — and the answerer
+/// — no crown, no hierarchy, no default starter — and the answerer
 /// is chosen **per message**, by a best-fit selection over the channel's own
 /// membership, with the first roster member as the deterministic fallback
 /// wherever selection cannot run (the default build, the small-talk fast
@@ -5321,7 +5321,7 @@ impl CompanyRecord {
         // A teammate the operator removed keeps its blueprint seat in
         // `[[group_chat]].members`, so it has to be dropped here rather than at
         // the source. Otherwise a deleted teammate would still lead a desk, still
-        // receive `delegate_to_desk` hand-offs, and still be named on the org
+        // start the desk's unaddressed lines, and still be named on the org
         // chart — a delete that removed the card and nothing else.
         members.retain(|id| !self.is_retired(id));
         // Apply the operator-set ordering as a whole-set permutation. Listed ids

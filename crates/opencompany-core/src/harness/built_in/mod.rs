@@ -418,8 +418,8 @@ pub struct HarnessDeps {
     /// the `query_company` read tool for recent-activity context (issue #53).
     /// `None` leaves the orchestrator without the recent-events half.
     pub events: Option<Arc<dyn EventLog>>,
-    /// The shared delegation queue the orchestrator's `spawn_task` /
-    /// `delegate_to_desk` tools push onto and the [`HarnessBrain`] drains after
+    /// The shared delegation queue the `spawn_task` and lifecycle tools push
+    /// onto and the [`HarnessBrain`] drains after
     /// an orchestrator turn (issue #53). A [`DelegationQueue`] is a cheap shared
     /// handle; cloning `HarnessDeps` shares one queue between the tools built
     /// into the agent and the brain that drains it. Default is an empty queue.

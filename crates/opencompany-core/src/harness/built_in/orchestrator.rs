@@ -9,10 +9,10 @@
 //! first agent when none is tagged (so a company without an orchestrator behaves
 //! exactly as before).
 //!
-//! It reaches sixteen tools, wired onto the orchestrator agent (three of them —
-//! the hand-off tools `spawn_task`, `delegate_to_desk` and
-//! `delegate_to_teammate` — also onto every other roster agent, scoped; see
-//! [`member_delegation_tools`]):
+//! It reaches fourteen tools, wired onto the orchestrator agent (one of them —
+//! `spawn_task` — also onto every other roster agent; see
+//! [`member_delegation_tools`]). Agents reach each other with the company
+//! hive's `hivemind_*` tools, which the OpenHuman host attaches (OC-2):
 //!
 //! * [`QueryCompanyTool`] — a read surface over the company's learnings,
 //!   recent [`EventLog`] history, and (issue #1859) a `## Board` summary of
@@ -24,7 +24,7 @@
 //!   run's outcome (an agent attempt, or a workflow run folded out of the
 //!   journal). Where the board tools below are write-only, this trio is how
 //!   an agent reads back what it — or the board — already did.
-//! * [`SpawnTaskTool`] / [`DelegateToDeskTool`] — delegation tools that push a
+//! * [`SpawnTaskTool`] — the delegation tool that pushes a
 //!   [`Delegation`] onto a shared [`DelegationQueue`]. They perform no work
 //!   themselves; the [`HarnessBrain`](crate::harness::HarnessBrain) drains the
 //!   queue after the orchestrator's turn (v1: synchronous, in-cycle, capped at
@@ -138,7 +138,7 @@ const MAX_FACT_BODY_CHARS: usize = 400;
 /// — and that outer cut is blind, so a facts list long enough to blow the
 /// budget would take the facts `[TRUNCATED …]` marker AND every section below
 /// it (Recent activity, Saved workflows, Team, Desks) over the edge with it,
-/// including the Desks list `delegate_to_desk` depends on. Bounding the facts
+/// including the Desks list `hivemind_send_hive` and `spawn_task` depend on. Bounding the facts
 /// section here — the one section with a `query` narrowing argument to fall
 /// back on — keeps the announcement and the delegation-grounding sections
 /// inside the outer budget. Half the budget leaves the other half for
@@ -1384,7 +1384,7 @@ impl Tool for QueryCompanyTool {
         // Desks (issue #272). The roster was already here, but the *desks* were
         // not — so an orchestrator asked to hand work to a desk had nothing
         // authoritative to read and reached for a teammate's id instead. These
-        // are exactly the ids `delegate_to_desk` accepts, with each desk's lead
+        // are exactly the hive ids `hivemind_send_hive` accepts, with each desk's lead
         // named so the two are never confused for one another again.
         let desks: Vec<(String, Option<String>)> = record
             .map(|record| {
@@ -1434,7 +1434,7 @@ impl Tool for QueryCompanyTool {
         // tool-result byte budget the harness enforces
         // (`TOOL_RESULT_BUDGET_BYTES`), and a company with an unusually large
         // board must never be able to push that cut back far enough to drop
-        // the Desks list `delegate_to_desk` depends on. Unlike Facts (which
+        // the Desks list `hivemind_send_hive` depends on. Unlike Facts (which
         // has `query` to narrow with) this section has no narrowing argument
         // of its own — `list_tasks` is the fallback for a board too big to
         // fit here, exactly as its own truncation marker below says.
@@ -2484,8 +2484,8 @@ pub struct SpawnTaskTool {
     queue: DelegationQueue,
     company: CompanyId,
     /// The company store, read at call time so the roster an `assignee` is
-    /// grounded against is the **current** one — the same reasoning as
-    /// [`DelegateToDeskTool::store`].
+    /// grounded against is the **current** one, not the roster the belt was
+    /// built against.
     store: Arc<dyn CompanyStore>,
 }
 

@@ -2944,15 +2944,8 @@ impl HarnessBrain {
     /// `spawn_task` opens a To-do card through the same
     /// [`TaskStore::upsert`](crate::ports::TaskStore) path the console uses and
     /// reports the card's id (issue #246); it surfaces no bubble of its own. A
-    /// missing task store is a silent no-op.
-    /// `delegate_to_desk` runs a single turn on the desk's lead member and
-    /// **returns its reply for the orchestrator to relay** (a [`DeskReply`]) —
-    /// the CEO-relay hand-back: instead of a disconnected sibling bubble the
-    /// teammate's answer feeds a second orchestrator turn so the CEO comes back
-    /// with it in one coherent conversation. An unknown desk (no roster-backed
-    /// lead) or a cancelled run yields nothing to relay. No sub-agent
-    /// re-delegation in v1: desk members carry no delegation tools, so their
-    /// turns queue nothing.
+    /// missing task store is a silent no-op. The lifecycle delegations write the
+    /// card they name; none runs another agent's turn (OC-2).
     ///
     /// The orchestration lives on the brain-agnostic seam (issue #176); this is
     /// a thin wrapper that re-attaches `HarnessDeps` behind a
