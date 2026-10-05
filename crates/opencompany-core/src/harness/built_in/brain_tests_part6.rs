@@ -54,7 +54,7 @@ async fn assign_task_reassigns_the_card_without_dispatching_it() {
         .await
         .expect("delegation runs");
     assert!(
-        out.bubble.is_none() && out.desk_reply.is_none(),
+        out.bubble.is_none(),
         "the orchestrator is mid-turn; a second voice here would be it talking to itself"
     );
 
@@ -232,7 +232,7 @@ async fn a_lifecycle_delegation_for_a_missing_card_is_a_no_op() {
             .run_delegation(delegation, None)
             .await
             .expect("a missing card must not error");
-        assert!(out.bubble.is_none() && out.desk_reply.is_none());
+        assert!(out.bubble.is_none());
     }
     assert!(
         tasks
@@ -240,58 +240,6 @@ async fn a_lifecycle_delegation_for_a_missing_card_is_a_no_op() {
             .await
             .unwrap()
             .is_empty()
-    );
-}
-
-/// A `delegate_to_desk` delegation runs the desk lead and hands its reply
-/// back to relay (a `DeskReply` attributed to the lead, no standalone
-/// bubble); an unknown desk yields nothing.
-#[tokio::test]
-async fn delegate_to_desk_delegation_answers_as_the_desk_lead() {
-    let dir = tempfile::tempdir().unwrap();
-    let (brain, _tasks) = brain_with_desk(dir.path());
-    // The pool must have the roster before a member turn can run.
-    brain
-        .pool
-        .ensure(&brain.record(), &brain.deps)
-        .await
-        .expect("roster");
-
-    let out = brain
-        .run_delegation(
-            Delegation::DelegateToDesk {
-                desk: "eng_desk".to_string(),
-                instruction: "ship-marker".to_string(),
-            },
-            None,
-        )
-        .await
-        .expect("delegation runs");
-    // The answer comes back as a DeskReply to relay — not a standalone
-    // bubble — attributed to the desk lead, and the mock provider echoes the
-    // instruction, proving the member's turn ran.
-    assert!(
-        out.bubble.is_none(),
-        "the desk reply is relayed, not bubbled"
-    );
-    let desk = out.desk_reply.expect("desk lead replies");
-    assert_eq!(desk.member, "engineer");
-    assert!(desk.reply.contains("ship-marker"), "{:?}", desk.reply);
-
-    // An unknown desk delegates to nobody.
-    let none = brain
-        .run_delegation(
-            Delegation::DelegateToDesk {
-                desk: "ghost".to_string(),
-                instruction: "hello".to_string(),
-            },
-            None,
-        )
-        .await
-        .expect("delegation runs");
-    assert!(
-        none.bubble.is_none() && none.desk_reply.is_none(),
-        "an unknown desk yields nothing"
     );
 }
 
@@ -309,7 +257,7 @@ async fn mcp_failures_surface_as_error_steps_and_event() {
     let events: Arc<dyn EventLog> = Arc::new(FsEventLog::new(dir.path()));
     let failures = crate::harness::mcp_probe::McpFailureQueue::default();
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -464,7 +412,7 @@ async fn a_failed_journal_write_does_not_swallow_the_rest_of_the_drain() {
     let log = Arc::new(FailFirstLog::default());
     let failures = crate::harness::mcp_probe::McpFailureQueue::default();
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,

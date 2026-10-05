@@ -4,9 +4,10 @@ import { OpenCompanyClient } from "@/api/client";
 import type { Transport, TransportRequest, TransportResponse } from "@/api/transport";
 
 /**
- * The routing and episode reads on the client hit the routes the host serves
- * (`/desks/{id}/routing`, `/episodes`) with the verbs the contract names — a
- * PUT that carried the block on the wrong route would 404 on every save.
+ * The routing and hive reads on the client hit the routes the host serves
+ * (`/desks/{id}/routing`, `/agents/{id}/messages`) with the verbs the contract
+ * names — a PUT that carried the block on the wrong route would 404 on every
+ * save.
  */
 
 function harness(payload: unknown = {}) {
@@ -30,24 +31,29 @@ describe("desk routing on the client", () => {
   it("reads, installs and resets a desk's block on its own route", async () => {
     const { client, sent } = harness({ deskId: "eng desk", source: "overlay", declared: {}, effective: {}, candidates: [] });
     await client.getDeskRouting("eng desk", "acme");
-    await client.putDeskRouting("eng desk", { round_width: 2, referral: { enabled: true } }, "acme");
+    await client.putDeskRouting("eng desk", { round_width: 2 }, "acme");
     await client.resetDeskRouting("eng desk", "acme");
     expect(sent.map((r) => `${r.method} ${r.url}`)).toEqual([
       "GET /api/v1/companies/acme/desks/eng%20desk/routing",
       "PUT /api/v1/companies/acme/desks/eng%20desk/routing",
       "DELETE /api/v1/companies/acme/desks/eng%20desk/routing",
     ]);
-    expect(sent[1].body).toEqual({ round_width: 2, referral: { enabled: true } });
+    expect(sent[1].body).toEqual({ round_width: 2 });
   });
 
-  it("lists episodes with only the filters the caller gave", async () => {
+  it("reads an agent's direct hive messages with only the cursor the caller gave", async () => {
     const { client, sent } = harness([]);
-    await client.listEpisodes({}, "acme");
-    await client.listEpisodes({ desk: "engineering", status: "open", limit: 5 }, "acme");
-    expect(sent.map((r) => r.url)).toEqual([
-      "/api/v1/companies/acme/episodes",
-      "/api/v1/companies/acme/episodes?desk=engineering&status=open&limit=5",
+    await client.listAgentHiveMessages("eng lead", {}, "acme");
+    await client.listAgentHiveMessages("eng lead", { after: 41, limit: 5 }, "acme");
+    expect(sent.map((r) => `${r.method} ${r.url}`)).toEqual([
+      "GET /api/v1/companies/acme/agents/eng%20lead/messages",
+      "GET /api/v1/companies/acme/agents/eng%20lead/messages?after=41&limit=5",
     ]);
+  });
+
+  it("no longer knows the retired episodes route", () => {
+    const { client } = harness();
+    expect((client as unknown as Record<string, unknown>).listEpisodes).toBeUndefined();
   });
 
   it("no longer knows the retired hive route", () => {

@@ -90,3 +90,19 @@ fn the_read_set_follows_the_stored_policy_over_the_declaration() {
     );
     assert_ne!(reads, mcp_read_set(&fx.deps.mcp_servers));
 }
+
+/// The policy a roster agent runs under, resolved from the company's policy
+/// and budget in force (what the retired episode seat was built with).
+fn seat_policy(
+    company: &CompanyRecord,
+    deps: &HarnessDeps,
+    agent: &ManifestAgent,
+) -> crate::harness::policy::ApprovalPolicy {
+    agent_policy_for(
+        company,
+        deps,
+        agent,
+        &company.effective_policy(),
+        company.effective_budget(&agent.id),
+    )
+}

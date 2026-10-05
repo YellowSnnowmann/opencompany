@@ -23,9 +23,9 @@ This section is not only additive. It removes three things.
 2. **[Desks are rooms, not relays](delegation.md#desks-are-rooms)**. A desk
    used to be a `{id, name, description, members}` record whose entire
    behaviour was "resolve the lead, run that member's turn, relay the reply",
-   and the plan was to fold it into the workflow engine. It is now an
-   `OpenHumanHive` whose seats run concurrent rounds and speak to each other
-   ([../hive.md](../hive.md)); the synchronous hand-off tools
+   and the plan was to fold it into the workflow engine. It is now a hive in
+   the company's TinyHiveMind Coordinator whose members run concurrently and
+   message each other ([../hive.md](../hive.md)); the synchronous hand-off tools
    (`delegate_to_desk`, `delegate_to_teammate`) and the in-turn relay went
    away instead. Workflows stay what they are: the static, inspectable graph
    for work that is a pipeline rather than a conversation.
@@ -43,9 +43,10 @@ Anything that matters is enforced by registration, routing, or a lock — never 
 asking a model to abstain. OpenCompany already argues this for tool reach in
 [`src/harness/built_in/confine.rs`](../../../../crates/opencompany-core/src/harness/built_in/confine.rs)
 ("an empty belt already means the model is offered nothing; the policy is what
-makes that a boundary rather than an absence"), and for speech in a room —
-"exactly one action per turn" is an MCP error on the second call, not a
-sentence in the prompt ([../hive.md](../hive.md#speaking)). This section
+makes that a boundary rather than an absence"), and for reach in the company
+hive — a direct message outside an agent's `delegates_to` is refused by the
+hive's `SendAuthorizer`, not discouraged in the prompt
+([../hive.md](../hive.md)). This section
 applies the same standard to
 *alignment*: which files a role sees, what may close a unit of work, and who may
 assert what.

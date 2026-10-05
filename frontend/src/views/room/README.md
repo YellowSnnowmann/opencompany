@@ -192,16 +192,17 @@ chart's desk level, since no desk can name a parent desk. See
 | | |
 |---|---|
 | `channels.ts` | What a channel is: desks, DMs, `#general`, and the id grammar. Pure. |
-| `timeline.ts` | Senders, hydration, grouping, the timeline items (messages, approvals, rounds, completion markers), reactions. Pure. |
+| `timeline.ts` | Senders, hydration, grouping, the timeline items (messages, approvals, hive episodes, settle markers), reactions. Pure. |
 | `review.ts` | A card's lifecycle inside a conversation: the settle pill a verdict hangs off, and the budget-pause markers. Pure. |
 | `model.ts` | A barrel re-exporting the three above, so one import address still reaches all of it. Declares nothing. |
-| `RoundBand.tsx` | One round of a desk answering as a room: the seats that ran together, each lane's live state, and the rows they produced (`data-testid="round-band"`, `data-round-status`). |
-| `EpisodeCompleteMarker.tsx` | The centred pill that says an episode is over — how many rounds, who closed it, and whether the host cut it off. |
+| `EpisodeGroup.tsx` | The rows one company-hive episode produced on a desk, drawn as one block (`data-testid="episode-group"`, `data-episode-status`). |
+| `EpisodeCompleteMarker.tsx` | The centred pill that says an episode settled or failed (`hive_episode_settled`), with the host's failure reason. |
+| `rawTurnScope.ts` | Which of a teammate's session rows belong to one DM's raw-turns view. Pure. |
 | `ChannelRail.tsx` | The channel/DM list: one flat list with no caption and no create/compose doors (channels first, then DMs; no section headings or folds) — new agents and desks are made on Company > Agents. The DM order is held while the pointer or keyboard focus is in the rail (`useStableList` with `holdPointerFocus: false`, #1414; a click's leftover focus does not hold) and slides to its new slot on release (`useFlipList`, expanded rail only, never while hydrating or under reduced motion). Each expanded row is two lines beside a round 40px face: the name with the last line's timestamp, then the busiest member's live activity (running tool step, else presence word) or the last top-level line. A channel's face is up to three of its members stacked as one group. |
 | `railPreview.ts` | Pure helpers for the rail row's second line: `channelPreview` (last top-level line, `You:`/speaker-prefixed, markdown flattened) and `railTime` (time today, Yesterday, weekday, short date). |
 | `PresenceDot.tsx` | A person's online/away dot. Never a teammate's: see `components/agent-status-dot.tsx`. |
 | `MessageTimeline.tsx` | The scroll body: day dividers, channel intro, loading skeleton, typing row. |
-| `MessageRow.tsx` | One line — avatar gutter, author, body, reactions, hover action bar, the board-card chip (link plus its dismissal, issue #984), and the utterance chip on a row an episode committed (`components/episode/UtteranceChip`). |
+| `MessageRow.tsx` | One line — avatar gutter, author, body, reactions, hover action bar, the board-card chip (link plus its dismissal, issue #984), and the attachments/outputs under it. |
 | `MessageComposer.tsx` | The composer dock; also used compact in the thread panel. |
 | `ThreadPanel.tsx` | Replies to one message, with their own composer. |
 | `bottomAnchor.ts` | How close to the bottom still counts as the bottom. Pure. |
@@ -211,22 +212,22 @@ chart's desk level, since no desk can name a parent desk. See
 
 `../RoomView.tsx` owns the state and composes them.
 
-## Rounds and episodes
+## Hive episodes
 
-A desk of two or more answers as a room, and the transcript shows it as a
-**grouping strip, not a page**. The seats' replies are ordinary rows; what the
-band adds is that they were written *together*: `lib/episodes.ts` folds the
-rows carrying `episode: {id, revision, kind}` with the live frames the shell
-holds (`lib/episode-frames.ts`, fed by `episode_opened`, `round_started`, the
-turn bracket, `round_committed`, `dm_delivered`, `episode_completed`), and
-`timeline.ts` collapses each round's rows into one `round` item at the position
-of its first row — a round no row has reached yet takes the moment it opened —
-with an `episode_complete` item after the last round. After a reload the frames
-are empty and every completed episode is rebuilt from `chat/history` alone; the
-frames only ever add the present tense (a lane still working, a seat that timed
-out). A DM, `#general` and a one-seat desk carry no `episode` and render exactly
-as before: the affordance follows the data, never the channel kind. The
-styleguide's "Rounds" section renders every piece against a fixture.
+Every desk is a hive on the company's TinyHiveMind Coordinator (OC-2). An
+operator line is accepted (`hive_accepted`), its starters run an **episode**,
+and the agents' public posts arrive as ordinary reply rows carrying
+`hive: {sequence, episodeId?, thread?}`. `lib/hive.ts` groups a desk's rows by
+`hive.episodeId` (`deskEpisodes`) and folds the shell's hive frames for how each
+ended; `timeline.ts` collapses each episode's rows into one `episode` item at
+the position of its first row, with an `episode_complete` item after its last
+row once `hive_episode_settled` arrives (settled, or failed with a reason).
+After a reload the frames are empty, so episodes regroup from `chat/history`
+alone and show no settle marker. Direct and private lines between agents
+(`hive_message`) never land on a desk; they feed the comms graph and the
+teammate's session view (`GET {scope}/agents/{id}/messages`). A row with no
+`hive.episodeId` renders exactly as before. The styleguide's "Episodes" section
+renders every piece against a fixture.
 
 ## Grouping rules
 

@@ -28,11 +28,12 @@ the room needs to know what would falsify it. "A competitor quoting St Mary's
 matters *if* their satisfaction is below 0.7 — it is 0.61 at ^4, so it matters."
 That shape is checkable. "A competitor is circling, we should act" is not.
 
-## Use the referral sparingly — you get one
+## Ask another desk sparingly
 
-This desk may ask one crossing question per episode. Spend it on the fact that
-would change the escalation, not on confirming something you could look up
-yourself with `client_status` or `margin_report`.
+You can message a member of another desk directly (`hivemind_send_agent`), and
+their answer reaches you on a later turn. Spend that on the fact that would
+change the escalation, not on confirming something you could look up yourself
+with `client_status` or `margin_report`.
 
 ## You hold the commit
 

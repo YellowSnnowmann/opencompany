@@ -119,8 +119,7 @@ pub async fn sweep_interrupted_turns(events: &Arc<dyn EventLog>, company: &Compa
                     error: TURN_INTERRUPTED_BY_RESTART.to_string(),
                     agent_id: None,
                     chat_id: Some(chat_id.clone()),
-                    episode_id: None,
-                    round_revision: None,
+                    hive: None,
                     outcome: None,
                 },
             )

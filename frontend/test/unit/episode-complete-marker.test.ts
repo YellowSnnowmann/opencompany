@@ -3,8 +3,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { Episode } from "@/lib/episodes";
-import { describeReason, EpisodeCompleteMarker } from "@/views/room/EpisodeCompleteMarker";
+import type { DeskEpisode } from "@/lib/hive";
+import { describeSettle, EpisodeCompleteMarker } from "@/views/room/EpisodeCompleteMarker";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -20,53 +20,29 @@ afterEach(() => {
   host.remove();
 });
 
-function episode(over: Partial<Episode> = {}): Episode {
-  return {
-    id: "ep-1",
-    participants: ["engineer", "ceo"],
-    status: "completed",
-    rounds: [],
-    messageIds: [],
-    roundCount: 3,
-    referrals: [],
-    conversations: [],
-    live: false,
-    completedBy: "ceo",
-    ...over,
-  };
+function episode(over: Partial<DeskEpisode> = {}): DeskEpisode {
+  return { id: "ep-1", chatId: "engineering", messageIds: [], status: "settled", ...over };
 }
 
-function render(value: Episode) {
+function render(value: DeskEpisode) {
   act(() => {
-    root.render(createElement(EpisodeCompleteMarker, { episode: value, agentNames: { ceo: "CEO" } }));
+    root.render(createElement(EpisodeCompleteMarker, { episode: value }));
   });
   return host.querySelector('[data-testid="episode-complete"]') as HTMLElement;
 }
 
 describe("EpisodeCompleteMarker", () => {
-  it("says how many rounds and who closed it", () => {
+  it("says a settled episode is complete", () => {
     const marker = render(episode());
     expect(marker.dataset.episodeId).toBe("ep-1");
-    expect(marker.dataset.reason).toBe("complete_episode");
-    expect(marker.textContent).toBe("Episode complete · 3 rounds · closed by CEO");
+    expect(marker.dataset.episodeStatus).toBe("settled");
+    expect(marker.textContent).toBe("Episode complete");
   });
 
-  it("names a cut-off in words, and a single round in the singular", () => {
-    expect(render(episode({ reason: "round_cap", roundCount: 1, completedBy: undefined })).textContent).toBe(
-      "Episode complete · 1 round · round cap reached",
-    );
-    expect(render(episode({ reason: "timeout" })).textContent).toContain("timed out");
-    expect(render(episode({ reason: "membership_changed" })).textContent).toContain("the desk changed");
-    expect(render(episode({ reason: "failed" })).dataset.reason).toBe("failed");
-  });
-
-  it("passes an unknown reason through rather than hiding it", () => {
-    expect(describeReason("budget_exhausted")).toBe("budget_exhausted");
-    expect(describeReason(undefined)).toBeNull();
-  });
-
-  it("counts the rounds it saw when the host counted none", () => {
-    const value = episode({ roundCount: 0, rounds: [{ episodeId: "ep-1", revision: 0, status: "committed", seats: [], messageIds: [] }] });
-    expect(render(value).textContent).toContain("1 round ");
+  it("says a failed episode failed, with the host's reason when it gave one", () => {
+    const marker = render(episode({ status: "failed", failure: "turn timed out" }));
+    expect(marker.dataset.episodeStatus).toBe("failed");
+    expect(marker.textContent).toBe("Episode failed · turn timed out");
+    expect(describeSettle({ status: "failed" })).toBe("Episode failed");
   });
 });

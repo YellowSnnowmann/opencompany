@@ -158,40 +158,6 @@ fn accepts_desk_ids_names_and_the_wildcard_in_delegates_to() {
     assert!(problems[0].contains("empty entry"), "{}", problems[0]);
 }
 
-/// The depth knob is bounded on both sides (issue #176): `0` would mean
-/// "delegation off" wearing a depth's clothes, and past the ceiling the
-/// per-level fan-out cap compounds into a runaway.
-#[test]
-fn rejects_a_delegation_depth_outside_its_bounds() {
-    for depth in ["0", "5"] {
-        let manifest = parse(&format!(
-            "[company]\nname = \"X\"\n[tools]\nmax_delegation_depth = {depth}\n"
-        ));
-        let problems = manifest.validate();
-        assert_eq!(problems.len(), 1, "depth {depth}: {problems:?}");
-        assert!(
-            problems[0].contains("`[tools].max_delegation_depth`"),
-            "{}",
-            problems[0]
-        );
-        assert!(problems[0].contains("between 1 and 4"), "{}", problems[0]);
-    }
-    for depth in ["1", "2", "3", "4"] {
-        let manifest = parse(&format!(
-            "[company]\nname = \"X\"\n[tools]\nmax_delegation_depth = {depth}\n"
-        ));
-        assert!(
-            manifest.validate().is_empty(),
-            "depth {depth} must be accepted: {:?}",
-            manifest.validate()
-        );
-    }
-    // Absent is always fine and means the default.
-    let bare = parse("[company]\nname = \"X\"\n");
-    assert_eq!(bare.tools.max_delegation_depth, None);
-    assert!(bare.validate().is_empty());
-}
-
 /// An existing manifest that names no `delegates_to` parses to the empty
 /// allowlist, which is what keeps #176 a no-op for every company that did
 /// not ask for it.

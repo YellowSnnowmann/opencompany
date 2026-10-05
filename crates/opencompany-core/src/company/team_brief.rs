@@ -32,8 +32,7 @@
 
 use crate::ports::types::CompanyRecord;
 use crate::runtime::delegation_tools::{
-    DELEGATE_TO_TEAMMATE_TOOL, desk_lead, desks_of_member, reach_is_unrestricted, roster_agent_ids,
-    teammate_targets,
+    desk_lead, desks_of_member, reach_is_unrestricted, roster_agent_ids, teammate_targets,
 };
 
 /// The heading the section opens with. Named so the tool descriptions and the
@@ -49,30 +48,12 @@ pub const TEAM_HEADING: &str = "## Your team";
 /// so not here), then every desk with its members and lead, then which of
 /// those this agent sits on and which it may hand work to.
 ///
-/// The reach line is rendered from the same rule the tools enforce at call
-/// time ([`teammate_targets`]), so the prompt never names a teammate the tool
-/// would then refuse. With an unrestricted reach — the ordinary case, a
+/// The reach line is rendered from the same rule the company hive's send
+/// policy enforces at call time ([`teammate_targets`], `hive::policy`), so the
+/// prompt never names a teammate `hivemind_send_agent` would then refuse. With an unrestricted reach — the ordinary case, a
 /// manifest entry that says nothing — the line says so in one clause rather
 /// than repeating the roster.
 pub fn team_section(record: &CompanyRecord, agent_id: &str) -> String {
-    render(record, agent_id, Audience::Roster)
-}
-
-/// [`team_section`] for a hive episode seat.
-///
-/// A seat's belt has no hand-off tools, so this variant describes who does
-/// what and how to name them, and says nothing about handing work on.
-pub fn seat_team_section(record: &CompanyRecord, agent_id: &str) -> String {
-    render(record, agent_id, Audience::Seat)
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Audience {
-    Roster,
-    Seat,
-}
-
-fn render(record: &CompanyRecord, agent_id: &str, audience: Audience) -> String {
     let manifest_roster = record.effective_agents();
     // The manifest roster, then the operator-added teammates — the same order
     // `roster_agent_ids` (and every refusal message) uses, so the listing and
@@ -129,39 +110,26 @@ fn render(record: &CompanyRecord, agent_id: &str, audience: Audience) -> String 
         "\n\nYou are one of {} teammates at {company}, and you are not working alone. ",
         roster.len(),
     ));
-    match audience {
-        Audience::Seat => out.push_str(
-            "Every teammate below is a real agent at this company. Call them by name when you \
-             write; an id is for a tool call.\n\nTeammates (name, role: mandate):\n",
-        ),
-        Audience::Roster if orchestrator.as_deref() == Some(agent_id) => {
-            out.push_str(match narrowed {
-                false => {
-                    "Every teammate below is a real agent you can hand work to: they run it and \
-                     hand their answer back to you in this same turn. Never tell anyone a \
-                     teammate is out of reach or that you cannot contact them — you can, with "
-                }
-                true => {
-                    "Every teammate below is a real agent; the ones you may hand work to are \
-                     named at the end of this section, and they hand their answer back to you \
-                     in this same turn. The tool for that is "
-                }
-            });
-            out.push_str(&format!(
-                "`{DELEGATE_TO_TEAMMATE_TOOL}`.\n\nTeammates (name, role: mandate). Hand work \
-                 to one with `{DELEGATE_TO_TEAMMATE_TOOL}`: pass the id in the tool call; call \
-                 them by name when you write.\n"
-            ));
+    out.push_str(match narrowed {
+        false => {
+            "Every teammate below is a real agent you can message directly with \
+             `hivemind_send_agent`, and you can speak in any hive you share with them with \
+             `hivemind_send_hive` (`hivemind_list_hives` / `hivemind_list_agents` show where). A \
+             message is delivered, not answered in this turn: their reply reaches you on a later \
+             turn, so say you have asked rather than writing as though you had the answer. Never \
+             tell anyone a teammate is out of reach. To put tracked work on a teammate, open a \
+             card for it with `spawn_task`, naming them. Call them by name when you write; an id \
+             is for a tool call.\n\nTeammates (name, role: mandate):\n"
         }
-        Audience::Roster => out.push_str(
-            "Every teammate below is a real agent. When you are in a room with one — a desk, or \
-             a conversation somebody opened with you — you can ask them directly and their \
-             answer reaches you there. Otherwise the way to put work on a teammate is to open a \
-             card for it with `spawn_task`, naming them; never say a teammate is out of \
-             reach. Call them by name when you write; an id is for a tool call.\n\nTeammates \
-             (name, role: mandate):\n",
-        ),
-    }
+        true => {
+            "Every teammate below is a real agent; the ones you may message directly with \
+             `hivemind_send_agent` are named at the end of this section, and you can speak in any \
+             hive you share with the rest with `hivemind_send_hive`. A message is delivered, not \
+             answered in this turn: their reply reaches you on a later turn. To put tracked work \
+             on a teammate, open a card for it with `spawn_task`, naming them. Call them by name \
+             when you write; an id is for a tool call.\n\nTeammates (name, role: mandate):\n"
+        }
+    });
     for agent in &others {
         out.push_str("- ");
         out.push_str(agent.label());
@@ -181,18 +149,20 @@ fn render(record: &CompanyRecord, agent_id: &str, audience: Audience) -> String 
             out.push_str(": ");
             out.push_str(description);
         }
-        out.push_str(&format!(" (id `{}` for tool calls)\n", agent.id));
+        out.push_str(&format!(
+            " (id `{}` for tool calls; `{}` as the `agent_id` of a `hivemind_*` tool)\n",
+            agent.id,
+            crate::session_key::runtime_agent_id(&record.id, agent.id)
+        ));
     }
 
     // **The desks this agent sits on, not every desk the company has.**
     //
     // A seat acts where it sits. The full org chart was the whole of this
     // section on a large roster, listing membership and a lead for rooms this
-    // agent will never take a turn in — and in a hive turn it arrives beside
-    // `EpisodePrompt::peers`, which lists the desks it may actually ask,
-    // filtered by the referral policy. The same desk was therefore described
-    // twice in one turn, once as somewhere to hand work whose lead answers and
-    // once as somewhere to put a question that the room answers, which are
+    // agent will never take a turn in — and the same desk was described twice
+    // in one turn, once as somewhere to hand work whose lead answers and once
+    // as somewhere to put a question that the room answers, which are
     // different mechanisms with different costs (#2368).
     //
     // What is deliberately NOT filtered is the roster above: knowing who does
@@ -233,15 +203,15 @@ fn render(record: &CompanyRecord, agent_id: &str, audience: Audience) -> String 
 
     // The reach, rendered from the rule the tool enforces. Only worth a line
     // when it is narrower than "everyone above", which the opening already says.
-    if narrowed && audience == Audience::Roster {
+    if narrowed {
         out.push_str(&match reachable.is_empty() {
-            true => "\nYour manifest entry does not let you hand work to anyone listed above. \
-                     They are listed so you know who does what: answer what you can yourself, \
-                     and say plainly who should be brought in.\n"
+            true => "\nYour manifest entry does not let you message anyone listed above \
+                     directly. They are listed so you know who does what: answer what you can \
+                     yourself, and say plainly who should be brought in.\n"
                 .to_string(),
             false => format!(
-                "\nYou may hand work to: {}. The rest are listed so you know who does what — \
-                 say who should be brought in rather than handing to them.\n",
+                "\nYou may message directly: {}. The rest are listed so you know who does what \
+                 — say who should be brought in rather than messaging them.\n",
                 reachable
                     .iter()
                     .map(|id| {
@@ -249,7 +219,8 @@ fn render(record: &CompanyRecord, agent_id: &str, audience: Audience) -> String 
                             .iter()
                             .find(|agent| agent.id == id.as_str())
                             .map_or(id.as_str(), Teammate::label);
-                        format!("{name} (`{id}`)")
+                        let hive_id = crate::session_key::runtime_agent_id(&record.id, id);
+                        format!("{name} (`{hive_id}`)")
                     })
                     .collect::<Vec<_>>()
                     .join(", ")

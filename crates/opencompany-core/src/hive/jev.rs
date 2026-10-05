@@ -2,7 +2,7 @@
 //!
 //! A desk episode asks Jev — TypeSafe's System One model — who should speak
 //! next: which seats a message needs, whether a broadcast fans out, whether the
-//! question is too ambiguous to route at all. `tinyhivemind_typesafe::JevRouter`
+//! question is too ambiguous to route at all. `tinyhivemind_core::typesafe::JevRouter`
 //! owns that conversation; it deliberately owns **no HTTP client, credential
 //! or runtime**, and asks the host for exactly one thing — a
 //! [`SystemOneTransport`] that can put a [`SystemOneRequest`] on the wire and
@@ -46,7 +46,7 @@
 
 use std::time::Duration;
 
-use tinyhivemind_typesafe::{
+use tinyhivemind_core::typesafe::{
     Error, JevRouter, RetryClass, SystemOneRequest, SystemOneResponse, SystemOneTransport,
     SystemOneTransportFuture, classify_retry,
 };

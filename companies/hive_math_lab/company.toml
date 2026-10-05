@@ -84,7 +84,7 @@ members = [
 
 [group_chat.routing]
 # Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
-# in concurrent rounds until every assigned seat calls `complete_episode`.
+# in concurrent rounds until every assigned seat calls `hivemind_complete`.
 # Round width, round cap and turn timeout take the library defaults here.
 
 [[group_chat]]

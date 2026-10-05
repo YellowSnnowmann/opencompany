@@ -1,76 +1,125 @@
-//! Hive desks: tinyhivemind's completion-driven episodes hosted over one
-//! process-wide OpenHuman runtime (plan `hive-desks`).
+//! The company hive: TinyHiveMind's durable `Coordinator` and its OpenHuman
+//! adapter, bound to one company (OC-2).
 //!
 //! This file is an index. Each concern lives in its own module and is listed,
-//! file by file, in this directory's `README.md`. The MCP server and the turn
-//! registry under it are gated with the harness (`openhuman`): OpenCompany's
-//! own tools are served to the agents over MCP because `openhuman_embed::Agent`
-//! has no seam for an in-process host tool, and this crate's `openhuman-embed`
-//! dependency enables `AgentSpec::mcp` unconditionally, so every harness build
-//! — the `rust-gated` lane included — can attach the server. (The plan named
-//! the `mcp` feature; that feature adds only OpenHuman's own MCP client
-//! surface, which the server does not need, and gating on it would leave the
-//! harness lane's turns without their tools.)
+//! file by file, in this directory's `README.md`. The Coordinator itself, its
+//! storage adapter over this crate's `HiveStore` port, the projector that
+//! journals its transcript, the send policy and the starter route are pure
+//! enough to compile on the default build; the runtime that registers live
+//! `openhuman_embed::Agent` handles, the Jev transport, and the MCP server
+//! with its in-flight registry are gated with the harness (`openhuman`).
 
-/// The closing turn a settled desk episode routes to one seat: whether it is
-/// needed, which seat takes it, and the summary its message becomes. Needs the
-/// harness whose seats it seats and whose routing credential it asks.
-#[cfg(feature = "openhuman")]
-pub mod conclude;
-/// One completion episode on `tinyhivemind`'s own loop.
-#[cfg(feature = "openhuman")]
-pub mod conducted;
-/// The chat body of the brain's cycle: which surface a message is on, and
-/// the episode it opens on a desk with a room (Phase 5).
-#[cfg(feature = "openhuman")]
-pub mod dispatch;
-/// An operator DM driven end to end: the hive, the surface, the dispatcher,
-/// the seats. Needs the harness it drives, so it is gated with it.
-#[cfg(all(test, feature = "openhuman"))]
-#[path = "dm_episode_tests.rs"]
-mod dm_episode_tests;
-/// The journal as the episode store: the `GET {scope}/episodes` fold, the
-/// driver checkpoint a resume reads, and the open-episode lookup (Phase 4).
-pub mod episode_store;
-/// One `OpenHumanHive` per desk over the company's live agents (Phase 4).
-#[cfg(feature = "openhuman")]
-pub mod graph;
-/// This company as the host of one completion episode: the journal
-/// `tinyhivemind` commits through, and how a teammate is built as a seat.
-#[cfg(feature = "openhuman")]
-pub mod host;
 /// Jev routing over the TinyHumans System One proxy: the host-owned
 /// `SystemOneTransport` and the `jev_router` constructor (plan Phase 7).
 /// Gated with the harness whose credential seam it reads.
 #[cfg(feature = "openhuman")]
 pub mod jev;
-/// The JSON-RPC Streamable-HTTP MCP server the company agents call their
-/// speech and OpenCompany tools on (plan Phase 3).
+/// The JSON-RPC Streamable-HTTP MCP server the company agents may reach
+/// OpenCompany's tools on, and the in-flight registry it shares with the turn
+/// envelope (plan Phase 3).
 #[cfg(feature = "openhuman")]
 pub mod mcp_server;
 /// Coordination metrics folded from the journal — concurrency, contacts,
 /// completion — behind `opencompany measure` (Phase 8).
 pub mod measure;
-/// Cross-desk referral, read side: the reserved authors, the pair key, the
-/// attribution heads, and the return address an answer comes home to.
-pub mod referral;
-/// The `[group_chat.routing]` block, its resolved `RoutingPolicy`, and the
-/// desk-routing wire shapes (plan Phase 4).
+/// Who may send to whom: the reach rules a teammate's `hivemind_send_*` /
+/// `ask` / `broadcast` calls are decided under (the `SendAuthorizer`).
+pub mod policy;
+/// The Coordinator transcript journaled as company events: replies, private
+/// rows, settled episodes and interrupted turns.
+pub mod projector;
+/// Which hive members start an operator message: mention, then Jev, then the
+/// desk's default responder.
+pub mod route;
+/// The `[group_chat.routing]` block, its resolved policy, the company
+/// `CoordinatorOptions` folded from it, and the desk-routing wire shapes.
 pub mod routing;
+/// One company's hive: the Coordinator, the OpenHuman host its agents are
+/// registered on, the projector and the run task. Needs live agent handles,
+/// so it is gated with the harness.
 #[cfg(feature = "openhuman")]
-pub mod seating;
-/// The company journal read as a tinyhivemind `SessionLog`, one desk at a
-/// time (ex `hivemind/log.rs`).
-pub mod session_log;
-/// The in-flight turn registry, the speech fold and the tool adapter the
-/// server dispatches through (plan Phase 3).
-#[cfg(feature = "openhuman")]
-pub mod shared_tool;
-/// `take_over`: a guest seat claims work, concluding the conversation that
-/// asked it and telling the operator in its own line.
-#[cfg(feature = "openhuman")]
-pub mod takeover;
-#[cfg(test)]
-pub(crate) mod test_support;
+pub mod runtime;
+/// `tinyhivemind_hives::Storage` over this crate's `HiveStore` port.
+pub mod storage;
+/// The in-flight turn registry and the MCP tool adapter.
 #[cfg(feature = "openhuman")]
 pub mod tools;
+
+/// The hive the company's `#general` line runs in.
+///
+/// TinyHiveMind core reserves `general` and `main` (any case) as desk
+/// identities except for its own default desk, whose id and name are both
+/// `General`; a hive created as `general` is accepted by the Coordinator but
+/// fails every episode it opens with `ReservedDeskIdentity`. So the console's
+/// `general` chat runs in that default desk, and every boundary between a
+/// console chat and a hive translates with [`hive_id_for_chat`] /
+/// [`chat_for_hive`]. A desk id is never `general` (the console reserves it),
+/// so the mapping is one-to-one. Any other desk whose id or name core would
+/// reserve is renamed on the way in ([`RESERVED_DESK_PREFIX`], [`hive_name`]).
+pub const GENERAL_HIVE_ID: &str = "General";
+
+/// The prefix a desk id core reserves (`main`, say) runs under in the hive.
+pub const RESERVED_DESK_PREFIX: &str = "desk-";
+
+/// Whether core reserves `identity` as a desk id or name.
+fn reserved(identity: &str) -> bool {
+    identity.eq_ignore_ascii_case("general") || identity.eq_ignore_ascii_case("main")
+}
+
+/// The hive id behind console chat `chat` (a desk id, or `general`).
+#[must_use]
+pub fn hive_id_for_chat(chat: &str) -> String {
+    if chat == crate::ports::general_channel::GENERAL_CHANNEL_ID {
+        GENERAL_HIVE_ID.to_string()
+    } else if reserved(chat) {
+        format!("{RESERVED_DESK_PREFIX}{chat}")
+    } else {
+        chat.to_string()
+    }
+}
+
+/// The console chat behind hive `hive_id`; the inverse of
+/// [`hive_id_for_chat`].
+#[must_use]
+pub fn chat_for_hive(hive_id: &str) -> String {
+    if hive_id == GENERAL_HIVE_ID {
+        return crate::ports::general_channel::GENERAL_CHANNEL_ID.to_string();
+    }
+    match hive_id.strip_prefix(RESERVED_DESK_PREFIX) {
+        Some(desk) if reserved(desk) => desk.to_string(),
+        _ => hive_id.to_string(),
+    }
+}
+
+/// The hive name a desk called `name` runs under: its own, unless core
+/// reserves it, in which case the desk id is appended so it is not.
+#[must_use]
+pub fn hive_name(hive_id: &str, name: &str) -> String {
+    if hive_id != GENERAL_HIVE_ID && reserved(name.trim()) {
+        format!("{} ({hive_id})", name.trim())
+    } else {
+        name.to_string()
+    }
+}
+
+/// The permanent tools the TinyHiveMind OpenHuman adapter attaches to every
+/// registered agent (`docs/opencompany-migration.md` in `vendor/tinyhivemind`):
+/// how an agent reads hives, messages a teammate, posts, asks, broadcasts and
+/// completes its part of an episode. Named here so an agent's tool scope can
+/// admit them, and so no belt tool of this crate's can shadow one
+/// (`attach_tools` refuses a name collision).
+pub const HIVEMIND_TOOLS: &[&str] = &[
+    "hivemind_list_hives",
+    "hivemind_list_agents",
+    "hivemind_read",
+    "hivemind_send_hive",
+    "hivemind_send_agent",
+    "hivemind_post",
+    "hivemind_ask",
+    "hivemind_broadcast",
+    "hivemind_complete",
+];
+
+#[cfg(test)]
+#[path = "hive_tests.rs"]
+mod tests;

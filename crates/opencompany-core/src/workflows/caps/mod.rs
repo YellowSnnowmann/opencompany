@@ -580,7 +580,7 @@ fn hex_segment(value: &str) -> String {
 /// # It claims the delegation queue for board writes, and nothing else (issue #661 / M5)
 ///
 /// A node's turn carries the whole toolbelt, so an orchestrator-tier `agent_ref`
-/// can reach `review_task`, `assign_task`, `spawn_task` and `delegate_to_desk`,
+/// can reach `review_task`, `assign_task`, `spawn_task`,
 /// and a granted one can reach `publish_artifact`.
 ///
 /// This path now holds a
@@ -595,20 +595,11 @@ fn hex_segment(value: &str) -> String {
 /// [`park_gated_calls`](HarnessAgentRunner::park_gated_calls) record approvals
 /// explicitly unlinked.
 ///
-/// The two other delegations stay **refused at the tool boundary**, for unrelated
-/// reasons the queue reports separately: `review_task`'s `in_review → done` is the
-/// operator's accept lane, and a hand-off's only value is a synchronous reply a run
-/// has nowhere to land. `assign_task` moves no column either — the arm the drain
+/// `review_task` stays **refused at the tool boundary**: its `in_review → done`
+/// is the operator's accept lane. `assign_task` moves no column either — the arm the drain
 /// reuses leaves it untouched — so **run → card → dispatch → run cycles stay
 /// bounded precisely because every dispatch still requires an operator act**. That
 /// is the loop bound, and relaxing the column rule would take it with it.
-///
-/// The claim also closes a **live** misattribution defect PR #771 identified.
-/// `DelegateToDeskTool` calls `push_refusal` before it consults the claim, so an
-/// ungrounded hand-off from a workflow node landed in the shared bucket and a
-/// concurrent chat turn's `drain_refusals` took it, recorded it on *that* turn's
-/// card, and cleared it. The scoped claim files it into the run's own bucket, and
-/// the drain below surfaces it as this run's notice.
 ///
 /// It still takes no [`PublishClaim`](crate::harness::publish::PublishClaim):
 /// `publish_artifact` needs a card to attach a version to, which a run does not
@@ -1206,20 +1197,13 @@ impl HarnessAgentRunner {
     /// Drains this run's delegation bucket after a node's turn and records what it
     /// did (issue #661 / M5).
     ///
-    /// Runs inside the run's board scope, so both drains read **this run's**
-    /// bucket rather than whatever `Unscoped` happens to hold.
-    ///
-    /// Two drains, in this order and both mandatory:
-    ///
-    /// 1. **Refusals** — desks a `delegate_to_desk` named that the company does not
-    ///    have. This is the live half of the defect PR #771 identified: the tool
-    ///    pushes these *before* consulting the claim, so before the scoped claim
-    ///    they landed in the shared bucket and a concurrent chat turn recorded them
-    ///    on its own card. Surfaced as a run notice — the run's own surface, and the
-    ///    only one it has.
-    /// 2. **Board writes** — executed through
-    ///    [`DelegationRunner::execute_board_writes`](crate::runtime::delegation),
-    ///    which is infallible by signature, so this cannot fail the node.
+    /// Runs inside the run's board scope, so the drain reads **this run's**
+    /// bucket rather than whatever `Unscoped` happens to hold. Board writes are
+    /// executed through
+    /// [`DelegationRunner::execute_board_writes`](crate::runtime::delegation),
+    /// which is infallible by signature, so this cannot fail the node. (The
+    /// refusal drain that ran first went with the desk hand-off it recorded,
+    /// OC-2.)
     ///
     /// # Never fails the node
     ///
@@ -1282,22 +1266,16 @@ impl HarnessAgentRunner {
     /// run's bucket and no other claimant's.
     fn discard_consultation_writes(&self) {
         let delegations = self.deps.delegations.drain(MAX_DELEGATIONS_PER_TURN).len();
-        let refused_delegations = self
-            .deps
-            .delegations
-            .drain_refusals(MAX_DELEGATIONS_PER_TURN)
-            .len();
         let publishes = self.deps.pending_publishes.drain().len();
         let refused_publishes = self.deps.pending_publishes.drain_refusals().len();
         let approvals = self.deps.approval_requests.queued();
-        let total = delegations + refused_delegations + publishes + refused_publishes + approvals;
+        let total = delegations + publishes + refused_publishes + approvals;
         if total > 0 {
             tracing::info!(
                 company = %self.company,
                 workflow = %self.workflow_id,
                 run_id = %self.run_id,
                 delegations,
-                refused_delegations,
                 publishes,
                 refused_publishes,
                 approvals,
@@ -1309,22 +1287,6 @@ impl HarnessAgentRunner {
 
     async fn drain_board_writes(&self) {
         let queue = &self.deps.delegations;
-
-        // Issue #661: the run's own refusals, on the run's own surface.
-        for desk in queue.drain_refusals(MAX_DELEGATIONS_PER_TURN) {
-            tracing::warn!(
-                company = %self.company,
-                workflow = %self.workflow_id,
-                run_id = %self.run_id,
-                "workflow agent node: a hand-off named a desk this company does not have; nothing \
-                 was handed off"
-            );
-            self.notices.push(format!(
-                "A step in this workflow tried to hand work to the \"{desk}\" desk, which this \
-                 company does not have. Nothing was handed off."
-            ));
-        }
-
         let staged = queue.drain(MAX_DELEGATIONS_PER_TURN);
         if staged.is_empty() {
             return;
@@ -1332,12 +1294,6 @@ impl HarnessAgentRunner {
         let runner = crate::runtime::delegation::DelegationRunner::for_workflow_run(
             &self.record,
             self.deps.tasks.as_ref(),
-            // Never touched: the only registration site is the `delegate_to_desk`
-            // arm, which a board claim makes unstageable. Threaded because the
-            // shared runner needs one, and the company's own rather than a fresh
-            // one so a future reachable path would surface in the operator's
-            // in-flight list rather than in a registry nobody can see.
-            &self.deps.steer,
             &self.company,
             queue,
             crate::runtime::delegation::WorkflowRunRef {

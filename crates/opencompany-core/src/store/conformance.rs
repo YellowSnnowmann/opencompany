@@ -1145,8 +1145,7 @@ pub async fn assert_event_retention(events: Arc<dyn EventLog>) {
                     parent: None,
                     by: None,
                     agent_id: None,
-                    episode_id: None,
-                    round_revision: None,
+                    hive: None,
                 },
             )
             .await
@@ -1160,8 +1159,7 @@ pub async fn assert_event_retention(events: Arc<dyn EventLog>) {
                 error: "the host restarted".to_string(),
                 agent_id: None,
                 chat_id: None,
-                episode_id: None,
-                round_revision: None,
+                hive: None,
                 outcome: None,
             },
         )

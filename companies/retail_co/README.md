@@ -2,12 +2,14 @@
 
 > **Migration note.** The trace-grammar hive this bundle was written against
 > (`[group_chat.hive]`: quorum, turn budget, blind round, per-seat moves,
-> asides) has been replaced by completion-driven rooms — concurrent rounds,
-> speech as a tool call, Jev routing, referral — configured by
-> `[group_chat.routing]` ([`docs/spec/runtime/hive.md`](../../docs/spec/runtime/hive.md)).
-> A `[group_chat.hive]` block is refused at load with a migration hint; the
-> desks below keep their seats and their referral settings, and the grammar
-> paragraphs describe the design the bundle was tuned under, not what runs.
+> asides) has been replaced by the company hive — one TinyHiveMind
+> `Coordinator` per company, desks as hives, agents talking with the
+> `hivemind_*` tools — configured by `[group_chat.routing]`
+> ([`docs/spec/runtime/hive.md`](../../docs/spec/runtime/hive.md)). A
+> `[group_chat.hive]` or `[group_chat.routing.referral]` block is refused at
+> load with a migration hint; cross-desk questions are direct messages now, and
+> the grammar paragraphs describe the design the bundle was tuned under, not
+> what runs.
 
 The [tau2-bench](https://github.com/sierra-research/tau2-bench) **retail**
 domain, run as a company of three desks and five seats.
@@ -132,11 +134,8 @@ whose end state did not match.
 
 Two mechanisms, and they are not interchangeable:
 
-- **`@desk` in a reply** posts the case on that desk's channel, where its seats
-  deliberate and send back what the room settled on. This is the hand-off to
-  reach for when the choice between remedies is the question.
-- **`delegate_to_teammate`** takes one turn from one named person, no room.
-
-`delegate_to_desk` resolves to whoever leads the desk and takes one turn from
-them, which skips the deliberation these paired desks exist for — the seats are
-told not to use it.
+- **`hivemind_send_hive`** posts the case on that desk's hive, where its members
+  work it as an episode and the room settles what it decides. This is the
+  hand-off to reach for when the choice between remedies is the question.
+- **`hivemind_send_agent`** asks one named person directly, no room; their
+  answer reaches the asker on a later turn.

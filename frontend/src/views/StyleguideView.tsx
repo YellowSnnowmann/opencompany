@@ -14,14 +14,10 @@ import {
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/page-header";
-import { foldEpisodes } from "@/lib/episodes";
-import { EMPTY_EPISODE_FRAMES, reduceEpisodeFrame } from "@/lib/episode-frames";
+import { deskEpisodes, EMPTY_HIVE_FRAMES, reduceHiveFrame } from "@/lib/hive";
 import type { ChatMessage } from "@/lib/chat";
-import type { EpisodeFrame, TurnBracketFrame } from "@/hooks/use-events";
-import { RoutingPlanChip } from "@/components/episode/RoutingPlanChip";
-import { UtteranceChip } from "@/components/episode/UtteranceChip";
 import { EpisodeCompleteMarker } from "@/views/room/EpisodeCompleteMarker";
-import { RoundBand } from "@/views/room/RoundBand";
+import { EpisodeGroup } from "@/views/room/EpisodeGroup";
 import { DeskRoutingPanel } from "@/views/company/routing/DeskRoutingPanel";
 import { CommsGraphView } from "@/views/comms/CommsGraphView";
 import { applyObservations, structuralGraph } from "@/views/comms/model";
@@ -143,7 +139,7 @@ export function StyleguideView() {
           <ElevationSection />
           <RadiusSection />
           <MotionSection />
-          <RoundsSection />
+          <EpisodesSection />
           <ComponentSection />
         </div>
       </div>
@@ -1287,15 +1283,12 @@ function ComponentSection() {
  * The episode vocabulary.
  *
  * Rendered against a fixture rather than a live desk, because `#/styleguide` is
- * served pre-auth and outside the shell — so the whole room surface can be
- * designed and reviewed in both themes with no backend, no company and no
- * episode having actually run. That is the point of prototyping it here first.
- *
- * The transcript below is the shape `companies/hive_demo` produces: an
- * operator question on a two-seat desk, a first round where both seats post
- * at once, a second where one broadcasts and one DMs, and the closing call.
+ * served pre-auth and outside the shell — so the room surface can be reviewed
+ * in both themes with no backend. An operator question on a two-agent desk,
+ * the agents' public posts (grouped by `hive.episodeId`), and the settle
+ * marker `hive_episode_settled` draws — once settled, once failed.
  */
-function RoundsSection() {
+function EpisodesSection() {
   const { items, running } = useMemo(() => {
     const channel: Channel = {
       id: "engineering",
@@ -1304,42 +1297,43 @@ function RoundsSection() {
       kind: "channel",
       purpose: "",
     };
-    const folded = foldEpisodes(SETTLED_ROWS, undefined, "engineering");
-    const items = buildTimelineItems(buildTimeline(SETTLED_ROWS, channel, []), [], {}, folded);
-    // The same desk mid-round: one seat has posted, the other is still
-    // thinking. Built through the real reducer so the preview exercises the
-    // same fold the Room does — a band that only looked right against a
-    // bespoke fixture would prove nothing.
-    const live: (EpisodeFrame | TurnBracketFrame)[] = [
+    // Built through the real reducer so the preview exercises the same fold
+    // the Room does.
+    const frames = [
+      { type: "hive_episode_settled", seq: 20, atMillis: 4, episodeId: "ep-1", chatId: "engineering", openedAt: 0 },
       {
-        type: "episode_opened",
-        seq: 10,
-        atMillis: 10,
+        type: "hive_episode_settled",
+        seq: 21,
+        atMillis: 12,
+        episodeId: "ep-2",
         chatId: "engineering",
-        episodeId: "ep-live",
-        openedBySeq: 9,
-        participants: ["engineer", "ceo"],
-        plan: { kind: "hive", primaryId: "engineer", invitedIds: ["ceo"] },
+        openedAt: 10,
+        failure: "a turn failed",
       },
-      { type: "round_started", seq: 11, atMillis: 11, chatId: "engineering", episodeId: "ep-live", revision: 0, agentIds: ["engineer", "ceo"] },
-      { type: "turn_started", seq: 12, atMillis: 12, chatId: "engineering", agentId: "engineer", episodeId: "ep-live", roundRevision: 0 },
-      { type: "turn_started", seq: 13, atMillis: 12, chatId: "engineering", agentId: "ceo", episodeId: "ep-live", roundRevision: 0 },
-      { type: "turn_settled", seq: 14, atMillis: 15, chatId: "engineering", agentId: "engineer", episodeId: "ep-live", roundRevision: 0, outcome: "committed" },
-    ];
-    const frames = live.reduce(reduceEpisodeFrame, EMPTY_EPISODE_FRAMES);
+    ].reduce(
+      (state, frame) => reduceHiveFrame(state, frame as Parameters<typeof reduceHiveFrame>[1]),
+      EMPTY_HIVE_FRAMES,
+    );
+    const items = buildTimelineItems(
+      buildTimeline(SETTLED_ROWS, channel, []),
+      [],
+      {},
+      deskEpisodes(SETTLED_ROWS, frames, "engineering"),
+    );
     const rows: ChatMessage[] = [
-      { id: "h9", from: "you", byPerson: true, at: 9, text: "Should we ship the rollout to staging first?" },
+      { id: "h9", from: "you", byPerson: true, at: 9, text: "And the release note?" },
+      { id: "h10", from: "company", channel: "writer", at: 10, text: "Drafting it now.", hive: { sequence: 10, episodeId: "ep-live" } },
     ];
     const running = buildTimelineItems(
       buildTimeline(rows, channel, []),
       [],
       {},
-      foldEpisodes(rows, frames, "engineering"),
+      deskEpisodes(rows, EMPTY_HIVE_FRAMES, "engineering"),
     );
     return { items, running };
   }, []);
 
-  const renderRow = (row: TimelineItem) =>
+  const renderRow = (row: TimelineItem): React.ReactNode =>
     row.kind === "message" ? (
       <MessageRow
         key={row.key}
@@ -1349,72 +1343,27 @@ function RoundsSection() {
         onReact={() => {}}
         onDismissCard={() => {}}
         dismissingCardId={null}
-        agentNames={FIXTURE_NAMES}
       />
+    ) : row.kind === "episode" ? (
+      <EpisodeGroup key={row.key} episode={row.episode} items={row.items} renderRow={renderRow} />
+    ) : row.kind === "episode_complete" ? (
+      <EpisodeCompleteMarker key={row.key} episode={row.episode} />
     ) : null;
-
-  const renderItem = (item: TimelineItem) =>
-    item.kind === "round" ? (
-      <RoundBand
-        key={item.key}
-        episode={item.episode}
-        round={item.round}
-        items={item.items}
-        renderRow={renderRow}
-        agentNames={FIXTURE_NAMES}
-      />
-    ) : item.kind === "episode_complete" ? (
-      <EpisodeCompleteMarker key={item.key} episode={item.episode} agentNames={FIXTURE_NAMES} />
-    ) : (
-      renderRow(item)
-    );
 
   return (
     <Section
-      title="Rounds"
-      hint="A desk of two or more answers as a room: seats run together in rounds until one of them calls the episode complete. These are the marks that make a round legible — every speech act is told apart by its icon and word, never by colour."
+      title="Episodes"
+      hint="A desk answers through the company hive: an operator line starts an episode, the agents post publicly on the desk, and the episode settles or fails. Settled and failed are told apart by icon and word, never by colour."
     >
       <div className="space-y-6">
         <div>
-          <p className="mb-2 text-xs font-medium text-muted-foreground">Utterances</p>
-          <div className="flex flex-wrap items-start gap-3">
-            <UtteranceChip episode={{ id: "ep", revision: 0, kind: "post" }} />
-            <UtteranceChip
-              episode={{
-                id: "ep",
-                revision: 1,
-                kind: "broadcast",
-                routedBy: { plan: { kind: "hive", primaryId: "ceo", invitedIds: ["engineer"] }, router: "jev" },
-              }}
-              agentNames={FIXTURE_NAMES}
-            />
-            <UtteranceChip episode={{ id: "ep", revision: 1, kind: "dm", to: ["ceo"] }} agentNames={FIXTURE_NAMES} />
-            <UtteranceChip episode={{ id: "ep", revision: 2, kind: "complete_episode" }} />
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            A broadcast carries the plan the router resolved it to, and who decided:
-            the System One router, the lead fallback, or an explicit mention.
-          </p>
-        </div>
-
-        <div>
-          <p className="mb-2 text-xs font-medium text-muted-foreground">Plans</p>
-          <div className="flex flex-wrap gap-1.5">
-            <RoutingPlanChip plan={{ kind: "one", primaryId: "engineer" }} router="explicit" agentNames={FIXTURE_NAMES} />
-            <RoutingPlanChip plan={{ kind: "hive", primaryId: "engineer", invitedIds: ["ceo"] }} router="jev" agentNames={FIXTURE_NAMES} />
-            <RoutingPlanChip plan={{ kind: "clarify", question: "Which rollout?" }} router="jev" />
-            <RoutingPlanChip plan={{ kind: "fallback", reason: "router unavailable" }} router="fallback" />
-          </div>
-        </div>
-
-        <div>
-          <p className="mb-2 text-xs font-medium text-muted-foreground">A round still running</p>
-          {running.map(renderItem)}
+          <p className="mb-2 text-xs font-medium text-muted-foreground">An episode still running</p>
+          {running.map(renderRow)}
         </div>
 
         <div>
           <p className="mb-2 text-xs font-medium text-muted-foreground">In the transcript</p>
-          {items.map(renderItem)}
+          {items.map(renderRow)}
         </div>
 
         <div>
@@ -1431,38 +1380,34 @@ function RoundsSection() {
   );
 }
 
-/** Display names for the fixture desk. */
-const FIXTURE_NAMES: Record<string, string> = { engineer: "Engineer", ceo: "CEO", writer: "Writer" };
-
 /**
- * A finished episode, as `chat/history` returns it: two rounds, then the call.
- * The operator message that opened it is a plain row, outside every band.
+ * Two settled episodes, as `chat/history` returns them. The operator messages
+ * that opened them are plain rows, outside every group.
  */
 const SETTLED_ROWS: ChatMessage[] = [
   { id: "h1", from: "you", byPerson: true, at: 0, text: "Should we ship the rollout to staging first?" },
-  { id: "h2", from: "company", channel: "engineer", at: 1, text: "Staging first. The last full rollout took checkout down for an hour.", episode: { id: "ep-1", revision: 0, kind: "post" } },
-  { id: "h3", from: "company", channel: "ceo", at: 1, text: "Agreed in principle — what does staging cost us in days?", episode: { id: "ep-1", revision: 0, kind: "post" } },
-  { id: "h4", from: "company", channel: "engineer", at: 2, text: "Two days, and the writer should draft the release note in parallel.", episode: { id: "ep-1", revision: 1, kind: "broadcast", routedBy: { plan: { kind: "hive", primaryId: "ceo", invitedIds: ["engineer"] }, router: "jev" } } },
-  { id: "h5", from: "company", channel: "ceo", at: 2, text: "Can you own the staging checklist?", audience: ["engineer"], episode: { id: "ep-1", revision: 1, kind: "dm", to: ["engineer"] } },
-  { id: "h6", from: "company", channel: "ceo", at: 3, text: "Decision: staging first, two days, release note drafted alongside.", episode: { id: "ep-1", revision: 2, kind: "complete_episode" } },
+  { id: "h2", from: "company", channel: "engineer", at: 1, text: "Staging first. The last full rollout took checkout down for an hour.", hive: { sequence: 2, episodeId: "ep-1" } },
+  { id: "h3", from: "company", channel: "ceo", at: 2, text: "Agreed — what does staging cost us in days?", hive: { sequence: 3, episodeId: "ep-1" } },
+  { id: "h4", from: "company", channel: "engineer", at: 3, text: "Two days. Decision: staging first.", hive: { sequence: 4, episodeId: "ep-1" } },
+  { id: "h5", from: "you", byPerson: true, at: 5, text: "Who owns the checklist?" },
+  { id: "h6", from: "company", channel: "ceo", at: 11, text: "Looking into it…", hive: { sequence: 6, episodeId: "ep-2" } },
 ];
 
 /**
- * A desk's routing, as `companies/hive_demo` ships it: rounds of two, referral
- * on, and a CEO shared with the content desk. Served from a stub so the panel
+ * A desk's routing, as `companies/hive_demo` ships it: rounds of two, and a
+ * CEO shared with the content desk. Served from a stub so the panel
  * can be reviewed with no host at all.
  */
 const FIXTURE_ROUTING: DeskRoutingDto = {
   deskId: "engineering",
   source: "manifest",
-  declared: { round_width: 2, referral: { enabled: true, max_hops: 1, returns: true } },
+  declared: { round_width: 2 },
   effective: {
     roundWidth: 2,
     choiceOptionLimit: 8,
     maxRounds: 6,
     turnTimeoutSecs: 600,
     router: "fallback",
-    referral: { enabled: true, maxHops: 1, returns: true },
   },
   candidates: [
     { agentId: "engineer", label: "Engineer", role: "Builds things", sharedWith: [] },
@@ -1482,7 +1427,7 @@ const FIXTURE_ROUTING_CLIENT = {
  *
  * Deliberately mixed — two dashed structural edges an operator has never used,
  * one solid hand-off that has run four times, a teammate the orchestrator
- * created at runtime, and two seats that spoke to each other inside an episode
+ * created at runtime, and two agents that spoke to each other through the hive
  * — because the whole point of the drawing is telling those apart.
  */
 const FIXTURE_COMMS = applyObservations(
@@ -1498,13 +1443,13 @@ const FIXTURE_COMMS = applyObservations(
     ],
   ),
   [
-    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "delegate_to_desk", atMillis: 1 },
-    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "delegate_to_desk", atMillis: 2 },
-    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "delegate_to_desk", atMillis: 3 },
+    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "task", atMillis: 1 },
+    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "task", atMillis: 2 },
+    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "task", atMillis: 3 },
     { kind: "handed-off", from: "planner", to: "records", via: "spawn_task", atMillis: 4 },
     { kind: "spawned", by: "orchestrator", agentId: "researcher", atMillis: 5 },
-    { kind: "spoke", from: "planner", to: "archivist", via: "dm", atMillis: 6 },
-    { kind: "spoke", from: "archivist", to: "solvers", via: "referral", atMillis: 7 },
+    { kind: "spoke", from: "planner", to: "archivist", via: "direct", atMillis: 6 },
+    { kind: "spoke", from: "archivist", to: "planner", via: "private", atMillis: 7 },
     { kind: "speaking", agentId: "planner" },
   ],
 );

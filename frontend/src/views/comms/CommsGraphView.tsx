@@ -173,7 +173,7 @@ function Legend() {
         <Solid className="stroke-status-done/70" /> created
       </li>
       <li>
-        <Solid className="stroke-status-running/80" /> spoke to (broadcast, dm, referral)
+        <Solid className="stroke-status-running/80" /> spoke to (direct, private)
       </li>
       <li className="text-muted-foreground/70">
         dashed is what the manifest allows; solid is what has happened

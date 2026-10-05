@@ -33,8 +33,8 @@ mode = "full"
 # `workspace.read`, and `workspace.*` covers the sub-grants but not the bare one.
 allow = ["mcp:*", "workspace", "workspace.*", "chargebee", "paypal"]
 
-# Desks (group chats) the orchestrator can hand a turn to. Each desk's first
-# member is its lead; `delegate_to_desk` runs that member's turn.
+# Desks (group chats): each is a hive in the company's Coordinator, and its
+# first member is its lead — who starts an unaddressed line on it.
 [[group_chat]]
 id = "engineering"
 name = "Engineering desk"

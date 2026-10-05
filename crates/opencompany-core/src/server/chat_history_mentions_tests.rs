@@ -14,7 +14,7 @@ fn agent_reply(chat_id: &str) -> CompanyEvent {
         agent_id: "ceo".to_string(),
         text: "hi".to_string(),
         steps: Vec::new(),
-        episode: None,
+        hive: None,
     }
 }
 
@@ -99,7 +99,7 @@ fn only_a_persons_message_is_projected_as_by_person() {
                 agent_id: "operator".to_string(),
                 text: "You said: on it".to_string(),
                 steps: Vec::new(),
-                episode: None,
+                hive: None,
             },
         ),
         &Viewer::User("u2".to_string()),
@@ -303,7 +303,7 @@ fn project_carries_the_thread_parent() {
                 agent_id: "ceo".to_string(),
                 text: "on it".to_string(),
                 steps: Vec::new(),
-                episode: None,
+                hive: None,
             },
         ),
         &Viewer::Operator,

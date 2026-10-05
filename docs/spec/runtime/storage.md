@@ -36,13 +36,13 @@ ephemeral scratch, discarded on every container replacement. It is now selected
 from the same handles as every other store, with a one-time receipt-gated import
 off the old file: [journal.md](journal.md).
 
-A sixteenth, `HiveStore`, holds the hive coordinator's durable state — one
+A fourteenth, `HiveStore`, holds the hive coordinator's durable state — one
 compare-and-swap state document and an append-only message log per company,
 opaque JSON bodies ([contract](ports-state.md#hivestore)). It rides the same
 handles (`StorageHandles::hive`), so a mongodb tenant's coordination state is
 never left on `/data`; see [Hive store](#hive-store) for each backend.
 
-Three of those fourteen — `UserStore`, `SessionStore`, `LoginCodeStore` — back
+Three of the twelve — `UserStore`, `SessionStore`, `LoginCodeStore` — back
 [human user authentication](users.md). Sessions and login codes are credential
 material: they hold **hashes only**, and they must never be added to the
 export path below.
@@ -116,8 +116,8 @@ from a `counters` collection via atomic `findOneAndUpdate {$inc}`.
 
 Collections (all uniquely indexed on `company_id` + their key):
 `companies`, `ledger`, `events`, `memory_traces`, `memory_tasks`,
-`context_chunks`, `secrets`, `journal` and `journal_imports`, `hive_state` and
-`hive_messages`, plus `counters`
+`secrets`, `journal` and `journal_imports`, `hive_state` and `hive_messages`,
+plus `counters`
 and `owners`; and the WS3 console-surface collections `tasks`, `workspace`,
 `usage`, `skills`, and `inboxes`. The `usage` collection is trimmed to the 90-day retention window
 on each `record` (see [`UsageMeter`](ports-console.md#usagemeter)).

@@ -76,12 +76,12 @@ import {
   type AgentReplyEvent,
   budgetProximityExpiresAt,
   type CompanyStreamEvent,
-  type EpisodeFrame,
+  type HiveFrame,
   isBudgetProximityExpired,
   type TurnBracketFrame,
   useEvents,
 } from "@/hooks/use-events";
-import { EMPTY_EPISODE_FRAMES, reduceEpisodeFrame } from "@/lib/episode-frames";
+import { EMPTY_HIVE_FRAMES, reduceHiveFrame } from "@/lib/hive";
 import {
   approvalAgentCounts,
   clearedOnThread,
@@ -162,14 +162,11 @@ import {
   deskFromDto,
   dmChannelId,
   dmThreadId,
-  type ReferralWorking,
-  runningCrossingRows,
   HISTORY_UNSTARTED,
   firstChannel,
   type DecidedApproval,
   type HistoryStatus,
 } from "@/views/room/model";
-import { ReferralRunningProvider } from "@/views/room/referral-running";
 import { TeamView } from "@/views/TeamView";
 import { NotificationsView } from "@/views/NotificationsView";
 import { LedgersView, MANAGE_SEGMENT } from "@/views/LedgersView";
@@ -1545,9 +1542,9 @@ export function AppShell({
             return;
           }
           setTranscripts((t) => {
-            // Reconciled, not merely appended: a referral folds its exchange
-            // onto a row this transcript ALREADY holds, so an id filter drops
-            // exactly the update it exists to deliver. See
+            // Reconciled, not merely appended: the host can re-project a row
+            // this transcript ALREADY holds, so an id filter drops exactly the
+            // update it exists to deliver. See
             // `reconcileTranscript` for the whole reasoning.
             const existing = t[channelId] ?? [];
             const merged = reconcileTranscript(existing, hydrated);
@@ -2252,43 +2249,26 @@ export function AppShell({
    * once it turns out to be the echo of a reply already rendered. Dedupe by
    * *what the POST turned out to be*, never by how long the frame waited.
    */
-  /**
-   * Who is answering a crossing right now, per asking desk (#2341 live report).
-   *
-   * A referred turn runs on the far desk's own episode, outside the
-   * `turn_started`/`turn_settled` bracket every other turn is announced by — so
-   * while a crossing ran, and `pair_messages` lets that be several model turns,
-   * the desk showed a generic working row naming nobody. The `referral` frame
-   * fires at exactly the right moment and now carries the teammate asked.
-   *
-   * Cleared when the desk speaks again, which is the precise end of the
-   * crossing: the asker's continuation is the next thing journaled on the desk
-   * after its question. A same-desk pair emits no return leg, so there is no
-   * closing frame to wait for and an indicator that waited for one would name
-   * the answerer for the rest of the episode.
-   */
-  const [referralWorking, setReferralWorking] = useState<Record<string, ReferralWorking>>({});
 
   /**
-   * The live half of every desk's episodes (`lib/episode-frames.ts`), and the
-   * chat turn brackets behind them (`lib/coordination.ts`).
+   * The company hive's frames (`lib/hive.ts`), and the chat turn brackets
+   * (`lib/coordination.ts`).
    *
-   * Owned here rather than in `RoomView` for the reason `transcripts` is: a
-   * round keeps running while the operator is on Company or Flows, and the
-   * band has to be right the moment they come back. Two reducers rather than
-   * one because they answer different questions — which seats a round has and
-   * what each is doing, versus how many models are thinking at once across
-   * the whole company — and the Comms graph wants the second without the
-   * first. Both are bounded, so a console left open on a busy company holds a
-   * fixed amount of either.
+   * Owned here rather than in `RoomView` for the reason `transcripts` is: an
+   * episode keeps running while the operator is on Company or Flows, and its
+   * settle marker has to be right the moment they come back. Two reducers
+   * rather than one because they answer different questions — how each
+   * episode ended and who spoke to whom, versus how many models are thinking
+   * at once across the whole company. Both are bounded, so a console left
+   * open on a busy company holds a fixed amount of either.
    */
-  const [episodeFrames, foldEpisodeFrame] = useReducer(reduceEpisodeFrame, EMPTY_EPISODE_FRAMES);
+  const [hiveFrames, foldHiveFrame] = useReducer(reduceHiveFrame, EMPTY_HIVE_FRAMES);
   const [turnLedger, foldTurnBracket] = useReducer(reduceTurnBracket, EMPTY_TURN_LEDGER);
-  const onEpisodeEvent = useCallback((event: EpisodeFrame) => foldEpisodeFrame(event), []);
+  const onHiveEvent = useCallback((event: HiveFrame) => foldHiveFrame(event), []);
   const onTurnBracket = useCallback((event: TurnBracketFrame) => {
     foldTurnBracket(event);
-    // A seat's bracket inside an episode also drives its lane on the band.
-    if (event.episodeId) foldEpisodeFrame(event);
+    // A bracket inside an episode counts a turn for it.
+    if (event.hive?.episodeId) foldHiveFrame(event);
     // A settle ends what the frames said about that turn, so its "typing" or
     // "working" dot goes out with it. Matched on the conversation the bracket
     // names, folded (`settledInChat`): a seat settles its DM under `dm:<id>`
@@ -2338,25 +2318,17 @@ export function AppShell({
   /** Bumped on `desk_routing_configured`, so an open routing editor re-reads. */
   const [deskRoutingTick, setDeskRoutingTick] = useState(0);
   const [rosterTick, setRosterTick] = useState(0);
-  /** What the episode frames say for the Comms graph: who spoke to whom. */
+  /** What the hive frames say for the Comms graph: who spoke to whom. */
   const commsObservations = useMemo(
-    () => coordinationObservations(episodeFrames, turnLedger),
-    [episodeFrames, turnLedger],
+    () => coordinationObservations(hiveFrames, turnLedger),
+    [hiveFrames, turnLedger],
   );
 
   const injectAgentReply = useCallback(
     (event: AgentReplyEvent) => {
-      // The desk speaking again is the end of any crossing it was waiting on.
-      // Rows from the pair's own `dm:<a>+<b>` conversation are not this desk
-      // and must not clear it — they are the crossing still running.
-      if (event.chatId) {
-        setReferralWorking((working) =>
-          working[event.chatId as string] === undefined
-            ? working
-            : Object.fromEntries(
-                Object.entries(working).filter(([chat]) => chat !== event.chatId),
-              ),
-        );
+      // A row inside an episode tells the hive fold which desk it ran on.
+      if (event.hive?.episodeId) {
+        foldHiveFrame({ type: "agent_reply", chatId: event.chatId, atMillis: Date.now(), hive: event.hive });
       }
       if (pendingPostThreadsRef.current.capture(event)) return;
       renderAgentReply(event);
@@ -3050,66 +3022,11 @@ export function AppShell({
       },
       [setRunStatuses],
     ),
-    // **A crossing changes a thread this console is already showing.**
-    //
-    // The fold that renders a crossing — `referralConversation` on the asking
-    // row — is built by `chat/history` and by nothing else, so a crossing was
-    // invisible until something re-read the thread. A desk crossing waited for
-    // settle; a pair DM waited forever, because its rows live in the pair's own
-    // `dm:<a>+<b>` conversation that no desk view subscribes to.
-    //
-    // Re-reading rather than rendering the frame: the frame deliberately
-    // carries no crossing content, and `reReadSettledThread` is idempotent, so
-    // a second call for a thread already holding the fold adds nothing.
-    onReferral: useCallback(
-      (event: {
-        chatId: string;
-        sequence?: number;
-        target?: string;
-        asker?: string;
-        toDesk?: string;
-        direct?: boolean;
-        returning?: boolean;
-      }) => {
-        // A forward is a turn starting on the far side; a return is that turn
-        // already finished and carried home, so it announces nobody.
-        if (!event.returning) {
-          // **What is happening differs by kind, not just who is named.**
-          //
-          // A person crossing is a two-way exchange: `pair_messages` lets the
-          // pair alternate, so both seats spend turns and neither is merely
-          // answering. A desk crossing is the far DESK answering — as a whole
-          // room since #2332 — and its `target` is only the library's
-          // first-eligible seat, so naming that seat would credit one member
-          // with a room's work.
-          // Stored structurally and phrased by the view: a desk's display
-          // name and a teammate's live where the channels and roster do, not
-          // here.
-          const crossing: ReferralWorking | undefined =
-            event.direct && event.asker && event.target
-              ? {
-                  direct: true,
-                  asker: event.asker,
-                  target: event.target,
-                  row: event.sequence,
-                }
-              : !event.direct && event.toDesk
-                ? { direct: false, desk: event.toDesk, row: event.sequence }
-                : undefined;
-          if (crossing) {
-            setReferralWorking((working) => ({ ...working, [event.chatId]: crossing }));
-          }
-        }
-        reReadSettledThread(event.chatId);
-      },
-      [reReadSettledThread],
-    ),
-    // The episode frames and the turn brackets fold into the shell's two
-    // ledgers; `RoomView` draws the band off the first, the Comms graph and
-    // the Observatory read both. Payloads, not counters: the band is a fold,
-    // not a re-read, and the transcript's `episode` field is what corrects a
-    // dropped frame on the next hydration.
-    onEpisodeEvent,
+    // The hive frames and the turn brackets fold into the shell's two
+    // ledgers; `RoomView` draws the settle markers off the first, the Comms
+    // graph reads both. Payloads, not counters: they are folds, not re-reads,
+    // and the transcript's `hive` field regroups a desk on the next hydration.
+    onHiveEvent,
     onTurnBracket,
     onDeskRoutingConfigured: useCallback(() => setDeskRoutingTick((n) => n + 1), []),
     onRosterChanged: useCallback(() => setRosterTick((n) => n + 1), []),
@@ -3518,7 +3435,7 @@ export function AppShell({
               // Skipping setup must not be a dead end: an unstaffed company keeps
               // a visible way back in.
               onRunSetup={() => setSetupForced(true)}
-              // Who spoke to whom inside episodes, for `#/company/comms`, and
+              // Who spoke to whom through the hive, for `#/company/comms`, and
               // the tick that re-reads a desk's routing editor when another
               // session installs or resets a block.
               commsObservations={commsObservations}
@@ -3547,10 +3464,6 @@ export function AppShell({
               effect in `RoomView` writing state up here and re-render the whole
               console on every unread tick from every section, rather than only
               from Room. */}
-          <ReferralRunningProvider
-            rows={runningCrossingRows(referralWorking)}
-            byDesk={referralWorking}
-          >
           <RoomView
               client={client}
               company={company}
@@ -3599,9 +3512,8 @@ export function AppShell({
               failedApprovals={failedApprovals}
               budgetProximity={budgetProximity}
               onDismissBudgetProximity={() => setBudgetProximity(null)}
-              episodeFrames={episodeFrames}
+              hiveFrames={hiveFrames}
             />
-          </ReferralRunningProvider>
           {view === "inbox" && <InboxView client={client} company={company} />}
           {/* All that is left of the Tasks page: the card detail. `sub` is a
               real id by the time this renders — `REWRITE_RETIRED` sent every

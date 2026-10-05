@@ -1,22 +1,31 @@
 //! Coordination metrics over a company's journal — the store-reading twin of
-//! `scripts/measure-coordination.mjs` (plan hive-desks, Phase 8).
+//! `scripts/measure-coordination.mjs` (plan hive-desks, Phase 8; rewritten for
+//! the OC-2 Coordinator).
 //!
-//! The question the plan asks of the hive desks is one number and two facts:
-//! do seats run **at once**, do they **talk to each other** (broadcast, dm,
-//! referral), and does every episode **complete**. The Node script answers it
-//! from the live `/events` stream a console sees; this answers it from the
-//! rows themselves, with no host running — `opencompany measure --company
-//! <id>` after a run, or a test over an in-memory journal — so the two can be
-//! compared and neither has to be trusted alone.
+//! The question asked of the company hive is one number and two facts: do
+//! agents run **at once**, do they **talk to each other**, and does every
+//! episode **settle**. The Node script answers it from the live `/events`
+//! stream a console sees; this answers it from the rows themselves, with no
+//! host running — `opencompany measure --company <id>` after a run, or a test
+//! over an in-memory journal — so the two can be compared and neither has to
+//! be trusted alone.
 //!
 //! The fold mirrors `scripts/lib/coordination-metrics.mjs` frame for frame:
-//! turn brackets keyed by turn id (`TurnStarted` → `TurnSettled` /
-//! `TurnFailed`), episodes from `EpisodeOpened` / `EpisodeCompleted`, rounds
-//! from the revisions the turn rows carry, contacts from `BroadcastRouted` /
-//! `DmDelivered` /
-//! `ReferralEnqueued`, and the utterance-kind histogram from
-//! `AgentReply.episode`. So do the thresholds ([`Thresholds`]), so a
-//! measurement passes or fails the same way on both paths.
+//!
+//! * turn brackets keyed by turn id (`TurnStarted` → `TurnSettled` /
+//!   `TurnFailed`) give the concurrency peak, every overlap, and the overlaps
+//!   one agent had with itself (which must be zero);
+//! * episodes are every episode id a row names — a turn bracket's
+//!   `hive.episodeId`, a reply's `hive.episodeId`, a private row — closed by
+//!   `HiveEpisodeSettled`, which says whether it settled or failed;
+//! * contacts are `HiveMessage` rows: an agent's direct message to another, and
+//!   a private desk line to its readers, each counted once per distinct
+//!   `from→to` pair;
+//! * `HiveAccepted.route` gives the starter-route histogram (mention, Jev,
+//!   default).
+//!
+//! The thresholds ([`Thresholds`]) are the script's, so a measurement passes or
+//! fails the same way on both paths.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -24,23 +33,21 @@ use serde::Serialize;
 
 use crate::error::Result;
 use crate::ports::events::EventLog;
-use crate::ports::types::{CompanyEvent, CompanyId, EventSeq, StoredEvent};
+use crate::ports::types::{CompanyEvent, CompanyId, EventSeq, HiveDestination, StoredEvent};
 
-/// Rows read per page while walking the journal forward.
+/// Rows read per journal page.
 const PAGE: usize = 512;
 
-/// The thresholds a run must clear — the plan's, and
-/// `DEFAULT_THRESHOLDS` in `scripts/lib/coordination-metrics.mjs`.
+/// What a run must clear. Mirrors `DEFAULT_THRESHOLDS` in
+/// `scripts/lib/coordination-metrics.mjs`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Thresholds {
-    /// Seat turns open at once, at the peak.
+    /// Least concurrency peak: agents must actually run at once.
     pub max_concurrent_turns: usize,
-    /// Referrals that crossed from one desk to another.
-    pub cross_desk_referrals: usize,
-    /// Agent-to-agent broadcasts plus dms.
+    /// Least agent→agent contacts (direct messages plus private lines).
     pub agent_contacts: usize,
-    /// Distinct `from→to` pairs over every contact kind.
+    /// Least distinct `from→to` pairs.
     pub distinct_pairs: usize,
 }
 
@@ -48,80 +55,70 @@ impl Default for Thresholds {
     fn default() -> Self {
         Self {
             max_concurrent_turns: 2,
-            cross_desk_referrals: 1,
             agent_contacts: 1,
             distinct_pairs: 2,
         }
     }
 }
 
-/// One episode as the fold saw it.
+/// One episode, as the journal shows it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EpisodeMeasure {
-    /// The desk.
-    pub chat_id: String,
-    /// Rounds run: the distinct wave revisions this episode's turn rows
-    /// carry, or the count the completion reported, whichever is larger.
-    pub rounds: u32,
-    /// Whether an `EpisodeCompleted` row closed it.
+    /// The hive it ran in, once a row named it.
+    pub hive_id: String,
+    /// Turns that ran for it.
+    pub turns: u32,
+    /// Whether it settled normally.
     pub completed: bool,
-    /// Why it closed, in the journal's own word.
+    /// Why it stopped, when it failed.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    /// Opening to completion, in milliseconds.
+    pub failure: Option<String>,
+    /// From the first row naming it to its settlement, epoch-millis apart.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_to_complete_millis: Option<u64>,
 }
 
-/// The numbers a measurement prints. Field names match `summarize()` in
-/// `scripts/lib/coordination-metrics.mjs` where the two report the same
-/// thing.
+/// The coordination report.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
     /// The company measured.
     pub company: String,
-    /// The first sequence considered.
+    /// The first journal sequence folded.
     pub since_seq: u64,
-    /// Journal rows folded.
+    /// Rows folded.
     pub rows: usize,
-    /// Seat turns open at once, at the peak.
+    /// The concurrency peak.
     pub max_concurrent_turns: usize,
-    /// Turns that started while another was still open.
+    /// Turn starts that found another turn open.
     pub overlaps: usize,
-    /// Turns that started while a turn of the **same agent** was still open.
-    /// Must be zero: one agent runs at most one turn at a time.
+    /// Turn starts that found the same agent already running.
     pub same_agent_overlaps: usize,
-    /// Turns still open at the end of the journal.
+    /// Turns never closed in the window.
     pub open_turns: usize,
-    /// Episodes opened.
+    /// Episodes any row named.
     pub episodes_opened: usize,
-    /// Episodes completed.
+    /// Episodes that settled normally.
     pub episodes_completed: usize,
-    /// Each episode, keyed by id.
+    /// Episodes that stopped on a wall, an error or an interruption.
+    pub episodes_failed: usize,
+    /// Per episode.
     pub episodes: BTreeMap<String, EpisodeMeasure>,
-    /// `broadcast` rows routed onward.
-    pub broadcasts: usize,
-    /// `dm` rows delivered.
-    pub dms: usize,
-    /// Referrals that crossed desks (non-returning, `from_desk != to_desk`).
-    pub cross_desk_referrals: usize,
-    /// Those referrals as `from→to` desk pairs, in journal order.
-    pub referral_pairs: Vec<String>,
-    /// Every agent→agent pair over broadcasts, dms and referrals.
+    /// Agent→agent direct messages.
+    pub direct_messages: usize,
+    /// Private desk lines.
+    pub private_lines: usize,
+    /// Distinct `from→to` pairs over both.
     pub distinct_pairs: BTreeSet<String>,
-    /// Utterance kinds over `AgentReply.episode.kind`.
-    pub utterance_kinds: BTreeMap<String, usize>,
-    /// Routing-plan kinds over `EpisodeOpened` and `BroadcastRouted`.
-    pub plan_kinds: BTreeMap<String, usize>,
-    /// Routers over `BroadcastRouted`.
-    pub routers: BTreeMap<String, usize>,
+    /// How operator messages chose their starters.
+    pub starter_routes: BTreeMap<String, usize>,
+    /// Coordinator turns interrupted and not replayed.
+    pub interrupted_turns: usize,
 }
 
 impl Report {
-    /// The failures against `thresholds`; an empty list is a pass. The same
-    /// rules, in the same words, as `evaluate()` in the Node twin.
+    /// The thresholds this report misses, worded for a person; empty is a pass.
     #[must_use]
     pub fn failures(&self, thresholds: &Thresholds) -> Vec<String> {
         let mut failures = Vec::new();
@@ -137,16 +134,10 @@ impl Report {
                 self.same_agent_overlaps
             ));
         }
-        if self.cross_desk_referrals < thresholds.cross_desk_referrals {
+        let contacts = self.direct_messages + self.private_lines;
+        if contacts < thresholds.agent_contacts {
             failures.push(format!(
-                "cross-desk referrals {} < {}",
-                self.cross_desk_referrals, thresholds.cross_desk_referrals
-            ));
-        }
-        if self.broadcasts + self.dms < thresholds.agent_contacts {
-            failures.push(format!(
-                "agent→agent dm/broadcast {} < {}",
-                self.broadcasts + self.dms,
+                "agent→agent contacts {contacts} < {}",
                 thresholds.agent_contacts
             ));
         }
@@ -164,11 +155,11 @@ impl Report {
                 .episodes
                 .iter()
                 .filter(|(_, episode)| !episode.completed)
-                .map(|(id, episode)| format!("{}/{id}", episode.chat_id))
+                .map(|(id, episode)| format!("{}/{id}", episode.hive_id))
                 .collect();
             if !open.is_empty() {
                 failures.push(format!(
-                    "{} episode(s) never completed: {}",
+                    "{} episode(s) never settled: {}",
                     open.len(),
                     open.join(", ")
                 ));
@@ -177,51 +168,49 @@ impl Report {
         failures
     }
 
-    /// The report as the aligned table `opencompany measure` prints.
+    /// The report as an aligned two-column table with its verdict.
     #[must_use]
     pub fn to_table(&self, thresholds: &Thresholds) -> String {
-        let rounds = self
-            .episodes
-            .iter()
-            .map(|(id, episode)| format!("{id}={}", episode.rounds))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let times = self
-            .episodes
-            .iter()
-            .filter_map(|(id, episode)| {
-                episode
-                    .time_to_complete_millis
-                    .map(|millis| format!("{id}={millis}"))
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        let reasons = self
-            .episodes
-            .iter()
-            .filter_map(|(id, episode)| {
-                episode
-                    .reason
-                    .as_ref()
-                    .map(|reason| format!("{id}={reason}"))
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        let dash = |value: String| {
-            if value.is_empty() {
+        let join = |items: Vec<String>| {
+            if items.is_empty() {
                 "-".to_string()
             } else {
-                value
+                items.join(" ")
             }
         };
-        let histogram = |map: &BTreeMap<String, usize>| {
-            dash(
-                map.iter()
-                    .map(|(key, count)| format!("{key}={count}"))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            )
-        };
+        let turns = join(
+            self.episodes
+                .iter()
+                .map(|(id, episode)| format!("{id}={}", episode.turns))
+                .collect(),
+        );
+        let times = join(
+            self.episodes
+                .iter()
+                .filter_map(|(id, episode)| {
+                    episode
+                        .time_to_complete_millis
+                        .map(|millis| format!("{id}={millis}"))
+                })
+                .collect(),
+        );
+        let failures_seen = join(
+            self.episodes
+                .iter()
+                .filter_map(|(id, episode)| {
+                    episode
+                        .failure
+                        .as_ref()
+                        .map(|reason| format!("{id}={reason}"))
+                })
+                .collect(),
+        );
+        let routes = join(
+            self.starter_routes
+                .iter()
+                .map(|(route, count)| format!("{route}={count}"))
+                .collect(),
+        );
         let failures = self.failures(thresholds);
         let verdict = if failures.is_empty() {
             "PASS: every threshold met".to_string()
@@ -250,25 +239,18 @@ impl Report {
         line("turn overlaps", self.overlaps.to_string());
         line("same-agent overlaps", self.same_agent_overlaps.to_string());
         line("open turns", self.open_turns.to_string());
+        line("interrupted turns", self.interrupted_turns.to_string());
         line(
             "episodes",
             format!(
-                "{}/{} completed",
-                self.episodes_completed, self.episodes_opened
+                "{}/{} settled, {} failed",
+                self.episodes_completed, self.episodes_opened, self.episodes_failed
             ),
         );
-        line("rounds per episode", dash(rounds));
+        line("turns per episode", turns);
         line(
-            "broadcasts / dms",
-            format!("{} / {}", self.broadcasts, self.dms),
-        );
-        line(
-            "cross-desk referrals",
-            format!(
-                "{} {}",
-                self.cross_desk_referrals,
-                self.referral_pairs.join(" ")
-            ),
+            "direct / private",
+            format!("{} / {}", self.direct_messages, self.private_lines),
         );
         line(
             "distinct pairs",
@@ -282,11 +264,9 @@ impl Report {
                     .join(" ")
             ),
         );
-        line("plan kinds", histogram(&self.plan_kinds));
-        line("routers", histogram(&self.routers));
-        line("utterance kinds", histogram(&self.utterance_kinds));
-        line("time to complete (ms)", dash(times));
-        line("reasons", dash(reasons));
+        line("starter routes", routes);
+        line("time to settle (ms)", times);
+        line("failures", failures_seen);
         out.push('\n');
         out.push_str(&verdict);
         out.push('\n');
@@ -294,36 +274,25 @@ impl Report {
     }
 }
 
-/// An open turn bracket.
-struct OpenTurn {
-    agent_id: Option<String>,
-}
-
-/// The running fold.
 #[derive(Default)]
 struct Fold {
     report: Report,
-    open: HashMap<String, OpenTurn>,
-    opened_at: HashMap<String, u64>,
-    /// The wave revisions each episode's turns ran in.
-    ///
-    /// A round is counted from the turn rows rather than from a row of its
-    /// own, because the conductor announces no round: a wave is whoever is
-    /// due, and nobody decides its membership in advance. The turn rows are
-    /// what actually happened, and they carry the revision, so the distinct
-    /// revisions *are* the rounds — with the bonus that a wave which only
-    /// turned seats inside private conversations is still counted, which a
-    /// desk-shaped round row never could.
-    ///
-    /// A `RoundStarted` row feeds the same set. Journals written before the
-    /// loop moved to the library carry them, and an episode must measure the
-    /// same however it was run.
-    revisions: HashMap<String, BTreeSet<u64>>,
+    /// Open turn id → the agent running it.
+    open: HashMap<String, Option<String>>,
+    /// Episode id → when a row first named it.
+    first_seen: HashMap<String, u64>,
 }
 
 impl Fold {
-    fn count(map: &mut BTreeMap<String, usize>, key: impl Into<String>) {
-        *map.entry(key.into()).or_insert(0) += 1;
+    fn episode(&mut self, id: &str, hive_id: Option<&str>, at: u64) -> &mut EpisodeMeasure {
+        self.first_seen.entry(id.to_string()).or_insert(at);
+        let episode = self.report.episodes.entry(id.to_string()).or_default();
+        if episode.hive_id.is_empty()
+            && let Some(hive) = hive_id
+        {
+            episode.hive_id = hive.to_string();
+        }
+        episode
     }
 
     fn pair(&mut self, from: &str, to: &str) {
@@ -332,49 +301,28 @@ impl Fold {
         }
     }
 
-    fn episode(&mut self, id: &str, chat_id: &str) -> &mut EpisodeMeasure {
-        let episode = self.report.episodes.entry(id.to_string()).or_default();
-        if episode.chat_id.is_empty() {
-            episode.chat_id = chat_id.to_string();
-        }
-        episode
-    }
-
     fn fold(&mut self, stored: &StoredEvent) {
         self.report.rows += 1;
+        let at = stored.at_millis;
         match &stored.event {
             CompanyEvent::TurnStarted {
                 turn_id,
                 agent_id,
-                chat_id,
-                episode_id,
-                round_revision,
+                hive,
                 ..
             } => {
-                if let (Some(episode_id), Some(revision)) = (episode_id, round_revision) {
-                    self.episode(episode_id, chat_id);
-                    self.revisions
-                        .entry(episode_id.clone())
-                        .or_default()
-                        .insert(*revision);
+                if let Some(hive) = hive
+                    && let Some(episode) = &hive.episode_id
+                {
+                    self.episode(episode, hive.hive_id.as_deref(), at).turns += 1;
                 }
                 if !self.open.is_empty() {
                     self.report.overlaps += 1;
                 }
-                if agent_id.is_some()
-                    && self
-                        .open
-                        .values()
-                        .any(|turn| turn.agent_id.as_deref() == agent_id.as_deref())
-                {
+                if agent_id.is_some() && self.open.values().any(|open| open == agent_id) {
                     self.report.same_agent_overlaps += 1;
                 }
-                self.open.insert(
-                    turn_id.clone(),
-                    OpenTurn {
-                        agent_id: agent_id.clone(),
-                    },
-                );
+                self.open.insert(turn_id.clone(), agent_id.clone());
                 self.report.max_concurrent_turns =
                     self.report.max_concurrent_turns.max(self.open.len());
             }
@@ -382,110 +330,70 @@ impl Fold {
             | CompanyEvent::TurnFailed { turn_id, .. } => {
                 self.open.remove(turn_id);
             }
-            CompanyEvent::EpisodeOpened {
-                chat_id,
-                episode_id,
-                plan,
-                ..
-            } => {
-                self.report.episodes_opened += 1;
-                self.episode(episode_id, chat_id);
-                self.opened_at.insert(episode_id.clone(), stored.at_millis);
-                Self::count(&mut self.report.plan_kinds, plan_kind(plan));
-            }
-            // Legacy: the hand-written round loop announced its own rounds.
-            // Feeding the same set keeps an old journal measuring the same as
-            // a new one, and keeps the two from double-counting an episode
-            // that somehow carries both.
-            CompanyEvent::RoundStarted {
-                chat_id,
-                episode_id,
-                revision,
-                ..
-            } => {
-                self.episode(episode_id, chat_id);
-                self.revisions
-                    .entry(episode_id.clone())
-                    .or_default()
-                    .insert(*revision);
-            }
-            CompanyEvent::BroadcastRouted {
-                chat_id,
-                episode_id,
-                agent_id,
-                plan,
-                router,
-                ..
-            } => {
-                self.episode(episode_id, chat_id);
-                self.report.broadcasts += 1;
-                Self::count(&mut self.report.plan_kinds, plan_kind(plan));
-                Self::count(&mut self.report.routers, router_word(*router));
-                for target in plan.agent_ids() {
-                    self.pair(agent_id, &target);
-                }
-            }
-            CompanyEvent::DmDelivered {
-                chat_id,
-                episode_id,
-                from,
-                to,
-                ..
-            } => {
-                self.episode(episode_id, chat_id);
-                self.report.dms += 1;
-                for target in to {
-                    self.pair(from, target);
-                }
-            }
-            CompanyEvent::ReferralEnqueued {
-                from_desk,
-                to_desk,
-                asker,
-                target,
-                returning,
-                ..
-            } => {
-                if *returning {
-                    return;
-                }
-                self.pair(asker, target);
-                if from_desk != to_desk {
-                    self.report.cross_desk_referrals += 1;
-                    self.report
-                        .referral_pairs
-                        .push(format!("{from_desk}→{to_desk}"));
-                }
-            }
-            CompanyEvent::EpisodeCompleted {
-                chat_id,
-                episode_id,
-                rounds,
-                reason,
-                ..
-            } => {
-                let opened_at = self.opened_at.get(episode_id).copied();
-                let episode = self.episode(episode_id, chat_id);
-                let first_completion = !episode.completed;
-                episode.completed = true;
-                episode.rounds = episode.rounds.max(*rounds);
-                episode.reason = Some(reason_word(*reason).to_string());
-                episode.time_to_complete_millis =
-                    opened_at.map(|opened| stored.at_millis.saturating_sub(opened));
-                if first_completion {
-                    self.report.episodes_completed += 1;
-                }
-            }
             CompanyEvent::AgentReply {
-                episode: Some(episode),
+                chat_id,
+                hive: Some(hive),
                 ..
             } => {
-                let kind = serde_json::to_value(episode.kind)
-                    .ok()
-                    .and_then(|value| value.as_str().map(str::to_string))
-                    .unwrap_or_else(|| format!("{:?}", episode.kind));
-                Self::count(&mut self.report.utterance_kinds, kind);
+                if let Some(episode) = &hive.episode_id {
+                    self.episode(episode, Some(chat_id), at);
+                }
             }
+            CompanyEvent::HiveMessage {
+                sender,
+                destination,
+                episode_id,
+                only_for,
+                ..
+            } => {
+                if let Some(episode) = episode_id {
+                    let hive = match destination {
+                        HiveDestination::Hive(hive) => Some(hive.as_str()),
+                        HiveDestination::Agent(_) => None,
+                    };
+                    self.episode(episode, hive, at);
+                }
+                match destination {
+                    HiveDestination::Agent(to) => {
+                        self.report.direct_messages += 1;
+                        self.pair(sender, to);
+                    }
+                    HiveDestination::Hive(_) => {
+                        self.report.private_lines += 1;
+                        for reader in only_for {
+                            self.pair(sender, reader);
+                        }
+                    }
+                }
+            }
+            CompanyEvent::HiveAccepted {
+                route: Some(route), ..
+            } => {
+                *self.report.starter_routes.entry(route.clone()).or_insert(0) += 1;
+            }
+            CompanyEvent::HiveEpisodeSettled {
+                episode_id,
+                hive_id,
+                failure,
+                ..
+            } => {
+                let first = self.first_seen.get(episode_id).copied();
+                let episode = self.episode(episode_id, Some(hive_id), at);
+                let fresh = !episode.completed && episode.failure.is_none();
+                match failure {
+                    None => episode.completed = true,
+                    Some(reason) => episode.failure = Some(reason.clone()),
+                }
+                episode.time_to_complete_millis = first.map(|opened| at.saturating_sub(opened));
+                if fresh {
+                    if failure.is_none() {
+                        self.report.episodes_completed += 1;
+                    } else {
+                        self.report.episodes_failed += 1;
+                    }
+                }
+            }
+            CompanyEvent::HiveTurnInterrupted { .. } => self.report.interrupted_turns += 1,
             _ => {}
         }
     }
@@ -494,48 +402,8 @@ impl Fold {
         self.report.company = company.to_string();
         self.report.since_seq = since.value();
         self.report.open_turns = self.open.len();
-        // An episode's rounds are the distinct revisions its turns ran in,
-        // never fewer than the completion reported: a fold that starts
-        // mid-episode (`since`) sees only the revisions after its cut, and
-        // the completion's own count is the whole story.
-        for (episode_id, revisions) in &self.revisions {
-            if let Some(episode) = self.report.episodes.get_mut(episode_id) {
-                let counted = u32::try_from(revisions.len()).unwrap_or(u32::MAX);
-                episode.rounds = episode.rounds.max(counted);
-            }
-        }
+        self.report.episodes_opened = self.report.episodes.len();
         self.report
-    }
-}
-
-/// The `kind` tag of a plan, as the wire spells it.
-fn plan_kind(plan: &crate::hive::routing::RoutingPlanDto) -> &'static str {
-    use crate::hive::routing::RoutingPlanDto;
-    match plan {
-        RoutingPlanDto::One { .. } => "one",
-        RoutingPlanDto::Hive { .. } => "hive",
-        RoutingPlanDto::Clarify { .. } => "clarify",
-        RoutingPlanDto::Fallback { .. } => "fallback",
-    }
-}
-
-fn router_word(router: crate::hive::routing::Router) -> &'static str {
-    use crate::hive::routing::Router;
-    match router {
-        Router::Jev => "jev",
-        Router::Fallback => "fallback",
-        Router::Explicit => "explicit",
-    }
-}
-
-fn reason_word(reason: crate::ports::types::EpisodeReason) -> &'static str {
-    use crate::ports::types::EpisodeReason;
-    match reason {
-        EpisodeReason::CompleteEpisode => "complete_episode",
-        EpisodeReason::RoundCap => "round_cap",
-        EpisodeReason::Timeout => "timeout",
-        EpisodeReason::Failed => "failed",
-        EpisodeReason::MembershipChanged => "membership_changed",
     }
 }
 

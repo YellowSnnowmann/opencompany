@@ -327,12 +327,6 @@ export interface DeskRoutingDeclared {
   high_impact_threshold?: number;
   max_rounds?: number;
   turn_timeout_secs?: number;
-  referral?: {
-    enabled?: boolean;
-    max_hops?: number;
-    reach?: string;
-    returns?: boolean;
-  };
 }
 
 /** The routing numbers the runtime will actually use, defaults resolved. */
@@ -348,12 +342,6 @@ export interface DeskRoutingEffective {
   highImpactMinimumConfidence?: number;
   clarificationThreshold?: number;
   highImpactThreshold?: number;
-  referral?: {
-    enabled: boolean;
-    maxHops: number;
-    reach?: string;
-    returns: boolean;
-  };
 }
 
 /** One seat the router may pick, and where else it sits. */
@@ -385,82 +373,45 @@ export interface DeskRoutingSummaryDto {
 export type RoutingRouter = "jev" | "fallback" | "explicit";
 
 /**
- * How a message was routed to seats — the plan a round opened with, or the
- * plan a broadcast resolved to. Mirrors `RoutingPlanDto` in
- * `src/server/operator.rs`, which is tinyhivemind's `RoutingPlan` on the wire.
- */
-export type RoutingPlanDto =
-  | { kind: "one"; primaryId: string }
-  | { kind: "hive"; primaryId: string; invitedIds: string[] }
-  | { kind: "clarify"; question?: string }
-  /**
-   * The deterministic destination and why the router did not decide. The
-   * host names the seat it fell back to (`primaryId`) beside the reason —
-   * the seat is what a comms edge or a round lane needs; optional only for
-   * a host predating the field.
-   */
-  | { kind: "fallback"; primaryId?: string; reason: string };
-
-/**
- * The one speech act a seat ends its turn with. Mirrors
- * `tinyhivemind::speech::Utterance`'s four kinds — `read` is a query, not an
- * utterance, and never reaches the journal.
- */
-export type UtteranceKind = "post" | "broadcast" | "dm" | "complete_episode";
-
-/**
- * What a journaled reply was, inside the episode that produced it. Mirrors the
- * `episode` field of `ChatHistoryMessageDto` in `src/server/operator.rs`.
+ * Where a reply sits in the company hive's transcript (OC-2). Mirrors
+ * `MessageHiveDto` in `src/server/operator.rs`; the same shape rides on the
+ * `agent_reply` SSE frame as `hive`.
  *
- * Optional everywhere it appears: a reply outside an episode — a DM, `#general`,
- * a workflow relay, every row from a host predating episodes — carries none,
- * and renders exactly as it always has.
+ * Optional everywhere it appears: a reply that did not come through the hive —
+ * a workflow relay, a system pill — carries none and renders as it always has.
+ * A desk groups its lines by {@link episodeId}.
  */
-export interface MessageEpisodeDto {
-  /** The episode this reply was committed into. */
-  id: string;
-  /** The round it was committed in — the driver's revision when it landed. */
-  revision: number;
-  kind: UtteranceKind;
-  /** A `dm`'s recipients, by agent id. */
-  to?: string[];
-  /** How a `broadcast` was routed onward, when the host recorded it. */
-  routedBy?: { plan: RoutingPlanDto; router: RoutingRouter };
+export interface MessageHiveDto {
+  /** The hive transcript sequence the row was accepted at. */
+  sequence: number;
+  /** The episode the row belongs to, when it belongs to one. */
+  episodeId?: string;
+  /** The hive conversation root, by hive sequence. */
+  thread?: number;
 }
 
 /**
- * `GET {scope}/episodes?desk&status&limit` — one episode a desk ran or is
- * running. Mirrors `EpisodeDto` in `src/server/operator.rs`.
+ * `GET {scope}/agents/{agentId}/messages?after&limit` — one direct line
+ * between two teammates in the company hive (OC-2). Mirrors `AgentMessageDto`
+ * in `src/server/ops/agent_messages.rs`.
+ *
+ * Teammates reach each other with `hivemind_send_agent`; those lines never
+ * land on a desk, so this is the one place the console reads them.
  */
-export interface EpisodeDto {
-  id: string;
-  /** The desk it ran on. */
-  chatId: string;
-  /** The journal sequence of the message that opened it. */
-  openedBySeq: number;
-  /** The thread root inside that desk, when the message was in a thread. */
-  parentId?: string;
-  participants: string[];
-  plan: RoutingPlanDto;
-  /** The driver's current revision — how many rounds have committed. */
-  revision: number;
-  status: "open" | "completed";
-  openedAtMillis: number;
-  completedAtMillis?: number;
-  completedBy?: string;
-  reason?: EpisodeCompletionReason;
-  /** Seats parked waiting on the operator, by agent id. Absent or empty when none. */
-  waiting?: string[];
+export interface AgentHiveMessageDto {
+  /** The journal sequence — the next read's exclusive `after` cursor. */
+  seq: number;
+  /** The hive transcript sequence it was accepted at. */
+  sequence: number;
+  /** Who sent it (a manifest agent id). */
+  sender: string;
+  /** Who it was sent to (a manifest agent id). */
+  recipient: string;
+  text: string;
+  /** The episode the sender was in, when it was in one. */
+  episodeId?: string;
+  atMillis: number;
 }
-
-/** Why an episode closed. Widened by the console to a string on read, so a
- *  word from a newer host is not a type error. */
-export type EpisodeCompletionReason =
-  | "complete_episode"
-  | "round_cap"
-  | "timeout"
-  | "failed"
-  | "membership_changed";
 
 /**
  * Body for `POST {scope}/desks` — create a desk. `name` is required; `id` is
@@ -487,94 +438,13 @@ export interface CreateDeskInput {
  * never disagree about a desk's history (issue #65).
  */
 /**
- * Where a message came from when another desk caused it (tinyhivemind P15).
- *
- * A crossing referral runs a turn on a desk the asker is not a member of, so
- * the message needs to say so on its face — otherwise a turn that exists only
- * because engineering asked reads as design's own idea.
- *
- * The labels are **captured with the row**, never resolved at render, for the
- * reason `SessionAuthor` captures its own: a desk renamed later must not
- * rewrite what the transcript said at the time.
- */
-/** One line of a crossing between a desk and somebody who does not work on it. */
-export interface ReferralLineDto {
-  authorId: string;
-  /** Empty for this desk's own agent, whom the console already names. */
-  authorLabel: string;
-  text: string;
-  /** True for the question going out, false for the answer coming back. */
-  outbound: boolean;
-}
-
-/**
- * A crossing folded onto the report that brought it home.
- *
- * The relayed rows are dropped from the transcript — an agent who does not work
- * on this desk did not speak on it — so without this the operator could see that
- * a question crossed and never what was said either way. `lines.length` is the
- * count the collapsed label shows.
- */
-/**
- * One agent-to-agent exchange on this desk, folded onto the `ask` row that
- * opened it.
- *
- * The same shape and the same `ReferralLineDto` rows as
- * {@link ReferralConversationDto}: to a reader both are an exchange somebody
- * on this desk had that the desk's own transcript cannot show. The difference
- * is where the rows are — a crossing's are dropped host-side, these live in
- * the pair channel the two seats wrote to.
- */
-export interface AgentConversationDto {
-  /**
-   * The `ask` row it is rooted at: its identity.
-   *
-   * Two seats can hold several exchanges inside one episode and they share a
-   * channel — `pair_conversation` is deterministic, so each is `dm:<a>+<b>`.
-   * Without this they are indistinguishable: same asker, same askee, same
-   * channel, and a reader sees the same line twice with nothing to tell them
-   * apart. It is also the only safe React key for the same reason.
-   */
-  root: number;
-  askerId: string;
-  askeeId: string;
-  /** The channel the exchange is written to (`dm:{a}+{b}`). */
-  conversationId: string;
-  /** Whether it has ended. A live exchange is worded in the present tense. */
-  concluded: boolean;
-  /** Whether it ended by running out of turns rather than by concluding. */
-  forced: boolean;
-  lines: ReferralLineDto[];
-}
-
-export interface ReferralConversationDto {
-  askerId: string;
-  otherId: string;
-  otherDeskId: string;
-  otherDeskName: string;
-  /** Whether a person was asked rather than a desk — `@name` vs `#desk`. */
-  direct: boolean;
-  /**
-   * Whether this desk was **asked** rather than doing the asking.
-   *
-   * Every other field is named from the asking desk's side, because that was
-   * the only desk a crossing used to be folded onto. Optional because a host
-   * predating it omits it, and `undefined` means the asking side — which is
-   * what every older row is.
-   */
-  inbound?: boolean;
-  lines: ReferralLineDto[];
-}
-
-/**
  * One line of an agent's session: a chat row plus where it was said.
  *
  * The session view is one continuous stream across every channel an agent can
  * read, so a row that does not say which channel it came from is unreadable —
  * two teammates answering in two desks would interleave with nothing to tell
  * them apart. Everything else is a plain {@link ChatHistoryMessageDto}, which
- * is what lets `fromHistory` map it and the room's own components render it,
- * referral collapses and utterance chips included.
+ * is what lets `fromHistory` map it and the room's own components render it.
  */
 export interface AgentSessionMessageDto extends ChatHistoryMessageDto {
   /** The channel as the rail names it — `#Brand`, `#general`, `dm`. */
@@ -634,31 +504,6 @@ export interface AgentSessionMessageDto extends ChatHistoryMessageDto {
   openhumanSessionKey?: string;
 }
 
-export interface ReferredFromDto {
-  deskId: string;
-  deskName: string;
-  askerId: string;
-  askerLabel: string;
-  /** The asking message, so the chip can link straight to it. */
-  sequence: number;
-  /** Whether a person was asked rather than a desk. */
-  direct?: boolean;
-  /**
-   * Which leg of the referral this message is: the outbound ask, or the answer
-   * arriving home.
-   *
-   * The host says it because only the host can. Both legs are agent-authored
-   * lines on a desk, so `from`, `byPerson` and the author all read identically
-   * on each — a console that guesses from those gets every return wrong, which
-   * is exactly what it did before this field existed.
-   *
-   * Optional: a host that predates it says nothing, and the chip then falls
-   * back to "asked", which is what every marker written before the return leg
-   * shipped actually was.
-   */
-  direction?: "asked" | "answered";
-}
-
 export interface ChatHistoryMessageDto {
   id: string;
   channel: string;
@@ -670,21 +515,15 @@ export interface ChatHistoryMessageDto {
    *
    * Absent when the two are equal, which is every row carrying no move, and
    * absent from a host predating the field. Read it wherever the *moves* are
-   * the point rather than the prose: the episode fold counts
-   * `!propose`/`!support`/`^N`, and reading {@link text} there is why a
-   * deliberation panel never survived a refresh.
+   * the point rather than the prose, such as the raw-turns view.
    */
   cueText?: string;
-  referredFrom?: ReferredFromDto;
-  referralConversation?: ReferralConversationDto;
-  agentConversations?: AgentConversationDto[];
   /**
-   * What this reply was inside the episode that produced it — its round, its
-   * speech act, and for a `dm` who it went to. Absent for every reply outside
-   * an episode and on a host predating episodes; such a row renders exactly as
-   * before.
+   * Where this reply sits in the company hive (OC-2) — its transcript
+   * sequence and the episode it belongs to. Absent for every row that did not
+   * come through the hive.
    */
-  episode?: MessageEpisodeDto;
+  hive?: MessageHiveDto;
   /**
    * Who may read this line, by agent id, when the host narrowed it — a `dm`
    * inside a desk. Absent means everyone on the desk. An operator reads every
@@ -1174,11 +1013,17 @@ export interface ApprovalSummary {
    */
   blocker_step_kind?: BlockerStepKind;
   /**
-   * The hive episode seat that raised this approval — `id` is the episode,
-   * `seat` the roster agent id. Such an approval's {@link thread} is the desk.
-   * Absent for an approval no episode seat raised, and on an older host.
+   * The company-hive turn held on this approval (OC-2): the manifest agent id
+   * whose coordinator turn parked, and the episode it ran for (absent for a
+   * direct message). Absent for an approval no hive turn raised.
    */
-  episode?: { id: string; seat: string } | null;
+  hive?: ApprovalHiveDto | null;
+}
+
+/** The company-hive turn an approval belongs to. Mirrors `ApprovalHive`. */
+export interface ApprovalHiveDto {
+  agentId: string;
+  episodeId?: string;
 }
 
 /**
@@ -1896,7 +1741,7 @@ export interface AgentSkillsDto {
 export interface AgentDeskDto {
   id: string;
   name: string;
-  /** The desk's first effective member, who receives a `delegate_to_desk` hand-off. */
+  /** The desk's first effective member, who answers the desk's unmentioned lines. */
   lead: boolean;
 }
 

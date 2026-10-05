@@ -45,14 +45,12 @@ fn spawn(title: &str) -> Delegation {
 async fn a_spawn_with_no_board_is_reported_rather_than_silently_dropped() {
     let record = record();
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let fx = Fixture::new();
     let turns = ScriptedTurns::new(&fx, vec![]);
     let runner = DelegationRunner::new(
         &turns,
         &record,
         None,
-        &steer,
         &record.id,
         &queue,
         orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -60,7 +58,7 @@ async fn a_spawn_with_no_board_is_reported_rather_than_silently_dropped() {
     queue.push(spawn("Draft the plan"));
     queue.push(spawn("Book the venue"));
     let drained = runner
-        .drain_and_execute(None, MessageContext::default(), HandOffs::Run)
+        .drain_and_execute(None)
         .await
         .expect("a missing board does not fail the drain");
     assert_eq!(drained.spawned_task, None);
@@ -88,14 +86,12 @@ async fn one_card_the_board_refuses_does_not_drop_the_rest_of_the_drain() {
     });
     let record = record();
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let fx = Fixture::new();
     let turns = ScriptedTurns::new(&fx, vec![]);
     let runner = DelegationRunner::new(
         &turns,
         &record,
         Some(&tasks),
-        &steer,
         &record.id,
         &queue,
         orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -103,7 +99,7 @@ async fn one_card_the_board_refuses_does_not_drop_the_rest_of_the_drain() {
     queue.push(spawn("Broken card"));
     queue.push(spawn("Working card"));
     let drained = runner
-        .drain_and_execute(None, MessageContext::default(), HandOffs::Run)
+        .drain_and_execute(None)
         .await
         .expect("a refused write does not fail the drain");
     assert_eq!(drained.refused_cards.len(), 1);

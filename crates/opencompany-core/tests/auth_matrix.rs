@@ -424,6 +424,13 @@ const OPS_SCOPED_ROUTES: &[Route] = &[
     r!(Delete, "/billing/paypal/key", Admin, Credential, ""),
     r!(Get, "/agents/{agent_id}/budget-pause", Scoped, Ordinary, ""),
     r!(
+        Get,
+        "/agents/{agent_id}/messages",
+        Scoped,
+        Ordinary,
+        "Members may read a teammate's direct hive messages."
+    ),
+    r!(
         Post,
         "/agents/{agent_id}/budget-pause/redeem",
         Scoped,
@@ -1243,19 +1250,6 @@ const OPERATOR_AUTHORITY_ROUTES: &[Route] = &[
         red_cells: RedCells::None,
     },
     Route {
-        method: Verb::Get,
-        path: "/episodes",
-        address: Address::Dual,
-        source: Source::Operator,
-        access: Access::Scoped,
-        features: &["openhuman"],
-        blast: Blast::Ordinary,
-        probe: Probe::Empty,
-        note: "Members may list the episodes the company's desks ran or are running.",
-        wait: Wait::None,
-        red_cells: RedCells::None,
-    },
-    Route {
         method: Verb::Put,
         path: "/desks/{desk_id}/order",
         address: Address::Dual,
@@ -1813,29 +1807,29 @@ async fn company_status_temp_password_boundary_waits_for_an_assigned_branch() {
 
 #[test]
 fn table_counts_and_intentional_widenings_are_explicit() {
-    assert_eq!(OPS_SCOPED_ROUTES.len(), 222);
+    assert_eq!(OPS_SCOPED_ROUTES.len(), 223);
     assert_eq!(
         OPS_SCOPED_ROUTES
             .iter()
             .map(|route| route.path)
             .collect::<BTreeSet<_>>()
             .len(),
-        173,
+        174,
     );
     assert_eq!(OPS_EXACT_ROUTES.len(), 3);
     assert_eq!(
         OPS_SCOPED_ROUTES.len() * 2,
-        444,
+        446,
         "dual-address ops route-method rows",
     );
     assert_eq!(
         OPS_SCOPED_ROUTES.len() * 2 + OPS_EXACT_ROUTES.len(),
-        447,
+        449,
         "complete ops route-method rows",
     );
     assert_eq!(EXTERNAL_AUTHORITY_ROUTES.len(), 4);
     assert_eq!(OVERLAPPING_EXTERNAL_ROUTES.len(), 1);
-    assert_eq!(OPERATOR_AUTHORITY_ROUTES.len(), 16);
+    assert_eq!(OPERATOR_AUTHORITY_ROUTES.len(), 15);
     assert_eq!(OPERATOR_DIRECT_ROUTES.len(), 13);
     assert_eq!(
         all_routes()

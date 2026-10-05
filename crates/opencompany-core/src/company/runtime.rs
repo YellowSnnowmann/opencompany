@@ -523,7 +523,7 @@ pub struct CompanyRuntime {
 fn continuation_failure_notice(thread: String, parent: Option<EventSeq>) -> CompanyEvent {
     CompanyEvent::AgentReply {
         audience: Vec::new(),
-        episode: None,
+        hive: None,
         parent,
         chat_id: thread,
         agent_id: crate::ports::SYSTEM_AUTHOR.to_string(),
@@ -1694,6 +1694,7 @@ impl CompanyRuntime {
                     approval_id: approval_id.clone(),
                     effect_kind: effect.kind.clone(),
                     thread: Some(thread.clone()),
+                    origin: None,
                 },
             )
             .await
@@ -2755,10 +2756,10 @@ impl CompanyRuntime {
             if let CompanyEvent::ApprovalResolved { approval_id, .. } = &event
                 && let Some(resolution) = rt.grants.take_blocker_resolution(approval_id)
             {
-                if rt.episode_seat_of(approval_id).is_none() {
+                if rt.hive_seat_of(approval_id).is_none() {
                     return rt.resume_blocker(approval_id, resolution).await;
                 }
-                rt.hold_episode_answer(approval_id, &resolution).await;
+                rt.hold_hive_answer(approval_id, &resolution).await;
             }
             rt.continue_turn(event).await
         })
@@ -3583,11 +3584,8 @@ impl CompanyRuntime {
             },
             None => vec![event],
         };
-        if let Some(seat) = turn
-            .as_deref()
-            .and_then(crate::runtime::episode_resume::parse)
-        {
-            return self.resume_episode_seat(&seat, batch).await;
+        if let Some(seat) = turn.as_deref().and_then(crate::runtime::hive_resume::parse) {
+            return self.resume_hive_seat(&seat, batch).await;
         }
         // Issue #978: a workflow run is not a brain turn, so it is not continued
         // like one. The fork is read off the turn key itself — see
@@ -4445,7 +4443,7 @@ impl CompanyRuntime {
                     &self.id,
                     CompanyEvent::AgentReply {
                         audience: Vec::new(),
-                        episode: None,
+                        hive: None,
                         parent,
                         chat_id: chat_id.to_string(),
                         // Issue #885: the author, falling back to the
@@ -4951,7 +4949,7 @@ impl CompanyRuntime {
                     &self.id,
                     CompanyEvent::AgentReply {
                         audience: Vec::new(),
-                        episode: None,
+                        hive: None,
                         parent,
                         chat_id: chat_id.clone(),
                         // Issue #885: the author, not the destination. Same
@@ -5532,26 +5530,26 @@ impl CompanyRuntime {
             // pause the continuation, and park a brand-new card for a
             // decision that has already been made.
             self.workflow_gates.decide(&turn, id, Verdict::Deny);
-            let episode_seat = crate::runtime::episode_resume::parse(&turn);
-            let expiry = episode_seat
+            let parked_seat = crate::runtime::hive_resume::parse(&turn);
+            let expiry = parked_seat
                 .as_ref()
                 .map(|_| CompanyEvent::ApprovalResolved {
                     approval_id: id.clone(),
                     verdict: Verdict::Deny,
                     by: Actor {
                         kind: ActorKind::System,
-                        id: episode_seat::EXPIRY_ACTOR.into(),
+                        id: hive_seat::EXPIRY_ACTOR.into(),
                     },
                 });
             if let Some(batch) = self.continuations.decide(&turn, expiry) {
-                if let Some(seat) = episode_seat {
+                if let Some(seat) = parked_seat {
                     let rt = Arc::clone(self);
                     tokio::spawn(async move {
-                        if let Err(error) = rt.resume_episode_seat(&seat, batch).await {
+                        if let Err(error) = rt.resume_hive_seat(&seat, batch).await {
                             tracing::error!(
                                 company = %rt.id,
                                 %error,
-                                "[approval] the episode seat released by an expiry could not be \
+                                "[approval] the hive agent released by an expiry could not be \
                                  resumed"
                             );
                         }
@@ -6200,13 +6198,13 @@ impl CompanyRuntime {
                 // derived — grouping by "same agent, same thread, close
                 // together" would guess at a fact the journal already records,
                 // and would guess wrong exactly when two turns overlap.
-                episode: p
+                hive: p
                     .batch
                     .as_deref()
-                    .and_then(crate::runtime::episode_resume::parse)
-                    .map(|seat| crate::runtime::types::ApprovalEpisode {
-                        id: seat.episode_id,
-                        seat: seat.seat,
+                    .and_then(crate::runtime::hive_resume::parse)
+                    .map(|seat| crate::runtime::types::ApprovalHive {
+                        agent_id: seat.agent_id,
+                        episode_id: seat.episode_id,
                     }),
                 batch: p.batch,
                 // Issue #1862: the shared root cause, so the console folds every
@@ -6779,7 +6777,7 @@ impl CompanyRuntime {
                 &self.id,
                 CompanyEvent::AgentReply {
                     audience: Vec::new(),
-                    episode: None,
+                    hive: None,
                     parent,
                     chat_id: thread.to_string(),
                     agent_id,
@@ -6848,7 +6846,7 @@ impl CompanyRuntime {
                     // notice is that everyone reading the channel — including
                     // whoever the ping failed to reach — can see it.
                     audience: Vec::new(),
-                    episode: None,
+                    hive: None,
                 },
             )
             .await
@@ -7784,7 +7782,7 @@ impl std::fmt::Debug for CompanyRuntime {
     }
 }
 
-mod episode_seat;
+mod hive_seat;
 
 #[cfg(test)]
 #[path = "runtime_ambiguous_mentions_tests.rs"]
@@ -7836,8 +7834,8 @@ mod tests_dispatch;
 #[path = "runtime_emergency_stop_tests.rs"]
 mod tests_emergency_stop;
 #[cfg(test)]
-#[path = "runtime_episode_seat_tests.rs"]
-mod tests_episode_seat;
+#[path = "runtime_hive_seat_tests.rs"]
+mod tests_hive_seat;
 /// What is under test is whether a continuation run is started, with what
 /// trigger input, and how many times.
 #[cfg(feature = "openhuman")]

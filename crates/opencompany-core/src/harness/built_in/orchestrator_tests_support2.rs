@@ -16,13 +16,6 @@ pub(super) fn card(title: &str) -> Delegation {
     }
 }
 
-pub(super) fn hand_off() -> Delegation {
-    Delegation::DelegateToDesk {
-        desk: "design".to_string(),
-        instruction: "have a look".to_string(),
-    }
-}
-
 pub(super) fn titles(drained: Vec<Delegation>) -> Vec<String> {
     drained
         .into_iter()
@@ -34,7 +27,7 @@ pub(super) fn titles(drained: Vec<Delegation>) -> Vec<String> {
 }
 
 pub(super) fn stage(queue: &DelegationQueue, d: Delegation) -> Staged {
-    queue.push_within_cap(d, MAX_DELEGATIONS_PER_TURN, NO_DEPTH_BOUND)
+    queue.push_within_cap(d, MAX_DELEGATIONS_PER_TURN)
 }
 
 // -----------------------------------------------------------------------

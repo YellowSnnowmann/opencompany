@@ -1103,12 +1103,9 @@ fn model_response_from_payload(payload: serde_json::Value) -> TaResult<ModelResp
 /// `mcp_call_tool`, not the catalogue behind it. Read from the same messages
 /// that go on the wire, so it can never name a tool this turn did not offer.
 ///
-/// User messages as well as the system prompt: a roster rebuilt under a
-/// resumed session re-announces the catalogue on the turn text
-/// (`build::opencompany_mcp_rebrief`), and that brief is the current one
-/// where the prompt's is pinned. A name a person typed under that heading
-/// buys nothing — a salvaged call is served only if the MCP host's
-/// allowlist names it.
+/// User messages as well as the system prompt, so a brief carried on a turn's
+/// text counts too. A name a person typed under that heading buys nothing — a
+/// salvaged call is served only if the MCP host's allowlist names it.
 fn mcp_served_tools(messages: &[Message]) -> std::collections::BTreeSet<String> {
     messages
         .iter()
@@ -1345,23 +1342,15 @@ fn model_response_from_payload_offering(
         // it cannot cross there (Codex review on #2011).
         refuse_approval_siblings(&recovered)?;
         content = cleaned;
-        // A recovered call to a tool on the wire keeps its own name; one the
-        // turn offers only through the `opencompany` MCP server (named in
-        // `offered` by `mcp_served_tools`) is dispatched as `mcp_call_tool`.
+        // A recovered call keeps its own name: every tool a turn offers rides
+        // the belt directly since the served speech tools went (OC-2).
         tool_calls = recovered
             .into_iter()
-            .map(|call| {
-                let (name, arguments) = if schemas.contains_key(&call.name) {
-                    (call.name, call.arguments)
-                } else {
-                    crate::hive::tools::via_opencompany_mcp(&call.name, call.arguments)
-                };
-                ToolCall {
-                    id: call.id,
-                    name,
-                    arguments,
-                    invalid: None,
-                }
+            .map(|call| ToolCall {
+                id: call.id,
+                name: call.name,
+                arguments: call.arguments,
+                invalid: None,
             })
             .collect();
     }

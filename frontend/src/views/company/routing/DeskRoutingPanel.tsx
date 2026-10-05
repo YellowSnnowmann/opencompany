@@ -1,6 +1,6 @@
 /**
- * A desk's routing block: how wide its rounds are, how many it may run, how
- * long a seat may think, and whether it may refer a question to another desk.
+ * A desk's routing block: how wide its rounds are, how many it may run, and
+ * how long a seat may think.
  *
  * # Declared and effective, side by side
  *
@@ -32,7 +32,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 
 interface Props {
   client: OpenCompanyClient;
@@ -47,7 +46,7 @@ interface Props {
 
 /** The numeric fields of the declared block, in the order the form shows them. */
 const NUMBER_FIELDS: {
-  key: keyof Omit<DeskRoutingDeclared, "referral">;
+  key: keyof DeskRoutingDeclared;
   label: string;
   hint: string;
   step?: number;
@@ -122,7 +121,7 @@ export function DeskRoutingPanel({ client, company, deskId, refreshKey = 0, canM
     }
   };
 
-  const setNumber = (key: keyof Omit<DeskRoutingDeclared, "referral">, raw: string) => {
+  const setNumber = (key: keyof DeskRoutingDeclared, raw: string) => {
     setForm((prev) => {
       const next = { ...prev };
       if (raw.trim() === "") delete next[key];
@@ -133,8 +132,6 @@ export function DeskRoutingPanel({ client, company, deskId, refreshKey = 0, canM
       return next;
     });
   };
-  const setReferral = (patch: NonNullable<DeskRoutingDeclared["referral"]>) =>
-    setForm((prev) => ({ ...prev, referral: { ...prev.referral, ...patch } }));
 
   if (load === "unavailable") {
     return (
@@ -190,16 +187,6 @@ export function DeskRoutingPanel({ client, company, deskId, refreshKey = 0, canM
         <div>
           <dt className="text-muted-foreground">turn timeout</dt>
           <dd className="tabular-nums">{effective.turnTimeoutSecs}s</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">referral</dt>
-          <dd>
-            {effective.referral?.enabled
-              ? `on · ${effective.referral.maxHops} hop${effective.referral.maxHops === 1 ? "" : "s"}${
-                  effective.referral.returns ? " · returns" : ""
-                }`
-              : "off"}
-          </dd>
         </div>
       </dl>
 
@@ -258,54 +245,6 @@ export function DeskRoutingPanel({ client, company, deskId, refreshKey = 0, canM
             <span className="text-2xs text-muted-foreground">{field.hint}</span>
           </div>
         ))}
-        <div className="flex flex-col gap-2 sm:col-span-2">
-          <div className="flex items-center gap-2">
-            <Switch
-              id={`routing-${deskId}-referral`}
-              checked={form.referral?.enabled ?? false}
-              disabled={!canManage || busy !== null}
-              onCheckedChange={(checked) => setReferral({ enabled: checked })}
-              data-testid="desk-routing-referral-enabled"
-            />
-            <Label htmlFor={`routing-${deskId}-referral`} className="text-xs">
-              May refer a question to another desk
-            </Label>
-          </div>
-          {form.referral?.enabled && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="flex flex-col gap-1">
-                <Label htmlFor={`routing-${deskId}-max_hops`} className="text-xs">
-                  Max hops
-                </Label>
-                <Input
-                  id={`routing-${deskId}-max_hops`}
-                  type="number"
-                  min={1}
-                  value={form.referral?.max_hops ?? ""}
-                  placeholder="default"
-                  disabled={!canManage || busy !== null}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    setReferral({ max_hops: Number.isFinite(value) && event.target.value !== "" ? value : undefined });
-                  }}
-                  data-testid="desk-routing-max_hops"
-                />
-              </div>
-              <div className="flex items-center gap-2 self-end">
-                <Switch
-                  id={`routing-${deskId}-returns`}
-                  checked={form.referral?.returns ?? true}
-                  disabled={!canManage || busy !== null}
-                  onCheckedChange={(checked) => setReferral({ returns: checked })}
-                  data-testid="desk-routing-referral-returns"
-                />
-                <Label htmlFor={`routing-${deskId}-returns`} className="text-xs">
-                  Answers return to the asking desk
-                </Label>
-              </div>
-            </div>
-          )}
-        </div>
         {error && (
           <p className="text-xs text-destructive sm:col-span-2" role="alert" data-testid="desk-routing-error">
             {error}

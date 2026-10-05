@@ -75,12 +75,10 @@ allow = ["files", "docs", "shell", "code", "workspace", "workspace.*", "mcp:*"]
 # Desks.
 #
 # One member each, which looks like ceremony until you notice what desks are
-# for here: they are the orchestrator's address space. `delegate_to_desk` takes
-# a desk id, opens a card and runs that desk's lead in the same turn, where
-# `spawn_task` opens a card that waits for an operator to start it. Both are
-# legitimate and the lab uses both — but the hand-off that runs is the one that
-# makes an unattended solve possible, and it cannot be addressed without a desk
-# to address.
+# for here: they are the orchestrator's address space. Each desk is a hive in
+# the company's Coordinator, and a card `spawn_task` assigns to a desk's member
+# or a direct `hivemind_send_agent` to them is how a stage is handed out — which
+# cannot be addressed without a desk to address.
 #
 # Named after the *stage* rather than the person, so a desk can grow a second
 # member without the orchestrator's habits having to change.

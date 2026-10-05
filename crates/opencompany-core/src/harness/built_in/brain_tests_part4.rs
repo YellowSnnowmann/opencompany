@@ -530,33 +530,3 @@ fn everyone_names_the_desk_without_choosing_a_responder() {
         "the only member is the responder, and it is not told it was mentioned",
     );
 }
-
-#[test]
-fn everyone_desk_is_the_addressed_chat_or_general() {
-    assert_eq!(HarnessBrain::everyone_desk(None), "general");
-    assert_eq!(HarnessBrain::everyone_desk(Some("general")), "general");
-    assert_eq!(HarnessBrain::everyone_desk(Some("eng_desk")), "eng_desk");
-}
-
-#[test]
-fn everyone_in_general_reaches_the_whole_roster() {
-    let record = record_with_desk();
-    let mentions = [crate::ports::types::Mention {
-        target: crate::ports::types::MentionTarget::Everyone,
-        text: "@everyone".to_string(),
-        offset: 0,
-        quiet: false,
-    }];
-    let expanded = crate::runtime::mentions::mentioned_agents(
-        &record,
-        &HarnessBrain::everyone_desk(None),
-        &mentions,
-        None,
-    );
-    for id in ["ceo", "engineer"] {
-        assert!(
-            expanded.contains(&id.to_string()),
-            "{id} missing from {expanded:?}"
-        );
-    }
-}

@@ -248,11 +248,11 @@ host at them:
   carrying `__MOCK_PLAN__ [[…],[…]]` scripts a whole **turn** instead of a single
   call — several calls in one assistant message, and several steps across the
   turn's tool loop — which is what lets one goal fan out to two teammates and be
-  closed out afterwards. A turn opening with the host's seat sentinel (`Hive
-  turn: desk …, episode …, round N.`) ends in one speech act on the
-  `opencompany` MCP server: `post` (asking the desk `__MOCK_REFER__
-  [<agent>:]<desk>` names), then `broadcast` (or `dm` to `__MOCK_DM__
-  <agent>`), then `complete_episode`. `MOCK_BRAIN_DEBUG=1` dumps each request
+  closed out afterwards. A coordinator turn (`Incoming attributed Hivemind
+  context (JSON).` + a `TurnRequest`) with an episode calls `hivemind_complete`
+  (after one `hivemind_send_agent` to the agent `__MOCK_DM__ <agent>` names, on
+  the starter's turn) and then answers in prose; a direct-message turn answers
+  in prose. `MOCK_BRAIN_DEBUG=1` dumps each request
   it receives. Bind with `PW_MOCK_BRAIN_BIND` (default `127.0.0.1:8099`).
 
 * [`test/e2e/mcp-server.mjs`](test/e2e/mcp-server.mjs) — an HTTP MCP server with
@@ -359,16 +359,15 @@ scripts/measure-coordination.sh --mock    # the same company, measured, no brows
 ```
 
 `desk-episode-live.spec.ts` serves [`companies/hive_demo`](../companies/hive_demo)
-— two desks of two seats sharing the CEO — behind the mock brain's hive arm,
-and asserts what the console *shows* of an episode: a `round-band` with two
-lanes working at once, the `dm` chip on the round the directive named, the
-`episode-complete` marker, and a `chat/history` row with `episode.kind ===
-"complete_episode"`; then that a reload rebuilds the bands from the transcript
-alone. A lane of its own for the reason the Euler lane is: the harness
-company's desks have one seat each, and a one-seat desk runs no round.
+— two desks of two agents sharing the CEO — behind the mock brain's
+coordinator arm, and asserts what the console *shows* of an episode: its rows
+grouped as one `episode-group`, the `episode-complete` marker once
+`hive_episode_settled` lands, and `chat/history` rows carrying
+`hive.episodeId`; then that a reload regroups them from the transcript alone.
 `scripts/measure-coordination.mjs` reads the same `/events` frames without a
-browser and prints peak concurrent turns, same-agent overlaps, rounds per
-episode, dms, broadcasts and cross-desk referrals against the thresholds in
+browser and prints peak concurrent turns, same-agent overlaps, episodes
+settled/failed, direct and private agent lines and distinct pairs against the
+thresholds in
 `scripts/lib/coordination-metrics.mjs` (`node --test` covers it).
 
 ### The lane that compares pixels

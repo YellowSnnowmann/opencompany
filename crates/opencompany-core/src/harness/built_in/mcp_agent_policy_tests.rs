@@ -430,3 +430,19 @@ impl tinytools::Tool for NeverDials {
         tinytools::PermissionLevel::Execute
     }
 }
+
+/// The policy a roster agent runs under, resolved from the company's policy
+/// and budget in force (what the retired episode seat was built with).
+fn seat_policy(
+    company: &CompanyRecord,
+    deps: &HarnessDeps,
+    agent: &ManifestAgent,
+) -> crate::harness::policy::ApprovalPolicy {
+    agent_policy_for(
+        company,
+        deps,
+        agent,
+        &company.effective_policy(),
+        company.effective_budget(&agent.id),
+    )
+}

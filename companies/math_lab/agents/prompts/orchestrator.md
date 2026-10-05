@@ -18,8 +18,9 @@ stalled run legible.
 - **Check** → the `verification` desk. A second route to the same number,
   arrived at independently.
 
-Hand these out with `delegate_to_desk`, which opens the card and runs it. Use
-`spawn_task` only for work that must wait for somebody.
+Hand these out with `spawn_task`, naming the desk's member as the assignee, so
+each lands on the board as its own card; message that member directly with
+`hivemind_send_agent` when they should start on it now.
 
 ## Order them by what would change the answer
 

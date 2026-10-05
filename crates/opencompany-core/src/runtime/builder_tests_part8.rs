@@ -100,181 +100,6 @@ async fn a_rebuild_keeps_a_console_rename_and_a_console_removal() {
     );
 }
 
-/// Issue #707: a desk reorder reaches a **resident** runtime, with no
-/// rebuild and no restart.
-///
-/// This is the assertion that was missing. The neighbouring #133 test is
-/// named `..._after_rebuild` and rebuilds the brain before asserting, so it
-/// only ever proved the builder *seeds* the order — nobody had asked what a
-/// live company does when the operator saves one. The answer was: keep
-/// routing to the old lead until the process restarted, because
-/// `HarnessBrain.record` was a build-time snapshot and the only caller of
-/// `rebuild_company` is an inference-settings change.
-///
-/// So the write here goes through the store exactly as
-/// `set_desk_order` (`src/server/operator.rs`) does — load, mutate, save —
-/// and then the SAME runtime object runs a second turn. No rebuild happens
-/// anywhere in this test, which is the whole point of it.
-#[cfg(feature = "openhuman")]
-#[tokio::test]
-async fn a_desk_reorder_reaches_a_resident_runtime_without_a_rebuild() {
-    use crate::harness::HarnessPool;
-    use crate::ports::types::{CompanyEvent, OverlayDeskOrder};
-    use crate::store::FsCompanyStore;
-
-    let home_dir = tmp_home("oc-707-order-");
-    let home = home_dir.path().to_path_buf();
-    let id = CompanyId::new("order-co");
-
-    let manifest = parse(
-        r#"
-        [company]
-        name = "Order Co"
-
-        [policy]
-        mode = "full"
-
-        [[agent]]
-        id = "eng1"
-        role = "Engineer One"
-
-        [[agent]]
-        id = "eng2"
-        role = "Engineer Two"
-
-        [[group_chat]]
-        id = "eng"
-        name = "Engineering"
-        members = ["eng1", "eng2"]
-        "#,
-    );
-
-    // The blueprint lead is `eng1`; no operator order yet.
-    let store = FsCompanyStore::new(home.clone());
-    store
-        .save(&CompanyRecord {
-            general_channel: Default::default(),
-            overlay_retired_agents: Vec::new(),
-            overlay_agent_edits: Vec::new(),
-            overlay_desk_hive: Vec::new(),
-            id: id.clone(),
-            manifest: manifest.clone(),
-            ledger: Vec::new(),
-            lifecycle: "running".to_string(),
-            overlay_agents: Vec::new(),
-            overlay_desk_members: Vec::new(),
-            overlay_desk_order: Vec::new(),
-            overlay_desks: Vec::new(),
-            overlay_workflows: Vec::new(),
-            overlay_budgets: Vec::new(),
-            overlay_policy: None,
-            overlay_tool_grants: None,
-            overlay_desk_tools: Default::default(),
-            disabled_workflows: Vec::new(),
-            template_provenance: None,
-            setup: None,
-            name_confirmed: false,
-            activation_completed_at: None,
-            created_at_millis: None,
-        })
-        .await
-        .unwrap();
-
-    let stub = spawn_stub("desk lead reply").await;
-    let runtime = RuntimeBuilder::new(home.clone(), manifest)
-        .with_id(id.clone())
-        .with_harness(Arc::new(HarnessPool::new()))
-        .with_harness_inference(
-            HostedProviderConfig {
-                base_url: stub,
-                credential: crate::company::Credential::from_value("k"),
-                extra_headers: Vec::new(),
-            },
-            Some("stub-model".to_string()),
-        )
-        .build()
-        .await
-        .unwrap();
-
-    let desk_turn = |text: &'static str| CompanyEvent::OperatorMessage {
-        mentions: Vec::new(),
-        parent: None,
-        text: text.to_string(),
-        by: None,
-        chat: Some("eng".to_string()),
-        deliverable: None,
-        attachments: Vec::new(),
-    };
-
-    // Baseline: the blueprint lead is the primary seat of the episode the
-    // desk message opens (plan hive-desks: a desk of two answers as a room;
-    // its opening plan puts the lead first). Asserted rather than assumed,
-    // so a later failure cannot be explained away as "the desk never routed".
-    runtime
-        .run_cycle(vec![desk_turn("who leads?")])
-        .await
-        .expect("first cycle");
-    let before = episode_participants(&runtime, &id, 1).await;
-    assert_eq!(
-        before.first().map(String::as_str),
-        Some("eng1"),
-        "the blueprint lead must lead before the reorder; saw {before:?}"
-    );
-
-    // The console write: load, mutate, save. Nothing rebuilds.
-    let mut record = store.load(&id).await.unwrap().expect("record");
-    record.overlay_desk_order.push(OverlayDeskOrder {
-        desk_id: "eng".to_string(),
-        ordered: vec!["eng2".to_string(), "eng1".to_string()],
-    });
-    store.save(&record).await.unwrap();
-
-    // The same runtime, a second turn — a new episode, whose primary is the
-    // reordered lead.
-    runtime
-        .run_cycle(vec![desk_turn("who leads now?")])
-        .await
-        .expect("second cycle");
-    let after = episode_participants(&runtime, &id, 2).await;
-    assert_eq!(
-        after.first().map(String::as_str),
-        Some("eng2"),
-        "the reordered lead eng2 never led — the resident brain routed on a stale \
-         record; saw {after:?}"
-    );
-}
-
-/// The participants of the `nth` episode the runtime opened (1-based), in
-/// plan order, waiting for the journal row: the episode is driven on its own
-/// task once the cycle accepted the message.
-#[cfg(feature = "openhuman")]
-async fn episode_participants(
-    runtime: &crate::company::runtime::CompanyRuntime,
-    id: &CompanyId,
-    nth: usize,
-) -> Vec<String> {
-    use crate::ports::types::{CompanyEvent, EventSeq};
-    for _ in 0..400 {
-        let rows = runtime
-            .events()
-            .read_from(id, EventSeq::new(0), usize::MAX)
-            .await
-            .expect("read the journal");
-        let opened: Vec<Vec<String>> = rows
-            .into_iter()
-            .filter_map(|stored| match stored.event {
-                CompanyEvent::EpisodeOpened { participants, .. } => Some(participants),
-                _ => None,
-            })
-            .collect();
-        if opened.len() >= nth {
-            return opened[nth - 1].clone();
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
-    Vec::new()
-}
-
 /// Issue #707, the same defect through `overlay_desks` + `overlay_desk_members`:
 /// a desk the operator creates on a **resident** runtime is reachable.
 ///
@@ -385,7 +210,7 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
         "the stored record must resolve the new desk, or this test proves nothing"
     );
 
-    let report = runtime
+    runtime
         .run_cycle(vec![CompanyEvent::OperatorMessage {
             mentions: Vec::new(),
             parent: None,
@@ -398,148 +223,26 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
         .await
         .expect("cycle");
 
-    let routed: Vec<String> = report
-        .responses
-        .iter()
-        .filter_map(|response| response.agent.clone())
+    // The line is handed to the company hive (OC-2), so who it reached is the
+    // starter its acceptance row names, not a reply this cycle ran.
+    let started: Vec<String> = runtime
+        .events
+        .read_from(&id, crate::ports::types::EventSeq::new(0), usize::MAX)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|row| match row.event {
+            CompanyEvent::HiveAccepted {
+                chat_id, starters, ..
+            } if chat_id == "design" => Some(starters),
+            _ => None,
+        })
+        .flatten()
         .collect();
     assert!(
-        routed.contains(&"eng2".to_string()),
-        "a desk chat must reach the desk's member; the runtime routed as though the desk \
-         did not exist; saw {routed:?}"
-    );
-}
-
-/// Builder-level regression for the `overlay_desk_order` seeding path (#133).
-/// The harness test `desk_order_change_updates_routing_after_rebuild` exercises
-/// `brain_over(record)` directly; this one drives the real
-/// [`RuntimeBuilder::build`] wiring end-to-end: a persisted record carries a
-/// NON-EMPTY `overlay_desk_order` that promotes `eng2` over the blueprint lead
-/// `eng1`, and after `build()` a desk-addressed cycle must run on `eng2` — the
-/// reordered lead — proving the builder seeds the operator order into the brain
-/// rather than an empty default. The harness records each turn under a
-/// `task-outcome/{agent_id}` context chunk, which is the observable seam.
-#[cfg(feature = "openhuman")]
-#[tokio::test]
-async fn build_seeds_desk_order_into_brain_routing() {
-    use crate::harness::HarnessPool;
-    use crate::ports::types::{CompanyEvent, OverlayDeskOrder};
-    use crate::store::FsCompanyStore;
-
-    let home_dir = tmp_home("oc-seed-order-");
-    let home = home_dir.path().to_path_buf();
-    let id = CompanyId::new("order-co");
-
-    // A desk `eng` whose blueprint lead is `eng1` (declared first).
-    let manifest = parse(
-        r#"
-        [company]
-        name = "Order Co"
-
-        [policy]
-        mode = "full"
-
-        [[agent]]
-        id = "eng1"
-        role = "Engineer One"
-
-        [[agent]]
-        id = "eng2"
-        role = "Engineer Two"
-
-        [[group_chat]]
-        id = "eng"
-        name = "Engineering"
-        members = ["eng1", "eng2"]
-        # This test is about WHO LEADS a desk, and a two-member desk now
-        # answers as a deliberating room by default (`crate::hivemind`) —
-        # where there is no lead, every member speaks, and the operator's
-        # desk order decides nothing. Opted out here so the fixture keeps
-        # exercising the single-responder ladder it was written for; the
-        # order still governs `delegate_to_desk` and the console's crown.
-        hive = { enabled = false }
-        "#,
-    );
-
-    // Persist a record whose operator order promotes `eng2` above `eng1`.
-    let store = FsCompanyStore::new(home.clone());
-    store
-        .save(&CompanyRecord {
-            general_channel: Default::default(),
-            overlay_retired_agents: Vec::new(),
-            overlay_agent_edits: Vec::new(),
-            overlay_desk_hive: Vec::new(),
-            id: id.clone(),
-            manifest: manifest.clone(),
-            ledger: Vec::new(),
-            lifecycle: "running".to_string(),
-            overlay_agents: Vec::new(),
-            overlay_desk_members: Vec::new(),
-            overlay_desk_order: vec![OverlayDeskOrder {
-                desk_id: "eng".to_string(),
-                ordered: vec!["eng2".to_string(), "eng1".to_string()],
-            }],
-            overlay_desks: Vec::new(),
-            overlay_workflows: Vec::new(),
-            overlay_budgets: Vec::new(),
-            overlay_policy: None,
-            overlay_tool_grants: None,
-            overlay_desk_tools: Default::default(),
-            disabled_workflows: Vec::new(),
-            template_provenance: None,
-            setup: None,
-            name_confirmed: false,
-            activation_completed_at: None,
-            created_at_millis: None,
-        })
-        .await
-        .unwrap();
-
-    // Build the runtime with an embedded harness pool + a stub inference
-    // backend, so `build()` constructs the seeded `HarnessBrain`.
-    let stub = spawn_stub("desk lead reply").await;
-    let runtime = RuntimeBuilder::new(home.clone(), manifest)
-        .with_id(id.clone())
-        .with_harness(Arc::new(HarnessPool::new()))
-        .with_harness_inference(
-            HostedProviderConfig {
-                base_url: stub,
-                credential: crate::company::Credential::from_value("k"),
-                extra_headers: Vec::new(),
-            },
-            Some("stub-model".to_string()),
-        )
-        .build()
-        .await
-        .unwrap();
-
-    // A message addressed to the `eng` desk must be answered by the reordered
-    // lead `eng2`, not the blueprint lead `eng1`.
-    runtime
-        .run_cycle(vec![CompanyEvent::OperatorMessage {
-            mentions: Vec::new(),
-            parent: None,
-            text: "who leads?".to_string(),
-            by: None,
-            chat: Some("eng".to_string()),
-            deliverable: None,
-            attachments: Vec::new(),
-        }])
-        .await
-        .expect("cycle");
-
-    // The desk of two opens an episode whose primary seat is the reordered
-    // lead: the blueprint lead sits second.
-    let participants = episode_participants(&runtime, &id, 1).await;
-    assert_eq!(
-        participants.first().map(String::as_str),
-        Some("eng2"),
-        "desk turn did not route to the reordered lead eng2; saw {participants:?}"
-    );
-    assert_ne!(
-        participants.first().map(String::as_str),
-        Some("eng1"),
-        "desk turn routed to the blueprint lead eng1 — the builder dropped the operator desk order; saw {participants:?}"
+        started.contains(&"eng2".to_string()),
+        "a desk chat must start the desk's member; the hive routed as though the desk \
+         did not exist; saw {started:?}"
     );
 }
 

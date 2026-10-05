@@ -185,6 +185,7 @@ async fn a_chat_cycle_stamps_its_thread_and_announces_the_park() {
                 approval_id,
                 effect_kind,
                 thread,
+                ..
             } => Some((approval_id.clone(), effect_kind.clone(), thread.clone())),
             _ => None,
         })

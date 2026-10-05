@@ -9,8 +9,7 @@ import { cn } from "@/lib/utils";
 import { ApprovalRow } from "./ApprovalRow";
 import { ChatLiveReceipt, type ChatReceipt } from "./ChatLiveReceipt";
 import { EpisodeCompleteMarker } from "./EpisodeCompleteMarker";
-import { EpisodeWaitingMarker } from "./EpisodeWaitingMarker";
-import { RoundBand } from "./RoundBand";
+import { EpisodeGroup } from "./EpisodeGroup";
 import { MessageRow } from "./MessageRow";
 import { StepTimeline } from "./StepTimeline";
 import { WorkingIndicator } from "./WorkingIndicator";
@@ -65,7 +64,7 @@ interface Props {
    * render: the live pair is pinned to the foot of the pane either way. A
    * "happening now" row placed back at the asking message claims the work
    * finished before every line beneath it, which is false the moment anything
-   * is journaled in between — a hive episode posts a seat's line per turn, so
+   * is journaled in between — a hive episode posts an agent's line per turn, so
    * by convergence the pulsing row sits several messages up while everything
    * below it has already happened.
    */
@@ -280,32 +279,18 @@ export function MessageTimeline({
   /**
    * One timeline row.
    *
-   * Extracted from the `items.map` it used to be inlined in so a
-   * {@link RoundBand} can render the very same rows inside itself. A round's
-   * utterances are ordinary messages — same avatar gutter, same hover actions,
-   * same thread affordances — and a second renderer for them would be a second
-   * place for those to drift.
+   * Extracted from the `items.map` it used to be inlined in so an
+   * {@link EpisodeGroup} can render the very same rows inside itself. An
+   * episode's replies are ordinary messages — same avatar gutter, same hover
+   * actions, same thread affordances — and a second renderer for them would be
+   * a second place for those to drift.
    */
   const renderRow = (item: TimelineItem): React.ReactNode => {
-    if (item.kind === "round") {
-      return (
-        <RoundBand
-          key={item.key}
-          episode={item.episode}
-          round={item.round}
-          items={item.items}
-          renderRow={renderRow}
-          agentNames={agentNames}
-        />
-      );
+    if (item.kind === "episode") {
+      return <EpisodeGroup key={item.key} episode={item.episode} items={item.items} renderRow={renderRow} />;
     }
     if (item.kind === "episode_complete") {
-      return <EpisodeCompleteMarker key={item.key} episode={item.episode} agentNames={agentNames} />;
-    }
-    if (item.kind === "episode_waiting") {
-      return (
-        <EpisodeWaitingMarker key={item.key} episode={item.episode} seats={item.seats} agentNames={agentNames} />
-      );
+      return <EpisodeCompleteMarker key={item.key} episode={item.episode} />;
     }
     if (item.kind === "message") {
       return (
@@ -328,7 +313,6 @@ export function MessageTimeline({
             onRedeemBudgetPause={onRedeemBudgetPause}
             redeemingBudgetPauseAgent={redeemingBudgetPauseAgent}
             latestBudgetPauseMessageIdByAgent={latestBudgetPauseMessageIdByAgent}
-            agentNames={agentNames}
           />
         </div>
       );

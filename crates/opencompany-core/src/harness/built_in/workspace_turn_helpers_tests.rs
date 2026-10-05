@@ -278,7 +278,7 @@ pub(crate) async fn harness(
         .unwrap();
 
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,

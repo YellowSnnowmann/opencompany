@@ -46,8 +46,8 @@ import {
  * # What is asserted, given that the answers are not ours
  *
  * Outcomes, never wording, and never *which* tool was used. An orchestrator
- * that opens cards with `spawn_task` and one that hands work over with
- * `delegate_to_teammate` (which opens its own card) are both doing the job; a
+ * that opens cards with `spawn_task` and one that hands work to a teammate
+ * over the hive (`hivemind_send_agent`) are both doing the job; a
  * spec that demanded one would be asserting a preference. So what is checked is
  * the shape of the board afterwards: work appeared, somebody on the roster owns
  * it, dispatching it runs a turn, and asking for it to be closed out closes it.
@@ -181,8 +181,7 @@ test("a real model takes a goal, gives it to its team, and closes it out", async
 
   // ── 2. The operator starts the work ────────────────────────────────────
   // Whatever is still unstarted gets dispatched by hand, on the board. A card
-  // the orchestrator already ran (a `delegate_to_teammate` hand-off opens one
-  // mid-turn) is left alone rather than re-run.
+  // the orchestrator already ran mid-turn is left alone rather than re-run.
   for (const card of opened) {
     const current = (await allCards(request)).find((held) => held.id === card.id);
     if ((current?.stage ?? current?.column) === "pending") {

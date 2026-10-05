@@ -95,6 +95,14 @@ openhuman = { path = "vendor/openhuman/crates/openhuman-core" }
 tinytools = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinytools/crates/tinytools" }
 tinytools-agent = { path = "vendor/openhuman/vendor/tinyagents/vendor/tinytools/crates/tinytools-agent" }
 
+# And the memory contract crates: `tinyhivemind-openhuman` names
+# `tinymemory-api` / `tinymemory-tools` by git URL (its `Recall`/`Remember`
+# over the engine OpenHuman runs seat memory through). Redirected onto
+# OpenHuman's vendored tinymemory so the `MemoryProvider` trait exists once.
+[patch."https://github.com/tinyhumansai/tinymemory"]
+tinymemory-api = { path = "vendor/openhuman/vendor/tinymemory/crates/tinymemory-api" }
+tinymemory-tools = { path = "vendor/openhuman/vendor/tinymemory/crates/tinymemory-tools" }
+
 [patch.crates-io]
 # No `tinyagents` entry: the crate no longer exists as a package (the workspace
 # split), and nothing in the graph asks crates.io for it any more — openhuman

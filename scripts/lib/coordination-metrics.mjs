@@ -6,39 +6,34 @@
 // are here, with no I/O, so `node --test scripts/lib/coordination-metrics.test.mjs`
 // can state each rule in a few lines.
 //
-// The frames folded are the ones `docs/spec/runtime/events.md` names under
-// "Hive episodes and rounds": `episode_opened`, `round_started`,
-// `turn_started` / `turn_settled`, `round_committed`, `broadcast_routed`,
-// `dm_delivered`, `episode_completed`, `referral`, plus `agent_reply` for the
-// utterance-kind histogram. The console's `frontend/src/lib/coordination.ts`
-// computes the same numbers over the same frames for the comms graph; the two
-// are kept in step by hand.
+// The frames folded are the company hive's (OC-2), named in
+// `docs/spec/runtime/events.md`: `turn_started` / `turn_settled` (with their
+// `hive` ref), `agent_reply` (its `hive.episodeId`), `hive_accepted` (the
+// starter route), `hive_message` (a direct or private line between agents),
+// `hive_episode_settled` and `hive_turn_interrupted`. This is the twin of
+// `opencompany measure` (`crates/opencompany-core/src/hive/measure.rs`), which
+// folds the same rows from the store: the two are kept in step by hand, and
+// the thresholds are the same numbers.
 
 /** A fresh, empty ledger. */
 export function createLedger() {
   return {
     turns: {
-      /** Open turns, by key. @type {Map<string, {agentId?: string, startedAt: number, episodeId?: string}>} */
+      /** Open turns, by turn id. @type {Map<string, {agentId?: string, startedAt: number, episodeId?: string}>} */
       open: new Map(),
       /** @type {{agentId?: string, startedAt: number, settledAt: number, episodeId?: string}[]} */
       closed: [],
       peak: 0,
+      overlaps: 0,
       sameAgentOverlaps: 0,
     },
-    /** @type {Map<string, {id: string, chatId: string, openedAt?: number, completedAt?: number, status: "open"|"completed", rounds: Set<number>, roundCount?: number, reason?: string, plan?: any}>} */
+    /** @type {Map<string, {id: string, chatId?: string, openedAt: number, settledAt?: number, status: "open"|"settled"|"failed", turns: number, failure?: string}>} */
     episodes: new Map(),
-    /** @type {{from: string, to: string[], via: "broadcast"|"dm"|"referral", at: number, episodeId?: string, chatId: string}[]} */
+    /** @type {{from: string, to: string[], via: "direct"|"private", at: number, episodeId?: string}[]} */
     contacts: [],
-    /** @type {Record<string, number>} */
-    planKinds: {},
-    /** @type {Record<string, number>} */
-    routers: {},
-    /** @type {Record<string, number>} from `round_committed`. */
-    utteranceKinds: {},
-    /** @type {Record<string, number>} from `agent_reply.episode`, the durable twin. */
-    replyKinds: {},
-    /** Referrals that crossed desks, keyed by the asking episode + target desk. */
-    referrals: [],
+    /** @type {Record<string, number>} from `hive_accepted.route`. */
+    starterRoutes: {},
+    interruptedTurns: 0,
     frames: 0,
   };
 }
@@ -46,7 +41,7 @@ export function createLedger() {
 function episodeOf(ledger, id, chatId, at) {
   let episode = ledger.episodes.get(id);
   if (!episode) {
-    episode = { id, chatId, openedAt: at, status: "open", rounds: new Set() };
+    episode = { id, chatId, openedAt: at, status: "open", turns: 0 };
     ledger.episodes.set(id, episode);
   }
   if (!episode.chatId && chatId) episode.chatId = chatId;
@@ -55,14 +50,6 @@ function episodeOf(ledger, id, chatId, at) {
 
 function turnKey(frame) {
   return frame.turnId ?? `${frame.agentId ?? "?"}:${frame.chatId ?? "?"}`;
-}
-
-/** The seats a routing plan hands a broadcast to, primary first. */
-export function planTargets(plan) {
-  const out = [];
-  if (plan?.primaryId) out.push(plan.primaryId);
-  for (const id of plan?.invitedIds ?? []) if (!out.includes(id)) out.push(id);
-  return out;
 }
 
 /**
@@ -78,97 +65,70 @@ export function foldFrame(ledger, frame) {
   switch (frame.type) {
     case "turn_started": {
       const { turns } = ledger;
+      const episodeId = frame.hive?.episodeId;
+      if (episodeId) episodeOf(ledger, episodeId, frame.hive?.hiveId, at).turns += 1;
+      if (turns.open.size > 0) turns.overlaps += 1;
       if (frame.agentId && [...turns.open.values()].some((turn) => turn.agentId === frame.agentId)) {
         turns.sameAgentOverlaps += 1;
       }
-      turns.open.set(turnKey(frame), { agentId: frame.agentId, startedAt: at, episodeId: frame.episodeId });
+      turns.open.set(turnKey(frame), { agentId: frame.agentId, startedAt: at, episodeId });
       turns.peak = Math.max(turns.peak, turns.open.size);
       break;
     }
     case "turn_settled": {
       const { turns } = ledger;
-      let key = turnKey(frame);
-      if (!turns.open.has(key) && frame.agentId) {
-        key = [...turns.open.entries()].find(([, turn]) => turn.agentId === frame.agentId)?.[0] ?? key;
-      }
+      const key = turnKey(frame);
       const turn = turns.open.get(key);
       if (!turn) break;
       turns.open.delete(key);
       turns.closed.push({ ...turn, settledAt: at });
       break;
     }
-    case "episode_opened": {
-      const episode = episodeOf(ledger, frame.episodeId, frame.chatId, at);
-      episode.openedAt = at;
-      episode.plan = frame.plan;
-      if (frame.plan?.kind) ledger.planKinds[frame.plan.kind] = (ledger.planKinds[frame.plan.kind] ?? 0) + 1;
-      break;
-    }
-    case "round_started": {
-      const episode = episodeOf(ledger, frame.episodeId, frame.chatId, at);
-      episode.rounds.add(frame.revision);
-      break;
-    }
-    case "round_committed": {
-      const episode = episodeOf(ledger, frame.episodeId, frame.chatId, at);
-      episode.rounds.add(frame.revision);
-      for (const utterance of frame.utterances ?? []) {
-        if (utterance?.kind) {
-          ledger.utteranceKinds[utterance.kind] = (ledger.utteranceKinds[utterance.kind] ?? 0) + 1;
-        }
-      }
-      break;
-    }
-    case "broadcast_routed": {
-      episodeOf(ledger, frame.episodeId, frame.chatId, at);
-      if (frame.router) ledger.routers[frame.router] = (ledger.routers[frame.router] ?? 0) + 1;
-      if (frame.plan?.kind) ledger.planKinds[frame.plan.kind] = (ledger.planKinds[frame.plan.kind] ?? 0) + 1;
-      const to = planTargets(frame.plan).filter((id) => id !== frame.agentId);
-      ledger.contacts.push({ from: frame.agentId, to, via: "broadcast", at, episodeId: frame.episodeId, chatId: frame.chatId });
-      break;
-    }
-    case "dm_delivered": {
-      episodeOf(ledger, frame.episodeId, frame.chatId, at);
-      const to = (frame.to ?? []).filter((id) => id !== frame.from);
-      ledger.contacts.push({ from: frame.from, to, via: "dm", at, episodeId: frame.episodeId, chatId: frame.chatId });
-      break;
-    }
-    case "referral": {
-      if (frame.returning) break;
-      const to = frame.direct ? frame.target : frame.toDesk;
-      ledger.contacts.push({ from: frame.asker, to: [to], via: "referral", at, episodeId: frame.episodeId, chatId: frame.chatId });
-      if (frame.toDesk && frame.toDesk !== frame.chatId) {
-        ledger.referrals.push({ from: frame.chatId, to: frame.toDesk, asker: frame.asker, episodeId: frame.episodeId, toEpisodeId: frame.toEpisodeId, at });
-      }
-      break;
-    }
-    case "episode_completed": {
-      const episode = episodeOf(ledger, frame.episodeId, frame.chatId, at);
-      episode.status = "completed";
-      episode.completedAt = at;
-      episode.reason = frame.reason;
-      episode.roundCount = frame.rounds;
-      break;
-    }
     case "agent_reply": {
-      // The durable twin of `round_committed`'s kinds: one reply per
-      // utterance, so a host that projects the episode onto the reply but
-      // not the commit still yields a histogram.
-      if (frame.episode?.kind) {
-        ledger.replyKinds[frame.episode.kind] = (ledger.replyKinds[frame.episode.kind] ?? 0) + 1;
+      const episodeId = frame.hive?.episodeId;
+      if (episodeId) episodeOf(ledger, episodeId, frame.chatId, at);
+      break;
+    }
+    case "hive_message": {
+      const destination = frame.destination ?? {};
+      if (frame.episodeId) {
+        episodeOf(ledger, frame.episodeId, destination.type === "hive" ? destination.id : undefined, at);
+      }
+      if (destination.type === "agent") {
+        const to = destination.id === frame.sender ? [] : [destination.id];
+        ledger.contacts.push({ from: frame.sender, to, via: "direct", at, episodeId: frame.episodeId });
+      } else {
+        const to = (frame.onlyFor ?? []).filter((id) => id !== frame.sender);
+        ledger.contacts.push({ from: frame.sender, to, via: "private", at, episodeId: frame.episodeId });
       }
       break;
     }
+    case "hive_accepted": {
+      if (frame.route) ledger.starterRoutes[frame.route] = (ledger.starterRoutes[frame.route] ?? 0) + 1;
+      break;
+    }
+    case "hive_episode_settled": {
+      const episode = episodeOf(ledger, frame.episodeId, frame.chatId, at);
+      if (episode.status === "open") {
+        episode.status = frame.failure ? "failed" : "settled";
+        episode.failure = frame.failure;
+        episode.settledAt = at;
+      }
+      break;
+    }
+    case "hive_turn_interrupted":
+      ledger.interruptedTurns += 1;
+      break;
     default:
       break;
   }
   return ledger;
 }
 
-/** Whether every episode the ledger saw open has completed. At least one must have opened. */
-export function allComplete(ledger) {
+/** Whether every episode the ledger saw has settled (or failed). At least one must have opened. */
+export function allSettled(ledger) {
   if (ledger.episodes.size === 0) return false;
-  for (const episode of ledger.episodes.values()) if (episode.status !== "completed") return false;
+  for (const episode of ledger.episodes.values()) if (episode.status === "open") return false;
   return true;
 }
 
@@ -199,56 +159,52 @@ export function peakFromRuns(runs, nowMillis = Date.now()) {
 }
 
 /**
- * The numbers a run prints.
+ * The numbers a run prints — the same fields `opencompany measure` reports.
  *
  * @param {ReturnType<typeof createLedger>} ledger
- * @param {{now?: number}} [options]
  */
-export function summarize(ledger, { now = Date.now() } = {}) {
+export function summarize(ledger) {
   const pairs = new Set();
-  let broadcasts = 0;
-  let dms = 0;
+  let directMessages = 0;
+  let privateLines = 0;
   for (const contact of ledger.contacts) {
-    if (contact.via === "broadcast") broadcasts += 1;
-    else if (contact.via === "dm") dms += 1;
+    if (contact.via === "direct") directMessages += 1;
+    else privateLines += 1;
     for (const to of contact.to) pairs.add(`${contact.from}→${to}`);
   }
   const episodes = [...ledger.episodes.values()];
-  const roundsPerEpisode = {};
-  const timeToComplete = {};
+  const turnsPerEpisode = {};
+  const timeToSettle = {};
+  const failures = {};
   for (const episode of episodes) {
-    roundsPerEpisode[episode.id] = Math.max(episode.roundCount ?? 0, episode.rounds.size);
-    if (episode.status === "completed" && episode.openedAt !== undefined) {
-      timeToComplete[episode.id] = (episode.completedAt ?? now) - episode.openedAt;
-    }
+    turnsPerEpisode[episode.id] = episode.turns;
+    if (episode.settledAt !== undefined) timeToSettle[episode.id] = episode.settledAt - episode.openedAt;
+    if (episode.failure) failures[episode.id] = episode.failure;
   }
-  const completed = episodes.filter((episode) => episode.status === "completed");
   return {
     frames: ledger.frames,
     maxConcurrentTurns: ledger.turns.peak,
+    overlaps: ledger.turns.overlaps,
     openTurns: ledger.turns.open.size,
     sameAgentOverlaps: ledger.turns.sameAgentOverlaps,
+    interruptedTurns: ledger.interruptedTurns,
     episodesOpened: episodes.length,
-    episodesCompleted: completed.length,
-    episodesOpen: episodes.filter((episode) => episode.status !== "completed").map((episode) => `${episode.chatId}/${episode.id}`),
-    roundsPerEpisode,
-    broadcasts,
-    dms,
-    crossDeskReferrals: ledger.referrals.length,
-    referralPairs: ledger.referrals.map((r) => `${r.from}→${r.to}`),
-    planKinds: ledger.planKinds,
-    routers: ledger.routers,
-    utteranceKinds: Object.keys(ledger.utteranceKinds).length > 0 ? ledger.utteranceKinds : ledger.replyKinds,
+    episodesSettled: episodes.filter((episode) => episode.status === "settled").length,
+    episodesFailed: episodes.filter((episode) => episode.status === "failed").length,
+    episodesOpen: episodes.filter((episode) => episode.status === "open").map((episode) => `${episode.chatId ?? "?"}/${episode.id}`),
+    turnsPerEpisode,
+    directMessages,
+    privateLines,
     distinctPairs: [...pairs].sort(),
-    timeToCompleteMillis: timeToComplete,
-    reasons: Object.fromEntries(completed.map((episode) => [episode.id, episode.reason ?? "complete_episode"])),
+    starterRoutes: ledger.starterRoutes,
+    timeToSettleMillis: timeToSettle,
+    failures,
   };
 }
 
-/** The thresholds a run must clear, as the plan states them. */
+/** The thresholds a run must clear: `Thresholds::default()` in `hive/measure.rs`. */
 export const DEFAULT_THRESHOLDS = Object.freeze({
   maxConcurrentTurns: 2,
-  crossDeskReferrals: 1,
   agentContacts: 1,
   distinctPairs: 2,
 });
@@ -271,11 +227,9 @@ export function evaluate(summary, thresholds = {}, crossCheck = {}) {
   if (summary.sameAgentOverlaps > 0) {
     failures.push(`same-agent overlaps ${summary.sameAgentOverlaps} (must be 0)`);
   }
-  if (summary.crossDeskReferrals < t.crossDeskReferrals) {
-    failures.push(`cross-desk referrals ${summary.crossDeskReferrals} < ${t.crossDeskReferrals}`);
-  }
-  if (summary.broadcasts + summary.dms < t.agentContacts) {
-    failures.push(`agent→agent dm/broadcast ${summary.broadcasts + summary.dms} < ${t.agentContacts}`);
+  const contacts = summary.directMessages + summary.privateLines;
+  if (contacts < t.agentContacts) {
+    failures.push(`agent→agent contacts ${contacts} < ${t.agentContacts}`);
   }
   if (summary.distinctPairs.length < t.distinctPairs) {
     failures.push(`distinct pairs ${summary.distinctPairs.length} < ${t.distinctPairs}`);
@@ -283,7 +237,7 @@ export function evaluate(summary, thresholds = {}, crossCheck = {}) {
   if (summary.episodesOpened === 0) {
     failures.push("no episode opened");
   } else if (summary.episodesOpen.length > 0) {
-    failures.push(`${summary.episodesOpen.length} episode(s) never completed: ${summary.episodesOpen.join(", ")}`);
+    failures.push(`${summary.episodesOpen.length} episode(s) never settled: ${summary.episodesOpen.join(", ")}`);
   }
   if (typeof crossCheck.runsPeak === "number" && crossCheck.runsPeak < t.maxConcurrentTurns) {
     failures.push(`GET /runs cross-check: peak ${crossCheck.runsPeak} < ${t.maxConcurrentTurns}`);

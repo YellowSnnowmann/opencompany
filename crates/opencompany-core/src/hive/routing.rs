@@ -1,10 +1,18 @@
 //! How a desk routes and paces the episodes it opens: the `[group_chat.routing]`
 //! block, its resolved policy, and the console's view of both.
 //!
+//! Since the OC-2 cutover the company hive's Coordinator conducts every
+//! episode; this block now feeds it and the host-side Jev route rather than a
+//! per-desk driver. [`coordinator_options`] folds every desk's block into the
+//! one company `CoordinatorOptions` (the widest round, the longest turn wall)
+//! and [`turn_timeout`] into the adapter's turn wall, while the Jev thresholds
+//! still freeze the `RoutingPolicy` a desk's starters are chosen under. The
+//! cross-desk referral block it once carried went with referral itself.
+//!
 //! One block, three readers. The manifest declares it (`RoutingConfig`, every
 //! key optional so "not said" stays distinct from any value it could hold);
-//! the runtime resolves it into the `tinyhivemind_embed::RoutingPolicy` a
-//! `CompletionDriver` and a Jev route are frozen on (`EffectiveRouting`); and
+//! the runtime resolves it into the `tinyhivemind_core::embed::RoutingPolicy` a
+//! Jev route is frozen on (`EffectiveRouting`); and
 //! the console reads the two side by side (`DeskRoutingDto`), because a
 //! `round_width = 2` is either an operator's decision or the library default
 //! and the two behave differently the moment the manifest changes.
@@ -20,9 +28,8 @@
 //! three ways.
 
 use serde::{Deserialize, Serialize};
-use tinyhivemind::referral::{ReferralPolicy, ReferralReach};
-use tinyhivemind::responder::{PROBABILITY_SCALE, Probability};
-use tinyhivemind_embed::{RoutingFallback, RoutingPlan, RoutingPolicy};
+use tinyhivemind_core::embed::{RoutingFallback, RoutingPlan, RoutingPolicy};
+use tinyhivemind_core::responder::{PROBABILITY_SCALE, Probability};
 
 use crate::ports::types::CompanyRecord;
 
@@ -34,13 +41,6 @@ pub const DEFAULT_CHOICE_OPTION_LIMIT: usize = 8;
 pub const DEFAULT_MAX_ROUNDS: u32 = 12;
 /// Seconds one seat turn may take, counted from the moment it holds its lock.
 pub const DEFAULT_TURN_TIMEOUT_SECS: u64 = 600;
-/// Referral hops allowed when `[group_chat.routing.referral]` enables crossing
-/// without saying how far.
-pub const DEFAULT_REFERRAL_MAX_HOPS: u32 = 1;
-
-/// The words `referral.reach` accepts, in the manifest's own spelling.
-pub const REACH_WORDS: &[&str] = &["local", "channels", "desks"];
-
 /// The `[group_chat.routing]` block as authored.
 ///
 /// Snake_case on every wire on purpose: this **is** the manifest block, the
@@ -73,32 +73,12 @@ pub struct RoutingConfig {
     /// Seconds one seat turn may take once it holds its turn lock.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_timeout_secs: Option<u64>,
-    /// Whether and how far a seat may put a question to another desk.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub referral: Option<ReferralConfig>,
 }
 
 // Probabilities are `f64`, which is not `Eq`; the record types that hold a
 // block derive `Eq`, and validation refuses `NaN`, so total equality holds for
 // every value a block can carry.
 impl Eq for RoutingConfig {}
-
-/// The `[group_chat.routing.referral]` block as authored.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReferralConfig {
-    /// Whether a seat's `@#desk` / `@agent` may open an episode elsewhere.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
-    /// How many crossings one question may make.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_hops: Option<u32>,
-    /// `local` | `channels` | `desks` — see [`REACH_WORDS`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reach: Option<String>,
-    /// Whether the far desk's answer is carried back to the asking desk.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub returns: Option<bool>,
-}
 
 impl RoutingConfig {
     /// Whether nothing was said — the serializer's skip rule and the
@@ -151,20 +131,6 @@ impl RoutingConfig {
                 "{label} sets `routing.turn_timeout_secs = 0` — every seat would time out before it spoke; omit the key for the default of {DEFAULT_TURN_TIMEOUT_SECS}."
             ));
         }
-        if let Some(referral) = &self.referral {
-            if let Some(reach) = referral.reach.as_deref()
-                && !REACH_WORDS.contains(&reach)
-            {
-                problems.push(format!(
-                    "{label} `routing.referral.reach` must be one of {REACH_WORDS:?}; got `{reach}`."
-                ));
-            }
-            if referral.max_hops == Some(0) && referral.enabled != Some(false) {
-                problems.push(format!(
-                    "{label} sets `routing.referral.max_hops = 0` — a referral budget of nothing never asks anybody anything; omit `routing.referral` to keep the desk inside its own room."
-                ));
-            }
-        }
         problems
     }
 }
@@ -188,29 +154,12 @@ pub struct EffectiveRouting {
     pub clarification_threshold: f64,
     /// High-impact threshold, `0..=1`.
     pub high_impact_threshold: f64,
-    /// Cross-desk referral policy.
-    pub referral: EffectiveReferral,
-}
-
-/// The referral policy in force.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EffectiveReferral {
-    /// Whether crossing is on.
-    pub enabled: bool,
-    /// Hops one question may make.
-    pub max_hops: u32,
-    /// How far a mention may reach.
-    pub reach: ReferralReach,
-    /// Whether the answer comes home.
-    pub returns: bool,
 }
 
 impl EffectiveRouting {
     /// Resolves a declared block against the defaults.
     #[must_use]
     pub fn resolve(config: &RoutingConfig) -> Self {
-        let referral = config.referral.clone().unwrap_or_default();
-        let enabled = referral.enabled.unwrap_or(false);
         Self {
             round_width: config.round_width.unwrap_or(DEFAULT_ROUND_WIDTH).max(1),
             choice_option_limit: config
@@ -226,19 +175,6 @@ impl EffectiveRouting {
             high_impact_minimum_confidence: config.high_impact_minimum_confidence.unwrap_or(0.0),
             clarification_threshold: config.clarification_threshold.unwrap_or(1.0),
             high_impact_threshold: config.high_impact_threshold.unwrap_or(1.0),
-            referral: EffectiveReferral {
-                enabled,
-                max_hops: referral.max_hops.unwrap_or(DEFAULT_REFERRAL_MAX_HOPS),
-                reach: match referral.reach.as_deref() {
-                    Some("local") => ReferralReach::Local,
-                    Some("channels") => ReferralReach::Channels,
-                    // Enabled without a word: crossing is the point of the
-                    // block, so the widest reach is the one it meant.
-                    Some("desks") | None => ReferralReach::Desks,
-                    Some(_) => ReferralReach::Local,
-                },
-                returns: referral.returns.unwrap_or(true),
-            },
         }
     }
 
@@ -252,17 +188,6 @@ impl EffectiveRouting {
             high_impact_threshold: probability(self.high_impact_threshold),
             round_width: self.round_width,
             choice_option_limit: self.choice_option_limit,
-        }
-    }
-
-    /// The referral policy `tinyhivemind::referral::referral` decides under.
-    #[must_use]
-    pub fn referral_policy(&self) -> ReferralPolicy {
-        ReferralPolicy {
-            enabled: self.referral.enabled,
-            max_hops: self.referral.max_hops,
-            reach: self.referral.reach,
-            returns: self.referral.returns,
         }
     }
 
@@ -352,7 +277,7 @@ pub enum RoutingPlanDto {
     Fallback {
         /// The seat.
         primary_id: String,
-        /// `snake_case` of `tinyhivemind_embed::RoutingFallback`.
+        /// `snake_case` of `tinyhivemind_core::embed::RoutingFallback`.
         reason: String,
     },
 }
@@ -493,22 +418,6 @@ pub struct EffectiveRoutingDto {
     pub clarification_threshold: f64,
     /// High-impact threshold.
     pub high_impact_threshold: f64,
-    /// Referral policy in force.
-    pub referral: EffectiveReferralDto,
-}
-
-/// The referral policy, camelCase for the console.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EffectiveReferralDto {
-    /// Whether crossing is on.
-    pub enabled: bool,
-    /// Hop budget.
-    pub max_hops: u32,
-    /// Reach word.
-    pub reach: String,
-    /// Whether answers come home.
-    pub returns: bool,
 }
 
 /// One seat the router may pick.
@@ -558,17 +467,6 @@ impl EffectiveRouting {
             high_impact_minimum_confidence: self.high_impact_minimum_confidence,
             clarification_threshold: self.clarification_threshold,
             high_impact_threshold: self.high_impact_threshold,
-            referral: EffectiveReferralDto {
-                enabled: self.referral.enabled,
-                max_hops: self.referral.max_hops,
-                reach: match self.referral.reach {
-                    ReferralReach::Local => "local",
-                    ReferralReach::Channels => "channels",
-                    ReferralReach::Desks => "desks",
-                }
-                .to_string(),
-                returns: self.referral.returns,
-            },
         }
     }
 }
@@ -640,7 +538,7 @@ pub fn desk_routing_dto(record: &CompanyRecord, desk_id: &str, router: Router) -
 ///
 /// It answers for `OPENCOMPANY_JEV_KEY` and the inherited environment ladder,
 /// and it takes no company, so it cannot see a company's *own* stored key.
-/// [`crate::hive::dispatch::host_router`] does read that key, which means the
+/// `hive::route`, which picks a desk's starters, does read that key, which means the
 /// two can disagree: a company that signed in through the console has its
 /// desks routed by Jev while this reports `Fallback`. Reporting the host's
 /// ladder is right for the host-level question; it is the per-company answer
@@ -659,6 +557,82 @@ pub fn host_router() -> Router {
         }
     }
     Router::Fallback
+}
+
+/// The settled episodes the company Coordinator's state row keeps. The
+/// transcript is never pruned; these bounds cap only the row every commit
+/// rewrites, which is what keeps a busy company's state document far from
+/// MongoDB's 16 MB cap. 256 settled episodes is days of desk work for a busy
+/// company, and the projector has journaled each one long before it is
+/// pruned.
+pub const RETAINED_SETTLED_EPISODES: usize = 256;
+/// The acknowledged direct deliveries the state row keeps. Delivered rows are
+/// bookkeeping only (the message itself stays in the transcript).
+pub const RETAINED_DELIVERIES: usize = 1024;
+/// The interruption records (and interrupted deliveries) the state row keeps.
+/// Each is journaled as a `HiveTurnInterrupted` row as soon as it appears, so
+/// the row needs only the recent ones.
+pub const RETAINED_INTERRUPTIONS: usize = 256;
+/// The most direct messages one agent may have waiting. A send past it is
+/// refused with `InboxFull` — backpressure on a sender (or the operator)
+/// talking to an agent that cannot keep up or is not attached — rather than
+/// growing the state row without limit.
+pub const PENDING_PER_AGENT: usize = 64;
+
+/// The one company Coordinator's options, folded from every desk's block.
+///
+/// The Coordinator conducts every desk of a company, so per-desk pacing has
+/// to collapse to one value: the widest `round_width` any desk declares (a
+/// narrower desk is still bounded by its own membership), and an episode turn
+/// wall of that width times the longest `max_rounds` — the turns the slowest
+/// desk was allowed before. A company with no desks runs on the defaults.
+#[must_use]
+pub fn coordinator_options(record: &CompanyRecord) -> tinyhivemind_hives::CoordinatorOptions {
+    let desks = crate::runtime::delegation_tools::desk_ids(record);
+    let resolved: Vec<EffectiveRouting> = desks
+        .iter()
+        .map(|desk| desk_routing(record, desk))
+        .collect();
+    let round_width = resolved
+        .iter()
+        .map(|routing| routing.round_width)
+        .max()
+        .unwrap_or(DEFAULT_ROUND_WIDTH);
+    let max_rounds = resolved
+        .iter()
+        .map(|routing| routing.max_rounds)
+        .max()
+        .unwrap_or(DEFAULT_MAX_ROUNDS);
+    let conduct_policy = tinyhivemind_core::driver::ConductPolicy {
+        turn_wall: (round_width as u64)
+            .saturating_mul(u64::from(max_rounds))
+            .max(1),
+        ..tinyhivemind_core::driver::ConductPolicy::default()
+    };
+    tinyhivemind_hives::CoordinatorOptions {
+        round_width,
+        conduct_policy,
+        broadcast_budget: None,
+        retention: tinyhivemind_hives::RetentionPolicy {
+            settled_episodes: Some(RETAINED_SETTLED_EPISODES),
+            delivered: Some(RETAINED_DELIVERIES),
+            interrupted: Some(RETAINED_INTERRUPTIONS),
+            pending_per_agent: Some(PENDING_PER_AGENT),
+        },
+    }
+}
+
+/// The wall on one coordinator turn: the longest `turn_timeout_secs` any desk
+/// declares, or the default. One value for the same reason
+/// [`coordinator_options`] folds: the adapter applies one wall to every turn.
+#[must_use]
+pub fn turn_timeout(record: &CompanyRecord) -> std::time::Duration {
+    let secs = crate::runtime::delegation_tools::desk_ids(record)
+        .iter()
+        .map(|desk| desk_routing(record, desk).turn_timeout_secs)
+        .max()
+        .unwrap_or(DEFAULT_TURN_TIMEOUT_SECS);
+    std::time::Duration::from_secs(secs.max(1))
 }
 
 #[cfg(test)]

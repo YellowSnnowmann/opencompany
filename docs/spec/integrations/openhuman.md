@@ -22,12 +22,12 @@ What the company declares reaches the agent through the spec:
   from the company default or the agent's own pair, served through the
   loopback model bridge so every call is metered.
 - **Tools** → the OpenHuman-native subset of the grants as the spec's tool
-  scope; every OpenCompany tool (ledger, tasks, pages, workspace, composio,
-  hosting, approvals) and the room's speech tools over the `opencompany` MCP
-  server, because the library has no seam for an in-process host tool. Memory
+  scope plus the company hive's `hivemind_*` tools, which the
+  `tinyhivemind-openhuman` host attaches at registration; the agent's custom
+  OpenCompany tools over the `opencompany` MCP server. Memory
   is not one of them: each agent is bound to its company root and uses
   OpenHuman's own `memory` tool ([runtime/memory-engine.md](../runtime/memory-engine.md))
-  ([runtime/hive.md](../runtime/hive.md#speaking)).
+  ([runtime/hive.md](../runtime/hive.md)).
 - **Approvals** → OpenHuman's runtime-wide gate stays off (`Access::full()`);
   OpenCompany's `ApprovalPolicy` decides allow / deny / park where the tool is
   served. Every agent also gets the intrinsic `request_approval` tool.
@@ -70,11 +70,9 @@ The confined workflow copilot is named the same way. It does not come off the
 roster, so it does not inherit the roster's call, and an unnamed session there
 would put the one turn that runs under a *confinement* back in the crowd.
 
-A `dm` between seats is a row on the desk with an `audience`; the recipient
-is assigned the next round and reads it in its delta
-([runtime/speech.md](../runtime/speech.md)). Both sessions are logged at
-`debug` as `from_session` / `to_session`, which is the only place both are
-known at once.
+A direct message between agents (`hivemind_send_agent`) is delivered to the
+recipient's Coordinator inbox and answered on its next turn, in its own one
+session ([runtime/hive.md](../runtime/hive.md)).
 
 [openhuman#6208]: https://github.com/tinyhumansai/openhuman/pull/6208
 

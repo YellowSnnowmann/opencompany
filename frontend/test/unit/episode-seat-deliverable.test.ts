@@ -12,10 +12,9 @@ import { ThreadPanel } from "@/views/room/ThreadPanel";
 import type { Channel, TimelineEntry } from "@/views/room/model";
 
 /**
- * A desk seat's deliverable reaches the operator on the episode row that
- * carries it: the artifact link opens the card's Artifacts tab at the version
- * the seat wrote, and the row links the card it was filed on. A turn that only
- * published hands over on a row with no text.
+ * A desk agent's deliverable reaches the operator on the hive episode row that
+ * carries it: the artifact link opens the artifact at the version the agent
+ * wrote. A turn that only published hands over on a row with no text.
  */
 
 const DESK: Channel = {
@@ -46,7 +45,7 @@ const MEMBERS: TeamMember[] = [
 // read the deliverable the row was already offering.
 const ARTIFACT_HREF = "#/artifacts/art-1?v=1";
 
-function episodeRow(id: string, text: string, kind: "complete_episode" | "post"): ChatHistoryMessageDto {
+function episodeRow(id: string, text: string): ChatHistoryMessageDto {
   return {
     id,
     channel: "engineer",
@@ -65,7 +64,7 @@ function episodeRow(id: string, text: string, kind: "complete_episode" | "post")
         version: 1,
       },
     ],
-    episode: { id: "ep-1", revision: 0, kind },
+    hive: { sequence: Number(id), episodeId: "ep-1" },
   };
 }
 
@@ -107,19 +106,19 @@ function renderRow(dto: ChatHistoryMessageDto) {
   );
 }
 
-describe("a desk seat's deliverable on its episode row", () => {
-  it("rehydrates the artifact, the card and the speech act together", () => {
-    const [row] = fromHistory([episodeRow("19", "The outline is published.", "complete_episode")]);
+describe("a desk agent's deliverable on its episode row", () => {
+  it("rehydrates the artifact, the card and the hive episode together", () => {
+    const [row] = fromHistory([episodeRow("19", "The outline is published.")]);
     expect(row.taskId).toBe("card-1");
     expect(row.outputs).toEqual([
       { kind: "artifact", targetId: "art-1", title: "Pilot slide outline", taskId: "card-1", version: 1 },
     ]);
-    expect(row.episode?.kind).toBe("complete_episode");
+    expect(row.hive?.episodeId).toBe("ep-1");
     expect(row.parentId).toBe("h5");
   });
 
   it("links the artifact at the version the seat wrote", () => {
-    renderRow(episodeRow("19", "The outline is published.", "complete_episode"));
+    renderRow(episodeRow("19", "The outline is published."));
     const link = container.querySelector("[data-chat-output-links] a");
     expect(link?.textContent).toContain("Pilot slide outline");
     expect(link?.getAttribute("href")).toBe(ARTIFACT_HREF);
@@ -134,13 +133,13 @@ describe("a desk seat's deliverable on its episode row", () => {
   });
 
   it("hands over on a row with no text", () => {
-    renderRow(episodeRow("20", "", "post"));
+    renderRow(episodeRow("20", ""));
     const link = container.querySelector("[data-chat-output-links] a");
     expect(link?.getAttribute("href")).toBe(ARTIFACT_HREF);
   });
 
   it("links the artifact from inside the episode's thread", () => {
-    const [reply] = fromHistory([episodeRow("19", "The outline is published.", "complete_episode")]);
+    const [reply] = fromHistory([episodeRow("19", "The outline is published.")]);
     act(() =>
       root.render(
         createElement(ThreadPanel, {

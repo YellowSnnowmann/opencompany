@@ -105,6 +105,9 @@ pub mod file_tool_outputs;
 /// The keys it reads live in `company::hosting`, which is compiled in every
 /// build — the console's Hosting settings write them whether or not this
 /// harness exists to use them.
+/// The company hive's turn hooks: admission, the turn bracket, the per-turn
+/// claims, and the filing of what a coordinator turn left (OC-2).
+pub mod hive_hooks;
 pub mod hosting;
 /// End-to-end proof of issue #988: a turn really does get
 /// [`MAX_TOOL_ITERATIONS`](build::MAX_TOOL_ITERATIONS) tool rounds instead of the
@@ -194,6 +197,8 @@ mod search_turn_tests;
 /// moved the search domain out to the `tinysearch` module and stopped owning a
 /// Rust type for the raw envelope.
 pub mod search_wire;
+/// A shared tool handed out as an owned belt entry per turn.
+pub mod shared_tool;
 pub mod skills;
 pub mod steer;
 pub mod steps;
@@ -201,6 +206,9 @@ pub mod title;
 pub mod tool_posture;
 pub mod toolbelt;
 pub mod triage;
+/// What every agent turn runs inside — the turn lock, the tool executor, the
+/// stop hooks — and the admission gates before it (OC-2).
+pub(crate) mod turn_envelope;
 pub mod turn_outputs;
 /// Issue #661 (M7): `read_workflow` / `update_workflow` / `delete_workflow` —
 /// the agent's way to fix or retire a workflow instead of only ever creating
@@ -410,8 +418,8 @@ pub struct HarnessDeps {
     /// the `query_company` read tool for recent-activity context (issue #53).
     /// `None` leaves the orchestrator without the recent-events half.
     pub events: Option<Arc<dyn EventLog>>,
-    /// The shared delegation queue the orchestrator's `spawn_task` /
-    /// `delegate_to_desk` tools push onto and the [`HarnessBrain`] drains after
+    /// The shared delegation queue the `spawn_task` and lifecycle tools push
+    /// onto and the [`HarnessBrain`] drains after
     /// an orchestrator turn (issue #53). A [`DelegationQueue`] is a cheap shared
     /// handle; cloning `HarnessDeps` shares one queue between the tools built
     /// into the agent and the brain that drains it. Default is an empty queue.
@@ -504,10 +512,12 @@ pub struct HarnessDeps {
     /// cheap-shared-handle pattern as [`Self::delegations`]; the default is an
     /// empty queue, which simply means nothing is ever parked.
     pub approval_requests: ApprovalRequestQueue,
-    /// Where a guest seat stages a takeover, and the dispatcher drains it once
-    /// the episode that produced it has ended. Same cheap-shared-handle shape
-    /// as the queues above; an empty default simply means nothing is claimed.
-    pub takeovers: crate::hive::takeover::TakeoverQueue,
+    /// Where the company hive's Coordinator persists its state and transcript
+    /// (OC-2) — the [`HiveStore`](crate::ports::hive::HiveStore) the storage
+    /// selection built beside the journal. With it (and [`Self::events`]) the
+    /// pool runs every conversational turn through the company hive; `None` —
+    /// every test that exercises a pooled turn — runs no hive at all.
+    pub hive_store: Option<Arc<dyn crate::ports::hive::HiveStore>>,
     /// The runtime's shared park transaction, for a turn that parks outside a
     /// cycle. `None` where no runtime is wired (tests, examples).
     pub approval_parker: Option<crate::runtime::approval_park::ApprovalParker>,
@@ -713,10 +723,8 @@ pub struct CompanyAgent {
     pub company: CompanyId,
     /// The runtime agent. Shared, not locked: see the type docs.
     agent: openhuman_embed::Agent,
-    /// Serialises this agent's turns.
-    /// Belts episodes have lent this teammate, by conversation. The same map
-    /// the belt factory reads, so what a host lends here reaches the turn.
-    seating: crate::hive::seating::EpisodeBelts,
+    /// Serialises this agent's turns — the pool's isolated ones and the
+    /// company hive's coordinator turns alike (`turn_envelope`).
     turn_lock: Arc<Mutex<()>>,
     /// The loopback route this agent's model is served on, and the usage tap
     /// its attempts are metered from. See [`model_bridge`](crate::harness::model_bridge).
@@ -754,30 +762,6 @@ pub struct CompanyAgent {
     /// telemetry cells. Held here so `meter_turn_costs` reads the SAME
     /// instance the turn ran through.
     chat_model: Arc<dyn HarnessModel>,
-    /// Always empty for an embedded agent: there is no `opencompany` MCP
-    /// catalogue left to brief it about, so [`Self::catalogue_brief_stale`]'s
-    /// comparison can never find this field to have moved. Kept as the type
-    /// the rebuild-comparison plumbing expects.
-    served_catalogue: Vec<String>,
-    /// Whether the session this agent resumes may still carry an OLDER brief
-    /// than [`Self::served_catalogue`].
-    ///
-    /// The embedded runtime pins a session's system prompt at its first
-    /// committed turn (`tinyagents_runtime::Session::apply_prefix` refuses a
-    /// changed prefix after one), and every conversational turn resumes this
-    /// agent's one stable [`session_key`](Self::session_key). So a roster
-    /// rebuild that changes the served catalogue — a Composio token set, a
-    /// tool grant, an MCP server added — reaches the MCP host (the rebuilt
-    /// [`McpAgent`] serves the new set at once) but never the prompt the
-    /// model reads the catalogue off. The previous builder rebuilt an
-    /// in-memory session per roster, so the prompt was always current; here
-    /// the fix is OpenHuman's own for a warm session (its
-    /// `refresh_dynamic_announcements`): say it on the turn text. Set by
-    /// [`HarnessPool::ensure`] when the rebuilt entry's catalogue differs
-    /// from the retired one's (or the retired one was itself still pending),
-    /// read by [`Self::run_with_steer`], which prepends the current brief to
-    /// the next conversational turn and clears it once that turn commits.
-    catalogue_brief_stale: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for CompanyAgent {
@@ -1334,8 +1318,6 @@ impl CompanyAgent {
         )?;
         let mcp = crate::hive::mcp_server::global();
         let mcp_bearer = crate::hive::mcp_server::McpAgent::mint_bearer();
-        let served_catalogue: Vec<String> = Vec::new();
-        let read_binding = Arc::new(std::sync::OnceLock::new());
         // Shared once, here, and handed to the spec as a factory that mints
         // owned handles per turn. OpenHuman's own tools are filtered out: it
         // runs those itself, and handing them back would register each twice.
@@ -1347,21 +1329,13 @@ impl CompanyAgent {
             .map(|tool| tool.name().to_string())
             .collect();
         let gate = Arc::clone(&blueprint.policy);
-        let mut shared_belt = crate::hive::tools::share_belt(
+        let shared_belt = crate::hive::tools::share_belt(
             std::mem::take(&mut blueprint.tools)
                 .into_iter()
                 .filter(|tool| !build::OPENHUMAN_NATIVE_TOOLS.contains(&tool.name()))
                 .collect(),
         );
-        shared_belt.push(Arc::new(crate::hive::tools::ConversationReadTool::new(
-            Arc::clone(mcp.in_flight()),
-            Arc::clone(&read_binding),
-            events.clone(),
-        )));
         let native_belt: Arc<Vec<Arc<dyn tinytools::Tool>>> = Arc::new(shared_belt);
-        // Created before the agent, because the belt factory closes over it at
-        // registration and an episode writes to it long afterwards.
-        let seating = crate::hive::seating::EpisodeBelts::default();
         let base_id = crate::session_key::runtime_agent_id(company, agent_id);
         let mut runtime_id = base_id.clone();
         let mut attempt = 0u32;
@@ -1373,7 +1347,6 @@ impl CompanyAgent {
                 None,
                 Some(&native_belt),
                 Some(&gate),
-                Some(&seating),
             );
             match runtime.agent(spec) {
                 Ok(agent) => break agent,
@@ -1401,7 +1374,6 @@ impl CompanyAgent {
                 "[harness] runtime id was taken; registered under a numbered suffix"
             );
         }
-        let _ = read_binding.set(runtime_id.clone());
         let build::AgentBlueprint {
             workspace,
             chat_model,
@@ -1430,7 +1402,6 @@ impl CompanyAgent {
             mcp_bearer,
             company: company.clone(),
             agent,
-            seating,
             turn_lock: Arc::new(Mutex::new(())),
             bridge,
             step_labels,
@@ -1439,37 +1410,7 @@ impl CompanyAgent {
             mcp,
             workspace,
             chat_model,
-            served_catalogue,
-            catalogue_brief_stale: std::sync::atomic::AtomicBool::new(false),
         })
-    }
-
-    /// The catalogue this agent's prompt brief names — see
-    /// [`Self::catalogue_brief_stale`].
-    #[must_use]
-    pub(crate) fn served_catalogue(&self) -> &[String] {
-        &self.served_catalogue
-    }
-
-    /// Whether the next conversational turn re-announces the catalogue — see
-    /// [`Self::catalogue_brief_stale`].
-    #[must_use]
-    pub(crate) fn catalogue_brief_pending(&self) -> bool {
-        self.catalogue_brief_stale
-            .load(std::sync::atomic::Ordering::Acquire)
-    }
-
-    /// Marks the resumed session's brief as possibly older than this entry's
-    /// catalogue, given what the entry it replaces was briefed with and
-    /// whether that one had itself still to announce. Carried forward rather
-    /// than compared pairwise alone: a rebuild that changed the catalogue and
-    /// was rebuilt again (to the same set) before any turn ran still leaves
-    /// the session on the prefix the first roster committed.
-    pub(crate) fn inherit_catalogue_brief(&self, previous_catalogue: &[String], pending: bool) {
-        if pending || previous_catalogue != self.served_catalogue.as_slice() {
-            self.catalogue_brief_stale
-                .store(true, std::sync::atomic::Ordering::Release);
-        }
     }
 
     /// The conversation a turn on `chat_id` answers in, as the in-flight
@@ -1479,8 +1420,8 @@ impl CompanyAgent {
         chat_id: Option<&str>,
         thread_root: Option<EventSeq>,
         session_id: &str,
-    ) -> tinyhivemind_embed::ConversationRef {
-        use tinyhivemind_embed::ConversationKind;
+    ) -> tinyhivemind_core::embed::ConversationRef {
+        use tinyhivemind_core::embed::ConversationKind;
         let (id, kind) = match chat_id {
             Some(chat) if chat == crate::ports::general_channel::GENERAL_CHANNEL_ID => {
                 (chat.to_string(), ConversationKind::General)
@@ -1489,10 +1430,10 @@ impl CompanyAgent {
             Some(chat) => (chat.to_string(), ConversationKind::Desk),
             None => (session_id.to_string(), ConversationKind::Workflow),
         };
-        tinyhivemind_embed::ConversationRef {
+        tinyhivemind_core::embed::ConversationRef {
             id,
             kind,
-            thread_root: thread_root.map(|root| tinyhivemind::Sequence(root.value())),
+            thread_root: thread_root.map(|root| tinyhivemind_core::runtime::Sequence(root.value())),
         }
     }
 
@@ -1505,12 +1446,6 @@ impl CompanyAgent {
     /// this agent is bound into, so two desks cannot run it at once.
     pub fn turn_lock(&self) -> Arc<Mutex<()>> {
         self.turn_lock.clone()
-    }
-
-    /// Where an episode lends this teammate its belt.
-    #[must_use]
-    pub fn seating(&self) -> &crate::hive::seating::EpisodeBelts {
-        &self.seating
     }
 
     /// The names of every tool this agent's belt wires, in belt order — the
@@ -1602,18 +1537,17 @@ impl CompanyAgent {
     /// dispatched card's trace is durable *during* the run rather than only
     /// after it (issue #242).
     ///
-    /// # Which session a turn resumes
+    /// # Every pool turn is isolated
     ///
-    /// A conversational turn — one on a chat, addressed by `chat` — resumes
-    /// this agent's one stable session ([`session_key`](Self::session_key)),
-    /// whatever chat it is on: OpenHuman owns the thread, and which
-    /// conversation a line belongs to is what the turn text says (the cue
-    /// below; the attributed desk delta in Phase 4). An **isolated** turn — a
-    /// dispatched card, a workflow node, a background task: anything that
-    /// names no chat, or that brings its own context — runs on a fresh
-    /// session of its own, so it neither drags the chat transcript in nor
-    /// leaves its working notes there; that is what the previous builder's
-    /// clear-and-suppress-autoload did.
+    /// Since the hive cutover (OC-2) every conversational turn — an operator
+    /// DM, a desk, a peer message — runs through the company hive's
+    /// Coordinator, which owns the agent's one continuing OpenHuman session.
+    /// What still runs here is isolated work: a dispatched card, a workflow
+    /// node, a copilot thread, a background task, a re-issued approved call.
+    /// Each runs on a fresh session of its own, so it neither drags the chat
+    /// transcript in nor writes into the session the Coordinator continues —
+    /// one writer per OpenHuman session. `chat` still names the conversation a
+    /// turn answers for the in-flight registry and the live stream.
     pub async fn run_with_steer(
         &self,
         message: &str,
@@ -1622,7 +1556,7 @@ impl CompanyAgent {
         run_sink: Option<Arc<run_trace::RunTraceSink>>,
         // The conversation this turn belongs to (#1890), carried in its own
         // right rather than read off `stream`: a turn that has a chat to
-        // resume on may still stream nowhere, and a workflow turn streams on
+        // answer on may still stream nowhere, and a workflow turn streams on
         // a route that is not a chat.
         chat: crate::runtime::delegation::ChatTarget<'_>,
     ) -> (crate::Result<TurnOutcome>, Vec<TurnUsage>) {
@@ -1633,45 +1567,8 @@ impl CompanyAgent {
                 crate::turn_stream::LiveRoute::Workflow { .. } => None,
             })
             .or_else(|| chat.chat_id.map(str::to_string));
-        // Isolated: a turn that names no conversation at all (a dispatched
-        // card, a workflow node, a background task), or one that brings its
-        // own context (`history_seed == false`). Everything else is a line
-        // in this agent's one conversation session.
-        let isolated = Self::isolated_session(turn_chat_id.as_deref(), chat.history_seed);
-        let session_id = if isolated {
-            format!("{}:run:{}", self.session_key, uuid::Uuid::new_v4().simple())
-        } else {
-            self.session_key.clone()
-        };
-
+        let session_id = format!("{}:run:{}", self.session_key, uuid::Uuid::new_v4().simple());
         let pump = progress_pump::ProgressPump::start(self.step_labels.clone(), stream, run_sink);
-
-        // Where this line was said, for a session that hears every chat. A
-        // single line rather than the `agent_session` cue block it replaces:
-        // the attributed delta that names the other speakers is Phase 4's.
-        let cued: std::borrow::Cow<'_, str> = match turn_chat_id.as_deref() {
-            Some(chat_id) if !isolated => std::borrow::Cow::Owned(match chat.thread_root {
-                Some(root) => format!(
-                    "[conversation: {chat_id}, thread {}]\n{message}",
-                    root.value()
-                ),
-                None => format!("[conversation: {chat_id}]\n{message}"),
-            }),
-            _ => std::borrow::Cow::Borrowed(message),
-        };
-        // A resumed session whose pinned prompt may name an older catalogue
-        // hears the current one on this turn — see `catalogue_brief_stale`.
-        // An isolated turn runs cold on a fresh session and needs nothing.
-        let rebrief = !isolated && self.catalogue_brief_pending();
-        let cued: std::borrow::Cow<'_, str> = if rebrief {
-            std::borrow::Cow::Owned(build::opencompany_mcp_rebrief(
-                &self.served_catalogue,
-                cued.as_ref(),
-            ))
-        } else {
-            cued
-        };
-        let message: &str = cued.as_ref();
 
         let chat_only = crate::runtime::delegation::is_chat_only_turn();
         if chat_only {
@@ -1681,91 +1578,13 @@ impl CompanyAgent {
             );
         }
 
-        let mut hooks: Vec<Arc<dyn oh::agent::stop_hooks::StopHook>> = Vec::new();
-        if let Some(control) = steer {
-            hooks.push(Arc::new(crate::harness::steer::SteerStopHook::new(
-                control.clone(),
-            )));
-        }
-        let mut spend_brake: Option<(f64, Arc<std::sync::atomic::AtomicBool>)> = None;
-        if let Some(cap) = self.turn_spend_cap_usd() {
-            let hook = crate::harness::spend::SpendStopHook::new(cap);
-            spend_brake = Some((cap, hook.halted()));
-            hooks.push(Arc::new(hook));
-        }
-
         let budget_pause_summary: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
         // Issue #1680, the sibling slot. Same idiom and same reason: the
         // classifier runs inside the stop-hook body and cannot return a second
         // value, so the one fact it learned travels out in a slot read below.
         let ceiling_pause: std::sync::Mutex<Option<(String, Duration)>> =
             std::sync::Mutex::new(None);
-
-        // A hive seat turn (plan hive-desks, Phase 4): the driver's episode
-        // coordinates ride on the in-flight registration below so the MCP
-        // server attributes the seat's speech to its round, the timeout is
-        // counted from the moment the lock is held, and the outbox is handed
-        // back through the scope when the turn returns.
-        let seat = crate::runtime::delegation::seat_turn();
-        let _turn = self.turn_lock.lock().await;
-        // An episode seat brackets its own turn, inside this same lock, from
-        // `hive::host`: the session it runs is the episode's, not this
-        // pool's, so the pool no longer has a bracket handed down to it.
-        let deadline = seat
-            .as_ref()
-            .map(|seat| tokio::time::Instant::now() + seat.timeout);
-        // Register the turn in flight so the `opencompany` MCP server can
-        // attribute this agent's tool calls to it (plan hive-desks Phase 3),
-        // and hand it the channel those calls come back on: the belt's tools
-        // file into task-local queues (approval scope, publish and delegation
-        // claims), so they must run on THIS task — `serve_jobs` below, joined
-        // with the turn. The lock is held, so nothing else of this agent's
-        // should be registered; a caller that registered first regardless
-        // keeps its own entry and this turn only lends it the executor.
-        let (job_tx, mut job_rx) = tokio::sync::mpsc::channel::<crate::hive::tools::ToolJob>(8);
-        let in_flight = self.mcp.in_flight();
-        let mut registration = crate::hive::tools::InFlight::new(
-            self.company.clone(),
-            self.runtime_id.clone(),
-            self.agent_id.clone(),
-            Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id),
-        )
-        .with_executor(job_tx.clone());
-        if let Some(seat) = seat.as_ref() {
-            registration = registration.with_hive(seat.hive.clone());
-        }
-        let _in_flight = match in_flight.begin(registration) {
-            Ok(ticket) => Some(ticket),
-            Err(_) => {
-                in_flight.with(&self.runtime_id, |turn| {
-                    turn.executor = Some(job_tx.clone())
-                });
-                None
-            }
-        };
-        drop(job_tx);
-        let served = self.mcp.agent(&self.runtime_id);
-        let serve_jobs = async {
-            while let Some(job) = job_rx.recv().await {
-                let turn = in_flight.snapshot(&self.runtime_id);
-                let result = match &served {
-                    Some(agent) => agent.serve_call(&job.tool, job.arguments, turn).await,
-                    None => serde_json::json!({
-                        "content": [{ "type": "text", "text": format!(
-                            "refused: '{}' is not served for this agent", job.tool
-                        ) }],
-                        "isError": true,
-                    }),
-                };
-                let _ = job.reply.send(result);
-            }
-            // The registry's sender outlives the turn, so this loop ends only
-            // if the entry was dropped under us; never let it end the select.
-            std::future::pending::<()>().await;
-        };
-        // Anything left on the taps belongs to no attempt of ours.
-        let _ = self.bridge.take_usage();
-        let _ = self.bridge.take_errors();
+        let envelope = turn_envelope::TurnEnvelope::new(self, steer);
         // `cwd` only where the workspace exists: the runtime refuses a turn
         // rooted at an inaccessible path, and a broken workspace root is a
         // reported-once condition the turn survives (issue #551) — relative
@@ -1780,268 +1599,80 @@ impl CompanyAgent {
             if let Some(cwd) = cwd {
                 turn = turn.cwd(cwd);
             }
-            let fut = turn.send();
-            let seat = seat.clone();
-            async move {
-                match deadline {
-                    Some(deadline) => match tokio::time::timeout_at(deadline, fut).await {
-                        Ok(outcome) => outcome,
-                        Err(_) => {
-                            let secs = seat
-                                .as_ref()
-                                .map(|seat| seat.timeout.as_secs())
-                                .unwrap_or_default();
-                            if let Some(seat) = seat.as_ref() {
-                                seat.timed_out
-                                    .store(true, std::sync::atomic::Ordering::Relaxed);
-                            }
-                            Err(openhuman_embed::CoreError::Rpc {
-                                method: "agent.turn",
-                                message: format!("the seat turn ran past its {secs}s timeout"),
-                            })
-                        }
-                    },
-                    None => fut.await,
-                }
-            }
+            turn.send()
         };
-
-        let turn_body = oh::agent::stop_hooks::with_stop_hooks(
-            hooks,
-            Box::pin(async {
-                let mut usages: Vec<TurnUsage> = Vec::new();
-                let started = std::time::Instant::now();
-                let first = send(pump.sender()).await.map(|outcome| outcome.reply);
-                let first_elapsed = started.elapsed();
-                usages.push(self.tapped_usage());
-                let reply: crate::Result<String> = match self
-                    .classify_turn(self.unmask(first), first_elapsed)
-                {
-                    AttemptOutcome::Reply(reply) => Ok(reply),
-                    AttemptOutcome::Hard(err) => Err(err),
-                    AttemptOutcome::BudgetPaused { summary } => {
-                        let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
-                        if let Ok(mut slot) = budget_pause_summary.lock() {
-                            *slot = Some(redacted.clone());
-                        }
-                        Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
-                    }
-                    AttemptOutcome::CeilingPaused { summary, elapsed } => {
-                        let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
-                        if let Ok(mut slot) = ceiling_pause.lock() {
-                            *slot = Some((redacted.clone(), elapsed));
-                        }
-                        Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
-                    }
-                    AttemptOutcome::Empty => {
-                        let spend_halted = spend_brake.as_ref().is_some_and(|(_, halted)| {
-                            halted.load(std::sync::atomic::Ordering::SeqCst)
-                        });
-                        if steer.map(|c| c.requested()).unwrap_or(false) || spend_halted {
-                            Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
-                        } else {
-                            let retry_started = std::time::Instant::now();
-                            let second = send(pump.sender()).await.map(|outcome| outcome.reply);
-                            let second_elapsed = retry_started.elapsed();
-                            usages.push(self.tapped_usage());
-                            match self.classify_turn(self.unmask(second), second_elapsed) {
-                                AttemptOutcome::Reply(reply) => Ok(reply),
-                                AttemptOutcome::Empty => {
-                                    Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
-                                }
-                                AttemptOutcome::BudgetPaused { summary } => {
-                                    let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
-                                    if let Ok(mut slot) = budget_pause_summary.lock() {
-                                        *slot = Some(redacted.clone());
-                                    }
-                                    Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
-                                }
-                                // A ceiling can fire on the retry too: the
-                                // first attempt returned the transient empty
-                                // class, the second worked until the budget ran
-                                // out. Terminal here as well -- this arm is the
-                                // end of the ladder, so there is nothing left
-                                // to re-enter.
-                                AttemptOutcome::CeilingPaused { summary, elapsed } => {
-                                    let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
-                                    if let Ok(mut slot) = ceiling_pause.lock() {
-                                        *slot = Some((redacted.clone(), elapsed));
-                                    }
-                                    Ok(crate::harness::mcp_probe::scrub(&redacted, &[]))
-                                }
-                                AttemptOutcome::Hard(err) => Err(err),
-                            }
-                        }
-                    }
-                };
-                (reply, usages)
-            }),
-        );
-        let (reply, mut usages): (crate::Result<String>, Vec<TurnUsage>) = tokio::select! {
-            biased;
-            outcome = turn_body => outcome,
-            () = serve_jobs => unreachable!("the tool-job loop never completes"),
+        let slot_budget = |summary: String| {
+            let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+            if let Ok(mut slot) = budget_pause_summary.lock() {
+                *slot = Some(redacted.clone());
+            }
+            crate::harness::mcp_probe::scrub(&redacted, &[])
         };
-        // The session heard the current catalogue; the next rebuild decides
-        // afresh. A failed turn commits nothing, so the brief stays owed.
-        if rebrief && reply.is_ok() {
-            self.catalogue_brief_stale
-                .store(false, std::sync::atomic::Ordering::Release);
-        }
-        match _in_flight {
-            // What the seat said, back to the caller, before the lock goes.
-            Some(ticket) => {
-                let finished = ticket.finish();
-                if let Some(seat) = seat.as_ref()
-                    && let Ok(mut outbox) = seat.outbox.lock()
-                {
-                    *outbox = finished.outbox;
+        let slot_ceiling = |summary: String, elapsed: Duration| {
+            let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+            if let Ok(mut slot) = ceiling_pause.lock() {
+                *slot = Some((redacted.clone(), elapsed));
+            }
+            crate::harness::mcp_probe::scrub(&redacted, &[])
+        };
+        let turn_body = async {
+            let mut usages: Vec<TurnUsage> = Vec::new();
+            let started = std::time::Instant::now();
+            let first = send(pump.sender()).await.map(|outcome| outcome.reply);
+            let first_elapsed = started.elapsed();
+            usages.push(self.tapped_usage());
+            let reply: crate::Result<String> = match self
+                .classify_turn(self.unmask(first), first_elapsed)
+            {
+                AttemptOutcome::Reply(reply) => Ok(reply),
+                AttemptOutcome::Hard(err) => Err(err),
+                AttemptOutcome::BudgetPaused { summary } => Ok(slot_budget(summary)),
+                AttemptOutcome::CeilingPaused { summary, elapsed } => {
+                    Ok(slot_ceiling(summary, elapsed))
                 }
-            }
-            None => {
-                in_flight.with(&self.runtime_id, |turn| turn.executor = None);
-            }
-        }
-        drop(_turn);
+                AttemptOutcome::Empty => {
+                    if steer.map(|c| c.requested()).unwrap_or(false) || envelope.spend_halted() {
+                        Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
+                    } else {
+                        let retry_started = std::time::Instant::now();
+                        let second = send(pump.sender()).await.map(|outcome| outcome.reply);
+                        let second_elapsed = retry_started.elapsed();
+                        usages.push(self.tapped_usage());
+                        match self.classify_turn(self.unmask(second), second_elapsed) {
+                            AttemptOutcome::Reply(reply) => Ok(reply),
+                            AttemptOutcome::Empty => {
+                                Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
+                            }
+                            AttemptOutcome::BudgetPaused { summary } => Ok(slot_budget(summary)),
+                            // A ceiling can fire on the retry too: this arm
+                            // is the end of the ladder, so it is terminal.
+                            AttemptOutcome::CeilingPaused { summary, elapsed } => {
+                                Ok(slot_ceiling(summary, elapsed))
+                            }
+                            AttemptOutcome::Hard(err) => Err(err),
+                        }
+                    }
+                }
+            };
+            (reply, usages)
+        };
+        let surface = Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id);
+        let (reply, mut usages): (crate::Result<String>, Vec<TurnUsage>) =
+            envelope.run(surface, None, Box::pin(turn_body)).await;
 
         let events = pump.finish().await;
-        // The bridge tap is authoritative for tokens and for a charged amount
-        // the provider reported. A provider that reports tokens but no price
-        // (the managed backend's billing meta is absent on a BYOK route, and
-        // on every scripted double) leaves the cost at zero there, while the
-        // runtime's own `TurnCostUpdated` carries its catalogue estimate — the
-        // figure the in-turn spend brake fired on — so that estimate stands
-        // in for the price, and for everything when the tap saw nothing.
-        if usages
-            .iter()
-            .any(|usage| usage.is_zero() || usage.cost_usd == 0.0)
-        {
-            let segments = progress_pump::attempt_event_segments(&events, usages.len());
-            // **The price when nothing marks where an attempt began.**
-            //
-            // `attempt_event_segments` splits on `AgentProgress::TurnStarted`,
-            // which is declared and never emitted -- a real stream opens
-            // `IterationStarted`. So every segment comes back empty and the
-            // `else { continue }` below skipped silently: a provider that
-            // reported tokens but no price (every scripted double, and a BYOK
-            // route per the note above) kept `cost_usd` at zero, and the spend
-            // a halt announced was zero with it.
-            //
-            // `TurnCostUpdated` is a cumulative rollup, so the stream's last
-            // one prices the turn. It supplies the **price only**, and only to
-            // an attempt that burned something: a turn that burned nothing must
-            // not inherit a total, which is what `zero_usage_turn_writes_nothing`
-            // and its two neighbours exist to hold.
-            let rollup = progress_pump::last_observed_turn_cost(&events);
-            for (usage, segment) in usages.iter_mut().zip(segments) {
-                let Some(observed) = progress_pump::last_observed_turn_cost(segment) else {
-                    if !usage.is_zero()
-                        && usage.cost_usd == 0.0
-                        && let Some(rollup) = rollup.as_ref()
-                        && rollup.cost_usd > 0.0
-                    {
-                        usage.cost_usd = rollup.cost_usd;
-                    }
-                    continue;
-                };
-                if usage.is_zero() {
-                    tracing::info!(
-                        agent = %self.agent_id,
-                        input_tokens = observed.input_tokens,
-                        output_tokens = observed.output_tokens,
-                        cost_usd = observed.cost_usd,
-                        "[turn] an attempt published no totals; metering the spend observed on \
-                         its own progress-stream segment"
-                    );
-                    *usage = observed;
-                } else if usage.cost_usd == 0.0 && observed.cost_usd > 0.0 {
-                    usage.cost_usd = observed.cost_usd;
-                }
-            }
-        }
-        let raw_iteration_cap = progress_pump::hit_iteration_cap(&events);
-        let halted_for_spend = spend_brake.and_then(|(cap_usd, halted)| {
-            halted
-                .load(std::sync::atomic::Ordering::SeqCst)
-                .then(|| SpendHalt {
-                    agent: self.agent_id.clone(),
-                    spent_usd: usages.iter().map(|usage| usage.cost_usd).sum(),
-                    cap_usd,
-                })
-        });
-        // #988: a spend halt reads `hit_iteration_cap == false`.
-        //
-        // `brain.rs` emits the step-pause notice and the spend notice from
-        // separate `if`s, on the stated grounds that one operator message can
-        // run several turns and both facts may be owed — but that the two
-        // "cannot both come from ONE turn" *because* this invariant holds.
-        // The predicate itself cannot see the halt: it reads only the progress
-        // stream, and a hook-driven halt is not in it. While the stream never
-        // reported a cap at all the invariant held for free; now that it does,
-        // it has to be stated here, where both facts are in hand, rather than
-        // re-checked at each notice site.
-        //
-        // The halt wins because it is the more specific account of why the
-        // turn stopped, and the two notices are not interchangeable: a step
-        // pause invites "continue", which on a spent budget would invite the
-        // operator to burn a cap that has already run out.
-        let hit_iteration_cap =
-            progress_pump::reportable_iteration_cap(raw_iteration_cap, halted_for_spend.is_some());
-        if hit_iteration_cap {
-            tracing::info!(
-                agent = %self.agent_id,
-                "[turn] paused at the tool-iteration cap; the reply is a resumable checkpoint, not a finished answer"
-            );
-        }
-        if raw_iteration_cap && !hit_iteration_cap {
-            tracing::info!(
-                agent = %self.agent_id,
-                "[turn] the iteration cap was reached on a turn already halted for spend; \
-                 reporting the halt, which is why it stopped"
-            );
-        }
-        if let Some(halt) = &halted_for_spend {
-            tracing::info!(
-                agent = %self.agent_id,
-                spent_usd = halt.spent_usd,
-                cap_usd = halt.cap_usd,
-                "[turn] halted at the in-turn spend cap; the reply stops short of the work it was doing"
-            );
-        }
-        let budget_paused = budget_pause_summary
-            .lock()
-            .ok()
-            .and_then(|mut slot| slot.take())
-            .map(|summary| BudgetPause {
-                agent: self.agent_id.clone(),
-                summary,
-            });
-        if let Some(pause) = &budget_paused {
-            tracing::info!(
-                agent = %self.agent_id,
-                "[turn] paused for lack of inference budget/credits: {}",
-                pause.summary
-            );
-        }
-        let ceiling_paused = ceiling_pause
-            .lock()
-            .ok()
-            .and_then(|mut slot| slot.take())
-            .map(|(summary, elapsed)| CeilingPause {
-                agent: self.agent_id.clone(),
-                elapsed,
-                summary,
-            });
-        if let Some(pause) = &ceiling_paused {
-            tracing::info!(
-                agent = %self.agent_id,
-                elapsed_ms = pause.elapsed.as_millis(),
-                progress_events = events.len(),
-                "[turn] hit the per-turn wall-clock ceiling; keeping the steps it had taken"
-            );
-        }
+        turn_envelope::price_usages(&self.agent_id, &mut usages, &events);
+        let findings = turn_envelope::turn_findings(
+            &self.agent_id,
+            &events,
+            envelope.halt(&usages),
+            budget_pause_summary
+                .lock()
+                .ok()
+                .and_then(|mut slot| slot.take()),
+            ceiling_pause.lock().ok().and_then(|mut slot| slot.take()),
+        );
         let steps = steps::fold_steps(events);
-
         let outcome = reply.map(|reply| TurnOutcome {
             reply: if chat_only {
                 chat_only_guard::guard_suppressed_reply(reply)
@@ -2049,11 +1680,11 @@ impl CompanyAgent {
                 reply
             },
             steps,
-            hit_iteration_cap,
+            hit_iteration_cap: findings.hit_iteration_cap,
             abnormal_stop: None,
-            halted_for_spend,
-            budget_paused,
-            ceiling_paused,
+            halted_for_spend: findings.halted_for_spend,
+            budget_paused: findings.budget_paused,
+            ceiling_paused: findings.ceiling_paused,
         });
         (outcome, usages)
     }
@@ -2092,12 +1723,6 @@ impl CompanyAgent {
                 }
             }
         }
-    }
-
-    /// Whether a turn runs on a session of its own rather than the agent's
-    /// conversation session: it names no chat, or brings its own context.
-    fn isolated_session(turn_chat_id: Option<&str>, history_seed: bool) -> bool {
-        turn_chat_id.is_none() || !history_seed
     }
 
     /// Everything the bridge tapped since the previous attempt, summed.
@@ -2630,6 +2255,15 @@ where
 /// A pool of live agents, one roster per company.
 pub struct HarnessPool {
     agents: RwLock<HashMap<CompanyId, Vec<Arc<CompanyAgent>>>>,
+    /// Each company's hive (OC-2), started on the first `ensure` whose deps
+    /// carry a hive store and a journal, and shared with every other pool
+    /// serving the same company (`hive::runtime::for_company`).
+    hives: RwLock<HashMap<CompanyId, Arc<crate::hive::runtime::CompanyHive>>>,
+    /// This pool, weakly, once a caller holding it in an `Arc` said so
+    /// ([`HarnessPool::remember`]) — what a hive seat reaches its admission
+    /// gates and isolated turns through. A pool nobody shares has none, and
+    /// its hive turns run ungated.
+    self_ref: std::sync::OnceLock<std::sync::Weak<HarnessPool>>,
     /// The process-wide `opencompany` MCP host every roster agent is served
     /// on (plan hive-desks Phase 3): its listener, its bearers, and the
     /// in-flight turn registry the hive driver attributes calls through.
@@ -2923,6 +2557,8 @@ impl HarnessPool {
     pub fn new() -> Self {
         Self {
             agents: RwLock::new(HashMap::new()),
+            hives: RwLock::new(HashMap::new()),
+            self_ref: std::sync::OnceLock::new(),
             mcp: crate::hive::mcp_server::global(),
             monthly_budgets: RwLock::new(HashMap::new()),
             mcp_fingerprints: RwLock::new(HashMap::new()),
@@ -2942,6 +2578,50 @@ impl HarnessPool {
             context_fingerprints: RwLock::new(HashMap::new()),
             workspace_failures: std::sync::Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Remembers this pool as the one its hive seats belong to. Idempotent;
+    /// every holder of the pool's `Arc` may call it.
+    pub fn remember(self: &Arc<Self>) {
+        let _ = self.self_ref.set(Arc::downgrade(self));
+    }
+
+    /// The company's hive, once an `ensure` started it.
+    pub async fn hive(
+        &self,
+        company: &CompanyId,
+    ) -> Option<Arc<crate::hive::runtime::CompanyHive>> {
+        self.hives.read().await.get(company).cloned()
+    }
+
+    /// The company's hive, started when `deps` carry a hive store and a
+    /// journal and none is running for this pool yet.
+    async fn company_hive(
+        &self,
+        company: &CompanyRecord,
+        deps: &HarnessDeps,
+        runtime: &openhuman_embed::Runtime,
+    ) -> crate::Result<Option<Arc<crate::hive::runtime::CompanyHive>>> {
+        if let Some(hive) = self.hive(&company.id).await {
+            return Ok(Some(hive));
+        }
+        let (Some(store), Some(events)) = (deps.hive_store.clone(), deps.events.clone()) else {
+            return Ok(None);
+        };
+        let hive = crate::hive::runtime::for_company(crate::hive::runtime::HiveConfig {
+            company: company.id.clone(),
+            runtime_id: runtime.runtime_id().to_string(),
+            store,
+            events,
+            options: crate::hive::routing::coordinator_options(company),
+            turn_timeout: crate::hive::routing::turn_timeout(company),
+        })
+        .await?;
+        self.hives
+            .write()
+            .await
+            .insert(company.id.clone(), Arc::clone(&hive));
+        Ok(Some(hive))
     }
 
     /// Records one workspace-ensure outcome for `(company, agent)` and returns
@@ -3441,22 +3121,12 @@ impl HarnessPool {
         // lands on a numbered suffix (`CompanyAgent::register`) and the old
         // one releases when the turn ends.
         let previous = self.agents.write().await.remove(&company.id);
-        // What each retired entry's prompt brief named, and whether it still
-        // owed the session that brief — see `CompanyAgent::catalogue_brief_stale`.
-        // Read before the drop: the rebuilt entry inherits it below.
-        let retired_briefs: HashMap<String, (Vec<String>, bool)> = previous
-            .iter()
-            .flatten()
-            .map(|agent| {
-                (
-                    agent.agent_id.clone(),
-                    (
-                        agent.served_catalogue().to_vec(),
-                        agent.catalogue_brief_pending(),
-                    ),
-                )
-            })
-            .collect();
+        // OC-2: the company hive, when this pool's deps carry its store. Its
+        // own clones of the retired handles go with the roster's, so a
+        // rebuild below can register the new handle under the same id.
+        let hive = self
+            .company_hive(&fresh_company, &fresh_deps, &runtime)
+            .await?;
         if let Some(previous) = previous {
             let quiesce = std::time::Duration::from_secs(30);
             for agent in &previous {
@@ -3470,31 +3140,38 @@ impl HarnessPool {
                          the rebuilt agent registers beside it"
                     ),
                 }
+                if let Some(hive) = &hive {
+                    hive.release_handle(&agent.runtime_id);
+                }
             }
             drop(previous);
         }
 
-        let roster = build_roster(
-            &runtime,
-            &fresh_company,
-            &fresh_deps,
-            &skill_deltas,
-            &routed_context,
-        )?;
-
-        // Keep the policy snapshot and the roster together for the entire turn.
-        // `ensure_with_policy` pins the snapshot on the pool (above), so a
-        // concurrent plain `ensure` — the workflow runner, a spawned task outside
-        // the cycle serial lock — rebuilds the policy axis against that same pin
-        // instead of a live override it could otherwise adopt a turn early. The
-        // serial lock already serializes cycle callers; the pin is what keeps a
-        // direct caller from regressing a pinned roster before `run_inner` clones
-        // its agent.
-        for agent in &roster {
-            if let Some((catalogue, pending)) = retired_briefs.get(&agent.agent_id) {
-                agent.inherit_catalogue_brief(catalogue, *pending);
+        let blueprints =
+            roster_blueprints(&fresh_company, &fresh_deps, &skill_deltas, &routed_context)?;
+        let roster = match &hive {
+            None => blueprints
+                .into_iter()
+                .map(|blueprint| {
+                    blueprint
+                        .register(&runtime, &company.id, fresh_deps.events.clone())
+                        .map(Arc::new)
+                })
+                .collect::<crate::Result<Vec<_>>>()?,
+            Some(hive) => {
+                let roster = self
+                    .seat_roster(hive, &runtime, &company.id, &fresh_deps, blueprints)
+                    .await?;
+                if let Err(error) = hive.sync(&fresh_company).await {
+                    tracing::warn!(
+                        company = %company.id,
+                        %error,
+                        "[hive] the company hive's desks could not be brought in line with the roster"
+                    );
+                }
+                roster
             }
-        }
+        };
 
         let mut agents = self.agents.write().await;
         agents.insert(company.id.clone(), roster);
@@ -3551,6 +3228,68 @@ impl HarnessPool {
             .await
             .insert(company.id.clone(), context_fp);
         Ok(())
+    }
+
+    /// Registers a rebuilt roster with the company hive: a teammate the hive
+    /// already runs is rebuilt in place (`CompanyHive::replace`), so its
+    /// continuing session and queued work carry over; a new one is registered
+    /// fresh. A teammate the hive could not take still serves this pool's
+    /// isolated turns — a warning, never a failed ensure.
+    async fn seat_roster(
+        &self,
+        hive: &crate::hive::runtime::CompanyHive,
+        runtime: &openhuman_embed::Runtime,
+        company: &CompanyId,
+        deps: &HarnessDeps,
+        blueprints: Vec<RosterBlueprint>,
+    ) -> crate::Result<Vec<Arc<CompanyAgent>>> {
+        let pool = self.self_ref.get().cloned().unwrap_or_default();
+        let shared = Arc::new(deps.clone());
+        let mut roster = Vec::with_capacity(blueprints.len());
+        for blueprint in blueprints {
+            let base = crate::session_key::runtime_agent_id(company, blueprint.agent_id());
+            let events = deps.events.clone();
+            let seat = |agent: CompanyAgent| hive_hooks::HiveSeat {
+                agent: Arc::new(agent),
+                pool: pool.clone(),
+                deps: Arc::clone(&shared),
+            };
+            if hive.is_registered(&base) {
+                match hive
+                    .replace(&base, || {
+                        blueprint.register(runtime, company, events).map(seat)
+                    })
+                    .await
+                {
+                    Ok(seat) => roster.push(seat.agent),
+                    Err((Some(seat), error)) => {
+                        tracing::warn!(
+                            %company,
+                            agent = %seat.agent.agent_id,
+                            %error,
+                            "[hive] a rebuilt teammate could not take over its hive handle; it \
+                             serves isolated turns until the next rebuild"
+                        );
+                        roster.push(seat.agent);
+                    }
+                    Err((None, error)) => return Err(error),
+                }
+            } else {
+                let agent = seat(blueprint.register(runtime, company, events)?);
+                let pooled = Arc::clone(&agent.agent);
+                if let Err(error) = hive.register(agent).await {
+                    tracing::warn!(
+                        %company,
+                        agent = %pooled.agent_id,
+                        %error,
+                        "[hive] a teammate could not be registered with the company hive; it \
+                         serves isolated turns only"
+                    );
+                }
+                roster.push(pooled);
+            }
+        }
+        Ok(roster)
     }
 
     /// Re-resolves the company's capability filter (issue #108): with a plan
@@ -4745,104 +4484,11 @@ impl HarnessPool {
         // observe, and the console goes on rendering that ceiling as if it
         // still applied. A refusal an operator can see and act on is a better
         // state than a cap that silently stopped existing.
-        let _ceiling = match Self::total_ceiling_refusal(company, agent_id, deps).await {
-            CeilingGate::Admitted(reservation) => reservation,
-            CeilingGate::Refused(refusal) => return Ok(refusal),
+        let _admission = match self.admit(company, &agent, deps).await {
+            Ok(admission) => admission,
+            Err(refusal) => return Ok(*refusal),
         };
 
-        let _monthly_budget = match self.monthly_budget_refusal(company, agent_id, deps).await {
-            MonthlyBudgetGate::Admitted(guard) => guard,
-            MonthlyBudgetGate::Refused(refusal) => return Ok(*refusal),
-        };
-
-        // Per-agent daily spend cap (issue #304): the same HARD, pre-model-call
-        // refusal as the ceiling above, scoped to ONE teammate.
-        //
-        // This is the layer that matters most in practice. The manifest's
-        // `budget_usd_daily` was validated, persisted and passed to
-        // `ApprovalPolicy` — where it sat on a field with no reader. But the
-        // dominant spend stream is not tool calls at all, it is inference, and
-        // inference never reaches a `ToolPolicy`. Gating only priced tool calls
-        // (the policy arm) would leave a capped teammate free to burn its budget
-        // many times over on model turns alone, which is how the cap came to be
-        // decorative in the first place.
-        //
-        // Refused BEFORE retrieve→inject and the memory writeback, exactly like
-        // the total ceiling, so a refused turn costs nothing and leaves no
-        // fabricated outcome in the store. The reply names the teammate, the cap
-        // and the reset — never a bare failure.
-        //
-        // Scoped to the desk that declared a bound: an uncapped colleague is
-        // never gated by a meter fault, so an unreadable meter costs the company
-        // its capped teammates, not its cognition.
-        if let Some(cap) = agent.budget_usd_daily {
-            let since = crate::metering::utc_day_start_millis(crate::ports::now_millis());
-            let samples = match read_spend_for_gate(deps.meter.as_deref(), company, since).await {
-                Ok(samples) => samples,
-                Err(fault) => {
-                    match &fault {
-                        SpendReadFault::NoMeter => tracing::error!(
-                            company = %company,
-                            agent = agent_id,
-                            cap,
-                            "[agent-budget] a daily spend cap is declared but this host has no usage meter; refusing dispatch to this teammate (no model call) until a meter is configured or the cap is removed"
-                        ),
-                        SpendReadFault::QueryFailed(error) => tracing::error!(
-                            company = %company,
-                            agent = agent_id,
-                            cap,
-                            %error,
-                            "[agent-budget] daily-spend query failed; refusing dispatch to this teammate (no model call) rather than spending against a cap that cannot be checked"
-                        ),
-                    }
-                    return Ok(spend_gate_refusal(
-                        unmeasurable_agent_budget_notice(agent_id, cap, &fault),
-                        SpendGateCause::Unmeasurable,
-                    ));
-                }
-            };
-
-            let spent = crate::metering::usd_spent_by_agent(&samples, agent_id);
-            // Issue #1846: same coarse proximity warning as the total-ceiling
-            // read above, reusing the SAME `samples` — no second query.
-            // Non-blocking; only fires when this teammate is not already
-            // refused below.
-            if spent < cap && is_approaching_budget_ceiling_f64(spent, cap) {
-                tracing::info!(
-                    company = %company,
-                    agent = agent_id,
-                    spent,
-                    cap,
-                    "[agent-budget] approaching the daily spend cap; publishing a non-blocking proximity warning"
-                );
-                crate::turn_stream::publish(
-                    company,
-                    crate::turn_stream::BudgetProximityFrame {
-                        kind: "budget_proximity",
-                        agent_id: Some(agent_id.to_string()),
-                        message: budget_proximity_message_usd(agent_id),
-                        at_millis: crate::ports::now_millis(),
-                    },
-                );
-            }
-            if spent >= cap {
-                tracing::info!(
-                    company = %company,
-                    agent = agent_id,
-                    spent,
-                    cap,
-                    "[agent-budget] daily spend cap reached; refusing dispatch (no model call) until 00:00 UTC"
-                );
-                return Ok(spend_gate_refusal(
-                    agent_budget_exhausted_notice(agent_id, cap),
-                    SpendGateCause::Exhausted,
-                ));
-            }
-        }
-
-        // Memory is OpenHuman's: the runtime recalls a pack for this agent and
-        // logs the turn under its own node (`crate::memory`), so the message
-        // goes through as composed.
         let augmented = message.to_string();
 
         // Run the turn and record its real cost. `CompanyAgent::run` reads each
@@ -5509,6 +5155,83 @@ fn policy_override_for(policy: &Policy, manifest: &Policy) -> PolicyOverride {
     }
 }
 
+/// The teammate's own daily spend cap (issue #304), as a dispatch gate: the
+/// refusal a turn of `agent`'s returns instead of running, or `None` to admit
+/// it. A cap that cannot be measured refuses rather than spends blind, and a
+/// teammate near its cap gets a non-blocking proximity frame.
+pub(crate) async fn daily_cap_refusal(
+    company: &CompanyId,
+    agent: &CompanyAgent,
+    deps: &HarnessDeps,
+) -> Option<TurnOutcome> {
+    let agent_id = agent.agent_id.as_str();
+    if let Some(cap) = agent.budget_usd_daily {
+        let since = crate::metering::utc_day_start_millis(crate::ports::now_millis());
+        let samples = match read_spend_for_gate(deps.meter.as_deref(), company, since).await {
+            Ok(samples) => samples,
+            Err(fault) => {
+                match &fault {
+                    SpendReadFault::NoMeter => tracing::error!(
+                        company = %company,
+                        agent = agent_id,
+                        cap,
+                        "[agent-budget] a daily spend cap is declared but this host has no usage meter; refusing dispatch to this teammate (no model call) until a meter is configured or the cap is removed"
+                    ),
+                    SpendReadFault::QueryFailed(error) => tracing::error!(
+                        company = %company,
+                        agent = agent_id,
+                        cap,
+                        %error,
+                        "[agent-budget] daily-spend query failed; refusing dispatch to this teammate (no model call) rather than spending against a cap that cannot be checked"
+                    ),
+                }
+                return Some(spend_gate_refusal(
+                    unmeasurable_agent_budget_notice(agent_id, cap, &fault),
+                    SpendGateCause::Unmeasurable,
+                ));
+            }
+        };
+
+        let spent = crate::metering::usd_spent_by_agent(&samples, agent_id);
+        // Issue #1846: same coarse proximity warning as the total-ceiling
+        // read above, reusing the SAME `samples` — no second query.
+        // Non-blocking; only fires when this teammate is not already
+        // refused below.
+        if spent < cap && is_approaching_budget_ceiling_f64(spent, cap) {
+            tracing::info!(
+                company = %company,
+                agent = agent_id,
+                spent,
+                cap,
+                "[agent-budget] approaching the daily spend cap; publishing a non-blocking proximity warning"
+            );
+            crate::turn_stream::publish(
+                company,
+                crate::turn_stream::BudgetProximityFrame {
+                    kind: "budget_proximity",
+                    agent_id: Some(agent_id.to_string()),
+                    message: budget_proximity_message_usd(agent_id),
+                    at_millis: crate::ports::now_millis(),
+                },
+            );
+        }
+        if spent >= cap {
+            tracing::info!(
+                company = %company,
+                agent = agent_id,
+                spent,
+                cap,
+                "[agent-budget] daily spend cap reached; refusing dispatch (no model call) until 00:00 UTC"
+            );
+            return Some(spend_gate_refusal(
+                agent_budget_exhausted_notice(agent_id, cap),
+                SpendGateCause::Exhausted,
+            ));
+        }
+    }
+    None
+}
+
 /// The live overlay state one roster rebuild is resolved against.
 ///
 /// A struct rather than the tuple this used to be: it grew past the point where
@@ -5900,181 +5623,48 @@ pub(crate) fn agent_policy_for(
     agent_policy
 }
 
-/// The approval policy an episode seat is built with: the roster agent's
-/// policy, resolved from the company's policy and budget in force.
-#[cfg(feature = "openhuman")]
-pub(crate) fn seat_policy(
-    company: &CompanyRecord,
-    deps: &HarnessDeps,
-    manifest_agent: &ManifestAgent,
-) -> ApprovalPolicy {
-    agent_policy_for(
-        company,
-        deps,
-        manifest_agent,
-        &company.effective_policy(),
-        company.effective_budget(&manifest_agent.id),
-    )
+/// One teammate of a roster, built but not yet registered on the runtime.
+///
+/// Split from registration (OC-2) because a rebuild of an agent the company
+/// hive already runs has to register the new handle *inside*
+/// `OpenHumanHost::replace_agent`, after the adapter dropped the old one —
+/// OpenHuman keeps an agent id reserved while any clone of it is alive.
+pub(crate) struct RosterBlueprint {
+    agent_id: String,
+    role: String,
+    budget_usd_daily: Option<f64>,
+    blueprint: build::AgentBlueprint,
 }
 
-/// The standing prompt one teammate carries as a seat of a running episode.
-///
-/// The persona [`build_roster`] would build for that teammate, less the
-/// hand-off tools and their briefs, rendered with OpenHuman's grounding and
-/// writing-style blocks so a seeded seat turn reads the prompt a cold turn
-/// would have composed.
-///
-/// # Errors
-///
-/// [`OpenCompanyError::Config`] when the company seats no teammate by that
-/// name, or whatever stops the session being built.
-#[cfg(feature = "openhuman")]
-pub(crate) fn seat_persona(
-    company: &CompanyRecord,
-    deps: &HarnessDeps,
-    seat: &str,
-) -> crate::Result<String> {
-    let live_roster = company.effective_agents();
-    let manifest_agent = live_roster
-        .iter()
-        .find(|agent| agent.id == seat)
-        .ok_or_else(|| {
-            crate::error::OpenCompanyError::Config(format!(
-                "hive episode: `{seat}` is seated at the desk but not on the roster"
-            ))
-        })?;
-    let grants = grants_for_policy(company, &company.manifest.tools.allow, manifest_agent);
-    let policy = seat_policy(company, deps, manifest_agent);
-    let instructions = company.effective_instructions(&manifest_agent.id);
-    let blueprint = build::build_agent_with_model(
-        &company.id,
-        &company.manifest.company.name,
-        manifest_agent,
-        Arc::new(policy),
-        deps,
-        &grants,
-        // An episode seat carries no skill deltas and no routed context: it
-        // is built for one episode and torn down with it.
-        &[],
-        &[],
-        instructions.as_deref(),
-        orchestrator::orchestrator_id(&live_roster).as_deref() == Some(manifest_agent.id.as_str()),
-        &crate::company::team_brief::seat_team_section(company, &manifest_agent.id),
-    )?;
-    // **The hand-off and lifecycle tools come off an episode seat's belt.**
-    //
-    // A seat reaches a teammate with the episode's own `ask`, and its turn
-    // claims a delegation bucket that permits opening a card and nothing else
-    // (`DrainClaim::Seat`). A tool on the belt that can only refuse argues the
-    // seat out of the verb that works, so these are withheld rather than left
-    // to refuse. `spawn_task` stays: the seat's settle writes its cards.
-    //
-    // Removed from the belt AND from the provider-visible names, because
-    // `episode_seat` builds the allowlist from these and a name the model can
-    // see is a name it will reach for.
-    let mut blueprint = blueprint;
-    blueprint
-        .tools
-        .retain(|tool| !EPISODE_WITHHELD_TOOLS.contains(&tool.name()));
-    blueprint
-        .native_tool_names
-        .retain(|name| !EPISODE_WITHHELD_TOOLS.contains(&name.as_str()));
-
-    // **And the briefs that describe them.**
-    //
-    // A seat is built by the same builder as an ordinary roster agent, so it
-    // inherits the orchestrator runtime's prose about handing work on and
-    // tracking it, which names the withheld tools. What a seat may do with
-    // cards is told to it by the host instead (`SEAT_CARDS_NOTE`).
-    //
-    // Removed by exact match on what was appended, so a brief that is
-    // reworded upstream is either removed whole or left whole, never
-    // half-cut.
-    for brief in [
-        orchestrator::orchestrator_brief(),
-        orchestrator::member_delegation_brief(),
-    ] {
-        if let Some(at) = blueprint.system_prompt.find(&brief) {
-            blueprint
-                .system_prompt
-                .replace_range(at..at + brief.len(), "");
-        }
+impl RosterBlueprint {
+    /// The manifest agent id.
+    pub(crate) fn agent_id(&self) -> &str {
+        &self.agent_id
     }
 
-    // **And the ledger catalogue, which names them too.**
-    //
-    // `ledger_brief` prints every native ledger's `written_by`, and the
-    // board's names `assign_task` beside `spawn_task` -- true of the company,
-    // and false of a seat. Swapped for a line that is true of a seat.
-    //
-    // Driven off `EPISODE_WITHHELD_TOOLS` rather than off the `tasks` slug,
-    // so a ledger declared later whose writer prose names a withheld verb is
-    // covered without anyone remembering this exists.
-    for spec in deps.ledger_registry.specs() {
-        if spec.source != crate::ledger::LedgerSource::Native
-            || !EPISODE_WITHHELD_TOOLS
-                .iter()
-                .any(|tool| spec.written_by.contains(tool))
-        {
-            continue;
-        }
-        let rendered = crate::harness::ledger_tools::written_by_note(spec);
-        if let Some(at) = blueprint.system_prompt.find(&rendered) {
-            let replacement = crate::harness::ledger_tools::episode_written_by_note(
-                crate::hive::host::TOOL_PREFIX,
-            );
-            blueprint
-                .system_prompt
-                .replace_range(at..at + rendered.len(), &replacement);
-        }
+    /// Registers the blueprint on `runtime` — see [`CompanyAgent::register`].
+    pub(crate) fn register(
+        self,
+        runtime: &openhuman_embed::Runtime,
+        company: &CompanyId,
+        events: Option<Arc<dyn EventLog>>,
+    ) -> crate::Result<CompanyAgent> {
+        CompanyAgent::register(
+            runtime,
+            company,
+            &self.agent_id,
+            &self.role,
+            self.budget_usd_daily,
+            self.blueprint,
+            events,
+        )
     }
-
-    // The belt reaches the pooled agent per turn through `EpisodeBelts`; the
-    // standing prompt cannot, because a seeded turn is not cold and composes
-    // none. The host puts this at the head of the seed instead -- see
-    // `EpisodeHost::persona` -- so it has to be the rendered prompt, not the
-    // bare body.
-    build::rendered_seat_persona(&blueprint)
 }
 
-/// The roster tools an episode seat is **not** built with.
-///
-/// A seat's delegation claim permits opening a card and nothing else, so each
-/// of these could only refuse there. See `seat_persona` for why they are
-/// withheld rather than left to refuse.
-pub(crate) const EPISODE_WITHHELD_TOOLS: [&str; 6] = [
-    "delegate_to_desk",
-    "delegate_to_teammate",
-    "assign_task",
-    "review_task",
-    // The two workflow verbs, for the list's own reason rather than a new one.
-    //
-    // Both stage a `TaskOutputWorkflow` on the shared `WorkflowRefQueue` — one
-    // field on `HarnessDeps` — for the brain to drain into the card it is
-    // holding. Nothing drains it inside an episode, which is what puts them on
-    // this list; `spawn_task` left it only because #2546 built a drain for that
-    // one.
-    //
-    // Leaving them on the belt was not merely inert. A pooled chat turn brackets
-    // that queue with `clear()` and `drain()`, and an episode is spawned detached
-    // while a seat takes only its agent's turn lock — so a seat's push could land
-    // inside a concurrent chat turn's window and be stamped on THAT turn's card:
-    // a workflow authored in a room, credited to a card in a channel.
-    //
-    // Withheld rather than isolated per episode, because the capability is worth
-    // less than the machinery that would make it safe. The workflow itself is a
-    // standalone saved graph and was never bound to a card or a chat; only the
-    // provenance link is, and a room cannot write one. A seat that needs a
-    // repeatable process says so, and the work happens where there is an
-    // attempt behind it to attribute.
-    //
-    // No prose to cut for these two: the only brief that names them is
-    // `orchestrator_brief`, which `build_episode_seat` already strips from a seat
-    // whole, and no ledger's `writtenBy` mentions either.
-    "create_workflow",
-    "run_workflow",
-];
-
+/// Builds and registers every teammate this pool serves — the whole roster
+/// at once, with no company hive in the way. The pool itself registers
+/// through [`roster_blueprints`] so a hive can rebuild each handle in place.
+#[cfg(test)]
 pub(crate) fn build_roster(
     runtime: &openhuman_embed::Runtime,
     company: &CompanyRecord,
@@ -6082,6 +5672,23 @@ pub(crate) fn build_roster(
     skill_deltas: &[SkillState],
     routed_context: &HashMap<String, Vec<(String, String)>>,
 ) -> crate::Result<Vec<Arc<CompanyAgent>>> {
+    roster_blueprints(company, deps, skill_deltas, routed_context)?
+        .into_iter()
+        .map(|blueprint| {
+            blueprint
+                .register(runtime, &company.id, deps.events.clone())
+                .map(Arc::new)
+        })
+        .collect()
+}
+
+/// Builds the blueprint of every teammate this pool serves, registering none.
+pub(crate) fn roster_blueprints(
+    company: &CompanyRecord,
+    deps: &HarnessDeps,
+    skill_deltas: &[SkillState],
+    routed_context: &HashMap<String, Vec<(String, String)>>,
+) -> crate::Result<Vec<RosterBlueprint>> {
     // Issue #562: the policy in force, not the one the manifest shipped with —
     // the same relationship `effective_budget` (issue #343) has to the manifest
     // cap, and resolved through the same record so the console and this gate
@@ -6183,15 +5790,12 @@ pub(crate) fn build_roster(
             is_orchestrator,
             &crate::company::team_brief::team_section(company, &manifest_agent.id),
         )?;
-        roster.push(Arc::new(CompanyAgent::register(
-            runtime,
-            &company.id,
-            &manifest_agent.id,
-            &manifest_agent.role,
-            effective_budget,
+        roster.push(RosterBlueprint {
+            agent_id: manifest_agent.id.clone(),
+            role: manifest_agent.role.clone(),
+            budget_usd_daily: effective_budget,
             blueprint,
-            deps.events.clone(),
-        )?));
+        });
     }
 
     // Issue #71 — Active Runtime Teammates (minimal slice): promote every
@@ -6257,15 +5861,12 @@ pub(crate) fn build_roster(
             /* is_orchestrator */ false,
             &crate::company::team_brief::team_section(company, &manifest_agent.id),
         )?;
-        roster.push(Arc::new(CompanyAgent::register(
-            runtime,
-            &company.id,
-            &manifest_agent.id,
-            &manifest_agent.role,
-            effective_budget,
+        roster.push(RosterBlueprint {
+            agent_id: manifest_agent.id.clone(),
+            role: manifest_agent.role.clone(),
+            budget_usd_daily: effective_budget,
             blueprint,
-            deps.events.clone(),
-        )?));
+        });
     }
 
     Ok(roster)
@@ -6361,7 +5962,7 @@ pub(crate) fn workflow_wiring_deps(
     plan: Option<capability_budget::CapabilityPlan>,
 ) -> HarnessDeps {
     HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         provider: Arc::new(provider::MockProvider::default()),
         provider_slug: "mock".to_string(),
@@ -6418,12 +6019,6 @@ pub(crate) fn workflow_wiring_deps(
     }
 }
 
-#[cfg(test)]
-#[path = "built_in_catalogue_brief_tests.rs"]
-mod built_in_catalogue_brief_tests;
-#[cfg(test)]
-#[path = "built_in_read_retention_tests.rs"]
-mod built_in_read_retention_tests;
 /// Issue #1840: chat-turn history seeding, first half.
 /// `routed_context` fingerprint/resolution coverage.
 #[cfg(test)]

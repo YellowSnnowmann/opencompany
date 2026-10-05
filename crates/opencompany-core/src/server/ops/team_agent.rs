@@ -343,7 +343,7 @@ pub(super) struct AgentDeskDto {
     id: String,
     name: String,
     /// Whether this agent is the desk's lead — the first effective member, who
-    /// receives a `delegate_to_desk` hand-off.
+    /// starts an unaddressed line on the desk's hive.
     lead: bool,
 }
 

@@ -17,12 +17,14 @@ orchestrator's `assign_task`) push onto a `DelegationQueue` that is drained
 caller can hold, no future to block on, and **no way for a turn to wait for
 work it asked for**.
 
-Conversation is the exception, by construction. A seat on a desk does not
-delegate to a colleague; it speaks (`post`, `dm`, `broadcast`), the round
-commits when every seat has spoken, and the next round is the reply
+Conversation is the exception, by construction. An agent does not delegate
+to a colleague; it messages them through the company hive
+(`hivemind_send_agent`, `hivemind_send_hive`), the send returns a receipt at
+once, and the colleague's answer reaches it on a later turn
 ([../hive.md](../hive.md)). The synchronous hand-offs that used to run a
 colleague's turn *inside* the caller's — `delegate_to_desk`,
-`delegate_to_teammate` — are gone with the relay they needed.
+`delegate_to_teammate` — are gone (OC-2); who may message whom is the reach
+rule they enforced, now the hive's `SendAuthorizer`.
 
 ### What ships
 
@@ -48,9 +50,10 @@ permit, the system stops. Size it accordingly and say so where it is set.
 **A batch validates every brief before launching any of them.** A half-launched
 batch leaves children running for a call that returned an error.
 
-**Depth and cycles are enforced at the tool boundary**, dynamically, against the
-live scope chain — not by which tools were wired. Belts are cached per roster,
-so depth cannot be a property of the belt.
+**Fan-out is enforced at the tool boundary**, dynamically — a turn may open at
+most `MAX_DELEGATIONS_PER_TURN` cards, and a hive episode at most three — not
+by which tools were wired. Belts are cached per roster, so a bound cannot be a
+property of the belt.
 
 ---
 
@@ -175,17 +178,18 @@ a chat thread, a channel adapter, an assignee, a workflow output destination
 A workflow is the static, inspectable graph for work that is a **pipeline**:
 retries, `on_error`, `requires_approval`, conditions, `sub_workflow` nesting,
 cron. A desk is for work that is a **conversation**. A workflow `agent` node
-still runs the same harness turn as a seat — same `AgentSpec`, same tools over
-the same MCP server, same metering — on a fresh session rather than the
-agent's standing one, and a workflow may deliver its output to a desk, which
+still runs the same harness turn as a hive turn — same `AgentSpec`, same
+tools, same metering — on a fresh session rather than the agent's one hive
+session, and a workflow may deliver its output to a desk, which
 is how a pipeline's result reaches a room.
 
 ### Migration of shipped companies
 
 Every shipped company that declared `[group_chat.hive]` (the quorum, budget
-and move-grammar knobs) declares `[group_chat.routing]` instead; the old
-block is refused at load with a migration hint. A company that declares desks
-and no routing block gets the defaults.
+and move-grammar knobs) declares `[group_chat.routing]` instead, and none
+declares `[group_chat.routing.referral]`; both old blocks are refused at load
+with a migration hint. A company that declares desks and no routing block gets
+the defaults.
 
 ---
 
@@ -197,8 +201,8 @@ and no routing block gets the defaults.
 - The concurrency semaphore's headroom exceeds maximum fan-out depth, asserted
   where it is configured.
 - A parent awaiting a child that itself delegates does not deadlock.
-- Depth and cycle rejection are enforced against the live scope chain, not the
-  wired belt.
+- The per-turn and per-episode card caps are enforced at the tool boundary,
+  not by the wired belt.
 - A torn line in the directive queue costs exactly one directive; every later
   directive still lands at the line number it would have without the crash.
 - An append that follows a torn trailing record tombstones it first (rather
@@ -210,4 +214,5 @@ and no routing block gets the defaults.
   run.
 - The role acting on a directive is not routed the claim ledger.
 - Every shipped company that declares desks loads with `[group_chat.routing]`
-  or the defaults, and a `[group_chat.hive]` block is refused with the hint.
+  or the defaults, and a `[group_chat.hive]` or `[group_chat.routing.referral]`
+  block is refused with the hint.

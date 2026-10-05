@@ -405,7 +405,7 @@ key as its credential, `TINYHUMANS_API_URL` as its backend), and
 | the OpenHuman-native subset of its grants (`shell`, `file_*`, `web_fetch`, …) | `.definition(AgentDefinitionSpec::new().tools(ToolScopeSpec::Named(..)).disallow_tools(..).max_iterations(25))` |
 | `[inference]` / the agent's own `{provider, model}` pair (`company/inference.rs`), BYOK included | `.provider(Provider::openai_compatible(url, key).model(m))`, served through the loopback model bridge so usage is metered |
 | the approval policy | `.access(Access::full())` — OpenHuman's runtime-wide gate stays off; OpenCompany decides allow / deny / park in its own MCP handler |
-| every OpenCompany tool (ledger, tasks, pages, workspace, composio, hosting, approvals) and the speech tools | `.mcp(McpServer::http("opencompany", url).auth(BearerToken).allow_tools(..))` — see [hive.md](hive.md#speaking) |
+| the agent's custom OpenCompany tools | `.mcp(McpServer::http("opencompany", url).auth(BearerToken).allow_tools(..))`; the `hivemind_*` tools are attached by the company hive's `OpenHumanHost` at registration — see [hive.md](hive.md) |
 | each `mcp:*` grant | one more `.mcp(..)` |
 | the company's skills, the company workspace | `.skills_dir(<home>/skills)`, `.action_dir(<workspace>)` |
 
@@ -422,7 +422,9 @@ maps `AgentProgress` onto `turn_stream::LiveFrame`s (`tool_call`, `tool_result`,
 for an ACP teammate's first `agent_message_chunk`) and reads cost from
 `ModelCallCompleted` / `TurnCostUpdated`. There is no resident session, no
 `Mutex<Agent>`, and no history seeding: OpenHuman owns the thread, and the
-company's delta is prepended to the message ([speech.md](speech.md)).
+company's delta is prepended to the message. A conversational turn is a
+company-hive turn and runs through the Coordinator's adapter instead
+([hive.md](hive.md)); the pool keeps isolated turns, each in a fresh session.
 
 What that buys, measured rather than argued: turns of **different** agents
 overlap — within a desk round and across desks — and a turn of one agent

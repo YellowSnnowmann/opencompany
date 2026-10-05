@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::ports::types::{CompanyId, DeskHiveOverride};
-use tinyhivemind_embed::{
+use tinyhivemind_core::embed::{
     CandidateProbability, EvaluationDisposition, RoutingEvaluation, RoutingFallback,
 };
 
@@ -35,11 +35,8 @@ members = ["engineer", "ceo"]
 
 [group_chat.routing]
 round_width = 2
-
-[group_chat.routing.referral]
-enabled = true
-max_hops = 1
-returns = true
+max_rounds = 3
+turn_timeout_secs = 900
 
 [[group_chat]]
 id = "content"
@@ -56,12 +53,8 @@ fn a_manifest_block_parses_under_routing_and_resolves_its_defaults() {
     let effective = EffectiveRouting::resolve(&config);
     assert_eq!(effective.round_width, 2);
     assert_eq!(effective.choice_option_limit, DEFAULT_CHOICE_OPTION_LIMIT);
-    assert_eq!(effective.max_rounds, DEFAULT_MAX_ROUNDS);
-    assert_eq!(effective.turn_timeout_secs, DEFAULT_TURN_TIMEOUT_SECS);
-    assert!(effective.referral.enabled);
-    assert_eq!(effective.referral.max_hops, 1);
-    assert!(effective.referral.returns);
-    assert_eq!(effective.referral.reach, ReferralReach::Desks);
+    assert_eq!(effective.max_rounds, 3);
+    assert_eq!(effective.turn_timeout_secs, 900);
     let policy = effective.policy();
     assert_eq!(policy.round_width, 2);
     assert_eq!(policy.clarification_threshold, Probability::ONE);
@@ -99,12 +92,6 @@ fn problems_name_the_zero_and_out_of_range_keys() {
         minimum_confidence: Some(1.5),
         max_rounds: Some(0),
         turn_timeout_secs: Some(0),
-        referral: Some(ReferralConfig {
-            enabled: Some(true),
-            max_hops: Some(0),
-            reach: Some("everywhere".into()),
-            returns: None,
-        }),
         ..RoutingConfig::default()
     };
     let problems = config.problems("desk `x`");
@@ -115,25 +102,11 @@ fn problems_name_the_zero_and_out_of_range_keys() {
         "minimum_confidence",
         "max_rounds = 0",
         "turn_timeout_secs = 0",
-        "referral.reach",
-        "referral.max_hops = 0",
     ] {
         assert!(joined.contains(key), "missing `{key}` in:\n{joined}");
     }
-    assert_eq!(problems.len(), 7);
+    assert_eq!(problems.len(), 5);
     assert!(RoutingConfig::default().problems("desk").is_empty());
-    // One hop with answers coming home is the hive_demo shape and is valid:
-    // the answer is carried back by the driver, not spent as a hop.
-    let demo = RoutingConfig {
-        referral: Some(ReferralConfig {
-            enabled: Some(true),
-            max_hops: Some(1),
-            reach: None,
-            returns: Some(true),
-        }),
-        ..RoutingConfig::default()
-    };
-    assert!(demo.problems("desk").is_empty());
 }
 
 #[test]
@@ -205,7 +178,6 @@ fn the_desk_routing_dto_lists_candidates_with_the_desks_they_share() {
     assert_eq!(dto.declared.round_width, Some(2));
     assert_eq!(dto.effective.round_width, 2);
     assert_eq!(dto.effective.router, Router::Fallback);
-    assert!(dto.effective.referral.enabled);
     let ceo = dto
         .candidates
         .iter()
@@ -225,10 +197,9 @@ fn the_desk_routing_dto_lists_candidates_with_the_desks_they_share() {
     let value = serde_json::to_value(&dto).unwrap();
     assert_eq!(value["deskId"], "engineering");
     assert_eq!(value["declared"]["round_width"], 2);
-    assert_eq!(value["declared"]["referral"]["max_hops"], 1);
+    assert_eq!(value["declared"]["max_rounds"], 3);
     assert_eq!(value["effective"]["roundWidth"], 2);
-    assert_eq!(value["effective"]["turnTimeoutSecs"], 600);
-    assert_eq!(value["effective"]["referral"]["maxHops"], 1);
+    assert_eq!(value["effective"]["turnTimeoutSecs"], 900);
     assert_eq!(value["candidates"][1]["sharedWith"][0], "content");
     let summary = desk_routing_summary(&record, "content", Router::Jev);
     assert_eq!(summary.source, RoutingSource::Default);
@@ -245,4 +216,47 @@ fn probabilities_round_trip_through_the_fixed_point_scale() {
     assert_eq!(probability(1.0), Probability::ONE);
     assert_eq!(probability(2.0), Probability::ONE);
     assert_eq!(probability(0.5).parts(), 500_000);
+}
+
+#[test]
+fn the_coordinator_folds_every_desk_to_the_widest_round_and_longest_wall() {
+    let record = record(TWO_DESKS);
+    let options = coordinator_options(&record);
+    // `content` declares nothing, so it runs at the default width of 5 — the
+    // widest — while `engineering`'s 3 rounds are fewer than the default 12.
+    assert_eq!(options.round_width, DEFAULT_ROUND_WIDTH);
+    assert_eq!(
+        options.conduct_policy.turn_wall,
+        DEFAULT_ROUND_WIDTH as u64 * u64::from(DEFAULT_MAX_ROUNDS)
+    );
+    assert_eq!(
+        options.retention.settled_episodes,
+        Some(RETAINED_SETTLED_EPISODES)
+    );
+    assert_eq!(options.retention.delivered, Some(RETAINED_DELIVERIES));
+    assert_eq!(options.retention.interrupted, Some(RETAINED_INTERRUPTIONS));
+    assert_eq!(options.retention.pending_per_agent, Some(PENDING_PER_AGENT));
+    assert_eq!(turn_timeout(&record), std::time::Duration::from_secs(900));
+}
+
+#[test]
+fn a_company_with_no_desks_runs_on_the_defaults() {
+    let record = record(
+        r#"
+[company]
+name = "Solo"
+
+[[agent]]
+id = "a"
+role = "A"
+"#,
+    );
+    assert_eq!(
+        coordinator_options(&record).round_width,
+        DEFAULT_ROUND_WIDTH
+    );
+    assert_eq!(
+        turn_timeout(&record),
+        std::time::Duration::from_secs(DEFAULT_TURN_TIMEOUT_SECS)
+    );
 }

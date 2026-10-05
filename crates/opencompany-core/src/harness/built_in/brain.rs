@@ -531,6 +531,7 @@ impl HarnessBrain {
     /// else the first roster agent). The pool is shared so the roster is built
     /// once and reused across cycles.
     pub fn new(pool: Arc<HarnessPool>, deps: HarnessDeps, record: CompanyRecord) -> Self {
+        pool.remember();
         // Resolved over the roster as it effectively stands: a company whose
         // first declared agent has since been removed still has an orchestrator,
         // and answering as a teammate the harness no longer builds would leave
@@ -687,6 +688,18 @@ impl HarnessBrain {
         match self.deps.store.load(&id).await? {
             Some(fresh) => {
                 *self.record.write().expect("harness brain record poisoned") = Arc::new(fresh);
+                // OC-2: a desk created, renamed or re-seated through the
+                // console reaches the company hive's memberships before this
+                // cycle routes on it.
+                if let Some(hive) = self.pool.hive(&id).await
+                    && let Err(error) = hive.sync(&self.record()).await
+                {
+                    tracing::warn!(
+                        company = %id,
+                        %error,
+                        "[hive] the company hive's desks could not be brought in line with the record"
+                    );
+                }
             }
             None => {
                 tracing::warn!(
@@ -957,11 +970,7 @@ impl HarnessBrain {
                     // exactly this reason, so a threaded approval resumes in its own
                     // thread rather than against the channel's unparented history.
                     .in_thread(grant.origin_parent)
-                    .drain_and_execute(
-                        grant.origin_thread.as_deref(),
-                        delegation::MessageContext::default(),
-                        delegation::HandOffs::Run,
-                    ),
+                    .drain_and_execute(grant.origin_thread.as_deref()),
             )
             .await
         {
@@ -1125,21 +1134,14 @@ impl HarnessBrain {
         }
         // A blank assignee is the one legitimate miss: nobody was named, so the
         // orchestrator picks it up.
-        //
-        // Not final: a turn that hands the work off (issue #204) reassigns the
-        // card to the delegate, and from that point the delegate is the
-        // responder every downstream write credits — the note, the artifact,
-        // the journal, and the relay.
-        let mut responder = resolution
+        let responder = resolution
             .working_agent()
             .unwrap_or(&self.responder)
             .to_string();
-        // Every id `responder` held before a reassignment overwrote it — a
-        // hand-off's `[<old responder>] delegated to …` block stays on the
-        // note under that old name, so `relay_text`'s `known_labels` needs it
-        // too or the strip leaves that block's chrome in the relayed bubble
-        // (issue #1949 review, CodeRabbit 3895599021).
-        let mut prior_responders: Vec<String> = Vec::new();
+        // Every id a card's note may carry a block under besides `responder`'s
+        // own, for `relay_text`'s `known_labels` (issue #1949 review). Empty
+        // since card hand-offs went with the hive cutover (OC-2).
+        let prior_responders: Vec<String> = Vec::new();
 
         // Link the working agent to the card, and persist it BEFORE the turn
         // runs (#205). A card the CEO picked up used to keep `assignee = ""`
@@ -1233,15 +1235,14 @@ impl HarnessBrain {
         // accumulating operator/agent blocks, but a redirect always re-runs from
         // the original brief plus the fresh instruction — last redirect wins).
         let base_instruction = format!(
-            "{}\n\nBoard-task coordination: delegate_to_teammate/delegate_to_desk TRANSFERS \
-             this card to one colleague and ends your ownership; it does not consult them and \
-             return a result. Only one hand-off can run. If this task requires several colleagues, \
-             independent review, or your final synthesis, use create_workflow/run_workflow when \
-             available, with separate agent steps, explicit dependencies, and a manual trigger \
-             only. If you lack those tools, hand the full remaining coordination brief to one \
-             authorized coordinator or report the actual limitation. Verify every required \
-             step and saved output before reporting completion. Do not replace \
-             a required colleague's work with your own or claim a queued hand-off is a review.",
+            "{}\n\nBoard-task coordination: a message to a colleague (`hivemind_send_agent`) is \
+             delivered, not answered in this turn — it does not return their result to you. If \
+             this task requires several colleagues, independent review, or your final synthesis, \
+             use create_workflow/run_workflow when available, with separate agent steps, explicit \
+             dependencies, and a manual trigger only. If you lack those tools, report the actual \
+             limitation. Verify every required step and saved output before reporting \
+             completion. Do not replace a required colleague's work with your own or claim a \
+             message you sent is a review.",
             task_instruction(&card)
         );
         let mut instruction = base_instruction.clone();
@@ -1285,10 +1286,10 @@ impl HarnessBrain {
         // chip, the attempt row, the note, the relay — is reached unchanged. A
         // second settle is what this avoids, and a second settle is where the next
         // lifecycle bug would come from.
-        let convened = self.convene_for_card(&card, &resolution).await;
-        let (run_end, result_text) = if let Some(room) = convened {
+        let convened = self.convene_for_card(&resolution).await;
+        let (run_end, result_text) = if let Some((hive, desk)) = convened {
             let (end, result) = delegation_claim
-                .scoped(Box::pin(self.run_card_room(room, &card)))
+                .scoped(Box::pin(self.run_card_room(hive, &desk, &card)))
                 .await;
             let (end, result) = room_outcome_after_steer(&mut card, control.take(), end, result);
             settle(&mut card, end, &responder, &result);
@@ -1404,160 +1405,46 @@ impl HarnessBrain {
                                 // The card keeps the delegate as its assignee on the
                                 // way to `todo` — the hand-off did happen, and a
                                 // re-dispatch should start from who it was given to.
-                                let handoff = match publish_claim
+                                if let Err(err) = publish_claim
                                     .scoped(Box::pin(
                                         self.delegation_runner(run_turn.as_ref(), &record)
                                             .for_task(&card.id)
-                                            // The delegate's turn is part of THIS attempt —
-                                            // its steps and its spend belong to the card's
-                                            // run, not to nothing (#242).
                                             .for_run(sink.clone())
-                                            // Issue #1846 review (Codex #3864988176): the
-                                            // card's own (possibly redirect-augmented)
-                                            // instruction — the closest thing a dispatched
-                                            // task has to "the operator's own words" — so a
-                                            // delegate's budget-pause marker re-parks with
-                                            // the brief this attempt is actually running,
-                                            // not the hand-off instruction the model wrote.
                                             .reissue_message(instruction.clone())
                                             .handle_task_delegations(&mut card, &responder),
                                     ))
                                     .await
                                 {
-                                    Ok(handoff) => handoff,
-                                    Err(err) => {
-                                        let result = format!("hand-off failed: {err}");
-                                        // Issue #1861: a hand-off that failed on a
-                                        // rejected model id or a dead integration
-                                        // is as answerable as a direct dispatch
-                                        // that did — the delegate hit the same
-                                        // wall, so it asks the same question.
-                                        let end = self.settle_as_blocker_or_failure(
-                                            &card.id,
-                                            &result,
-                                            sink.as_ref().map(|s| s.run_id()),
-                                        );
-                                        settle(&mut card, end, &responder, &result);
-                                        break (end, result);
-                                    }
-                                };
+                                    let result = format!("board writes failed: {err}");
+                                    // Issue #1861: a failure on a rejected model id
+                                    // or a dead integration is as answerable here
+                                    // as on a direct dispatch.
+                                    let end = self.settle_as_blocker_or_failure(
+                                        &card.id,
+                                        &result,
+                                        sink.as_ref().map(|s| s.run_id()),
+                                    );
+                                    settle(&mut card, end, &responder, &result);
+                                    break (end, result);
+                                }
                                 // `settle` writes the note (attributed to whoever
                                 // actually produced the text) and the landing column
                                 // via the #186 lifecycle seam; the loop still yields
                                 // the reply so the #185/#190 completion events
                                 // report the same text that landed in the note.
-                                let (end, result) = match handoff {
-                                    // The delegate answered: they own the card, and
-                                    // every downstream write credits them.
-                                    // SPIKE: handed over, delegate not yet run.
-                                    // Settles `Delegated` — which
-                                    // `settled_landing_column` keeps in
-                                    // `in_progress` precisely because a hand-off is
-                                    // "not an ending" — and the runtime re-fires
-                                    // dispatch for the card's new owner.
-                                    Some(handoff) if handoff.pending => {
-                                        let delegate = handoff.delegate.clone();
-                                        // The DELEGATOR is who handed it over, so
-                                        // the note is theirs. Reading `responder`
-                                        // after the swap credits the delegate with
-                                        // handing work to itself.
-                                        let delegator =
-                                            std::mem::replace(&mut responder, handoff.delegate);
-                                        let result =
-                                            format!("handed off to {delegate}; awaiting their run");
-                                        settle(
-                                            &mut card,
-                                            TaskRunEnd::Delegated,
-                                            &delegator,
-                                            &result,
-                                        );
-                                        prior_responders.push(delegator);
-                                        (TaskRunEnd::Delegated, result)
-                                    }
-                                    Some(handoff) => {
-                                        prior_responders.push(std::mem::replace(
-                                            &mut responder,
-                                            handoff.delegate,
-                                        ));
-                                        let budget_paused = handoff.budget_paused;
-                                        match handoff.reply {
-                                            Some(reply) => {
-                                                // Issue #1846 review (Codex
-                                                // #3865395868): `TaskHandoff` now
-                                                // carries the delegate's own
-                                                // budget pause through from
-                                                // `DeskReply` — this is the other
-                                                // half of the asymmetry the
-                                                // top-level orchestrator's own
-                                                // dispatched call already closed
-                                                // above (`outcome.budget_paused`).
-                                                // Without it a delegate that ran
-                                                // out of credits still settled
-                                                // `Completed`, landing the pause
-                                                // notice in In Review as though it
-                                                // were a finished answer.
-                                                let end = if budget_paused.is_some() {
-                                                    TaskRunEnd::Paused
-                                                } else {
-                                                    TaskRunEnd::Completed
-                                                };
-                                                settle(&mut card, end, &responder, &reply);
-                                                (end, reply)
-                                            }
-                                            // The hand-off ran and an operator
-                                            // CANCELLED it in flight, so it produced
-                                            // nothing. Naming the cancellation here
-                                            // is safe because `TaskHandoff` only
-                                            // carries `reply: None` for a run
-                                            // `run_delegation` reported as cancelled
-                                            // — a hand-off that ends empty for any
-                                            // other reason reports no hand-off at
-                                            // all and never reaches this arm (issue
-                                            // #213 review).
-                                            //
-                                            // Partial work is discarded and the card
-                                            // returns to To-do, exactly as a
-                                            // cancelled dispatch does — it must not
-                                            // read as finished, and it must not
-                                            // strand in `in_progress` either.
-                                            None => {
-                                                let reply =
-                                                    "the delegated run was cancelled before it \
-                                                 produced anything"
-                                                        .to_string();
-                                                settle(
-                                                    &mut card,
-                                                    TaskRunEnd::Cancelled,
-                                                    &responder,
-                                                    &reply,
-                                                );
-                                                (TaskRunEnd::Cancelled, reply)
-                                            }
-                                        }
-                                    }
-                                    // Nothing was handed off — the responder did the
-                                    // work itself, as before. A ceiling pause can happen
-                                    // after tool calls, so settle it only after draining
-                                    // the staged hand-off queue above (issue #1680).
-                                    None if outcome.ceiling_paused.is_some() => {
-                                        let pause = outcome
-                                            .ceiling_paused
-                                            .as_ref()
-                                            .expect("guarded by this arm");
-                                        let result = ceiling_pause_notice(pause);
-                                        settle(&mut card, TaskRunEnd::Paused, &responder, &result);
-                                        (TaskRunEnd::Paused, result)
-                                    }
-                                    None => {
-                                        let result = outcome.reply;
-                                        settle(
-                                            &mut card,
-                                            TaskRunEnd::Completed,
-                                            &responder,
-                                            &result,
-                                        );
-                                        (TaskRunEnd::Completed, result)
-                                    }
+                                let (end, result) = if let Some(pause) =
+                                    outcome.ceiling_paused.as_ref()
+                                {
+                                    // A ceiling pause can happen after tool calls, so
+                                    // settle it only after draining the staged board
+                                    // writes above (issue #1680).
+                                    let result = ceiling_pause_notice(pause);
+                                    settle(&mut card, TaskRunEnd::Paused, &responder, &result);
+                                    (TaskRunEnd::Paused, result)
+                                } else {
+                                    let result = outcome.reply;
+                                    settle(&mut card, TaskRunEnd::Completed, &responder, &result);
+                                    (TaskRunEnd::Completed, result)
                                 };
                                 break (end, result);
                             }
@@ -2313,7 +2200,7 @@ impl HarnessBrain {
                     steps: Vec::new(),
                     task_id: Some(card.id.clone()),
                     outputs: Vec::new(),
-                    episode: None,
+                    hive: None,
                 },
             )
             .await
@@ -2674,230 +2561,111 @@ impl HarnessBrain {
     /// next message with nothing to invalidate.
     /// The room this card convenes, or `None` for the ordinary pooled dispatch.
     ///
-    /// Three gates, all of which must hold. The flag, because a convened card's
-    /// episode is awaited inside this cycle and the cycle holds the company-wide
-    /// lock (see `card_episodes_enabled`). A **desk** assignee, because a card
-    /// worked by a room is owned by the desk — that makes convening the operator's
-    /// choice rather than something inferred from a teammate's memberships, which
-    /// has no good answer for somebody on three desks. And a room that actually
-    /// binds, which `card_hive` decides: a desk under two bindable seats cannot
-    /// deliberate, so the card takes the pooled path instead.
+    /// Three gates, all of which must hold. The flag
+    /// (`OPENCOMPANY_CARD_EPISODES`, default off), because a convened card's
+    /// episode is awaited inside this cycle and the cycle holds the
+    /// company-wide lock. A **desk** assignee, because a card worked by a room
+    /// is owned by the desk. And a desk the company hive can actually convene:
+    /// two or more of its members registered there, so the episode has
+    /// somebody to deliberate with.
     async fn convene_for_card(
         &self,
-        card: &TaskRecord,
         resolution: &assignee::AssigneeResolution,
-    ) -> Option<crate::hive::graph::DeskHive> {
-        if !crate::hive::graph::card_episodes_enabled(&crate::app::config::ProcessEnv) {
+    ) -> Option<(Arc<crate::hive::runtime::CompanyHive>, String)> {
+        if !card_episodes_enabled(&crate::app::config::ProcessEnv) {
             return None;
         }
         let assignee::AssigneeResolution::Desk { desk, .. } = resolution else {
             return None;
         };
         let record = self.record();
-        let mut agents: std::collections::HashMap<String, openhuman_embed::Agent> =
-            std::collections::HashMap::new();
-        for agent in record.effective_agents() {
-            if let Some(live) = self.pool.agent(&record.id, &agent.id).await {
-                agents.insert(agent.id.clone(), live.runtime_agent().clone());
-            }
-        }
-        let roster_version = record.effective_agents().len() as u64;
-        crate::hive::graph::card_hive(&record, &card.id, desk, roster_version, &|id| {
-            agents.get(id).cloned()
-        })
+        let hive = self.pool.hive(&record.id).await?;
+        let seated = crate::hive::route::hive_members(&record, desk)
+            .iter()
+            .filter(|member| hive.coordinator_id(member).is_some())
+            .count();
+        (seated >= 2).then(|| (hive, desk.clone()))
     }
 
-    /// Runs a card's work as one episode and folds it into the pair the settle
-    /// wants, so everything after the branch is the pooled path's own code.
+    /// Runs a card's work as one episode on its desk's hive and folds it into
+    /// the pair the settle wants, so everything after the branch is the
+    /// pooled path's own code (OC-2).
     ///
-    /// Awaited, not detached. That is what holds the company-wide lock for the
-    /// episode's life and why the flag defaults off — but it is also what lets the
-    /// existing settle land the card, rather than a second settle written for a
-    /// detached pass.
+    /// The brief goes in through the Coordinator's `send_as_host`, started by
+    /// the desk's default responder; the card settles once the episode it
+    /// opened does — `Completed` when it settled, `Failed` (back to the
+    /// column it came from) when it stopped on a wall, an error or an
+    /// interrupted turn. Awaited, not detached, for the reason the flag
+    /// defaults off.
     async fn run_card_room(
         &self,
-        room: crate::hive::graph::DeskHive,
+        hive: Arc<crate::hive::runtime::CompanyHive>,
+        desk: &str,
         card: &TaskRecord,
     ) -> (lifecycle::TaskRunEnd, String) {
-        let Some(events) = self.deps.events.clone() else {
-            return (
-                lifecycle::TaskRunEnd::Failed,
-                "this card's desk could not convene: no journal is wired for the room to read \
-                 and commit through"
-                    .to_string(),
-            );
-        };
-        let hives = std::collections::HashMap::from([(card.id.clone(), Arc::new(room))]);
-        let dispatcher = crate::hive::dispatch::dispatcher(
-            self.record(),
-            events,
-            hives,
-            Arc::new(HarnessDeps::clone(&self.deps)),
-            Arc::clone(&self.pool),
-            self.mentions.clone(),
-        )
-        .await;
-
-        // `carried_on` so the room reads this as work it has been handed rather
-        // than a question to answer — `Trigger::is_question` is the only thing the
-        // flag gates, and a card brief is an assignment.
-        //
-        // `seq` is zero because a card has no journaled message behind it;
-        // `trigger_for` takes `Option` and defaults the same way for the same
-        // reason.
-        let trigger = crate::hive::conducted::Trigger {
-            seq: crate::ports::types::EventSeq::new(0),
-            text: task_instruction(card),
-            parent: None,
-            mentions: Vec::new(),
-            carried_on: true,
-        };
-        let episode_id = uuid::Uuid::new_v4().simple().to_string();
-        match dispatcher
-            .run_desk_message_as(&card.id, trigger, episode_id)
+        let record = self.record();
+        let starters: Vec<String> =
+            crate::hive::route::default_starter(&record, desk, &self.orchestrator())
+                .and_then(|lead| hive.coordinator_id(&lead))
+                .into_iter()
+                .collect();
+        let coordinator = hive.coordinator();
+        let mut changes = coordinator.subscribe();
+        let receipt = match coordinator
+            .send_as_host(tinyhivemind_hives::SendMessage {
+                message_id: format!("card:{}:{}", card.id, uuid::Uuid::new_v4().simple()),
+                sender: String::new(),
+                destination: tinyhivemind_hives::Destination::Hive(crate::hive::hive_id_for_chat(
+                    desk,
+                )),
+                body: task_instruction(card),
+                thread: None,
+                only_for: Vec::new(),
+                starters,
+            })
             .await
         {
-            // At least one seat reported its work finished. The room's own words
-            // are already journaled on this card's conversation — the hive is
-            // keyed on the card id — so the note says what happened rather than
-            // repeating a transcript the timeline already holds.
-            Ok(report) if report.settled > 0 => (
-                lifecycle::TaskRunEnd::Completed,
-                format!(
-                    "{} worked this card as a room: {} seat turn(s) across {} wave(s), {} \
-                     reporting the work finished.",
-                    card.assignee, report.turns, report.waves, report.settled
-                ),
-            ),
-            // The room ran and nobody claimed the work. That is not a success with
-            // nothing to show; it is a card to put back, which `Failed` does.
-            Ok(report) => (
-                lifecycle::TaskRunEnd::Failed,
-                format!(
-                    "this card's desk convened but no seat reported the work finished after {} \
-                     turn(s)",
-                    report.turns
-                ),
-            ),
-            Err(err) => (
-                lifecycle::TaskRunEnd::Failed,
-                format!("this card's desk could not convene: {err}"),
-            ),
-        }
-    }
-
-    async fn desk_hives(
-        &self,
-        record: &CompanyRecord,
-    ) -> std::collections::HashMap<String, Arc<crate::hive::graph::DeskHive>> {
-        let mut agents: std::collections::HashMap<String, openhuman_embed::Agent> =
-            std::collections::HashMap::new();
-        for agent in record.effective_agents() {
-            if let Some(live) = self.pool.agent(&record.id, &agent.id).await {
-                agents.insert(agent.id.clone(), live.runtime_agent().clone());
+            Ok(receipt) => receipt,
+            Err(error) => {
+                return (
+                    lifecycle::TaskRunEnd::Failed,
+                    format!("this card's desk could not convene: {error}"),
+                );
+            }
+        };
+        loop {
+            let phase = coordinator.episodes().ok().and_then(|episodes| {
+                episodes
+                    .into_iter()
+                    .find(|episode| episode.opened_at == receipt.sequence)
+                    .map(|episode| episode.phase)
+            });
+            match phase {
+                Some(tinyhivemind_hives::EpisodePhase::Settled) => {
+                    return (
+                        lifecycle::TaskRunEnd::Completed,
+                        format!(
+                            "{} worked this card as a room; the episode settled and its lines \
+                             are on the desk.",
+                            card.assignee
+                        ),
+                    );
+                }
+                Some(tinyhivemind_hives::EpisodePhase::Failed(reason)) => {
+                    return (
+                        lifecycle::TaskRunEnd::Failed,
+                        format!("this card's desk convened but its episode stopped: {reason}"),
+                    );
+                }
+                _ => {}
+            }
+            if changes.changed().await.is_err() {
+                return (
+                    lifecycle::TaskRunEnd::Failed,
+                    "this card's desk stopped before its episode settled".to_string(),
+                );
             }
         }
-        crate::hive::dispatch::hives_for(record, &|id| agents.get(id).cloned())
-    }
-
-    /// The episode seat that parked `approval_id`, if a seat did.
-    fn episode_seat_of(
-        &self,
-        approval_id: &crate::ports::types::ApprovalId,
-    ) -> Option<crate::runtime::episode_resume::EpisodeSeat> {
-        self.deps
-            .approval_parker
-            .as_ref()?
-            .turn_of(approval_id)
-            .as_deref()
-            .and_then(crate::runtime::episode_resume::parse)
-    }
-
-    /// Carries on a desk episode from its last checkpoint, on its own task.
-    async fn resume_desk_episode(&self, episode_id: &str) -> bool {
-        let Some(events) = self.deps.events.clone() else {
-            return false;
-        };
-        let warmed = match self.refresh_record().await {
-            Ok(()) => self.run_turn().ensure(&self.record()).await,
-            Err(error) => Err(error),
-        };
-        if let Err(error) = warmed {
-            tracing::error!(
-                episode = %episode_id,
-                %error,
-                "[hive] the roster a parked episode resumes with could not be built"
-            );
-            return false;
-        }
-        let record = self.record();
-        let hives = self.desk_hives(&record).await;
-        let dispatcher = crate::hive::dispatch::dispatcher(
-            record,
-            events,
-            hives,
-            Arc::new(HarnessDeps::clone(&self.deps)),
-            Arc::clone(&self.pool),
-            self.mentions.clone(),
-        )
-        .await;
-        crate::hive::dispatch::spawn_resume(dispatcher, episode_id.to_owned());
-        true
-    }
-
-    /// The first active teammate the message named, in reading order —
-    /// `tinyhivemind_core::mention::direct_responder` over the live roster.
-    fn mentioned_responder(&self, mentions: &[crate::ports::types::Mention]) -> Option<String> {
-        if mentions.is_empty() {
-            return None;
-        }
-        let record = self.record();
-        let members = crate::runtime::delegation_tools::tinyhivemind_roster(&record);
-        let retired = record.overlay_retired_agents.clone();
-        let roster = tinyhivemind_core::roster::Roster::new(&members, &[], &retired);
-        let mentions: Vec<tinyhivemind_core::mention::Mention> = mentions
-            .iter()
-            .map(crate::hive::dispatch::tinyhivemind_mention)
-            .collect();
-        tinyhivemind_core::mention::direct_responder(&mentions, &roster).map(str::to_string)
-    }
-
-    /// Everyone else the message named, expanded against the addressed desk
-    /// — `tinyhivemind_core::mention::mentioned_members` over the live
-    /// roster and desks, excluding `responder`.
-    fn mentioned_members(
-        &self,
-        addressed_desk: &str,
-        mentions: &[crate::ports::types::Mention],
-        responder: Option<&str>,
-    ) -> Vec<String> {
-        if mentions.is_empty() {
-            return Vec::new();
-        }
-        let record = self.record();
-        let members = crate::runtime::delegation_tools::tinyhivemind_roster(&record);
-        let retired = record.overlay_retired_agents.clone();
-        let roster = tinyhivemind_core::roster::Roster::new(&members, &[], &retired);
-        let snapshots = crate::runtime::delegation_tools::tinyhivemind_desks(&record);
-        let desks = snapshots.set();
-        let mentions: Vec<tinyhivemind_core::mention::Mention> = mentions
-            .iter()
-            .map(crate::hive::dispatch::tinyhivemind_mention)
-            .collect();
-        tinyhivemind_core::mention::mentioned_members(
-            &mentions,
-            Some(addressed_desk),
-            responder,
-            &roster,
-            &desks,
-        )
-    }
-
-    /// The desk key `@everyone` expands against for a message addressed to
-    /// `chat`; an unaddressed message expands against #general.
-    fn everyone_desk(chat: Option<&str>) -> String {
-        chat.unwrap_or(crate::ports::general_channel::GENERAL_CHANNEL_ID)
-            .to_string()
     }
 
     /// Drains the MCP failure queue **onto the operator bubble's step timeline**
@@ -3169,15 +2937,8 @@ impl HarnessBrain {
     /// `spawn_task` opens a To-do card through the same
     /// [`TaskStore::upsert`](crate::ports::TaskStore) path the console uses and
     /// reports the card's id (issue #246); it surfaces no bubble of its own. A
-    /// missing task store is a silent no-op.
-    /// `delegate_to_desk` runs a single turn on the desk's lead member and
-    /// **returns its reply for the orchestrator to relay** (a [`DeskReply`]) —
-    /// the CEO-relay hand-back: instead of a disconnected sibling bubble the
-    /// teammate's answer feeds a second orchestrator turn so the CEO comes back
-    /// with it in one coherent conversation. An unknown desk (no roster-backed
-    /// lead) or a cancelled run yields nothing to relay. No sub-agent
-    /// re-delegation in v1: desk members carry no delegation tools, so their
-    /// turns queue nothing.
+    /// missing task store is a silent no-op. The lifecycle delegations write the
+    /// card they name; none runs another agent's turn (OC-2).
     ///
     /// The orchestration lives on the brain-agnostic seam (issue #176); this is
     /// a thin wrapper that re-attaches `HarnessDeps` behind a
@@ -3194,7 +2955,7 @@ impl HarnessBrain {
         let run_turn = self.run_turn();
         let record = self.record();
         self.delegation_runner(run_turn.as_ref(), &record)
-            .run_delegation(delegation, chat_id, delegation::MessageContext::default())
+            .run_delegation(delegation, chat_id)
             .await
     }
 
@@ -3224,7 +2985,6 @@ impl HarnessBrain {
             run_turn,
             record,
             self.deps.tasks.as_ref(),
-            &self.deps.steer,
             &record.id,
             &self.deps.delegations,
             orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -3286,6 +3046,19 @@ impl HarnessBrain {
             .map(|card| card.id)
             .next_back()
     }
+}
+
+/// Whether a desk-assigned card's work runs as an episode on its desk's hive
+/// rather than as one pooled turn on the desk's lead.
+///
+/// **Default off**: a convened card's episode is awaited *inside* its dispatch
+/// cycle, and that cycle holds the company-wide `serial` lock, so while a room
+/// works a card nothing else in that company runs. `OPENCOMPANY_CARD_EPISODES=1`
+/// turns it on.
+#[must_use]
+pub fn card_episodes_enabled(env: &dyn crate::app::config::EnvSource) -> bool {
+    env.get("OPENCOMPANY_CARD_EPISODES")
+        .is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
 }
 
 /// The turn instruction for a dispatched card: its title, plus its note when it
@@ -3434,8 +3207,23 @@ impl Brain for HarnessBrain {
         Some(self.title_pass(&self.record().id))
     }
 
-    async fn resume_episode(&self, episode_id: &str) -> bool {
-        self.resume_desk_episode(episode_id).await
+    async fn release_hive_agent(&self, agent_id: &str, note: Option<String>) -> bool {
+        let company = self.record().id.clone();
+        let Some(hive) = self.pool.hive(&company).await else {
+            return false;
+        };
+        match hive.release(agent_id, note).await {
+            Ok(released) => released,
+            Err(error) => {
+                tracing::error!(
+                    %company,
+                    agent = %agent_id,
+                    %error,
+                    "[hive] a parked agent could not be released"
+                );
+                false
+            }
+        }
     }
 
     async fn run_cycle(&self, req: CycleRequest, host: &dyn CycleHost) -> Result<CycleResult> {
@@ -3635,45 +3423,24 @@ impl HarnessBrain {
                         channel_responses.push(confined_turn_bubble(outcome));
                         continue;
                     }
-                    // Plan hive-desks, Phase 4/5: a desk with somebody to
-                    // deliberate WITH answers as a room. The message opens
-                    // (or joins) an episode on that desk's hive; the seats run
-                    // in concurrent rounds until every assigned one calls
-                    // `complete_episode`; every utterance is journaled by the
-                    // driver as an `AgentReply` with its episode metadata, so
-                    // no bubble goes back through `channel_responses` — the
-                    // REST route would journal it a second time.
+                    // OC-2: every conversation goes through the company hive.
+                    // The message is accepted by the Coordinator — on the
+                    // addressed desk's hive, started by the members the
+                    // mention / Jev / default ladder chose, or on the
+                    // teammate's direct line — and the turns that answer it
+                    // run on the hive's own task. Their replies reach the
+                    // journal through the projector, so no bubble goes back
+                    // through `channel_responses`: the REST route would
+                    // journal it a second time.
                     //
-                    // Every other surface — a DM, `#general`, a workflow
-                    // thread, a desk of one — takes the single-turn path
-                    // below. A copilot thread returned above.
-                    //
-                    // The episode runs on its own task: the cycle accepted the
-                    // message, the request is journaled, and the console
-                    // follows the rounds live. Skipped when the journal is not
-                    // wired: the driver reads its own rows back.
-                    if let Some(events) = self.deps.events.clone() {
-                        let record = self.record();
-                        let hives = self.desk_hives(&record).await;
-                        if let crate::hive::dispatch::Surface::Room { desk_id } =
-                            crate::hive::dispatch::surface_of(&record, &hives, chat.as_deref())
-                        {
-                            let dispatcher = crate::hive::dispatch::dispatcher(
-                                record,
-                                events,
-                                hives,
-                                Arc::new(HarnessDeps::clone(&self.deps)),
-                                Arc::clone(&self.pool),
-                                self.mentions.clone(),
-                            )
-                            .await;
-                            let trigger = crate::hive::dispatch::trigger_for(
-                                event_seq, &composed, *parent, mentions,
-                            );
-                            crate::hive::dispatch::spawn_episode(dispatcher, desk_id, trigger);
-                            room_answered = true;
-                            continue;
-                        }
+                    // A host with no hive (no store wired: most unit tests)
+                    // takes the single isolated turn below instead.
+                    if self
+                        .send_to_hive(event_seq, &composed, chat.as_deref(), *parent, mentions)
+                        .await?
+                    {
+                        room_answered = true;
+                        continue;
                     }
                     // Route to the teammate the message named, else to the
                     // addressed desk's default responder, else the
@@ -3689,9 +3456,15 @@ impl HarnessBrain {
                     // One thread, one card: a follow-up joins the work its
                     // thread already opened instead of opening another.
                     let thread_card = self.thread_card(chat.as_deref(), *parent).await;
-                    let responder = self
-                        .mentioned_responder(mentions)
-                        .unwrap_or_else(|| self.responder_for(chat.as_deref()));
+                    let record_now = self.record();
+                    let addressed = chat
+                        .as_deref()
+                        .unwrap_or(crate::ports::general_channel::GENERAL_CHANNEL_ID);
+                    let responder =
+                        crate::hive::route::mentioned_starters(&record_now, addressed, mentions)
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| self.responder_for(chat.as_deref()));
                     // Everyone else the message named, for the answering turn's
                     // context. A list, not a fan-out: one operator message still
                     // spawns exactly one turn, and this teammate spreads the
@@ -3699,9 +3472,11 @@ impl HarnessBrain {
                     // delegation seam rather than through a new uncontrolled
                     // one. `@everyone` expands here, against the addressed
                     // desk's membership.
-                    let addressed_desk = Self::everyone_desk(chat.as_deref());
-                    let also_mentioned =
-                        self.mentioned_members(&addressed_desk, mentions, Some(&responder));
+                    let also_mentioned: Vec<String> =
+                        crate::hive::route::mentioned_starters(&record_now, addressed, mentions)
+                            .into_iter()
+                            .filter(|member| member != &responder)
+                            .collect();
                     // The chat/desk thread this turn answers — the same id the
                     // reply is journaled under (`AgentReply.chat_id`). Passed into
                     // the pool so the live turn-stream frames carry it and the
@@ -4166,15 +3941,14 @@ impl HarnessBrain {
                     verdict,
                     ..
                 } => {
-                    if let Some(seat) = self.episode_seat_of(approval_id) {
+                    if let Some(seat) = self.hive_seat_of(approval_id) {
                         tracing::warn!(
                             %approval_id,
-                            episode = %seat.episode_id,
-                            seat = %seat.seat,
-                            "[hive] an episode seat's decision reached a chat cycle; handing it to \
-                             its episode instead of re-running the call here"
+                            agent = %seat.agent_id,
+                            "[hive] a hive turn's decision reached a chat cycle; releasing the \
+                             agent instead of re-running the call here"
                         );
-                        self.resume_episode(&seat.episode_id).await;
+                        self.release_hive_agent(&seat.agent_id, None).await;
                     } else if let Some(message) =
                         self.redispatch_granted_call(approval_id, *verdict).await?
                     {
@@ -4452,7 +4226,7 @@ impl HarnessBrain {
                                         steps: response.steps.clone(),
                                         mentions: Vec::new(),
                                         mention_depth: 0,
-                                        episode: None,
+                                        hive: None,
                                     },
                                 )
                                 .await
@@ -4514,3 +4288,5 @@ impl HarnessBrain {
 #[cfg(test)]
 #[path = "brain_tests.rs"]
 mod tests;
+
+mod hive_chat;

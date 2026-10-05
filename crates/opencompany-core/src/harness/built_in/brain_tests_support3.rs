@@ -57,7 +57,7 @@ pub(super) fn brain_with_queue_and_events(
     events: Arc<dyn crate::ports::EventLog>,
 ) -> HarnessBrain {
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -125,7 +125,7 @@ pub(super) fn brain_with_queue_and_events_and_budget_exhausted_provider(
     events: Arc<dyn crate::ports::EventLog>,
 ) -> HarnessBrain {
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -349,7 +349,7 @@ pub(super) fn brain_over_script(
     use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,

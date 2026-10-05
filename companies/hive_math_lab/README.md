@@ -2,12 +2,14 @@
 
 > **Migration note.** The trace-grammar hive this bundle was written against
 > (`[group_chat.hive]`: quorum, turn budget, blind round, per-seat moves,
-> asides) has been replaced by completion-driven rooms — concurrent rounds,
-> speech as a tool call, Jev routing, referral — configured by
-> `[group_chat.routing]` ([`docs/spec/runtime/hive.md`](../../docs/spec/runtime/hive.md)).
-> A `[group_chat.hive]` block is refused at load with a migration hint; the
-> desks below keep their seats and their referral settings, and the grammar
-> paragraphs describe the design the bundle was tuned under, not what runs.
+> asides) has been replaced by the company hive — one TinyHiveMind
+> `Coordinator` per company, desks as hives, agents talking with the
+> `hivemind_*` tools — configured by `[group_chat.routing]`
+> ([`docs/spec/runtime/hive.md`](../../docs/spec/runtime/hive.md)). A
+> `[group_chat.hive]` or `[group_chat.routing.referral]` block is refused at
+> load with a migration hint; cross-desk questions are direct messages now, and
+> the grammar paragraphs describe the design the bundle was tuned under, not
+> what runs.
 
 The [Agentic Math Lab](../math_lab/README.md), re-seated on **one
 desk** instead of four, so a stated problem is answered by a tinyhivemind

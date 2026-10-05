@@ -13,8 +13,6 @@ composio_list_tools group=Other reach=Nothing standing=PerCall
 create_workflow group=Other reach=Nothing standing=PerCall
 csv_export group=Other reach=Consequence standing=Grantable
 curl group=Other reach=Consequence standing=PerCall
-delegate_to_desk group=Other reach=Nothing standing=PerCall
-delegate_to_teammate group=Other reach=Nothing standing=PerCall
 delete_workflow group=Other reach=Consequence standing=PerCall
 describe_skill group=Other reach=Nothing standing=PerCall
 edit group=Other reach=Consequence standing=Grantable

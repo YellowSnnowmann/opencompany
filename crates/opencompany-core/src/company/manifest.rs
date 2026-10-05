@@ -15,8 +15,7 @@ use crate::ports::decode_wallet_address;
 use super::types::{
     ACP_AGENTS, ACP_TRANSPORTS, AUTH_MODES, BRAIN_MODES, CONNECTION_PRIORITIES, CompanyManifest,
     GATEABLE_NAMESPACES, HARNESS_KINDS, Harness, IMPLICIT_HARNESS_ID, Inference, KNOWN_CHANNELS,
-    MAX_DELEGATION_DEPTH_BOUNDS, PLAN_NAMES, PLAN_PERIODS, POLICY_MODES, PROMPT_CLASSES, TIERS,
-    TOOL_PROVIDERS,
+    PLAN_NAMES, PLAN_PERIODS, POLICY_MODES, PROMPT_CLASSES, TIERS, TOOL_PROVIDERS,
 };
 
 /// The `delegates_to` entry that means "every desk this company has".
@@ -324,7 +323,10 @@ impl CompanyManifest {
                 source,
             })?;
 
-        if let Some(problem) = legacy_hive_block(&text).or_else(|| legacy_speech_block(&text)) {
+        if let Some(problem) = legacy_hive_block(&text)
+            .or_else(|| legacy_speech_block(&text))
+            .or_else(|| legacy_referral_block(&text))
+        {
             return Err(OpenCompanyError::ManifestParse(path.to_path_buf(), problem));
         }
         toml::from_str(&text).map_err(|err| {
@@ -342,6 +344,15 @@ impl CompanyManifest {
     /// see a key it does not declare.
     pub fn legacy_hive_block(text: &str) -> Option<String> {
         legacy_hive_block(text)
+    }
+
+    /// Whether a manifest still carries the retired
+    /// `[group_chat.routing.referral]` block or `[tools].max_delegation_depth`
+    /// key, and the migration hint if it does (OC-2). Refused rather than ignored for the same reason as
+    /// [`legacy_hive_block`](Self::legacy_hive_block): a desk tuned to refer
+    /// across desks would otherwise run as though it never asked.
+    pub fn legacy_referral_block(text: &str) -> Option<String> {
+        legacy_referral_block(text)
     }
 
     /// Whether a manifest still carries the retired `[speech]` block, and the
@@ -686,8 +697,8 @@ impl CompanyManifest {
         // one agent field whose target lives in a *later* section — the desks
         // are only fully known once `[[group_chat]]` has been walked. An entry
         // that resolves to nothing would otherwise fail silently at runtime:
-        // the member would carry `delegate_to_desk`, every call would be
-        // refused as off-allowlist, and the manifest would look fine.
+        // every `hivemind_send_agent` to that desk would be refused as
+        // off-allowlist, and the manifest would look fine.
         for agent in &self.agents {
             let label = if agent.id.is_empty() {
                 "an agent".to_string()
@@ -784,21 +795,6 @@ impl CompanyManifest {
                 "`[tools].provider`",
                 TOOL_PROVIDERS,
                 &self.tools.provider,
-            ));
-        }
-
-        // The delegation chain bound (issue #176). `0` would refuse the
-        // orchestrator's own hand-off — delegation off entirely, by a knob that
-        // reads like a depth — and anything past the ceiling is a runaway with
-        // a number in front of it, since the per-turn fan-out cap applies at
-        // every level.
-        if let Some(depth) = self.tools.max_delegation_depth
-            && !MAX_DELEGATION_DEPTH_BOUNDS.contains(&depth)
-        {
-            problems.push(format!(
-                "`[tools].max_delegation_depth` must be between {} and {} — you wrote `{depth}`. Use `1` to stop desks re-delegating at all.",
-                MAX_DELEGATION_DEPTH_BOUNDS.start(),
-                MAX_DELEGATION_DEPTH_BOUNDS.end(),
             ));
         }
 
@@ -1476,7 +1472,47 @@ fn legacy_hive_block(text: &str) -> Option<String> {
         return None;
     }
     Some(format!(
-        "group chat `{}` declares `[group_chat.hive]`, which no longer exists — the trace-grammar          hive (quorum, moves, aside, turn_budget) was replaced by completion-driven episodes.          Delete the block, and say how the desk routes and paces its rounds under          `[group_chat.routing]` (`round_width`, `max_rounds`, `turn_timeout_secs`) and          `[group_chat.routing.referral]` (`enabled`, `max_hops`, `reach`, `returns`); see          `docs/spec/runtime/hive.md`.",
+        "group chat `{}` declares `[group_chat.hive]`, which no longer exists — the trace-grammar          hive (quorum, moves, aside, turn_budget) was replaced by completion-driven episodes.          Delete the block, and say how the desk routes and paces its rounds under          `[group_chat.routing]` (`round_width`, `max_rounds`, `turn_timeout_secs`); see          `docs/spec/runtime/hive.md`.",
+        stale.join("`, `")
+    ))
+}
+
+/// The migration hint for a manifest that still declares
+/// `[group_chat.routing.referral]` or `[tools].max_delegation_depth` (OC-2):
+/// both bounded the desk hand-offs the company hive replaced.
+fn legacy_referral_block(text: &str) -> Option<String> {
+    let document: toml::Value = toml::from_str(text).ok()?;
+    if document
+        .get("tools")
+        .and_then(|tools| tools.get("max_delegation_depth"))
+        .is_some()
+    {
+        return Some(
+            "`[tools].max_delegation_depth` no longer exists — it bounded the desk hand-off \
+             chain, and a teammate now reaches a colleague by message \
+             (`hivemind_send_agent`), which runs no turn inside its own. Delete the key; see \
+             `docs/spec/runtime/hive.md`."
+                .to_string(),
+        );
+    }
+    let desks = document.get("group_chat")?.as_array()?;
+    let stale: Vec<&str> = desks
+        .iter()
+        .filter(|desk| {
+            desk.get("routing")
+                .and_then(|routing| routing.get("referral"))
+                .is_some()
+        })
+        .map(|desk| desk.get("id").and_then(toml::Value::as_str).unwrap_or("?"))
+        .collect();
+    if stale.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "group chat `{}` declares `[group_chat.routing.referral]`, which no longer exists — a \
+         teammate reaches another desk by messaging its members directly \
+         (`hivemind_send_agent`), bounded by its `delegates_to` allowlist. Delete the block; \
+         see `docs/spec/runtime/hive.md`.",
         stale.join("`, `")
     ))
 }

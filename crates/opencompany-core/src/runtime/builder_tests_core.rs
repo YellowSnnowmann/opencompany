@@ -92,7 +92,6 @@ pub(super) fn seed_tools(allow: &[&str]) -> Tools {
         web_allowed_domains: Vec::new(),
         composio: Default::default(),
         search_daily_calls: None,
-        max_delegation_depth: None,
     };
     tools.allow.shrink_to_fit();
     tools

@@ -243,8 +243,6 @@ fn dispatched_desk_agent_tool_belt_is_pinned() {
         // a teammate that cannot reach the colleague beside it, and cannot
         // open a card, is one the runtime had to card *for* — which is how
         // every desk message became a task nobody asked for.
-        "delegate_to_desk",
-        "delegate_to_teammate",
         "spawn_task",
     ];
     // The global baseline installs skills in every company (issue: global
@@ -448,18 +446,17 @@ fn every_built_agent_states_a_raised_tool_iteration_cap() {
     );
 }
 
-/// (b) A dispatched desk agent carries the three **hand-off** tools and
-/// none of the orchestrator's **authority**; the orchestrator carries both.
-/// Building both from the same grant and contrasting them is the
-/// registration check that a desk lead can reach a colleague without
-/// becoming a second CEO.
+/// (b) A dispatched desk agent carries `spawn_task` and none of the
+/// orchestrator's **authority**; the orchestrator carries both. Building both
+/// from the same grant and contrasting them is the registration check that a
+/// desk lead can put work on a colleague's card without becoming a second CEO.
 ///
-/// Issue #176 wired the hand-off tools only onto a member that opted in
-/// with `delegates_to`; they are now on every belt, and the list only
-/// narrows where they reach — see [`a_narrowed_member_gets_the_same_belt`].
+/// Neither belt carries a desk or teammate hand-off: since OC-2 an agent
+/// reaches a colleague by hive message (`hivemind_send_agent`), which the
+/// OpenHuman host wires at registration, not this builder.
 #[test]
-fn dispatched_agent_has_the_hand_off_tools_but_not_the_orchestrators_authority() {
-    let hand_off = ["spawn_task", "delegate_to_desk", "delegate_to_teammate"];
+fn dispatched_agent_has_spawn_task_but_not_the_orchestrators_authority() {
+    let hand_off = ["spawn_task"];
     let authority = [
         "query_company",
         "assign_task",
@@ -492,6 +489,14 @@ fn dispatched_agent_has_the_hand_off_tools_but_not_the_orchestrators_authority()
             "orchestrator agent MUST receive `{tool}`: {orchestrator:?}"
         );
     }
+    for belt in [&dispatched, &orchestrator] {
+        for retired in ["delegate_to_desk", "delegate_to_teammate"] {
+            assert!(
+                !belt.contains(&retired.to_string()),
+                "`{retired}` is retired with OC-2: {belt:?}"
+            );
+        }
+    }
 }
 
 /// (b2) A member whose manifest names a `delegates_to` allowlist gets the
@@ -513,9 +518,6 @@ fn a_narrowed_member_gets_the_same_belt() {
 /// (b3) An empty allowlist and an absent one build the same belt, and the
 /// orchestrator's own belt is untouched by `delegates_to`.
 ///
-/// The orchestrator half is what proves the `else` really is exclusive,
-/// since a second scoped `delegate_to_desk` beside the orchestrator's
-/// unrestricted one would put two tools of the same name on one belt.
 #[test]
 fn an_empty_allowlist_and_the_orchestrator_belt_are_unchanged() {
     assert_eq!(
@@ -530,13 +532,9 @@ fn an_empty_allowlist_and_the_orchestrator_belt_are_unchanged() {
         orchestrator,
         "an orchestrator's belt must not change when it also names `delegates_to`"
     );
-    assert_eq!(
-        orchestrator
-            .iter()
-            .filter(|t| *t == "delegate_to_desk")
-            .count(),
-        1,
-        "exactly one `delegate_to_desk` may be wired: {orchestrator:?}"
+    assert!(
+        !orchestrator.iter().any(|t| t == "delegate_to_desk"),
+        "no `delegate_to_desk` is wired since OC-2: {orchestrator:?}"
     );
 }
 

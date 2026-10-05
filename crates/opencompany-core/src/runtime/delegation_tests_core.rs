@@ -1,4 +1,5 @@
 pub(super) use super::*;
+pub(super) use crate::company::steer::SteerAction;
 pub(super) use crate::ports::tasks::COLUMN_TODO;
 pub(super) use crate::ports::tasks::TaskTitle;
 
@@ -34,12 +35,6 @@ pub(super) struct Turn {
     /// on a question turn is REFUSED in the model's own turn, and a fixture
     /// that pushed straight onto the queue could never observe the refusal.
     pub(super) tool_pushes: Vec<Delegation>,
-    /// Desks this turn named that the tool REFUSED (issue #272 for the
-    /// delegator, #176 for a member), recorded the way
-    /// `DelegateToDeskTool` records them so the drain can report the
-    /// attempt. A refusal never becomes a `Delegation`, so this is the only
-    /// way a fixture can stand in for one.
-    pub(super) refuses: Vec<String>,
     /// Workflows this turn authors inline with `create_workflow`, staged onto
     /// the shared [`WorkflowRefQueue`] *while the turn runs* — which is the
     /// only honest place for it (issue #678). A fixture that staged before
@@ -104,79 +99,6 @@ impl Turn {
             ..Self::default()
         }
     }
-
-    pub(super) fn cancelled(reply: &str) -> Self {
-        Self {
-            reply: reply.to_string(),
-            cancel: true,
-            ..Self::default()
-        }
-    }
-
-    /// A turn whose `delegate_to_desk` call was REFUSED at the tool
-    /// boundary (issue #176): nothing is queued, and the desk it named is
-    /// recorded for the drain to report.
-    pub(super) fn refused(reply: &str, desks: &[&str]) -> Self {
-        Self {
-            reply: reply.to_string(),
-            refuses: desks.iter().map(|d| d.to_string()).collect(),
-            ..Self::default()
-        }
-    }
-
-    /// A turn the in-turn spend brake halted (issue #1032): it replies with
-    /// whatever it had, and reports the halt alongside.
-    pub(super) fn spend_halted(reply: &str, agent: &str, spent_usd: f64, cap_usd: f64) -> Self {
-        Self {
-            reply: reply.to_string(),
-            spend_halt: Some(crate::harness::SpendHalt {
-                agent: agent.to_string(),
-                spent_usd,
-                cap_usd,
-            }),
-            ..Self::default()
-        }
-    }
-
-    /// A turn that paused for lack of inference budget/credits (issue
-    /// #1846): it replies with the actionable pause copy, and reports the
-    /// pause alongside — the delegation-fold analogue of
-    /// [`spend_halted`](Self::spend_halted).
-    pub(super) fn budget_paused(reply: &str, agent: &str, summary: &str) -> Self {
-        Self {
-            reply: reply.to_string(),
-            budget_paused: Some(crate::harness::BudgetPause {
-                agent: agent.to_string(),
-                summary: summary.to_string(),
-            }),
-            ..Self::default()
-        }
-    }
-
-    /// A turn that hit the harness's per-turn wall-clock ceiling (issue
-    /// #1680) — the sibling of [`budget_paused`](Self::budget_paused).
-    pub(super) fn ceiling_paused(reply: &str, agent: &str, elapsed_ms: u64) -> Self {
-        Self {
-            reply: reply.to_string(),
-            ceiling_paused: Some(crate::harness::CeilingPause {
-                agent: agent.to_string(),
-                elapsed: std::time::Duration::from_millis(elapsed_ms),
-                summary: format!("{agent} hit the per-turn wall-clock ceiling"),
-            }),
-            ..Self::default()
-        }
-    }
-
-    /// A turn whose **first** tool call parked for approval, so it produced
-    /// nothing: the reply is the agent saying it is blocked, not a result.
-    /// This is the shape in the issue #465 report.
-    pub(super) fn parked(reply: &str, tool: &str) -> Self {
-        Self {
-            reply: reply.to_string(),
-            parks: vec![tool.to_string()],
-            ..Self::default()
-        }
-    }
 }
 
 /// A [`RunTurn`] that plays a fixed script of turns and records who was
@@ -192,12 +114,6 @@ pub(super) struct ScriptedTurns {
     /// The board as it looked at the START of each turn, so a test can prove
     /// a card existed *while* an agent worked rather than only afterwards.
     board_at_turn: Mutex<Vec<Vec<(String, String)>>>,
-    /// The delegation-chain bound the scripted tool boundary enforces
-    /// (issue #176), standing in for `[tools].max_delegation_depth`. The
-    /// production `DelegateToDeskTool` reads it off the live record; a
-    /// scripted turn has no tool, so the depth a test runs under is set
-    /// here.
-    max_depth: usize,
     /// How the delegation queue was **claimed** while each turn ran (issues
     /// #453, #267). This is what a real tool reads to decide between
     /// staging and refusing, so recording it here is how a test proves the
@@ -239,16 +155,7 @@ impl ScriptedTurns {
             tasks: fx.tasks.clone(),
             company: fx.record.id.clone(),
             workflow_refs: fx.workflow_refs.clone(),
-            max_depth: usize::from(crate::company::DEFAULT_MAX_DELEGATION_DEPTH),
         }
-    }
-
-    /// Runs this script under a different `[tools].max_delegation_depth`
-    /// (issue #176) — `1` reproduces the pre-#176 "desks may not
-    /// re-delegate" behaviour.
-    pub(super) fn with_max_depth(mut self, max_depth: usize) -> Self {
-        self.max_depth = max_depth;
-        self
     }
 
     /// What the tool boundary answered every [`Turn::tool_pushes`] call, in
@@ -260,12 +167,6 @@ impl ScriptedTurns {
     /// `(agent_id, message)` for every turn run, in order.
     pub(super) fn calls(&self) -> Vec<(String, String)> {
         self.calls.lock().expect("calls").clone()
-    }
-
-    /// `(assignee, column)` for every card on the board when turn `n`
-    /// started.
-    pub(super) fn board_at_turn(&self, n: usize) -> Vec<(String, String)> {
-        self.board_at_turn.lock().expect("board")[n].clone()
     }
 
     /// Whether the delegation queue was claimed at all while turn `n` ran
@@ -325,17 +226,10 @@ impl ScriptedTurns {
         // …and the ones that go through the boundary a real tool goes
         // through, recording what it answered (issue #267).
         for delegation in turn.tool_pushes {
-            let staged = self.queue.push_within_cap(
-                delegation,
-                orchestrator::MAX_DELEGATIONS_PER_TURN,
-                self.max_depth,
-            );
+            let staged = self
+                .queue
+                .push_within_cap(delegation, orchestrator::MAX_DELEGATIONS_PER_TURN);
             self.staged.lock().expect("staged").push(staged);
-        }
-        // …and the ones the tool refused outright, which never become a
-        // `Delegation` at all (issues #272, #176).
-        for desk in turn.refuses {
-            self.queue.push_refusal(desk);
         }
         // Staged mid-turn, like the inline `create_workflow` tool (#678).
         for authored in turn.authors {
@@ -546,61 +440,6 @@ members = ["designer"]
     }
 }
 
-/// The hand-off the engineering lead makes one level down (issue #176).
-pub(super) fn nested_handoff(instruction: &str) -> Delegation {
-    Delegation::DelegateToDesk {
-        desk: "research_desk".to_string(),
-        instruction: instruction.to_string(),
-    }
-}
-
-/// The company shape issue #884 D1 was observed on: ONE desk with three
-/// members, so the lead has peers beside it that `delegate_to_desk` — which
-/// only ever resolves to the lead — could never reach.
-pub(super) fn peer_record() -> CompanyRecord {
-    let manifest = toml::from_str(
-        r#"
-[company]
-name = "Acme"
-
-[[agent]]
-id = "chief"
-role = "Chief of Staff"
-tier = "orchestrator"
-
-[[agent]]
-id = "brand_strategist"
-role = "Brand Strategist"
-
-[[agent]]
-id = "seo_specialist"
-role = "SEO Specialist"
-
-[[agent]]
-id = "copywriter"
-role = "Copywriter"
-
-[[group_chat]]
-id = "strategy"
-name = "Strategy desk"
-members = ["brand_strategist", "seo_specialist", "copywriter"]
-"#,
-    )
-    .expect("valid manifest");
-    CompanyRecord {
-        manifest,
-        ..record()
-    }
-}
-
-/// A hand-off to a named teammate (issue #884).
-pub(super) fn peer_handoff(teammate: &str, instruction: &str) -> Delegation {
-    Delegation::DelegateToTeammate {
-        teammate: teammate.to_string(),
-        instruction: instruction.to_string(),
-    }
-}
-
 /// The wired pieces one drain needs: the company record, a real task store
 /// over a temp dir, the shared queue, and the steer registry.
 pub(super) struct Fixture {
@@ -608,7 +447,6 @@ pub(super) struct Fixture {
     pub(super) record: CompanyRecord,
     pub(super) tasks: Arc<dyn TaskStore>,
     pub(super) queue: DelegationQueue,
-    steer: InflightRegistry,
     /// Wired into every runner, so the parked-approval overlay (issue #465)
     /// is exercised by the whole existing suite rather than only by the
     /// tests that park something.
@@ -629,11 +467,6 @@ impl Fixture {
         Self::over(nested_record())
     }
 
-    /// A fixture over the one three-person desk issue #884 D1 was seen on.
-    pub(super) fn peers() -> Self {
-        Self::over(peer_record())
-    }
-
     pub(super) fn over(record: CompanyRecord) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         Self {
@@ -641,7 +474,6 @@ impl Fixture {
             _dir: dir,
             record,
             queue: DelegationQueue::default(),
-            steer: InflightRegistry::default(),
             approvals: ApprovalRequestQueue::default(),
             workflow_refs: WorkflowRefQueue::default(),
         }
@@ -652,7 +484,6 @@ impl Fixture {
             turns,
             &self.record,
             Some(&self.tasks),
-            &self.steer,
             &self.record.id,
             &self.queue,
             orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -663,13 +494,6 @@ impl Fixture {
 
     pub(super) async fn cards(&self) -> Vec<TaskRecord> {
         self.tasks.list(&self.record.id).await.expect("list cards")
-    }
-}
-
-pub(super) fn handoff(instruction: &str) -> Delegation {
-    Delegation::DelegateToDesk {
-        desk: "eng_desk".to_string(),
-        instruction: instruction.to_string(),
     }
 }
 

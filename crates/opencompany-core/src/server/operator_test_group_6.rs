@@ -27,7 +27,7 @@ async fn chat_history_route_reunifies_general_and_main_transcripts() {
             runtime.id(),
             CompanyEvent::AgentReply {
                 audience: Vec::new(),
-                episode: None,
+                hive: None,
                 mentions: Vec::new(),
                 mention_depth: 0,
                 parent: None,
@@ -47,7 +47,7 @@ async fn chat_history_route_reunifies_general_and_main_transcripts() {
             runtime.id(),
             CompanyEvent::AgentReply {
                 audience: Vec::new(),
-                episode: None,
+                hive: None,
                 mentions: Vec::new(),
                 mention_depth: 0,
                 parent: None,
@@ -155,7 +155,7 @@ async fn chat_history_route_rehydrates_reply_steps() {
             runtime.id(),
             CompanyEvent::AgentReply {
                 audience: Vec::new(),
-                episode: None,
+                hive: None,
                 mentions: Vec::new(),
                 mention_depth: 0,
                 parent: None,
@@ -254,7 +254,7 @@ async fn chat_history_route_rehydrates_outputs_and_drops_deleted_targets() {
             &company,
             CompanyEvent::AgentReply {
                 audience: Vec::new(),
-                episode: None,
+                hive: None,
                 mentions: Vec::new(),
                 mention_depth: 0,
                 parent: None,
@@ -399,7 +399,7 @@ async fn chat_history_route_rehydrates_the_card_a_reply_opened() {
                 runtime.id(),
                 CompanyEvent::AgentReply {
                     audience: Vec::new(),
-                    episode: None,
+                    hive: None,
                     mentions: Vec::new(),
                     mention_depth: 0,
                     parent: None,
@@ -497,7 +497,7 @@ async fn chat_history_route_honors_before_and_limit() {
                     runtime.id(),
                     CompanyEvent::AgentReply {
                         audience: Vec::new(),
-                        episode: None,
+                        hive: None,
                         mentions: Vec::new(),
                         mention_depth: 0,
                         parent: None,
@@ -551,7 +551,7 @@ async fn chat_history_cursor_keeps_later_reactions_on_displayed_messages() {
             runtime.id(),
             CompanyEvent::AgentReply {
                 audience: Vec::new(),
-                episode: None,
+                hive: None,
                 mentions: Vec::new(),
                 mention_depth: 0,
                 parent: None,

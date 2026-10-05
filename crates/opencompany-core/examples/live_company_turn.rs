@@ -86,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let meter = Arc::new(CapturingMeter::default());
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         ledgers: None,
         ledger_registry: Default::default(),

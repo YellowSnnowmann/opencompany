@@ -1,15 +1,16 @@
-//! A HiveMind room on a real company, for integration targets that drive a
-//! desk through the chat route and read what its seats did.
+//! A company hive on a real company, for integration targets that drive a
+//! desk through the chat route and read what its agents did (OC-2).
 //!
 //! [`Room::boot`] stands up the company behind the production router with a
 //! platform credential, so a message can be sent the way a machine client
-//! sends it (a card the chat handler opens then lands in To-do). The scripted
-//! model reads each seat turn off the episode brief: [`seat_of`] says who is
-//! speaking, in which thread, what the brief showed them and what the turn
-//! has already called, and [`room_script`] hands that to a test's closure.
+//! sends it. An operator line is handed to the company hive's Coordinator and
+//! answered on the hive's own task, so a test waits on the journal
+//! ([`Room::wait_for`]) rather than on the chat route's answer.
 //!
-//! The seat is identified by the persona's `You are the <role> at` line, so a
-//! test passes the `(id, role)` pairs its manifest declares.
+//! The scripted model reads each coordinator turn off the prompt the
+//! OpenHuman host renders for it — `Incoming attributed Hivemind context
+//! (JSON).` followed by the `TurnRequest` — with [`hive_turn`], and
+//! [`hive_script`] hands that to a test's closure.
 
 #![allow(dead_code)]
 
@@ -32,197 +33,215 @@ use super::script_model::{Ask, Reply, Responder};
 /// The platform credential every request carries.
 pub const TOKEN: &str = "room-platform-token";
 
-/// The line the episode brief ends a seat turn with, naming its desk.
-const FENCE: &str = "Every tool call must carry \"chat\": \"";
-/// The rest of that line, naming the thread.
-const FENCE_PARENT: &str = "and \"parent\": ";
-/// The brief's heading over what the seat has not seen yet.
-const DESK_MESSAGES: &str = "## New desk messages\n";
-/// A line only a settled episode's closing turn is given.
-const CLOSING: &str = "Your one job is to say what it all adds up to";
+/// The line the OpenHuman host opens every coordinator turn's prompt with.
+const HIVE_CONTEXT: &str = "Incoming attributed Hivemind context (JSON).";
 
-/// One seat turn, read off a request.
+/// One coordinator turn, read off a request.
 #[derive(Clone, Debug)]
-pub struct Seat {
-    /// The desk the turn runs on.
-    pub desk: String,
-    /// The thread the turn speaks in; `None` on the desk itself.
-    pub parent: Option<u64>,
-    /// Whose turn it is.
-    pub speaker: String,
-    /// The tools this turn already called, oldest first.
-    pub calls: Vec<String>,
-    /// Their results, in the same order.
+pub struct HiveTurn {
+    /// The manifest agent id the turn runs as.
+    pub agent: String,
+    /// The Coordinator agent id the turn runs as (`{company}--{agent}`).
+    pub coordinator_id: String,
+    /// The episode the turn was assigned in, absent for a direct message.
+    pub episode: Option<String>,
+    /// The hive (desk) that episode is in.
+    pub hive: Option<String>,
+    /// The attributed messages delivered to the turn: `(sender, body)`, the
+    /// sender a manifest agent id or `"host"` for an operator line.
+    pub messages: Vec<(String, String)>,
+    /// The host's release note, when the turn follows an approval decision.
+    pub resumption: Option<String>,
+    /// The tools this turn has already called, in order.
+    pub called: Vec<String>,
+    /// What those calls answered, in order.
     pub results: Vec<String>,
-    /// The brief, verbatim.
-    pub prompt: String,
-    /// The `## New desk messages` block alone.
-    pub assignment: String,
-    /// Whether this is a settled episode's closing turn.
-    pub closing: bool,
 }
 
-impl Seat {
-    /// Whether `tool` was called this turn.
-    pub fn called(&self, tool: &str) -> bool {
-        self.calls.iter().any(|call| call == tool)
+impl HiveTurn {
+    /// Whether the turn has made any tool call yet.
+    pub fn acted(&self) -> bool {
+        !self.called.is_empty()
     }
 
-    /// How many times `tool` was called this turn.
-    pub fn times(&self, tool: &str) -> usize {
-        self.calls.iter().filter(|call| *call == tool).count()
+    /// The Coordinator id of teammate `agent`, as a `hivemind_*` tool takes it.
+    pub fn peer(&self, agent: &str) -> String {
+        let company = self
+            .coordinator_id
+            .rsplit_once("--")
+            .map_or("", |(company, _)| company);
+        format!("{company}--{agent}")
     }
 
-    /// The results `tool` returned this turn.
-    pub fn results_of(&self, tool: &str) -> Vec<&str> {
-        self.calls
-            .iter()
-            .zip(&self.results)
-            .filter(|(call, _)| *call == tool)
-            .map(|(_, result)| result.as_str())
-            .collect()
-    }
-
-    /// The operator's newest words in the brief, or empty.
-    pub fn operator_asked(&self) -> &str {
-        self.assignment
-            .lines()
-            .filter_map(|line| line.strip_prefix("@operator: "))
-            .next_back()
+    /// The newest delivered message's body.
+    pub fn last_body(&self) -> &str {
+        self.messages
+            .last()
+            .map(|(_, body)| body.as_str())
             .unwrap_or_default()
     }
-
-    /// Whether the turn has recorded its part or opened a conversation.
-    pub fn spoke(&self) -> bool {
-        self.called("desk_complete_episode") || self.called("desk_ask")
-    }
 }
 
-fn role(message: &Value) -> &str {
-    message.get("role").and_then(Value::as_str).unwrap_or("")
+/// The manifest id behind a coordinator agent id (`{company}--{agent}`).
+pub fn manifest_id(coordinator_id: &str) -> String {
+    coordinator_id
+        .rsplit("--")
+        .next()
+        .unwrap_or(coordinator_id)
+        .to_string()
 }
 
-fn content(message: &Value) -> &str {
-    message.get("content").and_then(Value::as_str).unwrap_or("")
-}
-
-/// The seat turn `ask` is, when it is one.
-pub fn seat_of(ask: &Ask, roles: &[(&str, &str)]) -> Option<Seat> {
-    let last_user = ask
-        .messages
-        .iter()
-        .rposition(|message| role(message) == "user")?;
-    let prompt = content(&ask.messages[last_user]).to_string();
-    let at = prompt.rfind(FENCE)?;
-    let desk = prompt[at + FENCE.len()..].split_once('"')?.0.to_string();
-    let parent = prompt.rfind(FENCE_PARENT).and_then(|at| {
-        let rest = &prompt[at + FENCE_PARENT.len()..];
-        rest.split_once('.')?
-            .0
-            .trim()
-            .trim_matches('"')
-            .parse()
-            .ok()
-    });
-    let role_text = ask.messages.iter().rev().find_map(|message| {
-        let (_, opening) = content(message).rsplit_once("You are the ")?;
-        Some(opening.split_once(" at ")?.0.trim().to_string())
+/// The coordinator turn `ask` is, when it is one.
+pub fn hive_turn(ask: &Ask) -> Option<HiveTurn> {
+    let opened = ask.messages.iter().rposition(|message| {
+        message.get("role").and_then(Value::as_str) == Some("user")
+            && message
+                .get("content")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains(HIVE_CONTEXT))
     })?;
-    let speaker = roles
-        .iter()
-        .find(|(_, title)| *title == role_text)
-        .map(|(id, _)| (*id).to_string())?;
-    let closing = ask
-        .messages
-        .iter()
-        .any(|message| role(message) == "system" && content(message).contains(CLOSING))
-        || prompt.contains(CLOSING);
-    let assignment = prompt
-        .rsplit_once(DESK_MESSAGES)
-        .map(|(_, rest)| rest.split("\n\n").next().unwrap_or(rest).to_string())
+    let text = ask.messages[opened]
+        .get("content")
+        .and_then(Value::as_str)
         .unwrap_or_default();
-    let after = &ask.messages[last_user + 1..];
-    let results = after
-        .iter()
-        .filter(|message| role(message) == "tool")
-        .map(|message| content(message).to_string())
-        .collect();
-    let calls = after
-        .iter()
-        .filter(|message| role(message) == "assistant")
-        .filter_map(|message| message.get("tool_calls").and_then(Value::as_array))
-        .flatten()
-        .filter_map(|call| Some(call.get("function")?.get("name")?.as_str()?.to_string()))
-        .collect();
-    Some(Seat {
-        desk,
-        parent,
-        speaker,
-        calls,
+    let after = &text[text.find(HIVE_CONTEXT)? + HIVE_CONTEXT.len()..];
+    let json_start = after.find('{')?;
+    let request: Value = serde_json::from_str(after[json_start..].trim()).ok()?;
+    let coordinator_id = request.get("agent_id")?.as_str()?.to_string();
+    let agent = manifest_id(&coordinator_id);
+    let episode = request.get("episode").filter(|e| !e.is_null());
+    let messages = request
+        .get("messages")
+        .and_then(Value::as_array)
+        .map(|messages| {
+            messages
+                .iter()
+                .map(|message| {
+                    let sender = message["sender"].as_str().unwrap_or_default();
+                    let sender = if sender.contains("--") {
+                        manifest_id(sender)
+                    } else {
+                        "host".to_string()
+                    };
+                    (
+                        sender,
+                        message["body"].as_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut called = Vec::new();
+    let mut results = Vec::new();
+    for message in &ask.messages[opened + 1..] {
+        match message.get("role").and_then(Value::as_str) {
+            Some("assistant") => {
+                for call in message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(name) = call["function"]["name"].as_str() {
+                        called.push(name.to_string());
+                    }
+                }
+            }
+            Some("tool") => results.push(
+                message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
+            _ => {}
+        }
+    }
+    Some(HiveTurn {
+        agent,
+        coordinator_id,
+        episode: episode.and_then(|e| e["episode_id"].as_str().map(str::to_string)),
+        hive: episode.and_then(|e| e["hive_id"].as_str().map(str::to_string)),
+        messages,
+        resumption: request
+            .get("resumption")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        called,
         results,
-        prompt,
-        assignment,
-        closing,
     })
 }
 
-/// One speech act, carrying the desk and thread the fence named.
-pub fn speech(tool: &str, seat: &Seat, mut arguments: Value) -> Reply {
-    if let Some(object) = arguments.as_object_mut() {
-        object.insert("chat".to_string(), json!(seat.desk));
-        object.insert(
-            "parent".to_string(),
-            seat.parent
-                .map_or(Value::Null, |seq| json!(seq.to_string())),
-        );
-    }
+/// Completes the turn's episode with `body`.
+pub fn complete(turn: &HiveTurn, body: impl Into<String>) -> Reply {
     Reply::Call {
-        tool: Box::leak(format!("desk_{tool}").into_boxed_str()),
-        args: arguments,
+        tool: "hivemind_complete",
+        args: json!({
+            "episode_id": turn.episode.clone().unwrap_or_default(),
+            "body": body.into(),
+        }),
     }
 }
 
-/// Records the seat's part.
-pub fn complete(seat: &Seat, message: impl Into<String>) -> Reply {
-    speech(
-        "complete_episode",
-        seat,
-        json!({ "message": message.into() }),
-    )
+/// Sends `body` from `turn`'s agent to teammate `agent` directly.
+pub fn send_agent(
+    turn: &HiveTurn,
+    agent: &str,
+    message_id: &str,
+    body: impl Into<String>,
+) -> Reply {
+    Reply::Call {
+        tool: "hivemind_send_agent",
+        args: json!({
+            "agent_id": turn.peer(agent),
+            "message_id": message_id,
+            "body": body.into(),
+        }),
+    }
 }
 
-/// Opens a conversation with `to`.
-pub fn ask(seat: &Seat, to: &str, message: impl Into<String>) -> Reply {
-    speech("ask", seat, json!({ "to": to, "message": message.into() }))
-}
-
-/// One call to a tool on the seat's own belt.
+/// One call to a tool on the agent's own belt.
 pub fn call(tool: &'static str, args: Value) -> Reply {
     Reply::Call { tool, args }
 }
 
-/// A script over seat turns: `act` decides what a seat turn that has not
-/// spoken yet does; a turn that has spoken stops, and a request that is no
-/// seat turn answers `"Noted."`.
-pub fn room_script(
-    roles: &'static [(&'static str, &'static str)],
-    act: impl Fn(&Seat) -> Reply + Send + Sync + 'static,
-) -> Responder {
+/// A script over coordinator turns: `act` decides every model call a turn
+/// makes, and a request that is no coordinator turn (a triage or a title, say)
+/// answers `"Noted."`.
+pub fn hive_script(act: impl Fn(&HiveTurn) -> Reply + Send + Sync + 'static) -> Responder {
     Arc::new(move |request: &Ask| {
-        let Some(seat) = seat_of(request, roles) else {
+        if std::env::var_os("ROOM_ASKS").is_some() {
+            eprintln!(
+                "[ask] {}",
+                request
+                    .last_user_text()
+                    .chars()
+                    .take(300)
+                    .collect::<String>()
+            );
+        }
+        let Some(turn) = hive_turn(request) else {
             return Reply::Say("Noted.".to_string());
         };
         if std::env::var_os("ROOM_TURNS").is_some() {
             eprintln!(
-                "[turn] {} parent={:?} closing={} calls={:?} results={:?}",
-                seat.speaker, seat.parent, seat.closing, seat.calls, seat.results
+                "[turn] {} episode={:?} hive={:?} messages={:?} called={:?} results={:?}",
+                turn.agent, turn.episode, turn.hive, turn.messages, turn.called, turn.results
             );
         }
-        if seat.spoke() {
-            return Reply::Say("done".to_string());
-        }
-        act(&seat)
+        act(&turn)
     })
+}
+
+/// The ordinary turn: complete an episode with `answer` and then say so, or
+/// answer a direct message with `answer` itself.
+pub fn answer(turn: &HiveTurn, answer: impl Into<String>) -> Reply {
+    let answer = answer.into();
+    match (&turn.episode, turn.acted()) {
+        (Some(_), false) => complete(turn, answer),
+        (Some(_), true) => Reply::Say("Done.".to_string()),
+        (None, _) => Reply::Say(answer),
+    }
 }
 
 /// A company running on loopback behind the production router.
@@ -236,8 +255,23 @@ pub struct Room {
 impl Room {
     /// Boots `manifest` under `company_id` with its data under `home`.
     pub async fn boot(home: &Path, company_id: &str, manifest: &str) -> Self {
-        let mut manifest =
+        let manifest =
             CompanyManifest::from_stored_toml(manifest).expect("the room's manifest parses");
+        Self::boot_manifest(home, company_id, manifest).await
+    }
+
+    /// Boots an already parsed `manifest` under `company_id`.
+    pub async fn boot_manifest(
+        home: &Path,
+        company_id: &str,
+        mut manifest: CompanyManifest,
+    ) -> Self {
+        if std::env::var_os("ROOM_LOG").is_some() {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(tracing_subscriber::EnvFilter::from_env("ROOM_LOG"))
+                .with_test_writer()
+                .try_init();
+        }
         manifest.apply_globals();
         let problems = manifest.validate();
         assert!(problems.is_empty(), "the manifest is valid: {problems:?}");
@@ -315,20 +349,11 @@ impl Room {
         )
     }
 
-    /// Sends `text` to `desk`.
-    pub async fn say(&self, desk: &str, text: &str) -> Value {
-        self.say_with(desk, text, json!({})).await
-    }
-
-    /// Sends `text` to `desk` with extra fields on the request.
-    pub async fn say_with(&self, desk: &str, text: &str, extra: Value) -> Value {
-        let mut body = json!({ "text": text, "chat": desk });
-        if let (Some(body), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
-            for (key, value) in extra {
-                body.insert(key.clone(), value.clone());
-            }
-        }
-        let (status, answer) = self.post("/chat", body).await;
+    /// Sends `text` to `chat` (a desk id, `general`, or a teammate's DM).
+    pub async fn say(&self, chat: &str, text: &str) -> Value {
+        let (status, answer) = self
+            .post("/chat", json!({ "text": text, "chat": chat }))
+            .await;
         assert_eq!(status, 200, "chat refused: {answer}");
         answer
     }
@@ -336,13 +361,6 @@ impl Room {
     /// The board as the console reads it.
     pub async fn cards(&self) -> Vec<Value> {
         let (status, body) = self.get("/tasks").await;
-        assert_eq!(status, 200, "{body}");
-        body.as_array().cloned().unwrap_or_default()
-    }
-
-    /// The pending approvals.
-    pub async fn approvals(&self) -> Vec<Value> {
-        let (status, body) = self.get("/approvals").await;
         assert_eq!(status, 200, "{body}");
         body.as_array().cloned().unwrap_or_default()
     }
@@ -392,28 +410,33 @@ impl Room {
         }
     }
 
-    /// Waits until `n` episodes have completed.
-    pub async fn episodes_completed(&self, n: usize, timeout: Duration) -> Vec<StoredEvent> {
-        self.wait_for("the episodes to complete", timeout, |rows| {
-            completed(rows) >= n
+    /// Waits until `n` hive episodes have settled.
+    pub async fn episodes_settled(&self, n: usize, timeout: Duration) -> Vec<StoredEvent> {
+        self.wait_for("the episodes to settle", timeout, |rows| {
+            settled(rows).len() >= n
         })
         .await
     }
 }
 
-/// How many episodes the journal says completed.
-pub fn completed(rows: &[StoredEvent]) -> usize {
+/// Every settled episode: `(hive_id, failure)`.
+pub fn settled(rows: &[StoredEvent]) -> Vec<(String, Option<String>)> {
     rows.iter()
-        .filter(|row| matches!(row.event, CompanyEvent::EpisodeCompleted { .. }))
-        .count()
+        .filter_map(|row| match &row.event {
+            CompanyEvent::HiveEpisodeSettled {
+                hive_id, failure, ..
+            } => Some((hive_id.clone(), failure.clone())),
+            _ => None,
+        })
+        .collect()
 }
 
-/// The sequence of the operator's newest message on `desk`.
-pub fn operator_message(rows: &[StoredEvent], desk: &str) -> Option<u64> {
+/// The sequence of the operator's newest message on `chat`.
+pub fn operator_message(rows: &[StoredEvent], chat: &str) -> Option<u64> {
     rows.iter()
         .rev()
         .find(|row| {
-            matches!(&row.event, CompanyEvent::OperatorMessage { chat: Some(chat), .. } if chat == desk)
+            matches!(&row.event, CompanyEvent::OperatorMessage { chat: Some(c), .. } if c == chat)
         })
         .map(|row| row.seq.value())
 }

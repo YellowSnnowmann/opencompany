@@ -55,7 +55,7 @@ type TaskPriority = (typeof PRIORITIES)[number];
  *
  * The prompt box asks "what needs doing?", so what it collects is an *ask*, not
  * a name. It used to cut that ask at its first line and post it as the title —
- * the same rule the chat handler and `delegate_to_desk` used, and the reason a
+ * the same rule the chat handler used, and the reason a
  * board of prompt-box cards read as a list of half-sentences. Now the whole
  * prompt goes as the note and the host names the card from it.
  *

@@ -51,16 +51,14 @@ each page under the 500-line cap.
   derived from that tree, and an unlisted skill has nothing for
   `read_skill_resource` to open.
 
-  **`delegates_to`** (issue #176) narrows which **desks** a question from this
-  agent may cross to, and follows the same rule as `tools` and `ledgers`:
-  **omitted or empty means unrestricted**. On its own desk an agent reaches
-  its colleagues by speaking — `post`, `dm`, `broadcast`
-  ([hive.md](hive.md#speaking)) — and nothing here bounds that. Another desk
-  is reached only by a referral ([hive.md](hive.md#referral)), which the
-  desk's `[group_chat.routing.referral]` block has to enable first; a
-  non-empty `delegates_to` then narrows the desks that referral may target,
-  and the `## Your team` section renders exactly that list from the same
-  rule, so the prompt never names a desk the policy would refuse.
+  **`delegates_to`** (issue #176) narrows whom this agent may message
+  directly (`hivemind_send_agent`, [hive.md](hive.md)), and follows the same
+  rule as `tools` and `ledgers`: **omitted or empty means unrestricted**. A
+  non-empty list admits the agent's desk peers plus every member of the desks
+  named, enforced by the company hive's `SendAuthorizer`, and the
+  `## Your team` section renders exactly that list from the same rule, so the
+  prompt never names a teammate the policy would refuse. Posting in a hive the
+  agent sits on is never narrowed by it.
 
   It takes **desk** ids or names (`[[group_chat]]` entries), never teammate
   ids, and `"*"` means every desk the company has. An entry that names no
@@ -72,39 +70,15 @@ each page under the 500-line cap.
   `update_workflow`, `delete_workflow`) stay orchestrator-only. Every roster
   agent carries `spawn_task` to leave a slice tracked on the board; the
   hand-off tools (`delegate_to_desk`, `delegate_to_teammate`) that used to run
-  a colleague's turn *inside* the caller's are gone, because a room is where
-  colleagues answer each other, and a referral is how a room asks another.
+  a colleague's turn *inside* the caller's are gone (OC-2): an agent messages a
+  colleague through the company hive (`hivemind_send_agent`), bounded by its
+  `delegates_to`.
 
-  A dispatched board card accepts one hand-off per turn: it transfers ownership
-  after the current turn finishes and settles from the colleague's output. A
-  second hand-off is refused immediately instead of receiving a success receipt
-  for work the drain would discard. Other permitted board writes still stage.
-  Chat turns can collect multiple colleagues' replies. For several contributors
-  and a final synthesis on a board task, use explicit workflow agent steps and
-  dependencies. A queued receipt is not evidence that the colleague has run.
-
-  Three runtime guards bound what it can do, all enforced at the tool boundary
-  in the member's own turn rather than by which tools were wired (belts are
-  cached per roster, so a tool cannot be withheld from one turn):
-
-  - **Depth** — `[tools].max_delegation_depth`, below.
-  - **Cycles** — a hand-off to a desk already on the current chain (A→B→A), or
-    to the desk the caller itself leads, is refused.
-  - **Allowlist** — a target outside a non-empty `delegates_to` is refused, and
-    the refusal names the desks the member *can* reach so it can retry in the
-    same turn.
-
-  Each refusal reaches both the model and the board: the run trail carries it
-  verbatim, and a refused hand-off is recorded on the dispatched card's note,
-  so the operator reads the fact rather than inferring it from an absence.
-
-  The per-turn fan-out cap (three delegations) applies **per level**, not per
-  message — each turn starts against an empty queue.
-  Cross-desk referrals have two additional runtime bounds, enforced when the
-  referral is decided: **depth** — `referral.max_hops` — and **cycles** — a
-  question to a desk already on the current chain (A→B→A) is refused. A
-  refused crossing reaches the run trail verbatim, so the operator reads the
-  fact rather than inferring it from an absence.
+  A direct message is bounded at the tool boundary in the sender's own turn,
+  by the company hive's `SendAuthorizer`: a target outside a non-empty
+  `delegates_to` (desk peers plus the desks named) is refused, and the refusal
+  names the teammates it *can* reach so it can retry in the same turn. The
+  per-turn card cap (three `spawn_task` calls) applies to each turn.
 
   **`budget_usd_daily`** (enforced since issue #304 — before that it was
   validated, stored and displayed, but nothing read it) caps one teammate's
@@ -196,19 +170,19 @@ each page under the 500-line cap.
   carries no credential, so the console refuses that save while a key is still
   typed in the form rather than dropping it and reporting success (issue #265).
 - **`[[group_chat]]`** declares a desk: who the operator talks to, and who
-  answers. A desk of one answers with one turn; a desk of two or more answers
-  as a room — one `OpenHumanHive` whose seats run in concurrent rounds until
-  one reports the episode complete ([hive.md](hive.md)). `tools` is the
+  answers. Every desk is a hive in the company's Coordinator: a line on it
+  opens an episode its members run, concurrently, until the members it
+  assigned complete it ([hive.md](hive.md)). `tools` is the
   desk's tool ceiling (above). **`[group_chat.routing]`** paces the room:
   `round_width` (5), `choice_option_limit` (8), `max_rounds` (12),
   `turn_timeout_secs` (600) and the four Jev confidence thresholds; every key
-  optional, a zero refused rather than clamped. **`[group_chat.routing.referral]`**
-  (`enabled`, `max_hops`, `reach`, `returns`) lets the desk put a question to
-  another desk. The same block can be installed at runtime over the manifest
-  (`PUT {scope}/desks/{id}/routing`). The retired `[group_chat.hive]` block —
-  the quorum, budget and move-grammar knobs of the trace-grammar hive — is
-  refused at load with a migration hint, never silently ignored: a desk paced
-  by numbers nobody wrote is the failure the refusal exists to prevent.
+  optional, a zero refused rather than clamped. The same block can be
+  installed at runtime over the manifest (`PUT {scope}/desks/{id}/routing`).
+  The retired `[group_chat.hive]` block — the quorum, budget and move-grammar
+  knobs of the trace-grammar hive — and the retired
+  `[group_chat.routing.referral]` block are refused at load with a migration
+  hint, never silently ignored: a desk paced by numbers nobody wrote is the
+  failure the refusal exists to prevent.
 - **`[channels.*]`** enables `ChannelAdapter`s. Unknown channels are a
   validation error; disabled OpenHuman means non-operator channels degrade
   with a boot warning, never a failure.
@@ -301,19 +275,10 @@ each page under the 500-line cap.
     - **There is no `search` Cargo feature.** The tool rides the `openhuman`
       harness feature so CI's gated lane actually compiles and tests it.
 
-  **`max_delegation_depth`** (issue #176) bounds how deep one operator
-  message's chain of **board** hand-offs may run — `spawn_task` from a card's
-  turn opening another card — counted in hand-offs. Default `2`; valid
-  `1..=4`, where `1` is the "recursion off" setting. It does not bound a
-  room: the turns one desk message can buy are bounded by that desk's
-  `[group_chat.routing]` (`round_width × max_rounds`) and a crossing to
-  another desk by `referral.max_hops`.
-
-  The depth in force is read from the **live company record** on every call, so
-  lowering it takes effect on the next turn without a rebuild. A hand-off past
-  the bound is refused in the model's own turn with the reason
-  `depth_capped`, so a member that has run out of chain leaves the remaining
-  work tracked instead of doing it silently.
+  **`max_delegation_depth`** is retired (OC-2): it bounded the desk hand-off
+  chain, which the company hive replaced, and a manifest that still sets it is
+  refused at load with a migration hint. The turns one desk message can buy are
+  bounded by that desk's `[group_chat.routing]` (`round_width × max_rounds`).
     The Usage view surfaces a `Web searches` KPI plus a search status row
     (active / paused at cap 0 / awaiting credential / not granted / not in this
     build).

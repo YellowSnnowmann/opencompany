@@ -91,49 +91,43 @@ library that grew out of this repo, hosted over the
 
 ### How a desk thinks
 
-A message to a desk with two or more members doesn't pick a responder. It
-opens an **episode**: the room is asked who the message needs, those seats
-take their turns **at the same time**, each one ends its turn by saying
-exactly one thing, and the room goes round again until a seat reports the
-work complete.
+Every conversation in a company runs through one **company hive** — a
+TinyHiveMind Coordinator that owns who runs and when. A message to a desk opens
+an **episode** on that desk's hive: the members it needs start at once, each
+turn can talk to the room or to one colleague, and the episode settles when
+the members it assigned say their part is done.
 
 ```text
-engineer  post              I can have the backend flag ready Thursday.
-ceo       dm  → writer      Keep the copy short; the page ships Friday.
-writer    broadcast         Draft is up — who checks the pricing numbers?
-engineer  complete_episode  Numbers checked against the ledger. Done.
+engineer  hivemind_send_agent → writer   Keep the copy short; the page ships Friday.
+writer    (reply)                         Draft is up — numbers in the second para.
+engineer  hivemind_complete               Numbers checked against the ledger. Done.
 ```
 
-- **Speaking is a tool call.** A seat `post`s to the room, `dm`s the seats it
-  names, `broadcast`s when the room should decide who picks it up, or calls
-  `complete_episode` when its part is finished. The host appends the row and
-  decides what it means; nothing is said by accident, and nothing goes unsaid
-  because a model forgot.
-- **Rounds, not a queue.** Every seat with something to do runs at once. One
-  agent runs one turn at a time across every desk it sits on, and that is the
-  only lock — two desks working two problems proceed independently, and the
-  CEO on both of them is the same agent with the same memory.
-- **Routing by a model built for it.** Who a message needs, and who picks up
-  a broadcast, is asked of Jev — TypeSafe's System One routing model — through
-  the TinyHumans proxy on the key you already have. No key, and the desk lead
-  answers and the next seat picks up: the room still runs, with less
-  initiative.
-- **A reason to stop.** An episode ends when the assigned seats say it is
-  done, or when the desk's round cap is spent. Never because a fan-out ran out
-  of members. One operator message is one bounded number of turns.
-- **Cross-desk referral.** Members of one desk read the same transcript and
-  are wrong about the same things. A desk can put a question to another
-  desk, which answers in its own room, and only the answer crosses back.
+- **Talking is a tool call.** An agent posts to a hive it sits on, messages a
+  colleague directly, or completes its part of an episode with the
+  `hivemind_*` tools. A message is delivered, not awaited: the answer arrives
+  on the sender's next turn, so nothing blocks on anybody.
+- **Concurrent, never twice.** Different agents run at once, within a desk and
+  across desks. One agent runs one turn at a time across every hive it sits
+  in — the CEO on two desks is the same agent with the same memory.
+- **Routing by a model built for it.** Who an unaddressed message needs is
+  asked of Jev — TypeSafe's System One routing model — through the TinyHumans
+  proxy on the key you already have. Name someone and they start; no key, and
+  the desk lead starts.
+- **A reason to stop.** An episode settles when its assigned members say it is
+  done, or fails at the desk's round cap. One operator message is one bounded
+  number of turns.
+- **Reach you can state.** Who may message whom is the manifest's
+  `delegates_to`: desk peers plus the desks it names, or anybody when empty.
 - **One continuous agent.** Each teammate is one agent with one session that
-  spans every desk it sits on, its DMs and the general line. It is handed
-  what it has not yet seen, never re-seeded, so the question it answered on a
-  desk an hour ago is one it remembers in a DM now.
+  spans every desk it sits on, its DMs and the general line, so the question it
+  answered on a desk an hour ago is one it remembers in a DM now.
 
 ### What you get out of it
 
-Every round is on the record: who was asked, who spoke, who was DMed, what
-carried the work forward and who called it done — live in the room as it
-happens, and rebuilt from the journal after a reload. A desk of one behaves
+Every turn is on the record: who started, who spoke, who messaged whom, and
+when the episode settled — live in the room as it happens, and rebuilt from the
+journal after a reload. A desk of one behaves
 like a single agent, so nothing here costs you anything until a desk has
 somebody to work with.
 

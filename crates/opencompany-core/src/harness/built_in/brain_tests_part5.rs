@@ -496,7 +496,7 @@ async fn spawn_task_delegation_opens_a_todo_card() {
         .await
         .expect("delegation runs");
     assert!(
-        out.bubble.is_none() && out.desk_reply.is_none(),
+        out.bubble.is_none(),
         "spawn_task surfaces nothing to relay or bubble"
     );
 

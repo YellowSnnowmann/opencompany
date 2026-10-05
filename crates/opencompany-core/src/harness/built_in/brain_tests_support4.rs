@@ -24,7 +24,7 @@ pub(super) fn brain_that_steers_itself(
         calls: std::sync::atomic::AtomicUsize::new(0),
     });
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -174,7 +174,7 @@ pub(super) fn brain_that_selects_with(
         selector_calls: std::sync::atomic::AtomicUsize::new(0),
     });
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,
@@ -306,18 +306,9 @@ pub(super) struct TurnFaults {
     /// Invokes that CANCEL their own in-flight delegation mid-run, so the
     /// delegated reply is discarded exactly as an operator cancel does.
     pub(super) cancel_on: Vec<usize>,
-    /// Desk keys the first turn's `delegate_to_desk` calls named and the
-    /// tool REFUSED (issue #272). A refusal never becomes a `Delegation`,
-    /// so this is how a test reproduces one without standing up the tool.
-    pub(super) refused_on_first: Vec<String>,
 }
 
-impl DelegatingProvider {
-    /// The board snapshot each turn ran against, in invoke order.
-    pub(super) fn board(&self) -> Vec<(String, String)> {
-        self.board.lock().unwrap().clone()
-    }
-}
+impl DelegatingProvider {}
 
 #[async_trait]
 impl ChatModel<()> for DelegatingProvider {
@@ -388,11 +379,6 @@ impl ChatModel<()> for DelegatingProvider {
         for delegation in self.pushes.lock().unwrap().pop_front().unwrap_or_default() {
             self.queue.push(delegation);
         }
-        if invoke == 1 {
-            for desk in &self.faults.refused_on_first {
-                self.queue.push_refusal(desk.clone());
-            }
-        }
         let message = request
             .messages
             .iter()
@@ -447,7 +433,7 @@ pub(super) fn brain_that_delegates_with(
         steer: steer.clone(),
     });
     let deps = HarnessDeps {
-        takeovers: Default::default(),
+        hive_store: None,
         emergency_gate: None,
         notifications: None,
         ledgers: None,

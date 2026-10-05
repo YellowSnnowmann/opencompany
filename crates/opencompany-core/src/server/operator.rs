@@ -124,9 +124,6 @@ pub fn router() -> Router<AppState> {
                 .put(set_desk_routing)
                 .delete(reset_desk_routing),
         ))
-        // The episodes a desk ran or is running (plan hive-desks, Phase 4),
-        // newest first, folded from the journal's episode record.
-        .merge(scoped("/episodes", get(list_episodes)))
         // Desk member ordering / hierarchy (issue #131): set the operator's
         // explicit member order for a desk. Registered under both scope forms.
         .merge(scoped("/desks/{desk_id}/order", put(set_desk_order)))
@@ -588,70 +585,6 @@ async fn reset_desk_routing(
         &desk_id,
         crate::hive::routing::host_router(),
     )))
-}
-
-/// `GET {scope}/episodes?desk&status&limit` — the episodes a company ran or
-/// is running, newest first (plan hive-desks, Phase 4).
-///
-/// Folded from the journal's episode record on every call; the room does not
-/// read this (it folds episodes out of the transcript and the live frames),
-/// the measurement script and a reloaded Observatory do.
-async fn list_episodes(
-    scope: ScopedCompany,
-    Query(query): Query<EpisodesQuery>,
-) -> Result<Json<Vec<crate::hive::episode_store::EpisodeDto>>, ApiError> {
-    let status = match query.status.as_deref().map(str::trim) {
-        None | Some("") => None,
-        Some("open") => Some(crate::hive::episode_store::EpisodeStatus::Open),
-        Some("completed") => Some(crate::hive::episode_store::EpisodeStatus::Completed),
-        Some(other) => {
-            return Err(ApiError(OpenCompanyError::InvalidRequest(format!(
-                "`status` must be `open` or `completed`, not `{other}`"
-            ))));
-        }
-    };
-    let desk = match query.desk.as_deref().map(str::trim) {
-        None | Some("") => None,
-        Some(key) => {
-            let record = scope
-                .runtime
-                .store()
-                .load(scope.id())
-                .await?
-                .ok_or_else(|| OpenCompanyError::CompanyNotFound(scope.id().to_string()))?;
-            Some(
-                record
-                    .resolve_desk_id(key)
-                    .unwrap_or_else(|| key.to_string()),
-            )
-        }
-    };
-    let limit = query
-        .limit
-        .unwrap_or(EPISODES_DEFAULT_LIMIT)
-        .clamp(1, EPISODES_MAX_LIMIT);
-    let episodes = crate::hive::episode_store::list_episodes(
-        scope.runtime.events().as_ref(),
-        scope.id(),
-        desk.as_deref(),
-        status,
-        limit,
-    )
-    .await?;
-    Ok(Json(episodes))
-}
-
-/// Episodes returned when `limit` is not given.
-const EPISODES_DEFAULT_LIMIT: usize = 50;
-/// The most episodes one call returns.
-const EPISODES_MAX_LIMIT: usize = 500;
-
-/// `GET {scope}/episodes` query.
-#[derive(Debug, Deserialize)]
-struct EpisodesQuery {
-    desk: Option<String>,
-    status: Option<String>,
-    limit: Option<usize>,
 }
 
 /// `PUT {scope}/desks/{desk_id}/order` — set the operator's explicit member
@@ -1506,7 +1439,7 @@ fn project_event_for_viewer(
             parent,
             mentions,
             audience,
-            episode,
+            hive,
             ..
         } => {
             // See this fn's doc: an owner-fallback report is admin-only, live
@@ -1546,21 +1479,11 @@ fn project_event_for_viewer(
             if let Some(parent) = parent {
                 o["parentId"] = json!(parent.value().to_string());
             }
-            // **The episode this row belongs to**, when it belongs to one.
-            //
-            // The episode fold drops any frame that does not name an episode.
-            // That is right for an ordinary chat reply and wrong for this
-            // one: a row in a pair channel is a line of an exchange two seats
-            // are having inside an episode, and this frame is the only
-            // carrier those lines have -- the desk never shows them, so a
-            // reload was the only way to see what had been said. Without it
-            // the indicator can say an exchange opened and never that
-            // anything was said in it.
-            if let Some(episode) = episode.as_ref() {
-                o["episodeId"] = json!(episode.id);
-                // What the row committed, for the fold to tell a line of an
-                // exchange from the conclusion that restates its last one.
-                o["utteranceKind"] = json!(episode.kind);
+            // **The episode this row belongs to**, when it belongs to one, so
+            // the console groups a desk's lines by episode live exactly as it
+            // does on reload.
+            if let Some(episode) = hive.as_ref().and_then(|hive| hive.episode_id.as_ref()) {
+                o["episodeId"] = json!(episode);
             }
             // Scrubbed timeline (same shape the POST body carries); omitted
             // when empty so a tool-less reply's wire form is unchanged.
@@ -1590,12 +1513,12 @@ fn project_event_for_viewer(
                         .collect::<Vec<_>>()
                 );
             }
-            // Plan hive-desks, Phase 4: the same `episode` and `audience` the
-            // reload projects, so a live row and its rehydrated twin fold into
-            // the same round. Omitted outside an episode, so the legacy frame
-            // is unchanged for every other reply.
-            if let Some(episode) = episode {
-                o["episode"] = episode_json(episode);
+            // OC-2: the same `hive` and `audience` the reload projects, so a
+            // live row and its rehydrated twin fold into the same episode.
+            // Omitted outside the hive, so the legacy frame is unchanged for
+            // every other reply.
+            if let Some(hive) = hive {
+                o["hive"] = hive_json(hive);
             }
             if !audience.is_empty() {
                 o["audience"] = json!(audience);
@@ -1673,92 +1596,6 @@ fn project_event_for_viewer(
             }
             o
         }
-        // The dispatch terminal (#185), narrowed and widened by #377.
-        //
-        // **Widened** with `chatId`: the conversation the card was raised from,
-        // which is what lets a console file the settle into the channel the
-        // work came from instead of guessing at one. Omitted rather than null
-        // when the card names none — mirroring `approval_parked` below, so "no
-        // conversation raised this" is a presence check on the console rather
-        // than a null check, and a board-created card is board-only on the wire
-        // too.
-        //
-        // **Narrowed** by dropping `output`. The run's prose already reaches
-        // the operator as the orchestrator's relay bubble (#151); what the
-        // channel was missing is the structural fact that the card *settled*
-        // and *where*, which is `column`. Carrying the prose here as well would
-        // put one run's words into the same channel twice, so it is dropped at
-        // the projection — the one place that can guarantee no later reader
-        // reintroduces the duplicate. Nothing in the console read it. `desk`
-        // stays for wire compatibility.
-        // **A crossing happened; the thread it belongs to must be re-read.**
-        //
-        // A crossing renders as a collapsed `referralConversation` folded onto
-        // the asking row, and `attach_referral_origins` — which builds it — runs
-        // in `history_for_desk` and nowhere else. So a crossing was invisible
-        // live and appeared only once something re-read the thread, which for a
-        // desk crossing meant waiting for the turn to settle and for a pair DM
-        // meant never: its rows are journaled in the pair's own `dm:<a>+<b>`
-        // conversation, which no desk view is watching.
-        //
-        // This frame carries no crossing content, on purpose. Rebuilding the
-        // fold here would be a second implementation of a rule this subsystem
-        // has already had to fix in two places four separate times; the reload
-        // projection is the authority and this only tells the console to ask it
-        // again. Same shape as #2329's remedy for the grammar split: add to the
-        // stream rather than teach it to recompute.
-        CompanyEvent::ReferralEnqueued {
-            from_desk,
-            trigger_sequence,
-            to_desk,
-            target,
-            asker,
-            conversation,
-            returning,
-            episode_id,
-            to_episode_id,
-            ..
-        } => {
-            let mut o = envelope("referral");
-            // **The desk whose transcript gains the fold, which is not the same
-            // field on both legs.**
-            //
-            // The fold lands on the ASKING row, and a return leg is addressed
-            // the other way round: `mark` builds it from the answering desk, so
-            // its `from_desk` is the far desk and `to_desk` is the desk that
-            // asked. Emitting `from_desk` unconditionally pointed the console at
-            // the far desk exactly on the leg that carries the answer — and
-            // since the forward frame goes out before an answer exists, a
-            // cross-desk crossing was never refreshed on the desk waiting for it
-            // (Codex, #2341).
-            o["chatId"] = json!(match returning {
-                true => to_desk,
-                false => from_desk,
-            });
-            // The row it folds onto, so a console need not re-read a whole desk
-            // to find what changed.
-            o["sequence"] = json!(trigger_sequence);
-            o["toDesk"] = json!(to_desk);
-            o["target"] = json!(target);
-            o["asker"] = json!(asker);
-            // A pair thread exists only for a person-to-person crossing; on a
-            // desk crossing `target` is merely the room's first eligible seat.
-            o["direct"] = json!(conversation.is_some());
-            // Which leg this is, read the same way `ReferredFrom::returning`
-            // is: a return is the one that completes the exchange, so a console
-            // that only wants to re-read once can wait for it.
-            o["returning"] = json!(returning);
-            // The episode on the asking desk that raised the crossing, and
-            // the one opened on the far desk to answer it (plan hive-desks,
-            // Phase 6). Omitted on a pair DM and on older markers.
-            if let Some(episode_id) = episode_id {
-                o["episodeId"] = json!(episode_id);
-            }
-            if let Some(to_episode_id) = to_episode_id {
-                o["toEpisodeId"] = json!(to_episode_id);
-            }
-            o
-        }
         CompanyEvent::DeskTaskCompleted {
             task_id,
             desk,
@@ -1804,6 +1641,7 @@ fn project_event_for_viewer(
             approval_id,
             effect_kind,
             thread,
+            origin,
         } => {
             let mut o = envelope("approval_parked");
             o["approvalId"] = json!(approval_id.as_ref());
@@ -1812,6 +1650,15 @@ fn project_event_for_viewer(
             // is page-only on the wire too.
             if let Some(thread) = thread {
                 o["chatId"] = json!(thread);
+            }
+            // OC-2: whose coordinator turn is held on it, so the console can
+            // show that teammate as waiting. Omitted for a cycle park.
+            if let Some(crate::ports::types::ApprovalOrigin::Hive {
+                agent_id,
+                episode_id,
+            }) = origin
+            {
+                o["hive"] = json!({ "agentId": agent_id, "episodeId": episode_id });
             }
             o
         }
@@ -1954,206 +1801,88 @@ fn project_event_for_viewer(
             o["reset"] = json!(reset);
             o
         }
-        // Plan hive-desks, Phase 4: the episode record, projected one frame
-        // per journal row so a console draws the round band live and rebuilds
-        // the same shape from `chat/history`'s `episode` field on reload.
-        // Every frame carries `chatId` (the desk) and `episodeId`.
-        CompanyEvent::EpisodeOpened {
+        // OC-2: the company hive's record, one frame per journal row. The
+        // console groups a desk's lines by `hive.episodeId` from the
+        // `agent_reply` frames; these say when an operator line was accepted
+        // (and who starts it), when an episode settled, when two agents spoke
+        // privately, and when a turn was lost to a restart.
+        CompanyEvent::HiveAccepted {
+            message_id,
+            sequence,
             chat_id,
-            episode_id,
-            opened_by_seq,
-            parent,
-            participants,
-            plan,
-            ..
+            source,
+            starters,
+            route,
         } => {
-            let mut o = envelope("episode_opened");
+            let mut o = envelope("hive_accepted");
+            o["messageId"] = json!(message_id);
+            o["sequence"] = json!(sequence);
             o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["openedBySeq"] = json!(opened_by_seq);
-            if let Some(parent) = parent {
-                o["parentId"] = json!(parent.value().to_string());
+            if let Some(source) = source {
+                o["sourceId"] = json!(source.value().to_string());
             }
-            o["participants"] = json!(participants);
-            o["plan"] = json!(plan);
-            o
-        }
-        CompanyEvent::RoundStarted {
-            chat_id,
-            episode_id,
-            revision,
-            agent_ids,
-        } => {
-            let mut o = envelope("round_started");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["revision"] = json!(revision);
-            o["agentIds"] = json!(agent_ids);
-            o
-        }
-        CompanyEvent::RoundCommitted {
-            chat_id,
-            episode_id,
-            revision,
-            utterances,
-            actions,
-        } => {
-            let mut o = envelope("round_committed");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["revision"] = json!(revision);
-            o["utterances"] = json!(
-                utterances
-                    .iter()
-                    .map(|utterance| {
-                        let mut u = json!({
-                            "agentId": utterance.agent_id,
-                            "sequence": utterance.sequence,
-                            "kind": utterance.kind,
-                        });
-                        if let Some(message_seq) = utterance.message_seq {
-                            u["messageSeq"] = json!(message_seq);
-                        }
-                        if !utterance.to.is_empty() {
-                            u["to"] = json!(utterance.to);
-                        }
-                        u
-                    })
-                    .collect::<Vec<_>>()
-            );
-            o["actions"] = json!(actions);
-            o
-        }
-        CompanyEvent::BroadcastRouted {
-            chat_id,
-            episode_id,
-            revision,
-            agent_id,
-            message_seq,
-            plan,
-            probabilities,
-            router,
-        } => {
-            let mut o = envelope("broadcast_routed");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["revision"] = json!(revision);
-            o["agentId"] = json!(agent_id);
-            o["messageSeq"] = json!(message_seq);
-            o["plan"] = json!(plan);
-            if let Some(probabilities) = probabilities {
-                o["probabilities"] = json!(probabilities);
-            }
-            o["router"] = json!(router);
-            o
-        }
-        CompanyEvent::DmDelivered {
-            chat_id,
-            episode_id,
-            from,
-            to,
-            message_seq,
-        } => {
-            let mut o = envelope("dm_delivered");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["from"] = json!(from);
-            o["to"] = json!(to);
-            o["messageSeq"] = json!(message_seq);
-            o
-        }
-        // The desk's reference to a private exchange. Deliberately carries
-        // no text: the question and the answer live in the pair channel, and
-        // this row exists so the desk can say two seats are talking and
-        // where, not so it can quote them.
-        CompanyEvent::ConversationOpened {
-            chat_id,
-            episode_id,
-            conversation_id,
-            root,
-            asker,
-            askee,
-        } => {
-            let mut o = envelope("conversation_opened");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["conversationId"] = json!(conversation_id);
-            o["root"] = json!(root);
-            o["asker"] = json!(asker);
-            o["askee"] = json!(askee);
-            o
-        }
-        CompanyEvent::ConversationConcluded {
-            chat_id,
-            episode_id,
-            conversation_id,
-            root,
-            asker,
-            askee,
-            forced,
-        } => {
-            let mut o = envelope("conversation_concluded");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["conversationId"] = json!(conversation_id);
-            o["root"] = json!(root);
-            o["asker"] = json!(asker);
-            o["askee"] = json!(askee);
-            // A conversation that ran out of turns concluded without an
-            // answer. An indicator that only watched for one would hang on
-            // exactly this case.
-            o["forced"] = json!(forced);
-            o
-        }
-        CompanyEvent::EpisodeCompleted {
-            chat_id,
-            episode_id,
-            revision,
-            completed_by,
-            rounds,
-            reason,
-            summary_seq,
-        } => {
-            let mut o = envelope("episode_completed");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["revision"] = json!(revision);
-            if let Some(completed_by) = completed_by {
-                o["completedBy"] = json!(completed_by);
-            }
-            o["rounds"] = json!(rounds);
-            o["reason"] = json!(reason);
-            if let Some(summary_seq) = summary_seq {
-                o["summarySeq"] = json!(summary_seq);
+            o["starters"] = json!(starters);
+            if let Some(route) = route {
+                o["route"] = json!(route);
             }
             o
         }
-        CompanyEvent::EpisodeSeatParked {
-            chat_id,
-            episode_id,
-            seat,
+        CompanyEvent::HiveMessage {
+            sequence,
+            sender,
+            destination,
+            text,
             thread,
-            approval_ids,
+            episode_id,
+            only_for,
         } => {
-            let mut o = envelope("episode_seat_parked");
-            o["chatId"] = json!(chat_id);
-            o["episodeId"] = json!(episode_id);
-            o["seat"] = json!(seat);
+            let mut o = envelope("hive_message");
+            o["sequence"] = json!(sequence);
+            o["sender"] = json!(sender);
+            o["destination"] = json!(destination);
+            o["text"] = json!(text);
             if let Some(thread) = thread {
                 o["thread"] = json!(thread);
             }
-            o["approvalIds"] = json!(approval_ids);
+            if let Some(episode_id) = episode_id {
+                o["episodeId"] = json!(episode_id);
+            }
+            if !only_for.is_empty() {
+                o["onlyFor"] = json!(only_for);
+            }
             o
         }
-        CompanyEvent::EpisodeSeatResumed {
-            chat_id,
+        CompanyEvent::HiveEpisodeSettled {
             episode_id,
-            seat,
+            hive_id,
+            opened_at,
+            thread,
+            failure,
         } => {
-            let mut o = envelope("episode_seat_resumed");
-            o["chatId"] = json!(chat_id);
+            let mut o = envelope("hive_episode_settled");
             o["episodeId"] = json!(episode_id);
-            o["seat"] = json!(seat);
+            o["chatId"] = json!(hive_id);
+            o["openedAt"] = json!(opened_at);
+            if let Some(thread) = thread {
+                o["thread"] = json!(thread);
+            }
+            if let Some(failure) = failure {
+                o["failure"] = json!(failure);
+            }
+            o
+        }
+        CompanyEvent::HiveTurnInterrupted {
+            agent_id,
+            episode_id,
+            reason,
+            ..
+        } => {
+            let mut o = envelope("hive_turn_interrupted");
+            o["agentId"] = json!(agent_id);
+            if let Some(episode_id) = episode_id {
+                o["episodeId"] = json!(episode_id);
+            }
+            o["reason"] = json!(reason);
             o
         }
         // Issue #276: a workflow armed or paused, so a console holding the
@@ -2365,8 +2094,7 @@ fn project_event_for_viewer(
             chat_id,
             parent,
             agent_id,
-            episode_id,
-            round_revision,
+            hive,
             ..
         } => {
             let mut o = envelope("turn_started");
@@ -2383,11 +2111,8 @@ fn project_event_for_viewer(
             if let Some(agent_id) = agent_id {
                 o["agentId"] = json!(agent_id);
             }
-            if let Some(episode_id) = episode_id {
-                o["episodeId"] = json!(episode_id);
-            }
-            if let Some(round_revision) = round_revision {
-                o["roundRevision"] = json!(round_revision);
+            if let Some(hive) = hive {
+                o["hive"] = json!(hive);
             }
             o
         }
@@ -2400,8 +2125,7 @@ fn project_event_for_viewer(
             turn_id,
             agent_id,
             chat_id,
-            episode_id,
-            round_revision,
+            hive,
             outcome,
             ..
         } => {
@@ -2418,11 +2142,8 @@ fn project_event_for_viewer(
             if let Some(chat_id) = chat_id {
                 o["chatId"] = json!(chat_id);
             }
-            if let Some(episode_id) = episode_id {
-                o["episodeId"] = json!(episode_id);
-            }
-            if let Some(round_revision) = round_revision {
-                o["roundRevision"] = json!(round_revision);
+            if let Some(hive) = hive {
+                o["hive"] = json!(hive);
             }
             o
         }
@@ -2432,8 +2153,7 @@ fn project_event_for_viewer(
             turn_id,
             agent_id,
             chat_id,
-            episode_id,
-            round_revision,
+            hive,
             outcome,
         } => {
             let mut o = envelope("turn_settled");
@@ -2445,11 +2165,8 @@ fn project_event_for_viewer(
             if let Some(chat_id) = chat_id {
                 o["chatId"] = json!(chat_id);
             }
-            if let Some(episode_id) = episode_id {
-                o["episodeId"] = json!(episode_id);
-            }
-            if let Some(round_revision) = round_revision {
-                o["roundRevision"] = json!(round_revision);
+            if let Some(hive) = hive {
+                o["hive"] = json!(hive);
             }
             o
         }
@@ -2902,7 +2619,7 @@ async fn run_chat(
     // message typed into a desk became a board card that nobody had asked for,
     // and the agent answering it had no say in the matter. Tracking is now the
     // agent's own decision, made with a tool call — `spawn_task` opens a card,
-    // and a hand-off through `delegate_to_desk` / `delegate_to_teammate` opens
+    // and a hand-off through the retired desk hand-offs opens
     // the card that tracks the hand-off — so a card on the board means an agent
     // (or the operator, through the console or this control) put it there.
     //
@@ -3059,7 +2776,7 @@ async fn run_chat(
             // through history like any other reply.
             let notice = CompanyEvent::AgentReply {
                 audience: Vec::new(),
-                episode: None,
+                hive: None,
                 parent: reply_thread(accepted.thread_root(), accepted.message_seq),
                 chat_id: message.chat.clone().unwrap_or_else(|| {
                     crate::server::ops::language::GENERAL_CHANNEL_ID.to_string()
@@ -3601,8 +3318,7 @@ async fn accept_chat_turn(
                     parent,
                     by: by.cloned(),
                     agent_id: None,
-                    episode_id: None,
-                    round_revision: None,
+                    hive: None,
                 },
             )
             .await
@@ -3673,8 +3389,7 @@ async fn settle_chat_turn_by(
                     error: failure.0.to_string(),
                     agent_id: agent_id.map(str::to_string),
                     chat_id: None,
-                    episode_id: None,
-                    round_revision: None,
+                    hive: None,
                     outcome: None,
                 },
             )
@@ -3696,8 +3411,7 @@ async fn settle_chat_turn_by(
                     turn_id: turn_id.to_string(),
                     agent_id: agent_id.map(str::to_string),
                     chat_id: None,
-                    episode_id: None,
-                    round_revision: None,
+                    hive: None,
                     outcome: crate::ports::types::TurnOutcome::Committed,
                 },
             )
@@ -4157,7 +3871,7 @@ fn spawn_chat_turn(turn: ChatTurn) -> JoinHandle<Result<(CycleReport, Option<Str
                 };
                 let notice = CompanyEvent::AgentReply {
                     audience: Vec::new(),
-                    episode: None,
+                    hive: None,
                     // Issue #1890 D: threaded on exactly the terms a successful
                     // reply is. This notice IS the answer when there is no
                     // other one, and `reply_thread`'s whole argument is that
@@ -4205,9 +3919,6 @@ fn spawn_chat_turn(turn: ChatTurn) -> JoinHandle<Result<(CycleReport, Option<Str
         };
         let reply_parent = reply_thread(parent, accepted.message_seq);
         journal_chat_replies(&runtime, &company, &desk, reply_parent, &mut report).await;
-        // Cross-desk referral of a committed reply is re-homed in the hive
-        // driver (plan hive-desks, Phase 6: `hive::referral`); the P15 spike
-        // that ran here read `runtime::hivemind`, which is gone.
         let answered_by: Option<String> = report
             .responses
             .iter()
@@ -4349,7 +4060,7 @@ pub(crate) async fn journal_chat_replies(
                 id,
                 CompanyEvent::AgentReply {
                     audience: Vec::new(),
-                    episode: None,
+                    hive: None,
                     // Who this reply names. Rendered as chips and — unlike an
                     // operator message's — never consulted by dispatch, which
                     // is the mention-loop fuse.
@@ -4525,147 +4236,35 @@ struct ChatHistoryQuery {
 
 /// One desk-history message, as the console renders it. Mirrors `ChatMessage`
 /// in `frontend/src/lib/chat.ts`.
-/// Where a crossing referral came from, when another desk caused this message
-/// (tinyhivemind P15).
-///
-/// Mirrors `ReferredFromDto` in `frontend/src/api/types.ts`.
-///
-/// The labels are **captured with the row** rather than resolved when the
-/// transcript is read, for the reason [`SessionAuthor`] captures its own: a
-/// desk renamed later must not rewrite what the conversation said at the time.
-///
-/// [`SessionAuthor`]: tinyhivemind::session::SessionAuthor
-/// One line of a crossing, as the console renders it.
+/// Where a reply sits in the company hive's transcript (OC-2). Mirrors
+/// `MessageHiveDto` in `frontend/src/api/types.ts`; the same shape rides on the
+/// `agent_reply` SSE frame as `hive`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ReferralLineDto {
-    /// Who wrote it, by id.
-    author_id: String,
-    /// Their display label when the referral was made; empty for this desk's
-    /// own agent, whom the console already names.
-    author_label: String,
-    /// What they said.
-    text: String,
-    /// True for the question leaving this desk, false for the answer coming
-    /// back — which is what lets the console show the two sides differently.
-    outbound: bool,
-}
-
-/// One agent-to-agent exchange, as the console renders it.
-///
-/// Mirrors [`ReferralConversationDto`] below, and carries the same
-/// `ReferralLineDto` rows: to a reader the two are the same thing — an
-/// exchange somebody on this desk had that the desk itself cannot show — and
-/// a second line shape would be a second thing to keep in step.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentConversationDto {
-    /// The `ask` row it is rooted at: its identity, and the only thing that
-    /// tells two exchanges between the same pair apart.
-    root: u64,
-    asker_id: String,
-    askee_id: String,
-    conversation_id: String,
-    concluded: bool,
-    forced: bool,
-    lines: Vec<ReferralLineDto>,
-}
-
-/// A crossing folded onto the report that brought it home, so the console can
-/// render it as one collapsed line naming both parties and counting the
-/// messages.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ReferralConversationDto {
-    /// The agent on this desk that asked.
-    asker_id: String,
-    /// Who they asked.
-    other_id: String,
-    /// And where that person sits — id for the link, name for the label.
-    other_desk_id: String,
-    other_desk_name: String,
-    /// Whether a person was asked rather than a desk — `@name` vs `#desk`.
-    direct: bool,
-    /// Whether this desk was ASKED rather than doing the asking. Every other
-    /// field is named from the asker's side, so without this the label renders
-    /// an answering desk's crossing backwards.
-    inbound: bool,
-    /// The exchange, oldest first. Its length is the count in the label.
-    lines: Vec<ReferralLineDto>,
-}
-
-/// What a journaled reply was inside the episode that produced it. Mirrors
-/// `MessageEpisodeDto` in `frontend/src/api/types.ts`; the same shape rides
-/// on the `agent_reply` SSE frame as `episode`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageEpisodeDto {
-    /// The episode.
-    id: String,
-    /// The round it was committed in (raw revision).
-    revision: u64,
-    /// The speech act.
-    kind: crate::ports::types::UtteranceKind,
-    /// A `dm`'s recipients.
+pub(crate) struct MessageHiveDto {
+    /// The hive transcript sequence.
+    sequence: u64,
+    /// The episode the row belongs to.
     #[serde(skip_serializing_if = "Option::is_none")]
-    to: Option<Vec<String>>,
-    /// How a `broadcast` was routed on.
+    episode_id: Option<String>,
+    /// The hive conversation root, by hive sequence.
     #[serde(skip_serializing_if = "Option::is_none")]
-    routed_by: Option<RoutedByDto>,
+    thread: Option<u64>,
 }
 
-/// `MessageEpisodeDto.routedBy`.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RoutedByDto {
-    plan: crate::hive::routing::RoutingPlanDto,
-    router: crate::hive::routing::Router,
-}
-
-impl From<crate::ports::types::ReplyEpisode> for MessageEpisodeDto {
-    fn from(episode: crate::ports::types::ReplyEpisode) -> Self {
+impl From<crate::ports::types::HiveRef> for MessageHiveDto {
+    fn from(hive: crate::ports::types::HiveRef) -> Self {
         Self {
-            id: episode.id,
-            revision: episode.revision,
-            kind: episode.kind,
-            to: (!episode.to.is_empty()).then_some(episode.to),
-            routed_by: episode.routed_by.map(|routed| RoutedByDto {
-                plan: routed.plan,
-                router: routed.router,
-            }),
+            sequence: hive.sequence,
+            episode_id: hive.episode_id,
+            thread: hive.thread,
         }
     }
 }
 
-/// The `episode` object an `agent_reply` frame carries, as JSON.
-pub(crate) fn episode_json(episode: &crate::ports::types::ReplyEpisode) -> serde_json::Value {
-    serde_json::to_value(MessageEpisodeDto::from(episode.clone())).unwrap_or_default()
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ReferredFromDto {
-    /// The desk that asked, by id — for the link, never for display.
-    desk_id: String,
-    /// The desk's display name as it stood when the referral was made.
-    desk_name: String,
-    /// The agent that asked, by id.
-    asker_id: String,
-    /// That agent's display label as it stood when the referral was made.
-    asker_label: String,
-    /// The asking message, so the chip links straight to it.
-    sequence: u64,
-    /// Whether a person was asked rather than a desk, so the chip can name
-    /// whoever was actually addressed.
-    direct: bool,
-    /// Which word the chip uses. `"asked"` on the outbound leg, `"answered"`
-    /// when the answer has come home.
-    ///
-    /// Sent as the word rather than a bool because the console renders it and
-    /// nothing else: a `returning: true` would have the render side translating
-    /// a host decision back into English, which is how it came to guess in the
-    /// first place.
-    direction: &'static str,
+/// The `hive` object an `agent_reply` frame carries, as JSON.
+pub(crate) fn hive_json(hive: &crate::ports::types::HiveRef) -> serde_json::Value {
+    serde_json::to_value(MessageHiveDto::from(hive.clone())).unwrap_or_default()
 }
 
 #[derive(Debug, Serialize)]
@@ -4694,23 +4293,10 @@ struct ChatHistoryMessageDto {
     /// every desk that does not deliberate.
     #[serde(skip_serializing_if = "Option::is_none")]
     cue_text: Option<String>,
-    /// Set only when another desk's referral caused this line. Absent on every
-    /// ordinary message, so the wire shape is unchanged for them.
+    /// Where this reply sits in the company hive (OC-2). Absent for every
+    /// row that did not come through the hive.
     #[serde(skip_serializing_if = "Option::is_none")]
-    referred_from: Option<ReferredFromDto>,
-    /// The crossing this report brought home, when it brought one. Absent on
-    /// every ordinary message, so the wire shape is unchanged for them.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    referral_conversation: Option<ReferralConversationDto>,
-    /// The agent-to-agent exchanges this row reported, oldest first. Empty on
-    /// every ordinary message, and skipped then, so the wire shape is
-    /// unchanged for them.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    agent_conversations: Vec<AgentConversationDto>,
-    /// What this reply was inside the episode that produced it (plan
-    /// hive-desks, Phase 4). Absent for every reply outside an episode.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    episode: Option<MessageEpisodeDto>,
+    hive: Option<MessageHiveDto>,
     /// Who may read this line, when the host narrowed it (a desk `dm`).
     /// Absent means everyone on the desk.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -4895,63 +4481,8 @@ impl From<MessageView> for ChatHistoryMessageDto {
         let cue_text = (view.cue_text != view.text).then(|| view.cue_text.clone());
         Self {
             cue_text,
-            episode: view.episode.map(MessageEpisodeDto::from),
+            hive: view.hive.map(MessageHiveDto::from),
             audience: view.aside_audience,
-            agent_conversations: view
-                .agent_conversations
-                .into_iter()
-                .map(|exchange| AgentConversationDto {
-                    root: exchange.root,
-                    asker_id: exchange.asker_id,
-                    askee_id: exchange.askee_id,
-                    conversation_id: exchange.conversation_id,
-                    concluded: exchange.concluded,
-                    forced: exchange.forced,
-                    lines: exchange
-                        .lines
-                        .into_iter()
-                        .map(|line| ReferralLineDto {
-                            author_id: line.author_id,
-                            author_label: line.author_label,
-                            text: line.text,
-                            outbound: line.outbound,
-                        })
-                        .collect(),
-                })
-                .collect(),
-            referral_conversation: view.referral_conversation.map(|crossing| {
-                ReferralConversationDto {
-                    asker_id: crossing.asker_id,
-                    other_id: crossing.other_id,
-                    other_desk_id: crossing.other_desk_id,
-                    other_desk_name: crossing.other_desk_name,
-                    direct: crossing.direct,
-                    inbound: crossing.inbound,
-                    lines: crossing
-                        .lines
-                        .into_iter()
-                        .map(|line| ReferralLineDto {
-                            author_id: line.author_id,
-                            author_label: line.author_label,
-                            text: line.text,
-                            outbound: line.outbound,
-                        })
-                        .collect(),
-                }
-            }),
-            referred_from: view.referred_from.map(|origin| ReferredFromDto {
-                desk_id: origin.desk_id,
-                desk_name: origin.desk_name,
-                asker_id: origin.asker_id,
-                asker_label: origin.asker_label,
-                sequence: origin.sequence,
-                direct: origin.direct,
-                direction: if origin.returning {
-                    "answered"
-                } else {
-                    "asked"
-                },
-            }),
             id: view.id,
             channel: view.channel,
             author: view.author,
@@ -5208,14 +4739,11 @@ struct AgentSessionMessageDto {
 /// # Eligible is not delivered
 ///
 /// This is channel history the agent **may** read, not a record of what it
-/// has **already** been handed. A `desk_dm` journals a row and runs nothing —
-/// the recipient reads it on its own next turn, through the per-agent
-/// watermark `agent_session::AgentSessionState` tracks. That watermark lives
-/// in the live `HarnessPool`, gated behind the `openhuman` feature; this route
-/// has no access to it and compiles in every build. So a message queued
-/// behind another turn shows up here immediately,
-/// same as one the agent answered an hour ago. See
-/// `docs/spec/runtime/speech.md#reading-it-back`.
+/// has **already** been handed. A direct message is delivered to the
+/// recipient's company-hive inbox and read on its own next turn
+/// (`docs/spec/runtime/hive.md`); this route has no view of that inbox and
+/// compiles in every build. So a message queued behind another turn shows up
+/// here immediately, same as one the agent answered an hour ago.
 ///
 /// # The operator sees more than the agent does, deliberately
 ///
@@ -6299,9 +5827,6 @@ async fn extend_approval(
         .map_err(|error| IntoResponse::into_response(error).into())
 }
 
-#[cfg(test)]
-#[path = "operator_episode_dto_tests.rs"]
-mod operator_episode_dto_tests;
 #[cfg(test)]
 #[path = "operator_test_group_1.rs"]
 mod operator_test_group_1;

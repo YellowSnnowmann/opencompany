@@ -18,14 +18,12 @@ async fn two_concurrent_assignments_of_the_same_card_admit_exactly_one_writer() 
         barrier,
     });
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let idle_turns_fx = Fixture::new();
     let idle_turns = ScriptedTurns::new(&idle_turns_fx, vec![]);
     let runner_a = DelegationRunner::new(
         &idle_turns,
         &record,
         Some(&tasks),
-        &steer,
         &record.id,
         &queue,
         orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -34,7 +32,6 @@ async fn two_concurrent_assignments_of_the_same_card_admit_exactly_one_writer() 
         &idle_turns,
         &record,
         Some(&tasks),
-        &steer,
         &record.id,
         &queue,
         orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -47,8 +44,7 @@ async fn two_concurrent_assignments_of_the_same_card_admit_exactly_one_writer() 
                 assignee: "chief".to_string(),
                 note: Some("from A".to_string()),
             },
-            None,
-            MessageContext::default(),
+            None
         ),
         runner_b.run_delegation(
             Delegation::AssignTask {
@@ -56,8 +52,7 @@ async fn two_concurrent_assignments_of_the_same_card_admit_exactly_one_writer() 
                 assignee: "engineer".to_string(),
                 note: Some("from B".to_string()),
             },
-            None,
-            MessageContext::default(),
+            None
         ),
     );
     let a = a.expect("A's assignment completes");
@@ -98,14 +93,12 @@ async fn two_concurrent_reviews_of_the_same_card_admit_exactly_one_writer() {
         barrier,
     });
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let idle_turns_fx = Fixture::new();
     let idle_turns = ScriptedTurns::new(&idle_turns_fx, vec![]);
     let runner_a = DelegationRunner::new(
         &idle_turns,
         &record,
         Some(&tasks),
-        &steer,
         &record.id,
         &queue,
         orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -114,7 +107,6 @@ async fn two_concurrent_reviews_of_the_same_card_admit_exactly_one_writer() {
         &idle_turns,
         &record,
         Some(&tasks),
-        &steer,
         &record.id,
         &queue,
         orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -127,8 +119,7 @@ async fn two_concurrent_reviews_of_the_same_card_admit_exactly_one_writer() {
                 decision: lifecycle::ReviewDecision::Approve,
                 note: Some("approved by A".to_string()),
             },
-            None,
-            MessageContext::default(),
+            None
         ),
         runner_b.run_delegation(
             Delegation::ReviewTask {
@@ -136,8 +127,7 @@ async fn two_concurrent_reviews_of_the_same_card_admit_exactly_one_writer() {
                 decision: lifecycle::ReviewDecision::Revise,
                 note: Some("sent back by B".to_string()),
             },
-            None,
-            MessageContext::default(),
+            None
         ),
     );
     let a = a.expect("A's review completes");
@@ -178,14 +168,12 @@ async fn a_same_column_assignment_cannot_be_overwritten_by_a_stale_review() {
         assignment_written: Arc::new(tokio::sync::Barrier::new(2)),
     });
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let idle_turns_fx = Fixture::new();
     let idle_turns = ScriptedTurns::new(&idle_turns_fx, vec![]);
     let assigner = DelegationRunner::new(
         &idle_turns,
         &record,
         Some(&tasks),
-        &steer,
         &record.id,
         &queue,
         orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -194,7 +182,6 @@ async fn a_same_column_assignment_cannot_be_overwritten_by_a_stale_review() {
         &idle_turns,
         &record,
         Some(&tasks),
-        &steer,
         &record.id,
         &queue,
         orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -207,8 +194,7 @@ async fn a_same_column_assignment_cannot_be_overwritten_by_a_stale_review() {
                 assignee: "chief".to_string(),
                 note: Some("assigned concurrently".to_string()),
             },
-            None,
-            MessageContext::default(),
+            None
         ),
         reviewer.run_delegation(
             Delegation::ReviewTask {
@@ -216,8 +202,7 @@ async fn a_same_column_assignment_cannot_be_overwritten_by_a_stale_review() {
                 decision: lifecycle::ReviewDecision::Approve,
                 note: Some("reviewed concurrently".to_string()),
             },
-            None,
-            MessageContext::default(),
+            None
         ),
     );
     let assigned = assigned.expect("assignment completes");

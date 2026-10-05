@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use serde_json::json;
-use tinyhivemind_typesafe::{
+use tinyhivemind_core::typesafe::{
     Error, Question, SystemOneAnswer, SystemOneRequest, SystemOneTransport,
 };
 use wiremock::matchers::{body_partial_json, header, method, path};

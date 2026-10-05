@@ -18,8 +18,9 @@
  * - **Desk membership** is who shares a room, and therefore who can answer whom.
  * - **`task_dispatched` → `desk_task_completed`** is a delegation that actually
  *   happened, and the only pair the journal already correlates.
- * - **`tool_call` frames** name the rest: `add_agent` (a spawn), `spawn_task`,
- *   `delegate_to_desk`, `delegate_to_teammate`.
+ * - **`tool_call` frames** name the rest: `add_agent` (a spawn), `spawn_task`.
+ * - **`hive_message` frames** are agents reaching each other through the
+ *   company hive (`hivemind_send_agent` and private desk lines).
  *
  * The last of those is the weakest and is treated as such. A tool call's
  * arguments reach the console **redacted** (`TurnStep.detail`), so the target may
@@ -109,12 +110,13 @@ export type CommsObservation =
   | { kind: "spawned"; by: string | null; agentId: string; atMillis: number }
   | { kind: "speaking"; agentId: string }
   /**
-   * One agent reached another inside an episode — a broadcast the router
-   * carried to a seat, a desk DM, or a referral to another desk. Folded from
-   * the episode frames by `lib/coordination.ts`. The most direct claim the
-   * graph makes: not "may reach", not "handed a card", but "spoke to".
+   * One agent reached another through the company hive — a direct line to
+   * its inbox, or a private desk line it was a reader of (`hive_message`).
+   * Folded from the hive frames by `lib/coordination.ts`. The most direct
+   * claim the graph makes: not "may reach", not "handed a card", but "spoke
+   * to".
    */
-  | { kind: "spoke"; from: string; to: string; via: "broadcast" | "dm" | "referral"; atMillis: number };
+  | { kind: "spoke"; from: string; to: string; via: "direct" | "private"; atMillis: number };
 
 /** Build the structural graph — everything true before anybody does anything. */
 export function structuralGraph(

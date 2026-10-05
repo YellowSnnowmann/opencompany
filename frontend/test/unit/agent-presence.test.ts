@@ -385,9 +385,9 @@ describe("helpers", () => {
     expect(Object.keys(dropTurnMeta(all, staleTurnMeta(NOW)))).toEqual(["fresh"]);
   });
 
-  it("counts an episode seat's approval when it names no agent, and skips resolved ones", () => {
+  it("counts a hive turn's approval when it names no agent, and skips resolved ones", () => {
     const approvals = [
-      { id: "a1", agent: null, episode: { seat: "rae" } },
+      { id: "a1", agent: null, hive: { agentId: "rae" } },
       { id: "a2", agent: "ada" },
       { id: "a3", agent: "ada" },
     ];

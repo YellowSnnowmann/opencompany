@@ -60,10 +60,6 @@ name = "hive_e2e"
 path = "tests/hive_e2e.rs"
 
 [[test]]
-name = "hive_seat_cards"
-path = "tests/hive_seat_cards.rs"
-
-[[test]]
 name = "offline_e2e"
 path = "tests/offline_e2e.rs"
 
@@ -266,13 +262,6 @@ openhuman-tinyhumans = { path = "../../vendor/openhuman/crates/openhuman-tinyhum
 # transport, no HTTP client, no web framework — its own CI asserts that — and
 # its only dependencies, `serde` and `thiserror`, are already in this lockfile.
 tinyhivemind-core = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-core" }
-
-# The session-runtime half of the same vendored library: the `SessionLog` paging
-# port, the **attributed** transcript projection over it, and the `speech`
-# vocabulary (post / broadcast / dm / complete_episode) a desk turn ends with.
-# Unconditional like `tinyhivemind-core`: the speech tool specs are rendered on
-# the default build too.
-tinyhivemind = { path = "../../vendor/tinyhivemind/crates/tinyhivemind" }
 
 # The MCP client, extracted out of OpenHuman into its own crate. OpenHuman's
 # `oh::mcp::http_client` facade still re-exports the transport and the payload
@@ -550,41 +539,18 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 bs58 = { version = "0.5", default-features = false, features = ["std"] }
 rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
 
-# Bounded group deliberation on a desk (`src/hivemind/`): the trace grammar,
-# quorum with cross-inhibition, and the pure episode state machine that decides
-# which one teammate speaks next. Unconditional, and deliberately so — a desk
-# episode is a routing decision the default build makes as readily as the
-# harness one does, and the crate is pure Rust with `serde` + `thiserror` and
-# nothing else, executor-neutral, edition 2024, GPL-3.0 like this crate. It
-# adds no port and no storage: `step` is a fold over a transcript this host
-# already holds, and the state it returns is committed only after the reply is
-# durably journaled. Taking `tinyhivemind-hive` alone pulls the session runtime
-# and the pure algebra with it, so the types handed to `step` are the same
-# types rather than structural twins.
-tinyhivemind-hive = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-hive" }
-
-# Host-neutral conversation surfaces (`ConversationRef`, `MessageRoute`,
-# `RoutingPolicy`) and the Jev-first `route_message`/`route_broadcast`
-# composition. Pure, `serde` + `thiserror` only, unconditional for the same
-# reason `tinyhivemind-core` is: conversation identity is decided on the default
-# build too.
-tinyhivemind-embed = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-embed" }
-# The Jev System One wire types and `JevRouter` behind a host transport port
-# (`SystemOneTransport`). Deliberately contains no HTTP client; this crate
-# supplies one over `reqwest` under `openhuman` (plan Phase 7). Unconditional
-# because it is pure and the routing policy types live beside it.
-tinyhivemind-typesafe = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-typesafe" }
-# The first-class OpenHuman adapter: `OpenHumanHive` (one per desk), each member
-# bound to an already-built `openhuman_embed::Agent`, and the
-# `CompletionDriver` that proposes concurrent rounds. Optional because it
-# links `openhuman-embed`; it comes in with the `openhuman` feature.
-# The completion driver and the episode's tool record, both pure: the
-# conductor, the wire forms, and the record every tool call lands in. Split
-# out of `tinyhivemind-openhuman` upstream, which now holds only the crates
-# that link a harness.
-tinyhivemind-driver = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-driver" }
-tinyhivemind-tools = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-tools" }
-
+# The durable multi-agent Coordinator (`vendor/tinyhivemind`): agents, hives,
+# deliveries, episodes and the transcript, committed through a host `Storage`
+# port. This crate supplies that port over its own `HiveStore`
+# (`src/hive/storage.rs`), so the library's SQLite store stays off
+# (`default-features = false`). Unconditional: the coordinator types and the
+# storage adapter compile on the default build, and the crate is pure Rust
+# over tokio + serde with no transport of its own.
+tinyhivemind-hives = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-hives", default-features = false }
+# The OpenHuman adapter: `OpenHumanHost` registers this company's already-built
+# `openhuman_embed::Agent` handles with the Coordinator and attaches the
+# permanent `hivemind_*` tools. Optional because it links `openhuman-embed`;
+# it comes in with the `openhuman` feature.
 tinyhivemind-openhuman = { path = "../../vendor/tinyhivemind/crates/tinyhivemind-openhuman", optional = true }
 
 [features]

@@ -1,25 +1,25 @@
 /**
- * What the company's coordination actually looked like: how many seats ran
+ * What the company's coordination actually looked like: how many agents ran
  * at once, who spoke to whom, and how each episode ended.
  *
  * Two folds, both pure:
  *
  * - {@link reduceTurnBracket} keeps a ledger of the chat turn brackets
- *   (`turn_started` / `turn_settled`, issue #983), episode or not. Concurrency
- *   is a property of turns, and a DM turn overlapping a round is still two
- *   models thinking at once — so this reads the bracket and not the band.
- * - {@link coordinationObservations} turns the episode fold into the edges the
- *   comms graph draws: a broadcast is an agent reaching the seats the router
- *   picked, a desk DM is an agent reaching a teammate, a referral is an agent
- *   reaching another desk.
+ *   (`turn_started` / `turn_settled`, issue #983), keyed by `turnId`, episode
+ *   or not. Concurrency is a property of turns, and a direct-message turn
+ *   overlapping an episode turn is still two models thinking at once.
+ * - {@link coordinationObservations} turns the hive fold (`lib/hive.ts`) into
+ *   the edges the comms graph draws: every `hive_message` is an agent reaching
+ *   another — directly (one recipient) or privately on a desk (each `onlyFor`
+ *   reader).
  *
- * `scripts/measure-coordination.mjs` computes the same numbers over the raw
- * SSE feed for a run nobody is watching; the two are kept in step by hand and
- * by the thresholds that script asserts.
+ * `scripts/lib/coordination-metrics.mjs` computes the same numbers over the
+ * raw SSE feed for a run nobody is watching; the two are kept in step by hand
+ * and by the thresholds that script asserts.
  */
 
 import type { TurnBracketFrame } from "@/hooks/use-events";
-import type { EpisodeFrames } from "@/lib/episode-frames";
+import type { HiveFrames } from "@/lib/hive";
 import type { CommsObservation } from "@/views/comms/model";
 
 /** One turn the ledger saw open. */
@@ -28,8 +28,9 @@ export interface OpenTurn {
   agentId?: string;
   /** The thread the bracket named, so presence can say which chat a turn is in. */
   chatId?: string;
+  /** The hive the turn answered in, on a hive turn. */
+  hiveId?: string;
   episodeId?: string;
-  roundRevision?: number;
   startedAtMillis: number;
 }
 
@@ -45,6 +46,8 @@ export interface TurnLedger {
   closed: ClosedTurn[];
   /** The most turns open at once, ever. */
   peak: number;
+  /** How many turns started while another was open. */
+  overlaps: number;
   /** How many times one agent's turn started while its own was still open —
    *  the number the runtime promises is zero. */
   sameAgentOverlaps: number;
@@ -54,6 +57,7 @@ export const EMPTY_TURN_LEDGER: TurnLedger = Object.freeze({
   open: [],
   closed: [],
   peak: 0,
+  overlaps: 0,
   sameAgentOverlaps: 0,
 }) as TurnLedger;
 
@@ -76,8 +80,8 @@ export function reduceTurnBracket(ledger: TurnLedger, frame: TurnBracketFrame): 
         key,
         agentId: frame.agentId,
         chatId: frame.chatId,
-        episodeId: frame.episodeId,
-        roundRevision: frame.roundRevision,
+        hiveId: frame.hive?.hiveId,
+        episodeId: frame.hive?.episodeId,
         startedAtMillis: frame.atMillis,
       },
     ];
@@ -85,6 +89,7 @@ export function reduceTurnBracket(ledger: TurnLedger, frame: TurnBracketFrame): 
       open,
       closed: ledger.closed,
       peak: Math.max(ledger.peak, open.length),
+      overlaps: ledger.overlaps + (ledger.open.length > 0 ? 1 : 0),
       sameAgentOverlaps: ledger.sameAgentOverlaps + (sameAgent ? 1 : 0),
     };
   }
@@ -115,45 +120,23 @@ export function workingAgents(ledger: TurnLedger): string[] {
 }
 
 /** The kind of contact a coordination edge records. */
-export type SpokeVia = "broadcast" | "dm" | "referral";
+export type SpokeVia = "direct" | "private";
 
 /**
- * The comms-graph observations the episode fold implies.
+ * The comms-graph observations the hive fold implies.
  *
- * Every edge is agent → agent or agent → desk, and every one of them was
- * watched happen, so they are all history edges (`spoke`), never structure.
- * A broadcast whose plan named nobody but its author draws nothing: a room
- * talking to itself is not a pair.
+ * Every edge is agent → agent and was watched happen, so they are all history
+ * edges (`spoke`), never structure. A line to oneself draws nothing.
  */
 export function coordinationObservations(
-  frames: EpisodeFrames,
+  frames: HiveFrames,
   ledger?: TurnLedger,
 ): CommsObservation[] {
   const out: CommsObservation[] = [];
-  for (const id of frames.order) {
-    const episode = frames.byId[id];
-    if (!episode) continue;
-    for (const broadcast of episode.broadcasts) {
-      for (const to of planTargets(broadcast.plan)) {
-        if (to === broadcast.agentId) continue;
-        out.push({ kind: "spoke", from: broadcast.agentId, to, via: "broadcast", atMillis: broadcast.atMillis });
-      }
-    }
-    for (const dm of episode.dms) {
-      for (const to of dm.to) {
-        if (to === dm.from) continue;
-        out.push({ kind: "spoke", from: dm.from, to, via: "dm", atMillis: dm.atMillis });
-      }
-    }
-    for (const referral of episode.referrals) {
-      if (referral.returning) continue;
-      out.push({
-        kind: "spoke",
-        from: referral.asker,
-        to: referral.direct ? referral.target : referral.toDesk,
-        via: "referral",
-        atMillis: referral.atMillis,
-      });
+  for (const contact of frames.contacts) {
+    for (const to of contact.to) {
+      if (to === contact.from) continue;
+      out.push({ kind: "spoke", from: contact.from, to, via: contact.via, atMillis: contact.atMillis });
     }
   }
   if (ledger) {
@@ -162,59 +145,57 @@ export function coordinationObservations(
   return out;
 }
 
-/** The seats a routing plan hands a broadcast to. */
-export function planTargets(plan: { kind: string; primaryId?: string; invitedIds?: string[] }): string[] {
-  const out: string[] = [];
-  if (plan.primaryId) out.push(plan.primaryId);
-  for (const id of plan.invitedIds ?? []) if (!out.includes(id)) out.push(id);
-  return out;
-}
-
 /** The numbers the measurement script prints, computed the console's way. */
 export interface CoordinationSummary {
-  peakConcurrentTurns: number;
+  maxConcurrentTurns: number;
+  overlaps: number;
+  openTurns: number;
   sameAgentOverlaps: number;
+  interruptedTurns: number;
   episodesOpened: number;
-  episodesCompleted: number;
-  /** Rounds per episode, in episode order. */
-  roundsPerEpisode: number[];
-  broadcasts: number;
-  dms: number;
-  referrals: number;
+  episodesSettled: number;
+  episodesFailed: number;
+  /** `<chatId>/<episodeId>` of every episode still open. */
+  episodesOpen: string[];
+  /** Turns per episode, by episode id. */
+  turnsPerEpisode: Record<string, number>;
+  directMessages: number;
+  privateLines: number;
   /** Distinct `from→to` agent pairs that spoke, sorted. */
-  pairs: string[];
+  distinctPairs: string[];
+  /** How many episodes each starter route began. */
+  starterRoutes: Record<string, number>;
 }
 
-/** Folds the two ledgers into one summary. */
-export function coordinationSummary(frames: EpisodeFrames, ledger: TurnLedger): CoordinationSummary {
+/** Folds the two ledgers into one summary — `summarize` in the script. */
+export function coordinationSummary(frames: HiveFrames, ledger: TurnLedger): CoordinationSummary {
   const pairs = new Set<string>();
-  let broadcasts = 0;
-  let dms = 0;
-  let referrals = 0;
-  let completed = 0;
-  const rounds: number[] = [];
-  for (const observation of coordinationObservations(frames)) {
-    if (observation.kind !== "spoke") continue;
-    pairs.add(`${observation.from}→${observation.to}`);
-    if (observation.via === "broadcast") broadcasts += 1;
-    else if (observation.via === "dm") dms += 1;
-    else referrals += 1;
+  let directMessages = 0;
+  let privateLines = 0;
+  for (const contact of frames.contacts) {
+    if (contact.via === "direct") directMessages += 1;
+    else privateLines += 1;
+    for (const to of contact.to) pairs.add(`${contact.from}→${to}`);
   }
-  for (const id of frames.order) {
-    const episode = frames.byId[id];
-    if (!episode) continue;
-    if (episode.status === "completed") completed += 1;
-    rounds.push(Math.max(episode.roundCount ?? 0, Object.keys(episode.rounds).length));
-  }
+  const episodes = frames.order.map((id) => frames.byId[id]).filter((episode) => episode !== undefined);
+  const turnsPerEpisode: Record<string, number> = {};
+  for (const episode of episodes) turnsPerEpisode[episode.id] = episode.turns;
   return {
-    peakConcurrentTurns: ledger.peak,
+    maxConcurrentTurns: ledger.peak,
+    overlaps: ledger.overlaps,
+    openTurns: ledger.open.length,
     sameAgentOverlaps: ledger.sameAgentOverlaps,
-    episodesOpened: frames.order.length,
-    episodesCompleted: completed,
-    roundsPerEpisode: rounds,
-    broadcasts,
-    dms,
-    referrals,
-    pairs: [...pairs].sort(),
+    interruptedTurns: frames.interruptedTurns,
+    episodesOpened: episodes.length,
+    episodesSettled: episodes.filter((episode) => episode.status === "settled").length,
+    episodesFailed: episodes.filter((episode) => episode.status === "failed").length,
+    episodesOpen: episodes
+      .filter((episode) => episode.status === "open")
+      .map((episode) => `${episode.chatId ?? "?"}/${episode.id}`),
+    turnsPerEpisode,
+    directMessages,
+    privateLines,
+    distinctPairs: [...pairs].sort(),
+    starterRoutes: { ...frames.starterRoutes },
   };
 }

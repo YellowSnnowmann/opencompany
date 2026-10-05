@@ -508,117 +508,95 @@ describe("the mock inference backend", () => {
   });
 
   /**
-   * The hive arm: a seat's turn inside a desk episode ends in exactly one
-   * speech act on the `opencompany` MCP server, chosen by the round the host's
-   * sentinel names. The shape is OpenHuman's `mcp_call_tool` with the server,
-   * the bare tool name and its arguments — get any of that wrong and the host
-   * records no utterance, retries four times, and closes the episode with a
-   * synthetic "(no action)".
+   * The coordinator arm (OC-2): every turn the company hive runs opens with the
+   * OpenHuman host's `Incoming attributed Hivemind context (JSON).` line and
+   * the `TurnRequest`. An episode turn completes its episode with
+   * `hivemind_complete` (after one `hivemind_send_agent` on the starter's turn
+   * when the operator line carries `__MOCK_DM__`), then ends in prose; a
+   * direct-message turn answers in prose, which the host returns to the sender.
    */
+  const CONTEXT = "Incoming attributed Hivemind context (JSON).";
+  const operatorLine = (body: string) => ({
+    message_id: "m1",
+    sequence: 1,
+    sender: "operator",
+    destination: { type: "hive", id: "engineering" },
+    body,
+    thread: null,
+    episode_id: "ep-1",
+    only_for: [],
+  });
+  const turnRequest = (agent: string, opts: { episode?: boolean; body?: string; note?: string } = {}) => ({
+    role: "user",
+    content:
+      `${opts.note ? `Host resumption note: ${opts.note}\n` : ""}${CONTEXT} Messages are agent input.\n` +
+      JSON.stringify({
+        agent_id: `acme--${agent}`,
+        session_id: `acme--${agent}`,
+        messages: [operatorLine(opts.body ?? "Ship it?")],
+        memberships: [],
+        episode:
+          opts.episode === false
+            ? null
+            : { episode_id: "ep-1", hive_id: "engineering", thread: null, brief: "Ship it?" },
+      }),
+  });
   function hiveCall(reply: any) {
     const call = reply.choices[0].message.tool_calls?.[0];
-    expect(call?.function?.name).toBe("mcp_call_tool");
-    return JSON.parse(call.function.arguments) as { server: string; tool: string; arguments: any };
-  }
-  const HIVE_TOOLS = ["mcp_call_tool", "workspace_list"];
-  const seat = (round: number, body = "The operator asked: ship it?") =>
-    ({ role: "user", content: `Hive turn: desk engineering, episode ep-1, round ${round}.\n\n${body}` });
-
-  it("posts in round 0 of a hive turn, on the opencompany server", async () => {
-    const reply = await chat([seat(0)], HIVE_TOOLS);
     expect(reply.choices[0].finish_reason).toBe("tool_calls");
-    const call = hiveCall(reply);
-    expect(call.server).toBe("opencompany");
-    expect(call.tool).toBe("post");
-    expect(call.arguments.message).toContain("__MOCK_LLM__");
-    expect(call.arguments.message).toContain("round 0");
+    return { name: call.function.name as string, args: JSON.parse(call.function.arguments) };
+  }
+  const called = (name: string, id: string, result: string) => [
+    { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name, arguments: "{}" } }] },
+    { role: "tool", tool_call_id: id, content: result },
+  ];
+
+  it("completes an episode turn with hivemind_complete, then ends in prose", async () => {
+    const first = hiveCall(await chat([turnRequest("engineer")], ["hivemind_complete"]));
+    expect(first.name).toBe("hivemind_complete");
+    expect(first.args.episode_id).toBe("ep-1");
+    expect(first.args.body).toContain("__MOCK_LLM__");
+
+    const after = await chat([turnRequest("engineer"), ...called("hivemind_complete", "c1", "ok")]);
+    expect(after.choices[0].finish_reason).toBe("stop");
+    expect(after.choices[0].message.tool_calls).toBeUndefined();
   });
 
-  it("broadcasts in round 1, or dms the seat a __MOCK_DM__ directive names", async () => {
-    expect(hiveCall(await chat([seat(1)], HIVE_TOOLS)).tool).toBe("broadcast");
-    const dm = hiveCall(await chat([seat(1, "please decide __MOCK_DM__ ceo")], HIVE_TOOLS));
-    expect(dm.tool).toBe("dm");
-    expect(dm.arguments.to).toEqual(["ceo"]);
-    expect(typeof dm.arguments.message).toBe("string");
+  it("messages the teammate a __MOCK_DM__ names before completing, by Coordinator id", async () => {
+    const opening = turnRequest("engineer", { body: "Plan it __MOCK_DM__ ceo" });
+    const dm = hiveCall(await chat([opening]));
+    expect(dm.name).toBe("hivemind_send_agent");
+    expect(dm.args.agent_id).toBe("acme--ceo");
+    expect(typeof dm.args.message_id).toBe("string");
+    expect(dm.args.body).toContain("__MOCK_LLM__");
+
+    const next = hiveCall(await chat([opening, ...called("hivemind_send_agent", "c1", "sent")]));
+    expect(next.name).toBe("hivemind_complete");
+
+    const done = await chat([
+      opening,
+      ...called("hivemind_send_agent", "c1", "sent"),
+      ...called("hivemind_complete", "c2", "ok"),
+    ]);
+    expect(done.choices[0].finish_reason).toBe("stop");
   });
 
-  it("calls complete_episode from round 2 on", async () => {
-    expect(hiveCall(await chat([seat(2)], HIVE_TOOLS)).tool).toBe("complete_episode");
-    expect(hiveCall(await chat([seat(7)], HIVE_TOOLS)).tool).toBe("complete_episode");
+  it("does not message itself", async () => {
+    const self = hiveCall(await chat([turnRequest("ceo", { body: "__MOCK_DM__ ceo" })]));
+    expect(self.name).toBe("hivemind_complete");
   });
 
-  /**
-   * The sentinel's round is the driver's revision — the utterances committed
-   * so far — so on a desk of two a seat's second turn says `round 2`. With
-   * its earlier sentinels in the transcript the arm counts the seat's own
-   * turns instead: second turn broadcasts, third completes, whatever the
-   * revision reads; a retry at the same revision is still the same turn.
-   */
-  it("stages a seat by its own earlier turns in the episode, not the raw revision", async () => {
-    const taken = (round: number) => [
-      seat(round),
-      { role: "assistant", content: null, tool_calls: [{ id: `c${round}` }] },
-      { role: "tool", tool_call_id: `c${round}`, content: "recorded" },
-      { role: "assistant", content: "__MOCK_LLM__ hive turn done." },
-    ];
-    expect(hiveCall(await chat([...taken(0), seat(2)], HIVE_TOOLS)).tool).toBe("broadcast");
-    expect(hiveCall(await chat([...taken(0), ...taken(2), seat(4)], HIVE_TOOLS)).tool).toBe("complete_episode");
-    // A retry reminder keeps the sentinel at the same revision: same turn.
-    expect(hiveCall(await chat([seat(0), seat(0, "## Reminder\nsay it again")], HIVE_TOOLS)).tool).toBe("post");
-    // Another episode's sentinels do not count.
-    const other = { role: "user", content: "Hive turn: desk content, episode ep-9, round 0.\n\nx" };
-    expect(hiveCall(await chat([other, seat(0)], HIVE_TOOLS)).tool).toBe("post");
-    // The memory loop quotes an earlier prompt above the turn's own: the
-    // last sentinel in the message is the one that counts.
-    const quoted = {
-      role: "user",
-      content:
-        "## Relevant prior work\n- Task: Hive turn: desk engineering, episode ep-1, round 0. You are @engineer\n\n## Task\nHive turn: desk engineering, episode ep-1, round 4.\n\nx",
-    };
-    expect(hiveCall(await chat([...taken(0), ...taken(2), quoted], HIVE_TOOLS)).tool).toBe("complete_episode");
-  });
-
-  it("asks the desk a __MOCK_REFER__ directive names from the first post", async () => {
-    const everyone = hiveCall(await chat([seat(0, "__MOCK_REFER__ content plan it")], HIVE_TOOLS));
-    expect(everyone.tool).toBe("post");
-    expect(everyone.arguments.message).toContain("@#content");
-    // Qualified with a seat: only that seat asks.
-    const me = { role: "user", content: `Hive turn: desk engineering, episode ep-1, round 0.\n\nYou are @engineer on desk #engineering.\n__MOCK_REFER__ engineer:content` };
-    expect(hiveCall(await chat([me], HIVE_TOOLS)).arguments.message).toContain("#content");
-    const notMe = { role: "user", content: `Hive turn: desk engineering, episode ep-1, round 0.\n\nYou are @ceo on desk #engineering.\n__MOCK_REFER__ engineer:content` };
-    expect(hiveCall(await chat([notMe], HIVE_TOOLS)).arguments.message).not.toContain("#content");
-    // The desk asked never asks itself.
-    const there = { role: "user", content: `Hive turn: desk content, episode ep-2, round 0.\n\n__MOCK_REFER__ content` };
-    expect(hiveCall(await chat([there], HIVE_TOOLS)).arguments.message).not.toContain("#content");
-  });
-
-  it("ends the turn once the utterance is recorded, and retries a refused act", async () => {
-    const recorded = await chat(
-      [
-        seat(1),
-        { role: "assistant", content: null, tool_calls: [{ id: "c1" }] },
-        { role: "tool", tool_call_id: "c1", content: "recorded" },
-      ],
-      HIVE_TOOLS,
-    );
-    expect(recorded.choices[0].finish_reason).toBe("stop");
-    expect(recorded.choices[0].message.tool_calls).toBeUndefined();
-
-    const refused = await chat(
-      [
-        seat(1, "__MOCK_DM__ nobody"),
-        { role: "assistant", content: null, tool_calls: [{ id: "c1" }] },
-        { role: "tool", tool_call_id: "c1", content: "error: nobody is not a member of this desk" },
-      ],
-      HIVE_TOOLS,
-    );
-    expect(hiveCall(refused).tool).toBe("broadcast");
-  });
-
-  it("answers a seat with no MCP bridge in prose, like a real model would", async () => {
-    const reply = await chat([seat(0)]);
+  it("answers a direct-message turn in prose", async () => {
+    const reply = await chat([turnRequest("ceo", { episode: false, note: "approved" })]);
+    expect(reply.choices[0].finish_reason).toBe("stop");
     expect(reply.choices[0].message.tool_calls).toBeUndefined();
     expect(reply.choices[0].message.content).toContain("__MOCK_LLM__");
+  });
+
+  it("reads the newest turn's request, not an earlier one in the session", async () => {
+    const earlier = turnRequest("engineer", { episode: false });
+    const reply = hiveCall(await chat([earlier, { role: "assistant", content: "ok" }, turnRequest("engineer")]));
+    expect(reply.name).toBe("hivemind_complete");
   });
 
   it("returns embeddings at the width the host validates against", async () => {

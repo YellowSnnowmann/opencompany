@@ -1,4 +1,3 @@
-use super::tests_core::*;
 use super::tests_core2::*;
 use super::*;
 
@@ -112,71 +111,6 @@ async fn without_an_evaluator_an_abstention_keeps_the_deterministic_answer() {
         orchestrator::DrainClaim::Full,
         "an abstention with nobody to ask stays ungated"
     );
-}
-
-/// The defect, at the seam that still opens cards by construction: the card
-/// a hand-off opens is named after the **work**, not after the instruction.
-///
-/// The assertion that matters is the negative one. A card titled
-/// `hey can you take a look at the pricing page, I think the tiers are…` is
-/// a prefix of the request wearing an ellipsis, and that is what a board of
-/// them read as — a chat log. Asserting only the expected string would still
-/// pass if the title were an excerpt that happened to match.
-#[tokio::test]
-async fn a_hand_off_card_is_named_after_the_work_not_the_instruction() {
-    let rambling = "hey can you take a look at the pricing page, I think the tiers are \
-                    confusing and we should probably reword the middle one";
-    let fx = Fixture::new();
-    let titler = ScriptedTitler::new("Reword the middle pricing tier");
-    let turns = ScriptedTurns::new(&fx, vec![Turn::reply("on it")]);
-
-    fx.runner(&turns)
-        .with_titler(&titler)
-        .run_delegation(handoff(rambling), None, MessageContext::default())
-        .await
-        .expect("delegation runs");
-
-    let cards = fx.cards().await;
-    assert_eq!(cards.len(), 1, "one hand-off, one card: {cards:?}");
-    assert_eq!(cards[0].title, "Reword the middle pricing tier");
-    assert!(
-        !rambling.starts_with(cards[0].title.trim_end_matches('…')),
-        "the headline is still an excerpt of the request: {}",
-        cards[0].title
-    );
-    // The full instruction is not lost — it moved to where the detail belongs.
-    assert!(
-        cards[0]
-            .note
-            .as_deref()
-            .is_some_and(|note| note.contains("the tiers are confusing")),
-        "the instruction must survive on the card: {:?}",
-        cards[0].note
-    );
-    assert_eq!(titler.asked(), vec![rambling.to_string()]);
-}
-
-/// No titler wired — an offline company, a default build — still opens the
-/// hand-off card, named the way every card was named before.
-#[tokio::test]
-async fn without_a_titler_a_hand_off_card_is_still_opened_and_still_named() {
-    let request = "hey can you take a look at the pricing page, I think the tiers are \
-                   confusing and we should probably reword the middle one";
-    let fx = Fixture::new();
-    let turns = ScriptedTurns::new(&fx, vec![Turn::reply("on it")]);
-
-    fx.runner(&turns)
-        .run_delegation(handoff(request), None, MessageContext::default())
-        .await
-        .expect("delegation runs");
-
-    let cards = fx.cards().await;
-    assert_eq!(cards.len(), 1, "one hand-off, one card: {cards:?}");
-    assert_eq!(
-        cards[0].title,
-        crate::ports::tasks::TaskTitle::truncated(request)
-    );
-    assert!(!cards[0].title.is_empty());
 }
 
 /// The coupling this change exists to break: the handler's card is adopted
@@ -565,70 +499,4 @@ async fn a_workflow_left_staged_by_an_earlier_turn_settles_nothing() {
         !note.contains("someone-elses-workflow"),
         "a card must never name a workflow its own turn did not author: {note}"
     );
-}
-
-/// The same stand-down on the **hand-off** path (issue #463). #442 guarded
-/// only the direct path, so a recognised imperative the orchestrator handed
-/// off produced the handler's card AND the delegation's — measured on a live
-/// host as two cards for one message.
-///
-/// The guard cannot live in `run_delegation`: what reaches there is the
-/// instruction the model wrote, not the operator's words, and the handler
-/// classified the latter.
-#[tokio::test]
-async fn a_hand_off_of_a_message_the_chat_handler_carded_opens_no_second_card() {
-    let imperative = "draft the launch plan for next quarter";
-    let title = crate::company::task_intent::detect_task_intent(imperative)
-        .expect("fixture must be a message the chat handler cards");
-    let fx = Fixture::new();
-    // The card the REST handler wrote moments before the cycle started.
-    fx.tasks
-        .upsert(
-            &fx.record.id,
-            &TaskRecord {
-                opened_by: None,
-                id: "handler-card".to_string(),
-                title: TaskTitle::authored(&title),
-                note: None,
-                column: COLUMN_TODO.to_string(),
-                priority: "medium".to_string(),
-                assignee: String::new(),
-                updated_at_millis: now_millis(),
-                origin: None,
-                parent_task_id: None,
-                output: None,
-                plan: None,
-                planning_attempts: Vec::new(),
-                deliverable: crate::ports::tasks::TaskDeliverable::Once,
-                workflow_proposal: None,
-                origin_run_id: None,
-                origin_workflow_id: None,
-                origin_message_seq: Some(handler_seq()),
-                bounced: None,
-            },
-        )
-        .await
-        .expect("seed the handler's card");
-
-    let turns = ScriptedTurns::new(
-        &fx,
-        vec![
-            Turn::queueing("on it", vec![handoff("Draft the launch plan.")]),
-            Turn::reply("drafted"),
-            Turn::reply("the desk drafted it"),
-        ],
-    );
-    let turn = fx
-        .runner(&turns)
-        .answering(Some(handler_seq()))
-        .handle_operator_message("chief", imperative, None)
-        .await
-        .expect("operator message handled");
-
-    let cards = fx.cards().await;
-    assert_eq!(cards.len(), 1, "one message, one card: {cards:?}");
-    assert_eq!(cards[0].id, "handler-card");
-    // …and the turn ADOPTS it, which is what lets a publish later in the
-    // same message file onto it instead of minting a rival beside it.
-    assert_eq!(turn.spawned_task.as_deref(), Some("handler-card"));
 }

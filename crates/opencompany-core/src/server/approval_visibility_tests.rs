@@ -38,7 +38,7 @@ fn summary() -> ApprovalSummary {
         batch: Some("turn-1".to_string()),
         group_key: None,
         blocker_step_kind: None,
-        episode: None,
+        hive: None,
     }
 }
 

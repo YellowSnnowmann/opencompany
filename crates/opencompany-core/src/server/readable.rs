@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use crate::ports::types::{CompanyRecord, Mention};
-use crate::server::chat_history::{MentionView, MessageView, ReferralLine};
+use crate::server::chat_history::{MentionView, MessageView};
 
 /// Teammate and desk ids mapped to the names a person reads.
 ///
@@ -129,6 +129,11 @@ impl DisplayNames {
 }
 
 /// Agent-written `text` as a person reads it. See the module docs.
+///
+/// The single-body form of [`project_history`]. Its only production callers
+/// were the retired referral and agent-conversation folds (OC-2); the tests
+/// pin the projection through it, so it stays as the documented entry point.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn readable_moves(text: String, names: &DisplayNames) -> String {
     project(&text, names, &[]).text
 }
@@ -146,12 +151,6 @@ pub(crate) fn project_history(messages: &mut [MessageView], names: &DisplayNames
             }
             view.text = projected.text;
         }
-        if let Some(conversation) = view.referral_conversation.as_mut() {
-            project_lines(&mut conversation.lines, names);
-        }
-        for conversation in &mut view.agent_conversations {
-            project_lines(&mut conversation.lines, names);
-        }
     }
 }
 
@@ -164,15 +163,6 @@ pub(crate) fn project_reply(text: &str, mentions: &[Mention], names: &DisplayNam
         .map(|mention| mention.offset..mention.offset + mention.text.len())
         .collect();
     project(text, names, &spans)
-}
-
-fn project_lines(lines: &mut [ReferralLine], names: &DisplayNames) {
-    for line in lines {
-        line.text = readable_moves(std::mem::take(&mut line.text), names);
-        if let Some(name) = names.name_of(&line.author_label) {
-            line.author_label = name.to_string();
-        }
-    }
 }
 
 fn mention_span(mention: &MentionView) -> Range<usize> {

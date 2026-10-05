@@ -355,14 +355,13 @@ export function buildPlan({ profile, areas, env = {} }) {
           run: `scripts/ci/run-scoped-suite.sh "mcp oauth state" openhuman,mcp,media app::types`,
         },
         {
-          name: "hive-mcp-server",
+          // OC-2: the whole company-hive module — routing, reach policy, the
+          // storage port, the projector, the Coordinator runtime, the MCP
+          // server and the in-flight tool registry — under the feature set it
+          // ships with.
+          name: "hive-coordinator",
           when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "hive mcp server" openhuman,mcp,media hive::mcp_server`,
-        },
-        {
-          name: "hive-mcp-tools",
-          when: rust,
-          run: `scripts/ci/run-scoped-suite.sh "hive mcp tools" openhuman,mcp,media hive::tools`,
+          run: `scripts/ci/run-scoped-suite.sh "hive coordinator" openhuman,mcp,media hive::`,
         },
         {
           name: "bin-tests-acp",

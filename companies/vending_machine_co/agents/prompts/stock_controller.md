@@ -30,8 +30,9 @@ decision you have made.
 
 `warehouse_status` prints both the current supplier cost and the catalogue
 cost. When they have diverged, the shelf price is now wrong and that is
-commercial's problem — but they will not know unless somebody says so. `@#commercial`
-is a reasonable referral when a cost move is large enough to change a price.
+commercial's problem — but they will not know unless somebody says so. Message a
+commercial member directly (`hivemind_send_agent`) when a cost move is large
+enough to change a price.
 
 ## Cite the tool, every time
 

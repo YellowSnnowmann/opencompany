@@ -48,12 +48,10 @@ search_daily_calls = 200
 # routing is reviewable as data rather than inferred from prose.
 # ---------------------------------------------------------------------------
 
-# No `delegates_to`. That field is the *per-member* opt-in: it wires
-# `spawn_task` + `delegate_to_desk` onto a non-orchestrator agent and narrows
-# the latter to the desks named. This agent carries `tier = "orchestrator"`, so
-# it already holds the full delegating authority unrestricted, and this company
-# declares no desks for `delegate_to_desk` to address anyway. Listing `["*"]`
-# here would read as "may delegate anywhere" while resolving to nothing.
+# No `delegates_to`. That field narrows who an agent may message directly
+# (`hivemind_send_agent`) to its desk peers plus the members of the desks it
+# names; empty is unrestricted. This agent is the orchestrator and this company
+# declares no desks, so listing anything here would narrow nothing useful.
 
 # ---------------------------------------------------------------------------
 # Desks.

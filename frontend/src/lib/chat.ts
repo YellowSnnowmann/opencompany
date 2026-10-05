@@ -93,7 +93,7 @@ export interface ChatMessage {
   text: string;
   /**
    * **The body as the model wrote it**, when the host sent one — `text` before
-   * the host rewrote it for a person to read (a referral's cue line).
+   * the host rewrote it for a person to read.
    *
    * Equal to {@link text} on every row the rewrite did not touch, and absent
    * from a host that predates the field. Only the raw view reads it, because
@@ -132,31 +132,13 @@ export interface ChatMessage {
    */
   parentId?: string;
   /**
-   * The desk that caused this message, when another desk's agent referred the
-   * work here (tinyhivemind P15). Renders as a chip on the bubble — provenance
-   * of the message itself, which is why it rides here and not as a separate
-   * system line.
-   *
-   * A crossing referral cannot be threaded — the library lands one on the
-   * target's desk channel, "never in a thread, because a thread root is a
-   * sequence number in the conversation that owns it" — so this chip is the
-   * only link back to the conversation that asked.
+   * Where this line sits in the company hive (OC-2): its transcript sequence
+   * and the episode it belongs to. Only the host knows which episode a reply
+   * landed in, so it rides the message rather than being inferred here. A desk
+   * groups its lines by `hive.episodeId`; absent for every row that did not
+   * come through the hive.
    */
-  referredFrom?: import("@/api/types").ReferredFromDto;
-  /** The crossing this report brought home, rendered as one collapsed line. */
-  referralConversation?: import("@/api/types").ReferralConversationDto;
-  /** The agent-to-agent exchanges this row reported, oldest first. */
-  agentConversations?: import("@/api/types").AgentConversationDto[];
-  /**
-   * What this line was inside the episode that produced it — its round, its
-   * speech act (`post` / `broadcast` / `dm` / `complete_episode`) and a `dm`'s
-   * recipients. Carried the same way `referralConversation` is, and for the
-   * same reason: only the host knows which round committed a reply, so it
-   * rides the message rather than being inferred from the text here. Absent
-   * for every reply outside an episode, which is what keeps a DM, `#general`
-   * and a single-responder desk rendering exactly as they always have.
-   */
-  episode?: import("@/api/types").MessageEpisodeDto;
+  hive?: import("@/api/types").MessageHiveDto;
   /**
    * Who may read this line, by agent id, when the host narrowed it — a desk
    * `dm`. Absent means the whole desk. The operator reads every line either
@@ -398,8 +380,8 @@ export function makeMessage(
      * the same row after a reload read identically in the raw view.
      */
     cueText?: string;
-    /** The episode this reply was committed into — see {@link ChatMessage.episode}. */
-    episode?: import("@/api/types").MessageEpisodeDto;
+    /** Where this reply sits in the hive — see {@link ChatMessage.hive}. */
+    hive?: import("@/api/types").MessageHiveDto;
     /** Who may read it — see {@link ChatMessage.audience}. */
     audience?: string[];
     /** The fail-closed reason (KR-L2-03), already narrowed by `toTurnFailure`. */
@@ -414,7 +396,7 @@ export function makeMessage(
     at: opts.at ?? Date.now(),
     channel: opts.channel,
     parentId: opts.parentId,
-    episode: opts.episode,
+    hive: opts.hive,
     audience: opts.audience?.length ? opts.audience : undefined,
     steps: opts.steps,
     taskId: opts.taskId,
@@ -509,12 +491,11 @@ export function dispatchMarkerPlacement(
  *
  * ## Why this is not "append the ids we have not seen"
  *
- * That is what it was, and it assumed a re-read can only ADD rows. A referral
- * breaks the assumption: its exchange folds onto the row that *asked*, which is
- * a durable row the transcript already has. The refreshed copy carried the
- * fold, the id filter dropped it as already-known, and the crossing stayed
- * invisible until the thread was rebuilt from scratch — which is why a live
- * crossing appeared only after a reload (CodeRabbit, #2341).
+ * That is what it was, and it assumed a re-read can only ADD rows. The host
+ * can re-project a row the transcript already has (a reaction, a mention, a
+ * rewritten body); the id filter dropped the refreshed copy as already-known,
+ * and the change stayed invisible until the thread was rebuilt from scratch
+ * (CodeRabbit, #2341).
  *
  * The durable copy wins on conflict. It is what the host projected, and this
  * whole round trip exists precisely because the live frames are the
@@ -597,16 +578,10 @@ export function fromHistory(entries: ChatHistoryMessageDto[]): ChatMessage[] {
       // namespace as `entry.id` — so it takes the same prefix, or the reply
       // would point at a line no console id matches (issue #364).
       parentId: entry.parentId ? hostMessageId(entry.parentId) : undefined,
-      // Straight through, like `byPerson`: only the host knows another desk
-      // caused this line, and nothing here may infer it.
-      referredFrom: entry.referredFrom,
-      referralConversation: entry.referralConversation,
-      // And the a2a exchange, on the same terms: the rows are in the pair
-      // channel, so only the host can say this row reported one.
-      agentConversations: entry.agentConversations,
-      // The round and speech act behind a reply, and who may read it. Same
-      // rule again: only the host knows which round committed a line.
-      episode: entry.episode,
+      // Where the reply sits in the hive, and who may read it. Straight
+      // through, like `byPerson`: only the host knows which episode a line
+      // landed in.
+      hive: entry.hive,
       audience: entry.audience?.length ? entry.audience : undefined,
       // Reactions come through whoever the host said reacted; nothing is
       // inferred here, `mine` included.
@@ -819,11 +794,9 @@ export function mergeHistoryInOrder(
   // Keeping the row already on screen preserves its object identity so React
   // can bail out of re-rendering an unchanged transcript — but keeping it
   // *unconditionally* discards every update the host made to a row this
-  // console already holds. A referral is exactly that: its exchange folds onto
-  // the asking row, so the poll fetched the finished four-message crossing and
-  // then threw it away in favour of the one-message version it had caught mid
-  // exchange. Only a full reload, which builds the transcript from nothing,
-  // ever showed the whole thing.
+  // console already holds — the poll fetched the updated row and then threw
+  // it away in favour of the copy it had caught earlier. Only a full reload,
+  // which builds the transcript from nothing, ever showed the update.
   //
   // Comparing by value keeps the bail-out for rows that really are unchanged,
   // which is almost all of them on almost every tick.

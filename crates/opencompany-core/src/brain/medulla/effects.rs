@@ -259,19 +259,6 @@ pub(crate) fn wire_event(seq: u64, event: &CompanyEvent) -> WireEvent {
             format!("extended approval {approval_id}"),
             "approval.extended",
         ),
-        // Structural only, like the approval arms above — which desks and who,
-        // never the referred content.
-        CompanyEvent::ReferralEnqueued {
-            from_desk,
-            to_desk,
-            target,
-            ..
-        } => (
-            Role::System,
-            "referral".to_string(),
-            format!("referred {from_desk} → {to_desk} ({target})"),
-            "referral.enqueued",
-        ),
         CompanyEvent::FeedbackFiled { note } => (
             Role::User,
             "operator".to_string(),
@@ -568,154 +555,69 @@ pub(crate) fn wire_event(seq: u64, event: &CompanyEvent) -> WireEvent {
             ),
             "skill.changed",
         ),
-        // Plan hive-desks, Phase 4: the episode record. Structural only, like
-        // every arm here — ids, seats and the closed-vocabulary reason; the
-        // utterances themselves ride on the `AgentReply` rows they bracket.
-        CompanyEvent::EpisodeOpened {
+        // OC-2: the company hive's record. Structural only, like every arm
+        // here — ids, agents and the starter route; what was said rides on the
+        // `AgentReply` rows, and a private line's text stays off this wire.
+        CompanyEvent::HiveAccepted {
             chat_id,
-            episode_id,
-            participants,
+            starters,
+            route,
             ..
         } => (
             Role::System,
             "hive".to_string(),
             format!(
-                "Episode {episode_id} opened on desk {chat_id} with {}",
-                participants.join(", ")
-            ),
-            "episode.opened",
-        ),
-        CompanyEvent::RoundStarted {
-            episode_id,
-            revision,
-            agent_ids,
-            ..
-        } => (
-            Role::System,
-            "hive".to_string(),
-            format!(
-                "Episode {episode_id} round {revision} started: {}",
-                agent_ids.join(", ")
-            ),
-            "episode.round_started",
-        ),
-        CompanyEvent::RoundCommitted {
-            episode_id,
-            revision,
-            utterances,
-            ..
-        } => (
-            Role::System,
-            "hive".to_string(),
-            format!(
-                "Episode {episode_id} round {revision} committed {} utterances",
-                utterances.len()
-            ),
-            "episode.round_committed",
-        ),
-        CompanyEvent::BroadcastRouted {
-            episode_id,
-            agent_id,
-            plan,
-            ..
-        } => (
-            Role::System,
-            "hive".to_string(),
-            format!(
-                "Episode {episode_id}: {agent_id} broadcast to {}",
-                plan.agent_ids().join(", ")
-            ),
-            "episode.broadcast_routed",
-        ),
-        CompanyEvent::DmDelivered {
-            episode_id,
-            from,
-            to,
-            ..
-        } => (
-            Role::System,
-            "hive".to_string(),
-            format!("Episode {episode_id}: {from} messaged {}", to.join(", ")),
-            "episode.dm_delivered",
-        ),
-        // A row the driver turned away. The seat's words are already on the
-        // desk under their own row; this says only that its call did not take.
-        CompanyEvent::UtteranceRefused {
-            episode_id, seat, ..
-        } => (
-            Role::System,
-            "hive".to_string(),
-            format!("Episode {episode_id}: @{seat}'s call was refused"),
-            "episode.utterance_refused",
-        ),
-        CompanyEvent::ConversationOpened {
-            episode_id,
-            asker,
-            askee,
-            ..
-        } => (
-            Role::System,
-            "hive".to_string(),
-            format!("Episode {episode_id}: @{asker} asked @{askee}"),
-            "episode.conversation.opened",
-        ),
-        CompanyEvent::ConversationConcluded {
-            episode_id,
-            asker,
-            askee,
-            forced,
-            ..
-        } => (
-            Role::System,
-            "hive".to_string(),
-            format!(
-                "Episode {episode_id}: @{asker} and @{askee} concluded{}",
-                if *forced { " without an answer" } else { "" }
-            ),
-            "episode.conversation.concluded",
-        ),
-        CompanyEvent::EpisodeSeatParked {
-            episode_id, seat, ..
-        } => (
-            Role::System,
-            "hive".to_string(),
-            format!("Episode {episode_id}: @{seat} is waiting on the operator"),
-            "episode.seat.parked",
-        ),
-        CompanyEvent::EpisodeSeatResumed {
-            episode_id, seat, ..
-        } => (
-            Role::System,
-            "hive".to_string(),
-            format!("Episode {episode_id}: @{seat} resumed"),
-            "episode.seat.resumed",
-        ),
-        CompanyEvent::EpisodeCompleted {
-            episode_id,
-            reason,
-            rounds,
-            ..
-        } => (
-            Role::System,
-            "hive".to_string(),
-            format!(
-                "Episode {episode_id} completed after {rounds} rounds ({})",
-                serde_json::to_value(reason)
-                    .ok()
-                    .and_then(|value| value.as_str().map(str::to_string))
+                "Hive accepted a message on {chat_id}{}{}",
+                if starters.is_empty() {
+                    String::new()
+                } else {
+                    format!(", started by {}", starters.join(", "))
+                },
+                route
+                    .as_deref()
+                    .map(|route| format!(" ({route})"))
                     .unwrap_or_default()
             ),
-            "episode.completed",
+            "hive.accepted",
         ),
-        CompanyEvent::EpisodeStateSaved {
-            episode_id,
-            revision,
+        CompanyEvent::HiveMessage {
+            sender,
+            destination,
             ..
         } => (
             Role::System,
             "hive".to_string(),
-            format!("Episode {episode_id} checkpointed at revision {revision}"),
-            "episode.state_saved",
+            match destination {
+                crate::ports::types::HiveDestination::Agent(to) => {
+                    format!("@{sender} messaged @{to}")
+                }
+                crate::ports::types::HiveDestination::Hive(hive) => {
+                    format!("@{sender} said something privately on {hive}")
+                }
+            },
+            "hive.message",
+        ),
+        CompanyEvent::HiveEpisodeSettled {
+            episode_id,
+            hive_id,
+            failure,
+            ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            match failure {
+                None => format!("Episode {episode_id} on {hive_id} settled"),
+                Some(reason) => format!("Episode {episode_id} on {hive_id} stopped: {reason}"),
+            },
+            "hive.episode_settled",
+        ),
+        CompanyEvent::HiveTurnInterrupted {
+            agent_id, reason, ..
+        } => (
+            Role::System,
+            "hive".to_string(),
+            format!("@{agent_id}'s turn was interrupted: {reason}"),
+            "hive.turn_interrupted",
         ),
         CompanyEvent::WorkflowDeleted {
             workflow_id, name, ..

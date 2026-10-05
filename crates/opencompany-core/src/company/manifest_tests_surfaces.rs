@@ -390,23 +390,12 @@ fn a_routing_block_parses_and_its_zero_keys_are_refused() {
         [group_chat.routing]
         round_width = 2
         max_rounds = 4
-        [group_chat.routing.referral]
-        enabled = true
-        max_hops = 1
-        returns = true
         "#,
     );
     assert!(manifest.validate().is_empty(), "{:?}", manifest.validate());
     let desk = &manifest.group_chats[0];
     assert_eq!(desk.hive.round_width, Some(2));
     assert_eq!(desk.hive.max_rounds, Some(4));
-    assert_eq!(
-        desk.hive
-            .referral
-            .as_ref()
-            .and_then(|referral| referral.max_hops),
-        Some(1)
-    );
     // Round-trips under the `routing` key, never `hive`.
     let rendered = toml::to_string(&manifest).expect("serializes");
     assert!(rendered.contains("[group_chat.routing]"), "{rendered}");
@@ -476,4 +465,36 @@ fn a_stale_hive_block_is_refused_with_a_migration_hint() {
     assert!(
         CompanyManifest::legacy_hive_block("[company]\nname = \"X\"\n[[group_chat]]\nid = \"d\"\nname = \"D\"\n[group_chat.routing]\nround_width = 1\n").is_none()
     );
+}
+
+#[test]
+fn a_stale_referral_block_is_refused_with_a_migration_hint() {
+    let text = r#"
+        [company]
+        name = "X"
+        [[group_chat]]
+        id = "desk"
+        name = "Desk"
+        [group_chat.routing.referral]
+        enabled = true
+        "#;
+    let problem = CompanyManifest::legacy_referral_block(text).expect("refused");
+    assert!(problem.contains("group chat `desk`"), "{problem}");
+    assert!(problem.contains("hivemind_send_agent"), "{problem}");
+    assert!(
+        CompanyManifest::legacy_referral_block(
+            "[company]\nname = \"X\"\n[[group_chat]]\nid = \"d\"\nname = \"D\"\n[group_chat.routing]\nround_width = 1\n"
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn the_retired_delegation_depth_is_refused_with_a_migration_hint() {
+    let problem = CompanyManifest::legacy_referral_block(
+        "[company]\nname = \"X\"\n[tools]\nmax_delegation_depth = 2\n",
+    )
+    .expect("refused");
+    assert!(problem.contains("max_delegation_depth"), "{problem}");
+    assert!(problem.contains("hivemind_send_agent"), "{problem}");
 }

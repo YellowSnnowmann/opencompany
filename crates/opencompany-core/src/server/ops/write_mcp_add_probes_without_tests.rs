@@ -254,7 +254,7 @@ async fn task_detail_assembles_timeline_and_lineage() {
             steps: Vec::new(),
             task_id: Some("t-1".into()),
             outputs: Vec::new(),
-            episode: None,
+            hive: None,
         },
         // An ordinary chat reply — excluded.
         CompanyEvent::AgentReply {
@@ -268,7 +268,7 @@ async fn task_detail_assembles_timeline_and_lineage() {
             steps: Vec::new(),
             task_id: None,
             outputs: Vec::new(),
-            episode: None,
+            hive: None,
         },
         // Tagged to a different task — excluded.
         CompanyEvent::AgentReply {
@@ -282,7 +282,7 @@ async fn task_detail_assembles_timeline_and_lineage() {
             steps: Vec::new(),
             task_id: Some("t-other".into()),
             outputs: Vec::new(),
-            episode: None,
+            hive: None,
         },
         CompanyEvent::DeskTaskCompleted {
             task_id: "t-1".into(),

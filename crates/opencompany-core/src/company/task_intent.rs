@@ -19,8 +19,9 @@
 //! * an [`MessageTriage::Answer`] turn claims the delegation queue for
 //!   *answering only* (issue #267, Layer B), so the model's own board-writing
 //!   tools refuse in a turn that was a question — the gate is a narrowing, not
-//!   a withdrawal: `delegate_to_desk` still runs, because consulting a desk is
-//!   how a question the orchestrator cannot answer alone gets answered;
+//!   a withdrawal: messaging a desk through the hive still works, because
+//!   consulting a desk is how a question the orchestrator cannot answer alone
+//!   gets answered;
 //! * a lexically matched [`MessageTriage::Chatter`] (a bare greeting or
 //!   acknowledgement) takes the cheap chat-only turn (issue #1725), and
 //!   [`small_talk`] answers the barest of them with no turn at all.

@@ -2,155 +2,6 @@ use super::tests_core::*;
 use super::tests_core2::*;
 use super::*;
 
-/// A hand-off the MEMBER's own tool refused reaches the card and the
-/// operator, attributed to the member that attempted it.
-///
-/// A refusal never becomes a `Delegation`, so the only other record is the
-/// tool result — which the member is free to describe however it likes, and
-/// "I consulted design" is exactly the claim that must not stand unchecked.
-/// The delegator's own unread refusals must NOT be swept into the member's
-/// account of its turn, which is what the before/after sampling buys.
-#[tokio::test]
-async fn a_refusal_inside_a_members_turn_is_recorded_against_that_member() {
-    let fx = Fixture::nested();
-    let turns = ScriptedTurns::new(
-        &fx,
-        vec![
-            // The orchestrator hands off AND has a refusal of its own,
-            // which belongs to its turn and must not be folded into the
-            // member's account of theirs.
-            Turn {
-                reply: "handing it to engineering".to_string(),
-                tool_pushes: vec![handoff("ship the API")],
-                refuses: vec!["nowhere_desk".to_string()],
-                ..Turn::default()
-            },
-            // The member reaches for a desk it may not have — refused.
-            Turn::refused("built it; design did not pick it up", &["design_desk"]),
-            Turn::reply("Shipped."),
-        ],
-    );
-
-    fx.runner(&turns)
-        .handle_operator_message("chief", "ship the API", Some("general"))
-        .await
-        .expect("operator message handled");
-
-    let cards = fx.cards().await;
-    assert_eq!(cards.len(), 1, "{cards:?}");
-    let note = cards[0].note.clone().unwrap_or_default();
-    assert!(
-        note.contains("design_desk") && note.contains("refused"),
-        "the member's refused hand-off must reach the card: {note}"
-    );
-    assert!(
-        !note.contains("nowhere_desk"),
-        "the delegator's own unread refusal must not be attributed to the member: {note}"
-    );
-}
-
-/// On the DISPATCHED-card path the card stays owned by the level-1 member
-/// the orchestrator handed it to — nested delegation is visible in the note
-/// and the steps, not by the card changing hands again.
-///
-/// # This test changed with the async hand-off, and the change is the point
-///
-/// It used to additionally assert that `handed.reply` carried the level-1
-/// member's answer, with the nested researcher's reply folded into it. That
-/// was a true statement about a SYNCHRONOUS hand-off: the delegate ran
-/// inside the delegator's attempt, so its answer came back up the stack.
-///
-/// It cannot be true of an asynchronous one. The delegator now hands over
-/// and settles `Delegated`; the delegate is dispatched as its OWN attempt,
-/// which is what buys one attempt row per agent (so spend is attributable)
-/// and releases the per-company serial lock between hops. The answer still
-/// reaches the operator — through the delegate's own settle and relay —
-/// just not on the delegator's reply.
-///
-/// What the test was *named* for is unchanged and still asserted: the card
-/// belongs to the member the orchestrator handed it to, and nested
-/// delegation does not move it a second time.
-#[tokio::test]
-async fn a_dispatched_card_stays_with_the_level_one_member() {
-    let fx = Fixture::nested();
-    let mut card = TaskRecord {
-        opened_by: None,
-        id: "card-1".to_string(),
-        title: TaskTitle::authored("Ship the API"),
-        note: None,
-        column: COLUMN_TODO.to_string(),
-        priority: "medium".to_string(),
-        assignee: "chief".to_string(),
-        updated_at_millis: now_millis(),
-        origin: None,
-        parent_task_id: None,
-        output: None,
-        plan: None,
-        planning_attempts: Vec::new(),
-        deliverable: crate::ports::tasks::TaskDeliverable::Once,
-        workflow_proposal: None,
-        origin_run_id: None,
-        origin_workflow_id: None,
-        origin_message_seq: None,
-        bounced: None,
-    };
-    fx.tasks.upsert(&fx.record.id, &card).await.expect("seed");
-
-    let turns = ScriptedTurns::new(
-        &fx,
-        vec![
-            // The engineering lead's turn, run by the dispatched card.
-            Turn::tooling(
-                "asking research",
-                vec![nested_handoff("what rate limits do competitors use?")],
-            ),
-            Turn::reply("everyone lands around 100 rps"),
-        ],
-    );
-    // The dispatched turn's own delegations are staged by the orchestrator
-    // before this, so the queue is claimed the way `run_task` claims it.
-    let _claim = fx.queue.claim();
-    fx.queue.push(handoff("ship the API"));
-
-    let handed = fx
-        .runner(&turns)
-        .for_task("card-1")
-        .handle_task_delegations(&mut card, "chief")
-        .await
-        .expect("delegations drained")
-        .expect("a hand-off happened");
-
-    assert_eq!(
-        handed.delegate, "engineer",
-        "the card belongs to the member the ORCHESTRATOR handed it to"
-    );
-    assert!(
-        handed.pending,
-        "the hand-off is pending: the delegate has NOT run inside this attempt"
-    );
-    assert!(
-        handed.reply.is_none(),
-        "a pending hand-off carries no reply — the delegate answers from its own \
-         attempt, which is what makes the spend attributable to them: {:?}",
-        handed.reply
-    );
-    // **An owner is an agent; a desk is a channel.** Handing to a desk hands
-    // the work to that desk's lead, and it is the lead the card names.
-    //
-    // This assertion previously demanded `eng_desk`, on the reading that a
-    // desk hand-off leaves the DESK owning the card. That put a channel id
-    // in an ownership field — and `assignee` is what the thread's overseer
-    // is read from, so a card handed to a desk named nobody who could
-    // answer for it. `AssigneeResolution::canonical` maps a desk to its own
-    // id because it is the stored-key helper for whatever a card happens to
-    // say, not a claim that a desk owns work.
-    assert_eq!(
-        card.assignee, "engineer",
-        "the desk's lead owns the card; nested delegation must not move it \
-         a second time"
-    );
-}
-
 // ── Issue #453 residual: an id that names no card ───────────────────────
 
 #[tokio::test]
@@ -548,7 +399,6 @@ async fn a_task_store_write_failure_on_assign_task_surfaces_as_an_error() {
         inner: backing.clone(),
     });
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let idle_turns_fx = Fixture::new();
     let idle_turns = ScriptedTurns::new(&idle_turns_fx, vec![]);
 
@@ -556,7 +406,6 @@ async fn a_task_store_write_failure_on_assign_task_surfaces_as_an_error() {
         &idle_turns,
         &record,
         Some(&tasks),
-        &steer,
         &record.id,
         &queue,
         orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -569,7 +418,6 @@ async fn a_task_store_write_failure_on_assign_task_surfaces_as_an_error() {
                 note: None,
             },
             None,
-            MessageContext::default(),
         )
         .await;
     assert!(
@@ -600,7 +448,6 @@ async fn a_task_store_write_failure_on_review_task_surfaces_as_an_error() {
         inner: backing.clone(),
     });
     let queue = DelegationQueue::default();
-    let steer = InflightRegistry::default();
     let idle_turns_fx = Fixture::new();
     let idle_turns = ScriptedTurns::new(&idle_turns_fx, vec![]);
 
@@ -608,7 +455,6 @@ async fn a_task_store_write_failure_on_review_task_surfaces_as_an_error() {
         &idle_turns,
         &record,
         Some(&tasks),
-        &steer,
         &record.id,
         &queue,
         orchestrator::MAX_DELEGATIONS_PER_TURN,
@@ -621,7 +467,6 @@ async fn a_task_store_write_failure_on_review_task_surfaces_as_an_error() {
                 note: None,
             },
             None,
-            MessageContext::default(),
         )
         .await;
     assert!(
