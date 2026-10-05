@@ -341,7 +341,7 @@ async fn desk_routing_reports_resolved_numbers_for_an_undeclared_block() {
         body["effective"]["turnTimeoutSecs"],
         crate::hive::routing::DEFAULT_TURN_TIMEOUT_SECS
     );
-    assert_eq!(body["effective"]["referral"]["enabled"], false);
+    assert!(body["effective"].get("referral").is_none(), "{body}");
     assert!(
         matches!(
             body["effective"]["router"].as_str(),
@@ -388,7 +388,7 @@ async fn a_routing_block_installs_and_resets() {
                 .header("cookie", &cookie)
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"round_width":2,"max_rounds":3,"referral":{"enabled":true,"max_hops":1,"returns":true}}"#,
+                    r#"{"round_width":2,"max_rounds":3}"#,
                 ))
                 .unwrap(),
         )
@@ -403,12 +403,8 @@ async fn a_routing_block_installs_and_resets() {
     .unwrap();
     assert_eq!(body["source"], "overlay");
     assert_eq!(body["declared"]["round_width"], 2);
-    assert_eq!(body["declared"]["referral"]["max_hops"], 1);
     assert_eq!(body["effective"]["roundWidth"], 2);
     assert_eq!(body["effective"]["maxRounds"], 3);
-    assert_eq!(body["effective"]["referral"]["enabled"], true);
-    assert_eq!(body["effective"]["referral"]["maxHops"], 1);
-    assert_eq!(body["effective"]["referral"]["returns"], true);
 
     // The desk list carries the compact summary of what is in force.
     let desks = app
@@ -483,7 +479,6 @@ async fn installing_a_zero_width_round_is_refused() {
         r#"{"round_width":0}"#,
         r#"{"turn_timeout_secs":0}"#,
         r#"{"minimum_confidence":7}"#,
-        r#"{"referral":{"enabled":true,"reach":"everywhere"}}"#,
     ] {
         let res = app
             .clone()
