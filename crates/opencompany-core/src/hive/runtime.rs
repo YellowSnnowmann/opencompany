@@ -424,7 +424,8 @@ impl CompanyHive {
                 .filter_map(|member| by_manifest.get(member.as_str()))
                 .map(|coordinator| (*coordinator).to_string())
                 .collect();
-            match existing.get(desk) {
+            let hive_id = super::hive_id_for_chat(desk);
+            match existing.get(&hive_id) {
                 None => {
                     let name = if desk == GENERAL_CHANNEL_ID {
                         GENERAL_CHANNEL_NAME.to_string()
@@ -433,7 +434,7 @@ impl CompanyHive {
                     };
                     coordinator
                         .create_hive(HiveInfo {
-                            hive_id: desk.clone(),
+                            hive_id: hive_id.clone(),
                             name: if name.trim().is_empty() { desk.clone() } else { name },
                             description: None,
                             members,
@@ -444,13 +445,13 @@ impl CompanyHive {
                 Some(hive) => {
                     for member in members.iter().filter(|m| !hive.members.contains(m)) {
                         coordinator
-                            .join_hive(desk, member)
+                            .join_hive(&hive_id, member)
                             .await
                             .map_err(hive_error)?;
                     }
                     for member in hive.members.iter().filter(|m| !members.contains(m)) {
                         coordinator
-                            .leave_hive(desk, member)
+                            .leave_hive(&hive_id, member)
                             .await
                             .map_err(hive_error)?;
                     }
@@ -458,7 +459,7 @@ impl CompanyHive {
             }
         }
         for (hive_id, hive) in &existing {
-            if desks.contains(hive_id) {
+            if desks.contains(&super::chat_for_hive(hive_id)) {
                 continue;
             }
             for member in &hive.members {
