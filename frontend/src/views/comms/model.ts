@@ -109,12 +109,13 @@ export type CommsObservation =
   | { kind: "spawned"; by: string | null; agentId: string; atMillis: number }
   | { kind: "speaking"; agentId: string }
   /**
-   * One agent reached another inside an episode — a broadcast the router
-   * carried to a seat, a desk DM, or a referral to another desk. Folded from
-   * the episode frames by `lib/coordination.ts`. The most direct claim the
-   * graph makes: not "may reach", not "handed a card", but "spoke to".
+   * One agent reached another through the company hive — a direct line to
+   * its inbox, or a private desk line it was a reader of (`hive_message`).
+   * Folded from the hive frames by `lib/coordination.ts`. The most direct
+   * claim the graph makes: not "may reach", not "handed a card", but "spoke
+   * to".
    */
-  | { kind: "spoke"; from: string; to: string; via: "broadcast" | "dm" | "referral"; atMillis: number };
+  | { kind: "spoke"; from: string; to: string; via: "direct" | "private"; atMillis: number };
 
 /** Build the structural graph — everything true before anybody does anything. */
 export function structuralGraph(
