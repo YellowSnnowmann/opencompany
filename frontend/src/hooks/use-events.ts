@@ -467,42 +467,67 @@ export type CompanyStreamEvent =
       /** True when the override was dropped and the manifest restored. */
       reset: boolean;
     }
-  // ---- Hive episodes and rounds (`docs/spec/runtime/events.md`) ----
+  // ---- The company hive (OC-2, `docs/spec/runtime/events.md`) ----
   //
-  // A desk of two or more answers as an **episode**: the host opens one per
-  // operator message (or thread), routes it to seats, and runs the seats in
-  // concurrent **rounds** until one of them calls `complete_episode`. Every
-  // frame below is journaled, so a reload rebuilds the same shape from
-  // `chat/history`'s `episode` field; the frames are what make it live.
-  //
-  // `chatId` on every one is the desk the episode runs on, so a room can key
-  // its band on the same id its transcript is keyed on.
+  // Every desk is a hive on one company Coordinator. An operator line is
+  // accepted (`hive_accepted`) and its starters run an **episode**; public
+  // posts land as ordinary `agent_reply` rows carrying `hive.episodeId`, a
+  // direct or private line between agents is a `hive_message`, and the episode
+  // ends with `hive_episode_settled`. All journaled.
   | {
-      type: "episode_opened";
+      type: "hive_accepted";
       seq: number;
       atMillis: number;
+      /** The hive message id the Coordinator minted. */
+      messageId: string;
+      /** The hive transcript sequence it was accepted at. */
+      sequence: number;
+      /** The desk the line was posted on. */
       chatId: string;
-      episodeId: string;
-      /** The journal sequence of the message that opened it. */
-      openedBySeq: number;
-      /** The thread root inside the desk, when the message was in one. */
-      parentId?: string;
-      participants: string[];
-      plan: RoutingPlanDto;
+      /** The journal id of the operator message. */
+      sourceId?: string;
+      /** The manifest agent ids who start the episode. */
+      starters: string[];
+      /** How the starters were chosen; widened so a newer word is not an error. */
+      route?: HiveStarterRoute | string;
     }
   | {
-      type: "round_started";
+      /** A direct line between two agents (`destination.type === "agent"`),
+       *  or a private desk line read only by `onlyFor`. Public hive posts are
+       *  not this frame — they arrive as `agent_reply`. */
+      type: "hive_message";
       seq: number;
       atMillis: number;
-      chatId: string;
-      episodeId: string;
-      revision: number;
-      /** The seats running this round — concurrently, one turn each. */
-      agentIds: string[];
+      sequence: number;
+      sender: string;
+      destination: HiveDestination;
+      text: string;
+      thread?: number;
+      episodeId?: string;
+      onlyFor?: string[];
     }
-  // The chat turn bracket (issue #983), now with the seat and round it runs
-  // for. `agentId` is absent on a host predating the seat attribution; the
-  // episode fields are absent on every turn outside an episode.
+  | {
+      type: "hive_episode_settled";
+      seq: number;
+      atMillis: number;
+      episodeId: string;
+      /** The desk (hive) the episode ran on. */
+      chatId: string;
+      openedAt: number;
+      thread?: number;
+      /** Present when the episode failed rather than completed. */
+      failure?: string;
+    }
+  | {
+      type: "hive_turn_interrupted";
+      seq: number;
+      atMillis: number;
+      agentId: string;
+      episodeId?: string;
+      reason: string;
+    }
+  // The chat turn bracket (issue #983), with the agent it runs for and, on a
+  // hive turn, the hive and episode.
   | {
       type: "turn_started";
       seq: number;
@@ -511,8 +536,7 @@ export type CompanyStreamEvent =
       parentId?: string;
       turnId?: string;
       agentId?: string;
-      episodeId?: string;
-      roundRevision?: number;
+      hive?: HiveTurnRef;
     }
   | {
       type: "turn_settled";
@@ -521,117 +545,9 @@ export type CompanyStreamEvent =
       chatId?: string;
       turnId?: string;
       agentId?: string;
-      episodeId?: string;
-      roundRevision?: number;
+      hive?: HiveTurnRef;
       /** Widened so a word from a newer host is not a type error. */
       outcome?: TurnOutcome | string;
-    }
-  | {
-      type: "round_committed";
-      seq: number;
-      atMillis: number;
-      chatId: string;
-      episodeId: string;
-      revision: number;
-      utterances: RoundUtterance[];
-      /** The host actions the commit produced (`run_agents`, `deliver_dm`),
-       *  declared loosely: the console renders the typed frames that follow
-       *  them (`broadcast_routed`, `dm_delivered`) rather than these. */
-      actions?: unknown[];
-    }
-  | {
-      /** One seat opened a private conversation with another.
-       *
-       *  A **reference**: it carries no text. The question and the answer are
-       *  in `conversationId`, and this says two seats are talking and where,
-       *  so the indicator can be raised from the desk's own stream rather
-       *  than by watching every pair channel for one to start. */
-      type: "conversation_opened";
-      seq: number;
-      atMillis: number;
-      chatId: string;
-      episodeId: string;
-      /** The channel the exchange itself is written to. */
-      conversationId: string;
-      /** The `ask` row it is rooted at. */
-      root: number;
-      asker: string;
-      askee: string;
-    }
-  | {
-      /** The conversation ended — the other half of the reference. */
-      type: "conversation_concluded";
-      seq: number;
-      atMillis: number;
-      chatId: string;
-      episodeId: string;
-      conversationId: string;
-      root: number;
-      asker: string;
-      askee: string;
-      /** Ended without an answer: nothing was due, or it ran out of turns.
-       *  An indicator that only watched for an answer would hang here. */
-      forced: boolean;
-    }
-  | {
-      type: "broadcast_routed";
-      seq: number;
-      atMillis: number;
-      chatId: string;
-      episodeId: string;
-      revision: number;
-      agentId: string;
-      messageSeq: number;
-      plan: RoutingPlanDto;
-      /** Per-candidate probabilities when the System One router answered. */
-      probabilities?: Record<string, number>;
-      router: RoutingRouter;
-    }
-  | {
-      type: "dm_delivered";
-      seq: number;
-      atMillis: number;
-      chatId: string;
-      episodeId: string;
-      from: string;
-      to: string[];
-      messageSeq: number;
-    }
-  | {
-      type: "episode_completed";
-      seq: number;
-      atMillis: number;
-      chatId: string;
-      episodeId: string;
-      revision: number;
-      completedBy?: string;
-      rounds: number;
-      /** Widened so a word from a newer host is not a type error. */
-      reason: EpisodeCompletionReason | string;
-      /** The reply that closed it, when `complete_episode` carried one. */
-      summarySeq?: number;
-    }
-  | {
-      /** A seat parked on an approval: it asked the operator, or made a gated
-       *  call, and the episode waits for the decision. */
-      type: "episode_seat_parked";
-      seq: number;
-      atMillis: number;
-      chatId: string;
-      episodeId: string;
-      seat: string;
-      /** The conversation root the seat was in; absent on the desk itself. */
-      thread?: number;
-      approvalIds: string[];
-    }
-  | {
-      /** The parked seat was released and its turn goes on. */
-      type: "episode_seat_resumed";
-      seq: number;
-      atMillis: number;
-      chatId: string;
-      episodeId: string;
-      seat: string;
     }
   | {
       type:
@@ -694,8 +610,6 @@ export type CompanyStreamEvent =
        * card, a workflow node), where a consumer falls back to keying by thread.
        */
       messageSeq?: number;
-      // No `episodeId`/`roundRevision`: the host's `TurnStreamEvent` has
-      // neither (`events.md`), and a hive seat's turns emit no live frames.
     }
   | {
       type: "tool_result";
