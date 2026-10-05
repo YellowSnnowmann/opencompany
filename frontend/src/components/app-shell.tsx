@@ -3451,7 +3451,21 @@ export function AppShell({
         // No margin: the sidebar's in-flow gap is exactly its width, and the
         // column runs flush to the window's edges, so the content starts at its
         // right border. Pages bring their own gutter from there.
-        className="min-h-0 min-w-0 bg-page"
+        //
+        // `isolate`: this column and the fixed, `z-30` sidebar beside it are
+        // flex siblings with no stacking relationship of their own, so
+        // nothing stops a descendant somewhere in here — a sticky day divider,
+        // a floating pill, a drag overlay — from picking a `z-*` that happens
+        // to read higher than the sidebar's once the two are compared at the
+        // document root (issue #2130 follow-up: a transcript's sticky "Today"
+        // divider painted over the sidebar's own rows). `isolation: isolate`
+        // makes this whole column its own stacking context, so every z-index
+        // inside it is resolved against its *siblings in here* and the column
+        // as a unit is placed, with no explicit z-index of its own, at the
+        // implicit level every other unlayered sibling of the sidebar sits
+        // at — below the sidebar's explicit 30, by construction, regardless
+        // of what any page nested inside ever reaches for.
+        className="min-h-0 min-w-0 isolate bg-page"
       >
         {/* Below `md` the sidebar is a sheet, and the way to open it was a
             glyph in the window's title row. That row is gone, so the sheet's
