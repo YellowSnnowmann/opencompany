@@ -69,7 +69,7 @@ function click(el: HTMLElement) {
 describe("NewMessageDialog, opened by its own trigger", () => {
   it("opens from the trigger and picks a channel", () => {
     const onSelect = vi.fn();
-    const trigger = createElement("button", { type: "button" }, "Open");
+    const trigger = createElement("button", { type: "button", "data-testid": "open-trigger" }, "Open");
 
     act(() => {
       root.render(
@@ -82,7 +82,12 @@ describe("NewMessageDialog, opened by its own trigger", () => {
     });
 
     expect(document.body.textContent).not.toContain("Maya");
-    click(document.querySelector("button")!);
+    // Selected by the `data-testid` this test gave the trigger itself, not
+    // "the first button in the document" (tinysweeper, medium): this suite
+    // renders one dialog per test, so that happened to be true, but an
+    // undocumented DOM-order assumption is exactly the kind of thing a later
+    // test added to this file could break silently.
+    click(document.body.querySelector('[data-testid="open-trigger"]')!);
     expect(document.body.textContent).toContain("Maya");
 
     click(channelButton("Maya"));

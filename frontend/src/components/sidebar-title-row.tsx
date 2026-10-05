@@ -34,6 +34,7 @@ import {
   usesOverlayTitleBar,
 } from "@/components/window-chrome";
 import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
+import { cn } from "@/lib/utils";
 
 interface Props {
   /** Opens the picker for "start a conversation" — the pencil. */
@@ -72,6 +73,14 @@ interface Props {
  * the paragraph above explains the buttons need `z-30` to begin with. Left
  * at the default, the blank space between the inset and the buttons stops
  * the window from being draggable from most of its own title row.
+ *
+ * `TITLE_BAR_ICON_BUTTON`'s own `size-8` (32px) is 4px taller than this
+ * row's 28px `WINDOW_CHROME_HEIGHT` (tinysweeper, medium — the buttons
+ * centre past the row and clip into whatever sits below it). Overridden to
+ * `size-7` (28px exactly) here only, through `cn`'s tailwind-merge so the
+ * later class wins rather than leaving both in the string for the stylesheet
+ * to pick between — the shared constant stays `size-8` for every other title
+ * bar context, where the row itself is taller.
  */
 export function SidebarTitleRow({ onComposeMessage, onAddAgent }: Props) {
   if (!usesOverlayTitleBar()) return null;
@@ -89,7 +98,7 @@ export function SidebarTitleRow({ onComposeMessage, onAddAgent }: Props) {
           onClick={onComposeMessage}
           aria-label="Start a conversation"
           title="Start a conversation"
-          className={`pointer-events-auto ${TITLE_BAR_ICON_BUTTON}`}
+          className={cn(TITLE_BAR_ICON_BUTTON, "pointer-events-auto size-7")}
         >
           <SquarePen aria-hidden="true" className="size-4" />
         </button>
@@ -98,7 +107,7 @@ export function SidebarTitleRow({ onComposeMessage, onAddAgent }: Props) {
           onClick={onAddAgent}
           aria-label="Add"
           title="Add"
-          className={`pointer-events-auto ${TITLE_BAR_ICON_BUTTON}`}
+          className={cn(TITLE_BAR_ICON_BUTTON, "pointer-events-auto size-7")}
         >
           <Plus aria-hidden="true" className="size-4" />
         </button>
