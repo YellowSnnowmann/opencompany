@@ -44,10 +44,9 @@ number of failures). Against a real model:
 TINYHUMANS_API_KEY=<jwt> scripts/measure-coordination.sh
 ```
 
-The console shows the same run live: open `#/chat/engineering` and the round
-band draws two lanes working at once, the dm and broadcast chips, and the
-completion marker; `#/company/comms` draws who spoke to whom; the Observatory
-draws each round as a band across the seats that ran it.
+The console shows the same run live: open `#/chat/engineering` to watch both
+members answer and the episode settle; `#/company/comms` draws who messaged
+whom.
 
 `npm run e2e:hive` in `frontend/` drives the same company from a browser.
 
