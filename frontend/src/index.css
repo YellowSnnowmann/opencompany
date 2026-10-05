@@ -968,6 +968,17 @@
     :where(table, [data-numeric]) {
         font-variant-numeric: tabular-nums;
     }
+    /* Every clickable control gets the hand cursor, once, here — rather than
+       on each of the 70-plus individual call sites or on the shared `Button`
+       component's variants, which would miss a bare `<button>` written
+       without it. `[role="button"]` covers a non-`<button>` element (a `div`
+       or `span`) that was given the role explicitly; an element that merely
+       has an `onClick` with no button semantics is not this rule's problem —
+       it is missing the role, which is the real defect. */
+    button,
+    [role="button"] {
+        cursor: pointer;
+    }
     /* The quality floor: honour a reduced-motion preference globally rather
        than remembering to do it per animation. */
     @media (prefers-reduced-motion: reduce) {
