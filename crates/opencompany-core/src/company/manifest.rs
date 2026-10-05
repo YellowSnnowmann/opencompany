@@ -15,8 +15,7 @@ use crate::ports::decode_wallet_address;
 use super::types::{
     ACP_AGENTS, ACP_TRANSPORTS, AUTH_MODES, BRAIN_MODES, CONNECTION_PRIORITIES, CompanyManifest,
     GATEABLE_NAMESPACES, HARNESS_KINDS, Harness, IMPLICIT_HARNESS_ID, Inference, KNOWN_CHANNELS,
-    PLAN_NAMES, PLAN_PERIODS, POLICY_MODES, PROMPT_CLASSES, TIERS,
-    TOOL_PROVIDERS,
+    PLAN_NAMES, PLAN_PERIODS, POLICY_MODES, PROMPT_CLASSES, TIERS, TOOL_PROVIDERS,
 };
 
 /// The `delegates_to` entry that means "every desk this company has".
