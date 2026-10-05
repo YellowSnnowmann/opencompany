@@ -125,11 +125,6 @@ interface Props {
    * with the whole channel's history) and passed straight through.
    */
   latestBudgetPauseMessageIdByAgent?: Map<string, string>;
-  /**
-   * Display names by agent id, for the utterance chip's `dm → @name`. Optional:
-   * without it the chip names the id, which is still the truth.
-   */
-  agentNames?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -215,7 +210,6 @@ export function MessageRow({
   onRedeemBudgetPause,
   redeemingBudgetPauseAgent,
   latestBudgetPauseMessageIdByAgent,
-  agentNames,
 }: Props) {
   const { message, sender, continuation, replies, isLatestSettlePill } = entry;
   const chips = reactionChips(message.reactions);

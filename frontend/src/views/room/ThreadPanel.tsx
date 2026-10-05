@@ -13,7 +13,7 @@ import { BudgetPauseNoticeCard } from "./BudgetPauseNoticeCard";
 import { EchoPlaceholder, echoMarkerFor } from "./EchoPlaceholder";
 import { FailedSendNotice, OutputLinkRow, TurnFailureNotice } from "./MessageRow";
 import { MessageAttachments } from "./MessageAttachments";
-import { AgentConversation, ReferralChip, ReferralConversation, StepTimeline } from "./StepTimeline";
+import { StepTimeline } from "./StepTimeline";
 import { MessageComposer } from "./MessageComposer";
 import { TypingLine } from "./TypingLine";
 import { WorkingIndicator } from "./WorkingIndicator";
@@ -359,7 +359,6 @@ export function ThreadPanel({
                 redeemingBudgetPauseAgent={redeemingBudgetPauseAgent}
                 onRetrySend={onRetrySend}
                 latestBudgetPauseMessageIdByAgent={latestBudgetPauseMessageIdByAgent}
-                agentNames={agentNames}
               />
             ))}
           </div>
@@ -451,7 +450,6 @@ function Line({
   redeemingBudgetPauseAgent,
   latestBudgetPauseMessageIdByAgent,
   onRetrySend,
-  agentNames,
 }: {
   channel: Channel;
   members: TeamMember[];
@@ -463,7 +461,6 @@ function Line({
   redeemingBudgetPauseAgent?: string | null;
   latestBudgetPauseMessageIdByAgent?: Map<string, string>;
   onRetrySend?: (messageId: string) => void;
-  agentNames?: Record<string, string>;
 }) {
   // Four arguments, not three: `youAvatar` is the last parameter, and omitting
   // it left your own line with no avatar to seed from but the name "You" —
@@ -570,32 +567,6 @@ function Line({
         {message.outputs && message.outputs.length > 0 && (
           <OutputLinkRow outputs={message.outputs} />
         )}
-        {/* And the crossings, for the same reason the steps are here: a room's
-            turns are threaded, so this panel is the only surface a deliberating
-            desk's line has. Rendered only here would be a channel-only feature
-            that a room — the one place crossings actually come from — never
-            shows. */}
-        {message.referredFrom && (
-          <ReferralChip
-            deskId={message.referredFrom.deskId}
-            deskName={message.referredFrom.deskName}
-            askerId={message.referredFrom.askerId}
-            direct={message.referredFrom.direct}
-            sequence={message.referredFrom.sequence}
-            direction={message.referredFrom.direction ?? "asked"}
-            agentNames={agentNames}
-          />
-        )}
-        {message.referralConversation && (
-          <ReferralConversation
-            crossing={message.referralConversation}
-            rowId={message.id}
-            agentNames={agentNames}
-          />
-        )}
-        {message.agentConversations?.map((exchange) => (
-          <AgentConversation key={exchange.root} exchange={exchange} agentNames={agentNames} />
-        ))}
       </div>
     </div>
   );
