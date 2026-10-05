@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 // Measure how a running company coordinates: post one task to a desk, tail
-// `/events` until every episode it opened has completed, and print the numbers
-// against the thresholds. Node 20+, no dependencies.
+// `/events` until every company-hive episode it opened has settled (OC-2), and
+// print the numbers against the thresholds. Node 20+, no dependencies.
 //
 //   node scripts/measure-coordination.mjs --base http://127.0.0.1:8080 \
 //       [--desk engineering] [--text "…"] [--seconds 600] [--mock] [--json]
 //
 // `--mock` prefixes the message with the mock brain's directives
-// (`__MOCK_SLOW_MS__ 2000 __MOCK_DM__ ceo __MOCK_REFER__ engineer:content`) so
-// the scripted run is slow enough to overlap and deterministic enough to
-// assert on: the engineer's first post asks the content desk, which the host
-// carries across as the referral the thresholds count. `--seconds` bounds the
-// tail; a run that times out reports what it saw and fails the completion
-// threshold. The exit code is the number of failed thresholds.
+// (`__MOCK_SLOW_MS__ 2000 __MOCK_DM__ ceo`) so the scripted run is slow enough
+// to overlap and deterministic enough to assert on: the starter's first turn
+// messages the CEO directly (`hivemind_send_agent`), whose turn answers it —
+// the agent→agent contact and the distinct pairs the thresholds count.
+// `--seconds` bounds the tail; a run that times out reports what it saw and
+// fails the settlement threshold. The exit code is the number of failed
+// thresholds.
 //
 // This is the HTTP/SSE twin of `opencompany measure` (which reads the store
 // directly): the same numbers, computed from what a console would see, so a
@@ -26,7 +27,7 @@
 import { parseArgs } from "node:util";
 
 import {
-  allComplete,
+  allSettled,
   createLedger,
   createSseSplitter,
   DEFAULT_THRESHOLDS,
@@ -154,37 +155,28 @@ async function tail(ledger, until, millis) {
 }
 
 const INTERESTING = new Set([
-  "episode_opened",
-  "round_started",
-  "round_committed",
-  "broadcast_routed",
-  "dm_delivered",
-  "episode_completed",
-  "referral",
+  "hive_accepted",
+  "hive_message",
+  "hive_episode_settled",
+  "hive_turn_interrupted",
   "turn_started",
   "turn_settled",
 ]);
 const isInteresting = (frame) => INTERESTING.has(frame.type);
 function describe(frame) {
   switch (frame.type) {
-    case "episode_opened":
-      return `episode ${frame.episodeId} opened on #${frame.chatId} plan=${frame.plan?.kind} seats=${(frame.participants ?? []).join(",")}`;
-    case "round_started":
-      return `  round ${frame.revision} of ${frame.episodeId}: ${(frame.agentIds ?? []).join(" + ")}`;
+    case "hive_accepted":
+      return `line accepted on #${frame.chatId}: starters ${(frame.starters ?? []).join(",")} via ${frame.route ?? "-"}`;
     case "turn_started":
-      return `    ${frame.agentId ?? "?"} started${frame.episodeId ? ` (r${frame.roundRevision})` : ""}`;
+      return `    ${frame.agentId ?? "?"} started${frame.hive?.episodeId ? ` (${frame.hive.episodeId})` : ""}`;
     case "turn_settled":
       return `    ${frame.agentId ?? "?"} settled ${frame.outcome ?? ""}`;
-    case "round_committed":
-      return `  round ${frame.revision} committed: ${(frame.utterances ?? []).map((u) => `${u.agentId}:${u.kind}`).join(" ")}`;
-    case "broadcast_routed":
-      return `  broadcast by ${frame.agentId} → ${frame.plan?.kind}/${frame.plan?.primaryId ?? ""} via ${frame.router}`;
-    case "dm_delivered":
-      return `  dm ${frame.from} → ${(frame.to ?? []).join(",")}`;
-    case "referral":
-      return `  referral ${frame.returning ? "returned" : "asked"} ${frame.chatId} → ${frame.toDesk}${frame.toEpisodeId ? ` (${frame.toEpisodeId})` : ""}`;
-    case "episode_completed":
-      return `episode ${frame.episodeId} completed after ${frame.rounds} round(s): ${frame.reason}`;
+    case "hive_message":
+      return `  ${frame.sender} → ${frame.destination?.type === "agent" ? frame.destination.id : `#${frame.destination?.id} (${(frame.onlyFor ?? []).join(",")})`}`;
+    case "hive_episode_settled":
+      return `episode ${frame.episodeId} on #${frame.chatId} ${frame.failure ? `failed: ${frame.failure}` : "settled"}`;
+    case "hive_turn_interrupted":
+      return `  ${frame.agentId}'s turn interrupted: ${frame.reason}`;
     default:
       return frame.type;
   }
@@ -193,14 +185,12 @@ function describe(frame) {
 async function main() {
   await signIn();
   const ledger = createLedger();
-  const text = args.mock
-    ? `__MOCK_SLOW_MS__ 2000 __MOCK_DM__ ceo __MOCK_REFER__ ${args.desk === "content" ? "writer:engineering" : "engineer:content"} ${args.text}`
-    : args.text;
+  const text = args.mock ? `__MOCK_SLOW_MS__ 2000 __MOCK_DM__ ceo ${args.text}` : args.text;
 
   // Open the tail first, then post: a frame emitted before the stream is
-  // attached is a frame nobody counts, and `episode_opened` is the first one.
+  // attached is a frame nobody counts, and `hive_accepted` is the first one.
   const started = Date.now();
-  const tailing = tail(ledger, (l) => allComplete(l) && l.turns.open.size === 0, deadlineMillis);
+  const tailing = tail(ledger, (l) => allSettled(l) && l.turns.open.size === 0, deadlineMillis);
   await new Promise((resolve) => setTimeout(resolve, 500));
   const posted = await call("POST", "/chat", { text, chat: args.desk, detach: true });
   if (!posted.response.ok) {
@@ -209,7 +199,7 @@ async function main() {
   log(`posted to #${args.desk}: ${text}`);
   const completed = await tailing;
   const elapsed = Date.now() - started;
-  log(completed ? `every episode completed in ${(elapsed / 1000).toFixed(1)}s` : `deadline reached after ${(elapsed / 1000).toFixed(1)}s`);
+  log(completed ? `every episode settled in ${(elapsed / 1000).toFixed(1)}s` : `deadline reached after ${(elapsed / 1000).toFixed(1)}s`);
 
   // The durable cross-check: `GET /runs` rows carry start/finish stamps, so
   // the SSE bracket peak can be confirmed against something a reload sees.
@@ -230,17 +220,16 @@ async function main() {
   } else {
     const lines = [
       `max concurrent turns      ${summary.maxConcurrentTurns}${runsPeak !== undefined ? ` (GET /runs: ${runsPeak})` : ""}`,
+      `turn overlaps             ${summary.overlaps}`,
       `same-agent overlaps       ${summary.sameAgentOverlaps}`,
-      `episodes                  ${summary.episodesCompleted}/${summary.episodesOpened} completed`,
-      `rounds per episode        ${Object.entries(summary.roundsPerEpisode).map(([id, n]) => `${id}=${n}`).join(" ") || "-"}`,
-      `broadcasts / dms          ${summary.broadcasts} / ${summary.dms}`,
-      `cross-desk referrals      ${summary.crossDeskReferrals} ${summary.referralPairs.join(" ")}`,
+      `interrupted turns         ${summary.interruptedTurns}`,
+      `episodes                  ${summary.episodesSettled}/${summary.episodesOpened} settled, ${summary.episodesFailed} failed`,
+      `turns per episode         ${Object.entries(summary.turnsPerEpisode).map(([id, n]) => `${id}=${n}`).join(" ") || "-"}`,
+      `direct / private          ${summary.directMessages} / ${summary.privateLines}`,
       `distinct pairs            ${summary.distinctPairs.length} ${summary.distinctPairs.join(" ")}`,
-      `plan kinds                ${JSON.stringify(summary.planKinds)}`,
-      `routers                   ${JSON.stringify(summary.routers)}`,
-      `utterance kinds           ${JSON.stringify(summary.utteranceKinds)}`,
-      `time to complete (ms)     ${JSON.stringify(summary.timeToCompleteMillis)}`,
-      `reasons                   ${JSON.stringify(summary.reasons)}`,
+      `starter routes            ${JSON.stringify(summary.starterRoutes)}`,
+      `time to settle (ms)       ${JSON.stringify(summary.timeToSettleMillis)}`,
+      `failures                  ${JSON.stringify(summary.failures)}`,
       "",
       failures.length === 0 ? "PASS: every threshold met" : `FAIL (${failures.length}):\n  - ${failures.join("\n  - ")}`,
     ];
