@@ -85,11 +85,8 @@ instance of. `startVisiblePolling` stops while the tab is hidden.
 ## What it still cannot say
 
 A **delegation's two ends** are inferred, not read. `RunRecord` has no delegator
-field and a delegate shares its parent's run sink, so the `from → to` edge of a
-`delegate_to_desk` exists in no store; what is drawn instead is the board's
-`originChatId → assignee`, which is desk-level. Closing that is a host change —
-a `WorkHandedOff` row, which needs a `delegator` threaded through
-`DelegationRunner` — not a console one.
+field, so the `from → to` edge of a card hand-off exists in no store; what is
+drawn instead is the board's `originChatId → assignee`, which is desk-level.
 
 The **structural `CompanyEvent`s themselves are unconsumed here.** `TeammateAdded`,
 `DeskCreated`, `DeskDeleted`, `DeskMembersChanged`, and `DeskRoutingConfigured` are
@@ -100,17 +97,22 @@ current structure, but none of those responses carries `byAgentId`, so "who
 created whom" stays undrawn even though it is now a durable fact. Wiring that
 derivation is a separable follow-up, not a defect in what shipped.
 
-## What the episode frames add
+## What the hive frames add
 
 Mounted at `#/company/comms`, the view now receives the one set of observations
-the shell can derive exactly: **who spoke to whom inside an episode**.
-`lib/coordination.ts` folds the shell's episode ledger (`lib/episode-frames.ts`)
-into `spoke` observations — a `broadcast_routed` is the author reaching every
-seat the router's plan named, a `dm_delivered` is the sender reaching each
-recipient, a non-returning `referral` is the asker reaching the far desk — and
-a `speaking` observation per agent whose turn bracket is open. `spoke` is the
-most direct claim the graph makes: not "may reach", not "handed a card", but
-"said something to". Drawn solid like the other history edges, in the running
-tone, labelled by the last kind seen, and merged by endpoint pair like a
-hand-off. The same numbers, summarised, are what `scripts/measure-coordination.mjs`
-prints for a run nobody is watching.
+the shell can derive exactly: **who spoke to whom through the company hive**.
+`lib/coordination.ts` folds the shell's hive ledger (`lib/hive.ts`) into `spoke`
+observations — a `hive_message` to an agent (`destination.type === "agent"`) is
+the sender reaching that recipient (`via: "direct"`), and a private desk line
+(`destination.type === "hive"` with `onlyFor`) is the sender reaching each
+reader (`via: "private"`) — and a `speaking` observation per agent whose turn
+bracket is open. Public desk posts arrive as ordinary `agent_reply` rows and
+draw no edge. `spoke` is the most direct claim the graph makes: not "may
+reach", not "handed a card", but "said something to". Drawn solid like the
+other history edges, in the running tone, labelled by the last kind seen, and
+merged by endpoint pair like a hand-off. The same numbers, summarised, are what
+`scripts/measure-coordination.mjs` prints for a run nobody is watching.
+
+A teammate's direct lines can also be read after the fact from
+`GET {scope}/agents/{agentId}/messages` (`listAgentHiveMessages`), which the
+agent session view shows.
