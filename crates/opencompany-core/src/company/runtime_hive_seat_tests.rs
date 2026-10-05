@@ -280,6 +280,10 @@ async fn each_blocker_verdict_releases_a_question_with_its_distinct_decision() {
         assert_eq!(released[0].0, "ceo");
         let note = released[0].1.as_deref().expect("release note");
         assert_eq!(note, expected, "wrong note for {verdict:?}");
+        drop(rt);
+        _home
+            .close()
+            .expect("remove the temporary runtime directory");
     }
 }
 

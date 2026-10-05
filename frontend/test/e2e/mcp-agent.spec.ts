@@ -1,26 +1,32 @@
 import { randomUUID } from "node:crypto";
 
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { LIVE_BRAIN, LIVE_BRAIN_REASON, MCP_SERVER } from "./capabilities";
 
 let registeredServer: string | undefined;
 
-test.afterEach(async ({ request }, testInfo: TestInfo) => {
+test.afterEach(async ({ request }) => {
   // External hosts outlive the run; managed E2E keeps the registration for its
   // isolated host lifetime because durable agent snapshots can retain tools.
   if (!registeredServer || !process.env.PW_BASE_URL) return;
-  try {
-    const removed = await request.delete(
-      `/api/v1/company/mcp/servers/${encodeURIComponent(registeredServer)}`,
-    );
-    if (!removed.ok() && testInfo.status === "passed") {
-      throw new Error(`removing ${registeredServer} failed: ${removed.status()} ${await removed.text()}`);
+  const server = registeredServer;
+  let failure: string | undefined;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const removed = await request.delete(
+        `/api/v1/company/mcp/servers/${encodeURIComponent(server)}`,
+      );
+      if (removed.ok()) {
+        registeredServer = undefined;
+        return;
+      }
+      failure = `HTTP ${removed.status()}: ${await removed.text()}`;
+    } catch (error) {
+      failure = `request failed: ${String(error)}`;
     }
-  } catch (error) {
-    if (testInfo.status === "passed") throw error;
   }
-  registeredServer = undefined;
+  expect(failure, `removing registered MCP server ${server} failed`).toBeUndefined();
 });
 
 /**

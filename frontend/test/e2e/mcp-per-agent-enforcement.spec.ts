@@ -88,9 +88,13 @@ test.afterAll(async ({ request }) => {
   // makes later tests fail with non-executable tools. External hosts persist
   // beyond the run and do need the randomized registration removed.
   if (!MCP_SERVER || !LIVE_BRAIN || !process.env.PW_BASE_URL) return;
-  await request
-    .delete(`/api/v1/company/mcp/servers/${encodeURIComponent(SERVER)}`)
-    .catch(() => undefined);
+  const removed = await request.delete(
+    `/api/v1/company/mcp/servers/${encodeURIComponent(SERVER)}`,
+  );
+  expect(
+    removed.ok(),
+    `removing ${SERVER} failed: ${removed.status()} ${await removed.text()}`,
+  ).toBeTruthy();
 });
 
 /**
