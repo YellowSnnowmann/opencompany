@@ -13,7 +13,8 @@
 // {@link WindowDragBar}.
 //
 // **The lights' backdrop.** They are drawn over whatever is at the window's
-// top-left, which in this console is the sidebar's company switcher. A control
+// top-left, which in this console is the floating sidebar's own title row —
+// the pencil and `+` buttons `app-shell.tsx` mounts at its head. A control
 // under three floating circles is a control you cannot click. See
 // {@link WindowControlsInset}, which reserves the strip they land in.
 //
@@ -36,28 +37,6 @@ import { isDesktopRuntime } from "@/api/transport";
 export const WINDOW_CHROME_HEIGHT = 28;
 
 /**
- * Height of the console's own title row, in px.
- *
- * **A layout choice now, and it did not used to be.** While the shell drew its
- * own chrome this number was derived: the traffic lights floated *inside* this
- * row, the row centres its contents with `align-items: center`, and the lights
- * were the one item in it this code could not move — so the height had to be
- * exactly twice their centre line (`2 * (trafficLightPosition.y + 6)`) or they
- * sat off it. Change one, change the other.
- *
- * The window is natively decorated again, so the lights are in the OS title bar
- * above this row and that constraint is gone. 52 is kept because it is a good
- * height for what the row actually carries — comfortably clear of the 36px
- * switcher trigger, which the 28px sidebar strip this row replaced was not —
- * and no longer because any pixel of it is owed to the OS.
- *
- * The derivation is recorded rather than deleted because restoring
- * `titleBarStyle: "Overlay"` restores the constraint with it: this must go back
- * to `2 * (trafficLightPosition.y + 6)` in the same change.
- */
-export const WINDOW_TITLE_BAR_HEIGHT = 52;
-
-/**
  * How far into the window the traffic lights reach, in px.
  *
  * `trafficLightPosition.x` is 20 and macOS draws three 12px buttons on a 20px
@@ -71,24 +50,28 @@ export const WINDOW_CONTROLS_WIDTH = 72;
 /**
  * Whether the shell hides the native title bar and draws its own.
  *
- * **This must agree with `crates/opencompany-app/tauri.conf.json`.** The window runs with
- * `decorations: true` and no `titleBarStyle`, so macOS draws an ordinary title
- * bar and the traffic lights sit in it — there is nothing for the console to
- * reserve space for or make draggable, and both {@link WindowDragBar} and
- * {@link WindowControlsInset} render nothing.
+ * **This must agree with `crates/opencompany-app/tauri.conf.json`.** The window
+ * runs with `titleBarStyle: "Overlay"` and `hiddenTitle: true` again, so macOS
+ * draws no title bar of its own and the traffic lights float over whatever this
+ * console puts at its top-left — which means something here has to reserve
+ * their strip and make the rest of the strip draggable, or the window is
+ * un-movable and the lights sit on top of a control. That is
+ * {@link WindowControlsInset} and {@link WindowDragBar}, and this constant is
+ * what turns them on.
  *
  * Read from a constant rather than inferred from the platform, which is the bug
  * this replaces: the old check asked "is this a mac desktop?" and answered
  * "then the title bar is an overlay", so the config and the layout agreed only
- * by coincidence. Flipping `titleBarStyle` back in `tauri.conf.json` without
- * touching this file would have left a 72px hole where the lights used to be,
- * with nothing in the console to explain it.
+ * by coincidence. Flipping `titleBarStyle` in `tauri.conf.json` without
+ * touching this file would either leave a 72px hole where the lights float (set
+ * here, unset there) or an un-clickable, un-draggable strip under three circles
+ * that are not actually there (set there, unset here).
  *
  * The platform half is kept because it is still a precondition: `Overlay` is a
  * macOS style, so a Windows or Linux desktop keeps its native title bar however
  * this constant is set.
  */
-const SHELL_DRAWS_ITS_OWN_TITLE_BAR = false;
+const SHELL_DRAWS_ITS_OWN_TITLE_BAR = true;
 
 export function usesOverlayTitleBar(): boolean {
   if (!SHELL_DRAWS_ITS_OWN_TITLE_BAR) return false;
