@@ -45,7 +45,7 @@ fn the_seat_refusal_points_at_asking_a_teammate() {
         "the card was NOT opened",
         NoDrainReason::Seat,
     );
-    assert!(text.contains("desk_ask"), "{text}");
+    assert!(text.contains("hivemind_ask"), "{text}");
     assert!(text.starts_with("Refused"), "{text}");
 }
 
