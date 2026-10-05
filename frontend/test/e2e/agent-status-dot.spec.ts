@@ -97,7 +97,7 @@ for (const scheme of ["light", "dark"] as const) {
       // The pill over the transcript is where the header's dot went.
       const pill = page.getByTestId("channel-pill");
       const header = pill.getByTestId("agent-status-dot");
-      const seat = { chatId: `dm:${RAE.id}`, turnId: "seat-turn-1", agentId: RAE.id, episodeId: "ep-1", roundRevision: 1 };
+      const seat = { chatId: `dm:${RAE.id}`, turnId: "seat-turn-1", agentId: RAE.id, hive: { episodeId: "ep-1" } };
       sse.push({ type: "turn_started", seq: 1, atMillis: Date.now(), ...seat });
       await expect(dotOf(page, RAE.name)).toHaveAttribute("data-state", "working");
       await expect(header).toHaveAttribute("data-state", "working");
