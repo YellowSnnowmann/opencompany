@@ -8,7 +8,6 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
-  CornerUpLeft,
   Hourglass,
   Loader2,
   Scissors,
@@ -30,7 +29,6 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
-import { TeammateAvatar } from "@/components/teammate-avatar";
 
 import {
   AWAITING_APPROVAL_LABEL,
