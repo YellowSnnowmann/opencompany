@@ -3022,66 +3022,11 @@ export function AppShell({
       },
       [setRunStatuses],
     ),
-    // **A crossing changes a thread this console is already showing.**
-    //
-    // The fold that renders a crossing — `referralConversation` on the asking
-    // row — is built by `chat/history` and by nothing else, so a crossing was
-    // invisible until something re-read the thread. A desk crossing waited for
-    // settle; a pair DM waited forever, because its rows live in the pair's own
-    // `dm:<a>+<b>` conversation that no desk view subscribes to.
-    //
-    // Re-reading rather than rendering the frame: the frame deliberately
-    // carries no crossing content, and `reReadSettledThread` is idempotent, so
-    // a second call for a thread already holding the fold adds nothing.
-    onReferral: useCallback(
-      (event: {
-        chatId: string;
-        sequence?: number;
-        target?: string;
-        asker?: string;
-        toDesk?: string;
-        direct?: boolean;
-        returning?: boolean;
-      }) => {
-        // A forward is a turn starting on the far side; a return is that turn
-        // already finished and carried home, so it announces nobody.
-        if (!event.returning) {
-          // **What is happening differs by kind, not just who is named.**
-          //
-          // A person crossing is a two-way exchange: `pair_messages` lets the
-          // pair alternate, so both seats spend turns and neither is merely
-          // answering. A desk crossing is the far DESK answering — as a whole
-          // room since #2332 — and its `target` is only the library's
-          // first-eligible seat, so naming that seat would credit one member
-          // with a room's work.
-          // Stored structurally and phrased by the view: a desk's display
-          // name and a teammate's live where the channels and roster do, not
-          // here.
-          const crossing: ReferralWorking | undefined =
-            event.direct && event.asker && event.target
-              ? {
-                  direct: true,
-                  asker: event.asker,
-                  target: event.target,
-                  row: event.sequence,
-                }
-              : !event.direct && event.toDesk
-                ? { direct: false, desk: event.toDesk, row: event.sequence }
-                : undefined;
-          if (crossing) {
-            setReferralWorking((working) => ({ ...working, [event.chatId]: crossing }));
-          }
-        }
-        reReadSettledThread(event.chatId);
-      },
-      [reReadSettledThread],
-    ),
-    // The episode frames and the turn brackets fold into the shell's two
-    // ledgers; `RoomView` draws the band off the first, the Comms graph and
-    // the Observatory read both. Payloads, not counters: the band is a fold,
-    // not a re-read, and the transcript's `episode` field is what corrects a
-    // dropped frame on the next hydration.
-    onEpisodeEvent,
+    // The hive frames and the turn brackets fold into the shell's two
+    // ledgers; `RoomView` draws the settle markers off the first, the Comms
+    // graph reads both. Payloads, not counters: they are folds, not re-reads,
+    // and the transcript's `hive` field regroups a desk on the next hydration.
+    onHiveEvent,
     onTurnBracket,
     onDeskRoutingConfigured: useCallback(() => setDeskRoutingTick((n) => n + 1), []),
     onRosterChanged: useCallback(() => setRosterTick((n) => n + 1), []),
@@ -3490,7 +3435,7 @@ export function AppShell({
               // Skipping setup must not be a dead end: an unstaffed company keeps
               // a visible way back in.
               onRunSetup={() => setSetupForced(true)}
-              // Who spoke to whom inside episodes, for `#/company/comms`, and
+              // Who spoke to whom through the hive, for `#/company/comms`, and
               // the tick that re-reads a desk's routing editor when another
               // session installs or resets a block.
               commsObservations={commsObservations}
@@ -3519,10 +3464,6 @@ export function AppShell({
               effect in `RoomView` writing state up here and re-render the whole
               console on every unread tick from every section, rather than only
               from Room. */}
-          <ReferralRunningProvider
-            rows={runningCrossingRows(referralWorking)}
-            byDesk={referralWorking}
-          >
           <RoomView
               client={client}
               company={company}
@@ -3571,9 +3512,8 @@ export function AppShell({
               failedApprovals={failedApprovals}
               budgetProximity={budgetProximity}
               onDismissBudgetProximity={() => setBudgetProximity(null)}
-              episodeFrames={episodeFrames}
+              hiveFrames={hiveFrames}
             />
-          </ReferralRunningProvider>
           {view === "inbox" && <InboxView client={client} company={company} />}
           {/* All that is left of the Tasks page: the card detail. `sub` is a
               real id by the time this renders — `REWRITE_RETIRED` sent every
