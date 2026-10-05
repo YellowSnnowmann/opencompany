@@ -1,5 +1,5 @@
 pub(super) use super::*;
-pub(super) use crate::company::steer::{InflightRegistry, SteerAction};
+pub(super) use crate::company::steer::SteerAction;
 pub(super) use crate::ports::tasks::COLUMN_TODO;
 pub(super) use crate::ports::tasks::TaskTitle;
 
