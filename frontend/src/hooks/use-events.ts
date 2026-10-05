@@ -211,6 +211,8 @@ export type CompanyStreamEvent =
       approvalId: string;
       kind: string;
       chatId?: string;
+      /** Whose company-hive turn is held on it (OC-2); absent for a cycle park. */
+      hive?: import("@/api/types").ApprovalHiveDto;
     }
   | {
       type: "approval_resolved";
