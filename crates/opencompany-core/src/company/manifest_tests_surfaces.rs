@@ -488,3 +488,13 @@ fn a_stale_referral_block_is_refused_with_a_migration_hint() {
         .is_none()
     );
 }
+
+#[test]
+fn the_retired_delegation_depth_is_refused_with_a_migration_hint() {
+    let problem = CompanyManifest::legacy_referral_block(
+        "[company]\nname = \"X\"\n[tools]\nmax_delegation_depth = 2\n",
+    )
+    .expect("refused");
+    assert!(problem.contains("max_delegation_depth"), "{problem}");
+    assert!(problem.contains("hivemind_send_agent"), "{problem}");
+}

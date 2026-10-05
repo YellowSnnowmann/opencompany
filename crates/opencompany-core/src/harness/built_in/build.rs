@@ -73,13 +73,12 @@
 //!   agent is also briefed on its team (`company::team_brief::team_section`)
 //!   so it knows whom it can reach.
 //!
-//!   Recursion is bounded **dynamically**, not by which tools were wired: belts
-//!   are cached per roster and rebuilt rarely, so the tool cannot be withheld
-//!   from the one turn that happens to be running too deep. `[tools]
-//!   .max_delegation_depth` is enforced at the tool boundary by
-//!   [`DelegationQueue::push_within_cap`](crate::harness::orchestrator::DelegationQueue::push_within_cap)
-//!   against the live scope chain, and a hand-off that would loop or leave the
-//!   member's allowlist is refused there too.
+//!   Fan-out is bounded **dynamically**, not by which tools were wired: belts
+//!   are cached per roster and rebuilt rarely, so a tool cannot be withheld
+//!   from one turn. The per-turn card cap is enforced at the tool boundary by
+//!   [`DelegationQueue::push_within_cap`](crate::harness::orchestrator::DelegationQueue::push_within_cap),
+//!   and the reach a direct message may have by the company hive's
+//!   `SendAuthorizer` (`hive::policy`).
 //!
 //!   The dispatched belt is otherwise a curated, metered derivative of an
 //!   OpenHuman agent — the exec subset above plus intrinsic memory / file / MCP

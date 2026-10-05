@@ -15,7 +15,7 @@ use crate::ports::decode_wallet_address;
 use super::types::{
     ACP_AGENTS, ACP_TRANSPORTS, AUTH_MODES, BRAIN_MODES, CONNECTION_PRIORITIES, CompanyManifest,
     GATEABLE_NAMESPACES, HARNESS_KINDS, Harness, IMPLICIT_HARNESS_ID, Inference, KNOWN_CHANNELS,
-    MAX_DELEGATION_DEPTH_BOUNDS, PLAN_NAMES, PLAN_PERIODS, POLICY_MODES, PROMPT_CLASSES, TIERS,
+    PLAN_NAMES, PLAN_PERIODS, POLICY_MODES, PROMPT_CLASSES, TIERS,
     TOOL_PROVIDERS,
 };
 
@@ -348,8 +348,8 @@ impl CompanyManifest {
     }
 
     /// Whether a manifest still carries the retired
-    /// `[group_chat.routing.referral]` block, and the migration hint if it
-    /// does (OC-2). Refused rather than ignored for the same reason as
+    /// `[group_chat.routing.referral]` block or `[tools].max_delegation_depth`
+    /// key, and the migration hint if it does (OC-2). Refused rather than ignored for the same reason as
     /// [`legacy_hive_block`](Self::legacy_hive_block): a desk tuned to refer
     /// across desks would otherwise run as though it never asked.
     pub fn legacy_referral_block(text: &str) -> Option<String> {
@@ -796,21 +796,6 @@ impl CompanyManifest {
                 "`[tools].provider`",
                 TOOL_PROVIDERS,
                 &self.tools.provider,
-            ));
-        }
-
-        // The delegation chain bound (issue #176). `0` would refuse the
-        // orchestrator's own hand-off — delegation off entirely, by a knob that
-        // reads like a depth — and anything past the ceiling is a runaway with
-        // a number in front of it, since the per-turn fan-out cap applies at
-        // every level.
-        if let Some(depth) = self.tools.max_delegation_depth
-            && !MAX_DELEGATION_DEPTH_BOUNDS.contains(&depth)
-        {
-            problems.push(format!(
-                "`[tools].max_delegation_depth` must be between {} and {} — you wrote `{depth}`. Use `1` to stop desks re-delegating at all.",
-                MAX_DELEGATION_DEPTH_BOUNDS.start(),
-                MAX_DELEGATION_DEPTH_BOUNDS.end(),
             ));
         }
 
@@ -1494,9 +1479,23 @@ fn legacy_hive_block(text: &str) -> Option<String> {
 }
 
 /// The migration hint for a manifest that still declares
-/// `[group_chat.routing.referral]` (OC-2).
+/// `[group_chat.routing.referral]` or `[tools].max_delegation_depth` (OC-2):
+/// both bounded the desk hand-offs the company hive replaced.
 fn legacy_referral_block(text: &str) -> Option<String> {
     let document: toml::Value = toml::from_str(text).ok()?;
+    if document
+        .get("tools")
+        .and_then(|tools| tools.get("max_delegation_depth"))
+        .is_some()
+    {
+        return Some(
+            "`[tools].max_delegation_depth` no longer exists — it bounded the desk hand-off \
+             chain, and a teammate now reaches a colleague by message \
+             (`hivemind_send_agent`), which runs no turn inside its own. Delete the key; see \
+             `docs/spec/runtime/hive.md`."
+                .to_string(),
+        );
+    }
     let desks = document.get("group_chat")?.as_array()?;
     let stale: Vec<&str> = desks
         .iter()
