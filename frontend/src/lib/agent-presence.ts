@@ -330,15 +330,15 @@ export function staleTurnMeta(now: number): (key: string, entry: TurnMeta) => bo
 export interface PresenceApproval {
   id?: string;
   agent?: string | null;
-  /** The hive seat that raised it; `seat` is the roster id. */
-  episode?: { seat: string } | null;
+  /** The company-hive turn held on it; `agentId` is the roster id. */
+  hive?: { agentId: string } | null;
 }
 
 /**
  * Counts pending approvals per asking agent.
  *
- * The asker is `agent`, else the episode seat that raised it (a seat's approval
- * can arrive without `agent`). One no agent raised counts for nobody. `resolved`
+ * The asker is `agent`, else the agent whose hive turn is held on it (such an
+ * approval can arrive without `agent`). One no agent raised counts for nobody. `resolved`
  * names approvals a `approval_resolved` frame already settled (an expiry
  * included) while the feed still lists them: the dot goes out on the frame,
  * not a poll later.
@@ -350,7 +350,7 @@ export function approvalAgentCounts(
   const out: Record<string, number> = {};
   for (const approval of approvals) {
     if (approval.id !== undefined && resolved && approval.id in resolved) continue;
-    const asker = approval.agent || approval.episode?.seat;
+    const asker = approval.agent || approval.hive?.agentId;
     if (asker) out[asker] = (out[asker] ?? 0) + 1;
   }
   return out;
