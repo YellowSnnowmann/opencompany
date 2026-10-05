@@ -27,18 +27,10 @@
 # and the answer reaches the asker on a later turn as information — never as a
 # vote. See `docs/spec/runtime/hive.md`.
 #
-# The ops desk also turns on the *other* seam, which stays inside one desk:
-# **private asides** (`[group_chat.hive.aside]`). Two members may compare notes
-# in a line the rest of the room cannot read — elided rather than removed, so
-# everyone still sees that the exchange happened and who was in it — and then
-# owe the room a `!surface` in the open. See
-# `docs/spec/runtime/hivemind-asides.md`.
-#
-# One rule governs both, and it is the whole design constraint: what crosses a
-# visibility boundary carries information, **never support**. A referred answer
-# and a private line each add no supporter and move no option towards a
-# decision. A desk that could import a quorum from elsewhere, or assemble one
-# where the room cannot see it, would be a desk that never had to be convinced.
+# One rule governs it, and it is the whole design constraint: what crosses a
+# desk boundary carries information, **never support**. An answer from another
+# desk moves no option towards a decision on this one; a desk that could import
+# a quorum from elsewhere would be a desk that never had to be convinced.
 
 [company]
 name = "Northgate Vending"

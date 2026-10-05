@@ -5,7 +5,6 @@ import type { TaskStatus } from "@/api/tasks";
 import type { CognitionState } from "@/api/types";
 import { AgentAvatarButton, useAgentProfileOpener } from "@/components/agent-profile-sheet";
 import { Markdown } from "@/components/markdown";
-import { UtteranceChip } from "@/components/episode/UtteranceChip";
 import { TeammateAvatar } from "@/components/teammate-avatar";
 import { Button } from "@/components/ui/button";
 import { consoleHref } from "@/lib/console-paths";
@@ -28,7 +27,7 @@ import {
   type TimelineEntry,
 } from "./model";
 import { EchoPlaceholder, echoMarkerFor } from "./EchoPlaceholder";
-import { AgentConversation, CardChip, ReferralChip, ReferralConversation } from "./StepTimeline";
+import { CardChip } from "./StepTimeline";
 import { WorkingIndicator } from "./WorkingIndicator";
 
 interface Props {
@@ -347,47 +346,6 @@ export function MessageRow({
 
         {message.outputs && message.outputs.length > 0 && (
           <OutputLinkRow outputs={message.outputs} />
-        )}
-        {/* Provenance for a crossing referral: this turn exists because another
-            desk asked, and the reader of THIS desk cannot tell otherwise. */}
-        {message.referredFrom && (
-          <ReferralChip
-            deskId={message.referredFrom.deskId}
-            deskName={message.referredFrom.deskName}
-            askerId={message.referredFrom.askerId}
-            direct={message.referredFrom.direct}
-            sequence={message.referredFrom.sequence}
-            // The host's word, never a guess off `from`: both legs of a
-            // referral are `company` lines, so that test called every answer
-            // an ask. Falling back to "asked" matches a host too old to say.
-            direction={message.referredFrom.direction ?? "asked"}
-            agentNames={agentNames}
-          />
-        )}
-        {/* And what actually crossed. The chip says a referral happened; this
-            says what was asked and what came back, collapsed so the desk still
-            reads as its own conversation. */}
-        {message.referralConversation && (
-          <ReferralConversation
-            crossing={message.referralConversation}
-            rowId={message.id}
-            agentNames={agentNames}
-          />
-        )}
-        {message.agentConversations?.map((exchange) => (
-          <AgentConversation key={exchange.root} exchange={exchange} agentNames={agentNames} />
-        ))}
-        {/* What this line was inside its episode — its speech act and, for a
-            dm, who it went to. Absent for every ordinary reply, which is what
-            keeps a DM, `#general` and a single-responder desk rendering exactly
-            as they always have: the affordance follows the data, never the
-            channel kind. */}
-        {message.episode && (
-          <UtteranceChip
-            episode={message.episode}
-            audience={message.audience}
-            agentNames={agentNames}
-          />
         )}
         {message.taskId && !cardOnlyCarriesAnArtifact(message) && (
           <div className="flex flex-wrap items-center gap-2">
