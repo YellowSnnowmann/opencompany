@@ -434,7 +434,6 @@ fn is_zero_depth(depth: &u8) -> bool {
     *depth == 0
 }
 
-
 /// Where a projected hive row sits in the company Coordinator's transcript
 /// (OC-2): its global hive sequence, the episode it belongs to and the hive
 /// conversation root it answers. Carried on [`CompanyEvent::AgentReply`] so a
@@ -1201,13 +1200,9 @@ pub enum CompanyEvent {
         /// on the same terms: a person named here is badged, a teammate named
         /// here is not, because an agent has no inbox.
         ///
-        /// Consulted by dispatch in exactly one way: these mentions may open a
-        /// **cross-desk referral**, bounded by the episode's `hop` budget. They
-        /// can never open a same-desk turn — the round already seats every
-        /// member every round, so the named teammate is holding the whole
-        /// conversation already, and a second turn would break the
-        /// one-settle-per-seat order the round commits in. `hop` is the live
-        /// bound on that edge.
+        /// Never consulted by dispatch: naming a teammate in a reply starts
+        /// nothing. An agent reaches a colleague with `hivemind_send_agent`
+        /// (OC-2).
         ///
         /// Additive on the same terms as `task_id` and `parent` above.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

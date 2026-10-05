@@ -121,7 +121,6 @@ pub use crate::company::ORCHESTRATOR_TIER;
 /// told five were opened, find two.
 pub const MAX_DELEGATIONS_PER_TURN: usize = 3;
 
-
 /// How many recent events [`QueryCompanyTool`] surfaces.
 const RECENT_EVENTS: usize = 10;
 /// How many facts [`QueryCompanyTool`] surfaces.
@@ -2612,11 +2611,14 @@ impl Tool for SpawnTaskTool {
                 return Ok(ToolResult::error(card_refused(&effect, refusal)));
             }
         };
-        let staged = self.queue.push_within_cap(Delegation::SpawnTask {
+        let staged = self.queue.push_within_cap(
+            Delegation::SpawnTask {
                 title: title.clone(),
                 note,
                 assignee: owner,
-            }, MAX_DELEGATIONS_PER_TURN);
+            },
+            MAX_DELEGATIONS_PER_TURN,
+        );
         if seated && staged != Staged::Queued {
             super::card_budget::release(&title);
         }
@@ -2713,11 +2715,14 @@ impl Tool for AssignTaskTool {
         let note = optional_str(&args, "note");
 
         let effect = format!("card {task_id} was NOT assigned");
-        match self.queue.push_within_cap(Delegation::AssignTask {
+        match self.queue.push_within_cap(
+            Delegation::AssignTask {
                 task_id: task_id.clone(),
                 assignee: assignee.clone(),
                 note,
-            }, MAX_DELEGATIONS_PER_TURN) {
+            },
+            MAX_DELEGATIONS_PER_TURN,
+        ) {
             Staged::Queued => {}
             Staged::OverCap => return Ok(ToolResult::error(over_cap(&effect))),
             Staged::NoDrain(why) => {
@@ -2797,11 +2802,14 @@ impl Tool for ReviewTaskTool {
         let note = optional_str(&args, "note");
 
         let effect = format!("card {task_id} was NOT reviewed");
-        match self.queue.push_within_cap(Delegation::ReviewTask {
+        match self.queue.push_within_cap(
+            Delegation::ReviewTask {
                 task_id: task_id.clone(),
                 decision,
                 note,
-            }, MAX_DELEGATIONS_PER_TURN) {
+            },
+            MAX_DELEGATIONS_PER_TURN,
+        ) {
             Staged::Queued => {}
             Staged::OverCap => return Ok(ToolResult::error(over_cap(&effect))),
             Staged::NoDrain(why) => {

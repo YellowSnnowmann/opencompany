@@ -96,7 +96,11 @@ pub fn hive_members(record: &CompanyRecord, hive_id: &str) -> Vec<String> {
 /// The members of `hive_id` the message named — teammates directly, a desk
 /// or `@everyone` expanded against the addressed hive — in reading order.
 #[must_use]
-pub fn mentioned_starters(record: &CompanyRecord, hive_id: &str, mentions: &[Mention]) -> Vec<String> {
+pub fn mentioned_starters(
+    record: &CompanyRecord,
+    hive_id: &str,
+    mentions: &[Mention],
+) -> Vec<String> {
     if mentions.is_empty() {
         return Vec::new();
     }

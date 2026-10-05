@@ -229,7 +229,10 @@ fn the_coordinator_folds_every_desk_to_the_widest_round_and_longest_wall() {
         options.conduct_policy.turn_wall,
         DEFAULT_ROUND_WIDTH as u64 * u64::from(DEFAULT_MAX_ROUNDS)
     );
-    assert_eq!(options.retention.settled_episodes, Some(RETAINED_SETTLED_EPISODES));
+    assert_eq!(
+        options.retention.settled_episodes,
+        Some(RETAINED_SETTLED_EPISODES)
+    );
     assert_eq!(options.retention.delivered, Some(RETAINED_DELIVERIES));
     assert_eq!(options.retention.interrupted, Some(RETAINED_INTERRUPTIONS));
     assert_eq!(options.retention.pending_per_agent, Some(PENDING_PER_AGENT));
@@ -248,7 +251,10 @@ id = "a"
 role = "A"
 "#,
     );
-    assert_eq!(coordinator_options(&record).round_width, DEFAULT_ROUND_WIDTH);
+    assert_eq!(
+        coordinator_options(&record).round_width,
+        DEFAULT_ROUND_WIDTH
+    );
     assert_eq!(
         turn_timeout(&record),
         std::time::Duration::from_secs(DEFAULT_TURN_TIMEOUT_SECS)

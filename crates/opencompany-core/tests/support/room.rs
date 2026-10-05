@@ -123,7 +123,10 @@ pub fn hive_turn(ask: &Ask) -> Option<HiveTurn> {
                     } else {
                         "host".to_string()
                     };
-                    (sender, message["body"].as_str().unwrap_or_default().to_string())
+                    (
+                        sender,
+                        message["body"].as_str().unwrap_or_default().to_string(),
+                    )
                 })
                 .collect()
         })
@@ -210,7 +213,11 @@ pub fn hive_script(act: impl Fn(&HiveTurn) -> Reply + Send + Sync + 'static) -> 
         if std::env::var_os("ROOM_ASKS").is_some() {
             eprintln!(
                 "[ask] {}",
-                request.last_user_text().chars().take(300).collect::<String>()
+                request
+                    .last_user_text()
+                    .chars()
+                    .take(300)
+                    .collect::<String>()
             );
         }
         let Some(turn) = hive_turn(request) else {

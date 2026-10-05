@@ -41,7 +41,12 @@ fn the_fold_keeps_what_the_agent_sent_or_was_sent_directly() {
         line(1, "writer", to("engineer"), "draft?"),
         line(2, "engineer", to("writer"), "here"),
         line(3, "ceo", to("engineer"), "not the writer's"),
-        line(4, "writer", HiveDestination::Hive("content".into()), "a hive line"),
+        line(
+            4,
+            "writer",
+            HiveDestination::Hive("content".into()),
+            "a hive line",
+        ),
     ];
     let got = direct_messages(&rows, "writer", MAX_MESSAGES);
     let texts: Vec<&str> = got.iter().map(|m| m.text.as_str()).collect();

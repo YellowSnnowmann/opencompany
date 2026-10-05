@@ -273,7 +273,6 @@ async fn the_failed_attempt_leaves_no_durable_trace_and_display_matches() {
     );
 }
 
-
 // ---------------------------------------------------------------------------
 // Typed-row retention across the retry, on the production native-tool path
 // ---------------------------------------------------------------------------

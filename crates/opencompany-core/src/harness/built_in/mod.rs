@@ -178,8 +178,6 @@ mod publish_turn_helpers_tests;
 #[cfg(test)]
 mod publish_turn_link_tests;
 pub mod run_origin;
-/// A shared tool handed out as an owned belt entry per turn.
-pub mod shared_tool;
 pub mod run_trace;
 pub mod run_turn;
 pub mod search;
@@ -199,16 +197,18 @@ mod search_turn_tests;
 /// moved the search domain out to the `tinysearch` module and stopped owning a
 /// Rust type for the raw envelope.
 pub mod search_wire;
+/// A shared tool handed out as an owned belt entry per turn.
+pub mod shared_tool;
 pub mod skills;
 pub mod steer;
 pub mod steps;
 pub mod title;
 pub mod tool_posture;
+pub mod toolbelt;
+pub mod triage;
 /// What every agent turn runs inside — the turn lock, the tool executor, the
 /// stop hooks — and the admission gates before it (OC-2).
 pub(crate) mod turn_envelope;
-pub mod toolbelt;
-pub mod triage;
 pub mod turn_outputs;
 /// Issue #661 (M7): `read_workflow` / `update_workflow` / `delete_workflow` —
 /// the agent's way to fix or retire a workflow instead of only ever creating
@@ -1621,39 +1621,39 @@ impl CompanyAgent {
             let first = send(pump.sender()).await.map(|outcome| outcome.reply);
             let first_elapsed = started.elapsed();
             usages.push(self.tapped_usage());
-            let reply: crate::Result<String> =
-                match self.classify_turn(self.unmask(first), first_elapsed) {
-                    AttemptOutcome::Reply(reply) => Ok(reply),
-                    AttemptOutcome::Hard(err) => Err(err),
-                    AttemptOutcome::BudgetPaused { summary } => Ok(slot_budget(summary)),
-                    AttemptOutcome::CeilingPaused { summary, elapsed } => {
-                        Ok(slot_ceiling(summary, elapsed))
-                    }
-                    AttemptOutcome::Empty => {
-                        if steer.map(|c| c.requested()).unwrap_or(false) || envelope.spend_halted()
-                        {
-                            Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
-                        } else {
-                            let retry_started = std::time::Instant::now();
-                            let second = send(pump.sender()).await.map(|outcome| outcome.reply);
-                            let second_elapsed = retry_started.elapsed();
-                            usages.push(self.tapped_usage());
-                            match self.classify_turn(self.unmask(second), second_elapsed) {
-                                AttemptOutcome::Reply(reply) => Ok(reply),
-                                AttemptOutcome::Empty => {
-                                    Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
-                                }
-                                AttemptOutcome::BudgetPaused { summary } => Ok(slot_budget(summary)),
-                                // A ceiling can fire on the retry too: this arm
-                                // is the end of the ladder, so it is terminal.
-                                AttemptOutcome::CeilingPaused { summary, elapsed } => {
-                                    Ok(slot_ceiling(summary, elapsed))
-                                }
-                                AttemptOutcome::Hard(err) => Err(err),
+            let reply: crate::Result<String> = match self
+                .classify_turn(self.unmask(first), first_elapsed)
+            {
+                AttemptOutcome::Reply(reply) => Ok(reply),
+                AttemptOutcome::Hard(err) => Err(err),
+                AttemptOutcome::BudgetPaused { summary } => Ok(slot_budget(summary)),
+                AttemptOutcome::CeilingPaused { summary, elapsed } => {
+                    Ok(slot_ceiling(summary, elapsed))
+                }
+                AttemptOutcome::Empty => {
+                    if steer.map(|c| c.requested()).unwrap_or(false) || envelope.spend_halted() {
+                        Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
+                    } else {
+                        let retry_started = std::time::Instant::now();
+                        let second = send(pump.sender()).await.map(|outcome| outcome.reply);
+                        let second_elapsed = retry_started.elapsed();
+                        usages.push(self.tapped_usage());
+                        match self.classify_turn(self.unmask(second), second_elapsed) {
+                            AttemptOutcome::Reply(reply) => Ok(reply),
+                            AttemptOutcome::Empty => {
+                                Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
                             }
+                            AttemptOutcome::BudgetPaused { summary } => Ok(slot_budget(summary)),
+                            // A ceiling can fire on the retry too: this arm
+                            // is the end of the ladder, so it is terminal.
+                            AttemptOutcome::CeilingPaused { summary, elapsed } => {
+                                Ok(slot_ceiling(summary, elapsed))
+                            }
+                            AttemptOutcome::Hard(err) => Err(err),
                         }
                     }
-                };
+                }
+            };
             (reply, usages)
         };
         let surface = Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id);
@@ -1666,7 +1666,10 @@ impl CompanyAgent {
             &self.agent_id,
             &events,
             envelope.halt(&usages),
-            budget_pause_summary.lock().ok().and_then(|mut slot| slot.take()),
+            budget_pause_summary
+                .lock()
+                .ok()
+                .and_then(|mut slot| slot.take()),
             ceiling_pause.lock().ok().and_then(|mut slot| slot.take()),
         );
         let steps = steps::fold_steps(events);
@@ -2584,7 +2587,10 @@ impl HarnessPool {
     }
 
     /// The company's hive, once an `ensure` started it.
-    pub async fn hive(&self, company: &CompanyId) -> Option<Arc<crate::hive::runtime::CompanyHive>> {
+    pub async fn hive(
+        &self,
+        company: &CompanyId,
+    ) -> Option<Arc<crate::hive::runtime::CompanyHive>> {
         self.hives.read().await.get(company).cloned()
     }
 
@@ -5159,70 +5165,70 @@ pub(crate) async fn daily_cap_refusal(
     deps: &HarnessDeps,
 ) -> Option<TurnOutcome> {
     let agent_id = agent.agent_id.as_str();
-        if let Some(cap) = agent.budget_usd_daily {
-            let since = crate::metering::utc_day_start_millis(crate::ports::now_millis());
-            let samples = match read_spend_for_gate(deps.meter.as_deref(), company, since).await {
-                Ok(samples) => samples,
-                Err(fault) => {
-                    match &fault {
-                        SpendReadFault::NoMeter => tracing::error!(
-                            company = %company,
-                            agent = agent_id,
-                            cap,
-                            "[agent-budget] a daily spend cap is declared but this host has no usage meter; refusing dispatch to this teammate (no model call) until a meter is configured or the cap is removed"
-                        ),
-                        SpendReadFault::QueryFailed(error) => tracing::error!(
-                            company = %company,
-                            agent = agent_id,
-                            cap,
-                            %error,
-                            "[agent-budget] daily-spend query failed; refusing dispatch to this teammate (no model call) rather than spending against a cap that cannot be checked"
-                        ),
-                    }
-                    return Some(spend_gate_refusal(
-                        unmeasurable_agent_budget_notice(agent_id, cap, &fault),
-                        SpendGateCause::Unmeasurable,
-                    ));
+    if let Some(cap) = agent.budget_usd_daily {
+        let since = crate::metering::utc_day_start_millis(crate::ports::now_millis());
+        let samples = match read_spend_for_gate(deps.meter.as_deref(), company, since).await {
+            Ok(samples) => samples,
+            Err(fault) => {
+                match &fault {
+                    SpendReadFault::NoMeter => tracing::error!(
+                        company = %company,
+                        agent = agent_id,
+                        cap,
+                        "[agent-budget] a daily spend cap is declared but this host has no usage meter; refusing dispatch to this teammate (no model call) until a meter is configured or the cap is removed"
+                    ),
+                    SpendReadFault::QueryFailed(error) => tracing::error!(
+                        company = %company,
+                        agent = agent_id,
+                        cap,
+                        %error,
+                        "[agent-budget] daily-spend query failed; refusing dispatch to this teammate (no model call) rather than spending against a cap that cannot be checked"
+                    ),
                 }
-            };
-
-            let spent = crate::metering::usd_spent_by_agent(&samples, agent_id);
-            // Issue #1846: same coarse proximity warning as the total-ceiling
-            // read above, reusing the SAME `samples` — no second query.
-            // Non-blocking; only fires when this teammate is not already
-            // refused below.
-            if spent < cap && is_approaching_budget_ceiling_f64(spent, cap) {
-                tracing::info!(
-                    company = %company,
-                    agent = agent_id,
-                    spent,
-                    cap,
-                    "[agent-budget] approaching the daily spend cap; publishing a non-blocking proximity warning"
-                );
-                crate::turn_stream::publish(
-                    company,
-                    crate::turn_stream::BudgetProximityFrame {
-                        kind: "budget_proximity",
-                        agent_id: Some(agent_id.to_string()),
-                        message: budget_proximity_message_usd(agent_id),
-                        at_millis: crate::ports::now_millis(),
-                    },
-                );
-            }
-            if spent >= cap {
-                tracing::info!(
-                    company = %company,
-                    agent = agent_id,
-                    spent,
-                    cap,
-                    "[agent-budget] daily spend cap reached; refusing dispatch (no model call) until 00:00 UTC"
-                );
                 return Some(spend_gate_refusal(
-                    agent_budget_exhausted_notice(agent_id, cap),
-                    SpendGateCause::Exhausted,
+                    unmeasurable_agent_budget_notice(agent_id, cap, &fault),
+                    SpendGateCause::Unmeasurable,
                 ));
             }
+        };
+
+        let spent = crate::metering::usd_spent_by_agent(&samples, agent_id);
+        // Issue #1846: same coarse proximity warning as the total-ceiling
+        // read above, reusing the SAME `samples` — no second query.
+        // Non-blocking; only fires when this teammate is not already
+        // refused below.
+        if spent < cap && is_approaching_budget_ceiling_f64(spent, cap) {
+            tracing::info!(
+                company = %company,
+                agent = agent_id,
+                spent,
+                cap,
+                "[agent-budget] approaching the daily spend cap; publishing a non-blocking proximity warning"
+            );
+            crate::turn_stream::publish(
+                company,
+                crate::turn_stream::BudgetProximityFrame {
+                    kind: "budget_proximity",
+                    agent_id: Some(agent_id.to_string()),
+                    message: budget_proximity_message_usd(agent_id),
+                    at_millis: crate::ports::now_millis(),
+                },
+            );
         }
+        if spent >= cap {
+            tracing::info!(
+                company = %company,
+                agent = agent_id,
+                spent,
+                cap,
+                "[agent-budget] daily spend cap reached; refusing dispatch (no model call) until 00:00 UTC"
+            );
+            return Some(spend_gate_refusal(
+                agent_budget_exhausted_notice(agent_id, cap),
+                SpendGateCause::Exhausted,
+            ));
+        }
+    }
     None
 }
 

@@ -19,7 +19,10 @@ enum Script {
     /// Reply with this text.
     Reply(&'static str),
     /// Message `to` directly, then reply.
-    Message { to: &'static str, body: &'static str },
+    Message {
+        to: &'static str,
+        body: &'static str,
+    },
     /// Complete the episode it is in with this text.
     Complete(&'static str),
 }
@@ -192,7 +195,12 @@ async fn a_dm_reply_lands_in_the_operators_dm_with_its_turn_meta() {
         .await
         .expect("send");
     f.projector
-        .note_host_line(receipt.sequence, "dm:writer", Some(operator), Some("acme--writer"))
+        .note_host_line(
+            receipt.sequence,
+            "dm:writer",
+            Some(operator),
+            Some("acme--writer"),
+        )
         .await;
     f.meta.push(
         "acme--writer",
@@ -222,7 +230,11 @@ async fn a_dm_reply_lands_in_the_operators_dm_with_its_turn_meta() {
         }
         other => panic!("expected a reply, got {other:?}"),
     }
-    assert_eq!(f.projector.project().await.expect("again"), 0, "nothing twice");
+    assert_eq!(
+        f.projector.project().await.expect("again"),
+        0,
+        "nothing twice"
+    );
 }
 
 #[tokio::test]
@@ -263,16 +275,26 @@ async fn a_desk_reply_threads_under_the_operators_line_and_the_episode_settles_o
         .map(|(_, event)| event)
         .filter(|event| matches!(event, CompanyEvent::AgentReply { .. }))
         .collect();
-    assert!(!replies.is_empty(), "the starter's completion is on the desk: {rows:?}");
+    assert!(
+        !replies.is_empty(),
+        "the starter's completion is on the desk: {rows:?}"
+    );
     for reply in &replies {
         let CompanyEvent::AgentReply {
-            chat_id, parent, hive, ..
+            chat_id,
+            parent,
+            hive,
+            ..
         } = reply
         else {
             unreachable!()
         };
         assert_eq!(chat_id, "content");
-        assert_eq!(*parent, Some(operator), "threaded under the operator's line");
+        assert_eq!(
+            *parent,
+            Some(operator),
+            "threaded under the operator's line"
+        );
         assert!(hive.as_ref().is_some_and(|hive| hive.episode_id.is_some()));
     }
     let settled = rows
@@ -299,10 +321,13 @@ async fn a_desk_reply_threads_under_the_operators_line_and_the_episode_settles_o
 #[tokio::test]
 async fn a_peer_message_is_a_hive_message_not_a_reply() {
     let f = fixture(&[
-        ("writer", Script::Message {
-            to: "acme--editor",
-            body: "can you check this?",
-        }),
+        (
+            "writer",
+            Script::Message {
+                to: "acme--editor",
+                body: "can you check this?",
+            },
+        ),
         ("editor", Script::Reply("checked")),
     ])
     .await;
@@ -340,7 +365,10 @@ async fn a_peer_message_is_a_hive_message_not_a_reply() {
 #[test]
 fn the_roster_maps_ids_both_ways_and_strips_a_retired_prefix() {
     let roster = HiveRoster::default();
-    roster.install(HashMap::from([("acme--ceo".to_string(), "ceo".to_string())]));
+    roster.install(HashMap::from([(
+        "acme--ceo".to_string(),
+        "ceo".to_string(),
+    )]));
     assert_eq!(roster.manifest_id(&company(), "acme--ceo"), "ceo");
     assert_eq!(roster.manifest_id(&company(), "acme--gone"), "gone");
     assert_eq!(roster.coordinator_id("ceo").as_deref(), Some("acme--ceo"));

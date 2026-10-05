@@ -37,9 +37,7 @@ mod support;
 
 use std::time::Duration;
 
-use opencompany::ports::types::{
-    CompanyEvent, CompanyId, EventSeq, HiveDestination, StoredEvent,
-};
+use opencompany::ports::types::{CompanyEvent, CompanyId, EventSeq, HiveDestination, StoredEvent};
 use support::room::{HiveTurn, Room, answer, hive_script, send_agent, settled};
 use support::script_model::{Reply, spawn_script_with_latency};
 
@@ -168,7 +166,8 @@ fn brackets(rows: &[StoredEvent]) -> Vec<(String, String, u64, Option<u64>)> {
                 hive.hive_id.clone().unwrap_or_default(),
                 row.seq.value(),
             )),
-            CompanyEvent::TurnSettled { turn_id, .. } | CompanyEvent::TurnFailed { turn_id, .. } => {
+            CompanyEvent::TurnSettled { turn_id, .. }
+            | CompanyEvent::TurnFailed { turn_id, .. } => {
                 if let Some(at) = open.iter().position(|(id, ..)| id == turn_id) {
                     let (_, agent, hive, started) = open.remove(at);
                     out.push((agent, hive, started, Some(row.seq.value())));
@@ -220,10 +219,9 @@ async fn a_desk_line_is_answered_by_the_starter_its_routing_named() {
     );
     let ran = brackets(&rows);
     assert!(
-        ran.iter()
-            .any(|(agent, hive, _, closed)| agent == &starter
-                && hive == ENGINEERING
-                && closed.is_some()),
+        ran.iter().any(|(agent, hive, _, closed)| agent == &starter
+            && hive == ENGINEERING
+            && closed.is_some()),
         "the starter's turn is bracketed with the desk's hive: {ran:?}"
     );
     assert_eq!(
@@ -300,7 +298,8 @@ async fn a_teammate_reached_directly_answers_its_sender() {
         .await;
 
     assert!(
-        rows.iter().any(|row| matches!(&row.event, CompanyEvent::HiveMessage {
+        rows.iter()
+            .any(|row| matches!(&row.event, CompanyEvent::HiveMessage {
             sender,
             destination: HiveDestination::Agent(to),
             text,
@@ -425,7 +424,10 @@ async fn an_approval_a_turn_asked_for_releases_the_agent_with_the_decision() {
             if let Some(first) = body.as_array().and_then(|rows| rows.first()) {
                 break first.clone();
             }
-            assert!(started.elapsed() < WAIT, "the turn never parked its approval");
+            assert!(
+                started.elapsed() < WAIT,
+                "the turn never parked its approval"
+            );
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     };
@@ -445,7 +447,11 @@ async fn an_approval_a_turn_asked_for_releases_the_agent_with_the_decision() {
     let rows = room.episodes_settled(1, WAIT).await;
     assert_eq!(settled(&rows), vec![(FRONT.to_string(), None)]);
     let notes = notes.lock().unwrap().clone();
-    assert_eq!(notes.len(), 1, "the release note is delivered once: {notes:?}");
+    assert_eq!(
+        notes.len(),
+        1,
+        "the release note is delivered once: {notes:?}"
+    );
     assert!(
         notes[0].contains("Send the welcome pack"),
         "the note names the decision: {notes:?}"

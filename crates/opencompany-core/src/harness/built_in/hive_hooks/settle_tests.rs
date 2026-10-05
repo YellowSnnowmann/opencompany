@@ -21,7 +21,10 @@ fn an_episode_opens_at_most_three_distinct_cards() {
         })
     );
     budget.release("Publish the post");
-    assert!(budget.reserve("Promote the post").is_ok(), "a release frees a slot");
+    assert!(
+        budget.reserve("Promote the post").is_ok(),
+        "a release frees a slot"
+    );
 }
 
 #[test]

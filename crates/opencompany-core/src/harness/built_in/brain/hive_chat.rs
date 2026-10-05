@@ -166,7 +166,8 @@ impl HarnessBrain {
             None
         };
         if let Some(desk) = desk {
-            let router = crate::hive::route::host_router(&record.id, self.deps.secrets.as_ref()).await;
+            let router =
+                crate::hive::route::host_router(&record.id, self.deps.secrets.as_ref()).await;
             let starters = crate::hive::route::choose(
                 &record,
                 &desk,

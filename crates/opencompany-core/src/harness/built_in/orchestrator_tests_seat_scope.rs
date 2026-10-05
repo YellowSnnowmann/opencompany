@@ -30,9 +30,7 @@ async fn a_seat_answering_a_question_refuses_cards_as_a_pooled_question_turn_doe
     let queue = DelegationQueue::default();
     let claim = queue.claim_seat("ep:writer", true);
     let staged = claim
-        .scoped(async {
-            queue.push_within_cap(spawn("Draft"), MAX_DELEGATIONS_PER_TURN)
-        })
+        .scoped(async { queue.push_within_cap(spawn("Draft"), MAX_DELEGATIONS_PER_TURN) })
         .await;
     assert_eq!(staged, Staged::NoDrain(NoDrainReason::Triage));
     assert!(claim.drain(MAX_DELEGATIONS_PER_TURN).is_empty());

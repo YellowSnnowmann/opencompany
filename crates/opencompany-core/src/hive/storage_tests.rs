@@ -66,7 +66,10 @@ async fn a_coordinator_reloads_its_hives_and_transcript() {
         .expect_err("an empty hive has nobody to read the message");
     assert!(error.to_string().contains("empty hive"), "{error}");
 
-    let reloaded = PortStorage::new(company(), store).load().await.expect("load");
+    let reloaded = PortStorage::new(company(), store)
+        .load()
+        .await
+        .expect("load");
     assert_eq!(reloaded.hives.len(), 1);
     assert!(reloaded.revision >= 1);
 }
@@ -163,7 +166,10 @@ async fn a_seeded_transcript_row_decodes_into_the_state() {
         )
         .await
         .expect("seed");
-    let loaded = PortStorage::new(company(), store).load().await.expect("load");
+    let loaded = PortStorage::new(company(), store)
+        .load()
+        .await
+        .expect("load");
     assert_eq!(loaded.messages.len(), 1);
     assert_eq!(loaded.messages[0].message_id, "kept");
 }

@@ -198,7 +198,10 @@ impl Report {
             self.episodes
                 .iter()
                 .filter_map(|(id, episode)| {
-                    episode.failure.as_ref().map(|reason| format!("{id}={reason}"))
+                    episode
+                        .failure
+                        .as_ref()
+                        .map(|reason| format!("{id}={reason}"))
                 })
                 .collect(),
         );
@@ -229,7 +232,10 @@ impl Report {
                 self.company, self.since_seq, self.rows
             ),
         );
-        line("max concurrent turns", self.max_concurrent_turns.to_string());
+        line(
+            "max concurrent turns",
+            self.max_concurrent_turns.to_string(),
+        );
         line("turn overlaps", self.overlaps.to_string());
         line("same-agent overlaps", self.same_agent_overlaps.to_string());
         line("open turns", self.open_turns.to_string());
@@ -320,7 +326,8 @@ impl Fold {
                 self.report.max_concurrent_turns =
                     self.report.max_concurrent_turns.max(self.open.len());
             }
-            CompanyEvent::TurnSettled { turn_id, .. } | CompanyEvent::TurnFailed { turn_id, .. } => {
+            CompanyEvent::TurnSettled { turn_id, .. }
+            | CompanyEvent::TurnFailed { turn_id, .. } => {
                 self.open.remove(turn_id);
             }
             CompanyEvent::AgentReply {
@@ -401,7 +408,11 @@ impl Fold {
 }
 
 /// Folds every row of `company` from `since` (inclusive) to the tail.
-pub async fn measure(events: &dyn EventLog, company: &CompanyId, since: EventSeq) -> Result<Report> {
+pub async fn measure(
+    events: &dyn EventLog,
+    company: &CompanyId,
+    since: EventSeq,
+) -> Result<Report> {
     let mut fold = Fold::default();
     let mut cursor = since;
     loop {

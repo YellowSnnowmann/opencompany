@@ -1436,22 +1436,17 @@ impl HarnessBrain {
                                     // A ceiling pause can happen after tool calls, so
                                     // settle it only after draining the staged board
                                     // writes above (issue #1680).
-                                        let pause = outcome
-                                            .ceiling_paused
-                                            .as_ref()
-                                            .expect("guarded by this arm");
-                                        let result = ceiling_pause_notice(pause);
-                                        settle(&mut card, TaskRunEnd::Paused, &responder, &result);
-                                        (TaskRunEnd::Paused, result)
+                                    let pause = outcome
+                                        .ceiling_paused
+                                        .as_ref()
+                                        .expect("guarded by this arm");
+                                    let result = ceiling_pause_notice(pause);
+                                    settle(&mut card, TaskRunEnd::Paused, &responder, &result);
+                                    (TaskRunEnd::Paused, result)
                                 } else {
-                                        let result = outcome.reply;
-                                        settle(
-                                            &mut card,
-                                            TaskRunEnd::Completed,
-                                            &responder,
-                                            &result,
-                                        );
-                                        (TaskRunEnd::Completed, result)
+                                    let result = outcome.reply;
+                                    settle(&mut card, TaskRunEnd::Completed, &responder, &result);
+                                    (TaskRunEnd::Completed, result)
                                 };
                                 break (end, result);
                             }
@@ -3467,14 +3462,11 @@ impl HarnessBrain {
                     let addressed = chat
                         .as_deref()
                         .unwrap_or(crate::ports::general_channel::GENERAL_CHANNEL_ID);
-                    let responder = crate::hive::route::mentioned_starters(
-                        &record_now,
-                        addressed,
-                        mentions,
-                    )
-                    .into_iter()
-                    .next()
-                    .unwrap_or_else(|| self.responder_for(chat.as_deref()));
+                    let responder =
+                        crate::hive::route::mentioned_starters(&record_now, addressed, mentions)
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| self.responder_for(chat.as_deref()));
                     // Everyone else the message named, for the answering turn's
                     // context. A list, not a fan-out: one operator message still
                     // spawns exactly one turn, and this teammate spreads the

@@ -61,4 +61,3 @@ members = ["counsel"]
 }
 
 // --- Teammate hand-off (issue #884) ------------------------------------
-

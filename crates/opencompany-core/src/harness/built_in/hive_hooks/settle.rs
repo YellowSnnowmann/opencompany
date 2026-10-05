@@ -254,9 +254,12 @@ impl SettleTurn<'_> {
         let publish = deps.pending_publishes.claim(destination);
         let outputs = deps.pending_publishes.output_collector().claim();
         let delegations = deps.delegations.claim_hive_turn(key.clone());
-        let hooked = delegations.scoped(approvals.scoped(deps.approval_requests.turn_scoped(
-            publish.scoped(outputs.scoped(turn)),
-        )));
+        let hooked = delegations.scoped(
+            approvals.scoped(
+                deps.approval_requests
+                    .turn_scoped(publish.scoped(outputs.scoped(turn))),
+            ),
+        );
         let envelope = TurnEnvelope::new(agent, None);
         let hive = HiveScope {
             hive_id: self.hive_id(),
@@ -315,7 +318,9 @@ impl SettleTurn<'_> {
             let reply = std::mem::take(&mut outcome.reply);
             outcome.reply = match agent.classify_turn(agent.unmask(Ok(reply)), elapsed) {
                 AttemptOutcome::Reply(reply) => reply,
-                AttemptOutcome::Empty => crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]),
+                AttemptOutcome::Empty => {
+                    crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[])
+                }
                 AttemptOutcome::BudgetPaused { summary } => {
                     budget_summary = Some(crate::harness::mcp_probe::redact(&summary, &[]));
                     BUDGET_PAUSED_PLACEHOLDER_REPLY.to_string()
@@ -324,9 +329,10 @@ impl SettleTurn<'_> {
                     ceiling = Some((crate::harness::mcp_probe::redact(&summary, &[]), elapsed));
                     CEILING_PAUSED_PLACEHOLDER_REPLY.to_string()
                 }
-                AttemptOutcome::Hard(error) => {
-                    crate::harness::mcp_probe::scrub(&format!("I could not finish this: {error}"), &[])
-                }
+                AttemptOutcome::Hard(error) => crate::harness::mcp_probe::scrub(
+                    &format!("I could not finish this: {error}"),
+                    &[],
+                ),
             };
             outcome
         });
@@ -349,7 +355,11 @@ impl SettleTurn<'_> {
                 deps,
             };
             match filing
-                .record_conversation_publishes(&manifest, ChatTarget::channel(Some(self.chat)), published)
+                .record_conversation_publishes(
+                    &manifest,
+                    ChatTarget::channel(Some(self.chat)),
+                    published,
+                )
                 .await
             {
                 Ok(card_id) => card = Some(card_id),
@@ -372,7 +382,8 @@ impl SettleTurn<'_> {
         if let Some(pool) = &pool
             && let Ok(Some(record)) = deps.store.load(self.company()).await
         {
-            let run_turn = crate::harness::run_turn::HarnessRunTurn::new(Arc::clone(pool), Arc::clone(deps));
+            let run_turn =
+                crate::harness::run_turn::HarnessRunTurn::new(Arc::clone(pool), Arc::clone(deps));
             let runner = DelegationRunner::new(
                 &run_turn,
                 &record,

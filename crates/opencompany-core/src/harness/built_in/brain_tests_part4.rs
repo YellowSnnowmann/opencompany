@@ -530,4 +530,3 @@ fn everyone_names_the_desk_without_choosing_a_responder() {
         "the only member is the responder, and it is not told it was mentioned",
     );
 }
-

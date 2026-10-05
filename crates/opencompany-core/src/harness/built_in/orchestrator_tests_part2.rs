@@ -137,4 +137,3 @@ fn the_lifecycle_tools_are_internal_delegation_tools() {
     assert!(is_delegation_tool(ASSIGN_TASK_TOOL));
     assert!(is_delegation_tool(REVIEW_TASK_TOOL));
 }
-

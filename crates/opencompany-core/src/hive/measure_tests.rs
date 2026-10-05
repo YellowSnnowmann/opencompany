@@ -185,11 +185,22 @@ fn the_verdict_names_what_is_missing() {
     let report = measure_rows(
         &company(),
         EventSeq::new(0),
-        &rows(vec![started("t1", "engineer", "ep1"), settled("t1", "engineer")]),
+        &rows(vec![
+            started("t1", "engineer", "ep1"),
+            settled("t1", "engineer"),
+        ]),
     );
     let failures = report.failures(&Thresholds::default());
-    assert!(failures.iter().any(|f| f.starts_with("max concurrent turns 1")));
-    assert!(failures.iter().any(|f| f.starts_with("agent→agent contacts 0")));
+    assert!(
+        failures
+            .iter()
+            .any(|f| f.starts_with("max concurrent turns 1"))
+    );
+    assert!(
+        failures
+            .iter()
+            .any(|f| f.starts_with("agent→agent contacts 0"))
+    );
     assert!(failures.iter().any(|f| f.contains("never settled")));
     assert!(report.to_table(&Thresholds::default()).contains("FAIL ("));
 }

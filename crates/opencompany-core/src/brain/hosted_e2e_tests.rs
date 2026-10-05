@@ -319,7 +319,6 @@ async fn e2e_spawn_task_tool_call_opens_a_board_card() {
     assert_eq!(cards[0].column, "todo");
 }
 
-
 /// The same company with no usage frame on the wire: an honest zero, and no
 /// fabricated sample.
 #[tokio::test]

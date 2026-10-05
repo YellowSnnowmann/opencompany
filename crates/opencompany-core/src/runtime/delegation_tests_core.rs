@@ -99,7 +99,6 @@ impl Turn {
             ..Self::default()
         }
     }
-
 }
 
 /// A [`RunTurn`] that plays a fixed script of turns and records who was

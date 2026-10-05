@@ -25,14 +25,13 @@ function dto(over: Partial<DeskRoutingDto> = {}): DeskRoutingDto {
   return {
     deskId: "engineering",
     source: "manifest",
-    declared: { round_width: 2, referral: { enabled: true, max_hops: 1, returns: true } },
+    declared: { round_width: 2 },
     effective: {
       roundWidth: 2,
       choiceOptionLimit: 8,
       maxRounds: 6,
       turnTimeoutSecs: 600,
       router: "fallback",
-      referral: { enabled: true, maxHops: 1, returns: true },
     },
     candidates: [
       { agentId: "engineer", label: "Engineer", role: "Builds", sharedWith: [] },
@@ -96,7 +95,7 @@ describe("DeskRoutingPanel", () => {
     await settle();
     expect(putDeskRouting).toHaveBeenCalledWith(
       "engineering",
-      { round_width: 3, referral: { enabled: true, max_hops: 1, returns: true } },
+      { round_width: 3 },
       "acme",
     );
     expect(panel.dataset.source).toBe("overlay");

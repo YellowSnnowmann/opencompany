@@ -568,4 +568,3 @@ async fn a_paypal_grant_with_no_credential_wires_nothing_rather_than_failing() {
             .is_none()
     );
 }
-

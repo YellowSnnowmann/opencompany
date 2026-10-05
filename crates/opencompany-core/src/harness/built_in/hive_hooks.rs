@@ -160,7 +160,6 @@ impl HiveHooks {
             ),
         }
     }
-
 }
 
 impl TurnHooks for HiveHooks {

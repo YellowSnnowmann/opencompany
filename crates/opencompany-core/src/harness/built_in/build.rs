@@ -1707,16 +1707,14 @@ pub fn agent_spec_for(
             // non-visible executors for those names so a resumed turn can
             // validate its snapshot; never replace the company-scoped tools
             // when the host has wired them for this agent.
-            let legacy_composio =
-                crate::harness::built_in::tool_posture::retired_composio_tools();
+            let legacy_composio = crate::harness::built_in::tool_posture::retired_composio_tools();
             for retired in legacy_composio {
                 if !tools.iter().any(|tool| tool.name() == retired.name()) {
                     tools.push(retired);
                 }
             }
             let is_legacy_composio = |name: &str| {
-                crate::harness::built_in::tool_posture::RETIRED_COMPOSIO_TOOL_NAMES
-                    .contains(&name)
+                crate::harness::built_in::tool_posture::RETIRED_COMPOSIO_TOOL_NAMES.contains(&name)
             };
             let visible: std::collections::HashSet<String> = tools
                 .iter()

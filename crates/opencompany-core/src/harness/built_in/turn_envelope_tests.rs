@@ -18,7 +18,11 @@ fn cost(total_usd: f64) -> AgentProgress {
 #[test]
 fn a_tap_that_saw_nothing_is_metered_from_the_stream() {
     let mut usages = vec![TurnUsage::default()];
-    price_usages("ceo", &mut usages, &[AgentProgress::TurnStarted, cost(0.25)]);
+    price_usages(
+        "ceo",
+        &mut usages,
+        &[AgentProgress::TurnStarted, cost(0.25)],
+    );
     assert_eq!(usages[0].input_tokens, 10);
     assert!((usages[0].cost_usd - 0.25).abs() < f64::EPSILON);
 }

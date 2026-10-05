@@ -205,7 +205,10 @@ async fn an_approved_call_releases_its_agent_with_the_decision_not_a_chat_cycle(
     assert_eq!(released[0].0, "ceo");
     let note = released[0].1.as_deref().expect("a release note");
     assert!(note.contains("approved your `send_email` call"), "{note}");
-    assert!(note.contains("a@b.c"), "the note carries the arguments: {note}");
+    assert!(
+        note.contains("a@b.c"),
+        "the note carries the arguments: {note}"
+    );
     assert!(
         rt.grants.peek(&id).is_some(),
         "the agent redeems the single-use grant itself"
@@ -241,7 +244,11 @@ async fn an_agent_waits_for_every_decision_before_it_is_released() {
     let released = brain.released.lock().unwrap().clone();
     assert_eq!(released.len(), 1);
     let note = released[0].1.as_deref().unwrap();
-    assert_eq!(note.lines().count(), 2, "both decisions in one note: {note}");
+    assert_eq!(
+        note.lines().count(),
+        2,
+        "both decisions in one note: {note}"
+    );
 }
 
 #[tokio::test]
@@ -295,7 +302,10 @@ async fn an_expired_hive_approval_releases_the_agent_as_denied() {
         if !brain.released.lock().unwrap().is_empty() {
             break;
         }
-        assert!(tokio::time::Instant::now() < deadline, "an expiry releases the agent");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "an expiry releases the agent"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     let note = brain.released.lock().unwrap()[0].1.clone().unwrap();

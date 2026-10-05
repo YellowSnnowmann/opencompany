@@ -262,4 +262,3 @@ async fn attachments_reach_the_harness_agent() {
         bubble.text
     );
 }
-

@@ -3584,10 +3584,7 @@ impl CompanyRuntime {
             },
             None => vec![event],
         };
-        if let Some(seat) = turn
-            .as_deref()
-            .and_then(crate::runtime::hive_resume::parse)
-        {
+        if let Some(seat) = turn.as_deref().and_then(crate::runtime::hive_resume::parse) {
             return self.resume_hive_seat(&seat, batch).await;
         }
         // Issue #978: a workflow run is not a brain turn, so it is not continued

@@ -387,9 +387,7 @@ async fn a_routing_block_installs_and_resets() {
                 .uri("/api/v1/company/desks/solvers/routing")
                 .header("cookie", &cookie)
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"round_width":2,"max_rounds":3}"#,
-                ))
+                .body(Body::from(r#"{"round_width":2,"max_rounds":3}"#))
                 .unwrap(),
         )
         .await

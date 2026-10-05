@@ -182,9 +182,9 @@ mod authorizer {
                     .map_err(Error::SendDenied),
                 // Hive posts, asks and broadcasts are bounded by membership,
                 // which the Coordinator enforces itself.
-                SendRequest::Hive { .. } | SendRequest::Ask { .. } | SendRequest::Broadcast { .. } => {
-                    Ok(())
-                }
+                SendRequest::Hive { .. }
+                | SendRequest::Ask { .. }
+                | SendRequest::Broadcast { .. } => Ok(()),
             }
         }
     }

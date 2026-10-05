@@ -343,7 +343,9 @@ impl Projector {
         }
         let interruptions = self.coordinator.interruptions().map_err(hive_error)?;
         for interrupted in &interruptions {
-            let agent_id = self.roster.manifest_id(&self.company, &interrupted.agent_id);
+            let agent_id = self
+                .roster
+                .manifest_id(&self.company, &interrupted.agent_id);
             let key = interruption_key(&agent_id, &interrupted.message_ids, &interrupted.reason);
             if cursor.interruptions.contains(&key) {
                 continue;
@@ -399,19 +401,21 @@ impl Projector {
                 episode_id: row.episode_id.clone(),
                 only_for: Vec::new(),
             }),
-            Destination::Hive(hive_id) if !row.only_for.is_empty() => Some(CompanyEvent::HiveMessage {
-                sequence: row.sequence,
-                sender,
-                destination: HiveDestination::Hive(super::chat_for_hive(hive_id)),
-                text: row.body.clone(),
-                thread: row.thread,
-                episode_id: row.episode_id.clone(),
-                only_for: row
-                    .only_for
-                    .iter()
-                    .map(|reader| self.roster.manifest_id(&self.company, reader))
-                    .collect(),
-            }),
+            Destination::Hive(hive_id) if !row.only_for.is_empty() => {
+                Some(CompanyEvent::HiveMessage {
+                    sequence: row.sequence,
+                    sender,
+                    destination: HiveDestination::Hive(super::chat_for_hive(hive_id)),
+                    text: row.body.clone(),
+                    thread: row.thread,
+                    episode_id: row.episode_id.clone(),
+                    only_for: row
+                        .only_for
+                        .iter()
+                        .map(|reader| self.roster.manifest_id(&self.company, reader))
+                        .collect(),
+                })
+            }
             Destination::Hive(hive_id) => {
                 let chat = super::chat_for_hive(hive_id);
                 // A row answers its thread; an episode's unthreaded row

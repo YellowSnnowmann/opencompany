@@ -417,7 +417,8 @@ async fn a_task_store_write_failure_on_assign_task_surfaces_as_an_error() {
                 assignee: "engineer".to_string(),
                 note: None,
             },
-            None)
+            None,
+        )
         .await;
     assert!(
         outcome.is_err(),
@@ -465,7 +466,8 @@ async fn a_task_store_write_failure_on_review_task_surfaces_as_an_error() {
                 decision: lifecycle::ReviewDecision::Approve,
                 note: None,
             },
-            None)
+            None,
+        )
         .await;
     assert!(
         outcome.is_err(),

@@ -3602,7 +3602,6 @@ impl<'a> CycleHostImpl<'a> {
             }),
         })
     }
-
 }
 
 /// The first non-empty line of `text`, trimmed and capped to `max` chars — the

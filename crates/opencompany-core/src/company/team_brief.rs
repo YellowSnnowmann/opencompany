@@ -160,11 +160,9 @@ pub fn team_section(record: &CompanyRecord, agent_id: &str) -> String {
     //
     // A seat acts where it sits. The full org chart was the whole of this
     // section on a large roster, listing membership and a lead for rooms this
-    // agent will never take a turn in — and in a hive turn it arrives beside
-    // `EpisodePrompt::peers`, which lists the desks it may actually ask,
-    // filtered by the referral policy. The same desk was therefore described
-    // twice in one turn, once as somewhere to hand work whose lead answers and
-    // once as somewhere to put a question that the room answers, which are
+    // agent will never take a turn in — and the same desk was described twice
+    // in one turn, once as somewhere to hand work whose lead answers and once
+    // as somewhere to put a question that the room answers, which are
     // different mechanisms with different costs (#2368).
     //
     // What is deliberately NOT filtered is the roster above: knowing who does

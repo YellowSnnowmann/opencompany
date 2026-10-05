@@ -483,4 +483,3 @@ async fn two_runs_and_the_chat_cycle_neither_drain_nor_clear_each_other() {
         .await;
     assert_eq!(titles(drained_b), ["b"]);
 }
-

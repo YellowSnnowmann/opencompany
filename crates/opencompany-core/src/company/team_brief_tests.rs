@@ -182,7 +182,9 @@ role = "B"
         "a",
     );
     assert!(
-        section.contains("- B (id `b` for tool calls; `acme--b` as the `agent_id` of a `hivemind_*` tool)\n"),
+        section.contains(
+            "- B (id `b` for tool calls; `acme--b` as the `agent_id` of a `hivemind_*` tool)\n"
+        ),
         "{section}"
     );
     assert!(!section.contains("Desks ("), "{section}");
@@ -242,9 +244,7 @@ fn a_manifest_teammates_operator_rename_is_the_name_other_agents_are_given() {
 fn sections(record: &CompanyRecord) -> Vec<(String, String)> {
     ["pm", "backend", "designer", "writer"]
         .into_iter()
-        .flat_map(|id| {
-            [(format!("{id} (roster)"), team_section(record, id))]
-        })
+        .flat_map(|id| [(format!("{id} (roster)"), team_section(record, id))])
         .collect()
 }
 

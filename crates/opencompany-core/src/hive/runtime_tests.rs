@@ -57,7 +57,10 @@ async fn one_hive_per_company_and_store() {
     let again = for_company(config(&record, Arc::clone(&store), Arc::clone(&events)))
         .await
         .expect("hive");
-    assert!(Arc::ptr_eq(&first, &again), "the same store shares one hive");
+    assert!(
+        Arc::ptr_eq(&first, &again),
+        "the same store shares one hive"
+    );
     let other = for_company(config(
         &record,
         Arc::new(MemoryHiveStore::new()),
@@ -65,7 +68,10 @@ async fn one_hive_per_company_and_store() {
     ))
     .await
     .expect("hive");
-    assert!(!Arc::ptr_eq(&first, &other), "another store is another hive");
+    assert!(
+        !Arc::ptr_eq(&first, &other),
+        "another store is another hive"
+    );
 }
 
 #[tokio::test]

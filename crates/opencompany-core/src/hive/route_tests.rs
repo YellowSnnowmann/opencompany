@@ -83,7 +83,10 @@ async fn general_is_answered_by_the_fallback_when_it_sits_there() {
 struct Picks(&'static str);
 
 impl Router for Picks {
-    fn evaluate<'a>(&'a self, request: &'a RoutingRequest) -> tinyhivemind_core::embed::RouterFuture<'a> {
+    fn evaluate<'a>(
+        &'a self,
+        request: &'a RoutingRequest,
+    ) -> tinyhivemind_core::embed::RouterFuture<'a> {
         let pick = self.0;
         Box::pin(async move {
             let scale = tinyhivemind_core::responder::PROBABILITY_SCALE;
@@ -127,7 +130,15 @@ impl Router for Picks {
 #[tokio::test]
 async fn jev_starts_the_member_it_routed_to() {
     let router = Picks("editor");
-    let starters = choose(&record(), "content", "copy-edit this", &[], Some(&router), "ceo").await;
+    let starters = choose(
+        &record(),
+        "content",
+        "copy-edit this",
+        &[],
+        Some(&router),
+        "ceo",
+    )
+    .await;
     assert_eq!(starters.route, StarterRoute::Jev);
     assert_eq!(starters.members, vec!["editor".to_string()]);
 }

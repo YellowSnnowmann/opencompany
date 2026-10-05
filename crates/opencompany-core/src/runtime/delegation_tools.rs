@@ -131,18 +131,16 @@ pub fn spawn_task_schema() -> Value {
 /// tool-call frame in [`CycleHostImpl`](crate::runtime::cycle) by opening a
 /// board card.
 pub fn delegation_manifest_entries() -> Vec<ToolManifestEntry> {
-    vec![
-        ToolManifestEntry {
-            name: SPAWN_TASK_TOOL.to_string(),
-            description: Some(
-                "Open a tracked task card on the company's board for work that should be \
+    vec![ToolManifestEntry {
+        name: SPAWN_TASK_TOOL.to_string(),
+        description: Some(
+            "Open a tracked task card on the company's board for work that should be \
 followed up. Provide a `title`, an optional `note` brief, and an optional `assignee` (a desk \
 or teammate id)."
-                    .to_string(),
-            ),
-            input_schema: Some(spawn_task_schema()),
-        },
-    ]
+                .to_string(),
+        ),
+        input_schema: Some(spawn_task_schema()),
+    }]
 }
 
 /// The lead member of a desk: the first effective member (manifest ∪ overlay)
@@ -270,7 +268,6 @@ pub fn desk_ids(record: &CompanyRecord) -> Vec<String> {
     }
     ids
 }
-
 
 /// Every roster teammate id the company has: manifest agents in declaration
 /// order, then operator-added overlay teammates, deduplicated.

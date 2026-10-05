@@ -122,10 +122,8 @@ async fn the_adapter_runs_a_tool_under_the_in_flight_context() {
     assert_eq!(descriptor["name"], "context_echo");
     assert_eq!(descriptor["inputSchema"]["type"], "object");
 
-    let context = InFlightContext::new(
-        Some(desk_turn("ceo")),
-        Some(PathBuf::from("/tmp/acme/ceo")),
-    );
+    let context =
+        InFlightContext::new(Some(desk_turn("ceo")), Some(PathBuf::from("/tmp/acme/ceo")));
     let result = adapter.execute(json!({}), &context).await;
     assert!(!result.is_error);
     assert_eq!(

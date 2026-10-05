@@ -874,9 +874,7 @@ impl<'a> DelegationRunner<'a> {
             };
             // The SAME arm the chat path runs — which is what makes the
             // no-column-move invariant inherited rather than re-promised here.
-            let outcome = self
-                .run_delegation(delegation, None)
-                .await;
+            let outcome = self.run_delegation(delegation, None).await;
             let row = match (spawn, outcome) {
                 // A card id comes back only after the store took the write
                 // (issue #246), so `Some` here means the card is genuinely on
@@ -1632,9 +1630,7 @@ impl<'a> DelegationRunner<'a> {
             "[task] draining board writes queued by a dispatched turn"
         );
         for delegation in queued {
-            let outcome = self
-                .run_delegation(delegation, None)
-                .await?;
+            let outcome = self.run_delegation(delegation, None).await?;
             if let Some(refused) = outcome.refused_card {
                 card.note = Some(append_note(
                     card.note.as_deref(),

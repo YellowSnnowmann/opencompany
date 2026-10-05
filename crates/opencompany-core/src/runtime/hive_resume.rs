@@ -30,7 +30,10 @@ pub struct HiveSeat {
 /// The approval turn key a coordinator turn's parks are recorded under.
 #[must_use]
 pub fn turn_key(agent_id: &str, episode_id: Option<&str>) -> String {
-    format!("{HIVE_TURN_PREFIX}{agent_id}:{}", episode_id.unwrap_or_default())
+    format!(
+        "{HIVE_TURN_PREFIX}{agent_id}:{}",
+        episode_id.unwrap_or_default()
+    )
 }
 
 /// The agent and episode a turn key names, or `None` for any other key.
@@ -154,7 +157,9 @@ pub struct HiveAnswers {
 
 impl std::fmt::Debug for HiveAnswers {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("HiveAnswers").finish_non_exhaustive()
+        formatter
+            .debug_struct("HiveAnswers")
+            .finish_non_exhaustive()
     }
 }
 

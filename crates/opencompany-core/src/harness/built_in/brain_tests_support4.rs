@@ -308,8 +308,7 @@ pub(super) struct TurnFaults {
     pub(super) cancel_on: Vec<usize>,
 }
 
-impl DelegatingProvider {
-}
+impl DelegatingProvider {}
 
 #[async_trait]
 impl ChatModel<()> for DelegatingProvider {

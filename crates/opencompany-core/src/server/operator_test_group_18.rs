@@ -48,4 +48,3 @@ fn projects_agent_reply_omits_empty_steps() {
     // pre-#185 wire shape is byte-for-byte what it was.
     assert!(v.get("taskId").is_none());
 }
-

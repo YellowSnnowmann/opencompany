@@ -245,7 +245,8 @@ fn push_within_cap_refuses_once_the_turn_is_full() {
                     note: None,
                     assignee: None,
                 },
-                MAX_DELEGATIONS_PER_TURN),
+                MAX_DELEGATIONS_PER_TURN
+            ),
             Staged::Queued
         );
     }
@@ -256,7 +257,8 @@ fn push_within_cap_refuses_once_the_turn_is_full() {
                 note: None,
                 assignee: None,
             },
-            MAX_DELEGATIONS_PER_TURN),
+            MAX_DELEGATIONS_PER_TURN
+        ),
         Staged::OverCap
     );
     assert_eq!(queue.queued(), MAX_DELEGATIONS_PER_TURN);
@@ -277,7 +279,8 @@ fn an_unclaimed_queue_refuses_before_the_cap_is_even_consulted() {
                 note: None,
                 assignee: None,
             },
-            MAX_DELEGATIONS_PER_TURN),
+            MAX_DELEGATIONS_PER_TURN
+        ),
         Staged::NoDrain(NoDrainReason::Unwired),
         "an EMPTY unclaimed queue is still a queue nothing drains"
     );
@@ -302,7 +305,8 @@ fn a_claim_that_exits_early_un_commits_and_clears() {
                     decision: ReviewDecision::Approve,
                     note: None,
                 },
-                MAX_DELEGATIONS_PER_TURN),
+                MAX_DELEGATIONS_PER_TURN
+            ),
             Staged::Queued
         );
         assert_eq!(queue.queued(), 1, "staged while the claim is live");

@@ -90,7 +90,9 @@ members = ["engineer"]
 }
 
 /// A host whose model answers every coordinator turn with `act`.
-async fn host(act: impl Fn(&HiveTurn) -> Reply + Send + Sync + 'static) -> (Room, tempfile::TempDir) {
+async fn host(
+    act: impl Fn(&HiveTurn) -> Reply + Send + Sync + 'static,
+) -> (Room, tempfile::TempDir) {
     let (base_url, _script) = spawn_script(hive_script(act)).await;
     let home = tempfile::tempdir().expect("tempdir");
     let company = format!("acme-{}", uuid::Uuid::new_v4().simple());
