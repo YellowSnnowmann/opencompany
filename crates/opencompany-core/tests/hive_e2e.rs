@@ -22,6 +22,7 @@
 //! | Test | Claim |
 //! | --- | --- |
 //! | `a_desk_line_is_answered_by_the_starter_its_routing_named` | `HiveAccepted` names a desk member as starter; its turn is bracketed with the hive; its completion settles the episode |
+//! | `a_general_line_is_answered_by_the_orchestrator` | `#general` runs in core's default `General` desk and projects back onto the `general` chat |
 //! | `a_desk_of_one_answers_with_one_turn` | a one-member desk starts its only member and settles cleanly |
 //! | `a_teammate_reached_directly_answers_its_sender` | `hivemind_send_agent` lands as a `HiveMessage` to the teammate, whose turn's reply goes back to the sender |
 //! | `a_shared_agent_on_two_desks_never_runs_twice_at_once` | two desks sharing the CEO both settle; the CEO's turn brackets never overlap |
@@ -454,5 +455,26 @@ async fn an_approval_a_turn_asked_for_releases_the_agent_with_the_decision() {
             .iter()
             .any(|text| text.contains("Sent the welcome pack.")),
         "the released turn finished the work"
+    );
+}
+
+/// `#general` runs in core's default desk (`General`), which is the only
+/// spelling of "general" core does not reserve; the line is still journaled
+/// and answered on the console's `general` chat.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_general_line_is_answered_by_the_orchestrator() {
+    let home = tempfile::tempdir().unwrap();
+    let room = boot(home.path(), |turn| answer(turn, "Here is where we stand.")).await;
+
+    room.say("general", "where do we stand this week?").await;
+    let rows = room.episodes_settled(1, WAIT).await;
+
+    assert_eq!(starters_on(&rows, "general"), vec![vec![CEO.to_string()]]);
+    assert_eq!(settled(&rows), vec![("general".to_string(), None)]);
+    assert!(
+        replies(&rows, "general", CEO)
+            .iter()
+            .any(|text| text.contains("Here is where we stand.")),
+        "the orchestrator's answer lands on the general chat"
     );
 }
