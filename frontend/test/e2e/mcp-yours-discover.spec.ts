@@ -74,9 +74,31 @@ test("a Yours search with no match carries the term into Discover", async ({
   await expect(page.getByTestId("mcp-mode-discover")).toHaveAttribute("aria-pressed", "true");
 });
 
-test("a build without the feature reads as a missing feature, not an error", async ({
-  page,
-}) => {
+test("directory browsing reflects whether the build includes its feature", async ({ page }) => {
+  if (LIVE_BRAIN) {
+    // Keep this E2E independent of the public MCP directory's availability.
+    // The live-brain lane builds the host with `mcp`; the default lane below
+    // still exercises the host's real `not_wired` response.
+    await page.route("**/mcp/registry/search**", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          servers: [
+            {
+              qualifiedName: "@e2e/directory-fixture",
+              displayName: "E2E Directory Fixture",
+              source: "modelcontextprotocol",
+              official: false,
+              useCount: 1,
+            },
+          ],
+          page: 1,
+          totalPages: 1,
+        }),
+      }),
+    );
+  }
+
   await openMcp(page, "?view=discover");
   await expect(page.getByTestId("mcp-discover-search")).toBeVisible({ timeout: 30_000 });
 
