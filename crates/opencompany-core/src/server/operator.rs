@@ -3919,9 +3919,6 @@ fn spawn_chat_turn(turn: ChatTurn) -> JoinHandle<Result<(CycleReport, Option<Str
         };
         let reply_parent = reply_thread(parent, accepted.message_seq);
         journal_chat_replies(&runtime, &company, &desk, reply_parent, &mut report).await;
-        // Cross-desk referral of a committed reply is re-homed in the hive
-        // driver (plan hive-desks, Phase 6: `hive::referral`); the P15 spike
-        // that ran here read `runtime::hivemind`, which is gone.
         let answered_by: Option<String> = report
             .responses
             .iter()

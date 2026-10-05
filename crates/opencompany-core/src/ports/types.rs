@@ -4159,14 +4159,11 @@ pub struct OverlayDesk {
     /// no such field.
     #[serde(default, skip_serializing_if = "ResponderMode::is_lead")]
     pub responder: ResponderMode,
-    /// How this desk paces its episodes and whether it may refer across desks
-    /// — the overlay analogue of `[[group_chat]].routing`, persisted under the
-    /// key `routing`.
+    /// How this desk paces its episodes — the overlay analogue of
+    /// `[[group_chat]].routing`, persisted under the key `routing`.
     ///
-    /// Without it a console-created desk could not answer either question:
-    /// there is no `[[group_chat]]` entry to hang the block on, so a company
-    /// whose desks are all operator-created would have cross-desk referral
-    /// permanently unavailable.
+    /// Without it a console-created desk could not be tuned: there is no
+    /// `[[group_chat]]` entry to hang the block on.
     ///
     /// Defaulted and skipped when empty, so every record written before this
     /// field existed deserializes and re-serializes unchanged. The field name
