@@ -4,6 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "openhuman")]
 use crate::ports::blockers::{BlockerKind, BlockerPayload, BlockerSource, BlockerVerdict};
 use crate::ports::types::{
     Actor, ActorKind, ApprovalId, ApprovalOrigin, CompanyEvent, Effect, EffectGroup, Verdict,
@@ -217,6 +218,7 @@ async fn an_approved_call_releases_its_agent_with_the_decision_not_a_chat_cycle(
     assert_eq!(*brain.cycles.lock().unwrap(), 0, "no chat cycle ran");
 }
 
+#[cfg(feature = "openhuman")]
 #[tokio::test]
 async fn each_blocker_verdict_releases_a_question_with_its_distinct_decision() {
     let cases = [
