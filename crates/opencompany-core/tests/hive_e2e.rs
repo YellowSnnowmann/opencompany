@@ -431,7 +431,7 @@ async fn an_approval_a_turn_asked_for_releases_the_agent_with_the_decision() {
     let (status, body) = room
         .post(
             &format!("/approvals/{id}"),
-            serde_json::json!({ "verdict": "approve", "async": true }),
+            serde_json::json!({ "verdict": "approve", "detach": true }),
         )
         .await;
     assert!(status < 300, "the approve is accepted: {status} {body}");
