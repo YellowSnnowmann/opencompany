@@ -7,23 +7,20 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WindowControlsInset, WindowDragBar } from "@/components/window-chrome";
 
 /**
- * The desktop window's own chrome, and — now entirely — its absence.
+ * The desktop window's own chrome.
  *
- * `tauri.conf.json` used to run the main window with `titleBarStyle: "Overlay"`:
- * macOS drew no title bar and floated the traffic lights over the web content,
- * so the console put back a band that opts into dragging and reserved 72px so
- * the lights were not sitting on the company switcher.
+ * `tauri.conf.json` runs the main window with `titleBarStyle: "Overlay"` and
+ * `hiddenTitle: true` again: macOS draws no title bar of its own and floats
+ * the traffic lights over the web content, so the console draws a band that
+ * opts into dragging and reserves 72px so the lights are not sitting on a
+ * control underneath them.
  *
- * The window is `decorations: true` with no `titleBarStyle` now — an ordinary
- * macOS title bar, with the lights in it — so **neither piece renders anywhere**,
- * and that is what these tests assert.
- *
- * They are kept rather than deleted because the components are kept: flipping
- * `SHELL_DRAWS_ITS_OWN_TITLE_BAR` back in `window-chrome.tsx` restores the whole
- * arrangement, and the last case below is what says that switch still works. A
- * band that renders when the shell is NOT drawing its own chrome is a 28px strip
- * across the top of every page that silently swallows clicks, with nothing on
- * screen to explain it.
+ * On macOS desktop, both pieces render: {@link WindowDragBar}'s drag region
+ * and {@link WindowControlsInset}'s reserved, also-draggable strip. Elsewhere
+ * — a browser (no `__TAURI__`), or a desktop platform that is not macOS (an
+ * `Overlay` title bar is a macOS-only style) — neither renders anything,
+ * because there is no window to drag, or the native title bar already has
+ * the lights and a band here would only eat the top of every page.
  */
 
 let host: HTMLDivElement;
@@ -72,13 +69,13 @@ describe("the window drag band", () => {
     expect(host.querySelector("[data-tauri-drag-region]")).toBeNull();
   });
 
-  it("renders nothing on macOS either, now that the title bar is native", () => {
-    // The case that used to assert the band. macOS draws the title bar again,
-    // so there is a real one to grab and a band over the content would only
-    // swallow the clicks of whatever it covers.
+  it("renders the drag band on macOS desktop, where the title bar is an overlay", () => {
+    // macOS draws no title bar of its own again (`titleBarStyle: "Overlay"`),
+    // so this band is the only thing that opts the top of the window back
+    // into being draggable.
     asDesktop("MacIntel");
     render(createElement(WindowDragBar));
-    expect(host.querySelector("[data-tauri-drag-region]")).toBeNull();
+    expect(host.querySelector("[data-tauri-drag-region]")).not.toBeNull();
   });
 });
 
@@ -92,12 +89,11 @@ describe("the traffic-light inset", () => {
     expect(host.querySelector("[data-tauri-drag-region]")).toBeNull();
   });
 
-  it("reserves nothing on macOS either, now that the lights are in the title bar", () => {
-    // The 72px this used to hold is the whole point of the change: reserved
-    // while the shell drew its own chrome, it is a hole in the title row the
-    // moment macOS draws the lights somewhere else.
+  it("reserves 72px on macOS desktop, where the traffic lights float over the content", () => {
+    // The lights land in this strip, not in a title bar of their own, so it
+    // has to exist and has to be draggable rather than a dead hole in the row.
     asDesktop("MacIntel");
     render(createElement(WindowControlsInset));
-    expect(host.querySelector("[data-tauri-drag-region]")).toBeNull();
+    expect(host.querySelector("[data-tauri-drag-region]")).not.toBeNull();
   });
 });
