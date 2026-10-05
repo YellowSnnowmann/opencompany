@@ -38,10 +38,9 @@
 // that names the live session — and is never re-derived in TypeScript, because
 // a second spelling of a session's name is one that can drift from the runtime's.
 //
-// Nothing collapses. The referral collapse the chat views reuse from
-// `StepTimeline` is a summary, and a summary is the thing this exists to get
-// out from behind, so it renders as its own lines, in full. An utterance chip
-// becomes the episode and round it was committed in, spelled out.
+// Nothing collapses: the step summary the chat views reuse from
+// `StepTimeline` is the thing this exists to get out from behind, so every
+// step renders as its own lines, in full. A row's hive episode is spelled out.
 
 import type { AgentSessionMessageDto, TurnStep } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -209,9 +208,8 @@ function RawTurn({
 /**
  * The host's own cue shape, reproduced.
  *
- * Kept as one function so the two places a turn renders an inbound line — the
- * turn body and the referral lines under it — cannot disagree about what
- * a cue looks like. `render_cues` trims the text; so does this.
+ * Kept as one function so every place a turn renders an inbound line cannot
+ * disagree about what a cue looks like. `render_cues` trims the text; so does this.
  */
 function cueLine(channel: string, author: string, text: string): string {
   return `[${channel || "?"} · ${author}] ${text.trim()}`;

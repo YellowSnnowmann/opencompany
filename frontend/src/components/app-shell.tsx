@@ -1542,9 +1542,9 @@ export function AppShell({
             return;
           }
           setTranscripts((t) => {
-            // Reconciled, not merely appended: a referral folds its exchange
-            // onto a row this transcript ALREADY holds, so an id filter drops
-            // exactly the update it exists to deliver. See
+            // Reconciled, not merely appended: the host can re-project a row
+            // this transcript ALREADY holds, so an id filter drops exactly the
+            // update it exists to deliver. See
             // `reconcileTranscript` for the whole reasoning.
             const existing = t[channelId] ?? [];
             const merged = reconcileTranscript(existing, hydrated);
