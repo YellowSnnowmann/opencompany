@@ -2619,7 +2619,7 @@ async fn run_chat(
     // message typed into a desk became a board card that nobody had asked for,
     // and the agent answering it had no say in the matter. Tracking is now the
     // agent's own decision, made with a tool call — `spawn_task` opens a card,
-    // and a hand-off through `delegate_to_desk` / `delegate_to_teammate` opens
+    // and a hand-off through the retired desk hand-offs opens
     // the card that tracks the hand-off — so a card on the board means an agent
     // (or the operator, through the console or this control) put it there.
     //

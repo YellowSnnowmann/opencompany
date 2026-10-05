@@ -580,7 +580,7 @@ fn hex_segment(value: &str) -> String {
 /// # It claims the delegation queue for board writes, and nothing else (issue #661 / M5)
 ///
 /// A node's turn carries the whole toolbelt, so an orchestrator-tier `agent_ref`
-/// can reach `review_task`, `assign_task`, `spawn_task` and `delegate_to_desk`,
+/// can reach `review_task`, `assign_task`, `spawn_task`,
 /// and a granted one can reach `publish_artifact`.
 ///
 /// This path now holds a

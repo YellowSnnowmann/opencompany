@@ -1,7 +1,7 @@
 //! Resolving a task card's `assignee` against the company roster (issue #205).
 //!
 //! A card's `assignee` is a free-text string: an operator types it into the
-//! board's Assignee field, and `spawn_task` / `delegate_to_desk` let a model
+//! board's Assignee field, and `spawn_task` let a model
 //! write one. It can therefore name four different things — nobody, a roster
 //! teammate, a desk, or something that simply does not exist — and every
 //! consumer used to decide for itself which of those it recognised.

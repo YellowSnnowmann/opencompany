@@ -19,7 +19,7 @@
 //!
 //! * **No tools.** Its toolbelt is empty — not even the intrinsic memory tools
 //!   every roster agent carries, and none of the orchestrator's `query_company`
-//!   / `spawn_task` / `delegate_to_desk`. It cannot read the board, the roster,
+//!   / `spawn_task`. It cannot read the board, the roster,
 //!   the workspace tree, another workflow, an MCP server, the web, or a file.
 //! * **No company memory.** The agent is bound to its company's memory root
 //!   (an unbound agent would land at the engine's shared default root) but with

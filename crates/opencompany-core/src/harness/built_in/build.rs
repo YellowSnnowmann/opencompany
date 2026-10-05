@@ -309,7 +309,7 @@ fn sandbox_brief_flags(
 ///
 /// `is_orchestrator` marks the company's orchestrator agent (issue #53): it
 /// additionally receives the delegating-orchestrator persona brief and the
-/// `query_company` / `spawn_task` / `delegate_to_desk` tools.
+/// `query_company` / `spawn_task` tools.
 // Each parameter is a distinct, load-bearing dependency of agent construction;
 // bundling them into a struct would only relocate the surface. (Pre-existing —
 // surfaced only under the full `openhuman,mcp` clippy combo, which CI
@@ -1222,7 +1222,7 @@ pub fn build_agent_with_model(
 
     // Orchestrator seam (issues #53 + #67 + #71): the company's orchestrator agent
     // additionally gets the delegating-orchestrator persona + tools. `query_company`
-    // reads the company's facts + recent events; `spawn_task` / `delegate_to_desk`
+    // reads the company's facts + recent events; `spawn_task`
     // push onto the shared delegation queue the brain drains after the turn;
     // `run_workflow` executes one of the company's saved workflows by id through
     // the shared runner handle (so a task waiting on a workflow can be run to

@@ -1089,7 +1089,7 @@ impl<'a> DelegationRunner<'a> {
         //
         // Layer A (the REST handler) already declines to card a question, but
         // that closes one of two doors. The other is the model calling
-        // `spawn_task` / `delegate_to_desk` / `assign_task` / `review_task`
+        // `spawn_task` / `assign_task` / `review_task`
         // itself — which is exactly where the "Tell what is there in the tasks
         // list" card came from, a pure read that only wanted one
         // `query_company` call. A brief cannot close that door; it is guidance,

@@ -147,7 +147,7 @@ const FACTS_SECTION_BUDGET_BYTES: usize = crate::harness::build::TOOL_RESULT_BUD
 
 /// The `query_company` tool name.
 pub const QUERY_COMPANY_TOOL: &str = "query_company";
-// The `spawn_task` / `delegate_to_desk` names are the brain-agnostic canonical
+// The `spawn_task` names are the brain-agnostic canonical
 // constants (issue #176) — re-exported here so the harness path and the hosted
 // path share one definition and cannot drift.
 use crate::runtime::assignee;
@@ -2541,7 +2541,7 @@ impl Tool for SpawnTaskTool {
             .map(str::to_string);
 
         // Ground the target before queuing anything, on the same terms
-        // `delegate_to_desk`/`delegate_to_teammate` already do (issue #272):
+        // the retired desk hand-offs already do (issue #272):
         // a name that resolves to nobody is refused here, in the model's own
         // turn, rather than surviving as a queued card the drain silently
         // opens unowned with no signal anywhere that the assignee was bogus.
@@ -3445,7 +3445,7 @@ impl Tool for AddAgentTool {
 
 /// The complete tool set wired onto the company's orchestrator agent (issues
 /// #53, #67, #71, and #112), in order: the `query_company` read surface, the
-/// `spawn_task` and `delegate_to_desk` delegation tools, the `run_workflow`
+/// `spawn_task` delegation tools, the `run_workflow`
 /// execution tool, the `read_run_output` companion (issue #418), the
 /// `create_workflow` authoring tool, and the `add_agent` roster-write tool.
 ///

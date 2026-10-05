@@ -68,7 +68,7 @@
 //! cannot silently widen or narrow the belt:
 //!
 //! * **Depth cap = 1 — no re-delegation.** The orchestrator's delegation tools
-//!   (`query_company` / `spawn_task` / `delegate_to_desk`, plus the other
+//!   (`query_company` / `spawn_task`, plus the other
 //!   orchestrator-only roster/workflow tools) are wired ONLY onto the company
 //!   orchestrator; a dispatched agent never receives them, so a dispatched turn
 //!   cannot fan work out further (the "no sub-agent re-delegation in v1"
