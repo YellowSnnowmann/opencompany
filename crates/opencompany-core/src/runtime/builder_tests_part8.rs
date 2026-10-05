@@ -210,7 +210,7 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
         "the stored record must resolve the new desk, or this test proves nothing"
     );
 
-    let report = runtime
+    runtime
         .run_cycle(vec![CompanyEvent::OperatorMessage {
             mentions: Vec::new(),
             parent: None,
@@ -223,15 +223,26 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
         .await
         .expect("cycle");
 
-    let routed: Vec<String> = report
-        .responses
-        .iter()
-        .filter_map(|response| response.agent.clone())
+    // The line is handed to the company hive (OC-2), so who it reached is the
+    // starter its acceptance row names, not a reply this cycle ran.
+    let started: Vec<String> = runtime
+        .events
+        .read_from(&id, crate::ports::types::EventSeq::new(0), usize::MAX)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|row| match row.event {
+            CompanyEvent::HiveAccepted {
+                chat_id, starters, ..
+            } if chat_id.as_deref() == Some("design") => Some(starters),
+            _ => None,
+        })
+        .flatten()
         .collect();
     assert!(
-        routed.contains(&"eng2".to_string()),
-        "a desk chat must reach the desk's member; the runtime routed as though the desk \
-         did not exist; saw {routed:?}"
+        started.contains(&"eng2".to_string()),
+        "a desk chat must start the desk's member; the hive routed as though the desk \
+         did not exist; saw {started:?}"
     );
 }
 
