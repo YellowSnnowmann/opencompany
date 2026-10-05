@@ -253,7 +253,7 @@ async fn five_spawns_in_one_episode_open_three_cards() {
         match titles.get(turn.called.len()) {
             Some(title) => call(
                 "spawn_task",
-                json!({ "title": title, "description": "Part of the plan." }),
+                json!({ "title": title, "note": "Part of the plan." }),
             ),
             None if turn.called.len() == titles.len() => {
                 support::room::complete(turn, "Handed out the work.")
