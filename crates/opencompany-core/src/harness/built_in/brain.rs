@@ -2622,7 +2622,9 @@ impl HarnessBrain {
             .send_as_host(tinyhivemind_hives::SendMessage {
                 message_id: format!("card:{}:{}", card.id, uuid::Uuid::new_v4().simple()),
                 sender: String::new(),
-                destination: tinyhivemind_hives::Destination::Hive(desk.to_string()),
+                destination: tinyhivemind_hives::Destination::Hive(crate::hive::hive_id_for_chat(
+                    desk,
+                )),
                 body: task_instruction(card),
                 thread: None,
                 only_for: Vec::new(),

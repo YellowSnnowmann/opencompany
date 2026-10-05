@@ -45,6 +45,39 @@ pub mod storage;
 #[cfg(feature = "openhuman")]
 pub mod tools;
 
+/// The hive the company's `#general` line runs in.
+///
+/// TinyHiveMind core reserves `general` and `main` (any case) as desk
+/// identities except for its own default desk, whose id and name are both
+/// `General`; a hive created as `general` is accepted by the Coordinator but
+/// fails every episode it opens with `ReservedDeskIdentity`. So the console's
+/// `general` chat runs in that default desk, and every boundary between a
+/// console chat and a hive translates with [`hive_id_for_chat`] /
+/// [`chat_for_hive`]. A desk id is never `general` (the console reserves it),
+/// so the mapping is one-to-one.
+pub const GENERAL_HIVE_ID: &str = "General";
+
+/// The hive id behind console chat `chat` (a desk id, or `general`).
+#[must_use]
+pub fn hive_id_for_chat(chat: &str) -> String {
+    if chat == crate::ports::general_channel::GENERAL_CHANNEL_ID {
+        GENERAL_HIVE_ID.to_string()
+    } else {
+        chat.to_string()
+    }
+}
+
+/// The console chat behind hive `hive_id`; the inverse of
+/// [`hive_id_for_chat`].
+#[must_use]
+pub fn chat_for_hive(hive_id: &str) -> String {
+    if hive_id == GENERAL_HIVE_ID {
+        crate::ports::general_channel::GENERAL_CHANNEL_ID.to_string()
+    } else {
+        hive_id.to_string()
+    }
+}
+
 /// The permanent tools the TinyHiveMind OpenHuman adapter attaches to every
 /// registered agent (`docs/opencompany-migration.md` in `vendor/tinyhivemind`):
 /// how an agent reads hives, messages a teammate, posts, asks, broadcasts and

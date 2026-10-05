@@ -127,7 +127,7 @@ impl SettleTurn<'_> {
 
     fn hive_id(&self) -> Option<String> {
         match &self.scope.destination {
-            Destination::Hive(hive) => Some(hive.clone()),
+            Destination::Hive(hive) => Some(crate::hive::chat_for_hive(hive)),
             Destination::Agent(_) => None,
         }
     }
@@ -142,7 +142,7 @@ impl SettleTurn<'_> {
     fn surface(&self) -> ConversationRef {
         let kind = match &self.scope.destination {
             Destination::Agent(_) => ConversationKind::Direct,
-            Destination::Hive(hive) if hive == crate::ports::general_channel::GENERAL_CHANNEL_ID => {
+            Destination::Hive(hive) if hive == crate::hive::GENERAL_HIVE_ID => {
                 ConversationKind::General
             }
             Destination::Hive(_) => ConversationKind::Desk,

@@ -152,7 +152,7 @@ impl HiveHooks {
     /// agent's own direct line.
     fn chat_of(&self, scope: &TurnScope) -> String {
         match &scope.destination {
-            Destination::Hive(hive) => hive.clone(),
+            Destination::Hive(hive) => crate::hive::chat_for_hive(hive),
             Destination::Agent(_) => format!(
                 "{}{}",
                 crate::runtime::assignee::DM_PREFIX,

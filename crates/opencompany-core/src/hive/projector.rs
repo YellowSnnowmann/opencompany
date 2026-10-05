@@ -331,7 +331,7 @@ impl Projector {
                     &self.company,
                     CompanyEvent::HiveEpisodeSettled {
                         episode_id: episode.episode_id.clone(),
-                        hive_id: episode.hive_id.clone(),
+                        hive_id: super::chat_for_hive(&episode.hive_id),
                         opened_at: episode.opened_at,
                         thread: episode.thread,
                         failure,
@@ -402,7 +402,7 @@ impl Projector {
             Destination::Hive(hive_id) if !row.only_for.is_empty() => Some(CompanyEvent::HiveMessage {
                 sequence: row.sequence,
                 sender,
-                destination: HiveDestination::Hive(hive_id.clone()),
+                destination: HiveDestination::Hive(super::chat_for_hive(hive_id)),
                 text: row.body.clone(),
                 thread: row.thread,
                 episode_id: row.episode_id.clone(),
@@ -413,6 +413,7 @@ impl Projector {
                     .collect(),
             }),
             Destination::Hive(hive_id) => {
+                let chat = super::chat_for_hive(hive_id);
                 // A row answers its thread; an episode's unthreaded row
                 // answers the message that opened the episode.
                 let root = row.thread.or_else(|| {
@@ -422,9 +423,9 @@ impl Projector {
                 });
                 let parent = root
                     .and_then(|root| cursor.landed.get(&root))
-                    .filter(|landed| &landed.chat == hive_id)
+                    .filter(|landed| landed.chat == chat)
                     .map(|landed| landed.seq);
-                Some(self.reply(hive_id.clone(), &row.sender, sender, &row.body, parent, hive))
+                Some(self.reply(chat, &row.sender, sender, &row.body, parent, hive))
             }
         }
     }

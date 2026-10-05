@@ -177,7 +177,7 @@ impl HarnessBrain {
             )
             .await;
             return Ok(Addressed {
-                destination: Destination::Hive(desk),
+                destination: Destination::Hive(crate::hive::hive_id_for_chat(&desk)),
                 starters: starters
                     .members
                     .iter()
