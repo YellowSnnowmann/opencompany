@@ -259,6 +259,12 @@ impl Room {
         company_id: &str,
         mut manifest: CompanyManifest,
     ) -> Self {
+        if std::env::var_os("ROOM_LOG").is_some() {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(tracing_subscriber::EnvFilter::from_env("ROOM_LOG"))
+                .with_test_writer()
+                .try_init();
+        }
         manifest.apply_globals();
         let problems = manifest.validate();
         assert!(problems.is_empty(), "the manifest is valid: {problems:?}");
