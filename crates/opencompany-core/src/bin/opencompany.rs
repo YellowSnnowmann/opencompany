@@ -224,17 +224,17 @@ enum Command {
         #[arg(long)]
         home: Option<PathBuf>,
     },
-    /// Measure how a company's desks coordinated, from its journal alone
-    /// (plan hive-desks, Phase 8).
+    /// Measure how a company's hive coordinated, from its journal alone
+    /// (OC-2).
     ///
     /// Reads the company's event log through the env-selected storage
-    /// backend — no host needs to be running — and folds the hive frames
-    /// into the numbers the plan asks for: the peak of seat turns open at
-    /// once and how often they overlapped, same-agent overlaps (which must
-    /// be zero: one agent runs one turn at a time), episodes opened and
-    /// completed with their reason and rounds, cross-desk referrals,
-    /// broadcasts and dms with the distinct agent pairs they made, the
-    /// utterance-kind histogram, and each episode's time to complete.
+    /// backend — no host needs to be running — and folds the company-hive
+    /// rows into: the peak of turns open at once and how often they
+    /// overlapped, same-agent overlaps (which must be zero: one agent runs
+    /// one turn at a time), episodes settled and failed with the turns each
+    /// took and its time to settle, direct and private messages with the
+    /// distinct agent pairs they made, interrupted turns, and the
+    /// starter-route histogram.
     ///
     /// `scripts/measure-coordination.mjs` is the HTTP/SSE twin: the same
     /// numbers from a live `/events` stream, with the same thresholds.
@@ -254,9 +254,8 @@ enum Command {
         #[arg(long)]
         json: bool,
         /// Exit non-zero when a threshold is missed: max concurrent turns of
-        /// at least 2, at least one cross-desk referral, at least one
-        /// dm/broadcast, at least two distinct pairs, no same-agent overlap,
-        /// every episode completed.
+        /// at least 2, at least one agent→agent message, at least two
+        /// distinct pairs, no same-agent overlap, every episode settled.
         #[arg(long = "assert")]
         assert_thresholds: bool,
     },

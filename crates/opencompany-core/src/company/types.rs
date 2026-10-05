@@ -716,20 +716,19 @@ pub struct Agent {
     /// reach a skill installed later.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<String>>,
-    /// Desks this agent may hand work on to (issue #176).
+    /// Desks whose members this agent may message directly (issue #176).
     ///
-    /// Every roster agent carries `spawn_task` + `delegate_to_desk` +
-    /// `delegate_to_teammate` (issue #884) — never the orchestrator's
+    /// Every roster agent carries the company hive's `hivemind_*` tools and
+    /// `spawn_task` (issue #884, OC-2) — never the orchestrator's
     /// roster/workflow/lifecycle authority — and this list is what **narrows**
-    /// where the two hand-off tools may reach. Empty (the default, and every
-    /// manifest written before it existed) is **unrestricted**, on the same
-    /// convention as an omitted [`tools`](Self::tools) grant or an omitted
-    /// `ledgers` list: `delegate_to_teammate` reaches everybody on the roster
-    /// and `delegate_to_desk` every desk. A non-empty list narrows
-    /// `delegate_to_desk` to the desks named here, and `delegate_to_teammate`
-    /// to any member of any desk this agent sits on plus every member of the
-    /// desks named here. `"*"` is a wildcard for "every desk the company has"
-    /// on both tools, and so equivalent to leaving the list empty.
+    /// whom `hivemind_send_agent` may reach (`hive::policy::ReachPolicy`, the
+    /// Coordinator's `SendAuthorizer`). Empty (the default, and every manifest
+    /// written before it existed) is **unrestricted**, on the same convention
+    /// as an omitted [`tools`](Self::tools) grant or an omitted `ledgers`
+    /// list: the agent may message everybody on the roster. A non-empty list
+    /// narrows that to any member of any desk this agent sits on plus every
+    /// member of the desks named here. `"*"` is a wildcard for "every desk the
+    /// company has", and so equivalent to leaving the list empty.
     ///
     /// It used to be an opt-in — empty meant no hand-off tool at all — which
     /// left a specialist with no line unable to reach the colleague beside it,
@@ -738,10 +737,8 @@ pub struct Agent {
     /// each agent is now told about its reach.
     ///
     /// Entries are **desk** ids or names, not teammate ids: desks are
-    /// OpenCompany's delegation address space, and `delegate_to_desk` already
-    /// resolves its target that way — `delegate_to_teammate` reads the same
-    /// list and expands each desk to its members rather than taking teammate
-    /// ids directly. Deliberately a field of its own rather than more
+    /// OpenCompany's delegation address space, and the reach rule expands
+    /// each desk to its members rather than taking teammate ids directly. Deliberately a field of its own rather than more
     /// [`tools`](Self::tools) grant globs — that vocabulary feeds the
     /// capability-namespace math, and a desk id is not a namespace.
     ///
