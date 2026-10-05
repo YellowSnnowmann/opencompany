@@ -192,29 +192,14 @@ function RawTurn({
           ))}
         </ol>
       )}
-      {row.referralConversation?.lines.map((referral, index) => (
-        <pre
-          key={`referral:${index}`}
-          className="mt-1 font-mono text-2xs leading-relaxed whitespace-pre-wrap text-muted-foreground"
-        >
-          {cueLine(
-            referral.outbound ? "referral out" : "referral in",
-            referral.authorLabel || referral.authorId,
-            referral.text,
-          )}
-        </pre>
-      ))}
-      {row.episode && (
-        // The round and speech act, as the driver recorded them — the raw
-        // view's counterpart of the utterance chip. `to` is printed because a
-        // `dm`'s recipients are what narrowed its audience.
+      {row.hive?.episodeId && (
+        // The hive episode this row belongs to — the raw view's counterpart
+        // of the room's episode grouping.
         <pre
           className="mt-1 font-mono text-2xs leading-relaxed whitespace-pre-wrap text-muted-foreground"
           data-testid="agent-session-raw-episode"
         >
-          {`[episode ${row.episode.id} · round ${row.episode.revision}] ${row.episode.kind}${
-            row.episode.to?.length ? ` → ${row.episode.to.join(", ")}` : ""
-          }`}
+          {`[episode ${row.hive.episodeId} · hive #${row.hive.sequence}]`}
         </pre>
       )}
     </li>

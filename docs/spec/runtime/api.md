@@ -174,13 +174,12 @@ usage kind (`selectorCall`), charged to the whole-company bucket.
 
 ## Desk routing and episodes
 
-A desk of two or more members answers as a room (see
-[events.md](events.md#hive-episodes-and-rounds)). Its pacing is the manifest's
+Every desk is a hive in the company's Coordinator ([hive.md](hive.md),
+[events.md](events.md#the-company-hive-oc-2)). Its pacing is the manifest's
 `[group_chat.routing]` block — `round_width` (default 5), `choice_option_limit`
 (8), `minimum_confidence`, `high_impact_minimum_confidence`,
 `clarification_threshold`, `high_impact_threshold`, `max_rounds`,
-`turn_timeout_secs` (600) and `[group_chat.routing.referral] {enabled, max_hops,
-reach, returns}` — or an operator overlay installed over it:
+`turn_timeout_secs` (600) — or an operator overlay installed over it:
 
 - `GET {scope}/desks/{id}/routing` → `DeskRoutingDto {deskId, source: overlay |
   manifest | default, declared, effective, candidates[]}`. `declared` is the
@@ -193,19 +192,23 @@ reach, returns}` — or an operator overlay installed over it:
   and answers the resolved `DeskRoutingDto`; a refusal is a `400` carrying the
   host's own sentence. `DELETE` drops the overlay and restores the manifest.
   Both journal `DeskRoutingConfigured {desk_id, reset}`. `/desks/{id}/hive` is
-  gone; a manifest still carrying `[group_chat.hive]` is refused at load with
-  a migration hint.
+  gone; a manifest still carrying `[group_chat.hive]` or
+  `[group_chat.routing.referral]` is refused at load with a migration hint.
 - `GET {scope}/desks` rows carry `routing?: {source, roundWidth,
   choiceOptionLimit, maxRounds, turnTimeoutSecs, router}` — the summary, so the
   room can label a round without the second read. Absent on a desk that runs
   no rounds.
-- `GET {scope}/episodes?desk&status=open|completed&limit` → `EpisodeDto[]
-  {id, chatId, openedBySeq, parentId?, participants[], plan, revision, status,
-  openedAtMillis, completedAtMillis?, completedBy?, reason?}`, newest first.
-- `GET {scope}/chat/history` rows (+): `episode?: {id, revision, kind, to?,
-  routedBy?}` and `audience?: string[]` — see the events page for the shape.
-  Removed: `asideConversation`, and the `hive-report` / `hive-failure`
-  authors; `hive-referral` stays for a referral's returned answer.
+- `GET {scope}/agents/{agent_id}/messages?after&limit` → `AgentMessageDto[]
+  {seq, sequence, sender, recipient, text, episodeId?, atMillis}`: one
+  teammate's direct hive messages, sent or received, oldest first, after the
+  exclusive journal cursor `after` (pass back the last row's `seq`); `limit`
+  defaults to and is capped at 500. `404` for an agent not on the roster.
+  `GET {scope}/episodes` is gone (OC-2).
+- `GET {scope}/chat/history` rows (+): `hive?: {sequence, episodeId?,
+  thread?}` — see the events page. Removed: `episode`, and the
+  `hive-referral` author.
+- `GET {scope}/approvals` rows (+): `hive?: {agentId, episodeId?}` on an
+  approval a coordinator turn parked.
 - `GET {scope}/runs` rows and the GraphQL `AgentRun` (+): `episodeId?`,
   `roundRevision?` — the round an attempt was a seat's turn in.
 
