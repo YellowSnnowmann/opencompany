@@ -91,8 +91,7 @@ L0  Substrate       api.tinyhumans.ai, openhuman-core, filesystem
 | [runtime/ports-runs.md](runtime/ports-runs.md) | `RunStore`: attempts and their traces |
 | [runtime/events.md](runtime/events.md) | `CompanyEvent` vocabulary + journal correlation rules |
 | [runtime/manifest.md](runtime/manifest.md) | `company.toml` schema, `agents.toml` compatibility |
-| [runtime/hive.md](runtime/hive.md) | Hive desks: one `OpenHumanHive` per `[[group_chat]]` over the embedded OpenHuman runtime — when a room opens, the episode of concurrent rounds, speaking through the `opencompany` MCP server, Jev routing over the TinyHumans proxy with the lead fallback, cross-desk referral, what lands in the journal, and the `[group_chat.routing]` keys |
-| [runtime/speech.md](runtime/speech.md) | One agent, one session: the one stable OpenHuman session per agent, the delta a turn is handed, and talking as a tool call — `post`, `broadcast`, `dm`, `complete_episode`, `read` |
+| [runtime/hive.md](runtime/hive.md) | The company hive: one TinyHiveMind `Coordinator` per company over the `HiveStore` port, every agent registered on the `OpenHumanHost` with one session, one hive per desk plus `#general`, starters (mention → Jev → lead), episodes, the `hivemind_*` tools and the reach policy, approvals that park an agent, the projector into the journal, retention, and measuring |
 | [runtime/harnesses.md](runtime/harnesses.md) | Named execution engines: `built_in` vs `acp`, transports, per-agent binding |
 | [runtime/harnesses-acp.md](runtime/harnesses-acp.md) | The ACP transports in detail: `local` vs `runner`, readiness probing, resuming a teammate's session across a restart, and streaming its execution state while the turn runs |
 | [runtime/providers.md](runtime/providers.md) | Inference providers, dual-mode OpenRouter, per-harness credentials |

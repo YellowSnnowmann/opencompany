@@ -4742,14 +4742,11 @@ struct AgentSessionMessageDto {
 /// # Eligible is not delivered
 ///
 /// This is channel history the agent **may** read, not a record of what it
-/// has **already** been handed. A `desk_dm` journals a row and runs nothing —
-/// the recipient reads it on its own next turn, through the per-agent
-/// watermark `agent_session::AgentSessionState` tracks. That watermark lives
-/// in the live `HarnessPool`, gated behind the `openhuman` feature; this route
-/// has no access to it and compiles in every build. So a message queued
-/// behind another turn shows up here immediately,
-/// same as one the agent answered an hour ago. See
-/// `docs/spec/runtime/speech.md#reading-it-back`.
+/// has **already** been handed. A direct message is delivered to the
+/// recipient's company-hive inbox and read on its own next turn
+/// (`docs/spec/runtime/hive.md`); this route has no view of that inbox and
+/// compiles in every build. So a message queued behind another turn shows up
+/// here immediately, same as one the agent answered an hour ago.
 ///
 /// # The operator sees more than the agent does, deliberately
 ///

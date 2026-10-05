@@ -70,11 +70,9 @@ The confined workflow copilot is named the same way. It does not come off the
 roster, so it does not inherit the roster's call, and an unnamed session there
 would put the one turn that runs under a *confinement* back in the crowd.
 
-A `dm` between seats is a row on the desk with an `audience`; the recipient
-is assigned the next round and reads it in its delta
-([runtime/speech.md](../runtime/speech.md)). Both sessions are logged at
-`debug` as `from_session` / `to_session`, which is the only place both are
-known at once.
+A direct message between agents (`hivemind_send_agent`) is delivered to the
+recipient's Coordinator inbox and answered on its next turn, in its own one
+session ([runtime/hive.md](../runtime/hive.md)).
 
 [openhuman#6208]: https://github.com/tinyhumansai/openhuman/pull/6208
 

@@ -1247,8 +1247,7 @@ pub enum CompanyEvent {
         #[serde(default, skip_serializing_if = "is_zero_depth")]
         mention_depth: u8,
         /// The teammates this reply is addressed to, when that is **narrower
-        /// than the desk it was written on** — a private aside
-        /// (`docs/spec/runtime/hivemind-asides.md`).
+        /// than the desk it was written on** — a private line.
         ///
         /// Empty is the ordinary case and means desk-visible: every row written
         /// before this field existed, and every row this host writes unless a

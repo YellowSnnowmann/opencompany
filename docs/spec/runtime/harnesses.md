@@ -422,7 +422,9 @@ maps `AgentProgress` onto `turn_stream::LiveFrame`s (`tool_call`, `tool_result`,
 for an ACP teammate's first `agent_message_chunk`) and reads cost from
 `ModelCallCompleted` / `TurnCostUpdated`. There is no resident session, no
 `Mutex<Agent>`, and no history seeding: OpenHuman owns the thread, and the
-company's delta is prepended to the message ([speech.md](speech.md)).
+company's delta is prepended to the message. A conversational turn is a
+company-hive turn and runs through the Coordinator's adapter instead
+([hive.md](hive.md)); the pool keeps isolated turns, each in a fresh session.
 
 What that buys, measured rather than argued: turns of **different** agents
 overlap — within a desk round and across desks — and a turn of one agent
