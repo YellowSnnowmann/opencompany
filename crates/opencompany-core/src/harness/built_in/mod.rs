@@ -1548,11 +1548,6 @@ impl CompanyAgent {
     /// transcript in nor writes into the session the Coordinator continues —
     /// one writer per OpenHuman session. `chat` still names the conversation a
     /// turn answers for the in-flight registry and the live stream.
-    ///
-    /// The body is boxed: every caller (a card dispatch, a workflow node, a
-    /// delegation drain) would otherwise lay this whole future out inline in
-    /// its own, and the composition pushed the gated suite past the 8 MiB
-    /// test stack (`.cargo/config.toml`, issue #895).
     pub async fn run_with_steer(
         &self,
         message: &str,
@@ -1563,17 +1558,6 @@ impl CompanyAgent {
         // right rather than read off `stream`: a turn that has a chat to
         // answer on may still stream nowhere, and a workflow turn streams on
         // a route that is not a chat.
-        chat: crate::runtime::delegation::ChatTarget<'_>,
-    ) -> (crate::Result<TurnOutcome>, Vec<TurnUsage>) {
-        Box::pin(self.run_with_steer_boxed(message, steer, stream, run_sink, chat)).await
-    }
-
-    async fn run_with_steer_boxed(
-        &self,
-        message: &str,
-        steer: Option<&SteerControl>,
-        stream: Option<crate::turn_stream::TurnStreamCtx>,
-        run_sink: Option<Arc<run_trace::RunTraceSink>>,
         chat: crate::runtime::delegation::ChatTarget<'_>,
     ) -> (crate::Result<TurnOutcome>, Vec<TurnUsage>) {
         let turn_chat_id: Option<String> = stream
