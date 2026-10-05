@@ -260,9 +260,9 @@ fn desk_manifest() -> CompanyManifest {
     toml::from_str(toml_src).expect("valid manifest")
 }
 
-/// The hosted catalog registered with Medulla must advertise the delegation
-/// tools on top of the manifest's own `tools.allow`, so a hosted company's
-/// orchestrator can actually delegate.
+/// The hosted catalog registered with Medulla advertises `spawn_task` on top
+/// of the manifest's own `tools.allow`, and no desk hand-off: agent-to-agent
+/// work is hive messaging since OC-2, which a hosted brain does not run.
 #[tokio::test]
 async fn e2e_hosted_catalog_advertises_spawn_task_and_no_hand_off() {
     let home_dir = tmp_home();
