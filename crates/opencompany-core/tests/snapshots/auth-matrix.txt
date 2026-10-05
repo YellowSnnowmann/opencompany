@@ -502,6 +502,13 @@ GET /api/v1/companies/{id}/agents/{agent_id}/budget-pause must-change-password-a
 GET /api/v1/companies/{id}/agents/{agent_id}/budget-pause platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/agents/{agent_id}/budget-pause tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/agents/{agent_id}/budget-pause tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/companies/{id}/agents/{agent_id}/messages admin permitted source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/companies/{id}/agents/{agent_id}/messages anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/companies/{id}/agents/{agent_id}/messages member permitted source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/companies/{id}/agents/{agent_id}/messages must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/companies/{id}/agents/{agent_id}/messages platform permitted source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/companies/{id}/agents/{agent_id}/messages tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/companies/{id}/agents/{agent_id}/messages tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
 GET /api/v1/companies/{id}/agents/{agent_id}/session admin permitted source=operator access=addressed features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/agents/{agent_id}/session anonymous refused:401:unauthorized source=operator access=addressed features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/agents/{agent_id}/session member permitted source=operator access=addressed features=openhuman blast=ordinary note="" wait=-
@@ -635,13 +642,6 @@ GET /api/v1/companies/{id}/domain must-change-password-admin refused:403:passwor
 GET /api/v1/companies/{id}/domain platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/domain tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/domain tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/companies/{id}/episodes admin permitted source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/companies/{id}/episodes anonymous refused:401:unauthorized source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/companies/{id}/episodes member permitted source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/companies/{id}/episodes must-change-password-admin refused:403:password_change_required source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/companies/{id}/episodes platform permitted source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/companies/{id}/episodes tenant-non-owner refused:403:forbidden source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/companies/{id}/episodes tenant-owner permitted source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
 GET /api/v1/companies/{id}/events admin permitted source=operator access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/events anonymous refused:401:unauthorized source=operator access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/companies/{id}/events member permitted source=operator access=scoped features=openhuman blast=ordinary note="" wait=-
@@ -1139,6 +1139,13 @@ GET /api/v1/company/agents/{agent_id}/budget-pause must-change-password-admin re
 GET /api/v1/company/agents/{agent_id}/budget-pause platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/agents/{agent_id}/budget-pause tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/agents/{agent_id}/budget-pause tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
+GET /api/v1/company/agents/{agent_id}/messages admin permitted source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/company/agents/{agent_id}/messages anonymous refused:401:unauthorized source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/company/agents/{agent_id}/messages member permitted source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/company/agents/{agent_id}/messages must-change-password-admin refused:403:password_change_required source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/company/agents/{agent_id}/messages platform permitted source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/company/agents/{agent_id}/messages tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
+GET /api/v1/company/agents/{agent_id}/messages tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="Members may read a teammate's direct hive messages." wait=-
 GET /api/v1/company/agents/{agent_id}/session admin permitted source=operator access=addressed features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/agents/{agent_id}/session anonymous refused:401:unauthorized source=operator access=addressed features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/agents/{agent_id}/session member permitted source=operator access=addressed features=openhuman blast=ordinary note="" wait=-
@@ -1272,13 +1279,6 @@ GET /api/v1/company/domain must-change-password-admin refused:403:password_chang
 GET /api/v1/company/domain platform permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/domain tenant-non-owner refused:403:forbidden source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/domain tenant-owner permitted source=ops access=scoped features=openhuman blast=ordinary note="" wait=-
-GET /api/v1/company/episodes admin permitted source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/company/episodes anonymous refused:401:unauthorized source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/company/episodes member permitted source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/company/episodes must-change-password-admin refused:403:password_change_required source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/company/episodes platform permitted source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/company/episodes tenant-non-owner refused:403:forbidden source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
-GET /api/v1/company/episodes tenant-owner permitted source=operator access=scoped features=openhuman blast=ordinary note="Members may list the episodes the company's desks ran or are running." wait=-
 GET /api/v1/company/events admin permitted source=operator access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/events anonymous refused:401:unauthorized source=operator access=scoped features=openhuman blast=ordinary note="" wait=-
 GET /api/v1/company/events member permitted source=operator access=scoped features=openhuman blast=ordinary note="" wait=-

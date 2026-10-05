@@ -424,6 +424,13 @@ const OPS_SCOPED_ROUTES: &[Route] = &[
     r!(Delete, "/billing/paypal/key", Admin, Credential, ""),
     r!(Get, "/agents/{agent_id}/budget-pause", Scoped, Ordinary, ""),
     r!(
+        Get,
+        "/agents/{agent_id}/messages",
+        Scoped,
+        Ordinary,
+        "Members may read a teammate's direct hive messages."
+    ),
+    r!(
         Post,
         "/agents/{agent_id}/budget-pause/redeem",
         Scoped,
@@ -1239,19 +1246,6 @@ const OPERATOR_AUTHORITY_ROUTES: &[Route] = &[
         blast: Blast::Authority,
         probe: Probe::Empty,
         note: "Members may drop a desk's routing overlay and fall back to the manifest.",
-        wait: Wait::None,
-        red_cells: RedCells::None,
-    },
-    Route {
-        method: Verb::Get,
-        path: "/episodes",
-        address: Address::Dual,
-        source: Source::Operator,
-        access: Access::Scoped,
-        features: &["openhuman"],
-        blast: Blast::Ordinary,
-        probe: Probe::Empty,
-        note: "Members may list the episodes the company's desks ran or are running.",
         wait: Wait::None,
         red_cells: RedCells::None,
     },
