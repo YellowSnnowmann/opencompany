@@ -17,6 +17,10 @@ pub mod fs;
 /// Filesystem backends for the WS3 console ports (tasks, usage,
 /// skill-state, workspace tree) over the same [`Bundle`](paths::Bundle) layout.
 pub mod fs_ops;
+/// Backends for the [`HiveStore`](crate::ports::HiveStore) port — the
+/// per-company compare-and-swap state document and append-only message log a
+/// hive coordinator persists through — and their conformance suite.
+pub mod hive;
 pub mod layout;
 /// The canonical per-instance directory layout under `OPENCOMPANY_DATA_DIR`
 /// (`companies/`, `memory/`, `store/`, `files/`, `logs/`, `tmp/`) and the
@@ -62,6 +66,7 @@ pub use fs::{
     FsCompanyStore, FsEventLog, FsInboxStore, FsJournalStore, FsSecretStore, FsTraceStore,
 };
 pub use fs_ops::FsOps;
+pub use hive::{FsHiveStore, MemoryHiveStore};
 pub use layout::DataLayout;
 // Only the boot entry point is re-exported here. The migration is a one-shot
 // step the binary runs before it reads anything, and its silent core and result

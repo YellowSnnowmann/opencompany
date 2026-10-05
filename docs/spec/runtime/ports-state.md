@@ -327,3 +327,63 @@ Normative requirements beyond the usual per-company isolation:
   handler would be a check-time/use-time gap.
 - `token_hash` and `code_hash` hold hashes only. Never store, log, or return a
   plaintext secret.
+
+## HiveStore
+
+The durable state under a company's hive coordinator (`src/ports/hive.rs`).
+The coordinator is moving onto TinyHiveMind's, whose own persistence port the
+host implements; that adapter sits on this store, which deliberately names no
+TinyHiveMind type, so it does not move when the library's version does.
+
+```rust
+pub struct HiveStateDoc { pub revision: String, pub next_sequence: u64, pub body: serde_json::Value }
+pub struct HiveMessageRow { pub sequence: u64, pub body: serde_json::Value }
+pub struct HiveSnapshot { pub state: HiveStateDoc, pub messages: Vec<HiveMessageRow> }
+pub enum HiveCommit { Committed, Conflict { current: Option<String> } }
+
+#[async_trait]
+pub trait HiveStore: Send + Sync {
+    /// The state document and every committed row with `sequence < before`
+    /// (`None`: all), ascending. `None` when the company has no document.
+    async fn load_hive(&self, company: &CompanyId, before: Option<u64>)
+        -> Result<Option<HiveSnapshot>>;
+    /// Appends rows and swaps the document from `expected` (`None`: no
+    /// document yet) to `next`, all or nothing.
+    async fn commit_hive(&self, company: &CompanyId, expected: Option<&str>,
+        next: HiveStateDoc, appended: Vec<HiveMessageRow>) -> Result<HiveCommit>;
+    /// Removes the document and every row; a no-op for an absent company.
+    async fn purge_hive(&self, company: &CompanyId) -> Result<()>;
+}
+```
+
+Normative requirements:
+
+- **Bodies are opaque JSON.** A backend stores and returns them; it never reads
+  them, so a new coordinator field needs no backend change.
+- **Revisions are opaque, minted by the committer, and must change.** A commit
+  whose `next.revision` equals the stored one is refused, because a
+  compare-and-swap that can match a stale writer's revision detects nothing.
+- **A conflict is an answer.** A stale `expected` returns
+  `Conflict { current }` naming the stored revision and writes nothing — no
+  rows either. Creating a document that exists, or expecting one that does not,
+  conflicts the same way.
+- **Malformed commits are `InvalidRequest`.** Every appended row must lie in
+  `[stored next_sequence, next.next_sequence)` and the rows must ascend
+  strictly; `next_sequence` may not go down. Gaps are allowed. The swap is
+  checked first, so a stale writer learns it is stale before it learns its rows
+  no longer fit. One function (`ports::hive::check_commit`) states the rule for
+  every backend.
+- **Crash-safe by `next_sequence`.** `next_sequence` is an explicit field on the
+  document: the first sequence not yet committed. A backend that cannot write
+  rows and document atomically writes rows first and the document last, so an
+  interrupted commit leaves rows at or above the stored `next_sequence`. Those
+  rows are **never loaded**, and the next commit that claims their sequences
+  overwrites them idempotently.
+- **Not exported.** Hive state is runtime coordination state the coordinator
+  rebuilds; `store/export.rs` reads only the company, event and trace ports, so
+  a bundle carries none of it and an imported company starts with no hive
+  state.
+
+How each backend meets the crash rule — a byte-length prefix on fs, one
+transaction on sqlite, rows carried inside the swap on mongodb — is in
+[storage.md](storage.md#hive-store).

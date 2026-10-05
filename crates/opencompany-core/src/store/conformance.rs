@@ -6792,3 +6792,7 @@ pub async fn assert_deep_trace_store(deep: Arc<dyn crate::ports::deep_trace::Dee
         "a company-wide purge is still scoped to that company"
     );
 }
+
+// The `HiveStore` assertions live beside its backends (`store/hive/`); they are
+// re-exported here so this file stays the one index of the suite.
+pub use crate::store::hive::conformance::{assert_hive_commit_race, assert_hive_store};

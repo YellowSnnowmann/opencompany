@@ -18,6 +18,7 @@ pub mod channel;
 pub mod deep_trace;
 pub mod events;
 pub mod general_channel;
+pub mod hive;
 pub mod inbox;
 pub mod journal;
 pub mod ledgers;
@@ -59,6 +60,7 @@ pub use deep_trace::{
     bound_detail,
 };
 pub use events::{EventLog, PruneReport, RetentionClass, RetentionPolicy, plan_prune};
+pub use hive::{HiveCommit, HiveMessageRow, HiveSnapshot, HiveStateDoc, HiveStore};
 pub(crate) use ids::MILLIS_PER_DAY;
 pub use ids::{
     AGENT_SLUG_FALLBACK, CONFINED_AGENT_ID, SYSTEM_AUTHOR, agent_slug, generate_id, iso8601,

@@ -340,7 +340,7 @@ CREATE TABLE IF NOT EXISTS journal_imports (
 
 /// Maps a `rusqlite` failure onto the crate error type without a bare `?` on
 /// I/O (which would collide with the existing `#[from] io::Error` mapping).
-fn sql_err(e: rusqlite::Error) -> OpenCompanyError {
+pub(super) fn sql_err(e: rusqlite::Error) -> OpenCompanyError {
     OpenCompanyError::Store(format!("sqlite error: {e}"))
 }
 
@@ -570,6 +570,8 @@ impl SqliteStore {
     fn from_conn(conn: Connection) -> Result<Self> {
         Self::apply_pragmas(&conn)?;
         conn.execute_batch(MIGRATIONS).map_err(sql_err)?;
+        conn.execute_batch(crate::store::hive::HIVE_MIGRATIONS)
+            .map_err(sql_err)?;
         // `CREATE TABLE IF NOT EXISTS` is a no-op on a database that predates a
         // column, so additive columns need their own idempotent step.
         // Issue #553: a workspace node may hold bytes. Nullable and with no
@@ -649,7 +651,7 @@ impl SqliteStore {
         .map_err(sql_err)
     }
 
-    fn conn(&self) -> MutexGuard<'_, Connection> {
+    pub(super) fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().expect("sqlite connection mutex poisoned")
     }
 
@@ -3860,6 +3862,9 @@ fn workspace_descendants(
 #[cfg(test)]
 #[path = "sqlite_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "sqlite_hive_tests.rs"]
+mod tests_hive;
 #[cfg(test)]
 #[path = "sqlite_ledger_tests.rs"]
 mod tests_ledger;

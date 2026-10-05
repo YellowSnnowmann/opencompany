@@ -20,6 +20,7 @@ use crate::app::config::{EnvSource, ProcessEnv};
 use crate::error::OpenCompanyError;
 use crate::ports::artifacts::ArtifactStore;
 use crate::ports::events::EventLog;
+use crate::ports::hive::HiveStore;
 use crate::ports::inbox::InboxStore;
 use crate::ports::journal::JournalStore;
 use crate::ports::ledgers::LedgerStore;
@@ -191,6 +192,10 @@ pub struct StorageHandles {
     /// silent fs journal there loses every committed key and every parked
     /// approval the next time the container is replaced.
     pub journal: Arc<dyn JournalStore>,
+    /// The hive coordinator's compare-and-swap state document and append-only
+    /// message log. Not `Option`, for the journal's reason: on a mongodb tenant
+    /// a filesystem fallback would lose coordination state with the container.
+    pub hive: Arc<dyn HiveStore>,
     /// Present when the backend persists company → tenant ownership.
     pub ownership: Option<Arc<dyn OwnershipStore>>,
 }
@@ -354,7 +359,8 @@ fn open_sqlite(data_dir: &Path) -> Result<Option<StorageHandles>> {
         users: store.clone(),
         sessions: store.clone(),
         login_codes: store.clone(),
-        journal: store,
+        journal: store.clone(),
+        hive: store,
         ownership: None,
     }))
 }
@@ -398,6 +404,7 @@ async fn open_mongodb(settings: &StorageSettings) -> Result<Option<StorageHandle
         sessions: store.clone(),
         login_codes: store.clone(),
         journal: store.clone(),
+        hive: store.clone(),
         ownership: Some(store),
     }))
 }

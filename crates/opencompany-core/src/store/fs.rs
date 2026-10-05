@@ -398,7 +398,7 @@ fn open_for_append(path: &Path, sync: bool) -> Result<(std::fs::File, bool)> {
 /// append. The deployed target is Linux containers and the development target is
 /// macOS; both are covered.
 #[cfg(unix)]
-fn sync_parent_dir(path: &Path) -> Result<()> {
+pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
     let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) else {
         return Ok(());
     };
@@ -411,7 +411,7 @@ fn sync_parent_dir(path: &Path) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-fn sync_parent_dir(_path: &Path) -> Result<()> {
+pub(crate) fn sync_parent_dir(_path: &Path) -> Result<()> {
     Ok(())
 }
 

@@ -37,6 +37,7 @@ event vocabulary those traits carry moved to [`events.md`](events.md)
 | `WorkflowRevisionStore` | [`src/ports/workflow_revisions.rs`](../../../src/ports/workflow_revisions.rs) | a bounded per-workflow edit-history ring for rollback (issue #274) |
 | `JournalStore` | [journal.md](journal.md) | the runtime journal's durable sink: at-most-once effect keys, parked approvals, grants, cycle brackets (issue #726) |
 | `ScheduleFireStore` | [`src/ports/schedule_fires.rs`](../../../src/ports/schedule_fires.rs) | durable per-`(company, schedule, minute)` fire claims: at-most-once firing across replicas and restarts, purged per schedule on workflow delete (issues #241, #708) |
+| `HiveStore` | [ports-state.md](ports-state.md#hivestore) | the hive coordinator's durable state: a compare-and-swap state document plus an append-only message log, opaque JSON bodies |
 
 ## Assembly
 
@@ -74,6 +75,7 @@ the multi-tenant platform case with the same type.
 | `ArtifactStore`, `RunStore`, `WorkflowRevisionStore` | fs bundle (JSONL) | sqlite, mongodb |
 | `JournalStore` | fs bundle (`journal.jsonl`) | sqlite, mongodb |
 | `ScheduleFireStore` | fs bundle (`O_EXCL` marker files, single-node) | sqlite, mongodb (the hosted arbiter) |
+| `HiveStore` | fs bundle (`hive/state.json` + `hive/messages.jsonl`) | sqlite, mongodb; in-memory (`MemoryHiveStore`) for tests |
 
 ### `WorkflowRevisionStore` (issue #274)
 
