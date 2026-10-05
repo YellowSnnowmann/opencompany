@@ -534,10 +534,10 @@ fn a_recovered_call_keeps_its_name_when_the_wire_offers_it_natively() {
     let calls = &resp.message.tool_calls;
     assert_eq!(calls.len(), 1);
     assert_eq!(
-        calls[0].name, "mcp_call_tool",
-        "a name offered only by the MCP brief is still bridged"
+        calls[0].name, "read",
+        "nothing is bridged through `mcp_call_tool` since the speech tools went (OC-2)"
     );
-    assert_eq!(calls[0].arguments["tool"], "read");
+    assert_eq!(calls[0].arguments["limit"], 5);
 }
 
 /// A refusal turn: `content: null`, `finish_reason: "stop"`, a nonempty
