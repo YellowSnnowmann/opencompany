@@ -35,15 +35,16 @@
 //! 2. the retry does not duplicate the user message in the model context;
 //! 3. both attempts of a retried turn send the same tool scope;
 //! 4. the failed attempt leaves no durable trace, and the on-disk display
-//!    companion agrees with the durable rows;
-//! 5. a later turn on the same session replays the durable rows with system
-//!    and assistant roles intact;
-//! 6. typed tool-call / tool-result rows survive the replay across the retry.
+//!    companion agrees with the durable rows.
+//!
+//! A pooled turn runs in a fresh session since OC-2 (an agent's continuing
+//! session belongs to the company hive), so the cross-turn replay half of
+//! this file went with it; the hive's own session continuity is
+//! TinyHiveMind's to pin.
 
 use super::built_in_test_fixtures::test_runtime;
 use super::built_in_test_fixtures::*;
 use super::built_in_test_fixtures_2::*;
-use super::*;
 
 /// **Reachability** — a single `Ok(String::new())` in the scripted-provider
 /// sequence causes the wrapper to make exactly two provider calls: the first
