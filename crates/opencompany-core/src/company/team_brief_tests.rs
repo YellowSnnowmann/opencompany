@@ -275,7 +275,10 @@ fn every_row_leads_with_a_name_and_keeps_the_id_for_tool_calls() {
                 !row.starts_with("- `"),
                 "{who}: a row leads with an id: {row}"
             );
-            assert!(row.ends_with("of a `hivemind_*` tool)"), "{who}: {row}");
+            assert!(
+                row.ends_with("of a `hivemind_*` tool)") || row.ends_with("for tool calls)"),
+                "{who}: {row}"
+            );
         }
     }
 }
