@@ -1,10 +1,11 @@
 # Hive Demo Co
 
-> The smallest company whose desks answer as **rooms**: two desks of two seats
-> each, sharing the CEO. Every message on a desk opens an episode on that desk's
-> hive (`tinyhivemind-openhuman`), the seats run **concurrently** in rounds of
-> two, a seat may refer a question across to the other desk, and the episode
-> ends when a seat calls `complete_episode`.
+> The smallest company whose desks answer as **rooms**: two desks of two
+> members each, sharing the CEO, in one company hive (a TinyHiveMind
+> `Coordinator`). Every message on a desk opens an episode on that desk's hive,
+> members run **concurrently** in rounds of two, any member may message a
+> teammate on the other desk directly (`hivemind_send_agent`), and the episode
+> settles when its members call `hivemind_complete`.
 
 It exists to be measured. `companies/openhuman_demo` is the same three agents
 with one seat per desk — a one-seat desk runs no round — so this is the copy
@@ -19,11 +20,10 @@ rounds overlap, and one agent's turns never do.
 | Engineer | engineering (lead) | Explains how things are built and proposes technical plans. |
 | Writer | content (lead) | Turns rough notes into short, clear written drafts. |
 
-Both desks declare `[group_chat.routing] round_width = 2` and
-`[group_chat.routing.referral] enabled = true, max_hops = 1, returns = true`
-(see `docs/spec/runtime/manifest-semantics.md`). There is no remote MCP server:
-the only tools a seat needs are the speech tools the host serves on its own
-`opencompany` MCP server.
+Both desks declare `[group_chat.routing] round_width = 2` (see
+`docs/spec/runtime/manifest-semantics.md`). There is no remote MCP server: the
+only tools an agent needs to talk are the `hivemind_*` tools every registered
+agent carries (`docs/spec/runtime/hive.md`).
 
 ## Measuring it
 
@@ -35,10 +35,10 @@ scripts/measure-coordination.sh --mock
 
 which boots `frontend/test/e2e/mock-brain.mjs`, a host built with
 `--features openhuman,mcp` serving this company, posts one task to
-`engineering`, tails `/events` until every episode completes, and prints the
-numbers against the thresholds (max concurrent turns ≥ 2, ≥ 1 cross-desk
-referral, ≥ 1 agent→agent dm or broadcast, ≥ 2 distinct pairs, every episode
-completed; the exit code is the number of failures). Against a real model:
+`engineering`, tails `/events` until every episode settles, and prints the
+numbers against the thresholds (max concurrent turns ≥ 2, ≥ 1 agent→agent
+contact, ≥ 2 distinct pairs, every episode settled; the exit code is the
+number of failures). Against a real model:
 
 ```bash
 TINYHUMANS_API_KEY=<jwt> scripts/measure-coordination.sh
