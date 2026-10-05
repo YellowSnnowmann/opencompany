@@ -145,6 +145,16 @@ async fn runtime_with_brain(
     Arc<crate::company::runtime::CompanyRuntime>,
     tempfile::TempDir,
 ) {
+    runtime_with_channels(brain, Vec::new()).await
+}
+
+async fn runtime_with_channels(
+    brain: Arc<ReleaseRecorder>,
+    channels: Vec<Arc<dyn crate::ports::ChannelAdapter>>,
+) -> (
+    Arc<crate::company::runtime::CompanyRuntime>,
+    tempfile::TempDir,
+) {
     let home = tempfile::tempdir().expect("tempdir");
     let manifest: crate::company::types::CompanyManifest = toml::from_str(
         r#"
@@ -162,6 +172,7 @@ async fn runtime_with_brain(
     .expect("manifest");
     let rt = crate::runtime::RuntimeBuilder::new(home.path().to_path_buf(), manifest)
         .with_brain(brain)
+        .with_channels(channels)
         .build()
         .await
         .expect("runtime");
@@ -298,7 +309,10 @@ async fn a_release_nobody_takes_tells_the_operator() {
         refuse: true,
         ..ReleaseRecorder::default()
     });
-    let (rt, _home) = runtime_with_brain(brain.clone()).await;
+    let operator_line =
+        crate::runtime::channel::RecordingChannel::new(crate::runtime::channel::OPERATOR_CHANNEL);
+    let (rt, _home) =
+        runtime_with_channels(brain.clone(), vec![Arc::new(operator_line.clone())]).await;
     let id = park_for_turn(
         &rt,
         None,
@@ -309,15 +323,9 @@ async fn a_release_nobody_takes_tells_the_operator() {
     rt.resolve_approval(&id, Verdict::Approve, operator())
         .await
         .unwrap();
-    let announced = rt
-        .events
-        .read_from(&rt.id, crate::ports::types::EventSeq::new(0), usize::MAX)
-        .await
-        .unwrap()
-        .into_iter()
-        .any(|row| {
-            matches!(&row.event, CompanyEvent::AgentReply { text, .. }
-                if text.contains("no longer waiting"))
-        });
+    let announced = operator_line
+        .sent()
+        .iter()
+        .any(|message| message.text.contains("no longer waiting"));
     assert!(announced, "the operator is told the decision went nowhere");
 }
