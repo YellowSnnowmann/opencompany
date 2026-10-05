@@ -51,16 +51,14 @@ each page under the 500-line cap.
   derived from that tree, and an unlisted skill has nothing for
   `read_skill_resource` to open.
 
-  **`delegates_to`** (issue #176) narrows which **desks** a question from this
-  agent may cross to, and follows the same rule as `tools` and `ledgers`:
-  **omitted or empty means unrestricted**. On its own desk an agent reaches
-  its colleagues by speaking — `post`, `dm`, `broadcast`
-  ([hive.md](hive.md#speaking)) — and nothing here bounds that. Another desk
-  is reached only by a referral ([hive.md](hive.md#referral)), which the
-  desk's `[group_chat.routing.referral]` block has to enable first; a
-  non-empty `delegates_to` then narrows the desks that referral may target,
-  and the `## Your team` section renders exactly that list from the same
-  rule, so the prompt never names a desk the policy would refuse.
+  **`delegates_to`** (issue #176) narrows whom this agent may message
+  directly (`hivemind_send_agent`, [hive.md](hive.md)), and follows the same
+  rule as `tools` and `ledgers`: **omitted or empty means unrestricted**. A
+  non-empty list admits the agent's desk peers plus every member of the desks
+  named, enforced by the company hive's `SendAuthorizer`, and the
+  `## Your team` section renders exactly that list from the same rule, so the
+  prompt never names a teammate the policy would refuse. Posting in a hive the
+  agent sits on is never narrowed by it.
 
   It takes **desk** ids or names (`[[group_chat]]` entries), never teammate
   ids, and `"*"` means every desk the company has. An entry that names no
@@ -172,19 +170,19 @@ each page under the 500-line cap.
   carries no credential, so the console refuses that save while a key is still
   typed in the form rather than dropping it and reporting success (issue #265).
 - **`[[group_chat]]`** declares a desk: who the operator talks to, and who
-  answers. A desk of one answers with one turn; a desk of two or more answers
-  as a room — one `OpenHumanHive` whose seats run in concurrent rounds until
-  one reports the episode complete ([hive.md](hive.md)). `tools` is the
+  answers. Every desk is a hive in the company's Coordinator: a line on it
+  opens an episode its members run, concurrently, until the members it
+  assigned complete it ([hive.md](hive.md)). `tools` is the
   desk's tool ceiling (above). **`[group_chat.routing]`** paces the room:
   `round_width` (5), `choice_option_limit` (8), `max_rounds` (12),
   `turn_timeout_secs` (600) and the four Jev confidence thresholds; every key
-  optional, a zero refused rather than clamped. **`[group_chat.routing.referral]`**
-  (`enabled`, `max_hops`, `reach`, `returns`) lets the desk put a question to
-  another desk. The same block can be installed at runtime over the manifest
-  (`PUT {scope}/desks/{id}/routing`). The retired `[group_chat.hive]` block —
-  the quorum, budget and move-grammar knobs of the trace-grammar hive — is
-  refused at load with a migration hint, never silently ignored: a desk paced
-  by numbers nobody wrote is the failure the refusal exists to prevent.
+  optional, a zero refused rather than clamped. The same block can be
+  installed at runtime over the manifest (`PUT {scope}/desks/{id}/routing`).
+  The retired `[group_chat.hive]` block — the quorum, budget and move-grammar
+  knobs of the trace-grammar hive — and the retired
+  `[group_chat.routing.referral]` block are refused at load with a migration
+  hint, never silently ignored: a desk paced by numbers nobody wrote is the
+  failure the refusal exists to prevent.
 - **`[channels.*]`** enables `ChannelAdapter`s. Unknown channels are a
   validation error; disabled OpenHuman means non-operator channels degrade
   with a boot warning, never a failure.
