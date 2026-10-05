@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import type { EpisodeFrame, TurnBracketFrame } from "@/hooks/use-events";
+import type { HiveFrame, TurnBracketFrame } from "@/hooks/use-events";
 import {
   coordinationObservations,
   coordinationSummary,
   EMPTY_TURN_LEDGER,
-  planTargets,
   reduceTurnBracket,
   workingAgents,
 } from "@/lib/coordination";
-import { EMPTY_EPISODE_FRAMES, reduceEpisodeFrame } from "@/lib/episode-frames";
+import { EMPTY_HIVE_FRAMES, reduceHiveFrame, type HiveFoldInput } from "@/lib/hive";
 
 /**
- * `lib/coordination.ts`: the turn ledger's peak and same-agent overlap count,
- * and the comms edges the episode fold implies. These are the console's copy
- * of the numbers `scripts/measure-coordination.mjs` prints.
+ * `lib/coordination.ts`: the turn ledger's peak and overlap counts, and the
+ * comms edges the hive fold implies. These are the console's copy of the
+ * numbers `scripts/lib/coordination-metrics.mjs` prints — the last test feeds
+ * both the same frames and pins that they agree.
  */
 
 const bracket = (
@@ -35,6 +35,7 @@ describe("reduceTurnBracket", () => {
       bracket("turn_settled", "ceo", 6, { turnId: "t3" }),
     ].reduce(reduceTurnBracket, EMPTY_TURN_LEDGER);
     expect(ledger.peak).toBe(2);
+    expect(ledger.overlaps).toBe(2);
     expect(ledger.open).toEqual([]);
     expect(ledger.closed.map((t) => `${t.agentId}:${t.startedAtMillis}-${t.settledAtMillis}`)).toEqual([
       "engineer:10-30",
@@ -53,12 +54,16 @@ describe("reduceTurnBracket", () => {
     expect(reduceTurnBracket(ledger, bracket("turn_settled", "ceo", 3))).toBe(ledger);
   });
 
-  it("keeps the thread a bracket named on the open turn, for the presence dot", () => {
+  it("keeps the thread and the hive ref a bracket named on the open turn", () => {
     const ledger = reduceTurnBracket(
       EMPTY_TURN_LEDGER,
-      bracket("turn_started", "engineer", 1, { turnId: "t1", chatId: "dm-thread" }),
+      bracket("turn_started", "engineer", 1, {
+        turnId: "t1",
+        chatId: "dm-thread",
+        hive: { hiveId: "engineering", episodeId: "ep-1" },
+      }),
     );
-    expect(ledger.open[0].chatId).toBe("dm-thread");
+    expect(ledger.open[0]).toMatchObject({ chatId: "dm-thread", hiveId: "engineering", episodeId: "ep-1" });
   });
 
   it("counts a second turn opening on an agent whose first is still open", () => {
@@ -71,56 +76,108 @@ describe("reduceTurnBracket", () => {
   });
 });
 
-describe("coordinationObservations", () => {
-  const frames = (
-    [
-      { type: "episode_opened", seq: 1, atMillis: 10, chatId: "engineering", episodeId: "ep-1", openedBySeq: 1, participants: ["engineer", "ceo"], plan: { kind: "hive", primaryId: "engineer", invitedIds: ["ceo"] } },
-      { type: "broadcast_routed", seq: 2, atMillis: 20, chatId: "engineering", episodeId: "ep-1", revision: 1, agentId: "engineer", messageSeq: 5, plan: { kind: "hive", primaryId: "ceo", invitedIds: ["engineer", "ceo"] }, router: "jev" },
-      { type: "dm_delivered", seq: 3, atMillis: 30, chatId: "engineering", episodeId: "ep-1", from: "ceo", to: ["engineer"], messageSeq: 6 },
-      { type: "referral", seq: 4, atMillis: 40, chatId: "engineering", sequence: 7, toDesk: "content", target: "writer", asker: "engineer", direct: false, returning: false, episodeId: "ep-1", toEpisodeId: "ep-2" },
-      { type: "referral", seq: 5, atMillis: 50, chatId: "engineering", sequence: 8, toDesk: "content", target: "writer", asker: "engineer", direct: false, returning: true, episodeId: "ep-1", toEpisodeId: "ep-2" },
-      { type: "episode_completed", seq: 6, atMillis: 60, chatId: "engineering", episodeId: "ep-1", revision: 2, completedBy: "ceo", rounds: 2, reason: "complete_episode" },
-      { type: "episode_opened", seq: 7, atMillis: 70, chatId: "content", episodeId: "ep-2", openedBySeq: 7, participants: ["writer"], plan: { kind: "one", primaryId: "writer" } },
-      { type: "round_started", seq: 8, atMillis: 80, chatId: "content", episodeId: "ep-2", revision: 0, agentIds: ["writer"] },
-    ] as EpisodeFrame[]
-  ).reduce(reduceEpisodeFrame, EMPTY_EPISODE_FRAMES);
+/** One small company run: an accepted line, two direct lines, a private one, two settles. */
+const RUN: (HiveFrame | TurnBracketFrame)[] = [
+  { type: "hive_accepted", seq: 1, atMillis: 10, messageId: "m1", sequence: 1, chatId: "engineering", starters: ["engineer"], route: "jev" },
+  { type: "turn_started", seq: 2, atMillis: 20, turnId: "a", agentId: "engineer", hive: { hiveId: "engineering", episodeId: "ep-1" } },
+  {
+    type: "hive_message",
+    seq: 3,
+    atMillis: 30,
+    sequence: 2,
+    sender: "engineer",
+    destination: { type: "agent", id: "ceo" },
+    text: "Can you check the budget?",
+    episodeId: "ep-1",
+  },
+  { type: "turn_started", seq: 4, atMillis: 40, turnId: "b", agentId: "ceo" },
+  {
+    type: "hive_message",
+    seq: 5,
+    atMillis: 50,
+    sequence: 3,
+    sender: "ceo",
+    destination: { type: "agent", id: "engineer" },
+    text: "Budget is fine.",
+  },
+  { type: "turn_settled", seq: 6, atMillis: 60, turnId: "b", agentId: "ceo", outcome: "committed" },
+  {
+    type: "hive_message",
+    seq: 7,
+    atMillis: 70,
+    sequence: 4,
+    sender: "engineer",
+    destination: { type: "hive", id: "engineering" },
+    text: "Private note for the writer.",
+    episodeId: "ep-1",
+    onlyFor: ["writer", "engineer"],
+  },
+  { type: "turn_settled", seq: 8, atMillis: 80, turnId: "a", agentId: "engineer", outcome: "committed" },
+  { type: "hive_episode_settled", seq: 9, atMillis: 90, episodeId: "ep-1", chatId: "engineering", openedAt: 10 },
+  { type: "hive_episode_settled", seq: 10, atMillis: 100, episodeId: "ep-2", chatId: "content", openedAt: 95, failure: "turn failed" },
+  { type: "hive_turn_interrupted", seq: 11, atMillis: 110, agentId: "writer", reason: "restart" },
+];
 
-  it("draws a broadcast to every seat but its author, a dm to its recipients, and a referral to the desk", () => {
-    const observations = coordinationObservations(frames);
-    expect(observations).toEqual([
-      { kind: "spoke", from: "engineer", to: "ceo", via: "broadcast", atMillis: 20 },
-      { kind: "spoke", from: "ceo", to: "engineer", via: "dm", atMillis: 30 },
-      { kind: "spoke", from: "engineer", to: "content", via: "referral", atMillis: 40 },
+const frames = RUN.reduce((state, frame) => reduceHiveFrame(state, frame as HiveFoldInput), EMPTY_HIVE_FRAMES);
+const ledger = RUN.filter(
+  (frame): frame is TurnBracketFrame => frame.type === "turn_started" || frame.type === "turn_settled",
+).reduce(reduceTurnBracket, EMPTY_TURN_LEDGER);
+
+describe("coordinationObservations", () => {
+  it("draws a direct line to its recipient and a private line to each reader but the sender", () => {
+    expect(coordinationObservations(frames)).toEqual([
+      { kind: "spoke", from: "engineer", to: "ceo", via: "direct", atMillis: 30 },
+      { kind: "spoke", from: "ceo", to: "engineer", via: "direct", atMillis: 50 },
+      { kind: "spoke", from: "engineer", to: "writer", via: "private", atMillis: 70 },
     ]);
   });
 
   it("adds a speaking observation per agent with an open turn", () => {
-    const ledger = reduceTurnBracket(EMPTY_TURN_LEDGER, bracket("turn_started", "writer", 9));
-    expect(coordinationObservations(frames, ledger).at(-1)).toEqual({ kind: "speaking", agentId: "writer" });
+    const open = reduceTurnBracket(EMPTY_TURN_LEDGER, bracket("turn_started", "writer", 9));
+    expect(coordinationObservations(frames, open).at(-1)).toEqual({ kind: "speaking", agentId: "writer" });
   });
+});
 
+describe("coordinationSummary", () => {
   it("summarises the way the measurement script does", () => {
-    const ledger = [
-      bracket("turn_started", "engineer", 1, { turnId: "a" }),
-      bracket("turn_started", "writer", 2, { turnId: "b" }),
-      bracket("turn_settled", "engineer", 3, { turnId: "a" }),
-      bracket("turn_settled", "writer", 4, { turnId: "b" }),
-    ].reduce(reduceTurnBracket, EMPTY_TURN_LEDGER);
     expect(coordinationSummary(frames, ledger)).toEqual({
-      peakConcurrentTurns: 2,
+      maxConcurrentTurns: 2,
+      overlaps: 1,
+      openTurns: 0,
       sameAgentOverlaps: 0,
+      interruptedTurns: 1,
       episodesOpened: 2,
-      episodesCompleted: 1,
-      roundsPerEpisode: [2, 1],
-      broadcasts: 1,
-      dms: 1,
-      referrals: 1,
-      pairs: ["ceo→engineer", "engineer→ceo", "engineer→content"],
+      episodesSettled: 1,
+      episodesFailed: 1,
+      episodesOpen: [],
+      turnsPerEpisode: { "ep-1": 1, "ep-2": 0 },
+      directMessages: 2,
+      privateLines: 1,
+      distinctPairs: ["ceo→engineer", "engineer→ceo", "engineer→writer"],
+      starterRoutes: { jev: 1 },
     });
   });
 
-  it("lists a plan's seats once, primary first", () => {
-    expect(planTargets({ kind: "hive", primaryId: "ceo", invitedIds: ["engineer", "ceo"] })).toEqual(["ceo", "engineer"]);
-    expect(planTargets({ kind: "clarify" })).toEqual([]);
+  it("agrees with scripts/lib/coordination-metrics.mjs on the same frames", async () => {
+    // A variable specifier keeps TypeScript from resolving the untyped script.
+    const path = "../../../scripts/lib/coordination-metrics.mjs";
+    const metrics = await import(/* @vite-ignore */ path);
+    const scriptLedger = RUN.reduce((acc, frame) => metrics.foldFrame(acc, frame), metrics.createLedger());
+    const script = metrics.summarize(scriptLedger);
+    const console_ = coordinationSummary(frames, ledger);
+    expect(console_.maxConcurrentTurns).toBe(script.maxConcurrentTurns);
+    expect(console_.overlaps).toBe(script.overlaps);
+    expect(console_.openTurns).toBe(script.openTurns);
+    expect(console_.sameAgentOverlaps).toBe(script.sameAgentOverlaps);
+    expect(console_.interruptedTurns).toBe(script.interruptedTurns);
+    expect(console_.episodesOpened).toBe(script.episodesOpened);
+    expect(console_.episodesSettled).toBe(script.episodesSettled);
+    expect(console_.episodesFailed).toBe(script.episodesFailed);
+    expect(console_.episodesOpen).toEqual(script.episodesOpen);
+    expect(console_.turnsPerEpisode).toEqual(script.turnsPerEpisode);
+    expect(console_.directMessages).toBe(script.directMessages);
+    expect(console_.privateLines).toBe(script.privateLines);
+    expect(console_.distinctPairs).toEqual(script.distinctPairs);
+    expect(console_.starterRoutes).toEqual(script.starterRoutes);
   });
 });
