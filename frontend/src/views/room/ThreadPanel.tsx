@@ -11,9 +11,14 @@ import type { TeamMember } from "@/lib/team";
 import { cn } from "@/lib/utils";
 import { BudgetPauseNoticeCard } from "./BudgetPauseNoticeCard";
 import { EchoPlaceholder, echoMarkerFor } from "./EchoPlaceholder";
-import { FailedSendNotice, OutputLinkRow, TurnFailureNotice } from "./MessageRow";
+import {
+  cardOnlyCarriesAnArtifact,
+  FailedSendNotice,
+  OutputLinkRow,
+  TurnFailureNotice,
+} from "./MessageRow";
 import { MessageAttachments } from "./MessageAttachments";
-import { StepTimeline } from "./StepTimeline";
+import { CardChip, StepTimeline } from "./StepTimeline";
 import { MessageComposer } from "./MessageComposer";
 import { TypingLine } from "./TypingLine";
 import { WorkingIndicator } from "./WorkingIndicator";
@@ -108,6 +113,10 @@ interface Props {
   onReviewCard?: (taskId: string, decision: "approve" | "revise") => void;
   /** Whether {@link reviewTaskId}'s verdict is already in flight. */
   reviewInFlight?: boolean;
+  /** The task card currently being dismissed from a reply. */
+  dismissingCardId?: string | null;
+  /** Dismisses a task card linked from a reply. */
+  onDismissCard?: (taskId: string) => void;
   /**
    * Every OTHER in-review card this thread anchors to, besides
    * {@link reviewTaskId} — `reviewAnchorsForThread`'s entries after its
@@ -247,6 +256,8 @@ export function ThreadPanel({
   reviewTaskId,
   onReviewCard,
   reviewInFlight,
+  dismissingCardId = null,
+  onDismissCard,
   additionalReviewAnchors,
   reviewingTaskId,
   onClose,
@@ -331,6 +342,8 @@ export function ThreadPanel({
               channel={channel}
               members={members}
               message={parent}
+              dismissingCardId={dismissingCardId}
+              onDismissCard={onDismissCard}
               youAvatar={youAvatar}
               resolveAttachmentUrl={resolveAttachmentUrl}
               cognition={cognition}
@@ -351,6 +364,8 @@ export function ThreadPanel({
                 channel={channel}
                 members={members}
                 message={r}
+                dismissingCardId={dismissingCardId}
+                onDismissCard={onDismissCard}
                 youAvatar={youAvatar}
                 resolveAttachmentUrl={resolveAttachmentUrl}
                 cognition={cognition}
@@ -442,6 +457,8 @@ function Line({
   channel,
   members,
   message,
+  dismissingCardId = null,
+  onDismissCard,
   youAvatar,
   resolveAttachmentUrl,
   cognition,
@@ -453,6 +470,8 @@ function Line({
   channel: Channel;
   members: TeamMember[];
   message: ChatMessage;
+  dismissingCardId?: string | null;
+  onDismissCard?: (taskId: string) => void;
   youAvatar?: string;
   resolveAttachmentUrl?: (nodeId: string) => Promise<string>;
   cognition?: CognitionState | null;
@@ -565,6 +584,14 @@ function Line({
         )}
         {message.outputs && message.outputs.length > 0 && (
           <OutputLinkRow outputs={message.outputs} />
+        )}
+        {message.taskId && !cardOnlyCarriesAnArtifact(message) && (
+          <CardChip
+            taskId={message.taskId}
+            busy={dismissingCardId === message.taskId}
+            disabled={dismissingCardId !== null && dismissingCardId !== message.taskId}
+            onDismiss={onDismissCard}
+          />
         )}
       </div>
     </div>

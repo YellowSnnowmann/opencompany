@@ -11,7 +11,7 @@ test.skip(!LIVE_BRAIN, LIVE_BRAIN_REASON);
  *
  * This single spec exercises the whole chain the console depends on:
  *
- *   magic-link auth → session cookie → console → POST /api/v1/company/chat
+ *   magic-link auth → session cookie → console → operator DM
  *     → (mocked) LLM backend → reply rendered as a company bubble
  *
  * It runs against a feature-gated host with a mocked inference backend behind
@@ -46,8 +46,10 @@ test("operator console renders a mocked backend reply end to end", async ({
 }) => {
   // Authentication is performed once by global-setup.ts and shared through
   // Playwright storage state so multiple specs do not trip the resend throttle.
-  // Open Room. A bare address resolves to the company-wide line.
-  await page.goto("/#/chat");
+  // Use a direct teammate conversation so this wiring proof exercises one
+  // ordinary agent reply. Desk and #general lines run as hive episodes and
+  // have their own post/complete protocol.
+  await page.goto("/#/chat/dm:engineer");
 
   // Send a unique prompt through the operator chat input.
   const prompt = `e2e wiring ping ${Date.now()}`;
@@ -63,7 +65,7 @@ test("operator console renders a mocked backend reply end to end", async ({
   //    error may appear.
   //
   // On the reply's own words rather than the `__MOCK_LLM__` marker: Room runs a
-  // company line through `Markdown`, so the marker's underscores are emphasis
+  // teammate reply through `Markdown`, so the marker's underscores are emphasis
   // and the DOM carries `<strong>MOCK_LLM</strong>` — no node holds the literal
   // string. The prose is what the assertion was always about anyway.
   await expect(page.getByText("mock inference backend reply").first()).toBeVisible({

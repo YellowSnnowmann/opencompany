@@ -382,6 +382,13 @@ impl SettleTurn<'_> {
         if let Some(pool) = &pool
             && let Ok(Some(record)) = deps.store.load(self.company()).await
         {
+            let thread_root = match self.scope.thread {
+                Some(sequence) => match &self.hooks.projector {
+                    Some(projector) => projector.host_sequence_of(sequence).await,
+                    None => None,
+                },
+                None => None,
+            };
             let run_turn =
                 crate::harness::run_turn::HarnessRunTurn::new(Arc::clone(pool), Arc::clone(deps));
             let runner = DelegationRunner::new(
@@ -392,6 +399,7 @@ impl SettleTurn<'_> {
                 &deps.delegations,
                 crate::harness::orchestrator::MAX_DELEGATIONS_PER_TURN,
             )
+            .in_thread(thread_root)
             .with_approvals(&deps.approval_requests)
             .with_workflow_refs(&deps.workflow_refs);
             match delegations

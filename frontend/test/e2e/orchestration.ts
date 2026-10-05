@@ -69,6 +69,31 @@ export async function say(page: Page, text: string) {
   await page.getByRole("button", { name: "Send", exact: true }).click();
 }
 
+/** Replies in the currently open message thread. */
+export async function sayInThread(page: Page, text: string) {
+  const thread = threadPanel(page);
+  await thread.getByPlaceholder("Reply…").fill(text);
+  await thread.getByRole("button", { name: "Send", exact: true }).click();
+}
+
+/** The open message thread panel. */
+export function threadPanel(page: Page): Locator {
+  return page
+    .locator("aside")
+    .filter({ has: page.getByRole("heading", { name: "Thread" }) });
+}
+
+/** Opens a channel message's replies and waits for the thread panel. */
+export async function openMessageThread(page: Page, text: string) {
+  const root = page
+    .locator("article")
+    .filter({ hasText: text })
+    .last();
+  await expect(root).toBeVisible({ timeout: 30_000 });
+  await root.getByRole("button", { name: /\d+ repl(?:y|ies)/ }).click();
+  await expect(threadPanel(page)).toBeVisible({ timeout: 15_000 });
+}
+
 /**
  * Every dispatch marker in the open main line.
  *
@@ -112,14 +137,12 @@ export async function waitForTurn(page: Page, timeout = 600_000) {
 }
 
 /**
- * The marker count, once the thread's rehydration has stopped adding to it.
+ * The marker count on the channel transcript, once it has stopped changing.
  *
- * A thread opens empty and fills from `chat/history` a moment later, so a count
- * taken on arrival is a count of nothing — and "two new markers appeared" would
- * be measuring the hydration instead. Waits for two equal readings rather than
- * for a fixed time, the same shape `chat-dispatch-marker.spec.ts` uses and for
- * the same reason: this suite shares one host and one data root across tests,
- * so an earlier test's marker is legitimately in this thread's history.
+ * The transcript can fill from `chat/history` a moment after navigation, so a
+ * count taken on arrival may be incomplete. Waits for two equal readings rather
+ * than for a fixed time. This suite shares one host and data root across tests,
+ * so an earlier test's marker is legitimately in the channel history.
  */
 export async function settledMarkerCount(page: Page): Promise<number> {
   let last = -1;

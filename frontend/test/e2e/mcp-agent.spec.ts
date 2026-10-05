@@ -44,14 +44,16 @@ test.skip(
 test.skip(!LIVE_BRAIN, LIVE_BRAIN_REASON);
 
 /**
- * Opens Room on the company-wide line.
+ * Opens the engineer's direct conversation.
  *
  * The channel comes from the address, not a rail click: a composer is present
  * either way, so a `fill` succeeds even when nothing is selected — and the
  * reply then lands in a transcript this page is not showing.
  */
 async function openThread(page: Page) {
-  await page.goto("/#/chat");
+  // A desk line is an episode run by the hive coordinator. This test is about
+  // one agent's MCP call and its reply, so use the agent's direct conversation.
+  await page.goto("/#/chat/dm:engineer");
   const skip = page.getByRole("button", { name: "Skip for now" });
   await skip
     .waitFor({ state: "visible", timeout: 5_000 })
@@ -88,15 +90,18 @@ test("an agent calls a tool on a registered MCP server and shows the result", as
     `registering ${server} failed: ${added.status()} ${await added.text()}`,
   ).toBeTruthy();
 
-  let bodyPassed = false;
-  try {
-    await openThread(page);
+  // Keep the registration for the life of this E2E host. OpenHuman retains
+  // tool declarations in its durable agent session; deleting the server here
+  // would leave a later turn with a declared but non-executable tool. The
+  // managed live-brain host uses an isolated test data root and shuts down
+  // after the suite, so this fixture cannot escape the run.
+  await openThread(page);
 
-    const marker = `agent-mcp-${randomUUID()}`;
-    const directive = `__MOCK_TOOL_CALL__ ${JSON.stringify({
-      name: "mcp_call_tool",
-      arguments: { server, tool: "echo", arguments: { text: marker } },
-    })}`;
+  const marker = `agent-mcp-${randomUUID()}`;
+  const directive = `__MOCK_TOOL_CALL__ ${JSON.stringify({
+    name: "mcp_call_tool",
+    arguments: { server, tool: "echo", arguments: { text: marker } },
+  })}`;
 
     // The POST is awaited EXPLICITLY, and the reload below is why. A turn runs
     // inside the request that started it and the host drops the work when the
@@ -104,26 +109,26 @@ test("an agent calls a tool on a registered MCP server and shows the result", as
     // turn before it reaches the model. Observed, not feared: on the run that
     // first reloaded here, the mock backend logged no call at all for this
     // message where the run before it had logged the whole round trip.
-    const posted = page.waitForResponse(
-      (response) => response.url().endsWith("/chat") && response.request().method() === "POST",
-      { timeout: 90_000 },
-    );
-    await page.getByPlaceholder(/^Message /).fill(directive);
+  const posted = page.waitForResponse(
+    (response) => response.url().endsWith("/chat") && response.request().method() === "POST",
+    { timeout: 90_000 },
+  );
+  await page.getByPlaceholder(/^Message /).fill(directive);
     // `exact`, because the composer's button is labelled exactly "Send" while
     // the sidebar's thread previews take their accessible names from message
     // text — so a loose match resolves to two elements the moment any message
     // in the transcript mentions sending, and dies on a strict-mode violation
     // in a spec that has nothing to do with whatever wrote that message.
-    await page.getByRole("button", { name: "Send", exact: true }).click();
-    await expect(page.getByText(/^Couldn't send/)).toHaveCount(0);
-    expect((await posted).ok(), "the chat POST did not succeed").toBeTruthy();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText(/^Couldn't send/)).toHaveCount(0);
+  expect((await posted).ok(), "the chat POST did not succeed").toBeTruthy();
 
     // Read the answer from a RELOADED transcript: it is then rehydrated from
     // `chat/history`, so what is asserted is the durable record of the turn
     // rather than whatever the open view chose to draw — the same move
     // `chat-to-card.spec.ts` makes, and the stronger claim.
-    await page.reload();
-    await openThread(page);
+  await page.reload();
+  await openThread(page);
 
     // Both halves of the round trip on one row: the remote tool's own output,
     // which can only have come from the fixture over HTTP, and the marker that
@@ -134,35 +139,7 @@ test("an agent calls a tool on a registered MCP server and shows the result", as
     // is `MOCK_LLM` inside a `<strong>`. Only the plain-text surfaces — the
     // rail's thread preview, an API response — carry it verbatim, which is a
     // tidy way to assert against the sidebar by accident.
-    const reply = transcriptRow(page, `echo: ${marker}`);
-    await expect(reply).toBeVisible({ timeout: 30_000 });
-    await expect(reply).toContainText("MOCK_LLM");
-    bodyPassed = true;
-  } finally {
-    // The host persists runtime servers in its secret store, so a spec that
-    // failed half way would otherwise leave this one registered for every later
-    // run against the same data root.
-    //
-    // NOTHING here may throw past a failing body. An exception raised in a
-    // `finally` replaces the error already travelling out of the `try`, so a
-    // cleanup complaint would erase the real failure — the harder of the two to
-    // debug, and the one worth keeping. That covers both ways this can go
-    // wrong: `page.request.delete` REJECTS on a transport failure (it does not
-    // return a response to inspect), and the status check is an assertion.
-    // Both are therefore reported only when the body itself passed.
-    let removed: Awaited<ReturnType<typeof page.request.delete>> | undefined;
-    let transportError: unknown;
-    try {
-      removed = await page.request.delete(`/api/v1/company/mcp/servers/${server}`);
-    } catch (error) {
-      transportError = error;
-    }
-    if (bodyPassed) {
-      if (transportError) throw transportError;
-      expect(
-        removed!.ok(),
-        `removing ${server} failed: ${removed!.status()} ${await removed!.text()}`,
-      ).toBeTruthy();
-    }
-  }
+  const reply = transcriptRow(page, `echo: ${marker}`);
+  await expect(reply).toBeVisible({ timeout: 30_000 });
+  await expect(reply).toContainText("MOCK_LLM");
 });

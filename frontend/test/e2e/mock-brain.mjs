@@ -413,9 +413,13 @@ function hiveToolCall(model, tool, args, id) {
 function coordinatorCompletion(model, turn) {
   const episodeId = typeof turn.episode?.episode_id === "string" ? turn.episode.episode_id : null;
   if (!episodeId) {
+    const output = turn.outputs.at(-1);
+    const reply = output
+      ? toolOutputText(output)
+      : "mock inference backend reply.";
     return completion(
       model,
-      { role: "assistant", content: `${MARKER} ${turn.agent} replying: noted, thanks.` },
+      { role: "assistant", content: `${MARKER} ${reply}` },
       "stop",
     );
   }
@@ -436,7 +440,10 @@ function coordinatorCompletion(model, turn) {
     tool: "hivemind_complete",
     args: { episode_id: episodeId, body: `${MARKER} ${turn.agent} in episode ${episodeId}: done, nothing left open.` },
   });
-  const step = Math.max(turn.calls.length, turn.outputs.length);
+  // Explicit scripted tool calls may run inside the coordinator's agent turn
+  // before the episode is completed. They are not coordinator-control calls,
+  // so they do not advance the send/complete sequence.
+  const step = turn.calls.filter((name) => name.startsWith("hivemind_")).length;
   if (step >= plan.length) {
     return completion(model, { role: "assistant", content: `${MARKER} ${turn.agent}: episode handled.` }, "stop");
   }
@@ -1218,15 +1225,28 @@ function chatCompletion(body) {
     );
   }
 
-  // A coordinator turn (OC-2). Ahead of the plan and directive arms because
-  // the hive context says what this request IS: a turn that answers an
-  // episode or a teammate, whatever the operator's line carried.
+  // A coordinator turn (OC-2). Explicit scripted actions in its operator line
+  // still belong to the agent's turn (and can be executed before completing
+  // the episode); ordinary turns use the coordinator protocol below.
   const coordinator = findCoordinatorTurn(messages);
-  if (coordinator) return coordinatorCompletion(model, coordinator);
+
+  // TurnRequest embeds operator messages as JSON, so their directive quotes
+  // need to be decoded before the normal directive parsers can inspect them.
+  // Keep the original provider history too: it carries tool outputs used to
+  // tell whether a directive has already been served.
+  const scriptedMessages = coordinator
+    ? [
+        ...messages,
+        ...coordinator.request.messages
+          .filter((message) => typeof message?.body === "string")
+          .map((message) => ({ role: "user", content: message.body })),
+      ]
+    : messages;
 
   // The scripted-turn arm, ahead of the single-call directives: a plan is the
-  // whole turn, and a message carrying one carries nothing else.
-  const plan = findPlan(messages);
+  // whole turn. Inside a coordinator turn, the following empty step is the
+  // signal to complete the episode rather than leave it parked on a prose reply.
+  const plan = findPlan(scriptedMessages);
   if (plan) {
     const served = servedPlans.get(plan.id) ?? 0;
     const step = plan.steps[served];
@@ -1277,10 +1297,33 @@ function chatCompletion(body) {
       // Consumed, so the next call moves on rather than re-reading this one.
       servedPlans.set(plan.id, served + 1);
       process.stderr.write(`[mock brain] plan step ${served}: text reply\n`);
+      if (coordinator && coordinator.episode) {
+        return completion(
+          model,
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: `mock-hive-${coordinator.episode.episode_id}-complete`,
+                type: "function",
+                function: {
+                  name: "hivemind_complete",
+                  arguments: JSON.stringify({
+                    episode_id: coordinator.episode.episode_id,
+                    body: `${MARKER} scripted episode complete.`,
+                  }),
+                },
+              },
+            ],
+          },
+          "tool_calls",
+        );
+      }
     }
   }
 
-  const directive = findDirective(messages);
+  const directive = findDirective(scriptedMessages);
 
   if (
     directive &&
@@ -1337,6 +1380,8 @@ function chatCompletion(body) {
         `[${[...bridged].join(", ")}]\n`,
     );
   }
+
+  if (coordinator) return coordinatorCompletion(model, coordinator);
 
   const last = messages[messages.length - 1];
   const content = isToolOutput(last)

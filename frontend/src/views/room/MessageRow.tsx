@@ -600,7 +600,7 @@ function SystemPill({
  * A card from `spawn_task` carries no artifact of its own and still renders —
  * there the card IS the work, and the board is where it belongs.
  */
-function cardOnlyCarriesAnArtifact(message: ChatMessage): boolean {
+export function cardOnlyCarriesAnArtifact(message: ChatMessage): boolean {
   if (!message.taskId) return false;
   return (message.outputs ?? []).some(
     (output) => output.kind === "artifact" && output.taskId === message.taskId,

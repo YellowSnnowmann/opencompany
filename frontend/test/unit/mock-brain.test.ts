@@ -562,6 +562,66 @@ describe("the mock inference backend", () => {
     expect(after.choices[0].message.tool_calls).toBeUndefined();
   });
 
+  it("runs an explicit tool call in an episode before completing it", async () => {
+    const marker = `hive-tool-${Date.now()}`;
+    const opening = turnRequest("engineer", {
+      body: `__MOCK_TOOL_CALL__ ${JSON.stringify({
+        name: "mcp_call_tool",
+        arguments: { server: "fixture", tool: "echo", arguments: { text: marker } },
+      })}`,
+    });
+
+    const tool = hiveCall(await chat([opening], ["mcp_call_tool", "hivemind_complete"]));
+    expect(tool.name).toBe("mcp_call_tool");
+    expect(tool.args.arguments.text).toBe(marker);
+
+    const complete = hiveCall(
+      await chat(
+        [opening, ...called("mcp_call_tool", "tool-1", `echo: ${marker}`)],
+        ["mcp_call_tool", "hivemind_complete"],
+      ),
+    );
+    expect(complete.name).toBe("hivemind_complete");
+    expect(complete.args.episode_id).toBe("ep-1");
+
+    const done = await chat(
+      [
+        opening,
+        ...called("mcp_call_tool", "tool-1", `echo: ${marker}`),
+        ...called("hivemind_complete", "complete-1", "done"),
+      ],
+      ["mcp_call_tool", "hivemind_complete"],
+    );
+    expect(done.choices[0].finish_reason).toBe("stop");
+  });
+
+  it("runs a scripted plan in an episode and completes after its empty step", async () => {
+    const opening = turnRequest("engineer", {
+      body: plan("hive-plan-1", [[{ name: "spawn_task", arguments: { title: "Gather sources" } }], []]),
+    });
+    const tools = ["spawn_task", "hivemind_complete"];
+
+    const task = hiveCall(await chat([opening], tools));
+    expect(task.name).toBe("spawn_task");
+    expect(task.args.title).toBe("Gather sources");
+
+    const complete = hiveCall(
+      await chat([opening, ...called("spawn_task", "task-1", "created")], tools),
+    );
+    expect(complete.name).toBe("hivemind_complete");
+    expect(complete.args.episode_id).toBe("ep-1");
+
+    const done = await chat(
+      [
+        opening,
+        ...called("spawn_task", "task-1", "created"),
+        ...called("hivemind_complete", "complete-1", "done"),
+      ],
+      tools,
+    );
+    expect(done.choices[0].finish_reason).toBe("stop");
+  });
+
   it("messages the teammate a __MOCK_DM__ names before completing, by Coordinator id", async () => {
     const opening = turnRequest("engineer", { body: "Plan it __MOCK_DM__ ceo" });
     const dm = hiveCall(await chat([opening]));
@@ -591,6 +651,16 @@ describe("the mock inference backend", () => {
     expect(reply.choices[0].finish_reason).toBe("stop");
     expect(reply.choices[0].message.tool_calls).toBeUndefined();
     expect(reply.choices[0].message.content).toContain("__MOCK_LLM__");
+  });
+
+  it("includes a direct-message tool result in the agent's reply", async () => {
+    const marker = "echo: direct-mcp-result";
+    const reply = await chat([
+      turnRequest("engineer", { episode: false }),
+      ...called("mcp_call_tool", "tool-1", marker),
+    ]);
+
+    expect(reply.choices[0].message.content).toContain(marker);
   });
 
   it("reads the newest turn's request, not an earlier one in the session", async () => {

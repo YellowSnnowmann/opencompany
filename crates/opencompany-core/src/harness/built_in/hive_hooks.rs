@@ -30,6 +30,7 @@ use tinyhivemind_openhuman::{HostedTurn, TurnHooks, TurnOptions, TurnProgressSin
 
 use super::progress_pump::ProgressPump;
 use super::{CompanyAgent, HarnessDeps, HarnessPool};
+use crate::hive::projector::Projector;
 use crate::hive::projector::{HiveRoster, TurnMetaBoard};
 use crate::ports::types::CompanyId;
 
@@ -113,6 +114,7 @@ pub struct HiveHooks {
     agents: Arc<HiveAgents>,
     roster: Arc<HiveRoster>,
     meta: Arc<TurnMetaBoard>,
+    projector: Option<Arc<Projector>>,
     slots: std::sync::Mutex<HashMap<String, TurnSlot>>,
     cards: settle::EpisodeCards,
 }
@@ -139,9 +141,17 @@ impl HiveHooks {
             agents,
             roster,
             meta,
+            projector: None,
             slots: std::sync::Mutex::new(HashMap::new()),
             cards: settle::EpisodeCards::default(),
         }
+    }
+
+    /// Attaches the projector used to translate Coordinator thread roots into
+    /// host journal sequence ids when a turn opens a task card.
+    pub fn with_projector(mut self, projector: Arc<Projector>) -> Self {
+        self.projector = Some(projector);
+        self
     }
 
     fn slots(&self) -> std::sync::MutexGuard<'_, HashMap<String, TurnSlot>> {

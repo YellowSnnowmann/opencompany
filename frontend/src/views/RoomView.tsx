@@ -3086,6 +3086,8 @@ export function RoomView({
                   reviewing={threadReviewing}
                   reviewTaskId={threadReviewAnchor?.taskId}
                   onReviewCard={(taskId, decision) => void reviewCard(taskId, decision)}
+                  dismissingCardId={dismissingCardId}
+                  onDismissCard={(taskId) => void dismissCard(taskId)}
                   reviewInFlight={
                     threadReviewAnchor !== undefined &&
                     reviewingCardIds.has(threadReviewAnchor.taskId)

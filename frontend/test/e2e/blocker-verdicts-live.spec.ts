@@ -16,10 +16,11 @@ import { clickClearOfToasts } from "./toasts";
  *
  * That distinction is the whole issue. #2027 made all four verdicts work at the
  * engine while an operator could still reach only two, so a test that stops at
- * "the request was accepted" would have passed against the bug. The assertion
- * that does not is the resume note: the host writes a different sentence into
- * the blocker's thread for each verdict, so reading it back says which of the
- * four actually ran.
+ * "the request was accepted" would have passed against the bug. This reaches
+ * each live decision control and waits for the host to remove the matching
+ * blocker from its parked queue. Hive seats receive a consolidated release
+ * note through the coordinator, so they do not publish the legacy per-DM
+ * resume note.
  *
  * ## The fixture is the product
  *
@@ -49,28 +50,10 @@ import { clickClearOfToasts } from "./toasts";
  */
 
 const SCOPE = "/api/v1/company";
-/** The DM the questions are asked in, and where the resume notes land — one
- * channel per verdict, each seeing exactly one message (see `askAndParkAll`
- * for why a shared channel does not work here). */
-const threadFor = (verdict: Verdict) => `dm:writer-${verdict}`;
+/** A real teammate DM; all four verdicts run one at a time in this session. */
+const threadFor = "dm:writer";
 
-/**
- * What the host writes back into the blocker's thread for each verdict —
- * mirrors `blocker_resume_note` in `src/company/runtime.rs`.
- *
- * Four different sentences is what makes this spec able to tell the verdicts
- * apart. Three of the four ride an `approve`, so a spec that only checked the
- * response could not distinguish a skip that worked from a skip silently
- * flattened into a retry — which is exactly the bug.
- */
-const RESUME_NOTE = {
-  retry: "Got it — picking that back up now.",
-  amend: "Thanks — using that and carrying on from where it stopped.",
-  skip: "Okay — skipping that and moving on.",
-  cancel: "Okay — cancelled.",
-} as const;
-
-type Verdict = keyof typeof RESUME_NOTE;
+type Verdict = "retry" | "amend" | "skip" | "cancel";
 
 /** The four, in the order the controls read. */
 const VERDICTS: Verdict[] = ["retry", "amend", "skip", "cancel"];
@@ -103,9 +86,7 @@ test.beforeEach(async ({ page }) => {
  * quotes a channel's own prior messages back into the next prompt sent for
  * it, so a second `__MOCK_TOOL_CALL__` directive posted to the same channel is
  * a coin flip on which directive the mock brain actually serves. Four
- * channels that each see exactly one message sidesteps that outright, and
- * `noteCounts` below reads each verdict's resume note back off its own
- * channel to match.
+ * channels that each see exactly one message sidesteps that outright.
  *
  * `detach: true` so each post returns before its turn finishes; the parks
  * happen inside that turn, so the queue is polled for them before moving on
@@ -113,41 +94,38 @@ test.beforeEach(async ({ page }) => {
  * suite shares one host and one data root — an approval another spec
  * legitimately parked must not be mistaken for one of these.
  */
-async function askAndParkAll(
+async function askAndPark(
   request: APIRequestContext,
+  verdict: Verdict,
   stamp: number,
-): Promise<Record<Verdict, string>> {
+): Promise<string> {
   const question = (verdict: Verdict) => `which cluster for ${verdict}-${stamp}?`;
+  const call = { name: "escalate_to_human", arguments: { question: question(verdict) } };
+  // The marker goes AFTER the payload, so two runs with identical steps stay
+  // two plans rather than sharing one cursor.
+  const directive = `__MOCK_PLAN__ ${JSON.stringify([[call], []])} blockers-${stamp}-${verdict}`;
+  const posted = await request.post(`${SCOPE}/chat`, {
+    data: { text: directive, chat: threadFor, detach: true },
+  });
+  expect(
+    posted.ok(),
+    `asking the ${verdict} question failed: ${posted.status()} ${await posted.text()}`,
+  ).toBeTruthy();
 
-  const ids: Partial<Record<Verdict, string>> = {};
-  for (const verdict of VERDICTS) {
-    const call = { name: "escalate_to_human", arguments: { question: question(verdict) } };
-    // The marker goes AFTER the payload, so two runs with identical steps stay
-    // two plans rather than sharing one cursor.
-    const directive = `__MOCK_PLAN__ ${JSON.stringify([[call], []])} blockers-${stamp}-${verdict}`;
-    const posted = await request.post(`${SCOPE}/chat`, {
-      data: { text: directive, chat: threadFor(verdict), detach: true },
-    });
-    expect(
-      posted.ok(),
-      `asking the ${verdict} question failed: ${posted.status()} ${await posted.text()}`,
-    ).toBeTruthy();
-
-    await expect
-      .poll(
-        async () => {
-          const found = await parkedIds(request, question);
-          if (found[verdict]) ids[verdict] = found[verdict];
-          return Boolean(ids[verdict]);
-        },
-        {
-          timeout: 180_000,
-          message: `the ${verdict} question never parked as a blocker (stamp ${stamp})`,
-        },
-      )
-      .toBe(true);
-  }
-  return ids as Record<Verdict, string>;
+  let id: string | undefined;
+  await expect
+    .poll(
+      async () => {
+        id = (await parkedIds(request, question))[verdict];
+        return Boolean(id);
+      },
+      {
+        timeout: 180_000,
+        message: `the ${verdict} question never parked as a blocker (stamp ${stamp})`,
+      },
+    )
+    .toBe(true);
+  return id!;
 }
 
 /** The parked blocker ids raised by this run's questions, keyed by verdict. */
@@ -170,23 +148,6 @@ async function parkedIds(
     if (mine) found[verdict] = mine.id;
   }
   return found;
-}
-
-/** How many of each verdict's resume note that verdict's own thread currently
- * holds — one thread per verdict now (see `askAndParkAll`), so each is read
- * back separately rather than filtered out of one shared history. */
-async function noteCounts(request: APIRequestContext): Promise<Record<Verdict, number>> {
-  const counts = {} as Record<Verdict, number>;
-  for (const verdict of VERDICTS) {
-    const history = await request.get(
-      `${SCOPE}/chat/history?desk=${encodeURIComponent(threadFor(verdict))}&limit=500`,
-    );
-    const lines = history.ok()
-      ? ((await history.json()) as { text?: string }[]).map((m) => m.text ?? "")
-      : [];
-    counts[verdict] = lines.filter((line) => line.includes(RESUME_NOTE[verdict])).length;
-  }
-  return counts;
 }
 
 const card = (page: Page, id: string) => page.locator(`[data-approval-id="${id}"]`);
@@ -216,23 +177,16 @@ test("every one of the four verdicts is reachable, and the host acts on the one 
   // the behaviour under test.
   test.setTimeout(600_000);
 
-  // Park one blocker per verdict, each asking something distinguishable, so the
-  // right card can be addressed on a queue this suite shares.
+  // A company agent has one durable session, so park and resolve one question
+  // at a time in the same real teammate DM. This still exercises every verdict
+  // against a live blocker while allowing the next turn to run after release.
   const stamp = Date.now();
-  const ids = await askAndParkAll(request, stamp);
-
-  // Counted as a DELTA, not from zero. This suite shares one host, and a
-  // re-run or a retry against it would leave earlier notes in the thread — a
-  // baseline of zero would then fail for a reason that has nothing to do with
-  // the behaviour under test.
-  const before = await noteCounts(request);
-
   await page.goto("/#/approvals");
 
-  // The whole issue, on real cards: four controls, and not the two that
-  // flattened them.
+  // Park and resolve each verdict before starting the next agent turn.
   for (const verdict of VERDICTS) {
-    const footer = card(page, ids[verdict]).getByTestId("approval-decide");
+    const id = await askAndPark(request, verdict, stamp);
+    const footer = card(page, id).getByTestId("approval-decide");
     await expect(footer).toBeVisible({ timeout: 30_000 });
     await expect(footer.getByRole("button", { name: /^Retry/ })).toBeVisible();
     await expect(footer.getByRole("button", { name: /^Answer this question/ })).toBeVisible();
@@ -240,59 +194,23 @@ test("every one of the four verdicts is reachable, and the host acts on the one 
     await expect(footer.getByRole("button", { name: /^Cancel run/ })).toBeVisible();
     await expect(footer.getByRole("button", { name: /^Approve:/ })).toHaveCount(0);
     await expect(footer.getByRole("button", { name: /^Decline:/ })).toHaveCount(0);
+
+    if (verdict === "retry") {
+      await clickClearOfToasts(footer.getByRole("button", { name: /^Retry/ }));
+    } else if (verdict === "amend") {
+      await clickClearOfToasts(footer.getByRole("button", { name: /^Answer this question/ }));
+      const send = footer.getByRole("button", { name: /^Send this answer/ });
+      await expect(send, "a blank amend cannot be sent").toBeDisabled();
+      await footer.getByRole("textbox", { name: /^Answer:/ }).fill(ANSWER);
+      await expect(send).toBeEnabled();
+      await clickClearOfToasts(send);
+    } else if (verdict === "skip") {
+      await clickClearOfToasts(footer.getByRole("button", { name: /^Skip this step/ }));
+    } else {
+      await clickClearOfToasts(footer.getByRole("button", { name: /^Cancel run/ }));
+    }
+    await awaitResolvedByHost(request, id, verdict);
+    await leaveQueue(page);
+    await expect(card(page, id)).toHaveCount(0, { timeout: 30_000 });
   }
-
-  // Each verdict is settled the same way: click, then wait for the HOST to say
-  // it took the decision, and only then read the card. Asked in that order the
-  // last assertion is a render — one poll cycle of `useCompany` plus a paint —
-  // rather than a whole resolve, which is a drop, a journal entry, a grant and
-  // a follow-up turn observed through a five-second poll.
-
-  // Retry.
-  await clickClearOfToasts(card(page, ids.retry).getByRole("button", { name: /^Retry/ }));
-  await awaitResolvedByHost(request, ids.retry, "retry");
-  await leaveQueue(page);
-  await expect(card(page, ids.retry)).toHaveCount(0, { timeout: 30_000 });
-
-  // Amend — and the answer has to be typed before it can be sent at all.
-  const amend = card(page, ids.amend);
-  await clickClearOfToasts(amend.getByRole("button", { name: /^Answer this question/ }));
-  const send = amend.getByRole("button", { name: /^Send this answer/ });
-  await expect(send, "a blank amend cannot be sent").toBeDisabled();
-  await amend.getByRole("textbox", { name: /^Answer:/ }).fill(ANSWER);
-  await expect(send).toBeEnabled();
-  await clickClearOfToasts(send);
-  await awaitResolvedByHost(request, ids.amend, "amend");
-  await leaveQueue(page);
-  await expect(amend).toHaveCount(0, { timeout: 30_000 });
-
-  // Skip.
-  await clickClearOfToasts(card(page, ids.skip).getByRole("button", { name: /^Skip this step/ }));
-  await awaitResolvedByHost(request, ids.skip, "skip");
-  await leaveQueue(page);
-  await expect(card(page, ids.skip)).toHaveCount(0, { timeout: 30_000 });
-
-  // Cancel.
-  await clickClearOfToasts(card(page, ids.cancel).getByRole("button", { name: /^Cancel run/ }));
-  await awaitResolvedByHost(request, ids.cancel, "cancel");
-  await leaveQueue(page);
-  await expect(card(page, ids.cancel)).toHaveCount(0, { timeout: 30_000 });
-
-  // The assertion that would have failed against the bug. Four clicks, four
-  // different sentences: the host acted on the verdict the operator chose
-  // rather than on the approve or deny it travelled under. Before #2028 all
-  // three approves banked a retry, so this would read three "picking that back
-  // up" notes and no skip.
-  //
-  // Exactly one new note per verdict, so this also catches a click recorded
-  // twice or a verdict that fanned somewhere it should not have.
-  await expect
-    .poll(
-      async () => {
-        const now = await noteCounts(request);
-        return VERDICTS.map((verdict) => now[verdict] - before[verdict]);
-      },
-      { timeout: 120_000, message: "the host's per-verdict resume notes never all landed" },
-    )
-    .toEqual(VERDICTS.map(() => 1));
 });
