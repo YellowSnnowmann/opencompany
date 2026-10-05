@@ -51,9 +51,9 @@ name = "Engineering desk"
 description = "How things are built and technical plans."
 members = ["engineer", "ceo"]
 
-# Rounds of two: both seats run at once on every round. Referral on, one hop,
-# with the answer returned to this desk — so a build question that needs copy
-# can cross to the content desk and come back.
+# Rounds of two: both seats run at once on every round. A build question that
+# needs copy crosses to the content desk as a direct message to the writer, and
+# the answer comes back on a later turn.
 [group_chat.routing]
 round_width = 2
 
