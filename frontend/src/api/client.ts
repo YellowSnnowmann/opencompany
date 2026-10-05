@@ -31,6 +31,7 @@ import {
   type ApiErrorBody,
   type UsedBy,
   type WorkflowProblem,
+  type AgentHiveMessageDto,
   type AppSpec,
   type ApprovalSummary,
   type CapabilityStatusDto,
