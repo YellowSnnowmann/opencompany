@@ -26,6 +26,7 @@
 //! | `a_teammate_reached_directly_answers_its_sender` | `hivemind_send_agent` lands as a `HiveMessage` to the teammate, whose turn's reply goes back to the sender |
 //! | `a_shared_agent_on_two_desks_never_runs_twice_at_once` | two desks sharing the CEO both settle; the CEO's turn brackets never overlap |
 //! | `the_journal_measures_what_the_hive_did` | `measure_rows` folds the same run into episodes, turns, and a direct message |
+//! | `an_approval_a_turn_asked_for_releases_the_agent_with_the_decision` | a parked coordinator turn's approval names its agent; the approve releases it with one note and its next turn finishes |
 //!
 //! Every company gets a unique id: the runtime keeps one `Agent` per
 //! `(company, agent)` for the life of the process, so two tests naming the
@@ -393,7 +394,11 @@ async fn an_approval_a_turn_asked_for_releases_the_agent_with_the_decision() {
     let home = tempfile::tempdir().unwrap();
     let room = boot(home.path(), move |turn| {
         if let Some(note) = &turn.resumption {
-            seen.lock().unwrap().push(note.clone());
+            // Every model call of the released turn reads the same prompt;
+            // count the turn once, on its first call.
+            if !turn.acted() {
+                seen.lock().unwrap().push(note.clone());
+            }
             return answer(turn, "Sent the welcome pack.");
         }
         match (turn.episode.is_some(), turn.called.as_slice()) {
