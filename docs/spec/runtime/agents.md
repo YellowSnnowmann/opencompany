@@ -230,9 +230,10 @@ Step 4 (`company::team_brief::team_section`) tells every agent who else is at
 the company: each other roster teammate by id, role and mandate (the
 orchestrator marked as such), each desk with its members and lead, the desks
 this agent sits on, and — only when its `delegates_to` narrows it — exactly
-which desks a question from it may cross to, rendered from the same rule the
-referral policy enforces so the prompt never names a desk a referral would
-refuse. A roster of one gets no section.
+whom it may message directly, rendered from the same rule the hive's reach
+policy enforces so the prompt never names a teammate a send would refuse. Each
+teammate is listed with its manifest id (for `spawn_task`) and its Coordinator
+id (for `hivemind_*`). A roster of one gets no section.
 
 It exists because an agent that is not told it has colleagues does not use
 them. Colleagues are reached through the company hive's `hivemind_*` tools:
