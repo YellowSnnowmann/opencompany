@@ -76,24 +76,11 @@ each page under the 500-line cap.
   colleague through the company hive (`hivemind_send_agent`), bounded by its
   `delegates_to`.
 
-  A dispatched board card accepts one hand-off per turn: it transfers ownership
-  after the current turn finishes and settles from the colleague's output. A
-  second hand-off is refused immediately instead of receiving a success receipt
-  for work the drain would discard. Other permitted board writes still stage.
-  Chat turns can collect multiple colleagues' replies. For several contributors
-  and a final synthesis on a board task, use explicit workflow agent steps and
-  dependencies. A queued receipt is not evidence that the colleague has run.
-
   A direct message is bounded at the tool boundary in the sender's own turn,
   by the company hive's `SendAuthorizer`: a target outside a non-empty
   `delegates_to` (desk peers plus the desks named) is refused, and the refusal
   names the teammates it *can* reach so it can retry in the same turn. The
   per-turn card cap (three `spawn_task` calls) applies to each turn.
-  Cross-desk referrals have two additional runtime bounds, enforced when the
-  referral is decided: **depth** — `referral.max_hops` — and **cycles** — a
-  question to a desk already on the current chain (A→B→A) is refused. A
-  refused crossing reaches the run trail verbatim, so the operator reads the
-  fact rather than inferring it from an absence.
 
   **`budget_usd_daily`** (enforced since issue #304 — before that it was
   validated, stored and displayed, but nothing read it) caps one teammate's
