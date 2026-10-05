@@ -65,7 +65,7 @@ const ROWS: ChatMessage[] = [
   { id: "h1", from: "you", at: 1, text: "Question?" },
   { id: "h2", from: "company", channel: "engineer", at: 2, text: "One", hive: { sequence: 2, episodeId: "ep" } },
   { id: "h3", from: "company", channel: "ceo", at: 3, text: "Two", hive: { sequence: 3, episodeId: "ep" } },
-  { id: "h4", from: "company", channel: "ceo", at: 4, text: "Outside" },
+  { id: "h4", from: "company", channel: "ceo", at: 10, text: "Outside" },
 ];
 
 describe("deskEpisodes", () => {
