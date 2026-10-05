@@ -77,13 +77,47 @@ impl ReachPolicy {
             return Err("refused: the company's roster is not loaded yet; try again".to_string());
         };
         let caller = state.agents.get(actor).map_or(actor, String::as_str);
+        let hive_id_of = |manifest: &str| {
+            state
+                .agents
+                .iter()
+                .find(|(_, id)| id.as_str() == manifest)
+                .map(|(coordinator, _)| coordinator.clone())
+        };
         let Some(target_id) = state.agents.get(target) else {
+            // The model passed the teammate's manifest id — the one `spawn_task`
+            // takes — where the hive wants its Coordinator id.
+            if let Some(hive_id) = hive_id_of(target) {
+                return Err(format!(
+                    "refused: in `hivemind_*` tools \"{target}\" is `{hive_id}`. Send it again \
+                     with that `agent_id`."
+                ));
+            }
             return Err(format!(
                 "refused: there is no teammate \"{target}\" in this company. Call \
                  `hivemind_list_agents` for the ids you can message."
             ));
         };
-        decide_direct(record, caller, target_id)
+        decide_direct(record, caller, target_id).map_err(|refusal| {
+            // The refusal names teammates by manifest id; the model answers it
+            // with a hive tool, so name each the way that tool takes it.
+            let mut ids: Vec<(&String, &String)> = state.agents.iter().collect();
+            ids.sort_by_key(|(_, manifest)| std::cmp::Reverse(manifest.len()));
+            match refusal.split_once("The teammates you can message are: ") {
+                Some((head, list)) => {
+                    let rendered: Vec<String> = list
+                        .trim_end_matches('.')
+                        .split(", ")
+                        .map(|id| hive_id_of(id).unwrap_or_else(|| id.to_string()))
+                        .collect();
+                    format!(
+                        "{head}The teammates you can message are: {}.",
+                        rendered.join(", ")
+                    )
+                }
+                None => refusal,
+            }
+        })
     }
 }
 
