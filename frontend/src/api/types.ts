@@ -515,9 +515,7 @@ export interface ChatHistoryMessageDto {
    *
    * Absent when the two are equal, which is every row carrying no move, and
    * absent from a host predating the field. Read it wherever the *moves* are
-   * the point rather than the prose: the episode fold counts
-   * `!propose`/`!support`/`^N`, and reading {@link text} there is why a
-   * deliberation panel never survived a refresh.
+   * the point rather than the prose, such as the raw-turns view.
    */
   cueText?: string;
   /**

@@ -44,7 +44,6 @@ import {
   type DeskDto,
   type DeskRoutingDto,
   type DeskRoutingDeclared,
-  type EpisodeDto,
   type EditAgentInput,
   type FeedbackInput,
   type FeedbackResponse,
@@ -821,25 +820,6 @@ export class OpenCompanyClient {
     );
   }
 
-  /**
-   * The episodes a desk ran or is running (`GET {scope}/episodes`), newest
-   * first. `desk` narrows to one desk, `status` to `open` or `completed`, and
-   * `limit` bounds the page. The room does not read this — it folds episodes
-   * out of the transcript and the live frames — but the measurement script and
-   * a reloaded Observatory do.
-   */
-  listEpisodes(
-    query: { desk?: string; status?: "open" | "completed"; limit?: number } = {},
-    company?: string | null,
-  ): Promise<EpisodeDto[]> {
-    const params = new URLSearchParams();
-    if (query.desk) params.set("desk", query.desk);
-    if (query.status) params.set("status", query.status);
-    if (query.limit !== undefined) params.set("limit", String(query.limit));
-    const qs = params.size > 0 ? `?${params.toString()}` : "";
-    return this.request<EpisodeDto[]>("GET", `${this.scope(company)}/episodes${qs}`);
-  }
-
   deleteDesk(deskId: string, company?: string | null): Promise<void> {
     return this.request<void>(
       "DELETE",
@@ -1207,6 +1187,27 @@ export class OpenCompanyClient {
       "POST",
       `${this.scope(company)}/chat/review`,
       body,
+    );
+  }
+
+  /**
+   * One teammate's direct hive messages, sent or received, oldest first
+   * (`GET {scope}/agents/{agentId}/messages`, OC-2). `after` is an exclusive
+   * journal-seq cursor — pass back the `seq` of the newest row you hold — and
+   * `limit` bounds the page (the host caps it at 500).
+   */
+  listAgentHiveMessages(
+    agentId: string,
+    query: { after?: number; limit?: number } = {},
+    company?: string | null,
+  ): Promise<AgentHiveMessageDto[]> {
+    const params = new URLSearchParams();
+    if (query.after !== undefined) params.set("after", String(query.after));
+    if (query.limit !== undefined) params.set("limit", String(query.limit));
+    const qs = params.size > 0 ? `?${params.toString()}` : "";
+    return this.request<AgentHiveMessageDto[]>(
+      "GET",
+      `${this.scope(company)}/agents/${encodeURIComponent(agentId)}/messages${qs}`,
     );
   }
 
