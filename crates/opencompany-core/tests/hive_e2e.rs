@@ -262,7 +262,7 @@ async fn a_desk_of_one_answers_with_one_turn() {
 /// turn answers it, and the answer goes back to the engineer.
 fn asks_the_writer(turn: &HiveTurn) -> Reply {
     if turn.agent == ENGINEER && turn.episode.is_some() && !turn.acted() {
-        return send_agent(WRITER, "copy-1", "Can you draft the release note?");
+        return send_agent(turn, WRITER, "copy-1", "Can you draft the release note?");
     }
     if turn.agent == ENGINEER && turn.called == ["hivemind_send_agent"] {
         return answer(

@@ -41,6 +41,8 @@ const HIVE_CONTEXT: &str = "Incoming attributed Hivemind context (JSON).";
 pub struct HiveTurn {
     /// The manifest agent id the turn runs as.
     pub agent: String,
+    /// The Coordinator agent id the turn runs as (`{company}--{agent}`).
+    pub coordinator_id: String,
     /// The episode the turn was assigned in, absent for a direct message.
     pub episode: Option<String>,
     /// The hive (desk) that episode is in.
@@ -60,6 +62,15 @@ impl HiveTurn {
     /// Whether the turn has made any tool call yet.
     pub fn acted(&self) -> bool {
         !self.called.is_empty()
+    }
+
+    /// The Coordinator id of teammate `agent`, as a `hivemind_*` tool takes it.
+    pub fn peer(&self, agent: &str) -> String {
+        let company = self
+            .coordinator_id
+            .rsplit_once("--")
+            .map_or("", |(company, _)| company);
+        format!("{company}--{agent}")
     }
 
     /// The newest delivered message's body.
@@ -96,7 +107,8 @@ pub fn hive_turn(ask: &Ask) -> Option<HiveTurn> {
     let after = &text[text.find(HIVE_CONTEXT)? + HIVE_CONTEXT.len()..];
     let json_start = after.find('{')?;
     let request: Value = serde_json::from_str(after[json_start..].trim()).ok()?;
-    let agent = manifest_id(request.get("agent_id")?.as_str()?);
+    let coordinator_id = request.get("agent_id")?.as_str()?.to_string();
+    let agent = manifest_id(&coordinator_id);
     let episode = request.get("episode").filter(|e| !e.is_null());
     let messages = request
         .get("messages")
@@ -144,6 +156,7 @@ pub fn hive_turn(ask: &Ask) -> Option<HiveTurn> {
     }
     Some(HiveTurn {
         agent,
+        coordinator_id,
         episode: episode.and_then(|e| e["episode_id"].as_str().map(str::to_string)),
         hive: episode.and_then(|e| e["hive_id"].as_str().map(str::to_string)),
         messages,
@@ -167,11 +180,20 @@ pub fn complete(turn: &HiveTurn, body: impl Into<String>) -> Reply {
     }
 }
 
-/// Sends `body` to teammate `agent` directly.
-pub fn send_agent(agent: &str, message_id: &str, body: impl Into<String>) -> Reply {
+/// Sends `body` from `turn`'s agent to teammate `agent` directly.
+pub fn send_agent(
+    turn: &HiveTurn,
+    agent: &str,
+    message_id: &str,
+    body: impl Into<String>,
+) -> Reply {
     Reply::Call {
         tool: "hivemind_send_agent",
-        args: json!({ "agent_id": agent, "message_id": message_id, "body": body.into() }),
+        args: json!({
+            "agent_id": turn.peer(agent),
+            "message_id": message_id,
+            "body": body.into(),
+        }),
     }
 }
 
