@@ -22,11 +22,10 @@
 # depends on which host site is about to renew badly — which is commercial's
 # knowledge. "Do we raise the price of the energy line" is a commercial question
 # whose right answer depends on whether the chiller at that machine is reliable
-# — which is ops' knowledge. So all three desks run with **cross-desk referral**
-# on (`[group_chat.hive.referral]`): a member mid-episode may put a question to
-# a peer desk, that desk takes one real turn on it, and the answer is carried
-# home under `hive-referral` as information — never as a vote. See
-# `docs/spec/runtime/hivemind-referral.md`.
+# — which is ops' knowledge. So a member of any desk may message a member of a
+# peer desk directly (`hivemind_send_agent`): the peer takes a real turn on it,
+# and the answer reaches the asker on a later turn as information — never as a
+# vote. See `docs/spec/runtime/hive.md`.
 #
 # The ops desk also turns on the *other* seam, which stays inside one desk:
 # **private asides** (`[group_chat.hive.aside]`). Two members may compare notes
@@ -122,14 +121,8 @@ members = ["route_planner", "fleet_tech", "stock_controller", "field_realist"]
 
 [group_chat.routing]
 # Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
-# in concurrent rounds until every assigned seat calls `complete_episode`.
+# in concurrent rounds until every assigned seat calls `hivemind_complete`.
 # Round width, round cap and turn timeout take the library defaults here.
-
-[group_chat.routing.referral]
-enabled = true
-reach = "desks"
-max_hops = 2
-returns = true
 
 # ---------------------------------------------------------------------------
 # The commercial desk.
@@ -148,14 +141,8 @@ members = ["account_manager", "pricing_analyst", "contract_counsel"]
 
 [group_chat.routing]
 # Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
-# in concurrent rounds until every assigned seat calls `complete_episode`.
+# in concurrent rounds until every assigned seat calls `hivemind_complete`.
 # Round width, round cap and turn timeout take the library defaults here.
-
-[group_chat.routing.referral]
-enabled = true
-reach = "desks"
-max_hops = 2
-returns = true
 
 # ---------------------------------------------------------------------------
 # The signals desk.
@@ -176,20 +163,14 @@ members = ["market_scout", "demand_analyst"]
 
 [group_chat.routing]
 # Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
-# in concurrent rounds until every assigned seat calls `complete_episode`.
+# in concurrent rounds until every assigned seat calls `hivemind_complete`.
 # Round width, round cap and turn timeout take the library defaults here.
-
-[group_chat.routing.referral]
-enabled = true
-reach = "desks"
-max_hops = 2
-returns = true
 
 # ---------------------------------------------------------------------------
 # Cadence. This is what makes the company run rather than wait.
 #
 # Times are deliberately staggered: signals reads before ops plans, and ops
-# plans before commercial reviews, so each desk's referral to a peer reaches a
+# plans before commercial reviews, so each desk's message to a peer reaches a
 # desk that has already looked at today.
 # ---------------------------------------------------------------------------
 

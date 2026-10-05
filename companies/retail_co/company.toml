@@ -127,14 +127,8 @@ members = ["triage", "exchanges", "refunds", "cancellations", "amendments"]
 
 [group_chat.routing]
 # Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
-# in concurrent rounds until every assigned seat calls `complete_episode`.
+# in concurrent rounds until every assigned seat calls `hivemind_complete`.
 # Round width, round cap and turn timeout take the library defaults here.
-
-[group_chat.routing.referral]
-enabled = true
-reach = "desks"
-max_hops = 2
-returns = true
 
 # ---------------------------------------------------------------------------
 # Pending orders. Two seats, competing remedies.
@@ -148,14 +142,8 @@ members = ["cancellations", "amendments"]
 
 [group_chat.routing]
 # Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
-# in concurrent rounds until every assigned seat calls `complete_episode`.
+# in concurrent rounds until every assigned seat calls `hivemind_complete`.
 # Round width, round cap and turn timeout take the library defaults here.
-
-[group_chat.routing.referral]
-enabled = true
-reach = "desks"
-max_hops = 2
-returns = true
 
 # ---------------------------------------------------------------------------
 # Delivered orders. Same shape.
@@ -169,14 +157,8 @@ members = ["exchanges", "refunds"]
 
 [group_chat.routing]
 # Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
-# in concurrent rounds until every assigned seat calls `complete_episode`.
+# in concurrent rounds until every assigned seat calls `hivemind_complete`.
 # Round width, round cap and turn timeout take the library defaults here.
-
-[group_chat.routing.referral]
-enabled = true
-reach = "desks"
-max_hops = 2
-returns = true
 
 # **A desk `amendments` sits on, with somebody `order_ops` does not have.**
 #
@@ -199,11 +181,6 @@ members = ["amendments", "refunds"]
 
 [group_chat.routing]
 # Completion-driven episodes (`docs/spec/runtime/hive.md`): the desk's seats run
-# in concurrent rounds until every assigned seat calls `complete_episode`.
+# in concurrent rounds until every assigned seat calls `hivemind_complete`.
 # Round width, round cap and turn timeout take the library defaults here.
 
-[group_chat.routing.referral]
-enabled = true
-reach = "desks"
-max_hops = 2
-returns = true
