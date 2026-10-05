@@ -382,3 +382,72 @@ async fn the_journal_measures_what_the_hive_did() {
         "the accepted line's route is counted: {report:?}"
     );
 }
+
+/// A coordinator turn that asks the operator parks under its agent; the
+/// operator's decision releases the agent with a note, and its next turn reads
+/// that note and finishes the episode.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_approval_a_turn_asked_for_releases_the_agent_with_the_decision() {
+    let notes = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let seen = std::sync::Arc::clone(&notes);
+    let home = tempfile::tempdir().unwrap();
+    let room = boot(home.path(), move |turn| {
+        if let Some(note) = &turn.resumption {
+            seen.lock().unwrap().push(note.clone());
+            return answer(turn, "Sent the welcome pack.");
+        }
+        match (turn.episode.is_some(), turn.called.as_slice()) {
+            (true, []) => support::room::call(
+                "request_approval",
+                serde_json::json!({
+                    "title": "Send the welcome pack",
+                    "question": "May I send the welcome pack to the new client?",
+                }),
+            ),
+            (true, _) => Reply::Say("Waiting on the operator.".to_string()),
+            (false, _) => answer(turn, "Noted."),
+        }
+    })
+    .await;
+
+    room.say(FRONT, "welcome our new client").await;
+    let approval = {
+        let started = std::time::Instant::now();
+        loop {
+            let (status, body) = room.get("/approvals").await;
+            assert_eq!(status, 200, "{body}");
+            if let Some(first) = body.as_array().and_then(|rows| rows.first()) {
+                break first.clone();
+            }
+            assert!(started.elapsed() < WAIT, "the turn never parked its approval");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    };
+    assert_eq!(
+        approval["hive"]["agentId"], GREETER,
+        "the approval names the hive turn that parked it: {approval}"
+    );
+    let id = approval["id"].as_str().expect("an approval id");
+    let (status, body) = room
+        .post(
+            &format!("/approvals/{id}"),
+            serde_json::json!({ "verdict": "approve", "async": true }),
+        )
+        .await;
+    assert!(status < 300, "the approve is accepted: {status} {body}");
+
+    let rows = room.episodes_settled(1, WAIT).await;
+    assert_eq!(settled(&rows), vec![(FRONT.to_string(), None)]);
+    let notes = notes.lock().unwrap().clone();
+    assert_eq!(notes.len(), 1, "the release note is delivered once: {notes:?}");
+    assert!(
+        notes[0].contains("Send the welcome pack"),
+        "the note names the decision: {notes:?}"
+    );
+    assert!(
+        replies(&rows, FRONT, GREETER)
+            .iter()
+            .any(|text| text.contains("Sent the welcome pack.")),
+        "the released turn finished the work"
+    );
+}
