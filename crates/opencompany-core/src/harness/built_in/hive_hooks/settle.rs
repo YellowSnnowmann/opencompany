@@ -271,11 +271,15 @@ impl SettleTurn<'_> {
                     .run(
                         self.surface(),
                         Some(hive),
-                        super::super::card_budget::scoped(budget, hooked),
+                        Box::pin(super::super::card_budget::scoped(budget, hooked)),
                     )
                     .await
             }
-            None => envelope.run(self.surface(), Some(hive), hooked).await,
+            None => {
+                envelope
+                    .run(self.surface(), Some(hive), Box::pin(hooked))
+                    .await
+            }
         };
         let elapsed = started.elapsed();
         let events = match pump {

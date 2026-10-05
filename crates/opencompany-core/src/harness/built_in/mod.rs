@@ -1658,7 +1658,7 @@ impl CompanyAgent {
         };
         let surface = Self::surface_for(turn_chat_id.as_deref(), chat.thread_root, &session_id);
         let (reply, mut usages): (crate::Result<String>, Vec<TurnUsage>) =
-            envelope.run(surface, None, turn_body).await;
+            envelope.run(surface, None, Box::pin(turn_body)).await;
 
         let events = pump.finish().await;
         turn_envelope::price_usages(&self.agent_id, &mut usages, &events);
