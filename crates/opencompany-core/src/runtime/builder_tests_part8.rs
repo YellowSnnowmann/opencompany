@@ -234,7 +234,7 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
         .filter_map(|row| match row.event {
             CompanyEvent::HiveAccepted {
                 chat_id, starters, ..
-            } if chat_id.as_deref() == Some("design") => Some(starters),
+            } if chat_id == "design" => Some(starters),
             _ => None,
         })
         .flatten()
