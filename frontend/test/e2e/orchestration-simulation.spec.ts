@@ -12,6 +12,7 @@ import {
   openBoard,
   openCard,
   openMainLine,
+  openMessageThread,
   say,
   settledMarkerCount,
   silenceTour,
@@ -141,13 +142,6 @@ test("a goal becomes delegated cards, the team works them, and review closes the
     );
   await say(page, goal);
 
-  // The conversation says a card was opened, and links to it. This is the chat
-  // half of the chain — the card knows which thread raised it, which is what
-  // later lets its completion answer back here (issue #151 §3.2).
-  await expect(page.getByRole("link", { name: /Card opened/ }).last()).toBeVisible({
-    timeout: 180_000,
-  });
-
   // ── 2. The board holds the work, unstarted ──────────────────────────────
   // After the turn has *finished*, not merely after its first card appeared:
   // delegations are drained at the end of a turn, so a board read taken mid-turn
@@ -156,6 +150,13 @@ test("a goal becomes delegated cards, the team works them, and review closes the
   // teaching the pattern that made `orchestration-live.spec.ts` report on half
   // a goal.
   await waitForTurn(page);
+
+  // Hive replies and their card chips live in the message thread. The card
+  // knows which thread raised it, which later lets completion answer there.
+  await openMessageThread(page, "Ship a short market digest this week");
+  await expect(page.getByRole("link", { name: /Card opened/ }).last()).toBeVisible({
+    timeout: 180_000,
+  });
 
   // The markers this thread already holds, counted **here** — on the transcript
   // this test has been watching all along, rather than after a fresh navigation
@@ -209,9 +210,11 @@ test("a goal becomes delegated cards, the team works them, and review closes the
 
   // ── 5. …and the conversation the goal was stated in is told ─────────────
   // The structural line a reader needs and the relay prose cannot give them:
-  // the run *stopped*, and here is where it landed (issue #377). Counted rather
-  // than addressed by card, because this surface renders a marker as a plain
-  // system pill — see `markers` in `./orchestration`.
+  // the run *stopped*, and here is where it landed (issue #377). These settle
+  // markers appear on the channel transcript, while card-open chips appear in
+  // the originating thread. Counted rather than addressed by card because the
+  // transcript renders a marker as a system pill — see `markers` in
+  // `./orchestration`.
   await openMainLine(page);
   await expect
     .poll(() => markers(page).count(), {

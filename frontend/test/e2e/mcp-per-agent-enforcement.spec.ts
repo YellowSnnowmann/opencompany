@@ -59,12 +59,12 @@ const TOOL = "echo";
 /**
  * The teammate the rule is written for, and the desk whose only member it is.
  *
- * A desk with one member is the only addressable way to say *which* teammate
- * takes the next turn — the company-wide line is the orchestrator's — so the
- * "for that teammate and nobody else" half is two desks rather than two hopes.
+ * A teammate's direct conversation addresses that teammate's own turn. Group
+ * chat lines are conducted episodes, whose completion does not render a tool
+ * refusal as a direct reply in the room transcript.
  */
-const BLOCKED = { id: "engineer", name: "Engineer", desk: "engineering" };
-const UNTOUCHED = { desk: "content" };
+const BLOCKED = { id: "engineer", name: "Engineer", thread: "dm:engineer" };
+const UNTOUCHED = { thread: "dm:writer" };
 
 /** Registered per run: the host keeps runtime servers in its secret store. */
 const SERVER = `pw-perm-${randomUUID().slice(0, 8)}`;
@@ -82,14 +82,10 @@ test.beforeAll(async ({ request }) => {
   ).toBeTruthy();
 });
 
-test.afterAll(async ({ request }) => {
-  if (!MCP_SERVER || !LIVE_BRAIN) return;
-  // Best effort, and it must not throw past a failing body: an exception in
-  // teardown would replace the real failure with its own.
-  await request
-    .delete(`/api/v1/company/mcp/servers/${encodeURIComponent(SERVER)}`)
-    .catch(() => undefined);
-});
+// Keep this server installed until the managed E2E host exits. Its tools can
+// be present in durable agent snapshots used by later tests in the same run.
+// The live-brain lane uses a dedicated test data root, so the registration is
+// discarded with that host rather than leaking into another run.
 
 /**
  * Opens this server's permissions panel, with `showing` as the lens.
@@ -144,9 +140,9 @@ function toolRow(page: Page, tool: string) {
  * `__MOCK_TOOL_CALL__` per distinct payload — two turns asking for the same
  * arguments would leave the second one with a plain text reply.
  */
-async function callTool(page: Page, desk: string): Promise<string> {
+async function callTool(page: Page, thread: string): Promise<string> {
   const marker = `perm-${randomUUID()}`;
-  await page.goto(`/#/chat/${desk}`);
+  await page.goto(`/#/chat/${thread}`);
   await page.reload();
   await dismissTour(page);
   const composer = page.getByPlaceholder(/^Message /);
@@ -179,7 +175,7 @@ async function callTool(page: Page, desk: string): Promise<string> {
   // of the turn rather than whatever the open view chose to draw.
   await page.reload();
   await dismissTour(page);
-  await page.goto(`/#/chat/${desk}`);
+  await page.goto(`/#/chat/${thread}`);
   await expect(page.getByPlaceholder(/^Message /)).toBeVisible({
     timeout: 30_000,
   });
@@ -187,8 +183,8 @@ async function callTool(page: Page, desk: string): Promise<string> {
 }
 
 /** Drives one listing of the server's tools, so the belt's inventory is readable. */
-async function listTools(page: Page, desk: string): Promise<void> {
-  await page.goto(`/#/chat/${desk}`);
+async function listTools(page: Page, thread: string): Promise<void> {
+  await page.goto(`/#/chat/${thread}`);
   await page.reload();
   await dismissTour(page);
   const composer = page.getByPlaceholder(/^Message /);
@@ -215,7 +211,7 @@ async function listTools(page: Page, desk: string): Promise<void> {
 
   await page.reload();
   await dismissTour(page);
-  await page.goto(`/#/chat/${desk}`);
+  await page.goto(`/#/chat/${thread}`);
   await expect(page.getByPlaceholder(/^Message /)).toBeVisible({
     timeout: 30_000,
   });
@@ -239,7 +235,7 @@ test("a block set for one teammate refuses that teammate's next turn", async ({
   );
 
   // No restart and no rebuild: the next turn is the whole contract.
-  const marker = await callTool(page, BLOCKED.desk);
+  const marker = await callTool(page, BLOCKED.thread);
 
   await expect(bubbles(page).filter({ hasText: REFUSAL }).last()).toBeVisible({
     timeout: 120_000,
@@ -254,7 +250,7 @@ test("a block set for one teammate refuses that teammate's next turn", async ({
   // only refuses the dispatch still offers the model a tool it will be refused
   // for choosing. The listing is asked for rather than waited on, because the
   // mock brain chooses no tool of its own.
-  await listTools(page, BLOCKED.desk);
+  await listTools(page, BLOCKED.thread);
   const listing = bubbles(page).filter({ hasText: /"name":\s*"describe"/ });
   await expect(listing.last()).toBeVisible({ timeout: 120_000 });
   await expect(
@@ -267,7 +263,7 @@ test("the same tool stays callable for a teammate the rule does not name", async
 }) => {
   // The other half of the promise, and the reason a per-teammate layer exists at
   // all: narrowing one teammate must not narrow the company.
-  const marker = await callTool(page, UNTOUCHED.desk);
+  const marker = await callTool(page, UNTOUCHED.thread);
 
   await expect(
     bubbles(page).filter({ hasText: `echo: ${marker}` }).last(),
@@ -292,7 +288,7 @@ test("clearing the teammate's rule restores the call, again with no restart", as
     new RegExp(`et for ${BLOCKED.name}`),
   );
 
-  const marker = await callTool(page, BLOCKED.desk);
+  const marker = await callTool(page, BLOCKED.thread);
 
   await expect(
     bubbles(page).filter({ hasText: `echo: ${marker}` }).last(),

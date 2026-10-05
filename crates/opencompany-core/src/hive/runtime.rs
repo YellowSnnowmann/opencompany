@@ -167,25 +167,28 @@ impl CompanyHive {
         let meta = Arc::new(TurnMetaBoard::default());
         let agents = Arc::new(HiveAgents::default());
         let policy = Arc::new(ReachPolicy::new());
-        let hooks = Arc::new(HiveHooks::new(
-            company.clone(),
-            Arc::clone(&agents),
-            Arc::clone(&roster),
-            Arc::clone(&meta),
-        ));
-        let host = OpenHumanHost::new(runtime_id, coordinator.clone())
-            .and_then(|host| host.with_hooks(hooks))
-            .and_then(|host| host.with_send_policy(Arc::clone(&policy) as _))
-            .and_then(|host| host.with_turn_timeout(turn_timeout))
-            .map_err(hive_error)?;
         let projector = Arc::new(Projector::new(
             company.clone(),
             events,
             coordinator.clone(),
             Arc::clone(&roster),
-            meta,
+            Arc::clone(&meta),
         ));
         projector.reconcile().await?;
+        let hooks = Arc::new(
+            HiveHooks::new(
+                company.clone(),
+                Arc::clone(&agents),
+                Arc::clone(&roster),
+                meta,
+            )
+            .with_projector(Arc::clone(&projector)),
+        );
+        let host = OpenHumanHost::new(runtime_id, coordinator.clone())
+            .and_then(|host| host.with_hooks(hooks))
+            .and_then(|host| host.with_send_policy(Arc::clone(&policy) as _))
+            .and_then(|host| host.with_turn_timeout(turn_timeout))
+            .map_err(hive_error)?;
         let tail = {
             let projector = Arc::clone(&projector);
             let mut changes = coordinator.subscribe();

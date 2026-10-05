@@ -238,6 +238,18 @@ async fn a_dm_reply_lands_in_the_operators_dm_with_its_turn_meta() {
 }
 
 #[tokio::test]
+async fn a_hive_thread_sequence_resolves_to_its_host_journal_sequence() {
+    let f = fixture(&[]).await;
+    let host_seq = EventSeq::new(41);
+    f.projector
+        .note_host_line(7, "content", Some(host_seq), None)
+        .await;
+
+    assert_eq!(f.projector.host_sequence_of(7).await, Some(host_seq));
+    assert_eq!(f.projector.host_sequence_of(8).await, None);
+}
+
+#[tokio::test]
 async fn a_desk_reply_threads_under_the_operators_line_and_the_episode_settles_once() {
     let f = fixture(&[
         ("writer", Script::Complete("here is the post")),

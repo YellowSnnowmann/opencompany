@@ -64,6 +64,19 @@ async function openThread(page: Page, channelId: string) {
   await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: 30_000 });
 }
 
+/** Opens the replies for a channel message and waits for the thread panel. */
+async function openMessageThread(page: Page, text: string) {
+  const root = page
+    .locator("article")
+    .filter({ has: page.getByText(text, { exact: true }) })
+    .last();
+  await expect(root).toBeVisible({ timeout: 30_000 });
+  await root.getByRole("button", { name: /\d+ repl(?:y|ies)/ }).click();
+  await expect(
+    page.locator("aside").filter({ has: page.getByRole("heading", { name: "Thread" }) }),
+  ).toBeVisible({ timeout: 15_000 });
+}
+
 type Task = {
   id: string;
   title: string;
@@ -284,7 +297,9 @@ test("a card the orchestrator opens is chipped in chat, and survives a reload", 
   );
   const href = `#/company/tasks/${card.id}`;
 
-  // Live: the reply bubble says a card was opened.
+  // Hive replies are children of the operator's room line, so their card chip
+  // is rendered in that line's thread panel.
+  await openMessageThread(page, prompt);
   const chip = page.locator(`a[href="${href}"]`, { hasText: "Card opened" });
   await expect(chip).toBeVisible({ timeout: 60_000 });
   await expect(chip).toHaveAttribute("href", href);
@@ -293,6 +308,7 @@ test("a card the orchestrator opens is chipped in chat, and survives a reload", 
   // that only existed on the live POST response would vanish here.
   await page.reload();
   await openThread(page, "general");
+  await openMessageThread(page, prompt);
   const rehydrated = page.locator(`a[href="${href}"]`, { hasText: "Card opened" });
   await expect(rehydrated).toBeVisible({ timeout: 30_000 });
   await expect(rehydrated).toHaveAttribute("href", href);
@@ -367,6 +383,7 @@ test("a dismissed card's chip goes away and does not come back on reload", async
   await page.getByPlaceholder(/^Message /).fill(prompt);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
+  await openMessageThread(page, prompt);
   const chip = page.getByRole("link", { name: /Card opened/ }).last();
   await expect(chip).toBeVisible({ timeout: 60_000 });
   const href = await chip.getAttribute("href");
@@ -409,7 +426,7 @@ test("a dismissed card's chip goes away and does not come back on reload", async
   // lose to a stray click. Scoped to the row the chip sits on, so the dialog
   // opened is that card's.
   const row = page
-    .locator("article[data-message-id]")
+    .locator("[data-message-id]")
     .filter({ has: page.locator(`a[href="${href}"]`) });
   await row.getByRole("button", { name: "Dismiss this card" }).click();
   await expect(page.getByText("Dismiss this card?")).toBeVisible();
@@ -424,9 +441,14 @@ test("a dismissed card's chip goes away and does not come back on reload", async
 
   // …and gone from the board, which is what makes it a dismissal rather than a
   // hidden chip over a card that is still filling the board.
-  await page.goto(href!);
-  await dismissWelcome(page);
-  await expect(page.getByText(prompt).first()).toHaveCount(0, { timeout: 30_000 });
+  await expect
+    .poll(async () => {
+      const response = await request.get("/api/v1/company/tasks");
+      if (!response.ok()) return true;
+      const tasks = (await response.json()) as Task[];
+      return !tasks.some((task) => task.id === taskId);
+    })
+    .toBe(true);
 
   // …and still gone after a reload. This is the regression: the transcript is
   // rehydrated from the host here, not from the React state the click cleared.
@@ -434,5 +456,6 @@ test("a dismissed card's chip goes away and does not come back on reload", async
   await page.reload();
   await openThread(page, "");
   await expect(page.getByText(prompt, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+  await openMessageThread(page, prompt);
   await expect(page.locator(`a[href="${href}"]`)).toHaveCount(0);
 });

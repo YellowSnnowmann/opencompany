@@ -286,6 +286,21 @@ impl Projector {
             .map(|(sequence, _)| *sequence)
     }
 
+    /// The host journal sequence for a Coordinator conversation sequence.
+    ///
+    /// Hive turns carry their thread root in the Coordinator transcript's
+    /// sequence space; task origins and company events use the host journal's
+    /// sequence space. Resolve the boundary through the rows this projector
+    /// already landed rather than treating the two counters as interchangeable.
+    pub async fn host_sequence_of(&self, sequence: u64) -> Option<EventSeq> {
+        self.cursor
+            .lock()
+            .await
+            .landed
+            .get(&sequence)
+            .map(|landed| landed.seq)
+    }
+
     /// Projects everything the Coordinator committed since the cursor.
     /// Returns how many journal rows it appended.
     pub async fn project(&self) -> crate::Result<usize> {
