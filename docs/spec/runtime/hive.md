@@ -1,462 +1,234 @@
-# Hive desks
+# The company hive
 
-A desk with somebody to work **with** answers an operator message as a room:
-the message opens an **episode**, the room runs it in **rounds** of concurrent
-turns, seats talk to each other by posting, broadcasting and DMing, and the
-episode ends when a seat reports the work complete.
+Every conversation a company's agents have — an operator line on a desk or on
+`#general`, an operator DM to a teammate, one teammate messaging another — runs
+through **one TinyHiveMind `Coordinator` per company** (OC-2). The Coordinator
+owns who runs and when: each agent has one durable inbox and one serialized
+turn stream across every hive it sits in, a desk message opens an **episode**
+the conductor runs until its members complete it, and a direct message is
+delivered to its recipient's inbox and answered on a later turn. OpenCompany
+hosts it: it owns the runtime, the agents, the storage, the journal and the
+turn hooks.
 
-That is the whole story for a `[[group_chat]]` of two or more members. A desk
-of one, a DM, the General line and a workflow copilot thread run one ordinary
-turn, exactly as they always did.
+The mechanics come from `vendor/tinyhivemind`: `tinyhivemind-hives`
+(`Coordinator`, `Storage`, `RetentionPolicy`) and `tinyhivemind-openhuman`
+(`OpenHumanHost`, `TurnHooks`, `SendAuthorizer`, the permanent `hivemind_*`
+tools). Its own migration note is `vendor/tinyhivemind/docs/opencompany-migration.md`.
 
-The mechanics come from [`tinyhivemind`](https://github.com/tinyhumansai/tinyhivemind)
-(`vendor/tinyhivemind`) and its `tinyhivemind-openhuman` adapter, which binds
-a desk to already-built `openhuman_embed::Agent`s and folds what the host
-commits. OpenCompany hosts it: it owns the runtime, the agents, the journal,
-the sequences, the scheduling and the tools. Nothing in the library appends a
-row, waits, or runs a turn.
+Isolated turns — a dispatched card, a workflow node, a copilot thread, a
+background task — stay on the harness pool (`HarnessPool`), each in a fresh
+session, and never enter the hive.
 
 ## The shape
 
 ```text
 one process ── one openhuman_embed::Runtime
-                 ├─ one openhuman_embed::Agent per (company, agent)     ← the seat
-                 │     one stable session, one turn_lock
-                 └─ one OpenHumanHive + CompletionDriver per [[group_chat]]   ← the room
-                       members = cloned Agent handles (a shared agent is in every hive that lists it)
+                 └─ one openhuman_embed::Agent per (company, agent)
+company ────── one CompanyHive  (hive::runtime::for_company, keyed by company + HiveStore)
+                 ├─ Coordinator  over PortStorage(HiveStore)       ← state row + transcript, CAS
+                 ├─ OpenHumanHost                                  ← every agent registered, one session each
+                 │    ├─ ReachPolicy  (SendAuthorizer)
+                 │    └─ HiveHooks    (TurnHooks)
+                 ├─ hives: one per desk + `General` (#general)
+                 └─ Projector  transcript ─▶ company journal
 ```
 
-- **One runtime.** `openhuman_embed` allows one `Runtime` per process
-  (`harness::openhuman_runtime::global`). It is booted at `serve` with
-  `<data-dir>/openhuman` as its workspace and the TinyHumans key as its
-  credential ([harnesses.md](harnesses.md)).
-- **One agent per company agent.** `harness::build::agent_spec_for` renders a
-  manifest `[[agent]]` into an `AgentSpec` — persona prompt, native tool scope,
-  provider route, `Access::full()`, the `opencompany` MCP server, its skills
-  dir and action dir — and `runtime.agent(spec)` mints the handle. The runtime
-  id is `session_key::runtime_agent_id(company, agent)` (`{company}--{agent}`,
-  lowercased, hashed past 64 chars). The handle is a cheap clone; the
-  `CompanyAgent` beside it holds the agent's `turn_lock`.
-- **One hive per desk.** `hive::graph::DeskHive` builds
-  `HiveGraph::new(desk, candidates)` from the roster
-  (`delegation_tools::tinyhivemind_desks` / `tinyhivemind_roster`) and binds
-  every member with `AgentBinding::new(member_id, company_agent.agent.clone())`.
-  Held in `HarnessPool.hives` and rebuilt with the roster and on
-  `DeskCreated` / `DeskDeleted` / `DeskMembersChanged`.
-- **A shared agent is one agent.** The CEO on both `engineering` and `content`
-  is one `Agent` bound into two hives. Its `turn_lock` is what keeps that
-  honest: it runs one turn at a time across every room it sits in, and two
-  rooms' rounds otherwise proceed independently.
+- **One Coordinator per company, not per pool or process.** A company with
+  several `built_in` harnesses has one pool per harness; every pool registers
+  its agents into the same `CompanyHive`. Coordinator agent ids are runtime ids
+  (`session_key::runtime_agent_id` → `{company}--{agent}`), so one process can
+  host many tenants without `hivemind_list_agents` leaking another's roster.
+- **One writer per store.** `Coordinator::new` claims the store's
+  `writer_epoch`; an older Coordinator on the same store gets `Fenced` on every
+  write and from `run()`. The run loop treats `Fenced` as "another process owns
+  this company" and stops for good, logging it — no retry loop. Any other
+  run-loop error restarts it after a second.
+- **Storage is the `HiveStore` port** (`docs/spec/runtime/ports.md`),
+  implemented by the filesystem, SQLite and MongoDB backends, so a hosted
+  tenant's hive lives in its own database (or its namespace of the shared one)
+  exactly as its journal does. `hive::storage::PortStorage` adapts it; a
+  revision mismatch is `RevisionConflict { expected, actual }`, which the
+  Coordinator reloads and retries.
+- **One session per agent.** Registration binds each agent to its existing
+  OpenHuman conversation (`register_agent_in_session`), so an agent continues
+  one session across every hive and DM. A roster rebuild replaces the handle
+  (`OpenHumanHost::replace_agent`) after the pool drops its own clones.
 
-## Where a message goes
+## Desks, `#general` and DMs
 
-`hive::dispatch` is the chat body of `Brain::run_cycle` and the only gate:
+`CompanyHive::sync` runs on every roster rebuild and record refresh: one hive
+per desk (`delegation_tools::desk_ids`, overlay desks included) holding the
+desk's effective members that are registered, plus `#general`. A desk that
+disappears keeps its hive (the transcript is permanent) with every member
+removed.
 
-| Surface (`ConversationRef.kind`) | What runs |
+TinyHiveMind core reserves `general` and `main` (any case) as desk identities,
+except for its own default desk whose id and name are both `General`. So:
+
+| Console chat | Hive id | Note |
+| --- | --- | --- |
+| `general` | `General` | core's default desk |
+| a desk called `main` | `desk-main` | prefixed, mapped back by `chat_for_hive` |
+| any other desk id | the same id | |
+
+A desk whose display name is `General` or `Main` runs under `"<name> (<id>)"`.
+A hive created under a reserved identity is accepted by the Coordinator but
+fails every episode it opens and stalls the run loop, so every boundary
+between a console chat and a hive goes through `hive::hive_id_for_chat` /
+`chat_for_hive`.
+
+An operator line in a teammate's DM (`dm:<agent>` or a bare roster id) is a
+direct `send_as_host` to that agent: no episode, one turn, and its reply comes
+back to the host as a returned reply that the projector journals on the DM.
+
+## Where an operator line goes
+
+`HarnessBrain::send_to_hive` (`harness/built_in/brain/hive_chat.rs`) is the
+operator path. It hands the line to the Coordinator with `send_as_host` and
+returns; the turns that answer it run on the hive's own task, and their output
+reaches the console through the journal. The message id is `op:{seq}` — the
+journal row the line was said as — so a redelivered cycle resends
+idempotently (`MessageConflict` is "already accepted").
+
+| Outcome | What happens |
 | --- | --- |
-| `Direct` (`dm:<agent>` or a bare roster id) | one turn on that agent |
-| `General` (`""`, `main`, `general`, `General`) | one turn on `delegation_tools::chat_responder` |
-| `Workflow` (a copilot thread) | one **confined** turn (`confine.rs`); returns before this gate |
-| `Desk`, one effective member | one ordinary turn; a bare reply is salvaged as a `post` and the episode auto-completes |
-| `Desk`, two or more members | an **episode** |
+| accepted | `HiveAccepted { message_id, sequence, chat_id, source, starters, route }` is journaled |
+| `InvalidThread` | the line answers a thread the hive cannot see; resent at the top level |
+| `InboxFull { agent_id, limit }` | backpressure: a system line in the chat says the teammate has `limit` messages waiting and to resend later |
+| no hive (no `HiveStore` wired) | the brain answers with a pooled turn instead |
 
-`route_message` answers `Fallback` for the first three: no Jev, no driver, one
-ordinary turn, journaled as `AgentReply`. `@mention` resolution is
-`tinyhivemind_core::mention::{resolve, direct_responder, mentioned_members}` on
-every surface.
+**Starters** (`hive::route::choose`) are who the episode starts with:
 
-Membership is `CompanyRecord::effective_desk_members` — overlay desks and
-Team-API retirements count — so who is in the room and who the console says
-is in it cannot drift.
+1. **Mention** — the named members of this hive (a teammate, a desk, `@everyone`).
+2. **Jev** — an unaddressed desk line is put to System One with the desk's
+   members as candidates (`route.rs`, `jev.rs`); skipped without a TinyHumans
+   key and always on `#general`.
+3. **Default** — the desk lead; on `#general`, the orchestrator.
+
+`route` on `HiveAccepted` says which rung decided (`mention`, `jev`,
+`default`); `opencompany measure` counts them.
 
 ## An episode
 
-```text
-operator message ─▶ route_desk (Jev | lead/mention fallback) ─▶ EpisodeOpened
-      │
-      ▼
- ┌─ pending_round ─▶ RoundStarted ─▶ tokio::spawn one turn per seat (own stack, turn_lock, timeout)
- │       ▼
- │  each seat ends its turn with exactly one speech call ─▶ AgentReply row (sequence = the commit)
- │       ▼
- │  apply_committed_round ─▶ RoundCommitted ─▶ HostAction::RunAgents → BroadcastRouted
- │                                            HostAction::DeliverDm  → DmDelivered
- └────── completion_status != Complete ◀──────┘
-                 │
-                 ▼ Complete
-          EpisodeCompleted
-```
+Each hive has at most one active episode; later lines queue. The conductor
+(TinyHiveMind's `CompletionDriver` / `Conductor`) assigns the starters, runs
+rounds of at most `round_width` concurrent turns, nudges, and settles the
+episode when every assigned member has called `hivemind_complete`, or fails it
+at the round cap or turn wall. A turn's plain reply is recorded as a post in
+the episode, not as completion; completion is always an explicit
+`hivemind_complete { episode_id, body }`.
 
-**Opening.** The episode key is `(desk, thread_root ?? message_seq)`. A message
-in a thread with an open episode resumes it (`driver.resume(state)` plus
-`apply_assignment` for the mentioned or lead seat). Otherwise the host asks
-`hive.route_desk(jev, None, &hive.desk_request(..), explicit_mention,
-fallback = desk_lead)` for a `RoutingPlan`, journals `EpisodeOpened` with it,
-builds `CompletionEpisodeState::opened(conversation, message_seq, members)`,
-assigns the selected seats, and `driver.start`s.
+The Coordinator's options are folded from every desk's `[group_chat.routing]`
+block (`hive::routing::coordinator_options`): the widest `round_width`, the
+largest `max_rounds`, a turn wall of `round_width × max_rounds`, and the
+adapter's per-turn timeout is the longest `turn_timeout_secs`
+(`routing::turn_timeout`). Defaults: `round_width=5`, `max_rounds=12`,
+`turn_timeout_secs=600`.
 
-**A round.** `driver.pending_round(&state)` names the seats with pending work,
-at most `round_width` of them. The host journals `RoundStarted` and runs every
-one **at the same time**: each seat's turn is its own `tokio::spawn`, waits on
-that agent's `turn_lock`, and is bounded by `turn_timeout_secs` counted from
-the moment it holds the lock — so a seat shared with a busy desk is delayed,
-not timed out, by the other room. Turns in one round do not read each other;
-they see the desk as it stood when the round opened.
+### Retention
 
-**Exactly one action.** A seat's turn ends with exactly one speech tool call.
-A turn that made none has its reply salvaged as a `post` when it reads as one
-(`speech::fence::extract_post`); otherwise the seat is re-asked with a stricter
-reminder, up to four times, and then the host journals `TurnFailed` and commits
-a synthetic `complete_episode("(no action)")` for that seat so the room never
-hangs on a silent member. A second speech call in one turn is refused by the
-MCP server ("one action per turn; the first is recorded").
+The state row is bounded (`RetentionPolicy`, `hive/routing.rs`); the
+transcript is never pruned:
 
-**Committing.** Each utterance is appended as an ordinary `AgentReply` row on
-the desk — `parent` = the thread root, `episode: {id, revision, kind, to?,
-routed_by?}`, `audience` = the recipients of a `dm` — and the row's `EventSeq`
-**is** the `CommittedUtterance.sequence`. The host then folds the whole round
-with `apply_committed_round(&state, &pending, committed, BroadcastRouting
-{primary: jev, policy, roster_version, thread_context})`, journals
-`RoundCommitted`, and persists the new `DriverState`. The library's actions are
-descriptions; the host executes them: `RunAgents{agent_ids, plan}` schedules
-the next round's seats and journals `BroadcastRouted{plan, router}`,
-`DeliverDm{route, message}` journals `DmDelivered` and assigns the recipients.
-
-**Ending.** When `completion_status` is `Complete` — every assigned seat has
-called `complete_episode` — the host journals `EpisodeCompleted{reason:
-complete_episode}`. The other reasons are `round_cap` (`max_rounds` spent),
-`timeout`, `failed` (a journal append failed) and `membership_changed` (the
-roster moved underneath the room). A completed episode is the transcript above
-it; there is no closing summary row.
-
-**Resuming.** `EpisodeStateSaved{episode_id, desk, thread_root, revision,
-state, sharing}` is journaled after every commit (a ledger row, never
-projected). On restart the host loads the latest row and replays every
-`AgentReply` whose `episode.revision` is above it through `apply_committed`;
-an exact replay is a no-op by the driver's receipts, so a crash between
-`RoundCommitted` and the state save costs nothing twice.
-
-**Concurrency.** Episodes of different desks are independent tasks tracked in
-`HarnessPool.episodes`. There is no company-wide serial lock on chat and no
-per-chat slot; the locks are the per-agent `turn_lock` and a per-episode lock.
-The invariant the measurement (`opencompany measure`,
-`scripts/measure-coordination.mjs`) checks: turns of different agents overlap
-freely, across desks and within a round; turns of one agent never do.
-
-## Speaking
-
-Seats speak through the `opencompany` MCP server
-(`src/hive/mcp_server.rs`), reached from a turn as `mcp_call_tool{server:
-"opencompany", tool, arguments}`. The tool names, argument shapes and
-descriptions are `tinyhivemind::speech::tool_specs()`, rendered verbatim:
-
-| Tool | Utterance | What the host does |
+| Field | Value | What it bounds |
 | --- | --- | --- |
-| `post {message}` | `Post` | one row for the whole desk |
-| `broadcast {message}` | `Broadcast` | one row, then asks the router who should pick it up (`RunAgents`) |
-| `dm {to: [ids], message}` | `Dm` | one row with `audience = to`; the recipients are assigned the next round (`DeliverDm`) |
-| `complete_episode {message}` | `CompleteEpisode` | one row, and this seat's assignment is done |
-| `read {limit}` | — | further back in this desk than the turn was handed |
+| `settled_episodes` | 256 | settled episodes kept on the row (each is journaled as `HiveEpisodeSettled` as it settles) |
+| `deliveries` | 1024 | acknowledged direct deliveries (bookkeeping; the message stays in the transcript) |
+| `interrupted` | 256 | interruption records (journaled as `HiveTurnInterrupted` as they appear) |
+| `pending_per_agent` | 64 | undelivered direct messages one agent may have waiting; a send past it is `InboxFull` |
 
-`dm` recipients are checked at call time against `hive.resolve_dm`: a name
-that is not an active seat on this desk is a tool **error**, and the seat
-retries in the same turn. A DM is a narrowing *within* the room — the row is
-on the desk, elided for a viewer not in its audience; an operator sees every
-row. Reaching another desk is a [referral](#referral), never a `dm`.
+## Talking: the `hivemind_*` tools
 
-The same server serves every OpenCompany tool an agent holds (ledger, tasks,
-pages, workspace, memory, composio, hosting, approvals), because
-`openhuman_embed::Agent` has no seam for an in-process host tool. The server
-runs on a dedicated loopback listener; the route is `POST
-/internal/mcp/{company}/{runtime_agent_id}` with a per-agent bearer minted at
-build, and that bearer is the attribution: bearer → agent → the agent's one
-in-flight turn → exactly one episode and round. Approvals are decided there
-too — an OpenCompany tool call the agent's `ApprovalPolicy` parks journals
-`ApprovalParked`, answers "awaiting approval", and its result is delivered as
-a fresh turn once `ApprovalResolved` lands.
+Every registered agent carries the adapter's permanent family, admitted by the
+agent's tool scope (`hive::HIVEMIND_TOOLS`):
 
-## Seats open cards
+| Tool | Does |
+| --- | --- |
+| `hivemind_list_hives` / `hivemind_list_agents` | where the agent sits; who it can message |
+| `hivemind_read` | a hive (optionally a thread) or its direct transcript with one peer, after an exclusive cursor; starts no turn |
+| `hivemind_send_hive` | enqueue a line on a hive it belongs to (opens or queues an episode) |
+| `hivemind_send_agent` | enqueue a direct message to a teammate; their reply arrives on a later turn |
+| `hivemind_post` / `hivemind_ask` / `hivemind_broadcast` / `hivemind_complete` | act in its active episode, by explicit `episode_id` |
 
-A seat keeps `spawn_task`. What an episode withholds is the board's hand-over
-verbs — `delegate_to_desk`, `delegate_to_teammate`, `assign_task` and
-`review_task` (`EPISODE_WITHHELD_TOOLS`) — because handing work to a teammate
-inside a room is a `dm` or an `ask`, not a card someone else then picks up.
-Opening a card for work that should outlive the conversation is still the
-seat's call.
+Sends return a receipt immediately and never wait for the peer. `agent_id`
+arguments are Coordinator ids; the team brief lists each teammate's
+(`` `acme--writer` as the `agent_id` of a `hivemind_*` tool``), and a send that
+passes a bare manifest id is refused with the id to use.
 
-A seat's `spawn_task` does not write the card in the turn. It is queued under
-the seat's own delegation scope (`DelegationScope::Seat`, keyed by the seat's
-turn key), so nothing it queues can drain into the pooled turn or another
-seat, and it is written when the seat's turn settles
-(`host/seat_park.rs` → `open_seat_cards`). The tool answers "Queued a task
-card", never "opened": until the board has taken it, it is not open, and a
-card the board refuses is reported back to the seat rather than dropped.
+**Reach** (`hive::policy::ReachPolicy`, the host's `SendAuthorizer`) is the rule
+the retired `delegate_to_teammate` enforced: a teammate may message the people
+it shares a desk with, plus the members of every desk its manifest
+`delegates_to` names — anybody when that list is empty or `"*"`, never itself.
+A refusal reaches the model as the tool's error text and its turn continues.
 
-One episode opens at most **three** cards (`EPISODE_CARD_CAP`), shared by
-every seat, through a task-local `CardBudget` the episode installs around each
-seat turn. A title the episode already queued or opened — compared after
-case, spacing and punctuation are folded — is refused at call time with a
-message that says so, and so is a fourth card. A seat whose message is a
-question (`triage` says answer) is claimed as answering and cannot open a
-card at all.
+## A coordinator turn
 
-The card the person's message already opened — the REST handler's card for a
-`deliverable: workflow` request, found by `origin_message_seq` — is the
-episode's **message card**. A seat's first spawn adopts it instead of opening
-a second card when it is still unowned and in To-do, and the seats' publishes
-are filed on it. With no message card the first publish mints one and stamps
-it with the message's sequence, so a resumed episode finds the same card
-(`EpisodeCards::recall`). Every card a seat opens carries
-`openedBy {agentId, episodeId}`, which the console's card detail renders as
-"Opened in chat by <name>".
+The adapter runs the agent's turn on its own handle and calls
+`HiveHooks` (`harness/built_in/hive_hooks.rs`) around it:
 
-## The prompt
+1. **`prepare`** finds the `CompanyAgent` behind the coordinator id and roots
+   the turn in the agent's workspace.
+2. **`progress`** streams the turn live to the desk or DM it answers.
+3. **`wrap_turn`** (`hive_hooks/settle.rs`) admits the turn (total ceiling,
+   monthly budget, daily cap — `HarnessPool::admit`), journals `TurnStarted`
+   with `hive: { hiveId, episodeId }`, claims the per-turn queues (approval
+   scope, publishes, outputs, `spawn_task` cards, the episode's card budget),
+   runs the model inside the agent's `TurnEnvelope` (turn lock, tool executor,
+   stop hooks), then files what the turn left — published files on a card,
+   cards it opened, approvals it asked for — and journals `TurnSettled` /
+   `TurnFailed`.
+4. **`after_turn`** answers `Parked` when the turn put an approval in front of
+   the operator; the Coordinator then holds the agent.
 
-Every seat's turn message has a fixed first line — the sentinel the mock
-brain and the tests key on — followed by the desk delta and the instruction:
+**Cards.** One episode may open at most three cards with no repeated title
+(`EpisodeCards`); a fourth `spawn_task` is refused in-turn. A publish with no
+card in scope mints one; a line the chat handler already carded keeps that one.
 
-```text
-Hive turn: desk engineering, episode 7f3a…, round 2.
-
-Since your last turn on this desk:
-[41] operator: Ship the pricing page by Friday.
-[42] engineer: !post I can have the backend flag ready Thursday.
-[43] ceo (dm to you): Keep the copy short.
-
-Your assignment: answer the operator's message; @writer has been invited.
-Tools on server `opencompany`: post, broadcast, dm, complete_episode, read, record_entry, …
-End this turn with exactly one `mcp_call_tool` on server `opencompany`:
-post | broadcast | dm | complete_episode.
-```
-
-The delta is `tinyhivemind::sharing::prepare_delta` over
-`EventLogSessionLog` — the journal read as a `SessionLog`, narrowed to this
-desk and to what this seat may read — with attributed `SessionAuthor` lines.
-The per-(agent, conversation) `SharingState` watermark is persisted with the
-episode, so a 200-turn desk hands a seat only what it has not seen. A non-desk
-turn gets the delta prefix and no fence. `revision` in the sentinel is raw
-(0-based); the console shows it 1-based.
-
-## Routing: Jev, then the lead
-
-Who a message needs, and who a broadcast reaches, is asked of **Jev** —
-TypeSafe's System One model — through `tinyhivemind_typesafe::JevRouter` over
-the host transport `hive::jev::TinyHumansSystemOne`:
-
-- `POST https://api.tinyhumans.ai/agent-integrations/openrouter/systemone`,
-  bearer = the TinyHumans key resolved the way every managed call resolves it
-  (`OPENCOMPANY_INFERENCE_KEY`, then the token file, then
-  `TINYHUMANS_API_KEY`). The proxy speaks the System One wire body unchanged
-  and resolves `jev-latest` to a concrete `typesafe/jev-*` id in the
-  response; the router records that id and never compares it.
-- `OPENCOMPANY_JEV_KEY` is a **development** override: the bearer to present
-  instead of the managed TinyHumans credential, for pointing routing at a
-  different vendor than inference while testing. Paired with
-  `OPENCOMPANY_JEV_URL` — TypeSafe's own endpoint with a TypeSafe key — because
-  either alone is the misconfiguration that looks configured: a TinyHumans key
-  addressed to `api.typesafe.ai` `401`s every round and falls back to
-  lead-and-mention with no "no key" line to say why, since a key *was* resolved.
-  Resolved by `hive::dispatch::host_router` and `host_oracle` and handed to
-  `jev_router` / `jev_transport`; unset — the hosted default — leaves the managed
-  ladder untouched.
-- `OPENCOMPANY_JEV_URL` moves the proxy. It must be `https`, or `http` to a
-  loopback host — the credential is a request header, and the rule is the one
-  [analytics.md](analytics.md) applies to its collector. A plain-`http` URL on
-  a routable host is refused at boot.
-- One immediate retry on a `429`/`529` (`classify_retry`) or any `5xx`; then
-  the call fails and the round routes without Jev. A timeout (30 s) or a `4xx`
-  fails at once.
-- **No key, no router.** `hive::jev::jev_router` answers `None`, logged once,
-  and every route is the fallback below.
-
-The plan Jev returns is one of `One{primary}`, `Hive{primary, invited}`,
-`Clarify{question}` or `Fallback{reason}`, journaled on `EpisodeOpened` and
-`BroadcastRouted` as `plan` with `router: jev | fallback | explicit`. An
-explicit `@mention` outranks Jev (`explicit`). Without Jev the fallback is
-deterministic: an operator message goes to the desk lead (the first roster
-member listed), and a broadcast goes to the next distinct participant in
-scheduling order — which is why a company with no TinyHumans key still runs
-every episode, only with less initiative in who picks a broadcast up.
-
-`[group_chat.routing]` is the policy the router and the driver are frozen on
-for the episode's life (`src/hive/routing.rs`):
-
-```toml
-[[group_chat]]
-id = "engineering"
-name = "Engineering desk"
-members = ["engineer", "ceo"]
-
-[group_chat.routing]
-round_width = 2            # seats a round runs at once, including the primary
-choice_option_limit = 8    # alternatives in one System One Choice, incl. `none`
-max_rounds = 12            # rounds before the host closes the episode (`round_cap`)
-turn_timeout_secs = 600    # one seat turn, counted from holding its turn_lock
-minimum_confidence = 0.0   # Choice concentration below which Jev's pick is not taken
-high_impact_minimum_confidence = 0.0
-clarification_threshold = 1.0   # missing-information probability that asks instead of routing
-high_impact_threshold = 1.0
-
-[group_chat.routing.referral]
-enabled = true             # off unless this says so
-max_hops = 1               # chain depth; 2 is one round trip
-reach = "desks"            # local | channels | desks — widens strictly
-returns = true             # carry the answer back to the desk that asked
-```
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `round_width` | `5` | seats the driver runs per round; Jev's `invited` list is clamped to it |
-| `choice_option_limit` | `8` | alternatives per Choice; a larger roster is routed hierarchically |
-| `max_rounds` | `12` | rounds before `EpisodeCompleted{reason: round_cap}` |
-| `turn_timeout_secs` | `600` | one seat's turn; the lock wait is not counted |
-| `minimum_confidence`, `high_impact_minimum_confidence` | `0.0` | the concentration a Choice needs before its pick is accepted |
-| `clarification_threshold`, `high_impact_threshold` | `1.0` | when a plan becomes `Clarify` / when the high-impact rule applies |
-| `referral.enabled` | `false` | may this desk put a question to another desk |
-| `referral.max_hops` | `1` | chain depth |
-| `referral.reach` | `desks` | `local` pulls a target into this room; `channels` runs them on their own desk; `desks` also lets `@#desk` convene that desk |
-| `referral.returns` | `true` | the answer comes home |
-
-A zero is refused at load rather than clamped (`routing.round_width = 0` is a
-round of nobody; `max_rounds = 0` an episode that can never complete), and an
-unknown `reach` word is named against the valid list. A manifest still
-carrying the retired `[group_chat.hive]` block is refused with a migration
-hint. The same block can be installed at runtime — `PUT
-{scope}/desks/{id}/routing`, `DELETE` to restore the manifest, `GET` for the
-declared block beside the effective numbers and the candidates — and every
-write journals `DeskRoutingConfigured{desk_id, reset}` ([api.md](api.md#desk-routing-and-episodes)).
-A running episode keeps the policy it opened with.
-
-## Referral
-
-Members of one desk read the same transcript and are wrong about the same
-things, so the only pooling that helps is across the boundary. With
-`[group_chat.routing.referral]` enabled, a `post` or `dm` that names a desk
-(`@#content`) or a member of another desk is decided by
-`tinyhivemind_core::referral::referral(policy, input, roster, desks)`; a
-`MessageRoute::DeskReferral{desk_id}` is enqueued once — the journal's
-`ReferralEnqueued` row keyed by `(episode, hop)` is the idempotency record —
-and an episode opens on the target desk seeded with the question, authored
-`hive-referral`.
-
-When that episode completes, its answer is appended to the origin desk under
-`HIVE_REFERRAL_AUTHOR` (`hive-referral`, hyphenated so no roster id can hold
-it) and the origin episode resumes with the asker assigned. Only the answer
-crosses: the far desk's own rounds stay on the far desk, under the seats that
-took them. The `referral` frame carries both `episodeId` and `toEpisodeId`.
-
-`reach = "local"` makes this exactly `mention_dispatch`: a target who is not
-on this desk is pulled into this conversation for one turn. `max_hops = 1`
-with `returns = true` is one question and one answer; a longer chain has to be
-asked for.
+**Approvals.** A parked turn's approvals are keyed `hive-turn:{agent}:{episode}`
+(`runtime::hive_resume`) and carry `origin: Hive { agent_id, episode_id }` on
+`ApprovalParked`, surfaced as `hive` on the approval summary. When the last
+decision the agent waits on lands, every decision is rendered as one release
+note and `Brain::release_hive_agent` calls `Coordinator::release_with`; the
+agent reads it as `Host resumption note: …` at the top of its next turn and
+redeems an approved call itself under the single-use grant. If no hive takes
+the release, the operator is told the teammate is no longer waiting.
 
 ## What lands in the journal
 
-| Event | Fields | Projected |
-| --- | --- | --- |
-| `EpisodeOpened` | `chat_id, episode_id, opened_by_seq, parent_id?, participants, plan` | `episode_opened` |
-| `RoundStarted` | `episode_id, revision, agent_ids` | `round_started` |
-| `AgentReply` (+) | `episode: {id, revision, kind, to?, routed_by?}`, `audience` | `agent_reply` |
-| `RoundCommitted` | `episode_id, revision, utterances[{agent_id, sequence, kind, message_seq?, to?}], actions` | `round_committed` |
-| `BroadcastRouted` | `episode_id, revision, agent_id, message_seq, plan, probabilities?, router` | `broadcast_routed` |
-| `DmDelivered` | `episode_id, from, to, message_seq` | `dm_delivered` |
-| `EpisodeCompleted` | `episode_id, revision, completed_by?, rounds, reason, summary_seq?` | `episode_completed` |
-| `EpisodeStateSaved` | `episode_id, desk, thread_root, revision, state, sharing` | never |
-| `ReferralEnqueued` (+) | `episode_id?, to_episode_id?, hop` | `referral` |
-| `DeskRoutingConfigured` | `desk_id, reset` (never the block) | `desk_routing_configured` |
-| `TurnStarted` / `TurnFailed` (+) | `episode_id?, round_revision?, chat_id?, turn_id?` | `turn_started` / `turn_settled` (now on success too) |
+The `Projector` (`hive/projector.rs`) tails `Coordinator::read_transcript` on
+every committed revision and appends:
 
-`EpisodeOpened` and `EpisodeCompleted` are permanent; the round, broadcast,
-dm and state rows are prunable, because the reply rows are the evidence and a
-completed episode is rebuilt from them. `chat/history` alone rebuilds every
-round after a reload; the frames add the present tense — which seats a round
-opened with, which is still working. The frame shapes are in
-[events.md](events.md#hive-episodes-and-rounds); the DTOs and
-`GET {scope}/episodes` in [api.md](api.md#desk-routing-and-episodes).
-
-Gone with the quorum hive: the `hive-report` and `hive-failure` authors, the
-`!propose` / `!support` trace grammar, the closing summary row, private asides
-(`asideConversation`), `DeskHiveConfigured` and `/desks/{id}/hive`.
-
-## Failure
-
-| Failure | Effect |
+| Transcript row | Journal row |
 | --- | --- |
-| a seat's turn errors or times out | `TurnFailed`, a synthetic `complete_episode("(no action)")` for that seat, the round commits |
-| a seat makes no speech call | salvage as `post`, else up to four re-asks, then as above |
-| a `dm` names a non-member | tool error to the seat; the turn continues |
-| Jev unreachable | one retry, then the lead/mention fallback, logged; the round runs |
-| a journal append fails | `EpisodeCompleted{reason: failed}`; the rows already appended are real |
-| the roster changes under an open episode | `EpisodeCompleted{reason: membership_changed}`; the next message opens a fresh one |
-| the host restarts mid-episode | resume from `EpisodeStateSaved` + replay; nothing runs twice |
+| a member's line on a hive, visible to all | `AgentReply` on the desk chat, threaded under what it answers, `hive: { sequence, episodeId?, thread? }` |
+| a reply to an operator DM | `AgentReply` on the DM chat |
+| a direct line between two agents | `HiveMessage { destination: Agent(to) }` |
+| a private desk line (`only_for`) | `HiveMessage { destination: Hive(desk), only_for }` |
+| an episode settled / failed | `HiveEpisodeSettled { episode_id, hive_id, opened_at, thread, failure }` |
+| a turn interrupted by a restart | `HiveTurnInterrupted` |
 
-## Where the code is
-
-| Path | Holds |
-| --- | --- |
-| `src/hive/graph.rs` | `DeskHive` — `HiveGraph` + `AgentBinding`s per desk, rebuilt with the roster |
-| `src/hive/driver.rs`, `round.rs` | `hive::dispatch`, the episode loop, seat turns, exactly-one enforcement |
-| `src/hive/episode_store.rs` | `EpisodeStateSaved`, resume and replay |
-| `src/hive/routing.rs` | `[group_chat.routing]` → `EffectiveRouting` → `RoutingPolicy`, the overlay, `RoutingPlanDto` |
-| `src/hive/jev.rs` | `TinyHumansSystemOne`, `jev_router` |
-| `src/hive/referral.rs` | the reserved `hive-referral` author, the pair key, the question and answer heads, `ReturnAddress` |
-| `src/hive/session_log.rs` | `EventLogSessionLog` — the journal as a `SessionLog` |
-| `src/hive/host/seat_cards.rs` | `EpisodeCards` — the episode's card budget, the message card, adoption and recall |
-| `src/hive/mcp_server.rs`, `tools.rs` | the `opencompany` MCP server, `InFlightRegistry`, the speech fold, `McpToolAdapter` |
-| `src/harness/openhuman_runtime.rs` | the one `Runtime` |
-| `src/harness/built_in/build.rs` | `agent_spec_for` |
-
-## Testing
-
-`tests/hive_e2e.rs` (gated `openhuman`, the `rust-gated` lane) boots a real
-company — `RuntimeBuilder`, the embedded runtime, the filesystem store, the
-HTTP surface — and drives it through `POST /api/v1/company/chat` against a
-scripted OpenAI-compatible model that answers `tool_calls` for
-`mcp_call_tool{server: "opencompany", tool, arguments}`:
-
-| Test | What it proves |
-| --- | --- |
-| a two-member desk completes in two rounds | `EpisodeOpened`, two `RoundStarted`/`RoundCommitted` pairs, `EpisodeCompleted{complete_episode}` |
-| a broadcast with no Jev falls back to the lead | `BroadcastRouted{router: fallback}` names the lead |
-| a DM schedules its recipient | the row carries `audience`, the recipient is in the next round |
-| a single-member desk | one ordinary reply, no round frames |
-| a cross-desk referral | only the answer crosses, under `hive-referral` |
-| **a shared agent on two desks** | both episodes complete; `turn_started` brackets overlap across desks and never for the same agent |
-| crash after `RoundCommitted` | resume replays as a no-op |
-| memory over MCP | `memory` tool `learn` in one episode, `recall` in the next |
-
-`src/hive/*_tests.rs` pin each seam without a model; `hive::jev` tests stand
-up a fake proxy and assert the bearer, the URL rule, the one retry and the
-timeout. The console's side is `npm run e2e:hive` against the mock brain
-(`frontend/test/e2e/mock-brain.mjs`), and the numbers come from
-`scripts/measure-coordination.sh` on `companies/hive_demo`.
+Each also streams on `/events` (`docs/spec/runtime/events.md`). A teammate's
+direct lines are read back with `GET {scope}/agents/{agent_id}/messages?after=`.
 
 ## Measuring
 
-Two readers fold the same frames into the same numbers, so neither has to be
-trusted alone:
+`opencompany measure --company <id>` (`hive/measure.rs`) and
+`scripts/measure-coordination.mjs` (over `/events`) fold the same rows into
+the same report: the concurrency peak and same-agent overlaps from the turn
+brackets, episodes settled / failed, direct and private contacts and distinct
+pairs, and the starter-route histogram. Thresholds: at least two turns at
+once, no agent overlapping itself, one agent→agent contact, two distinct
+pairs, every episode settled.
 
-- `opencompany measure --company <id> [--data-dir <dir>] [--since <seq>]
-  [--json] [--assert]` (`src/hive/measure.rs`) reads the journal through the
-  env-selected storage backend, with no host running: turn brackets keyed by
-  turn id give the peak of concurrent seat turns, the overlap count and the
-  same-agent overlaps (must be zero); `EpisodeOpened` / `RoundStarted` /
-  `EpisodeCompleted` give episodes opened and completed, rounds and time to
-  complete per episode and the reason each closed; `BroadcastRouted`,
-  `DmDelivered` and the forward `ReferralEnqueued` legs give broadcasts, dms,
-  cross-desk referrals and the distinct agent pairs; `AgentReply.episode.kind`
-  gives the utterance histogram. `--assert` exits with the number of missed
-  thresholds.
-- `scripts/measure-coordination.mjs` (thresholds and fold in
-  `scripts/lib/coordination-metrics.mjs`) tails a live host's `/events` and
-  cross-checks the peak against `GET /runs`, where every seat turn is a row
-  carrying `episodeId` and `roundRevision`.
+## Testing
 
-The thresholds are the plan's: max concurrent turns >= 2, >= 1 cross-desk
-referral, >= 1 agent-to-agent dm or broadcast, >= 2 distinct pairs, no
-same-agent overlap, every opened episode completed.
-
-See also [speech.md](speech.md), [harnesses.md](harnesses.md),
-[events.md](events.md#hive-episodes-and-rounds),
-[api.md](api.md#desk-routing-and-episodes) and
-[`docs/modules/hive/README.md`](../../modules/hive/README.md).
+- `src/hive/*_tests.rs`: routing, reach, storage, projector, mapping, measure.
+- `harness/built_in/hive_hooks_tests.rs`, `hive_hooks/settle_tests.rs`.
+- `tests/hive_e2e.rs`: a real company over HTTP with a scripted model keyed on
+  the coordinator turn's prompt (`tests/support/room.rs`) — desk, `#general`,
+  desk of one, a direct message answered, a shared agent never running twice,
+  the approval release, and the measurement.
+- `tests/one_card_per_message.rs`: one operator line opens one card.
+- CI: the `hive-coordinator` lane runs `hive::` under
+  `openhuman,mcp,media`; the HiveStore conformance runs in the SQLite and
+  MongoDB lanes (`store::sqlite`, `store::mongodb`).
