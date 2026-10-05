@@ -54,14 +54,25 @@ pub mod tools;
 /// `general` chat runs in that default desk, and every boundary between a
 /// console chat and a hive translates with [`hive_id_for_chat`] /
 /// [`chat_for_hive`]. A desk id is never `general` (the console reserves it),
-/// so the mapping is one-to-one.
+/// so the mapping is one-to-one. Any other desk whose id or name core would
+/// reserve is renamed on the way in ([`RESERVED_DESK_PREFIX`], [`hive_name`]).
 pub const GENERAL_HIVE_ID: &str = "General";
+
+/// The prefix a desk id core reserves (`main`, say) runs under in the hive.
+pub const RESERVED_DESK_PREFIX: &str = "desk-";
+
+/// Whether core reserves `identity` as a desk id or name.
+fn reserved(identity: &str) -> bool {
+    identity.eq_ignore_ascii_case("general") || identity.eq_ignore_ascii_case("main")
+}
 
 /// The hive id behind console chat `chat` (a desk id, or `general`).
 #[must_use]
 pub fn hive_id_for_chat(chat: &str) -> String {
     if chat == crate::ports::general_channel::GENERAL_CHANNEL_ID {
         GENERAL_HIVE_ID.to_string()
+    } else if reserved(chat) {
+        format!("{RESERVED_DESK_PREFIX}{chat}")
     } else {
         chat.to_string()
     }
@@ -72,9 +83,22 @@ pub fn hive_id_for_chat(chat: &str) -> String {
 #[must_use]
 pub fn chat_for_hive(hive_id: &str) -> String {
     if hive_id == GENERAL_HIVE_ID {
-        crate::ports::general_channel::GENERAL_CHANNEL_ID.to_string()
+        return crate::ports::general_channel::GENERAL_CHANNEL_ID.to_string();
+    }
+    match hive_id.strip_prefix(RESERVED_DESK_PREFIX) {
+        Some(desk) if reserved(desk) => desk.to_string(),
+        _ => hive_id.to_string(),
+    }
+}
+
+/// The hive name a desk called `name` runs under: its own, unless core
+/// reserves it, in which case the desk id is appended so it is not.
+#[must_use]
+pub fn hive_name(hive_id: &str, name: &str) -> String {
+    if hive_id != GENERAL_HIVE_ID && reserved(name.trim()) {
+        format!("{} ({hive_id})", name.trim())
     } else {
-        hive_id.to_string()
+        name.to_string()
     }
 }
 

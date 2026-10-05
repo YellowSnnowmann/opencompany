@@ -85,7 +85,7 @@ async fn sync_creates_a_hive_per_desk_and_general() {
         .map(|info| info.hive_id)
         .collect();
     hives.sort();
-    assert_eq!(hives, vec!["content".to_string(), "general".to_string()]);
+    assert_eq!(hives, vec!["General".to_string(), "content".to_string()]);
     hive.sync(&record).await.expect("a second sync is a no-op");
     assert!(
         !hive.release("writer", None).await.expect("release"),

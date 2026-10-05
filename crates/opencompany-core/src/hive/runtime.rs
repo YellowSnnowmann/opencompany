@@ -435,7 +435,10 @@ impl CompanyHive {
                     coordinator
                         .create_hive(HiveInfo {
                             hive_id: hive_id.clone(),
-                            name: if name.trim().is_empty() { desk.clone() } else { name },
+                            name: super::hive_name(
+                                &hive_id,
+                                if name.trim().is_empty() { desk } else { &name },
+                            ),
                             description: None,
                             members,
                         })
