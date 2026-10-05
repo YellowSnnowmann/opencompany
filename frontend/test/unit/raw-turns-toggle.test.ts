@@ -152,15 +152,14 @@ describe("the raw-turns renderer", () => {
    * it was committed in, spelled out — with a dm's recipients, since they are
    * what narrowed its audience.
    */
-  it("unfolds steps, prints referral lines in full, and spells out the episode", () => {
+  it("unfolds steps in full and spells out the hive episode", () => {
     expect(raw).toContain('data-testid="agent-session-raw-step"');
     expect(raw).toContain("{step.detail}");
     expect(raw).toContain("{step.result}");
     expect(raw).toContain("step.truncated");
-    expect(raw).toMatch(/row\.referralConversation\?\.lines\.map/);
     expect(raw).toContain('data-testid="agent-session-raw-episode"');
-    expect(raw).toContain("row.episode.kind");
-    expect(raw).toContain("row.episode.to");
+    expect(raw).toContain("row.hive.episodeId");
+    expect(raw).not.toContain("referralConversation");
     expect(raw).not.toContain("asideConversation");
   });
 
