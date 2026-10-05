@@ -147,6 +147,9 @@ fn live(key: &HiveKey) -> Option<Arc<CompanyHive>> {
 }
 
 impl CompanyHive {
+    // The closures return the adapter's own error type, whose size is
+    // TinyHiveMind's to change, not this crate's.
+    #[allow(clippy::result_large_err)]
     async fn start(config: HiveConfig) -> Result<Self> {
         let HiveConfig {
             company,
@@ -354,6 +357,9 @@ impl CompanyHive {
     /// # Errors
     ///
     /// `build` failed, or built an agent the adapter refused.
+    // The closure returns the adapter's own error type, whose size is
+    // TinyHiveMind's to change, not this crate's.
+    #[allow(clippy::result_large_err)]
     pub async fn replace(
         &self,
         coordinator_id: &str,
