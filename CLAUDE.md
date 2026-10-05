@@ -29,7 +29,7 @@ source module directories:
   authored in `companies/_globals/` and embedded at build time
   (`docs/spec/runtime/globals.md`)
 - `src/harness/`: the execution engines — the embedded OpenHuman runtime and one agent per teammate (feature `openhuman`)
-- `src/hive/`: hive desks — one `OpenHumanHive` per `[[group_chat]]`, speech over the `opencompany` MCP server, Jev routing, referral (`docs/spec/runtime/hive.md`)
+- `src/hive/`: the company hive — one TinyHiveMind `Coordinator` per company over the `HiveStore` port, agents on the `OpenHumanHost`, one hive per desk plus `#general`, starters (mention → Jev → lead), the reach policy, and the projector into the journal (`docs/spec/runtime/hive.md`)
 - `src/tiny/`: optional TinyAgents crate feature/status surface
 
 The command-line entrypoint lives in `src/bin/opencompany.rs`. Business types
@@ -234,30 +234,25 @@ Direct submodules under `vendor/`:
 | Submodule | Owns |
 | --- | --- |
 | `openhuman` | The agent runtime: `openhuman-core` business domains (agents, memory, tools, security, skills, MCP, hosting), the `openhuman-embed` `Runtime` → `Agent` facade every company turn goes through, the `openhuman-tinyhumans` backend transport, and JSON-RPC. Its own `AGENTS.md` names the owner of every library underneath it. |
-| `tinyhivemind` | Hive mind mechanics for agent group chats: desks, rosters, mentions, shared transcripts, routing, bounded group deliberation, and the completion driver, all as pure folds over a transcript the host owns. |
+| `tinyhivemind` | Hive mind mechanics for agent group chats: desks, rosters, mentions, routing, the completion driver, and the durable `Coordinator` that schedules every agent's turns across hives over a host-supplied storage port. |
 
 TinyHiveMind's crates, and what stays here:
 
 | Crate | Owns |
 | --- | --- |
-| `tinyhivemind-core` | Desks, rosters, mentions and conversation identity — the pure algebra, no IO. |
-| `tinyhivemind` | Runtime-neutral session ports (`SessionLog` paging), the attributed transcript projection, and the `speech` vocabulary (post / broadcast / dm / complete_episode). |
-| `tinyhivemind-hive` | Bounded deliberation: trace grammar, salience, quorum with cross-inhibition, the attention market, and the pure episode `step`. |
-| `tinyhivemind-embed` | Host-neutral conversation surfaces (`ConversationRef`, `MessageRoute`, `RoutingPolicy`) and Jev-first `route_message` / `route_broadcast`. |
-| `tinyhivemind-typesafe` | Jev System One wire types and `JevRouter` behind the `SystemOneTransport` port. No HTTP client. |
-| `tinyhivemind-driver` | The completion driver: who runs next in an episode, what a committed row means, what a seat is told. |
-| `tinyhivemind-tools` | The episode's tool record a host drains: what a seat may call and what its calls did. |
-| `tinyhivemind-mcp` | The room's tools served over MCP. |
-| `tinyhivemind-openhuman` | The OpenHuman seat adapter (`OpenHumanHive`): a seat as an `openhuman-embed` agent or a raw session. |
+| `tinyhivemind-core` | The host-neutral library: desks, rosters, mentions, approval and responder decisions, session projection, Jev routing (`embed`, `typesafe`) and the completion driver. Opens no storage, socket or model client. |
+| `tinyhivemind-hives` | The `Coordinator`: durable inboxes, one serialized turn stream per agent across hives, episodes, direct messages, retention and single-writer fencing, over the async `Storage` port (OpenCompany builds it without its default SQLite storage). |
+| `tinyhivemind-tools` | The episode vocabulary as native tool specs, and the call record a host drains. |
+| `tinyhivemind-openhuman` | `OpenHumanHost`: registers already-built `openhuman-embed` agents on a Coordinator, runs their turns through `TurnHooks`, gates sends through `SendAuthorizer`, and attaches the permanent `hivemind_*` tools. |
 
-OpenCompany keeps, in `src/hive/`, only what binds those to a company: one desk
-per `[[group_chat]]`, seating from the company roster, the `opencompany` MCP
-server, durable journaling of episode state (committed only after the reply is
-journaled), referral, and the `reqwest` implementation of `SystemOneTransport`
-(`hive/jev.rs`). A change to deliberation rules, routing policy, transcript
-projection, mention parsing or the driver's scheduling belongs in TinyHiveMind,
-which by its own charter never opens a file, socket or database and never names
-a host type — so storage and company policy never move the other way.
+OpenCompany keeps, in `src/hive/`, only what binds those to a company: one
+Coordinator per company over the `HiveStore` port, registering the company's
+agents, one hive per desk, who starts an operator line, the `delegates_to` reach
+rule behind `SendAuthorizer`, the projector into the company journal, and the
+`reqwest` implementation of `SystemOneTransport` (`hive/jev.rs`). A change to
+scheduling, episode rules, routing policy, mention parsing or the tool family
+belongs in TinyHiveMind, which never names a host type — so storage and company
+policy never move the other way.
 
 Libraries reached through OpenHuman are owned by the projects its
 `vendor/openhuman/AGENTS.md` lists, not by OpenHuman and not by this repo. The
