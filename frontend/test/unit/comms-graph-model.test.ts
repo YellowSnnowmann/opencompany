@@ -73,8 +73,8 @@ describe("what the stream adds", () => {
     // Fifty parallel lines say nothing; one thick one says "this is the path
     // the company actually uses".
     const obs: CommsObservation[] = [
-      { kind: "handed-off", from: "planner", to: "solvers", via: "delegate_to_desk", atMillis: 1 },
-      { kind: "handed-off", from: "planner", to: "solvers", via: "delegate_to_desk", atMillis: 2 },
+      { kind: "handed-off", from: "planner", to: "solvers", via: "task", atMillis: 1 },
+      { kind: "handed-off", from: "planner", to: "solvers", via: "task", atMillis: 2 },
     ];
     const g = applyObservations(base, obs);
     const handed = g.edges.filter((e) => e.kind === "handed-off");
@@ -87,7 +87,7 @@ describe("what the stream adds", () => {
     // Tool-call arguments reach the console redacted, so the target may not be
     // readable. Guessing one is worse than admitting the gap.
     const g = applyObservations(base, [
-      { kind: "handed-off", from: "planner", to: null, via: "delegate_to_desk", atMillis: 1 },
+      { kind: "handed-off", from: "planner", to: null, via: "task", atMillis: 1 },
     ]);
     expect(g.edges.filter((e) => e.kind === "handed-off")).toEqual([]);
   });
