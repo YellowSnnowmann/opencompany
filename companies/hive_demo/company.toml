@@ -39,9 +39,9 @@ mode = "full"
 [tools]
 # The company's own note tree — the same one the console's Workspace tab reads
 # and writes. Both spellings are needed: bare `workspace` covers an agent
-# asking for `workspace`, `workspace.*` covers the sub-grants. `mcp:*` is what
-# reaches the speech tools (`post`, `broadcast`, `dm`, `complete_episode`,
-# `read`) the host serves every seat on its own MCP server.
+# asking for `workspace`, `workspace.*` covers the sub-grants. `mcp:*` reaches
+# the company's installed MCP servers; the `hivemind_*` tools every agent uses
+# to speak in a hive need no grant.
 allow = ["mcp:*", "workspace", "workspace.*", "chargebee", "paypal"]
 
 # The engineering desk: the engineer leads, the CEO sits in.
