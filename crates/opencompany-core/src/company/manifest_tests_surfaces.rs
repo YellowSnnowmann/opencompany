@@ -466,3 +466,25 @@ fn a_stale_hive_block_is_refused_with_a_migration_hint() {
         CompanyManifest::legacy_hive_block("[company]\nname = \"X\"\n[[group_chat]]\nid = \"d\"\nname = \"D\"\n[group_chat.routing]\nround_width = 1\n").is_none()
     );
 }
+
+#[test]
+fn a_stale_referral_block_is_refused_with_a_migration_hint() {
+    let text = r#"
+        [company]
+        name = "X"
+        [[group_chat]]
+        id = "desk"
+        name = "Desk"
+        [group_chat.routing.referral]
+        enabled = true
+        "#;
+    let problem = CompanyManifest::legacy_referral_block(text).expect("refused");
+    assert!(problem.contains("group chat `desk`"), "{problem}");
+    assert!(problem.contains("hivemind_send_agent"), "{problem}");
+    assert!(
+        CompanyManifest::legacy_referral_block(
+            "[company]\nname = \"X\"\n[[group_chat]]\nid = \"d\"\nname = \"D\"\n[group_chat.routing]\nround_width = 1\n"
+        )
+        .is_none()
+    );
+}

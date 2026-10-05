@@ -324,7 +324,10 @@ impl CompanyManifest {
                 source,
             })?;
 
-        if let Some(problem) = legacy_hive_block(&text).or_else(|| legacy_speech_block(&text)) {
+        if let Some(problem) = legacy_hive_block(&text)
+            .or_else(|| legacy_speech_block(&text))
+            .or_else(|| legacy_referral_block(&text))
+        {
             return Err(OpenCompanyError::ManifestParse(path.to_path_buf(), problem));
         }
         toml::from_str(&text).map_err(|err| {
@@ -342,6 +345,15 @@ impl CompanyManifest {
     /// see a key it does not declare.
     pub fn legacy_hive_block(text: &str) -> Option<String> {
         legacy_hive_block(text)
+    }
+
+    /// Whether a manifest still carries the retired
+    /// `[group_chat.routing.referral]` block, and the migration hint if it
+    /// does (OC-2). Refused rather than ignored for the same reason as
+    /// [`legacy_hive_block`](Self::legacy_hive_block): a desk tuned to refer
+    /// across desks would otherwise run as though it never asked.
+    pub fn legacy_referral_block(text: &str) -> Option<String> {
+        legacy_referral_block(text)
     }
 
     /// Whether a manifest still carries the retired `[speech]` block, and the
@@ -1476,7 +1488,33 @@ fn legacy_hive_block(text: &str) -> Option<String> {
         return None;
     }
     Some(format!(
-        "group chat `{}` declares `[group_chat.hive]`, which no longer exists — the trace-grammar          hive (quorum, moves, aside, turn_budget) was replaced by completion-driven episodes.          Delete the block, and say how the desk routes and paces its rounds under          `[group_chat.routing]` (`round_width`, `max_rounds`, `turn_timeout_secs`) and          `[group_chat.routing.referral]` (`enabled`, `max_hops`, `reach`, `returns`); see          `docs/spec/runtime/hive.md`.",
+        "group chat `{}` declares `[group_chat.hive]`, which no longer exists — the trace-grammar          hive (quorum, moves, aside, turn_budget) was replaced by completion-driven episodes.          Delete the block, and say how the desk routes and paces its rounds under          `[group_chat.routing]` (`round_width`, `max_rounds`, `turn_timeout_secs`); see          `docs/spec/runtime/hive.md`.",
+        stale.join("`, `")
+    ))
+}
+
+/// The migration hint for a manifest that still declares
+/// `[group_chat.routing.referral]` (OC-2).
+fn legacy_referral_block(text: &str) -> Option<String> {
+    let document: toml::Value = toml::from_str(text).ok()?;
+    let desks = document.get("group_chat")?.as_array()?;
+    let stale: Vec<&str> = desks
+        .iter()
+        .filter(|desk| {
+            desk.get("routing")
+                .and_then(|routing| routing.get("referral"))
+                .is_some()
+        })
+        .map(|desk| desk.get("id").and_then(toml::Value::as_str).unwrap_or("?"))
+        .collect();
+    if stale.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "group chat `{}` declares `[group_chat.routing.referral]`, which no longer exists — a \
+         teammate reaches another desk by messaging its members directly \
+         (`hivemind_send_agent`), bounded by its `delegates_to` allowlist. Delete the block; \
+         see `docs/spec/runtime/hive.md`.",
         stale.join("`, `")
     ))
 }
