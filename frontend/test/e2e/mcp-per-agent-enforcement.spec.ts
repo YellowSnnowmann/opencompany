@@ -83,7 +83,11 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.afterAll(async ({ request }) => {
-  if (!MCP_SERVER || !LIVE_BRAIN) return;
+  // The managed host is isolated and exits after the suite; its durable agent
+  // snapshots retain this server's tool declarations, so removing it here
+  // makes later tests fail with non-executable tools. External hosts persist
+  // beyond the run and do need the randomized registration removed.
+  if (!MCP_SERVER || !LIVE_BRAIN || !process.env.PW_BASE_URL) return;
   await request
     .delete(`/api/v1/company/mcp/servers/${encodeURIComponent(SERVER)}`)
     .catch(() => undefined);
