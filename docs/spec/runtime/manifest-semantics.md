@@ -84,23 +84,11 @@ each page under the 500-line cap.
   and a final synthesis on a board task, use explicit workflow agent steps and
   dependencies. A queued receipt is not evidence that the colleague has run.
 
-  Three runtime guards bound what it can do, all enforced at the tool boundary
-  in the member's own turn rather than by which tools were wired (belts are
-  cached per roster, so a tool cannot be withheld from one turn):
-
-  - **Depth** — `[tools].max_delegation_depth`, below.
-  - **Cycles** — a hand-off to a desk already on the current chain (A→B→A), or
-    to the desk the caller itself leads, is refused.
-  - **Allowlist** — a target outside a non-empty `delegates_to` is refused, and
-    the refusal names the desks the member *can* reach so it can retry in the
-    same turn.
-
-  Each refusal reaches both the model and the board: the run trail carries it
-  verbatim, and a refused hand-off is recorded on the dispatched card's note,
-  so the operator reads the fact rather than inferring it from an absence.
-
-  The per-turn fan-out cap (three delegations) applies **per level**, not per
-  message — each turn starts against an empty queue.
+  A direct message is bounded at the tool boundary in the sender's own turn,
+  by the company hive's `SendAuthorizer`: a target outside a non-empty
+  `delegates_to` (desk peers plus the desks named) is refused, and the refusal
+  names the teammates it *can* reach so it can retry in the same turn. The
+  per-turn card cap (three `spawn_task` calls) applies to each turn.
   Cross-desk referrals have two additional runtime bounds, enforced when the
   referral is decided: **depth** — `referral.max_hops` — and **cycles** — a
   question to a desk already on the current chain (A→B→A) is refused. A
@@ -302,19 +290,10 @@ each page under the 500-line cap.
     - **There is no `search` Cargo feature.** The tool rides the `openhuman`
       harness feature so CI's gated lane actually compiles and tests it.
 
-  **`max_delegation_depth`** (issue #176) bounds how deep one operator
-  message's chain of **board** hand-offs may run — `spawn_task` from a card's
-  turn opening another card — counted in hand-offs. Default `2`; valid
-  `1..=4`, where `1` is the "recursion off" setting. It does not bound a
-  room: the turns one desk message can buy are bounded by that desk's
-  `[group_chat.routing]` (`round_width × max_rounds`) and a crossing to
-  another desk by `referral.max_hops`.
-
-  The depth in force is read from the **live company record** on every call, so
-  lowering it takes effect on the next turn without a rebuild. A hand-off past
-  the bound is refused in the model's own turn with the reason
-  `depth_capped`, so a member that has run out of chain leaves the remaining
-  work tracked instead of doing it silently.
+  **`max_delegation_depth`** is retired (OC-2): it bounded the desk hand-off
+  chain, which the company hive replaced, and a manifest that still sets it is
+  refused at load with a migration hint. The turns one desk message can buy are
+  bounded by that desk's `[group_chat.routing]` (`round_width × max_rounds`).
     The Usage view surfaces a `Web searches` KPI plus a search status row
     (active / paused at cap 0 / awaiting credential / not granted / not in this
     build).

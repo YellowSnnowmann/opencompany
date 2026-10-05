@@ -334,9 +334,8 @@ together they are stronger than "a human dragged it":
 
 1. **Dedup.** A runaway agent restating one need produces one demand. The
    pathological case a card board makes cheap is the case this makes impossible.
-2. **Depth and cycles.** The existing delegation scope chain caps depth
-   (`max_delegation_depth`, default 2, bounded 1..=4) and refuses a target
-   already on the chain.
+2. **Fan-out.** Each turn may open at most three cards, and a company-hive
+   episode at most three, so one claim cannot spray work.
 3. **Closure is not self-assertable.** An agent cannot mark its own demand
    answered; only a claim on disk does that. So a loop cannot manufacture
    apparent progress.

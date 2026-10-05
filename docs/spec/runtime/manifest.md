@@ -134,8 +134,6 @@ allow = ["web.*", "docs.*", "search"]  # company-wide ceiling. Desks and agents
                                    # narrow it: allow ∩ desk.tools ∩ agent.tools
                                    # `search` must be named — `*` never grants it
 search_daily_calls = 200           # per-company daily web_search cap (0 = paused)
-max_delegation_depth = 2           # how deep one message's hand-off chain may run
-                                   # 1 = desks may not re-delegate at all; 1..=4
 
 [policy]                           # see company-brain/approvals.md
 mode = "supervised"                # readonly | supervised | auto | full
