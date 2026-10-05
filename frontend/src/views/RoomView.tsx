@@ -470,7 +470,7 @@ export function RoomView({
   failedApprovals,
   budgetProximity,
   onDismissBudgetProximity,
-  episodeFrames,
+  hiveFrames,
 }: Props) {
   /*
    * Read straight from the Room store rather than taken as props.
