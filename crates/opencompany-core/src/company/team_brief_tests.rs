@@ -119,11 +119,10 @@ fn an_unrestricted_reach_is_stated_once_at_the_top_and_not_as_a_list() {
     // `designer` declares no `delegates_to`, so it may reach everyone.
     let section = team_section(&record(TEAM), "pm");
     assert!(
-        section.contains("Every teammate below is a real agent you can hand work to"),
+        section.contains("Every teammate below is a real agent you can message directly"),
         "{section}"
     );
-    assert!(!section.contains("You may hand work to:"), "{section}");
-    assert!(!section.contains("does not let you hand work"), "{section}");
+    assert!(!section.contains("You may message directly:"), "{section}");
 }
 
 #[test]
