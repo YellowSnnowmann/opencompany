@@ -692,7 +692,6 @@ impl DelegationQueue {
     /// the cap instead would tell the model to try again next turn, and the next
     /// turn on that path drains no better than this one. The two refusals are
     /// therefore distinct [`Staged`] variants and never collapsed.
-
     #[must_use = "a refused delegation must be reported to the model, not dropped"]
     pub fn push_within_cap(&self, delegation: Delegation, cap: usize) -> Staged {
         let claim = self.claim_state();

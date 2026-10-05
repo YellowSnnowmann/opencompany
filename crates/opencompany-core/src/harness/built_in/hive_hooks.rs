@@ -229,6 +229,9 @@ impl TurnHooks for HiveHooks {
 }
 
 impl HiveHooks {
+    // The error type is the adapter's own (`TurnHooks::wrap_turn` returns it),
+    // so its size is TinyHiveMind's to change, not this crate's.
+    #[allow(clippy::result_large_err)]
     async fn wrapped<'a>(
         &'a self,
         scope: &'a TurnScope,

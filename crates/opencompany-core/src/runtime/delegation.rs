@@ -721,7 +721,6 @@ impl<'a> DelegationRunner<'a> {
     /// [`NoTurn`]), and it stamps run provenance onto everything it opens. The
     /// only thing it is ever asked to execute is
     /// [`execute_board_writes`](Self::execute_board_writes).
-
     ///
     /// No approval queue is wired: `with_approvals` exists so a *settle* can tell
     /// whether the turn it is recording parked (issue #465), and this runner
