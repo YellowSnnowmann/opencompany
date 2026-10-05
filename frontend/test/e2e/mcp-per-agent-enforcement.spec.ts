@@ -82,10 +82,12 @@ test.beforeAll(async ({ request }) => {
   ).toBeTruthy();
 });
 
-// Keep this server installed until the managed E2E host exits. Its tools can
-// be present in durable agent snapshots used by later tests in the same run.
-// The live-brain lane uses a dedicated test data root, so the registration is
-// discarded with that host rather than leaking into another run.
+test.afterAll(async ({ request }) => {
+  if (!MCP_SERVER || !LIVE_BRAIN) return;
+  await request
+    .delete(`/api/v1/company/mcp/servers/${encodeURIComponent(SERVER)}`)
+    .catch(() => undefined);
+});
 
 /**
  * Opens this server's permissions panel, with `showing` as the lens.

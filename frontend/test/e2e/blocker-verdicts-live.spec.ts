@@ -196,18 +196,29 @@ test("every one of the four verdicts is reachable, and the host acts on the one 
     await expect(footer.getByRole("button", { name: /^Decline:/ })).toHaveCount(0);
 
     if (verdict === "retry") {
-      await clickClearOfToasts(footer.getByRole("button", { name: /^Retry/ }));
+      const clicked = footer.getByRole("button", { name: /^Retry/ });
+      const decision = page.waitForRequest((r) => r.url().includes(`/approvals/${id}`) && r.method() === "POST");
+      await clickClearOfToasts(clicked);
+      expect((await decision).postDataJSON().blocker_verdict).toBe(verdict);
     } else if (verdict === "amend") {
       await clickClearOfToasts(footer.getByRole("button", { name: /^Answer this question/ }));
       const send = footer.getByRole("button", { name: /^Send this answer/ });
       await expect(send, "a blank amend cannot be sent").toBeDisabled();
       await footer.getByRole("textbox", { name: /^Answer:/ }).fill(ANSWER);
       await expect(send).toBeEnabled();
+      const decision = page.waitForRequest((r) => r.url().includes(`/approvals/${id}`) && r.method() === "POST");
       await clickClearOfToasts(send);
+      expect((await decision).postDataJSON().blocker_verdict).toBe(verdict);
     } else if (verdict === "skip") {
-      await clickClearOfToasts(footer.getByRole("button", { name: /^Skip this step/ }));
+      const clicked = footer.getByRole("button", { name: /^Skip this step/ });
+      const decision = page.waitForRequest((r) => r.url().includes(`/approvals/${id}`) && r.method() === "POST");
+      await clickClearOfToasts(clicked);
+      expect((await decision).postDataJSON().blocker_verdict).toBe(verdict);
     } else {
-      await clickClearOfToasts(footer.getByRole("button", { name: /^Cancel run/ }));
+      const clicked = footer.getByRole("button", { name: /^Cancel run/ });
+      const decision = page.waitForRequest((r) => r.url().includes(`/approvals/${id}`) && r.method() === "POST");
+      await clickClearOfToasts(clicked);
+      expect((await decision).postDataJSON().blocker_verdict).toBe(verdict);
     }
     await awaitResolvedByHost(request, id, verdict);
     await leaveQueue(page);

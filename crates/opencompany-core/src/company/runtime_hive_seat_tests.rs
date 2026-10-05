@@ -4,6 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::ports::blockers::{BlockerKind, BlockerPayload, BlockerSource, BlockerVerdict};
 use crate::ports::types::{
     Actor, ActorKind, ApprovalId, ApprovalOrigin, CompanyEvent, Effect, EffectGroup, Verdict,
 };
@@ -214,6 +215,70 @@ async fn an_approved_call_releases_its_agent_with_the_decision_not_a_chat_cycle(
         "the agent redeems the single-use grant itself"
     );
     assert_eq!(*brain.cycles.lock().unwrap(), 0, "no chat cycle ran");
+}
+
+#[tokio::test]
+async fn each_blocker_verdict_releases_a_question_with_its_distinct_decision() {
+    let cases = [
+        (
+            BlockerVerdict::Retry,
+            "",
+            "The operator told you to go ahead with what you asked about (what you asked).",
+        ),
+        (
+            BlockerVerdict::Amend,
+            "use staging",
+            "The operator answered your question (what you asked): \"use staging\"",
+        ),
+        (
+            BlockerVerdict::Skip,
+            "",
+            "The operator said to skip what you asked about (what you asked) and carry on without it.",
+        ),
+        (
+            BlockerVerdict::Cancel,
+            "",
+            "The operator declined what you asked about (what you asked). Stop that part of the work.",
+        ),
+    ];
+
+    for (index, (verdict, answer, expected)) in cases.into_iter().enumerate() {
+        let brain = Arc::new(ReleaseRecorder::default());
+        let (rt, _home) = runtime_with_brain(brain.clone()).await;
+        let payload = BlockerPayload {
+            kind: BlockerKind::Information,
+            source: BlockerSource::AgentQuestion,
+            step: None,
+            reason: format!("which cluster for case {index}?"),
+            needed: "the cluster name".to_owned(),
+            group_key: None,
+        };
+        let id = park_for_turn(
+            &rt,
+            Some("ep1"),
+            "ceo",
+            seat_effect(
+                "blocker.information",
+                "ceo",
+                serde_json::to_value(payload).unwrap(),
+            ),
+        )
+        .await;
+        let (receipt, follow_up) = rt
+            .apply_blocker_reply_spawned(&[id.clone()], &id, verdict, answer, None)
+            .await
+            .expect("applies the blocker verdict");
+        assert_eq!(receipt.outcome(), "settled");
+        crate::company::runtime::join_follow_up(follow_up)
+            .await
+            .expect("releases the parked seat");
+
+        let released = brain.released.lock().unwrap().clone();
+        assert_eq!(released.len(), 1);
+        assert_eq!(released[0].0, "ceo");
+        let note = released[0].1.as_deref().expect("release note");
+        assert_eq!(note, expected, "wrong note for {verdict:?}");
+    }
 }
 
 #[tokio::test]

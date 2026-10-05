@@ -557,7 +557,10 @@ describe("the mock inference backend", () => {
     expect(first.args.episode_id).toBe("ep-1");
     expect(first.args.body).toContain("__MOCK_LLM__");
 
-    const after = await chat([turnRequest("engineer"), ...called("hivemind_complete", "c1", "ok")]);
+    const after = await chat([
+      turnRequest("engineer"),
+      ...called("hivemind_complete", "mock-hive-ep-1-0", "ok"),
+    ]);
     expect(after.choices[0].finish_reason).toBe("stop");
     expect(after.choices[0].message.tool_calls).toBeUndefined();
   });
@@ -588,11 +591,49 @@ describe("the mock inference backend", () => {
       [
         opening,
         ...called("mcp_call_tool", "tool-1", `echo: ${marker}`),
-        ...called("hivemind_complete", "complete-1", "done"),
+        ...called("hivemind_complete", "mock-hive-ep-1-0", "done"),
       ],
       ["mcp_call_tool", "hivemind_complete"],
     );
     expect(done.choices[0].finish_reason).toBe("stop");
+  });
+
+  it("does not count an explicitly scripted hivemind tool as protocol progress", async () => {
+    const opening = turnRequest("engineer", {
+      body: `__MOCK_TOOL_CALL__ ${JSON.stringify({
+        name: "hivemind_send_agent",
+        arguments: { agent_id: "acme--ceo", message_id: "scripted", body: "scripted" },
+      })}`,
+    });
+    const tools = ["hivemind_send_agent", "hivemind_complete"];
+    const scripted = hiveCall(await chat([opening], tools));
+    expect(scripted.name).toBe("hivemind_send_agent");
+
+    const coordinator = hiveCall(
+      await chat([opening, ...called("hivemind_send_agent", "mock-call-0", "sent")], tools),
+    );
+    expect(coordinator.name).toBe("hivemind_complete");
+  });
+
+  it("completes an empty scripted DM plan once after sending the teammate message", async () => {
+    const opening = turnRequest("engineer", {
+      body: `__MOCK_DM__ ceo ${plan("hive-empty-dm-1", [[], []])}`,
+    });
+    const tools = ["hivemind_send_agent", "hivemind_complete"];
+
+    const send = hiveCall(await chat([opening], tools));
+    expect(send.name).toBe("hivemind_send_agent");
+    const complete = hiveCall(
+      await chat([opening, ...called("hivemind_send_agent", "mock-hive-ep-1-0", "sent")], tools),
+    );
+    expect(complete.name).toBe("hivemind_complete");
+    const done = await chat([
+      opening,
+      ...called("hivemind_send_agent", "mock-hive-ep-1-0", "sent"),
+      ...called("hivemind_complete", "mock-hive-ep-1-1", "done"),
+    ], tools);
+    expect(done.choices[0].finish_reason).toBe("stop");
+    expect(done.choices[0].message.tool_calls).toBeUndefined();
   });
 
   it("runs a scripted plan in an episode and completes after its empty step", async () => {
@@ -615,7 +656,7 @@ describe("the mock inference backend", () => {
       [
         opening,
         ...called("spawn_task", "task-1", "created"),
-        ...called("hivemind_complete", "complete-1", "done"),
+        ...called("hivemind_complete", "mock-hive-ep-1-0", "done"),
       ],
       tools,
     );
@@ -630,13 +671,13 @@ describe("the mock inference backend", () => {
     expect(typeof dm.args.message_id).toBe("string");
     expect(dm.args.body).toContain("__MOCK_LLM__");
 
-    const next = hiveCall(await chat([opening, ...called("hivemind_send_agent", "c1", "sent")]));
+    const next = hiveCall(await chat([opening, ...called("hivemind_send_agent", "mock-hive-ep-1-0", "sent")]));
     expect(next.name).toBe("hivemind_complete");
 
     const done = await chat([
       opening,
-      ...called("hivemind_send_agent", "c1", "sent"),
-      ...called("hivemind_complete", "c2", "ok"),
+      ...called("hivemind_send_agent", "mock-hive-ep-1-0", "sent"),
+      ...called("hivemind_complete", "mock-hive-ep-1-1", "ok"),
     ]);
     expect(done.choices[0].finish_reason).toBe("stop");
   });

@@ -1,8 +1,27 @@
 import { randomUUID } from "node:crypto";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 import { LIVE_BRAIN, LIVE_BRAIN_REASON, MCP_SERVER } from "./capabilities";
+
+let registeredServer: string | undefined;
+
+test.afterEach(async ({ request }, testInfo: TestInfo) => {
+  // External hosts outlive the run; managed E2E keeps the registration for its
+  // isolated host lifetime because durable agent snapshots can retain tools.
+  if (!registeredServer || !process.env.PW_BASE_URL) return;
+  try {
+    const removed = await request.delete(
+      `/api/v1/company/mcp/servers/${encodeURIComponent(registeredServer)}`,
+    );
+    if (!removed.ok() && testInfo.status === "passed") {
+      throw new Error(`removing ${registeredServer} failed: ${removed.status()} ${await removed.text()}`);
+    }
+  } catch (error) {
+    if (testInfo.status === "passed") throw error;
+  }
+  registeredServer = undefined;
+});
 
 /**
  * The half of the MCP bridge a console cannot reach: an **agent** calling a
@@ -89,6 +108,7 @@ test("an agent calls a tool on a registered MCP server and shows the result", as
     added.ok(),
     `registering ${server} failed: ${added.status()} ${await added.text()}`,
   ).toBeTruthy();
+  registeredServer = server;
 
   // Keep the registration for the life of this E2E host. OpenHuman retains
   // tool declarations in its durable agent session; deleting the server here
