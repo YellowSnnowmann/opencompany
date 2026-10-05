@@ -34,9 +34,9 @@ this company can use it.
 is the one that sets and revises goals and decisions rather than a specialist
 re-deciding them mid-task.
 
-`backend_engineer` leads the Engineering desk and may hand one slice to a peer
-on that desk with `delegate_to_teammate` rather than declining work addressed to
-a specialist. Depth stays capped at 2 — a delegate does not delegate onward.
+`backend_engineer` leads the Engineering desk and may message a peer on that
+desk directly (`hivemind_send_agent`) rather than declining work addressed to a
+specialist; its `delegates_to` keeps that reach to its own desk.
 
 Humans keep **product direction**; everything else here is the roster's to run.
 

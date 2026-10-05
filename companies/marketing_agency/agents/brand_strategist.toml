@@ -1,9 +1,9 @@
 role = "Brand Strategist"
 description = "Positioning and brand strategy."
 
-# Desk lead (issue #884): may hand one slice to a peer on this desk with
-# `delegate_to_teammate`, instead of declining work addressed to a specialist.
-# Naming its own desk is the enable switch; depth stays capped at 2.
+# Desk lead (issue #884): may message a peer on this desk directly
+# (`hivemind_send_agent`), instead of declining work addressed to a specialist.
+# Naming its own desk keeps that reach to the desk.
 delegates_to = ["strategy"]
 
 # Visibility/read-record scope (docs/spec/runtime/ledgers.md): this specialist
