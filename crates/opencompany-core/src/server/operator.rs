@@ -124,8 +124,6 @@ pub fn router() -> Router<AppState> {
                 .put(set_desk_routing)
                 .delete(reset_desk_routing),
         ))
-        // The episodes a desk ran or is running (plan hive-desks, Phase 4),
-        // newest first, folded from the journal's episode record.
         // Desk member ordering / hierarchy (issue #131): set the operator's
         // explicit member order for a desk. Registered under both scope forms.
         .merge(scoped("/desks/{desk_id}/order", put(set_desk_order)))

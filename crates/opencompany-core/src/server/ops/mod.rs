@@ -27,6 +27,7 @@ pub mod billing;
 /// `POST {scope}/agents/{agent_id}/budget-pause/redeem` (issue #1846): read
 /// and redeem the durable re-issue marker a top-level turn parks when it
 /// pauses for lack of inference budget/credits. The console's Add-Credits CTA.
+pub mod agent_messages;
 pub mod budget_pause;
 pub mod capabilities;
 pub mod company_key;
@@ -300,6 +301,7 @@ pub fn router() -> Router<AppState> {
         .merge(capabilities::router())
         .merge(harnesses::router())
         .merge(budget_pause::router())
+        .merge(agent_messages::router())
         .merge(tool_catalog::router())
         .merge(connections_read::router())
         .merge(billing::router())

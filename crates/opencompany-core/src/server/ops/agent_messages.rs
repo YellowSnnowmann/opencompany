@@ -10,6 +10,7 @@
 //! passes back the `seq` of the newest row it got.
 
 use axum::extract::{Path, Query};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -102,22 +103,24 @@ async fn agent_messages(
     company: ScopedCompany,
     Path(AgentPath { agent_id }): Path<AgentPath>,
     Query(query): Query<MessagesQuery>,
-) -> Result<Json<Vec<AgentMessageDto>>, ApiError> {
+) -> Response {
     let runtime = &company.runtime;
-    let record = runtime.record();
-    if !record.is_roster_agent(&agent_id) {
-        return Err(ApiError::not_found(format!(
-            "no teammate `{agent_id}` in this company"
-        )));
+    if let Err(refusal) =
+        crate::server::ops::mcp_tool_policy::require_roster_agent(runtime, &agent_id).await
+    {
+        return *refusal;
     }
     let from = query.after.map_or(0, |after| after.saturating_add(1));
-    let rows = runtime
+    let rows = match runtime
         .events()
         .read_from(company.id(), EventSeq::new(from), SCAN_WINDOW)
         .await
-        .map_err(ApiError::from)?;
+    {
+        Ok(rows) => rows,
+        Err(error) => return ApiError::from(error).into_response(),
+    };
     let limit = query.limit.unwrap_or(MAX_MESSAGES).clamp(1, MAX_MESSAGES);
-    Ok(Json(direct_messages(&rows, &agent_id, limit)))
+    Json(direct_messages(&rows, &agent_id, limit)).into_response()
 }
 
 #[cfg(test)]
