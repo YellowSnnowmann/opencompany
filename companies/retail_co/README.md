@@ -134,11 +134,8 @@ whose end state did not match.
 
 Two mechanisms, and they are not interchangeable:
 
-- **`@desk` in a reply** posts the case on that desk's channel, where its seats
-  deliberate and send back what the room settled on. This is the hand-off to
-  reach for when the choice between remedies is the question.
-- **`delegate_to_teammate`** takes one turn from one named person, no room.
-
-`delegate_to_desk` resolves to whoever leads the desk and takes one turn from
-them, which skips the deliberation these paired desks exist for — the seats are
-told not to use it.
+- **`hivemind_send_hive`** posts the case on that desk's hive, where its members
+  work it as an episode and the room settles what it decides. This is the
+  hand-off to reach for when the choice between remedies is the question.
+- **`hivemind_send_agent`** asks one named person directly, no room; their
+  answer reaches the asker on a later turn.

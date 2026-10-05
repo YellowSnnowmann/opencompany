@@ -33,33 +33,16 @@ correctly:
   question whose right answer depends on whether that machine's chiller is
   reliable — which is **ops'** knowledge.
 
-So all three desks run with cross-desk referral on. A member mid-episode may put
-a question to a peer desk, that desk takes one real turn on it, and the answer
-comes home under `hive-referral`.
+So a member of any desk messages a member of a peer desk directly
+(`hivemind_send_agent`): the peer takes a real turn on it, and the answer comes
+back to the asker on a later turn.
 
-The `ops` desk also turns on the other seam, the one that stays *inside* a desk:
-**private asides**. Its fleet technician and stock controller may compare notes
-in a line the rest of the room cannot read — "is VM-301's chiller reliable
-enough to put sandwiches back in it" is a question those two settle in two lines,
-and settling it on the floor costs the room two of its twelve turns watching a
-conversation with no bearing on the route until it has an answer. The row is
-**elided, never removed**: everyone still sees that the exchange happened, who
-was in it, and where it settled, and a `^N` citation naming it still resolves.
-The pair then owes the room a `!surface` in the open.
-
-Asides are auditable, **not confidential** — an operator and every person reads
-one in full. They are on for this one desk and off everywhere else in the repo
-on purpose: upstream measured the mechanism and it *lost* on answer quality, so
-enabling it is a decision about this desk rather than a default anybody
-inherits. Asides are gone; a seat `dm`s the seats it names instead ([`hive.md`](../../docs/spec/runtime/hive.md#speaking)).
-
-One rule governs both seams, and it is what makes this sound rather than merely
-chatty: **what crosses a visibility boundary carries information, never
-support.** A referred answer and a private line each add no supporter and move
-no option toward a decision — the asking desk still has to convince itself. A
-desk that could import a quorum from elsewhere, or assemble one where the room
-cannot see it, would be a desk that never had to be convinced. See
-[`hive.md`](../../docs/spec/runtime/hive.md#referral).
+One rule governs that, and it is what makes this sound rather than merely
+chatty: **what crosses a desk boundary carries information, never support.** An
+answer from another desk adds no supporter and moves no option toward a
+decision — the asking desk still has to convince itself. A desk that could
+import a quorum from elsewhere would be a desk that never had to be convinced.
+See [`hive.md`](../../docs/spec/runtime/hive.md).
 
 ## The three desks
 
@@ -163,8 +146,7 @@ then advances the clock a day at a time. For each desk it posts the day's
 triggers and waits for the room to close, pumping the approvals queue
 meanwhile — the chat POST holds open for the whole episode and a parked
 `place_order` would otherwise deadlock it. It prints each episode's turns,
-its private asides and how many were surfaced, the text of every cross-desk
-referral, and the close. Exit status is the number of days on which no desk
+the direct messages that crossed desks, and the close. Exit status is the number of days on which no desk
 decided anything, so zero means the company was awake throughout.
 
 ## The ledgers
