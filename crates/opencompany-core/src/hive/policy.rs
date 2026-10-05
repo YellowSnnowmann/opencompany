@@ -98,25 +98,10 @@ impl ReachPolicy {
                  `hivemind_list_agents` for the ids you can message."
             ));
         };
-        decide_direct(record, caller, target_id).map_err(|refusal| {
-            // The refusal names teammates by manifest id; the model answers it
-            // with a hive tool, so name each the way that tool takes it.
-            let mut ids: Vec<(&String, &String)> = state.agents.iter().collect();
-            ids.sort_by_key(|(_, manifest)| std::cmp::Reverse(manifest.len()));
-            match refusal.split_once("The teammates you can message are: ") {
-                Some((head, list)) => {
-                    let rendered: Vec<String> = list
-                        .trim_end_matches('.')
-                        .split(", ")
-                        .map(|id| hive_id_of(id).unwrap_or_else(|| id.to_string()))
-                        .collect();
-                    format!(
-                        "{head}The teammates you can message are: {}.",
-                        rendered.join(", ")
-                    )
-                }
-                None => refusal,
-            }
+        // The refusal names reachable teammates the way the hive tool the model
+        // answers it with takes them.
+        decide_direct_naming(record, caller, target_id, &|manifest| {
+            hive_id_of(manifest).unwrap_or_else(|| manifest.to_string())
         })
     }
 }
@@ -128,6 +113,17 @@ impl ReachPolicy {
 /// the list is empty or `"*"`. Never itself: a message to oneself would run
 /// the turn it is already in.
 pub fn decide_direct(record: &CompanyRecord, caller: &str, target: &str) -> Result<(), String> {
+    decide_direct_naming(record, caller, target, &str::to_string)
+}
+
+/// [`decide_direct`], naming the reachable teammates in a refusal with
+/// `name` — their Coordinator ids, when the refusal answers a hive tool.
+fn decide_direct_naming(
+    record: &CompanyRecord,
+    caller: &str,
+    target: &str,
+    name: &dyn Fn(&str) -> String,
+) -> Result<(), String> {
     if caller == target {
         return Err(format!(
             "refused: you are \"{caller}\" — messaging yourself would re-enter the turn you are \
@@ -151,7 +147,11 @@ pub fn decide_direct(record: &CompanyRecord, caller: &str, target: &str) -> Resu
         format!(
             "refused: you may not message \"{target}\": they are not on a desk with you, and no \
              desk you may reach has them on it. The teammates you can message are: {}.",
-            reachable.join(", ")
+            reachable
+                .iter()
+                .map(|id| name(id))
+                .collect::<Vec<_>>()
+                .join(", ")
         )
     })
 }
