@@ -81,9 +81,7 @@ import { RawTurns } from "./room/RawTurns";
 import { ThreadPanel } from "./room/ThreadPanel";
 import { useLocalScope } from "@/connections/ConnectionContext";
 import * as room from "@/room/store";
-import { useEpisodes } from "@/hooks/use-episodes";
-import { withLiveExchanges } from "@/lib/episodes";
-import type { EpisodeFrames } from "@/lib/episode-frames";
+import { deskEpisodes, type HiveFrames } from "@/lib/hive";
 import {
   buildChannels,
   buildTimeline,
@@ -398,14 +396,13 @@ interface Props {
   /** Clears the banner above — the shell's own state, this view only asks. */
   onDismissBudgetProximity?: () => void;
   /**
-   * The live half of every desk's episodes, folded by the shell off the SSE
-   * frames (`lib/episode-frames.ts`). Owned there for the reason
-   * `transcripts` is: a round keeps running while the operator is on another
-   * section, and the band has to be right the moment they come back. Absent
-   * — an older shell, a test — the rounds are rebuilt from the transcript
-   * alone, which is every completed episode and none of the live lanes.
+   * The company hive's frames, folded by the shell (`lib/hive.ts`). Owned
+   * there for the reason `transcripts` is: an episode keeps running while the
+   * operator is on another section, and its settle marker has to be right the
+   * moment they come back. Absent — a test — the episodes are grouped from the
+   * transcript alone, with no settle markers.
    */
-  episodeFrames?: EpisodeFrames;
+  hiveFrames?: HiveFrames;
 }
 
 /**
@@ -1304,16 +1301,19 @@ export function RoomView({
     !loadingTeam &&
     hydration.discovered &&
     Object.values(hydration.byChannel).every((status) => status === "ready");
-  // Folded from the raw transcript, and then folded back onto it: an
-  // exchange two seats are having is written to their pair channel, so the
-  // rows never reach this desk and only the episode fold has seen them.
-  // Attaching them here means every surface below -- the timeline, the thread
-  // panel -- renders one enriched transcript rather than each learning about
-  // conversations separately.
-  const episodes = useEpisodes(transcript, episodeFrames, channel?.id);
-  const messages = useMemo(
-    () => withLiveExchanges(transcript, episodes),
-    [transcript, episodes],
+  const messages = transcript;
+  /**
+   * The hive episodes this channel ran: its rows grouped by `hive.episodeId`,
+   * each with how it ended from the frames (`lib/hive.ts`). Derived rather
+   * than fetched — every public post is an ordinary reply row carrying
+   * `hive`, so the transcript **is** the durable record.
+   *
+   * `[]` for every conversation whose rows carry no `hive` episode, which is
+   * what keeps the surface unchanged for them.
+   */
+  const episodes = useMemo(
+    () => deskEpisodes(transcript, hiveFrames, channel?.id),
+    [transcript, hiveFrames, channel?.id],
   );
   const entries = useMemo(
     () => (channel ? buildTimeline(messages, channel, members, youAvatar) : []),
@@ -1386,23 +1386,6 @@ export function RoomView({
   }, [decidedApprovals, channel, desks, channelApprovals, chatChannelByThread]);
 
   const askerNames = useAskerNames(client, company, channelApprovals);
-
-  /**
-   * The episodes this channel ran, folded out of its transcript and the live
-   * frames.
-   *
-   * Derived rather than fetched: every committed utterance is an ordinary
-   * reply row carrying `episode`, so the transcript **is** the durable record
-   * and there is no read to make. The frames layer the present tense on top —
-   * which seats a round opened with, which is still working. See
-   * `lib/episodes.ts`.
-   *
-   * `[]` for every DM, `#general` and every desk that
-   * answered with one ordinary turn — the fold looks for rows carrying
-   * `episode` and frames naming this desk, and finds neither. Nothing here
-   * consults the channel's kind, which is what keeps the surface unchanged
-   * for every conversation that is not a room.
-   */
 
   const items = useMemo(
     () =>
