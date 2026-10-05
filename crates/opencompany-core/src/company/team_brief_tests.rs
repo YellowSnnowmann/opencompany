@@ -68,15 +68,15 @@ fn every_other_teammate_is_listed_with_role_and_mandate_but_not_the_agent_itself
         "{section}"
     );
     assert!(
-        section.contains("owns the board): Own the roadmap. (id `pm` for tool calls)\n"),
+        section.contains("owns the board): Own the roadmap. (id `pm` for tool calls; `acme--pm` as the `agent_id` of a `hivemind_*` tool)\n"),
         "{section}"
     );
     assert!(
-        section.contains("- Backend Engineer: Build the services. (id `backend` for tool calls)\n"),
+        section.contains("- Backend Engineer: Build the services. (id `backend` for tool calls; `acme--backend` as the `agent_id` of a `hivemind_*` tool)\n"),
         "{section}"
     );
     assert!(
-        section.contains("- Writer (id `writer` for tool calls)\n"),
+        section.contains("- Writer (id `writer` for tool calls; `acme--writer` as the `agent_id` of a `hivemind_*` tool)\n"),
         "{section}"
     );
     assert!(!section.contains("`designer`"), "{section}");
@@ -108,7 +108,7 @@ fn desks_list_their_members_and_lead_and_the_agents_own_seat() {
     );
     assert!(section.contains("You sit on (desk: members):"), "{section}");
     assert!(
-        section.contains("- Writer (id `writer` for tool calls)"),
+        section.contains("- Writer (id `writer` for tool calls; `acme--writer` as the `agent_id` of a `hivemind_*` tool)"),
         "the roster of people stays whole — `writer` is still someone to ask, \
          even though their desk is not one `designer` sits on: {section}"
     );
@@ -131,7 +131,7 @@ fn a_narrowed_reach_names_exactly_who_the_tool_would_accept() {
     // and nobody on the content desk or the orchestrator.
     let section = team_section(&record(TEAM), "backend");
     assert!(
-        section.contains("\nYou may message directly: Designer (`designer`)."),
+        section.contains("\nYou may message directly: Designer (`acme--designer`)."),
         "{section}"
     );
     let reach = teammate_targets(&record(TEAM), "backend", &["engineering".to_string()]);
@@ -182,7 +182,7 @@ role = "B"
         "a",
     );
     assert!(
-        section.contains("- B (id `b` for tool calls)\n"),
+        section.contains("- B (id `b` for tool calls; `acme--b` as the `agent_id` of a `hivemind_*` tool)\n"),
         "{section}"
     );
     assert!(!section.contains("Desks ("), "{section}");
@@ -208,7 +208,7 @@ fn an_operator_added_teammate_is_listed_by_name_and_role() {
     let section = team_section(&record, "designer");
     assert!(section.contains("one of 5 teammates"), "{section}");
     assert!(
-        section.contains("- Sam, Copywriter: Write the words. (id `sam` for tool calls)\n"),
+        section.contains("- Sam, Copywriter: Write the words. (id `sam` for tool calls; `acme--sam` as the `agent_id` of a `hivemind_*` tool)\n"),
         "{section}"
     );
 }
@@ -227,7 +227,7 @@ fn a_manifest_teammates_operator_rename_is_the_name_other_agents_are_given() {
     let section = team_section(&record, "writer");
     assert!(
         section.contains(
-            "- Johnny, Backend Engineer: Build the services. (id `backend` for tool calls)"
+            "- Johnny, Backend Engineer: Build the services. (id `backend` for tool calls; `acme--backend` as the `agent_id` of a `hivemind_*` tool)"
         ),
         "the live overlay name and canonical id must both reach the teammate prompt: {section}"
     );
@@ -275,7 +275,7 @@ fn every_row_leads_with_a_name_and_keeps_the_id_for_tool_calls() {
                 !row.starts_with("- `"),
                 "{who}: a row leads with an id: {row}"
             );
-            assert!(row.ends_with("for tool calls)"), "{who}: {row}");
+            assert!(row.ends_with("of a `hivemind_*` tool)"), "{who}: {row}");
         }
     }
 }
