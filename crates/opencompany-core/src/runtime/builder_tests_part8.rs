@@ -286,7 +286,7 @@ async fn episode_participants(
 async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
     use crate::harness::HarnessPool;
     use crate::ports::types::{CompanyEvent, OverlayDesk, OverlayDeskMember};
-    use crate::store::{FsCompanyStore, FsContextStore};
+    use crate::store::FsCompanyStore;
 
     let home_dir = tmp_home("oc-707-desk-");
     let home = home_dir.path().to_path_buf();
@@ -385,7 +385,7 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
         "the stored record must resolve the new desk, or this test proves nothing"
     );
 
-    runtime
+    let report = runtime
         .run_cycle(vec![CompanyEvent::OperatorMessage {
             mentions: Vec::new(),
             parent: None,
@@ -398,16 +398,13 @@ async fn a_new_overlay_desk_is_reachable_on_a_resident_runtime() {
         .await
         .expect("cycle");
 
-    let context: Arc<dyn ContextStore> = Arc::new(FsContextStore::new(home.clone()));
-    let routed: Vec<String> = context
-        .list(&id, "task-outcome/")
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|m| m.label)
+    let routed: Vec<String> = report
+        .responses
+        .iter()
+        .filter_map(|response| response.agent.clone())
         .collect();
     assert!(
-        routed.contains(&"task-outcome/eng2".to_string()),
+        routed.contains(&"eng2".to_string()),
         "a desk chat must reach the desk's member; the runtime routed as though the desk \
          did not exist; saw {routed:?}"
     );

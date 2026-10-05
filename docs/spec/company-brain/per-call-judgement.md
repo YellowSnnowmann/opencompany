@@ -83,7 +83,7 @@ operator-authored state* (`workspace_write`). Deriving from it swept up the
 workspace tools, which is how a company publishes to its own note tree, and
 broke publishing outright. What keeps it narrow at the other end is
 `Grantable`: the agent's own scratch writes (`file_write`, `edit`,
-`apply_patch`, `memory_store`) are `Consequence` too and do not stop, so "a run
+`apply_patch`, OpenHuman's `memory` tool) are `Consequence` too and do not stop, so "a run
 that only reads, searches, or drafts does not stop" stays true.
 
 ## Which path the call arrived on

@@ -26,7 +26,7 @@ pub(super) fn the_auto_tier_line_is_pinned_tool_by_tool() {
         "csv_export",
         "edit",
         "file_write",
-        "memory_store",
+        "memory",
         // Issue #903, and the one entry that is not the agent's private
         // sandbox: it writes into the company's shared workspace. Declared
         // deliberately. A publish still reaches no counterparty and no

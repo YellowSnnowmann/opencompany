@@ -39,12 +39,6 @@ async fn file_backed_store_runs_in_wal_with_relaxed_sync() {
 }
 
 #[tokio::test]
-async fn conformance_isolation_by_company() {
-    let s = store();
-    conformance::assert_isolation_by_company(s.clone(), s.clone(), s.clone(), s).await;
-}
-
-#[tokio::test]
 async fn conformance_paused_ordinary_save_preserves_activation_gate() {
     let s = store();
     conformance::assert_paused_ordinary_save_preserves_activation_gate(s).await;
@@ -76,12 +70,6 @@ async fn conformance_event_read_before() {
 async fn conformance_event_retention() {
     let s = store();
     conformance::assert_event_retention(s).await;
-}
-
-#[tokio::test]
-async fn conformance_export_totality() {
-    let s = store();
-    conformance::assert_export_totality(s.clone(), s.clone(), s.clone(), s).await;
 }
 
 #[tokio::test]
@@ -118,12 +106,6 @@ async fn conformance_login_code_store() {
 }
 
 #[tokio::test]
-async fn conformance_fact_store() {
-    conformance::assert_fact_store(store()).await;
-    conformance::assert_artifact_store(store()).await;
-}
-
-#[tokio::test]
 async fn conformance_workflow_revision_store() {
     conformance::assert_workflow_revision_store(store()).await;
 }
@@ -131,198 +113,6 @@ async fn conformance_workflow_revision_store() {
 #[tokio::test]
 async fn conformance_workflow_run_output_store() {
     conformance::assert_workflow_run_output_store(store()).await;
-}
-
-#[tokio::test]
-async fn conformance_context_chunk_stamps() {
-    conformance::assert_context_chunk_stamps(store()).await;
-}
-
-// Exercises this backend's single-connection `peek_many` override against
-// the same positional contract the default implementation gives.
-#[tokio::test]
-async fn conformance_context_peek_many() {
-    conformance::assert_context_peek_many_answers_positionally(store()).await;
-}
-
-#[tokio::test]
-async fn conformance_context_multibyte_bodies() {
-    conformance::assert_multibyte_bodies_survive_search_and_ranged_peek(store()).await;
-}
-
-#[tokio::test]
-async fn conformance_context_identical_body_two_labels() {
-    conformance::assert_identical_body_two_labels(store()).await;
-}
-
-#[tokio::test]
-async fn conformance_context_delete_label_scoped() {
-    conformance::assert_delete_label_scoped(store()).await;
-}
-
-#[tokio::test]
-async fn conformance_context_delete_label_survives_a_concurrent_identical_put() {
-    conformance::assert_delete_label_survives_a_concurrent_identical_put(store()).await;
-}
-
-/// The same search semantics as every other backend.
-#[tokio::test]
-async fn conformance_context_search_ranking() {
-    conformance::assert_context_search_ranking(store()).await;
-}
-
-/// The migration path a fresh database never exercises.
-///
-/// [`MIGRATIONS`] is all `CREATE TABLE IF NOT EXISTS`, which is a no-op
-/// against a database that already has `context_chunks` — so on an existing
-/// deployment only [`add_column_if_missing`] can add `stored_ms`. Without
-/// it, every read of the column would fail with "no such column" and the
-/// whole Brain list/stats surface would 500.
-#[tokio::test]
-async fn legacy_context_chunks_table_gains_stored_ms_on_open() {
-    // A database as it looked before the column existed, with a row in it.
-    let conn = Connection::open_in_memory().expect("open in-memory sqlite");
-    conn.execute_batch(
-        "CREATE TABLE context_chunks (
-                 company_id TEXT NOT NULL,
-                 addr       TEXT NOT NULL,
-                 label      TEXT NOT NULL,
-                 body       TEXT NOT NULL,
-                 len        INTEGER NOT NULL,
-                 PRIMARY KEY (company_id, addr)
-             );
-             INSERT INTO context_chunks (company_id, addr, label, body, len)
-             VALUES ('acme', 'legacy-addr', 'agent/ceo', 'remembered before stamps', 24);",
-    )
-    .expect("seed a pre-`stored_ms` database");
-
-    let store = SqliteStore::from_conn(conn).expect("migrations run on a legacy database");
-    let id = CompanyId::new("acme");
-
-    // The legacy row survives the migration and reports an *unknown* store
-    // time — not the epoch, and not a misleading "migrated just now".
-    // Fully qualified: `SqliteStore` implements both `ContextStore::list`
-    // and `CompanyStore::list`, and method resolution matches on the name
-    // alone — arity does not disambiguate, so the bare call is `E0034`.
-    let metas = ContextStore::list(&store, &id, "")
-        .await
-        .expect("list after migration");
-    assert_eq!(metas.len(), 1, "the legacy row must not be dropped");
-    assert_eq!(metas[0].label, "agent/ceo");
-    assert_eq!(
-        metas[0].stored_at_millis, 0,
-        "a row written before stamps existed has no store time to report"
-    );
-
-    // A write after the migration is stamped for real.
-    let before = now_millis();
-    store
-        .put(
-            &id,
-            ContextChunk {
-                label: "agent/ops".to_string(),
-                body: "remembered after the migration".to_string(),
-            },
-        )
-        .await
-        .expect("put into a migrated database");
-
-    let metas = ContextStore::list(&store, &id, "")
-        .await
-        .expect("list after put");
-    assert_eq!(metas.len(), 2);
-    let fresh = metas
-        .iter()
-        .find(|m| m.label == "agent/ops")
-        .expect("the new chunk is listed");
-    assert!(
-        fresh.stored_at_millis >= before,
-        "a post-migration write must carry a real stamp, got {}",
-        fresh.stored_at_millis
-    );
-
-    // Reopening an already-migrated database must not try to add the column
-    // a second time — the `ALTER` would fail with "duplicate column name".
-    add_column_if_missing(
-        &store.conn(),
-        "context_chunks",
-        "stored_ms",
-        "INTEGER NOT NULL DEFAULT 0",
-    )
-    .expect("adding an existing column is a no-op, not an error");
-}
-
-/// Issue #1300's open-time heals on a mixed-version database: the
-/// backfill gives a row an older binary wrote its label claim (so the
-/// label-scoped delete can reach it), and the orphan sweep drops an index
-/// row whose body row an older binary's address-level delete removed.
-#[tokio::test]
-async fn legacy_context_rows_gain_label_claims_and_orphans_are_swept_on_open() {
-    let conn = Connection::open_in_memory().expect("open in-memory sqlite");
-    conn.execute_batch(
-        "CREATE TABLE context_chunks (
-                 company_id TEXT NOT NULL,
-                 addr       TEXT NOT NULL,
-                 label      TEXT NOT NULL,
-                 body       TEXT NOT NULL,
-                 len        INTEGER NOT NULL,
-                 stored_ms  INTEGER NOT NULL DEFAULT 0,
-                 PRIMARY KEY (company_id, addr)
-             );
-             CREATE TABLE context_chunk_labels (
-                 company_id TEXT NOT NULL,
-                 addr       TEXT NOT NULL,
-                 label      TEXT NOT NULL,
-                 stored_ms  INTEGER NOT NULL DEFAULT 0,
-                 PRIMARY KEY (company_id, addr, label)
-             );
-             -- A row an older binary wrote after the labels table existed: the
-             -- body row is there, its claim is not.
-             INSERT INTO context_chunks (company_id, addr, label, body, len, stored_ms)
-             VALUES ('acme', 'old-binary-addr', 'agent/ceo', 'written by an old binary', 24, 7);
-             -- And the reverse: a claim whose body row an older binary's
-             -- address-level delete removed.
-             INSERT INTO context_chunk_labels (company_id, addr, label, stored_ms)
-             VALUES ('acme', 'reaped-addr', 'agent/ops', 9);",
-    )
-    .expect("seed a mixed-version database");
-
-    let store = SqliteStore::from_conn(conn).expect("migrations run");
-    let id = CompanyId::new("acme");
-
-    let metas = ContextStore::list(&store, &id, "")
-        .await
-        .expect("list after the heals");
-    assert_eq!(
-        metas.iter().map(|m| m.label.as_str()).collect::<Vec<_>>(),
-        ["agent/ceo"],
-        "the old binary's row gains its claim; the orphaned claim is swept"
-    );
-    assert_eq!(
-        metas[0].stored_at_millis, 7,
-        "the backfilled claim carries the body row's stamp"
-    );
-
-    // The backfilled claim is label-deletable, and takes the body with it
-    // as the last claim.
-    let addr = ChunkAddr::new("old-binary-addr".to_string());
-    assert!(
-        store
-            .delete_label(&id, &addr, "agent/ceo")
-            .await
-            .expect("label-scoped delete on a backfilled claim")
-    );
-    assert!(
-        ContextStore::list(&store, &id, "")
-            .await
-            .unwrap()
-            .is_empty(),
-        "no claim may remain"
-    );
-    assert!(
-        store.peek(&id, &addr, None).await.is_err(),
-        "the body row went with its last claim"
-    );
 }
 
 /// Issue #983: a database created while `runs.task_id` was `NOT NULL` must
@@ -578,4 +368,16 @@ async fn conformance_run_reaper() {
 #[tokio::test]
 async fn conformance_deep_trace_store() {
     conformance::assert_deep_trace_store(store()).await;
+}
+
+#[tokio::test]
+async fn conformance_isolation_by_company() {
+    let s = store();
+    conformance::assert_isolation_by_company(s.clone(), s.clone(), s).await;
+}
+
+#[tokio::test]
+async fn conformance_export_totality() {
+    let s = store();
+    conformance::assert_export_totality(s.clone(), s.clone(), s).await;
 }

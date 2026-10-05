@@ -22,7 +22,7 @@ being *required*.
 | Medulla via TinyHumans backend | [medulla.md](medulla.md) | **required for cycles** | build/inspect/explore only |
 | OpenHuman | [openhuman.md](openhuman.md) | default tools/channels | built-in tools; extra channels disabled |
 | TinyAgents | [tinyagents.md](tinyagents.md) | default harness (feature `tiny`) | stub brain and local workers unavailable |
-| Hosted memory | [memory-engine.md](../runtime/memory-engine.md) | optional memory backend (feature `tinymemory`) | fs memory bundle |
+| Company memory | [memory-engine.md](../runtime/memory-engine.md) | OpenHuman memory v2 (TinyHumans or CortexDB engine) | memory off |
 
 ## Vendoring and versioning
 

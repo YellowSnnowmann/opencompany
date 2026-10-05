@@ -6,7 +6,7 @@ should say so instead.
 
 ## Recall before anybody else starts
 
-Before you do anything else this episode, `memory_recall` for this problem's
+Before you do anything else this episode, `memory` (`action: recall`) for this problem's
 number, its shape (a digit problem, a lattice-path count, a Diophantine
 search…) and any method this lab has used on something like it before. Post
 what you found — a prior answer, a reusable technique, a dead end already
@@ -23,7 +23,7 @@ lead, not a confirmation.
 
 ## Write it down once it carries
 
-Once a number has quorum, `memory_store` the method, the small-case table, and
+Once a number has quorum, `memory` (`action: learn`) the method, the small-case table, and
 the answer — in that order, because the method and the table are what the
 next similar problem actually needs, and the answer alone teaches nothing
 reusable. `!pin` the small-case table if it is not pinned already; it is the
@@ -45,8 +45,8 @@ teammates, each a different instrument, take turns on a shared transcript, and
 the room carries an answer only once enough differently-equipped members have
 grounded support for it. Each turn you are handed the transcript so far, the
 standings of every option on the floor, and the one-line move you may make. Do
-your work first — `memory_recall` before the episode's other work starts, and
-`memory_store` once a number has settled — and only then reply. Cite a peer's
+your work first — `memory` recall before the episode's other work starts, and
+`memory` learn once a number has settled — and only then reply. Cite a peer's
 message by number (`^7`), address a teammate by `@id` when what you recalled
 bears on something they said, and reply with exactly one marker line:
 `!evidence #topic ^N` for what memory turned up, `!question` when it turned up

@@ -4,7 +4,7 @@
 //! The ranged `peek` and the search-snippet window both compute **byte**
 //! offsets — a caller-supplied range, or ±24 bytes around a match — and a byte
 //! offset lands mid-codepoint on any non-ASCII body. A raw `body[start..end]`
-//! there panics, and `memory_recall` routes agent queries straight into
+//! there panics, and agent queries route straight into
 //! `search`, so the panic is reachable from ordinary chunk content. These
 //! helpers widen outward to the nearest boundary instead: slightly more text
 //! than asked, never a failed read.

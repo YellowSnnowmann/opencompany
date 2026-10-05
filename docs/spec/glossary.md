@@ -40,11 +40,11 @@ Medulla vocabulary is adopted unchanged where it appears; see
 | Medulla term | Meaning here |
 | --- | --- |
 | **Tier** | A named cognition class (`orchestrator`, `reasoning`, `frontend`, `compress`, `subconscious`). The client only names a tier; the TinyHumans backend maps tier → model SKU. OpenCompany never selects models. |
-| **Compressed trace** | One record per cycle, persisted through `MemoryStore`. Named for the ~20:1 working memory it is meant to become; today the `summary` is a constant string and no cycle reads it back. Maintenance retains the newest 32 for inspection (issue #1175). |
+| **Compressed trace** | One record per cycle, persisted through `TraceStore` (formerly `MemoryStore`). Named for the ~20:1 working memory it is meant to become; today the `summary` is a constant string and no cycle reads it back. Maintenance retains the newest 32 for inspection (issue #1175). |
 | **World-state diff** | Append-only notes about the world uploaded between cycles (`POST /orchestration/v1/world-diff`). |
 | **Steering** | A directive synthesized by the subconscious tick that biases future cycles. |
 | **Device tool** | A tool the client registers over Socket.IO that the hosted brain calls back into (`orch:tool_call` → `orch:tool_result`). |
-| **ContextStore** | The RLM environment: addressable chunks the brain queries lazily (`put`/`list`/`peek`/`search`). |
+| **ContextStore** | Removed in the memory v2 cutover. It was the RLM chunk store; the brain's `context_*` device tools now read and write learnings in OpenHuman memory ([runtime/memory-engine.md](runtime/memory-engine.md)). |
 
 ## Money terms
 

@@ -9,7 +9,7 @@
 //! ephemeral `tmp/` scratch so none survives a restart.
 //!
 //! Per-company bundles live under [`companies_dir`](DataLayout::companies_dir)
-//! (`companies/<slug>/`), each carrying its own `memory/`/`context/`. The
+//! (`companies/<slug>/`), each carrying its own `memory/` traces. The
 //! top-level [`memory_dir`](DataLayout::memory_dir) and friends are therefore
 //! the *instance-shared* locations, distinct from per-company state, and are
 //! created empty as the reserved home for shared artifacts.

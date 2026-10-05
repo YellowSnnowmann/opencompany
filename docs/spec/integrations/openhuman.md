@@ -22,10 +22,11 @@ What the company declares reaches the agent through the spec:
   from the company default or the agent's own pair, served through the
   loopback model bridge so every call is metered.
 - **Tools** → the OpenHuman-native subset of the grants as the spec's tool
-  scope; every OpenCompany tool (ledger, tasks, pages, workspace, memory over
-  the [`ContextStore`](../runtime/ports-state.md#contextstore), composio,
+  scope; every OpenCompany tool (ledger, tasks, pages, workspace, composio,
   hosting, approvals) and the room's speech tools over the `opencompany` MCP
-  server, because the library has no seam for an in-process host tool
+  server, because the library has no seam for an in-process host tool. Memory
+  is not one of them: each agent is bound to its company root and uses
+  OpenHuman's own `memory` tool ([runtime/memory-engine.md](../runtime/memory-engine.md))
   ([runtime/hive.md](../runtime/hive.md#speaking)).
 - **Approvals** → OpenHuman's runtime-wide gate stays off (`Access::full()`);
   OpenCompany's `ApprovalPolicy` decides allow / deny / park where the tool is

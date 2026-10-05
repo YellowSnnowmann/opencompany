@@ -289,7 +289,7 @@ pub enum GrantScope {
 ///
 /// The cost is stated rather than hidden: for the six tools that are grantable
 /// with no scope at all (`file_write`, `edit`, `apply_patch`, `csv_export`,
-/// `memory_store`, `publish_artifact`) nothing narrows a workflow permission, so
+/// `csv_export`, `publish_artifact`) nothing narrows a workflow permission, so
 /// a node added inside the window inherits it. Three things bound that, and are
 /// why it is the accepted trade: `shell` and `http_request` are
 /// [`Standing::PerCall`](crate::policy::Standing) and never persist at all, the

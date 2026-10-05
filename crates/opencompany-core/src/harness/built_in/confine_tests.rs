@@ -24,9 +24,7 @@ async fn every_tool_is_denied() {
         "query_company",
         "spawn_task",
         "delegate_to_desk",
-        "memory_forget",
-        "memory_recall",
-        "memory_store",
+        "memory",
         "workspace_read",
         "file_read",
         "web_fetch",
@@ -76,39 +74,6 @@ fn the_persona_allows_proposing_and_forbids_claiming_to_have_applied() {
     assert!(
         persona.contains("never say you have made a change"),
         "{persona}"
-    );
-}
-
-/// The confined context is a hole: nothing written to it can be read back,
-/// by this turn or any later one.
-#[tokio::test]
-async fn the_confined_context_stores_nothing() {
-    let store = ConfinedContext;
-    let company = CompanyId::new("acme");
-    store
-        .put(
-            &company,
-            ContextChunk {
-                label: "k".into(),
-                body: "the company's private note".into(),
-            },
-        )
-        .await
-        .expect("a confined put is accepted");
-    assert!(
-        store
-            .search(&company, "private", 10)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(store.list(&company, "").await.unwrap().is_empty());
-    assert!(
-        store
-            .peek(&company, &ChunkAddr::new("confined/k"), None)
-            .await
-            .unwrap()
-            .is_empty()
     );
 }
 

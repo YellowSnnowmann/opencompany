@@ -198,7 +198,7 @@ it back through `emit_effect` would re-decide it against the coarser
 `CycleRequest` carries `{cycle_id, company_id, events, event_seqs}`. It also
 carried `compressed_history`, `roster` and `context_index` until issue #1175:
 no `Brain` read any of the three, and populating the first two cost a
-`recent_traces` read plus an unbounded `ContextStore::list` scan on every
+`recent_traces` read plus an unbounded context-chunk scan on every
 cycle. A cycle therefore carries **no working memory** — see
 [company-brain/memory.md](../company-brain/memory.md) for what does the
 compounding instead. `CycleResult` carries channel responses, new
@@ -335,9 +335,9 @@ arguments *are* the parked effect's payload the card already shows; it also
 means #372's documented limit applies here too (the denylist matches on keys, so
 a credential hidden in free text under a benign key is shown on both surfaces by
 the same rule). A remote tool's output never contributes content — only a shape.
-Steps are never written to the memory store (`memory_loop::outcome_chunk` stays
-text-only), so a step detail can never be retrieved and re-injected into a later
-turn. The fold + scrub lives in `src/harness/steps.rs` (compiled under the
+Steps are never written to company memory (OpenHuman logs only the turn's
+text, [memory-engine.md](memory-engine.md)), so a step detail can never be
+retrieved and re-injected into a later turn. The fold + scrub lives in `src/harness/steps.rs` (compiled under the
 `openhuman` feature). Non-harness brains (echo, medulla) emit no steps.
 
 The same `TurnStep` rows are persisted per attempt by the

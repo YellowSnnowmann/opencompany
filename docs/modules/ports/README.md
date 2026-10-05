@@ -1,7 +1,7 @@
 # Ports Module
 
 The ports module holds the kernel's seams: one trait per file (`Brain`,
-`CompanyStore`, `EventLog`, `MemoryStore`, `ContextStore`, `ChannelAdapter`,
+`CompanyStore`, `EventLog`, `TraceStore`, `ChannelAdapter`,
 `ToolProvider`, `ApprovalGate`, `SecretStore`) plus the shared
 id, event, effect, and cycle payload types in `types.rs`. Trait and method
 names are binding against [`docs/spec/runtime/ports.md`](../../spec/runtime/ports.md);

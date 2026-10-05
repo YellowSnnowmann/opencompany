@@ -17,7 +17,10 @@ async fn memory(company: &str) -> CompanyMemory {
 fn the_root_matches_tinymemorys_own_sanitizing() {
     for raw in ["acme", "acme corp.io", "", "tenant--acme"] {
         let ours = super::super::memory_root(&CompanyId::new(raw));
-        let theirs = format!("team:{}", tm::Segment::sanitized(SegmentKind::Team, raw).id());
+        let theirs = format!(
+            "team:{}",
+            tm::Segment::sanitized(SegmentKind::Team, raw).id()
+        );
         assert_eq!(ours, theirs, "{raw:?}");
     }
 }
@@ -27,7 +30,11 @@ async fn a_learning_lands_at_the_company_root_and_is_listed() {
     let memory = memory("learn").await;
     assert!(memory.status().await.on);
     let row = memory
-        .learn("Invoices go out on the 1st", LearningKind::Procedure, vec!["operator".into()])
+        .learn(
+            "Invoices go out on the 1st",
+            LearningKind::Procedure,
+            vec!["operator".into()],
+        )
         .await
         .expect("learn");
     assert_eq!(row.kind, MemoryItemKind::Learning);
@@ -63,7 +70,14 @@ async fn one_company_never_reaches_anothers_memory() {
         .await
         .unwrap();
     assert!(globex.get(vec![row.id.clone()]).await.unwrap().is_empty());
-    assert!(globex.list(MemoryQuery::default()).await.unwrap().items.is_empty());
+    assert!(
+        globex
+            .list(MemoryQuery::default())
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
     assert_eq!(globex.forget(vec![row.id.clone()]).await.unwrap(), 0);
     assert_eq!(acme.get(vec![row.id.clone()]).await.unwrap().len(), 1);
     assert_eq!(acme.forget(vec![row.id.clone()]).await.unwrap(), 1);
@@ -150,7 +164,12 @@ async fn the_brain_context_ops_round_trip_through_memory() {
     assert!(row[0].tags.contains(&super::super::INBOUND_TAG.to_string()));
 
     let ContextOpResult::Metas(metas) = memory
-        .context_op(ContextOp::List { prefix: "notes/".into() }, false)
+        .context_op(
+            ContextOp::List {
+                prefix: "notes/".into(),
+            },
+            false,
+        )
         .await
         .unwrap()
     else {
@@ -159,7 +178,12 @@ async fn the_brain_context_ops_round_trip_through_memory() {
     assert_eq!(metas.len(), 1);
     assert_eq!(metas[0].label, "notes/q4");
     let ContextOpResult::Metas(none) = memory
-        .context_op(ContextOp::List { prefix: "other/".into() }, false)
+        .context_op(
+            ContextOp::List {
+                prefix: "other/".into(),
+            },
+            false,
+        )
         .await
         .unwrap()
     else {

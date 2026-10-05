@@ -1,42 +1,27 @@
 use super::*;
 
-#[tokio::test]
-async fn memory_tools_are_wired_to_the_company_context_store() {
-    // The flip of the old withholding lock. The doc comment on
-    // `memory_tools` demanded that whatever un-withholds these must first
-    // confirm each company's own `ContextStore` genuinely backs them — so
-    // that is exactly what this asserts: a store through the tool lands in
-    // THIS company's context rows, under the agent's own label prefix,
-    // reachable by the same port the memory_loop and the Brain view read.
-    use crate::ports::ContextStore;
+/// Every agent on the shared runtime is bound to its company's memory root —
+/// an unbound one would log at the engine's default root, which every company
+/// the process serves shares. A teammate is bound as itself and active; a
+/// confined turn is bound to the same root but inactive.
+#[test]
+fn agents_are_bound_to_their_companys_memory_root() {
     use crate::ports::types::CompanyId;
-    use std::sync::Arc;
 
-    let dir = tempfile::tempdir().expect("tempdir");
-    let context: Arc<dyn ContextStore> =
-        Arc::new(crate::store::FsContextStore::new(dir.path().to_path_buf()));
     let company = CompanyId::new("acme");
-    let tools = crate::harness::built_in::memory_tools::memory_tools(
-        context.clone(),
-        company.clone(),
-        "ceo".to_string(),
-    );
-    let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
-    assert_eq!(names, ["memory_store", "memory_recall", "memory_forget"]);
+    let teammate = AgentMemory::teammate(&company, "ceo");
+    assert_eq!(teammate.agent_id, "ceo");
+    assert_eq!(teammate.root, "team:acme");
+    assert!(teammate.active);
 
-    let store = &tools[0];
-    let reply = store
-        .execute(serde_json::json!({"title": "Pin", "body": "the fact"}))
-        .await
-        .expect("execute");
-    assert!(!reply.is_error, "{reply:?}");
-    let rows = context.list(&company, "agent-memory/ceo/").await.unwrap();
-    assert_eq!(
-        rows.len(),
-        1,
-        "the tool write must land on the company port"
+    let confined = AgentMemory::inactive(&company, "confined");
+    assert_eq!(confined.root, "team:acme");
+    assert!(!confined.active);
+    assert_ne!(
+        AgentMemory::teammate(&CompanyId::new("globex"), "ceo").root,
+        teammate.root,
+        "two companies never share a root"
     );
-    assert_eq!(rows[0].label, "agent-memory/ceo/pin");
 }
 
 /// The grant alone is not enough: a wired `shell`/`code` namespace the

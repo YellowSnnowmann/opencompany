@@ -24,7 +24,7 @@ use opencompany::harness::provider::{HostedProvider, harness_inference_from_env}
 use opencompany::harness::{HarnessDeps, HarnessPool};
 use opencompany::ports::types::{CompanyId, CompanyRecord};
 use opencompany::ports::usage::{UsageMeter, UsageSample};
-use opencompany::store::{FsCompanyStore, FsContextStore};
+use opencompany::store::FsCompanyStore;
 
 /// A [`UsageMeter`] that keeps every sample in memory so the run can print the
 /// turn's metered token/cost totals.
@@ -93,7 +93,6 @@ async fn main() -> anyhow::Result<()> {
         provider: Arc::new(HostedProvider::new(cfg)),
         provider_slug: "managed".to_string(),
         serves: None,
-        context: Arc::new(FsContextStore::new(dir.path())),
         store: Arc::new(FsCompanyStore::new(dir.path())),
         meter: Some(meter.clone()),
         workspace_root: dir.path().join("harness"),
@@ -111,7 +110,6 @@ async fn main() -> anyhow::Result<()> {
         skills_registry: std::sync::Arc::from([]),
         default_mcp_servers: Vec::new(),
         mcp_servers: Vec::new(),
-        facts: None,
         events: None,
         artifacts: None,
         delegations: opencompany::harness::orchestrator::DelegationQueue::default(),

@@ -130,7 +130,7 @@ So the two questions are now separate answers from one declaration
 
 What stays grantable is the low-consequence middle the feature exists for:
 writes confined to the agent's own sandboxed workspace (`file_write`, `edit`,
-`apply_patch`, `csv_export`, `memory_store`), and **Composio reads**.
+`apply_patch`, `csv_export`, OpenHuman's `memory` tool), and **Composio reads**.
 
 ### The `auto` tier
 

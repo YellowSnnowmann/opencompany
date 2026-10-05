@@ -50,7 +50,6 @@ pub(super) fn a_workspace_read_never_parks_whatever_its_name_begins_with() {
         "grep",
         "image_info",
         "list",
-        "memory_recall",
         "workspace_list",
         "workspace_read",
         "workspace_search",
@@ -103,13 +102,7 @@ pub(super) fn reading_workspace_state_is_classified_with_shell_because_it_runs_g
 /// of autonomy is still handing over something useful.
 #[test]
 pub(super) fn the_agents_own_workspace_writes_stay_grantable() {
-    for tool in [
-        "file_write",
-        "edit",
-        "apply_patch",
-        "csv_export",
-        "memory_store",
-    ] {
+    for tool in ["file_write", "edit", "apply_patch", "csv_export", "memory"] {
         let verdict = c(tool);
         assert_eq!(verdict.standing, Standing::Grantable, "`{tool}`");
         // They mutate, so `readonly` must still deny and `supervised` must
@@ -374,4 +367,22 @@ pub(super) fn lookup_ignores_case() {
         Standing::Grantable,
         "the curated lookup is case-insensitive on the slug too"
     );
+}
+
+/// OpenHuman's `memory` tool is graded on its `action`: reads of the company's
+/// own memory never park, a learning is grantable, a forget is per-call, and
+/// an unreadable action takes the fail-closed `learn` verdict.
+#[test]
+pub(super) fn the_memory_tool_is_graded_on_its_action() {
+    for action in ["recall", "fetch"] {
+        let verdict = consequence_of("memory", &json!({ "action": action }));
+        assert!(!verdict.reach.parks_under_supervision(), "`{action}` reads");
+    }
+    let learn = consequence_of("memory", &json!({ "action": "learn" }));
+    assert_eq!(learn.standing, Standing::Grantable);
+    assert!(learn.reach.parks_under_supervision());
+    let forget = consequence_of("memory", &json!({ "action": "forget" }));
+    assert_eq!(forget.standing, Standing::PerCall);
+    assert!(forget.reach.parks_under_supervision());
+    assert_eq!(consequence_of("memory", &json!({})), learn);
 }

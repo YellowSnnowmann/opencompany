@@ -38,7 +38,7 @@ use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{HarnessDeps, HarnessPool};
 use crate::ports::types::CompanyRecord;
 use crate::ports::workspace::{NodeKind, WorkspaceNode, WorkspaceOrigin, WorkspaceStore};
-use crate::store::{FsCompanyStore, FsContextStore, FsOps};
+use crate::store::{FsCompanyStore, FsOps};
 
 /// What the scripted model does on each successive call.
 #[derive(Clone, Debug)]

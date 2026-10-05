@@ -3,7 +3,7 @@ use super::*;
 
 use crate::company::parse_workflow;
 use crate::harness::provider::MockProvider;
-use crate::store::{FsCompanyStore, FsContextStore, FsOps};
+use crate::store::{FsCompanyStore, FsOps};
 
 #[async_trait]
 impl crate::runtime::delegation::RunTurn for HaltOkTurn {
@@ -447,7 +447,6 @@ pub(super) fn deps(dir: &std::path::Path) -> HarnessDeps {
         provider: Arc::new(MockProvider::new("mock: ")),
         provider_slug: "mock".to_string(),
         serves: None,
-        context: Arc::new(FsContextStore::new(dir)),
         store: Arc::new(FsCompanyStore::new(dir)),
         meter: Some(Arc::new(FsOps::new(dir))),
         workspace_root: dir.to_path_buf(),
@@ -462,7 +461,6 @@ pub(super) fn deps(dir: &std::path::Path) -> HarnessDeps {
         skills_registry: std::sync::Arc::from([]),
         default_mcp_servers: Vec::new(),
         mcp_servers: Vec::new(),
-        facts: None,
         events: None,
         delegations: crate::harness::orchestrator::DelegationQueue::default(),
         workflow_runner: crate::harness::orchestrator::WorkflowRunnerHandle::default(),

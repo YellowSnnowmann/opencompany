@@ -578,7 +578,7 @@ async fn e2e_inference_then_gated_send_dm_drives_a_channel_response() {
     assert!(acks[0].ok);
 
     // A compressed trace was persisted to the fs-backed TraceStore.
-    let traces = rt.memory.recent_traces(rt.id(), 10).await.unwrap();
+    let traces = rt.traces.recent_traces(rt.id(), 10).await.unwrap();
     assert!(!traces.is_empty());
 }
 
