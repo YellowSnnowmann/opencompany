@@ -603,10 +603,12 @@ pub fn coordinator_options(record: &CompanyRecord) -> tinyhivemind_hives::Coordi
         .map(|routing| routing.max_rounds)
         .max()
         .unwrap_or(DEFAULT_MAX_ROUNDS);
-    let mut conduct_policy = tinyhivemind_core::driver::ConductPolicy::default();
-    conduct_policy.turn_wall = (round_width as u64)
-        .saturating_mul(u64::from(max_rounds))
-        .max(1);
+    let conduct_policy = tinyhivemind_core::driver::ConductPolicy {
+        turn_wall: (round_width as u64)
+            .saturating_mul(u64::from(max_rounds))
+            .max(1),
+        ..tinyhivemind_core::driver::ConductPolicy::default()
+    };
     tinyhivemind_hives::CoordinatorOptions {
         round_width,
         conduct_policy,
