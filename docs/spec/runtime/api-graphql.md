@@ -123,9 +123,9 @@ conversational surface) and the `/events` work feed
   claim to answering for that turn, so the model's own `spawn_task` /
   `assign_task` / `review_task` fail at the tool boundary with the
   do-not-retry refusal.
-  `delegate_to_desk` is deliberately **not** refused — it is how a question the
-  orchestrator cannot answer alone reaches a desk that can — so it runs the
-  desk lead and relays their reply, and only its board card stands down.
+  Messaging a desk through the company hive is deliberately **not** refused —
+  it is how a question the orchestrator cannot answer alone reaches a desk
+  that can — and only board cards stand down.
   `query_company` / `run_workflow` / `read_run_output` — and, since issue
   #1859, the board/run-history read trio `list_tasks` / `read_task` /
   `read_run` — run inline and are untouched throughout. The turn loses the

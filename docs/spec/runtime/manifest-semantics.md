@@ -72,8 +72,9 @@ each page under the 500-line cap.
   `update_workflow`, `delete_workflow`) stay orchestrator-only. Every roster
   agent carries `spawn_task` to leave a slice tracked on the board; the
   hand-off tools (`delegate_to_desk`, `delegate_to_teammate`) that used to run
-  a colleague's turn *inside* the caller's are gone, because a room is where
-  colleagues answer each other, and a referral is how a room asks another.
+  a colleague's turn *inside* the caller's are gone (OC-2): an agent messages a
+  colleague through the company hive (`hivemind_send_agent`), bounded by its
+  `delegates_to`.
 
   A dispatched board card accepts one hand-off per turn: it transfers ownership
   after the current turn finishes and settles from the colleague's output. A

@@ -405,7 +405,7 @@ key as its credential, `TINYHUMANS_API_URL` as its backend), and
 | the OpenHuman-native subset of its grants (`shell`, `file_*`, `web_fetch`, …) | `.definition(AgentDefinitionSpec::new().tools(ToolScopeSpec::Named(..)).disallow_tools(..).max_iterations(25))` |
 | `[inference]` / the agent's own `{provider, model}` pair (`company/inference.rs`), BYOK included | `.provider(Provider::openai_compatible(url, key).model(m))`, served through the loopback model bridge so usage is metered |
 | the approval policy | `.access(Access::full())` — OpenHuman's runtime-wide gate stays off; OpenCompany decides allow / deny / park in its own MCP handler |
-| every OpenCompany tool (ledger, tasks, pages, workspace, composio, hosting, approvals) and the speech tools | `.mcp(McpServer::http("opencompany", url).auth(BearerToken).allow_tools(..))` — see [hive.md](hive.md#speaking) |
+| the agent's custom OpenCompany tools | `.mcp(McpServer::http("opencompany", url).auth(BearerToken).allow_tools(..))`; the `hivemind_*` tools are attached by the company hive's `OpenHumanHost` at registration — see [hive.md](hive.md) |
 | each `mcp:*` grant | one more `.mcp(..)` |
 | the company's skills, the company workspace | `.skills_dir(<home>/skills)`, `.action_dir(<workspace>)` |
 

@@ -161,7 +161,7 @@ consoles and old wire shapes are byte-for-byte unchanged.
 `"lead"` is the standing model: `members[0]` leads, and an unmentioned message
 addressed to the desk is answered by that lead. `"auto"` is a **channel**: no
 lead exists — the org chart crowns nobody, the members pane badges nobody, and
-`delegate_to_desk` refuses it with a reason — and an unmentioned message's
+no default starter exists — and an unmentioned message's
 answerer is picked **per message**, by a single tool-less model call over the
 channel's own membership (id, role, description), clamped to that membership.
 An `@`-mention outranks the pick everywhere, and wherever selection cannot run
