@@ -149,7 +149,11 @@ pub fn team_section(record: &CompanyRecord, agent_id: &str) -> String {
             out.push_str(": ");
             out.push_str(description);
         }
-        out.push_str(&format!(" (id `{}` for tool calls)\n", agent.id));
+        out.push_str(&format!(
+            " (id `{}` for tool calls; `{}` as the `agent_id` of a `hivemind_*` tool)\n",
+            agent.id,
+            crate::session_key::runtime_agent_id(&record.id, agent.id)
+        ));
     }
 
     // **The desks this agent sits on, not every desk the company has.**
@@ -217,7 +221,8 @@ pub fn team_section(record: &CompanyRecord, agent_id: &str) -> String {
                             .iter()
                             .find(|agent| agent.id == id.as_str())
                             .map_or(id.as_str(), Teammate::label);
-                        format!("{name} (`{id}`)")
+                        let hive_id = crate::session_key::runtime_agent_id(&record.id, id);
+                        format!("{name} (`{hive_id}`)")
                     })
                     .collect::<Vec<_>>()
                     .join(", ")
