@@ -36,7 +36,7 @@ fn the_brief_leads_with_answering_and_did_not_grow() {
     );
     // The #442 two-decisions block survives the restructure.
     assert!(brief.contains("they are INDEPENDENT"), "{brief}");
-    assert!(brief.contains("the hand-off IS the card"), "{brief}");
+    assert!(brief.contains("`hivemind_send_hive`"), "{brief}");
     // A "create a workflow" ask is authored now, not parked.
     assert!(
         brief.contains("author it NOW with `create_workflow`"),
