@@ -1741,7 +1741,7 @@ export interface AgentSkillsDto {
 export interface AgentDeskDto {
   id: string;
   name: string;
-  /** The desk's first effective member, who receives a `delegate_to_desk` hand-off. */
+  /** The desk's first effective member, who answers the desk's unmentioned lines. */
   lead: boolean;
 }
 

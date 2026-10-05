@@ -1498,9 +1498,9 @@ const FIXTURE_COMMS = applyObservations(
     ],
   ),
   [
-    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "delegate_to_desk", atMillis: 1 },
-    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "delegate_to_desk", atMillis: 2 },
-    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "delegate_to_desk", atMillis: 3 },
+    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "task", atMillis: 1 },
+    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "task", atMillis: 2 },
+    { kind: "handed-off", from: "orchestrator", to: "solvers", via: "task", atMillis: 3 },
     { kind: "handed-off", from: "planner", to: "records", via: "spawn_task", atMillis: 4 },
     { kind: "spawned", by: "orchestrator", agentId: "researcher", atMillis: 5 },
     { kind: "spoke", from: "planner", to: "archivist", via: "dm", atMillis: 6 },

@@ -18,8 +18,9 @@
  * - **Desk membership** is who shares a room, and therefore who can answer whom.
  * - **`task_dispatched` → `desk_task_completed`** is a delegation that actually
  *   happened, and the only pair the journal already correlates.
- * - **`tool_call` frames** name the rest: `add_agent` (a spawn), `spawn_task`,
- *   `delegate_to_desk`, `delegate_to_teammate`.
+ * - **`tool_call` frames** name the rest: `add_agent` (a spawn), `spawn_task`.
+ * - **`hive_message` frames** are agents reaching each other through the
+ *   company hive (`hivemind_send_agent` and private desk lines).
  *
  * The last of those is the weakest and is treated as such. A tool call's
  * arguments reach the console **redacted** (`TurnStep.detail`), so the target may
