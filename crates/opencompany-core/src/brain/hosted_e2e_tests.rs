@@ -226,40 +226,6 @@ async fn e2e_reported_usage_lands_on_the_usage_meter() {
 // cognition) + handed-task awareness.
 // ---------------------------------------------------------------------------
 
-/// A manifest with an Engineering desk (`eng`) whose lead is `eng1`, plus a
-/// hosted brain. Used to prove hosted `delegate_to_desk` resolves the desk and
-/// records the hand-off against it.
-fn desk_manifest() -> CompanyManifest {
-    let toml_src = r#"
-        [company]
-        name = "Acme"
-
-        [brain]
-        mode = "hosted"
-
-        [tools]
-        allow = ["noop"]
-
-        [policy]
-        mode = "full"
-
-        [[agent]]
-        id = "chief"
-        role = "Chief"
-        tier = "orchestrator"
-
-        [[agent]]
-        id = "eng1"
-        role = "Engineer"
-
-        [[group_chat]]
-        id = "eng"
-        name = "Engineering"
-        members = ["eng1"]
-        "#;
-    toml::from_str(toml_src).expect("valid manifest")
-}
-
 /// The hosted catalog registered with Medulla advertises `spawn_task` on top
 /// of the manifest's own `tools.allow`, and no desk hand-off: agent-to-agent
 /// work is hive messaging since OC-2, which a hosted brain does not run.
