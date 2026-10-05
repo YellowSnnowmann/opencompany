@@ -3,11 +3,7 @@ import { toast } from "sonner";
 
 import type {
   ChatMentionDto,
-  EpisodeCompletionReason,
-  RoutingPlanDto,
-  RoutingRouter,
   TurnStepFailure,
-  UtteranceKind,
 } from "@/api/types";
 import type { OpenCompanyClient } from "@/api/client";
 import type {
@@ -166,57 +162,6 @@ export type CompanyStreamEvent =
   //   orchestrator's relay bubble, so the host stopped projecting it rather
   //   than leave a second copy on the wire for a future reader to render.
   //   Nothing in this console read it.
-  // **A crossing landed; the thread it folds onto has changed.**
-  //
-  // A crossing renders as a collapsed `referralConversation` on the asking row,
-  // and only `chat/history` builds that — so a crossing was invisible until
-  // something re-read the thread. For a desk crossing that meant waiting for
-  // settle; for a pair DM it meant never, because the exchange is journaled in
-  // the pair's own `dm:<a>+<b>` conversation that no desk view subscribes to.
-  //
-  // Carries no crossing content by design: the host does not rebuild the fold
-  // on this path, it says which thread to ask about. See the frame's comment in
-  // `operator.rs`.
-  | {
-      type: "referral";
-      seq: number;
-      atMillis: number;
-      /** The desk whose transcript gains the fold — the desk that ASKED. */
-      chatId: string;
-      /** The row the crossing folds onto. */
-      sequence: number;
-      toDesk: string;
-      /**
-       * Who was asked, and who asked — so a console can say that a turn is
-       * running and whose.
-       *
-       * A referred turn runs outside the `turn_started`/`turn_settled` bracket
-       * every other turn is announced by, so this frame is the only notice the
-       * console gets that a model is working.
-       */
-      target: string;
-      asker: string;
-      /**
-       * Whether a PERSON was asked rather than a desk.
-       *
-       * It changes what is happening, not just who: a desk crossing is one
-       * side answering (the whole room, since #2332), while a person crossing
-       * is a two-way exchange both seats spend turns on. It also decides
-       * whether `target` may be shown at all — on a desk crossing the library
-       * resolves it to that desk's first eligible seat, so printing it would
-       * name an arbitrary member for a room's work.
-       */
-      direct: boolean;
-      /** A return is the leg that completes the exchange. */
-      returning: boolean;
-      /**
-       * The episode on the asking desk that raised the crossing, and the
-       * episode opened on the far desk to answer it. Both optional: a host
-       * predating episodes says neither, and a pair DM opens no episode.
-       */
-      episodeId?: string;
-      toEpisodeId?: string;
-    }
   | {
       type: "desk_task_completed";
       seq: number;
@@ -1202,8 +1147,7 @@ export function useEvents(
     onAgentReply,
     onTaskEvent,
     onRunEvent,
-    onReferral,
-    onEpisodeEvent,
+    onHiveEvent,
     onTurnBracket,
     onDeskRoutingConfigured,
     onRosterChanged,
@@ -1231,18 +1175,14 @@ export function useEvents(
   useEffect(() => {
     onTaskEventRef.current = onTaskEvent;
   }, [onTaskEvent]);
-  const onReferralRef = useRef(onReferral);
-  useEffect(() => {
-    onReferralRef.current = onReferral;
-  }, [onReferral]);
   const onRunEventRef = useRef(onRunEvent);
   useEffect(() => {
     onRunEventRef.current = onRunEvent;
   }, [onRunEvent]);
-  const onEpisodeEventRef = useRef(onEpisodeEvent);
+  const onHiveEventRef = useRef(onHiveEvent);
   useEffect(() => {
-    onEpisodeEventRef.current = onEpisodeEvent;
-  }, [onEpisodeEvent]);
+    onHiveEventRef.current = onHiveEvent;
+  }, [onHiveEvent]);
   const onTurnBracketRef = useRef(onTurnBracket);
   useEffect(() => {
     onTurnBracketRef.current = onTurnBracket;
@@ -1383,8 +1323,7 @@ export function useEvents(
             onAgentReply: onAgentReplyRef.current,
             onTaskEvent: onTaskEventRef.current,
             onRunEvent: onRunEventRef.current,
-            onReferral: onReferralRef.current,
-            onEpisodeEvent: onEpisodeEventRef.current,
+            onHiveEvent: onHiveEventRef.current,
             onTurnBracket: onTurnBracketRef.current,
             onDeskRoutingConfigured: onDeskRoutingConfiguredRef.current,
             onRosterChanged: onRosterChangedRef.current,
@@ -1444,8 +1383,7 @@ export function handleEvent(
     onAgentReply,
     onTaskEvent,
     onRunEvent,
-    onReferral,
-    onEpisodeEvent,
+    onHiveEvent,
     onTurnBracket,
     onDeskRoutingConfigured,
     onRosterChanged,
@@ -1537,37 +1475,19 @@ export function handleEvent(
     // The origin channel's inline marker remains the notification while it is
     // on screen. Away from that exact channel, #1758 adds one linked toast so a
     // background turn cannot finish silently while the operator works elsewhere.
-    case "referral":
-      onReferral?.(event);
-      // A crossing raised from inside an episode is part of that episode's
-      // story too — the band shows the far desk being asked.
-      onEpisodeEvent?.(event);
-      break;
-    // The episode frames. **No toast**, for the reason the turn frames raise
-    // none: a desk of two answering a question fires a handful of these per
-    // round, and they render inline as the round band. Journaled, so a
-    // reload rebuilds the same band from `chat/history`.
-    case "episode_opened":
-    case "round_started":
-    case "round_committed":
-    case "broadcast_routed":
-    case "dm_delivered":
-    // The a2a pair. Easy to miss because the conversation's own rows are in
-    // the pair channel and never reach this desk's stream: these two
-    // references are the ONLY thing that tells the desk an exchange happened,
-    // so without an arm here the indicator has no input at all and the fold
-    // sees an episode that never talked to itself.
-    case "conversation_opened":
-    case "conversation_concluded":
-    case "episode_completed":
-    case "episode_seat_parked":
-    case "episode_seat_resumed":
-      onEpisodeEvent?.(event);
+    // The company-hive frames. **No toast**, for the reason the turn frames
+    // raise none: a desk answering a question fires a handful of these, and
+    // they render inline (the settle marker) and on the comms graph.
+    case "hive_accepted":
+    case "hive_message":
+    case "hive_episode_settled":
+    case "hive_turn_interrupted":
+      onHiveEvent?.(event);
       break;
     // The chat turn bracket (issue #983). Silent, and routed to its own
     // subscriber rather than `onTurnEvent`: that one folds tool rows into a
-    // message's timeline, and a bracket is not a row — it is when a seat
-    // started and stopped, which the band and the concurrency count read.
+    // message's timeline, and a bracket is not a row — it is when an agent
+    // started and stopped, which presence and the concurrency count read.
     case "turn_started":
     case "turn_settled":
       onTurnBracket?.(event);
@@ -1606,16 +1526,12 @@ export function handleEvent(
       onWorkspaceEvent?.(event);
       break;
     case "agent_reply":
-      // Also to the episode fold: a row in a pair channel is a line of an
-      // exchange two seats are having, and nothing else on this stream
-      // carries one. The fold drops every desk row it sees.
-      onEpisodeEvent?.(event);
       onAgentReply?.({
         chatId: event.chatId,
         agentId: event.agentId,
         text: event.text,
-        // The body as the model wrote it, when the host still rewrites one
-        // (a referral's cue line). Carried untouched so the raw view can show
+        // The body as the model wrote it, when the host rewrote one. Carried
+        // untouched so the raw view can show
         // what the model received.
         cueText: event.cueText,
         // Issue #483: the host's own id for this message. Carried so the
@@ -1633,10 +1549,9 @@ export function handleEvent(
         // Absent when the host's projection omits it; the same mentions are
         // always available through `chat/history` (see {@link fromHistory}).
         mentions: event.mentions,
-        // The episode this reply was committed into, and who may read it.
-        // Carried so a live row lands in the same round band a reload would
-        // put it in.
-        episode: event.episode,
+        // Where this reply sits in the hive, and who may read it. Carried so
+        // a live row groups into the same episode a reload would put it in.
+        hive: event.hive,
         audience: event.audience,
       });
       break;
