@@ -90,15 +90,17 @@ impl<'a> TurnEnvelope<'a> {
     /// Runs `body` as this agent's one turn: under its turn lock, registered
     /// in flight on `surface` (and `hive`, for a coordinator turn) with its
     /// tool calls executed on this task, inside its stop hooks.
-    pub(crate) async fn run<T, F>(
+    ///
+    /// `body` arrives boxed, and the tool-job loop is boxed here, so neither
+    /// is laid out inline in this future's state: the turn chain beneath is
+    /// deep enough that an inline body pushed a dispatched card turn past the
+    /// 8 MiB test stack (`.cargo/config.toml`, issue #895).
+    pub(crate) async fn run<'b, T>(
         &self,
         surface: ConversationRef,
         hive: Option<HiveScope>,
-        body: F,
-    ) -> T
-    where
-        F: std::future::Future<Output = T>,
-    {
+        body: std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'b>>,
+    ) -> T {
         let agent = self.agent;
         let _turn = agent.turn_lock.lock().await;
         let (job_tx, mut job_rx) = tokio::sync::mpsc::channel::<ToolJob>(8);
@@ -127,7 +129,7 @@ impl<'a> TurnEnvelope<'a> {
         };
         drop(job_tx);
         let served = agent.mcp.agent(&agent.runtime_id);
-        let serve_jobs = async {
+        let serve_jobs = Box::pin(async {
             while let Some(job) = job_rx.recv().await {
                 let turn = in_flight.snapshot(&agent.runtime_id);
                 let result = match &served {
@@ -144,11 +146,11 @@ impl<'a> TurnEnvelope<'a> {
             // The registry's sender outlives the turn, so this loop ends only
             // if the entry was dropped under us; never let it end the select.
             std::future::pending::<()>().await;
-        };
+        });
         // Anything left on the taps belongs to no attempt of ours.
         let _ = agent.bridge.take_usage();
         let _ = agent.bridge.take_errors();
-        let body = oh::agent::stop_hooks::with_stop_hooks(self.hooks.clone(), Box::pin(body));
+        let body = oh::agent::stop_hooks::with_stop_hooks(self.hooks.clone(), body);
         let out = tokio::select! {
             biased;
             out = body => out,
