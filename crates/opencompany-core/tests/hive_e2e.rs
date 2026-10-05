@@ -337,6 +337,10 @@ async fn a_shared_agent_on_two_desks_never_runs_twice_at_once() {
         .into_iter()
         .filter(|(agent, ..)| agent == CEO)
         .collect();
+    assert!(
+        ceo.len() >= 2,
+        "the CEO was named on both desks and answered on both: {ceo:?}"
+    );
     for (i, (_, _, a_start, a_end)) in ceo.iter().enumerate() {
         for (_, _, b_start, _) in &ceo[i + 1..] {
             let a_end = a_end.expect("every CEO turn closed");
