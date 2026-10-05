@@ -804,8 +804,14 @@ async function main() {
     log(`detached runner pid=${child.pid} lanes=${lanesJson}`);
     return 0;
   }
-  if (args.profile === "ex63")
+  if (args.profile === "ex63") {
+    // Keep the server for the whole run. Its default 10-minute idle timeout
+    // let it exit while the e2e lanes ran (they compile nothing), so the
+    // closing `--show-stats` started a fresh server and reported 0 requests
+    // for a run whose binaries had compiled through it.
+    process.env.SCCACHE_IDLE_TIMEOUT ??= "0";
     spawnSync("sccache", ["--start-server"], { stdio: "ignore" });
+  }
 
   const envHeavy = Number.parseInt(process.env.OC_LANES_MAX_HEAVY ?? "", 10);
   const maxHeavy =
