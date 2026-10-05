@@ -207,6 +207,12 @@ pub fn call(tool: &'static str, args: Value) -> Reply {
 /// answers `"Noted."`.
 pub fn hive_script(act: impl Fn(&HiveTurn) -> Reply + Send + Sync + 'static) -> Responder {
     Arc::new(move |request: &Ask| {
+        if std::env::var_os("ROOM_ASKS").is_some() {
+            eprintln!(
+                "[ask] {}",
+                request.last_user_text().chars().take(300).collect::<String>()
+            );
+        }
         let Some(turn) = hive_turn(request) else {
             return Reply::Say("Noted.".to_string());
         };
