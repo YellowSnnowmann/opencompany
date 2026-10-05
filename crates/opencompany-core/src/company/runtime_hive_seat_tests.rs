@@ -267,7 +267,7 @@ async fn each_blocker_verdict_releases_a_question_with_its_distinct_decision() {
         )
         .await;
         let (receipt, follow_up) = rt
-            .apply_blocker_reply_spawned(&[id.clone()], &id, verdict, answer, None)
+            .apply_blocker_reply_spawned(std::slice::from_ref(&id), &id, verdict, answer, None)
             .await
             .expect("applies the blocker verdict");
         assert_eq!(receipt.outcome(), "settled");
