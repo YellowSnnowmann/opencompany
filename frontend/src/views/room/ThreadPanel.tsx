@@ -338,7 +338,6 @@ export function ThreadPanel({
               redeemingBudgetPauseAgent={redeemingBudgetPauseAgent}
               latestBudgetPauseMessageIdByAgent={latestBudgetPauseMessageIdByAgent}
               onRetrySend={onRetrySend}
-              agentNames={agentNames}
             />
             <div className="flex items-center gap-2 px-4 py-2">
               <span className="text-xs font-medium text-muted-foreground">

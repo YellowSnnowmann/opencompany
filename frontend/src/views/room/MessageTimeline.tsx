@@ -313,7 +313,6 @@ export function MessageTimeline({
             onRedeemBudgetPause={onRedeemBudgetPause}
             redeemingBudgetPauseAgent={redeemingBudgetPauseAgent}
             latestBudgetPauseMessageIdByAgent={latestBudgetPauseMessageIdByAgent}
-            agentNames={agentNames}
           />
         </div>
       );
