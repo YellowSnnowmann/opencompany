@@ -54,10 +54,9 @@ GET    /api/v1/companies/{id}/feedback/board   the shared board, one page
 GET    .../feedback/board/{item}               one board item + its comments
 POST   .../feedback/board/{item}/vote          { "value": 1 | -1 | 0 }
 POST   .../feedback/board/{item}/comments      { "body": "…" }
-GET    /api/v1/companies/{id}/memory/traces    inspect working memory (debug)
-GET    .../memory/archives                    traces retained on eviction
-                                             (provider-backed engines only; 404
-                                             when the engine keeps no archive)
+GET    /api/v1/companies/{id}/memory/traces    inspect the cycle-trace window (debug)
+GET    .../memory[?kind=&agent=&query=]       company memory (OpenHuman); the rest
+                                             of the surface is in memory-engine.md
 POST   /api/v1/companies/{id}/export           export bundle (tar)
 POST   /api/v1/companies/{id}/pause            pause / resume lifecycle transitions
 GET    /api/v1/companies/{id}/desks            #general, then the desks and channels

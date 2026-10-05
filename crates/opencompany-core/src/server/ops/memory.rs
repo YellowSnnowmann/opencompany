@@ -29,8 +29,8 @@ use serde::{Deserialize, Serialize};
 use crate::AppState;
 use crate::error::OpenCompanyError;
 use crate::memory::{
-    BrainSources, LearningKind, MemoryAgents, MemoryItem, MemoryItemKind, MemoryPage,
-    MemoryQuery, MemoryStatus, RecallAnswer,
+    BrainSources, LearningKind, MemoryAgents, MemoryItem, MemoryItemKind, MemoryPage, MemoryQuery,
+    MemoryStatus, RecallAnswer,
 };
 use crate::ports::types::{CompanyEvent, CompressedTrace};
 use crate::runtime::maintenance::TRACE_RETENTION_LIMIT;
@@ -87,7 +87,12 @@ async fn list_items(
         })?),
     };
     let memory = company.runtime.memory();
-    if let Some(query) = params.query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+    if let Some(query) = params
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+    {
         let items = memory.search(query, kind, SEARCH_LIMIT).await?;
         return Ok(Json(MemoryPage {
             items,
@@ -149,7 +154,11 @@ async fn forget_item(
     company: ScopedCompany,
     Path(ItemPath { item_id }): Path<ItemPath>,
 ) -> Result<StatusCode, ApiError> {
-    let forgotten = company.runtime.memory().forget(vec![item_id.clone()]).await?;
+    let forgotten = company
+        .runtime
+        .memory()
+        .forget(vec![item_id.clone()])
+        .await?;
     if forgotten == 0 {
         return Err(OpenCompanyError::NotFound(format!("memory {item_id}")).into());
     }
@@ -213,8 +222,14 @@ async fn recall(
     if question.is_empty() {
         return Err(OpenCompanyError::InvalidRequest("ask a question".into()).into());
     }
-    let agent = body.agent.as_deref().map(str::trim).filter(|a| !a.is_empty());
-    Ok(Json(company.runtime.memory().recall(question, agent).await?))
+    let agent = body
+        .agent
+        .as_deref()
+        .map(str::trim)
+        .filter(|a| !a.is_empty());
+    Ok(Json(
+        company.runtime.memory().recall(question, agent).await?,
+    ))
 }
 
 /// `GET /memory/brain` — the brain's document sources and their sizes.
@@ -223,14 +238,14 @@ async fn brain_sources(company: ScopedCompany) -> Result<Json<BrainSources>, Api
 }
 
 /// Journals an operator forget to the event log (audit trail).
-pub(crate) async fn journal_forget(
-    company: &ScopedCompany,
-    what: String,
-) -> Result<(), ApiError> {
+pub(crate) async fn journal_forget(company: &ScopedCompany, what: String) -> Result<(), ApiError> {
     company
         .runtime
         .events()
-        .append(company.id(), CompanyEvent::MemoryFactDeleted { fact_id: what })
+        .append(
+            company.id(),
+            CompanyEvent::MemoryFactDeleted { fact_id: what },
+        )
         .await?;
     Ok(())
 }

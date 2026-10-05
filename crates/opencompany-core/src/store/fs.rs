@@ -7,8 +7,7 @@
 //! Those locks live in one process-wide registry (`path_lock`) rather than on
 //! each store, so two instances over one bundle actually meet (issue #388).
 
-use std::collections::{HashMap, HashSet};
-use std::ops::Range;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -20,13 +19,12 @@ use crate::Result;
 use crate::error::OpenCompanyError;
 use crate::ports::events::{EventLog, EventStreamItem, PruneReport, RetentionPolicy, plan_prune};
 use crate::ports::inbox::{EmailRecord, InboxMeta, InboxStore};
-use crate::ports::traces::TraceStore;
 use crate::ports::secrets::SecretStore;
 use crate::ports::store::CompanyStore;
+use crate::ports::traces::TraceStore;
 use crate::ports::types::{
     CompanyEvent, CompanyId, CompanyRecord, CompanySummary, CompressedTrace, EventSeq,
-    EvictionPolicy, LedgerEntry, SecretValue, StoredEvent,
-    TaskResult,
+    EvictionPolicy, LedgerEntry, SecretValue, StoredEvent, TaskResult,
 };
 use crate::ports::{generate_id, now_millis};
 use crate::store::paths::Bundle;

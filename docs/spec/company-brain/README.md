@@ -25,8 +25,10 @@ CompanyBrain
 
 Each family maps to a storage port
 ([runtime/ports-state.md](../runtime/ports-state.md)):
-identity/charter/roster/world → `CompanyStore` + `EventLog`, memory →
-`MemoryStore`, context → `ContextStore`. All of it exports as one bundle
+identity/charter/roster/world → `CompanyStore` + `EventLog`, traces →
+`TraceStore`. Company memory is OpenHuman's engine, not a port
+([runtime/memory-engine.md](../runtime/memory-engine.md)), so it is not in the
+bundle. The rest exports as one bundle
 ([runtime/lifecycle.md](../runtime/lifecycle.md)).
 
 ## The cycle
@@ -69,8 +71,8 @@ single-approval-queue model.
 | State | System of record | Notes |
 | --- | --- | --- |
 | Charter, roster, ledger, approvals | OpenCompany (`CompanyStore`/`EventLog`) | never delegated |
-| Working memory (compressed traces) | `MemoryStore` — fs default, TinyMemory engine overlay | hosted Medulla also keeps server-side compressed state per session; the local copy is authoritative for export |
-| Context chunks | `ContextStore` | ditto |
+| Compressed traces | `TraceStore` (inspection window only; not recalled) | hosted Medulla also keeps server-side compressed state per session; the local copy is authoritative for export |
+| Company memory (learnings, brain, conversations) | OpenHuman memory engine, root `team:<company>` | outside the export bundle |
 | Conversation history with the hosted brain | TinyHumans backend (per-session messages) | mirrored locally via the read surface when needed |
 | Channel credentials, tool state | OpenHuman domains | reached through ports, never copied |
 

@@ -371,100 +371,6 @@ async fn workspace_sweep_keeps_a_folder_whose_only_child_has_no_renderable_path(
 }
 
 #[tokio::test]
-async fn one_store_serves_every_port_through_arc() {
-    // A single Arc<SqliteStore> satisfies all five port trait objects — the
-    // shape a platform-mode `build_runtime` injects into every `with_*`.
-    let s = store();
-    let company: Arc<dyn CompanyStore> = s.clone();
-    let events: Arc<dyn EventLog> = s.clone();
-    let memory: Arc<dyn TraceStore> = s.clone();
-    let context: Arc<dyn ContextStore> = s.clone();
-    let secrets: Arc<dyn SecretStore> = s.clone();
-
-    let id = CompanyId::new("acme");
-    company
-            .save(&CompanyRecord {
-                       general_channel: Default::default(),
-                       overlay_desk_hive: Vec::new(),
-                overlay_retired_agents: Vec::new(),
-                id: id.clone(),
-                manifest: toml::from_str(
-                    "[company]\nname=\"Acme\"\noutput=\"widgets\"\n[[agent]]\nid=\"ceo\"\nrole=\"Chief\"\n[policy]\nmode=\"supervised\"\n",
-                )
-                .unwrap(),
-                ledger: Vec::new(),
-                lifecycle: "running".into(),
-                overlay_agents: Vec::new(),
-                overlay_desk_members: Vec::new(),
-                overlay_desk_order: Vec::new(),
-                overlay_desks: Vec::new(),
-                overlay_workflows: Vec::new(),
-                overlay_budgets: Vec::new(),
-                overlay_agent_edits: Vec::new(),
-                overlay_policy: None,
-                overlay_tool_grants: None,
-                overlay_desk_tools: Default::default(),
-                disabled_workflows: Vec::new(),
-                template_provenance: None,
-                setup: None,
-                name_confirmed: false,
-                activation_completed_at: None,
-                created_at_millis: None,
-            })
-            .await
-            .unwrap();
-    events
-        .append(
-            &id,
-            CompanyEvent::OperatorMessage {
-                mentions: Vec::new(),
-                parent: None,
-                text: "hi".into(),
-                by: None,
-                chat: None,
-                deliverable: None,
-                attachments: Vec::new(),
-            },
-        )
-        .await
-        .unwrap();
-    memory
-        .save_trace(&id, CompressedTrace::now("c0", "s0"))
-        .await
-        .unwrap();
-    context
-        .put(
-            &id,
-            ContextChunk {
-                label: "notes".into(),
-                body: "body".into(),
-            },
-        )
-        .await
-        .unwrap();
-    secrets
-        .set(&id, "token", SecretValue("secret".into()))
-        .await
-        .unwrap();
-
-    assert!(company.load(&id).await.unwrap().is_some());
-    assert_eq!(
-        events
-            .read_from(&id, EventSeq::new(0), 10)
-            .await
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(memory.recent_traces(&id, 10).await.unwrap().len(), 1);
-    assert_eq!(context.list(&id, "").await.unwrap().len(), 1);
-    assert_eq!(
-        secrets.get(&id, "token").await.unwrap(),
-        Some(SecretValue("secret".into()))
-    );
-}
-
-#[tokio::test]
 async fn subscribe_delivers_new_event() {
     let s = store();
     let id = CompanyId::new("acme");
@@ -606,5 +512,87 @@ async fn data_survives_reopen() {
             deliverable: None,
             attachments: Vec::new(),
         }
+    );
+}
+
+#[tokio::test]
+async fn one_store_serves_every_port_through_arc() {
+    // A single Arc<SqliteStore> satisfies every port trait object — the
+    // shape a platform-mode `build_runtime` injects into every `with_*`.
+    let s = store();
+    let company: Arc<dyn CompanyStore> = s.clone();
+    let events: Arc<dyn EventLog> = s.clone();
+    let memory: Arc<dyn TraceStore> = s.clone();
+    let secrets: Arc<dyn SecretStore> = s.clone();
+
+    let id = CompanyId::new("acme");
+    company
+            .save(&CompanyRecord {
+                       general_channel: Default::default(),
+                       overlay_desk_hive: Vec::new(),
+                overlay_retired_agents: Vec::new(),
+                id: id.clone(),
+                manifest: toml::from_str(
+                    "[company]\nname=\"Acme\"\noutput=\"widgets\"\n[[agent]]\nid=\"ceo\"\nrole=\"Chief\"\n[policy]\nmode=\"supervised\"\n",
+                )
+                .unwrap(),
+                ledger: Vec::new(),
+                lifecycle: "running".into(),
+                overlay_agents: Vec::new(),
+                overlay_desk_members: Vec::new(),
+                overlay_desk_order: Vec::new(),
+                overlay_desks: Vec::new(),
+                overlay_workflows: Vec::new(),
+                overlay_budgets: Vec::new(),
+                overlay_agent_edits: Vec::new(),
+                overlay_policy: None,
+                overlay_tool_grants: None,
+                overlay_desk_tools: Default::default(),
+                disabled_workflows: Vec::new(),
+                template_provenance: None,
+                setup: None,
+                name_confirmed: false,
+                activation_completed_at: None,
+                created_at_millis: None,
+            })
+            .await
+            .unwrap();
+    events
+        .append(
+            &id,
+            CompanyEvent::OperatorMessage {
+                mentions: Vec::new(),
+                parent: None,
+                text: "hi".into(),
+                by: None,
+                chat: None,
+                deliverable: None,
+                attachments: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+    memory
+        .save_trace(&id, CompressedTrace::now("c0", "s0"))
+        .await
+        .unwrap();
+    secrets
+        .set(&id, "token", SecretValue("secret".into()))
+        .await
+        .unwrap();
+
+    assert!(company.load(&id).await.unwrap().is_some());
+    assert_eq!(
+        events
+            .read_from(&id, EventSeq::new(0), 10)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(memory.recent_traces(&id, 10).await.unwrap().len(), 1);
+    assert_eq!(
+        secrets.get(&id, "token").await.unwrap(),
+        Some(SecretValue("secret".into()))
     );
 }

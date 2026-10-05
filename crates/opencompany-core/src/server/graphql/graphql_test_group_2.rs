@@ -392,45 +392,36 @@ async fn tasks_page_reflects_upserts_and_column_filter() {
     assert_eq!(none["data"]["company"]["tasks"]["total"], 0);
 }
 
+#[cfg(feature = "openhuman")]
 #[tokio::test]
-async fn memory_page_reflects_upserts() {
-    use crate::ports::facts::{FactKind, FactRecord};
+async fn memory_page_reflects_learnings() {
     let home_dir = home();
     let home = home_dir.path().to_path_buf();
     let state = state_with_rich_company(&home).await;
     let runtime = state.registry().get(&CompanyId::new("acme")).unwrap();
-    runtime
-        .facts()
-        .upsert(
-            runtime.id(),
-            &FactRecord {
-                id: "f1".into(),
-                kind: FactKind::Preference,
-                title: "Tone".into(),
-                body: "Friendly.".into(),
-                source: "general".into(),
-                updated_at_millis: 1_700_000_000_000,
-            },
-        )
+    let marker = format!("Tone is friendly {}", uuid::Uuid::new_v4().simple());
+    let learned = runtime
+        .memory()
+        .learn(&marker, crate::memory::LearningKind::Preference, Vec::new())
         .await
         .unwrap();
     let app = router(state);
     let value = query(
         app,
-        r#"{"query":"{ company(id:\"acme\"){ memory(kind: PREFERENCE){ total items { id kind title updatedAt } } } }"}"#,
+        r#"{"query":"{ company(id:\"acme\"){ memory(kind: LEARNING, first: 200){ total items { id kind body namespace updatedAt } } } }"}"#,
     )
     .await;
-    assert_eq!(value["data"]["company"]["memory"]["total"], 1);
-    assert_eq!(
-        value["data"]["company"]["memory"]["items"][0]["kind"],
-        "PREFERENCE"
-    );
-    assert!(
-        value["data"]["company"]["memory"]["items"][0]["updatedAt"]
-            .as_str()
-            .unwrap()
-            .starts_with("2023-")
-    );
+    let items = value["data"]["company"]["memory"]["items"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{value}"));
+    let row = items
+        .iter()
+        .find(|item| item["id"] == learned.id.as_str())
+        .unwrap_or_else(|| panic!("the learning is listed: {value}"));
+    assert_eq!(row["kind"], "LEARNING");
+    assert_eq!(row["namespace"], "team:acme");
+    assert!(row["body"].as_str().unwrap().contains(&marker));
+    assert!(row["updatedAt"].is_string());
 }
 
 /// An unpopulated surface resolves to `[]`, never to `null` or an error.

@@ -113,7 +113,7 @@ async fn e2e_operator_message_drives_tool_call_and_gated_send_dm() {
     assert_eq!(transport.posted_events().len(), 1);
 
     // A compressed trace was persisted to the fs-backed TraceStore.
-    let traces = rt.memory.recent_traces(rt.id(), 10).await.unwrap();
+    let traces = rt.traces.recent_traces(rt.id(), 10).await.unwrap();
     assert!(!traces.is_empty());
 }
 

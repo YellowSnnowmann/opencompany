@@ -33,7 +33,7 @@ this root whenever `<home>` and `OPENCOMPANY_DATA_DIR` agree — as they do by
 default and in the hosted shape — and splits from it when `--home` diverges
 (see “`--home` moves the bundles and the runtime trees” below).
 
-Per-company state (each bundle's own `memory/`/`context/`) lives under
+Per-company state (each bundle's own `memory/`, which holds cycle traces only) lives under
 `companies/<slug>/`; the top-level `memory/`/`store/`/`files/` are the shared,
 instance-level locations. `serve` calls `DataLayout::ensure` at boot: it creates
 the shared subdirectories and — unless `[workspace].clear_tmp_on_startup` is

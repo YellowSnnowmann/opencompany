@@ -279,7 +279,7 @@ async fn event_log_subscribe_delivers_new_event() {
 }
 
 #[tokio::test]
-async fn memory_store_traces_tail_and_evict() {
+async fn trace_store_tails_and_evicts() {
     let root_dir = tmp_root();
     let root = root_dir.path().to_path_buf();
     let mem = FsTraceStore::new(&root);
@@ -299,37 +299,6 @@ async fn memory_store_traces_tail_and_evict() {
         .unwrap();
     assert_eq!(removed, 4);
     assert_eq!(mem.recent_traces(&id, 10).await.unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn context_store_put_peek_search() {
-    let root_dir = tmp_root();
-    let root = root_dir.path().to_path_buf();
-    let ctx = FsContextStore::new(&root);
-    let id = CompanyId::new("acme");
-    let addr = ctx
-        .put(
-            &id,
-            ContextChunk {
-                label: "notes/intro".into(),
-                body: "the quick brown fox jumps".into(),
-            },
-        )
-        .await
-        .unwrap();
-
-    let full = ctx.peek(&id, &addr, None).await.unwrap();
-    assert_eq!(full, "the quick brown fox jumps");
-    let ranged = ctx.peek(&id, &addr, Some(4..9)).await.unwrap();
-    assert_eq!(ranged, "quick");
-
-    let listed = ctx.list(&id, "notes/").await.unwrap();
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].label, "notes/intro");
-
-    let hits = ctx.search(&id, "brown", 5).await.unwrap();
-    assert_eq!(hits.len(), 1);
-    assert!(hits[0].snippet.contains("brown"));
 }
 
 #[tokio::test]
@@ -590,43 +559,4 @@ async fn secret_set_succeeds_for_encoding_heavy_keys() {
 
     secrets.set(&company, &key, value.clone()).await.unwrap();
     assert_eq!(secrets.get(&company, &key).await.unwrap(), Some(value));
-}
-/// The put/delete race the index lock exists for: a same-address write
-/// and delete interleaving as write-blob / delete-both / append-index
-/// would leave an index row whose blob is gone — list answers, peek
-/// fails. With the blob write under the lock, every surviving index row
-/// must have a readable blob, whichever order the race resolved.
-#[tokio::test]
-async fn concurrent_same_address_put_and_delete_stay_coherent() {
-    use crate::ports::ContextStore;
-    let dir = tempfile::tempdir().unwrap();
-    let store = std::sync::Arc::new(FsContextStore::new(dir.path().to_path_buf()));
-    let id = CompanyId::new("race-co");
-    let chunk = || ContextChunk {
-        label: "race/probe".into(),
-        body: "identical body".into(),
-    };
-    let addr = store.put(&id, chunk()).await.unwrap();
-
-    for _ in 0..20 {
-        let s1 = store.clone();
-        let s2 = store.clone();
-        let id1 = id.clone();
-        let id2 = id.clone();
-        let a = addr.clone();
-        let put = tokio::spawn(async move { s1.put(&id1, chunk()).await });
-        let del = tokio::spawn(async move { s2.delete(&id2, &a).await });
-        put.await.unwrap().unwrap();
-        del.await.unwrap().unwrap();
-
-        // Whatever interleaving happened: every listed row peeks.
-        for meta in store.list(&id, "").await.unwrap() {
-            store
-                .peek(&id, &meta.addr, None)
-                .await
-                .unwrap_or_else(|e| panic!("index row {} has no readable blob: {e}", meta.label));
-        }
-        // Reset to a known present state for the next round.
-        store.put(&id, chunk()).await.unwrap();
-    }
 }

@@ -6,7 +6,7 @@
 #
 #   * ingress  → channels (operator/email) and the POST /hooks/{company}/{channel}
 #                webhook path carry raw signals into the company
-#   * memory   → the runtime's MemoryStore/ContextStore hold the signal corpus
+#   * memory   → the company's OpenHuman memory (learnings + brain) holds the signal corpus
 #   * reasoning → the brain clusters pain, ranks opportunities, drafts the digest
 #   * cadence  → [[schedule]] entries drive the weekly scan/rank/report loop
 #

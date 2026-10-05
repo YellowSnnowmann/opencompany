@@ -17,12 +17,25 @@ use crate::{AppConfig, AppState};
 
 const BOUNDARY: &str = "----ingesttestboundary";
 
+std::thread_local! {
+    /// The company the current test registered. Each test gets its own id:
+    /// the memory engine is shared by the whole test binary, and companies
+    /// stay apart only by their root.
+    static COMPANY: std::cell::RefCell<String> = std::cell::RefCell::new("acme".to_string());
+}
+
+fn company() -> String {
+    COMPANY.with(|c| c.borrow().clone())
+}
+
 /// A one-company host on a temporary home.
 async fn state_at(dir: &std::path::Path) -> AppState {
     let manifest: CompanyManifest =
         toml::from_str("[company]\nname = \"Acme\"\n[policy]\nmode = \"full\"\n").unwrap();
     let store = FsCompanyStore::new(dir.to_path_buf());
-    let id = CompanyId::new("acme");
+    let slug = format!("acme-{}", crate::ports::generate_id());
+    COMPANY.with(|c| *c.borrow_mut() = slug.clone());
+    let id = CompanyId::new(&slug);
     store
         .save(&CompanyRecord {
             general_channel: Default::default(),
@@ -58,7 +71,7 @@ async fn state_at(dir: &std::path::Path) -> AppState {
         .unwrap();
     let state = AppState::new(AppConfig::default()).with_home(dir.to_path_buf());
     state.registry().insert(id, Arc::new(runtime));
-    crate::server::test_support::seed_fixed_admin(&state, "acme").await;
+    crate::server::test_support::seed_fixed_admin(&state, &slug).await;
     state
 }
 
@@ -86,7 +99,10 @@ async fn drop_files(state: &AppState, files: &[(&str, &str, &[u8])]) -> (StatusC
     let request = Request::builder()
         .method("POST")
         .uri("/api/v1/company/memory/ingest")
-        .header("cookie", crate::server::test_support::fixed_cookie("acme"))
+        .header(
+            "cookie",
+            crate::server::test_support::fixed_cookie(&company()),
+        )
         .header(
             "content-type",
             format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -104,11 +120,15 @@ async fn drop_files(state: &AppState, files: &[(&str, &str, &[u8])]) -> (StatusC
 
 /// Reads the company's Brain list back, which is where an operator will look
 /// for what they just dropped.
+#[cfg(feature = "openhuman")]
 async fn brain_rows(state: &AppState) -> Vec<Value> {
     let request = Request::builder()
         .method("GET")
         .uri("/api/v1/company/memory")
-        .header("cookie", crate::server::test_support::fixed_cookie("acme"))
+        .header(
+            "cookie",
+            crate::server::test_support::fixed_cookie(&company()),
+        )
         .body(Body::empty())
         .unwrap();
     let response = router(state.clone()).oneshot(request).await.unwrap();
@@ -121,6 +141,7 @@ async fn brain_rows(state: &AppState) -> Vec<Value> {
 
 /// The whole point: a dropped document is in memory afterwards, and the Brain
 /// list shows it as a document rather than as something a teammate learned.
+#[cfg(feature = "openhuman")]
 #[tokio::test]
 async fn a_dropped_document_becomes_recallable_memory() {
     let dir = tempfile::tempdir().unwrap();
@@ -143,7 +164,7 @@ async fn a_dropped_document_becomes_recallable_memory() {
     let rows = brain_rows(&state).await;
     let document = rows
         .iter()
-        .find(|row| row["origin"] == "document")
+        .find(|row| row["kind"] == "document")
         .unwrap_or_else(|| panic!("no document row in {rows:#?}"));
     assert!(
         document["body"]
@@ -153,13 +174,15 @@ async fn a_dropped_document_becomes_recallable_memory() {
         "{document}"
     );
     assert_eq!(
-        document["source"], "handbook.md",
-        "the row names the document it came from"
+        document["source"], "markdown",
+        "the row names the brain source it was filed under"
     );
+    assert_eq!(body["items"][0]["brainSource"], "markdown");
 }
 
 /// A folder drop is many files at once, and its relative paths are what
 /// distinguishes four `README.md`s from each other.
+#[cfg(feature = "openhuman")]
 #[tokio::test]
 async fn a_folder_drop_keeps_each_file_apart_by_its_path() {
     let dir = tempfile::tempdir().unwrap();
@@ -192,7 +215,7 @@ async fn a_folder_drop_keeps_each_file_apart_by_its_path() {
     assert_eq!(sources, vec!["docs/alpha/README.md", "docs/beta/README.md"]);
 
     let rows = brain_rows(&state).await;
-    let documents: Vec<&Value> = rows.iter().filter(|r| r["origin"] == "document").collect();
+    let documents: Vec<&Value> = rows.iter().filter(|r| r["kind"] == "document").collect();
     assert_eq!(documents.len(), 2, "both files are their own memory");
 }
 
@@ -200,6 +223,7 @@ async fn a_folder_drop_keeps_each_file_apart_by_its_path() {
 /// always contains a `.DS_Store` or an image — but it must be *reported*,
 /// because silently skipping it leaves the operator believing the whole folder
 /// is in memory.
+#[cfg(feature = "openhuman")]
 #[tokio::test]
 async fn an_unreadable_file_is_reported_without_failing_the_batch() {
     let dir = tempfile::tempdir().unwrap();
@@ -298,7 +322,10 @@ async fn a_request_over_the_body_limit_is_refused_as_413_not_malformed() {
     let request = Request::builder()
         .method("POST")
         .uri("/api/v1/company/memory/ingest")
-        .header("cookie", crate::server::test_support::fixed_cookie("acme"))
+        .header(
+            "cookie",
+            crate::server::test_support::fixed_cookie(&company()),
+        )
         .header(
             "content-type",
             format!("multipart/form-data; boundary={BOUNDARY}"),
@@ -359,6 +386,7 @@ fn link_ingestion_refuses_this_deployments_own_network() {
 
 /// Dropping the wrong folder is a mistake an operator makes once; without a
 /// forget, the only remedy would be the company's whole memory.
+#[cfg(feature = "openhuman")]
 #[tokio::test]
 async fn a_dropped_document_can_be_forgotten_again() {
     let dir = tempfile::tempdir().unwrap();
@@ -374,13 +402,13 @@ async fn a_dropped_document_can_be_forgotten_again() {
 
     let request = Request::builder()
         .method("DELETE")
-        .uri(format!(
-            "/api/v1/company/memory/document/{}",
-            crate::ingest::label_for("private/salaries.csv")
-                .strip_prefix("document/")
-                .unwrap()
-        ))
-        .header("cookie", crate::server::test_support::fixed_cookie("acme"))
+        // A CSV is filed under the generic `document` source, the Markdown
+        // file under `markdown`.
+        .uri("/api/v1/company/memory/document/document")
+        .header(
+            "cookie",
+            crate::server::test_support::fixed_cookie(&company()),
+        )
         .body(Body::empty())
         .unwrap();
     let response = router(state.clone()).oneshot(request).await.unwrap();
@@ -389,18 +417,19 @@ async fn a_dropped_document_can_be_forgotten_again() {
     let rows = brain_rows(&state).await;
     let documents: Vec<&str> = rows
         .iter()
-        .filter(|r| r["origin"] == "document")
+        .filter(|r| r["kind"] == "document")
         .map(|r| r["source"].as_str().unwrap())
         .collect();
     assert_eq!(
         documents,
-        vec!["keep.md"],
-        "only the named document is forgotten"
+        vec!["markdown"],
+        "only the named source is forgotten"
     );
 }
 
 /// Forgetting reaches document memory and nothing else: an agent's own memory
 /// is a record of what happened, not material an operator supplied.
+#[cfg(feature = "openhuman")]
 #[tokio::test]
 async fn forgetting_an_unknown_document_is_a_not_found() {
     let dir = tempfile::tempdir().unwrap();
@@ -408,7 +437,10 @@ async fn forgetting_an_unknown_document_is_a_not_found() {
     let request = Request::builder()
         .method("DELETE")
         .uri("/api/v1/company/memory/document/never-uploaded")
-        .header("cookie", crate::server::test_support::fixed_cookie("acme"))
+        .header(
+            "cookie",
+            crate::server::test_support::fixed_cookie(&company()),
+        )
         .body(Body::empty())
         .unwrap();
     let response = router(state.clone()).oneshot(request).await.unwrap();

@@ -48,9 +48,9 @@ use crate::ports::types::{
     SecretValue, TemplateProvenance, ToolGrantsOverride, effective_policy, effective_tool_allow,
 };
 use crate::ports::{
-    ArtifactStore, Brain, ChannelAdapter, CompanyStore, EventLog,
-    InboxStore, LoginCodeStore, TraceStore, RunStore, SecretStore, SessionStore, SkillStateStore,
-    TaskStore, ToolProvider, UsageMeter, UserStore, WorkflowRevisionStore, WorkspaceStore,
+    ArtifactStore, Brain, ChannelAdapter, CompanyStore, EventLog, InboxStore, LoginCodeStore,
+    RunStore, SecretStore, SessionStore, SkillStateStore, TaskStore, ToolProvider, TraceStore,
+    UsageMeter, UserStore, WorkflowRevisionStore, WorkspaceStore,
 };
 #[cfg(feature = "openhuman")]
 use crate::runtime::delegation::RunTurn;
@@ -66,9 +66,7 @@ use crate::runtime::journal::RuntimeJournal;
 use crate::runtime::tools::{StubToolProvider, grant_matches};
 use crate::runtime::workspace_events::WorkspaceAnnouncer;
 use crate::store::paths::Bundle;
-use crate::store::{
-    FsCompanyStore, FsEventLog, FsInboxStore, FsTraceStore, FsOps, FsSecretStore,
-};
+use crate::store::{FsCompanyStore, FsEventLog, FsInboxStore, FsOps, FsSecretStore, FsTraceStore};
 #[cfg(feature = "openhuman")]
 use crate::workflows::HarnessWorkflowRunner;
 
@@ -729,7 +727,6 @@ impl RuntimeBuilder {
             store: None,
             events: None,
             traces: None,
-            #[cfg(feature = "openhuman")]
             tools: None,
             channels: None,
             approvals: None,
@@ -1637,10 +1634,7 @@ impl RuntimeBuilder {
             // A rebuild inherits the ops it was handed, announcer and all — the
             // wrap below happens once, at first construction. Re-wrapping an
             // inherited board would announce every write twice.
-            Some(h) => {
-                let ops = h.ops.clone();
-                ops
-            }
+            Some(h) => h.ops.clone(),
             None => OpsStores {
                 // Issue #464: the board announces its own writes. Wrapped here,
                 // at the single place the store is chosen, so *every* writer —

@@ -5,15 +5,11 @@ use std::collections::HashSet;
 #[test]
 fn coordinator_preserves_real_workflow_and_integration_tools() {
     for composio in [false, true] {
-        let mut tools: HashSet<String> = [
-            "create_workflow",
-            "run_workflow",
-            "read_workflow",
-            "memory_recall",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect();
+        let mut tools: HashSet<String> =
+            ["create_workflow", "run_workflow", "read_workflow", "memory"]
+                .into_iter()
+                .map(str::to_string)
+                .collect();
         if composio {
             tools.insert("composio_execute".into());
         }
@@ -28,7 +24,12 @@ fn coordinator_preserves_real_workflow_and_integration_tools() {
 
 #[test]
 fn specialist_disclosure_does_not_gain_workflow_tools() {
-    let mut tools: HashSet<String> = ["composio_execute", "memory_recall"]
+    // The host's own posture (Composio off, everything else advertised). Set
+    // explicitly: the process default is a first-call-wins `OnceLock`, and a
+    // filtered run can reach this test before any agent build declares it,
+    // leaving every pack withheld.
+    crate::harness::built_in::tool_posture::declare();
+    let mut tools: HashSet<String> = ["composio_execute", "memory"]
         .into_iter()
         .map(str::to_string)
         .collect();

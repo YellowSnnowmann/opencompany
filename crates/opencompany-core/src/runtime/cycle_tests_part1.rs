@@ -475,7 +475,7 @@ async fn a_bare_greeting_answers_without_calling_the_brain() {
     );
     // Nothing was written back for a later turn to retrieve.
     assert!(
-        rt.memory
+        rt.traces
             .recent_traces(rt.id(), 8)
             .await
             .unwrap()

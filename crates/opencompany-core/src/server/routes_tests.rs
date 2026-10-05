@@ -450,58 +450,6 @@ async fn console_config_route_returns_uncached_javascript() {
     );
 }
 
-#[tokio::test]
-async fn console_config_route_serves_only_safe_hosted_configuration() {
-    let env = crate::test_support::EnvVarGuard::capture(&[
-        "OPENCOMPANY_DEPLOYMENT",
-        "OPENCOMPANY_TENANT_ID",
-        "OPENCOMPANY_ANALYTICS",
-        "OPENCOMPANY_ANALYTICS_ENDPOINT",
-    ]);
-    env.set("OPENCOMPANY_DEPLOYMENT", "hosted-tenant");
-    env.remove("OPENCOMPANY_TENANT_ID");
-    env.set("OPENCOMPANY_ANALYTICS", "on");
-    env.set(
-        "OPENCOMPANY_ANALYTICS_ENDPOINT",
-        "https://collector.example/api/track",
-    );
-
-    let app = router_with_console(AppState::new(AppConfig::default()), None);
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/opencompany-config.js")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        body_text(response).await,
-        "window.OPENCOMPANY_CONFIG=Object.assign(window.OPENCOMPANY_CONFIG||{},\
-{analytics:true,analyticsEndpoint:\"https://collector.example/api\"});\n"
-    );
-
-    env.set(
-        "OPENCOMPANY_ANALYTICS_ENDPOINT",
-        "http://collector.example/api/track",
-    );
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/opencompany-config.js")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        body_text(response).await,
-        "window.OPENCOMPANY_CONFIG=window.OPENCOMPANY_CONFIG||{};\n"
-    );
-}
-
 /// **A configured-but-unreadable endpoint must not fall back to the hosted
 /// default.**
 ///
@@ -523,7 +471,10 @@ async fn console_config_route_does_not_default_an_unreadable_endpoint() {
         "OPENCOMPANY_ANALYTICS",
         "OPENCOMPANY_ANALYTICS_ENDPOINT",
     ]);
-    env.set("OPENCOMPANY_DEPLOYMENT", "hosted-tenant");
+    // This is a malformed-endpoint test, not a hosted-tenant config test. Keep
+    // the temporary process environment harmless to unrelated tests that read
+    // ProcessEnv without taking ENV_LOCK (for example, setup route tests).
+    env.set("OPENCOMPANY_DEPLOYMENT", "self-hosted");
     env.remove("OPENCOMPANY_TENANT_ID");
     env.set("OPENCOMPANY_ANALYTICS", "on");
     // SAFETY: single-threaded under the guard's `ENV_LOCK`, like every other

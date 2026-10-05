@@ -4142,10 +4142,7 @@ impl CycleHost for CycleHostImpl<'_> {
     async fn context_op(&self, op: ContextOp) -> Result<ContextOpResult> {
         // External-triggered cycles tag their puts inbound; see
         // `external_trigger` on this struct.
-        self.rt
-            .memory()
-            .context_op(op, self.external_trigger)
-            .await
+        self.rt.memory().context_op(op, self.external_trigger).await
     }
 
     async fn emit_effect(&self, effect: Effect) -> Result<EffectDisposition> {

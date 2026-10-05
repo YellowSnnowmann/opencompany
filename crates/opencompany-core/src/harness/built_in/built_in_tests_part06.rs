@@ -394,7 +394,7 @@ async fn ensure_rebuilds_when_a_runtime_mcp_server_is_added() {
 async fn company_only_managed_search_keeps_its_ledger_across_resolution() {
     let secrets: Arc<dyn SecretStore> = Arc::new(MemSecrets::default());
     let dir = tempfile::tempdir().unwrap();
-    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext::default()), None, None);
+    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext), None, None);
     deps.secrets = Some(secrets.clone());
     let mut rec = record();
     rec.manifest.tools.allow = vec!["search".to_string()];
@@ -436,7 +436,7 @@ async fn ensure_rebuilds_when_a_chargebee_credential_is_saved_or_rotated() {
 
     let secrets: Arc<dyn SecretStore> = Arc::new(MemSecrets::default());
     let dir = tempfile::tempdir().unwrap();
-    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext::default()), None, None);
+    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext), None, None);
     deps.secrets = Some(secrets.clone());
 
     // The explicit grant is what opens this axis. A `*` wildcard does not
@@ -531,7 +531,7 @@ async fn a_company_without_the_chargebee_grant_never_moves_on_this_axis() {
 
     let secrets: Arc<dyn SecretStore> = Arc::new(MemSecrets::default());
     let dir = tempfile::tempdir().unwrap();
-    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext::default()), None, None);
+    let mut deps = deps_with_plan(dir.path(), Arc::new(MockContext), None, None);
     deps.secrets = Some(secrets.clone());
 
     // A wildcard, deliberately: it must NOT confer billing.

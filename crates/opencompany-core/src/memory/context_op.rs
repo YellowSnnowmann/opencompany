@@ -30,10 +30,17 @@ const LIST_LIMIT: usize = 200;
 impl CompanyMemory {
     /// Runs one brain `context_*` operation. `external` marks a cycle that
     /// content from outside the company triggered.
-    pub async fn context_op(&self, op: ContextOp, external: bool) -> crate::Result<ContextOpResult> {
+    pub async fn context_op(
+        &self,
+        op: ContextOp,
+        external: bool,
+    ) -> crate::Result<ContextOpResult> {
         match op {
             ContextOp::Put(chunk) => {
-                let mut tags = vec![CONTEXT_TAG.to_string(), format!("{LABEL_TAG}{}", chunk.label)];
+                let mut tags = vec![
+                    CONTEXT_TAG.to_string(),
+                    format!("{LABEL_TAG}{}", chunk.label),
+                ];
                 if external {
                     tags.push(INBOUND_TAG.to_string());
                 }
@@ -59,8 +66,14 @@ impl CompanyMemory {
                 Ok(ContextOpResult::Metas(metas))
             }
             ContextOp::Peek { addr, range } => {
-                let item = self.get(vec![addr.as_ref().to_string()]).await?.into_iter().next();
-                let text = item.map(|item| slice(&item.body, range)).unwrap_or_default();
+                let item = self
+                    .get(vec![addr.as_ref().to_string()])
+                    .await?
+                    .into_iter()
+                    .next();
+                let text = item
+                    .map(|item| slice(&item.body, range))
+                    .unwrap_or_default();
                 Ok(ContextOpResult::Text(text))
             }
             ContextOp::Search { query, limit } => {

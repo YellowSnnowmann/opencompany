@@ -75,7 +75,11 @@ impl CompanyMemory {
         let view = self
             .handle()
             .await?
-            .fetch(query, kind.map(item_kind).into_iter().collect(), Some(limit))
+            .fetch(
+                query,
+                kind.map(item_kind).into_iter().collect(),
+                Some(limit),
+            )
             .await
             .map_err(error)?;
         Ok(view.hits.into_iter().map(item).collect())

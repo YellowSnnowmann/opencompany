@@ -253,7 +253,7 @@ use crate::harness::provider::HarnessModel;
 use crate::company::Agent as ManifestAgent;
 use crate::company::Policy;
 use crate::company::mcp::McpServerDecl;
-use crate::company::steer::{SteerAction, SteerControl};
+use crate::company::steer::SteerControl;
 use crate::error::OpenCompanyError;
 use crate::harness::cost::{TurnUsage, record_turn_cost};
 use crate::harness::mcp_probe::McpFailureQueue;
@@ -3553,7 +3553,6 @@ impl HarnessPool {
         Ok(())
     }
 
-
     /// Re-resolves the company's capability filter (issue #108): with a plan
     /// wired ([`HarnessDeps::plan`]), a per-tenant, per-period, fail-closed
     /// budget read from the [`UsageMeter`] via
@@ -6367,7 +6366,6 @@ pub(crate) fn workflow_wiring_deps(
         provider: Arc::new(provider::MockProvider::default()),
         provider_slug: "mock".to_string(),
         serves: None,
-        context: runtime.context.clone(),
         store: runtime.store.clone(),
         notifications: Some(runtime.notifications().clone()),
         ledgers: None,
@@ -6385,7 +6383,6 @@ pub(crate) fn workflow_wiring_deps(
         skills_registry: Arc::from([]),
         mcp_servers: Vec::new(),
         default_mcp_servers: Vec::new(),
-        facts: None,
         events: None,
         delegations: orchestrator::DelegationQueue::default(),
         workflow_runner: orchestrator::WorkflowRunnerHandle::default(),

@@ -55,7 +55,7 @@ the `opencompany-core` dependency in `crates/opencompany-app/Cargo.toml` (`analy
 
 ```toml
 opencompany-core = { path = "../opencompany-core", default-features = false, features = [
-  "sqlite", "platform-jwt", "oauth", "mcp", "tinymemory", "tinyhumans", "crash-reporting", "analytics",
+  "sqlite", "platform-jwt", "oauth", "mcp", "tinyhumans", "crash-reporting", "analytics",
 ] }
 ```
 
@@ -100,7 +100,8 @@ agent harness is not compiled in."* for every provider, however good the key.
 The belt a desktop agent gets is deliberately the minimal one. The host declares
 `openhuman_core` with `default-features = false, features = ["skills", "mcp",
 "hosting"]`, so what a company can use is **built-in tools, MCP servers and
-skills** — no memory engine, no TokenJuice, no voice or inference stack out of
+skills** — plus OpenHuman's `memory` tool when the TinyHumans credential makes
+the memory engine available ([memory-engine.md](memory-engine.md)); no TokenJuice, no voice or inference stack out of
 the vendored runtime. Features left off, each on purpose:
 
 | Off | Why |

@@ -136,58 +136,6 @@ async fn export_and_import_migrate_before_they_read() {
     }
 }
 
-#[test]
-fn live_ports_layers_the_config_file_memory_section() {
-    // A self-hosted operator's engine selection lives only in `config.toml`
-    // (the console never exports environment variables), so `live_ports`
-    // must layer that section the way `serve` does — otherwise a bundle
-    // would read and write the base stores instead of the engine the host
-    // actually remembers with. This pins the load-and-layer composition
-    // `live_ports` feeds its settings through.
-    let tmp = std::env::temp_dir().join(format!(
-        "oc-bin-memcfg-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).unwrap();
-    std::fs::write(
-        tmp.join("config.toml"),
-        "[memory]\nbackend = \"remote\"\ndriver = \"cortexdb\"\nurl = \"https://memory.example\"\n",
-    )
-    .unwrap();
-    let settings =
-        layer_config_memory(opencompany::store::StorageSettings::default(), &tmp).unwrap();
-    assert_eq!(
-        settings.memory_backend,
-        opencompany::store::MemoryBackend::Remote
-    );
-    assert_eq!(settings.memory_driver.as_deref(), Some("cortexdb"));
-    assert_eq!(
-        settings.memory_url.as_deref(),
-        Some("https://memory.example")
-    );
-
-    // The absent-file shape (a fresh root, or the fs default) stays on the
-    // base backend's own memory.
-    let absent = std::env::temp_dir().join(format!(
-        "oc-bin-memcfg-absent-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&absent);
-    std::fs::create_dir_all(&absent).unwrap();
-    let settings =
-        layer_config_memory(opencompany::store::StorageSettings::default(), &absent).unwrap();
-    assert_eq!(
-        settings.memory_backend,
-        opencompany::store::MemoryBackend::Store
-    );
-    let _ = std::fs::remove_dir_all(&absent);
-
-    let _ = std::fs::remove_dir_all(&tmp);
-}
-
 #[tokio::test]
 async fn register_company_loads_manifest_and_registers() {
     let home = std::env::temp_dir().join(format!("oc-bin-{}", std::process::id()));
