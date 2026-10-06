@@ -308,48 +308,6 @@ async fn the_platform_owner_can_redeem_into_setup_on_a_routable_empty_host() {
 }
 
 #[tokio::test]
-async fn the_first_run_link_can_be_re_redeemed_within_validity() {
-    // The empty-host bootstrap redemption is single-use too, and the same
-    // lost-response-during-wake failure applies — a fresh company is the one most
-    // likely to still be booting when its owner first clicks the link. Re-redeeming
-    // the same still-valid token must re-issue the setup session, not refuse it.
-    let home = home();
-    let state = empty_routable_state(home.path());
-
-    let first = router(state.clone())
-        .oneshot(post(
-            "/api/v1/sso/redeem",
-            serde_json::json!({ "token": valid_token() }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(first.status(), StatusCode::OK);
-    assert!(
-        body_json(first).await["session"].is_string(),
-        "the first redemption issues a setup session"
-    );
-
-    // Registry is still empty (setup is not complete), so the same bootstrap path
-    // runs again; the consumed marker must no longer dead-end it.
-    let replay = router(state.clone())
-        .oneshot(post(
-            "/api/v1/sso/redeem",
-            serde_json::json!({ "token": valid_token() }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(
-        replay.status(),
-        StatusCode::OK,
-        "re-redeeming the first-run link within validity must re-issue the session"
-    );
-    assert!(
-        body_json(replay).await["session"].is_string(),
-        "the re-redemption issues a fresh setup session"
-    );
-}
-
-#[tokio::test]
 async fn a_valid_token_claims_the_admin_on_first_use() {
     // The company starts with no users; a first redemption materializes the
     // standing admin as a passwordless account — the SSO half of the claim.
@@ -558,12 +516,7 @@ async fn a_token_for_a_non_admin_subject_is_refused() {
 }
 
 #[tokio::test]
-async fn a_replayed_valid_token_re_mints_rather_than_dead_ending() {
-    // A single-use token whose first redemption's response was lost — e.g. the
-    // hosted company was still waking when the link opened — must not strand the
-    // owner on "already used". Replaying the *same* still-valid token re-mints a
-    // session for the same proven admin: the replay is idempotent, not
-    // privilege-granting, and must not create a second account.
+async fn a_replayed_jti_is_refused() {
     let home = home();
     let state = enabled_state(home.path()).await;
 
@@ -572,29 +525,10 @@ async fn a_replayed_valid_token_re_mints_rather_than_dead_ending() {
         redeem(&state, &valid_token()).await.status(),
         StatusCode::OK
     );
-
-    // Replaying the same token — same jti — now re-mints rather than refusing,
-    // because the token is still valid and its subject is a standing admin.
-    let replay = redeem(&state, &valid_token()).await;
-    assert_eq!(
-        replay.status(),
-        StatusCode::OK,
-        "a still-valid replay must re-mint, not dead-end"
-    );
-    assert!(
-        replay.headers().get("set-cookie").is_some(),
-        "the re-mint sets a fresh session cookie"
-    );
-    assert_eq!(body_json(replay).await["email"], "ada@example.com");
-
-    // The idempotent replay must not mint a second account.
-    let runtime = state.registry().get(&CompanyId::new("acme")).unwrap();
-    let users = runtime.users().list_users(runtime.id()).await.unwrap();
-    assert_eq!(
-        users.len(),
-        1,
-        "re-minting on replay must not create a second account"
-    );
+    // Replaying the same token — same jti — is refused even though it is still
+    // otherwise valid. A lost first response is recovered by minting a fresh link,
+    // not by replaying this one.
+    assert_rejected(&state, &valid_token(), "a replay of a consumed jti").await;
 }
 
 #[tokio::test]
