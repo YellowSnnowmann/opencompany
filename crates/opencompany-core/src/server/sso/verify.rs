@@ -11,10 +11,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{SsoClaims, SsoRejection};
 
-/// The platform contract is a 5-minute token. A token claiming a longer life is
-/// refused regardless of whether it has expired yet, so a mint-side bug or a
-/// leaked key cannot sign a token that stays valid for hours or years.
-const MAX_TOKEN_LIFETIME_SECS: u64 = 300;
+/// The platform contract is a 15-minute token — the backend mints it with
+/// `SSO_TOKEN_TTL_SECONDS = 900` (`backend-alphahuman` `controllers/opencompany/sso.ts`).
+/// A token claiming a longer life is refused regardless of whether it has expired
+/// yet, so a mint-side bug or a leaked key cannot sign a token that stays valid
+/// for hours or years. This value MUST track the mint side: it was widened from 5
+/// to 15 minutes so a hosted company that was cold (hibernated) when the link was
+/// issued still has a live token once it finishes waking — a 5-minute cap refused
+/// every token the 15-minute mint produced, which read on the wire as the flat
+/// "expired or already used" 401.
+const MAX_TOKEN_LIFETIME_SECS: u64 = 900;
 /// Clock-skew leeway added to the lifetime cap, so an honest token minted against
 /// a slightly fast platform clock is not refused at the boundary.
 const CLOCK_LEEWAY_SECS: u64 = 60;
@@ -31,9 +37,9 @@ const CLOCK_LEEWAY_SECS: u64 = 60;
 ///   partial claim set.
 /// - **Expiry** — `jsonwebtoken` validates `exp` by default; a token past it is
 ///   refused here rather than downstream.
-/// - **Lifetime cap** — `exp - iat` must not exceed the 5-minute contract (plus
+/// - **Lifetime cap** — `exp - iat` must not exceed the 15-minute contract (plus
 ///   leeway). `exp` alone only bounds the far edge; this bounds the blast radius
-///   of any mint-side bug or key leak to ~5 minutes.
+///   of any mint-side bug or key leak to ~15 minutes.
 ///
 /// Every failure collapses to [`SsoRejection::Invalid`]: the caller renders one
 /// flat `401`, so the distinction between "bad signature" and "expired" never

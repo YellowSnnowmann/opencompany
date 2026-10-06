@@ -305,7 +305,9 @@ async fn redeem_for_runtime(
 
     // Single use: record the jti before minting a session. `consume` is an
     // atomic `create_new`, so two requests racing on one token cannot both win —
-    // and a replay of a still-valid token finds the marker already there.
+    // and a replay of a still-valid token finds the marker already there. A lost
+    // redemption response is recovered by minting a fresh link (click Open again),
+    // not by replaying this one, so single use stays a hard boundary.
     let consumed = ConsumedJtis::new(state.home(), runtime.id())
         .consume(&claims.jti, claims.exp)
         .await?;
