@@ -519,22 +519,18 @@ async fn create_custom(
 /// body. Shared by custom-skill authoring and registry install (which passes
 /// the description as the body).
 ///
-/// The frontmatter parser is line-based (`key: value`), so each scalar is
-/// collapsed to a single line: newlines become spaces. That prevents a
-/// name/description from injecting extra frontmatter fields or emitting a bare
-/// `---` line that would close the block early. (Colons within a value are
-/// safe — the parser splits only on the first one.)
+/// Rendered by [`render_skill_md`], whose one-line collapse keeps a name or
+/// description from injecting frontmatter keys or closing the block early.
 fn skill_md(name: &str, description: &str, category: Option<&str>, content: &str) -> String {
-    let one_line = |s: &str| s.replace(['\n', '\r'], " ");
-    let mut frontmatter = format!(
-        "name: {}\ndescription: {}\n",
-        one_line(name).trim(),
-        one_line(description).trim()
-    );
-    if let Some(category) = category {
-        frontmatter.push_str(&format!("category: {}\n", one_line(category).trim()));
-    }
-    format!("---\n{frontmatter}---\n{content}\n")
+    render_skill_md(&SkillDoc {
+        slug: String::new(),
+        name: name.to_string(),
+        description: description.to_string(),
+        category: category.map(str::to_string),
+        version: None,
+        body: format!("{content}\n"),
+        extra_frontmatter: Vec::new(),
+    })
 }
 
 /// Every slug the company already resolves — bundled, registry-installed and

@@ -36,6 +36,45 @@ fn skill_md_frontmatter_resists_injection() {
     );
 }
 
+/// `skill_md` renders the bytes the hand-assembled document it replaced did, so
+/// no authored or client-metadata install digests differently.
+#[test]
+fn skill_md_is_byte_identical_to_the_hand_assembled_document() {
+    fn assembled(name: &str, description: &str, category: Option<&str>, content: &str) -> String {
+        let one_line = |s: &str| s.replace(['\n', '\r'], " ");
+        let mut frontmatter = format!(
+            "name: {}\ndescription: {}\n",
+            one_line(name).trim(),
+            one_line(description).trim()
+        );
+        if let Some(category) = category {
+            frontmatter.push_str(&format!("category: {}\n", one_line(category).trim()));
+        }
+        format!("---\n{frontmatter}---\n{content}\n")
+    }
+
+    let cases: &[(&str, &str, Option<&str>, &str)] = &[
+        ("Name", "A description", None, "body"),
+        ("Name", "A description", Some("Ops"), "# Heading\n\nText"),
+        ("  padded  ", "  spaced\r\n out ", Some("  cat \n"), ""),
+        (
+            "Evil\n---\ninjected: true",
+            "ratio 3:1",
+            Some("a\rb"),
+            "---\nnot: frontmatter",
+        ),
+        ("", "", Some(""), "trailing\n"),
+        ("Ünïcode ✓", "émoji 🚀 desc", None, "body\r\nwith crlf\r\n"),
+    ];
+    for &(name, description, category, content) in cases {
+        assert_eq!(
+            skill_md(name, description, category, content),
+            assembled(name, description, category, content),
+            "{name:?} / {description:?} / {category:?} / {content:?}"
+        );
+    }
+}
+
 /// The projection every `GET …/skills` row goes through, over the same
 /// resolution the harness materializes.
 fn list(source_dir: Option<&FsPath>, deltas: &[SkillState]) -> Vec<InstalledSkill> {
