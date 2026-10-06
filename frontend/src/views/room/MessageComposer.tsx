@@ -643,7 +643,7 @@ export function MessageComposer({
           // The transcript's column (`max-w-4xl`, centred), and a fill and edge
           // of its own: `bg-muted` with a 15% ink border, so the box reads as
           // the place to type rather than as white on a white page.
-          "relative mx-auto w-full max-w-4xl overflow-hidden rounded-3xl border border-foreground/15 bg-muted/60 shadow-sm focus-within:ring-2 focus-within:ring-ring/40",
+          "relative mx-auto w-full max-w-4xl overflow-hidden rounded-3xl border border-foreground/15 bg-muted/60 shadow-sm",
           dragDepth > 0 && "border-primary ring-2 ring-primary/40",
         )}
         onDragEnter={(event) => {
@@ -829,7 +829,14 @@ export function MessageComposer({
             aria-label={placeholder}
             placeholder={placeholder}
             rows={1}
-            className="field-sizing-content max-h-48 min-h-9 flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground"
+            // `outline-none` drops the native outline unconditionally, and no
+            // ring replaces it, by explicit operator request: the composer
+            // stays quiet on focus, full stop (a `focus-visible` ring was
+            // tried here to keep a CodeRabbit-flagged keyboard-focus
+            // indicator, but WebKit/most UAs treat a text field's
+            // `:focus-visible` as matching on pointer focus too, not just
+            // keyboard, so it fired on every click anyway).
+            className="field-sizing-content max-h-48 min-h-9 flex-1 resize-none rounded-sm bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground"
           />
           <Button
             size="icon"

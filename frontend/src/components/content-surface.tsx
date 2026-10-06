@@ -86,16 +86,18 @@ export function ContentSurface({ children }: { children: ReactNode }) {
   return (
     <div className={FRAME}>
       <div className={CARD} data-testid="content-surface">
-        {/* No drag band here any more.
+        {/* No drag band here.
 
-            This card carried one because the window drew no title bar of its
-            own, so the top of the content was the only thing left to grab.
-            There is a real full-width title row now (`window-title-bar.tsx`),
-            which drags where it is not covered by a control — so this band
-            stopped being the handle and stayed only as 28px at the top of every
-            page that quietly refused a press. It was the spacing under the new
-            row, and the reason the two canvases you can drag lost their top
-            edge. */}
+            This card carried one for a while because the window drew no
+            title bar of its own, so the top of the content was the only
+            thing left to grab, and every page paid for it as 28px of dead
+            top padding over a press that quietly did nothing. The overlay
+            title bar is back (`window-chrome.tsx`), but its drag band is
+            scoped to the floating sidebar's own title row now
+            (`sidebar-title-row.tsx`) rather than mounted again here —
+            content pages keep their real top edge, and the two canvases that
+            need to be dragged from the top (the graph, the workflow editor)
+            keep it too. */}
         {children}
       </div>
     </div>

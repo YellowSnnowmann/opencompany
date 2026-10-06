@@ -165,17 +165,17 @@ export function SettingsSection({
           width its widest card (SMTP) needs, clipping it on both sides
           (issue #1383). */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* On the macOS desktop, `ContentSurface` overlays every page's top
-            28px with an absolutely-positioned, pointer-events-enabled drag
-            band (`WindowDragBar`, z-20) so the window stays movable without a
-            native title bar — content-surface.tsx explains the trade-off it
-            accepted: that band wins the click over whatever a page draws
-            underneath it. This row is the one page top that actually sits in
-            that band below `lg`, so without a higher stacking order its links
-            are unreachable at 880–1023px window widths on macOS. `relative
-            z-30` gives it its own stacking context above the drag band without
-            touching `WindowDragBar` itself, whose absolute-overlay contract
-            other pages (the graph, the workflow editor) still rely on. */}
+        {/* `relative z-30` here is a leftover of a design the console no
+            longer builds: `WindowDragBar` used to be mounted once, full-width,
+            over every page's top 28px (`content-surface.tsx`), and this row's
+            chips sat in that band below `lg` — unreachable without a higher
+            stacking order of their own. The overlay title bar is back
+            (`window-chrome.tsx`), but its drag band now lives only in the
+            floating sidebar's own title row (`sidebar-title-row.tsx`), never
+            in `ContentSurface` — so nothing here competes with it any more.
+            The class is harmless and left in place rather than pulled on
+            spec; removing it is a change to verify on its own, not a side
+            effect of a title-bar pass. */}
         {/* Both `hint` readers below survive #2131, which was about the
             desktop rail. This row is a different surface with a different
             problem: the chips carry the label alone, so the `title` is the only

@@ -177,12 +177,16 @@ export function SectionRail({
         {/* Below `lg` the rail collapses to a scrolling row of chips, so the
             sub-pages stay reachable without a second drawer.
 
-            `relative z-30`: on the macOS desktop `WindowDragBar` overlays the
-            top 28px of the content area with a pointer-events-enabled drag band
-            at `z-20`, and this row is the one page top that sits in that band
-            below `lg`. Without its own stacking context its links are
-            unreachable at 880–1023px window widths — the same fix, for the same
-            reason, that `SettingsSection`'s chip row carries. */}
+            `relative z-30` is a leftover of a design the console no longer
+            builds: `WindowDragBar` used to overlay the top 28px of the
+            content area with a pointer-events-enabled drag band at `z-20`
+            (`content-surface.tsx`), and this row was the one page top that
+            sat in that band below `lg` — the same fix, for the same reason,
+            that `SettingsSection`'s chip row carried. The overlay title bar is
+            back (`window-chrome.tsx`), but its drag band now lives only in the
+            floating sidebar's own title row (`sidebar-title-row.tsx`), never
+            over the content pages, so nothing here competes with it any
+            more. Left in place as harmless rather than pulled on spec. */}
         {hasRail && (
         <div className="relative z-30 border-b lg:hidden">
           <div className="flex gap-1 overflow-x-auto p-2">

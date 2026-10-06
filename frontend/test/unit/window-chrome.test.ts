@@ -4,30 +4,40 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { WindowControlsInset, WindowDragBar } from "@/components/window-chrome";
+import {
+  WINDOW_CHROME_HEIGHT,
+  WINDOW_CONTROLS_WIDTH,
+  WindowControlsInset,
+  WindowDragBar,
+} from "@/components/window-chrome";
 
 /**
- * The desktop window's own chrome, and — now entirely — its absence.
+ * The desktop window's own chrome.
  *
- * `tauri.conf.json` used to run the main window with `titleBarStyle: "Overlay"`:
- * macOS drew no title bar and floated the traffic lights over the web content,
- * so the console put back a band that opts into dragging and reserved 72px so
- * the lights were not sitting on the company switcher.
+ * `tauri.conf.json` runs the main window with `titleBarStyle: "Overlay"` and
+ * `hiddenTitle: true` again: macOS draws no title bar of its own and floats
+ * the traffic lights over the web content, so the console draws a band that
+ * opts into dragging and reserves 72px so the lights are not sitting on a
+ * control underneath them.
  *
- * The window is `decorations: true` with no `titleBarStyle` now — an ordinary
- * macOS title bar, with the lights in it — so **neither piece renders anywhere**,
- * and that is what these tests assert.
- *
- * They are kept rather than deleted because the components are kept: flipping
- * `SHELL_DRAWS_ITS_OWN_TITLE_BAR` back in `window-chrome.tsx` restores the whole
- * arrangement, and the last case below is what says that switch still works. A
- * band that renders when the shell is NOT drawing its own chrome is a 28px strip
- * across the top of every page that silently swallows clicks, with nothing on
- * screen to explain it.
+ * On macOS desktop, both pieces render: {@link WindowDragBar}'s drag region
+ * and {@link WindowControlsInset}'s reserved, also-draggable strip. Elsewhere
+ * — a browser (no `__TAURI__`), or a desktop platform that is not macOS (an
+ * `Overlay` title bar is a macOS-only style) — neither renders anything,
+ * because there is no window to drag, or the native title bar already has
+ * the lights and a band here would only eat the top of every page.
  */
 
 let host: HTMLDivElement;
 let root: Root | null = null;
+
+// `navigator.platform` is a shared global `defineProperty` can only override,
+// never scope to one test — jsdom defines it on the prototype, so `asDesktop`
+// shadows that with an own property on `navigator` itself. Restoring means
+// deleting that own property in `afterEach` below, not redefining it, so the
+// prototype's own getter answers again rather than leaking "MacIntel" into
+// whatever runs next in this worker (tinysweeper, medium).
+const hadOwnPlatform = Object.prototype.hasOwnProperty.call(navigator, "platform");
 
 /** Present the runtime as the Tauri desktop, on the given platform. */
 function asDesktop(platform: string) {
@@ -36,6 +46,11 @@ function asDesktop(platform: string) {
     configurable: true,
     value: platform,
   });
+}
+
+/** Undoes `asDesktop`'s override, leaving `navigator.platform` as it was. */
+function restorePlatform() {
+  if (!hadOwnPlatform) delete (navigator as unknown as Record<string, unknown>).platform;
 }
 
 function render(node: Parameters<Root["render"]>[0]) {
@@ -54,6 +69,7 @@ afterEach(() => {
   root = null;
   host.remove();
   delete (window as unknown as Record<string, unknown>).__TAURI__;
+  restorePlatform();
 });
 
 describe("the window drag band", () => {
@@ -72,13 +88,18 @@ describe("the window drag band", () => {
     expect(host.querySelector("[data-tauri-drag-region]")).toBeNull();
   });
 
-  it("renders nothing on macOS either, now that the title bar is native", () => {
-    // The case that used to assert the band. macOS draws the title bar again,
-    // so there is a real one to grab and a band over the content would only
-    // swallow the clicks of whatever it covers.
+  it("renders the drag band on macOS desktop, where the title bar is an overlay", () => {
+    // macOS draws no title bar of its own again (`titleBarStyle: "Overlay"`),
+    // so this band is the only thing that opts the top of the window back
+    // into being draggable.
     asDesktop("MacIntel");
     render(createElement(WindowDragBar));
-    expect(host.querySelector("[data-tauri-drag-region]")).toBeNull();
+    const band = host.querySelector("[data-tauri-drag-region]");
+    expect(band).not.toBeNull();
+    // Existence alone would still pass if the band rendered at zero height or
+    // the wrong one — assert the inline style actually reserves the
+    // documented `WINDOW_CHROME_HEIGHT` (tinysweeper, medium).
+    expect((band as HTMLElement).style.height).toBe(`${WINDOW_CHROME_HEIGHT}px`);
   });
 });
 
@@ -92,12 +113,15 @@ describe("the traffic-light inset", () => {
     expect(host.querySelector("[data-tauri-drag-region]")).toBeNull();
   });
 
-  it("reserves nothing on macOS either, now that the lights are in the title bar", () => {
-    // The 72px this used to hold is the whole point of the change: reserved
-    // while the shell drew its own chrome, it is a hole in the title row the
-    // moment macOS draws the lights somewhere else.
+  it("reserves 72px on macOS desktop, where the traffic lights float over the content", () => {
+    // The lights land in this strip, not in a title bar of their own, so it
+    // has to exist and has to be draggable rather than a dead hole in the row.
     asDesktop("MacIntel");
     render(createElement(WindowControlsInset));
-    expect(host.querySelector("[data-tauri-drag-region]")).toBeNull();
+    const inset = host.querySelector("[data-tauri-drag-region]");
+    expect(inset).not.toBeNull();
+    // Same gap as the drag band above: assert the reserved width itself, not
+    // just that some drag region exists (tinysweeper, medium).
+    expect((inset as HTMLElement).style.width).toBe(`${WINDOW_CONTROLS_WIDTH}px`);
   });
 });
