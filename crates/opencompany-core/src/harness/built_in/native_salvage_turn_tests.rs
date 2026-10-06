@@ -39,12 +39,12 @@ use serde_json::{Value, json};
 
 use crate::company::CompanyManifest;
 use crate::company::credentials::Credential;
-use crate::harness::mcp_probe::McpFailureQueue;
 use crate::harness::orchestrator::{DelegationQueue, WorkflowRunnerHandle};
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::search::SearchBackend;
 use crate::harness::{HarnessDeps, HarnessPool};
+use crate::mcp::probe::McpFailureQueue;
 use crate::ports::types::{CompanyId, CompanyRecord};
 use crate::ports::types::{TurnStep, TurnStepFailure, TurnStepStatus};
 use crate::ports::usage::{SampleKind, UsageMeter, UsageSample};

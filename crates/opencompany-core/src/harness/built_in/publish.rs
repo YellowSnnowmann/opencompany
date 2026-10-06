@@ -81,7 +81,7 @@
 //!   cannot make the success message a liar, because the message describes what
 //!   was captured, not what is on disk now.
 //!
-//! [`McpFailureQueue`]: crate::harness::mcp_probe::McpFailureQueue
+//! [`McpFailureQueue`]: crate::mcp::probe::McpFailureQueue
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -312,7 +312,7 @@ fn cannot_publish_here(path: &str) -> String {
 }
 
 /// A shared, in-memory queue of staged publishes — the exact
-/// [`McpFailureQueue`](crate::harness::mcp_probe::McpFailureQueue) pattern.
+/// [`McpFailureQueue`](crate::mcp::probe::McpFailureQueue) pattern.
 ///
 /// Cheap to [`Clone`] (a shared handle); the tool built into the agent and the
 /// brain that drains it see the same queue because

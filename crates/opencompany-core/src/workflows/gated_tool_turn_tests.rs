@@ -35,11 +35,11 @@ use serde_json::{Value, json};
 
 use crate::company::credentials::Credential;
 use crate::company::{CompanyManifest, parse_workflow};
-use crate::harness::mcp_probe::McpFailureQueue;
 use crate::harness::orchestrator::{DelegationQueue, WorkflowRunnerHandle};
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{HarnessDeps, HarnessPool};
+use crate::mcp::probe::McpFailureQueue;
 use crate::ports::WorkflowRunContext;
 use crate::ports::types::CompanyRecord;
 use crate::runtime::journal::RuntimeJournal;

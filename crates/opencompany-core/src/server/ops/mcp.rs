@@ -885,10 +885,7 @@ async fn probe_and_persist(runtime: &CompanyRuntime, name: &str) -> Option<McpHe
     let decl = decls.iter().find(|d| d.name == name)?;
     // The probe already scrubs its message; what is persisted is that scrubbed
     // health, plus the inventory the same listing yielded.
-    Some(
-        crate::harness::mcp_probe::probe_and_record(runtime.id(), decl, runtime.secrets().as_ref())
-            .await,
-    )
+    Some(crate::mcp::probe::probe_and_record(runtime.id(), decl, runtime.secrets().as_ref()).await)
 }
 
 /// Without the `openhuman` feature there is no MCP transport, so probing is a
@@ -968,7 +965,7 @@ async fn discover_tools(
                 // full request URL (with a query-parameter credential). Classify,
                 // scrub against this server's known secrets, and persist the
                 // scrubbed outcome as health.
-                use crate::harness::mcp_probe;
+                use crate::mcp::probe as mcp_probe;
                 let secrets = decl.auth.secret_values();
                 let class = mcp_probe::classify_mcp_error(&err, decl.auth.is_configured(), false);
                 let message = crate::redact::scrub(

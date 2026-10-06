@@ -248,14 +248,14 @@ async fn a_lifecycle_delegation_for_a_missing_card_is_a_no_op() {
 /// event log is wired (the Activity-trace re-skin of the old warning bubble).
 #[tokio::test]
 async fn mcp_failures_surface_as_error_steps_and_event() {
-    use crate::harness::mcp_probe::McpFailure;
+    use crate::mcp::probe::McpFailure;
     use crate::ports::EventLog;
     use crate::ports::types::EventSeq;
     use crate::store::FsEventLog;
 
     let dir = tempfile::tempdir().unwrap();
     let events: Arc<dyn EventLog> = Arc::new(FsEventLog::new(dir.path()));
-    let failures = crate::harness::mcp_probe::McpFailureQueue::default();
+    let failures = crate::mcp::probe::McpFailureQueue::default();
     let deps = HarnessDeps {
         hive_store: None,
         emergency_gate: None,
@@ -364,7 +364,7 @@ async fn mcp_failures_surface_as_error_steps_and_event() {
 /// from. Journaling is per-item best-effort so the drain always completes.
 #[tokio::test]
 async fn a_failed_journal_write_does_not_swallow_the_rest_of_the_drain() {
-    use crate::harness::mcp_probe::McpFailure;
+    use crate::mcp::probe::McpFailure;
     use crate::ports::EventLog;
     use crate::ports::types::{EventSeq, StoredEvent};
     use futures::stream::{self, BoxStream};
@@ -410,7 +410,7 @@ async fn a_failed_journal_write_does_not_swallow_the_rest_of_the_drain() {
 
     let dir = tempfile::tempdir().unwrap();
     let log = Arc::new(FailFirstLog::default());
-    let failures = crate::harness::mcp_probe::McpFailureQueue::default();
+    let failures = crate::mcp::probe::McpFailureQueue::default();
     let deps = HarnessDeps {
         hive_store: None,
         emergency_gate: None,

@@ -34,9 +34,7 @@ use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
 
 use crate::company::mcp::{AuthMaterial, McpServerDecl};
 use crate::error::OpenCompanyError;
-use crate::harness::mcp_probe::{
-    McpFailure, McpFailureQueue, classify_mcp_error, operator_message,
-};
+use crate::mcp::probe::{McpFailure, McpFailureQueue, classify_mcp_error, operator_message};
 use crate::ports::types::CompanyId;
 use crate::ports::usage::UsageMeter;
 use crate::redact::scrub;

@@ -6,7 +6,7 @@
 //! credential must NEVER appear in any error/health/response/agent-output"
 //! invariant.
 //!
-//! Compiled only under `feature = "openhuman"` (the whole `harness` module is).
+//! Compiled only under `feature = "openhuman"`.
 
 use std::sync::{Arc, Mutex};
 
@@ -544,5 +544,5 @@ async fn refine_oauth_capability(_endpoint: &str, class: ProbeClass) -> ProbeCla
 }
 
 #[cfg(test)]
-#[path = "mcp_probe_tests.rs"]
+#[path = "probe_tests.rs"]
 mod tests;

@@ -49,10 +49,10 @@ fn manifest_agent(role: &str, description: Option<&str>) -> ManifestAgent {
 // `toolbelt.rs`.
 
 use crate::company::Policy;
-use crate::harness::mcp_probe::McpFailureQueue;
 use crate::harness::orchestrator::{DelegationQueue, WorkflowRunnerHandle};
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::MockProvider;
+use crate::mcp::probe::McpFailureQueue;
 use crate::ports::CompanyStore;
 use crate::ports::types::{CompanyRecord, CompanySummary, LedgerEntry};
 

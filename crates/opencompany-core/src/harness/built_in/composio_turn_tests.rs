@@ -54,11 +54,11 @@ use serde_json::{Value, json};
 use crate::company::CompanyManifest;
 use crate::company::credentials::Credential;
 use crate::harness::composio::TenantComposio;
-use crate::harness::mcp_probe::McpFailureQueue;
 use crate::harness::orchestrator::{DelegationQueue, WorkflowRunnerHandle};
 use crate::harness::policy::ApprovalRequestQueue;
 use crate::harness::provider::{HostedProvider, HostedProviderConfig};
 use crate::harness::{HarnessDeps, HarnessPool};
+use crate::mcp::probe::McpFailureQueue;
 use crate::ports::types::CompanyRecord;
 use crate::store::FsCompanyStore;
 

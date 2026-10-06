@@ -25,7 +25,7 @@ fn non_empty_trims_and_rejects_blank() {
 
 // Integration-style coverage of the unauthenticated callback route's guard
 // branches, driven through a real axum app (mirrors
-// `mcp_probe::oauth_token_never_leaks_into_probed_health`). These are the
+// `mcp::probe::oauth_token_never_leaks_into_probed_health`). These are the
 // security-relevant early exits: none may exchange a code or reach a company.
 use crate::AppConfig;
 use axum::body::Body;

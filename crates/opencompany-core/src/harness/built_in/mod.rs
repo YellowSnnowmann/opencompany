@@ -123,7 +123,6 @@ mod iteration_cap_turn_tests;
 pub mod ledger_tools;
 pub mod lifecycle;
 pub mod mcp;
-pub mod mcp_probe;
 /// Recovering a tool call that a model on the **native** transport wrote into
 /// its message body as prose instead of emitting it through the structured
 /// channel. Validated against the tools the turn itself offered — the marker a
@@ -264,10 +263,10 @@ use crate::company::mcp::McpServerDecl;
 use crate::company::steer::SteerControl;
 use crate::error::OpenCompanyError;
 use crate::harness::cost::{TurnUsage, record_turn_cost};
-use crate::harness::mcp_probe::McpFailureQueue;
 use crate::harness::orchestrator::DelegationQueue;
 use crate::harness::policy::{ApprovalPolicy, ApprovalRequestQueue};
 use crate::hive::mcp_server::McpHost;
+use crate::mcp::probe::McpFailureQueue;
 use crate::ports::skills_state::{SkillState, SkillStateStore};
 use crate::ports::types::{
     Actor, ActorKind, AgentOverride, BudgetOverride, CompanyId, CompanyRecord, EventSeq,
@@ -5987,7 +5986,7 @@ pub(crate) fn workflow_wiring_deps(
         events: None,
         delegations: orchestrator::DelegationQueue::default(),
         workflow_runner: orchestrator::WorkflowRunnerHandle::default(),
-        mcp_failures: mcp_probe::McpFailureQueue::default(),
+        mcp_failures: crate::mcp::probe::McpFailureQueue::default(),
         pending_publishes: publish::PendingPublishQueue::default(),
         workflow_refs: workflow_refs::WorkflowRefQueue::default(),
         run_outputs: orchestrator::RunOutputCache::default(),
