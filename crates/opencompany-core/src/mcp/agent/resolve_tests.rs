@@ -115,3 +115,26 @@ fn an_agent_with_no_mcp_gets_no_persona_brief() {
     let mcp = resolve_for_agent(&[], "writer", &grants, None);
     assert_eq!(mcp.persona_brief(&[]), "");
 }
+
+#[test]
+fn a_wildcard_grant_attaches_every_enabled_server_and_a_named_one_only_its_own() {
+    let mut off = decl("off", "https://off.example/mcp");
+    off.enabled = false;
+    let decls = [
+        decl("notion", "https://notion.example/mcp"),
+        decl("linear", "https://linear.example/mcp"),
+        off,
+    ];
+
+    let wildcard = grants(&["mcp:*"]);
+    let all = resolve_for_agent(&decls, "writer", &wildcard, None).embed_servers();
+    let debug = format!("{all:?}");
+    assert_eq!(all.len(), 2, "{debug}");
+    assert!(debug.contains("notion") && debug.contains("linear") && !debug.contains("\"off\""));
+
+    let named = grants(&["mcp:notion"]);
+    let one = resolve_for_agent(&decls, "writer", &named, None).embed_servers();
+    let debug = format!("{one:?}");
+    assert_eq!(one.len(), 1, "{debug}");
+    assert!(debug.contains("notion") && !debug.contains("linear"));
+}
