@@ -73,8 +73,9 @@ known gaps, not as enforced rules.
    directory. Read-only at runtime; the operator can disable one but never
    uninstall it.
 3. **Shared registry** — the host-global library an operator browses and
-   installs by slug. A hosted tenant container carries no repository checkout,
-   so `AppConfig::skills_root()` is `None` there and this library is **empty**.
+   installs by slug, read from disk at the directory the host names (see
+   [The shared library](#the-shared-library-where-a-host-reads-it)). A host
+   that names none serves an **empty** library.
 4. **Console-authored custom** — a skill the operator writes in
    `Settings → Skills`, stored as a whole `SKILL.md` in the delta.
 
@@ -143,6 +144,16 @@ The harness, `GET …/skills` and the GraphQL `Company.skills` resolver
 all call `resolve`. The console therefore cannot report a set the agents do not
 have.
 
+`resolve` takes its layers as a `SkillLayers { baseline, bundle_root, library }`
+and reads nothing ambient. Which layers a company has is named once, in
+[`company/skill_set.rs`](../../crates/opencompany-core/src/company/skill_set.rs):
+the embedded global baseline, `<source_dir>/skills`, and the host's library.
+Every route reader loads through `load_runtime_skill_set` (the stored deltas,
+the persisted `[globals].disable`, the fold); the harness reads its deltas
+through `load_skill_deltas` with the manifest's `[globals].disable`, and
+fingerprints exactly those rows. `SkillOwner` names whose deltas are read — a
+company today.
+
 `resolve` reports **disabled** entries too — the console needs the row to render
 its switch. The harness filters to the enabled ones.
 
@@ -165,7 +176,7 @@ The field carries three states, the same shape a teammate's tools use:
 first takes it back when the switch returns — so the two are never collapsed.
 
 `agent_effective_skills`
-([`runtime/builder.rs`](../../crates/opencompany-core/src/runtime/builder.rs))
+([`company/skill_scope.rs`](../../crates/opencompany-core/src/company/skill_scope.rs))
 is the one derivation; `resolve_for_agent` and the team route's `agent_skills`
 both call it, so the console cannot report a scope the harness does not apply.
 
@@ -247,6 +258,27 @@ Every write that changes a skill's document appends a `SkillChanged` row —
 slug, change, tier, digest, actor, and never the body. A failed append fails the
 write, so the store and the journal cannot disagree.
 
+## The shared library: where a host reads it
+
+The library is a directory of company bundles — every
+`<bundle>/skills/<slug>/SKILL.md` under it, `_globals` first, then bundle name
+order — loaded once and cached
+([`company/skill_library.rs`](../../crates/opencompany-core/src/company/skill_library.rs)).
+It is always read from disk and never compiled into a binary. `for_host` picks
+the directory, first match wins:
+
+| Order | Source | Who sets it |
+| --- | --- | --- |
+| 1 | explicit | `serve`: the `companies/` directory its first `--company` lives in |
+| 2 | `OPENCOMPANY_SKILL_LIBRARY` | the container image (`/app/companies`), `scripts/desktop-dev.sh` (the checkout), any operator |
+| 3 | packaged | the desktop: every `companies/*/skills/**` shipped as Tauri bundle resources, layout preserved |
+| 4 | none | an empty library |
+
+An explicit or environment directory is configuration: a missing one, or a
+malformed `SKILL.md` in it, fails boot and `500`s a provision rather than
+degrading to "no library". A packaged copy is served only when it exists. The
+harness receives a snapshot when a company runtime is built.
+
 ## Lifecycle, route by route
 
 Routes are registered by `router()` in
@@ -296,10 +328,13 @@ cannot dictate what a registry skill contains. Resolution, in order:
 2. **Slug absent from a non-empty registry** → `404`. That is a typo or a stale
    client, and silently persisting a stub is what produced content-less installs
    before.
-3. **Empty registry** → fall back to the client's metadata. An empty registry
-   means this host serves no shared library at all (platform-provisioned, no
-   `skills_root`), so there is nothing to resolve against and refusing every
-   install would break hosted tenants outright.
+3. **Empty registry** → fall back to the client's metadata. Only a host that
+   names no library at all gets here — `serve` with no `--company` and no
+   `OPENCOMPANY_SKILL_LIBRARY`, or a desktop build carrying no packaged copy —
+   so there is nothing to resolve against and refusing every install would
+   break those hosts outright. The desktop, which ships a library, takes case 2
+   for an unknown slug. Custom stubs an earlier desktop wrote are left as they
+   are.
 4. **A configured library that fails to load** → `500`, never case 3. Silently
    degrading a broken library to "no library" would hand the client authorship
    of a registry skill's contents on exactly the hosts that meant to be
@@ -402,6 +437,7 @@ is written against this fact. It changes the day execution ships.
 | No dry run | A verdict is only ever produced by a write attempt: a block returns the report, writes nothing, and offers a per-request `force` |
 | Scope changes and scan verdicts are not journalled | `SkillChange` covers `Installed` / `Updated` / `Removed`; a scope edit goes through the team route, which appends no company event |
 | Validation narrower than the spec | See [Spec deltas](#spec-deltas-worth-knowing) |
+| `read_skill_resource` resolves from a stale scan | OpenHuman caches skill metadata per workspace for the life of the process. After a rebuild adds a skill to an agent's tree, `list_skills` and `describe_skill` see it but `read_skill_resource` answers "not found" until restart; pinned by `harness/built_in/skills_stale_read_tests.rs`, fix belongs upstream |
 
 ## Where this lives
 
@@ -409,6 +445,8 @@ is written against this fact. It changes the day execution ships.
 | --- | --- |
 | Document shape, parse and render | `crates/opencompany-core/src/company/skill_file.rs` |
 | The effective-set fold, slug validation, `[globals].disable` synthesis | `crates/opencompany-core/src/company/skill_effective.rs` |
+| A company's layers and delta loading, shared by every reader | `crates/opencompany-core/src/company/skill_set.rs` |
+| The shared library and which directory a host serves it from | `crates/opencompany-core/src/company/skill_library.rs` |
 | Operator deltas (port + conformance) | `crates/opencompany-core/src/ports/skills_state.rs` |
 | Write routes | `crates/opencompany-core/src/server/ops/skills.rs`, and `skills/` beside it for registry, upload, draft and update |
 | Size cap, scan verdict, per-company lock | `crates/opencompany-core/src/server/ops/skills/vet.rs` |
@@ -416,8 +454,9 @@ is written against this fact. It changes the day execution ships.
 | Shared validation | `crates/opencompany-core/src/company/skill_validate.rs` |
 | Archive hardening | `crates/opencompany-core/src/company/skill_upload.rs` |
 | Install pin, drift, trust tier | `crates/opencompany-core/src/company/skill_provenance.rs` |
-| Per-agent scope: the derivation | `crates/opencompany-core/src/runtime/builder.rs` |
+| Per-agent scope: the derivation | `crates/opencompany-core/src/company/skill_scope.rs` |
 | Per-agent scope: the per-skill inversion | `crates/opencompany-core/src/company/skill_scope.rs` |
+| Shipped-skill parse/render and digest pins | `crates/opencompany-core/tests/snapshots/skill-pins.txt` (`company/skill_file_pins_tests.rs`, re-bless with `BLESS_SKILL_PINS=1`) |
 | `Company.skills` and `skillRegistry` reads | `crates/opencompany-core/src/server/graphql/skills.rs` |
 | Materialization, read tools, prompt catalogue | `crates/opencompany-core/src/harness/built_in/skills.rs` |
 | Tool consequence classification | `crates/opencompany-core/src/policy/consequence.rs` |

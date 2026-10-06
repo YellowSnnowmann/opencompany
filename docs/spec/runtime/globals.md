@@ -23,9 +23,10 @@ contents are described in [`companies/_globals/README.md`](../../../companies/_g
 
 Everything in `companies/_globals/` is embedded into the binary by `build.rs`, exactly like
 the built-in ledgers in `src/ledger/registry.rs`. A platform-provisioned tenant
-container carries no repository checkout — it is why `skills_root()` is `None`
-there and the shared skill registry is empty — so a baseline resolved from the
-filesystem would be a baseline every hosted company silently lacked.
+container carries no repository checkout, so a baseline resolved from the
+filesystem would be a baseline every hosted company silently lacked. (The shared
+skill library is the opposite case: it is read from disk, from wherever the host
+says — see [`docs/modules/skills.md`](../../modules/skills.md#the-shared-library-where-a-host-reads-it).)
 
 Malformed input is a **fault**, never a panic: `globals::faults()` reports it and
 the rest of the baseline still loads, so one broken global never costs a company
