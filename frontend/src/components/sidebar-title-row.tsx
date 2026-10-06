@@ -34,12 +34,22 @@ import {
   usesOverlayTitleBar,
 } from "@/components/window-chrome";
 import { TITLE_BAR_ICON_BUTTON } from "@/components/window-title-bar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 interface Props {
-  /** Opens the picker for "start a conversation" — the pencil. */
+  /** "Start a conversation in a channel", from the pencil's menu. */
+  onStartChannelConversation: () => void;
+  /** "Start a conversation with the agent", from the pencil's menu. */
   onComposeMessage: () => void;
-  /** Opens the add-agent dialog — the `+`. */
+  /** "Create a new channel", from the `+` menu. */
+  onCreateChannel: () => void;
+  /** "Create a new agent", from the `+` menu. */
   onAddAgent: () => void;
 }
 
@@ -82,7 +92,12 @@ interface Props {
  * to pick between — the shared constant stays `size-8` for every other title
  * bar context, where the row itself is taller.
  */
-export function SidebarTitleRow({ onComposeMessage, onAddAgent }: Props) {
+export function SidebarTitleRow({
+  onStartChannelConversation,
+  onComposeMessage,
+  onCreateChannel,
+  onAddAgent,
+}: Props) {
   if (!usesOverlayTitleBar()) return null;
   return (
     <div
@@ -93,24 +108,41 @@ export function SidebarTitleRow({ onComposeMessage, onAddAgent }: Props) {
       <WindowDragBar />
       <WindowControlsInset />
       <div className="pointer-events-none relative z-30 flex min-w-0 flex-1 items-center justify-end gap-0.5 pr-1.5">
-        <button
-          type="button"
-          onClick={onComposeMessage}
-          aria-label="Start a conversation"
-          title="Start a conversation"
-          className={cn(TITLE_BAR_ICON_BUTTON, "pointer-events-auto size-7")}
-        >
-          <SquarePen aria-hidden="true" className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={onAddAgent}
-          aria-label="Add"
-          title="Add"
-          className={cn(TITLE_BAR_ICON_BUTTON, "pointer-events-auto size-7")}
-        >
-          <Plus aria-hidden="true" className="size-4" />
-        </button>
+        {/* Pencil: who to talk to, not what to make — a channel already in
+            the sidebar, or an agent not yet DM'd. Same two-item split
+            PR #2545 built into `ChannelRail`'s own compose door, just
+            relocated up here with it. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label="Start a conversation"
+            title="Start a conversation"
+            className={cn(TITLE_BAR_ICON_BUTTON, "pointer-events-auto size-7")}
+          >
+            <SquarePen aria-hidden="true" className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-56">
+            <DropdownMenuItem onClick={onStartChannelConversation}>
+              Start a conversation in a channel
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onComposeMessage}>
+              Start a conversation with the agent
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {/* `+`: make a new one — same split. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label="Add"
+            title="Add"
+            className={cn(TITLE_BAR_ICON_BUTTON, "pointer-events-auto size-7")}
+          >
+            <Plus aria-hidden="true" className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-48">
+            <DropdownMenuItem onClick={onCreateChannel}>Create a new channel</DropdownMenuItem>
+            <DropdownMenuItem onClick={onAddAgent}>Create a new agent</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   );

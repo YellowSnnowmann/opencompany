@@ -15,6 +15,7 @@ import {
   type ApprovalSummary,
   type BlockerVerdict,
   type CompanyStatus,
+  type DeskDto,
   type GrantScope,
   type NotificationDto,
   type TeamMemberDto,
@@ -169,11 +170,13 @@ import {
   dmThreadId,
   HISTORY_UNSTARTED,
   firstChannel,
+  type Channel,
   type DecidedApproval,
   type HistoryStatus,
 } from "@/views/room/model";
 import { AddMemberDialog, type NewMemberFields } from "@/views/room/AddMemberDialog";
 import { NewMessageDialog } from "@/views/room/NewMessageDialog";
+import { ChannelCreateDialog } from "@/views/room/ChannelCreateDialog";
 import { TeamView } from "@/views/TeamView";
 import { NotificationsView } from "@/views/NotificationsView";
 import { LedgersView, MANAGE_SEGMENT } from "@/views/LedgersView";
@@ -534,6 +537,12 @@ export function AppShell({
    */
   const [titleAddOpen, setTitleAddOpen] = useState(false);
   const [titleComposeOpen, setTitleComposeOpen] = useState(false);
+  // The other half of the title row's two menus (issue #2130 follow-up,
+  // operator-requested): `+`'s "Create a new channel" and the pencil's
+  // "Start a conversation in a channel" — the agent-only half above already
+  // covered "Create a new agent" and "Start a conversation with the agent".
+  const [titleChannelCreateOpen, setTitleChannelCreateOpen] = useState(false);
+  const [titleChannelPickOpen, setTitleChannelPickOpen] = useState(false);
   // The floating sidebar's width, dragged by its right edge and remembered
   // per browser (`lib/sidebar-width.ts`).
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
@@ -906,6 +915,12 @@ export function AppShell({
    * the roster that read already fetched, kept rather than discarded.
    */
   const [teammates, setTeammates] = useState<TeamMember[]>([]);
+  /**
+   * The non-DM channels, for the title row's pencil ("start a conversation in
+   * a channel") — `teammates` above is the agent half of the same pair.
+   * Populated by, and cleared alongside, the same desks/roster read.
+   */
+  const [titleChannels, setTitleChannels] = useState<Channel[]>([]);
   // The threads with a chat POST currently in flight, so the SSE `agent_reply`
   // echo for each is suppressed — the awaited POST reply is the authoritative,
   // steps-bearing copy (fixes the duplicate-bubble race).
@@ -1177,6 +1192,8 @@ export function AppShell({
     // synchronously here for the same reason `agentNames` above is, rather
     // than left to that same async read.
     setTeammates((prev) => (prev.length === 0 ? prev : []));
+    // Same reason, same shape, for the pencil's channel half.
+    setTitleChannels((prev) => (prev.length === 0 ? prev : []));
 
     // How far each channel's cold hydration has got, and which thread's
     // request is still in flight, so the 5-second poll below (`rehydrateAll`
@@ -1314,9 +1331,15 @@ export function AppShell({
         setTeammates(roster);
         // Keep the addressing this loop resolves, not just its side effect.
         setChatChannelByThread(channelMap(chatDesks, roster));
+        const builtSections = buildChannels(roster, chatDesks);
         // Unaddressed system lines go to the channel a bare Room route opens:
         // `#general` when the host lists it, since it is pinned first.
-        setFirstDeskChannelId(firstChannel(buildChannels(roster, chatDesks))?.id ?? null);
+        setFirstDeskChannelId(firstChannel(builtSections)?.id ?? null);
+        // The pencil's "start a conversation in a channel" picker — the
+        // non-DM half of the same sections `firstChannel` above already read.
+        setTitleChannels(
+          builtSections.flatMap((section) => section.channels).filter((c) => c.kind !== "dm"),
+        );
         const threadIds = resolved.map((t) => t.id);
         const channels = [
           ...chatDesks.map((d) => ({ channelId: d.id, threadId: d.id })),
@@ -1350,7 +1373,11 @@ export function AppShell({
         setAgentNames({});
         setTeammates([]);
         setChatChannelByThread(channelMap(fallbackDesks, []));
-        setFirstDeskChannelId(firstChannel(buildChannels([], fallbackDesks))?.id ?? null);
+        const fallbackSections = buildChannels([], fallbackDesks);
+        setFirstDeskChannelId(firstChannel(fallbackSections)?.id ?? null);
+        setTitleChannels(
+          fallbackSections.flatMap((section) => section.channels).filter((c) => c.kind !== "dm"),
+        );
         const threadIds = defaultThreads().map((t) => t.id);
         const channels = [
           { channelId: GENERAL_CHANNEL_ID, threadId: GENERAL_CHANNEL_ID },
@@ -3009,6 +3036,28 @@ export function AppShell({
   }
 
   /**
+   * `ChannelCreateDialog`'s `onCreated` for the title row's `+` ("Create a new
+   * channel"). Same scope-guard shape as `addTeammateFromTitleBar` just
+   * above, for the same reason: a create started before a company switch
+   * must not land its navigation or its optimistic row in the company the
+   * operator has since moved to.
+   */
+  function titleChannelCreated(desk: DeskDto): void {
+    const requestCompany = company;
+    const requestConnection = scope.connection;
+    const requestClient = client;
+    setTitleChannelCreateOpen(false);
+    if (
+      scopeRef.current.company !== requestCompany ||
+      scopeRef.current.connection !== requestConnection ||
+      scopeRef.current.client !== requestClient
+    ) {
+      return;
+    }
+    navigate("chat", desk.id);
+  }
+
+  /**
    * Decide an approval from inside the conversation it was raised in (#379).
    *
    * **Detached** (`detach: true`), unlike the Approvals page. The default
@@ -3420,7 +3469,9 @@ export function AppShell({
             nothing off macOS desktop or with the native title bar in force;
             see `usesOverlayTitleBar()`. */}
         <SidebarTitleRow
+          onStartChannelConversation={() => setTitleChannelPickOpen(true)}
           onComposeMessage={() => setTitleComposeOpen(true)}
+          onCreateChannel={() => setTitleChannelCreateOpen(true)}
           onAddAgent={() => setTitleAddOpen(true)}
         />
         <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col">
@@ -4067,6 +4118,28 @@ export function AppShell({
           setTitleComposeOpen(false);
           navigate("chat", id);
         }}
+      />
+      {/* The other half of each menu: "Create a new channel" and "Start a
+          conversation in a channel". Same rule — one instance, mounted here,
+          not inside the title row. */}
+      <ChannelCreateDialog
+        client={client}
+        company={company}
+        members={teammates}
+        open={titleChannelCreateOpen}
+        onOpenChange={setTitleChannelCreateOpen}
+        onCreated={titleChannelCreated}
+      />
+      <NewMessageDialog
+        open={titleChannelPickOpen}
+        onOpenChange={setTitleChannelPickOpen}
+        directMessages={titleChannels}
+        onSelect={(id) => {
+          setTitleChannelPickOpen(false);
+          navigate("chat", id);
+        }}
+        title="Start a conversation in a channel"
+        description="Choose a channel to talk in."
       />
 
       <TourController
