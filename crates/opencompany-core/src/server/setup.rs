@@ -509,14 +509,6 @@ pub struct AppliedDto {
     ///
     /// `None` when none was sent or no company was seeded.
     pub composio_note: Option<String>,
-    /// A header-carrier session for the owner who arrived via the platform SSO
-    /// bootstrap, so the console lands signed in without a second sign-in.
-    ///
-    /// Set only when this apply was authorized by the SSO bootstrap session, it
-    /// seeded a company, and the caller asked for the header carrier
-    /// (cross-origin). A same-origin caller is signed in by the `Set-Cookie` this
-    /// response carries instead, and this stays `None`. See [`apply`].
-    pub session: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -943,14 +935,16 @@ async fn bootstrap_setup_subject(
 /// Falls through to the plain `AppliedDto` when there is no bootstrap owner, no
 /// company was seeded, or the owner is not a standing admin of the seeded
 /// company (the same eligibility gate the SSO redeem applies, so setup cannot
-/// mint a session for an address the company would not itself admit). A
-/// same-origin console is signed in by a `Set-Cookie`; a header-carrier caller
-/// gets the session in the body instead.
+/// mint a session for an address the company would not itself admit). The owner
+/// is signed in by a `Set-Cookie`: the SSO bootstrap link only ever lands in the
+/// host's own same-origin console, so the cookie is the carrier and there is no
+/// cross-origin setup apply to hand a body session to (see
+/// [`crate::server::users::routes::mint_session_cookie`]).
 async fn apply_response(
     state: &AppState,
     headers: &HeaderMap,
     bootstrap_owner: Option<String>,
-    mut applied: AppliedDto,
+    applied: AppliedDto,
 ) -> Result<axum::response::Response, crate::server::Rejection> {
     let Some(owner) = bootstrap_owner else {
         return Ok(Json(applied).into_response());
@@ -976,17 +970,9 @@ async fn apply_response(
         now,
     )
     .await?;
-    match crate::server::users::routes::mint_session_carrier(state, &runtime, &user, headers)
-        .await?
-    {
-        crate::server::users::routes::SessionCarrier::Header(session) => {
-            applied.session = Some(session);
-            Ok(Json(applied).into_response())
-        }
-        crate::server::users::routes::SessionCarrier::Cookie(set) => {
-            Ok(([(axum::http::header::SET_COOKIE, set)], Json(applied)).into_response())
-        }
-    }
+    let set =
+        crate::server::users::routes::mint_session_cookie(state, &runtime, &user, headers).await?;
+    Ok(([(axum::http::header::SET_COOKIE, set)], Json(applied)).into_response())
 }
 
 /// Serializes the whole first-run apply, process-wide.
@@ -1359,9 +1345,6 @@ async fn apply_inner(
         credential_note,
         provider_note,
         composio_note,
-        // `apply` fills this in after seeding when the request arrived on an SSO
-        // bootstrap session; `apply_inner` never has the request headers.
-        session: None,
     })
 }
 

@@ -627,28 +627,26 @@ pub(crate) async fn mint_session(
     Ok(([(header::SET_COOKIE, set)], body).into_response())
 }
 
-/// Where a freshly-minted browser session is carried: a `Set-Cookie` header for
-/// a same-origin caller, or a header-carrier value handed back in the body for a
-/// cross-origin one.
-pub(crate) enum SessionCarrier {
-    /// A `Set-Cookie` header value.
-    Cookie(String),
-    /// A header-carrier session value for the caller to send back as a header.
-    Header(String),
-}
-
-/// Mints a browser session for `user` and returns its carrier, split out of
-/// [`mint_session`] so a handler with its own response body — first-run setup's
-/// `AppliedDto` — can sign the operator in without having to emit
-/// [`mint_session`]'s `SignInResult`. The cookie's attributes still come from
-/// [`cookie::set_cookie`] and the value from [`create_session`], so a session
-/// minted here is indistinguishable from one minted by any other login path.
-pub(crate) async fn mint_session_carrier(
+/// Mints a browser session for `user` and returns its `Set-Cookie` header value,
+/// split out of [`mint_session`] so a handler with its own response body —
+/// first-run setup's `AppliedDto` — can sign the operator in without having to
+/// emit [`mint_session`]'s `SignInResult`. The cookie's attributes still come
+/// from [`cookie::set_cookie`] and the value from [`create_session`], so a
+/// session minted here is indistinguishable from one minted by any other login
+/// path.
+///
+/// Cookie-only, with no header-carrier branch, because its one caller — the SSO
+/// bootstrap setup apply — is always same-origin: the platform SSO link lands
+/// the operator in the host's own console (where the console's `needsCarriedSession`
+/// is false), and the apply is an ordinary `post` that never asks for the header
+/// carrier. A cross-origin login still receives the header carrier through
+/// [`mint_session`], which every cross-origin sign-in path already routes through.
+pub(crate) async fn mint_session_cookie(
     state: &AppState,
     runtime: &CompanyRuntime,
     user: &UserRecord,
     headers: &HeaderMap,
-) -> Result<SessionCarrier, crate::server::Rejection> {
+) -> Result<String, crate::server::Rejection> {
     let company = runtime.id();
     let Some(name) = cookie::session_cookie_name(company) else {
         return Err(ApiError(OpenCompanyError::InvalidRequest(
@@ -668,23 +666,13 @@ pub(crate) async fn mint_session_carrier(
             .map(|v| v.chars().take(200).collect()),
     )
     .await?;
-    if cookie::wants_header_carrier(headers) {
-        let Some(session) = cookie::session_header_value(company, &plaintext) else {
-            return Err(ApiError(OpenCompanyError::InvalidRequest(
-                "this company's id cannot carry a session header".to_string(),
-            ))
-            .into_response()
-            .into());
-        };
-        return Ok(SessionCarrier::Header(session));
-    }
     let insecure = !state.config().host_base_url().starts_with("https://");
-    Ok(SessionCarrier::Cookie(cookie::set_cookie(
+    Ok(cookie::set_cookie(
         &name,
         &plaintext,
         token::SESSION_TTL_MILLIS / 1000,
         insecure,
-    )))
+    ))
 }
 
 fn me_result(company: &CompanyId, user: &UserRecord) -> MeResult {
