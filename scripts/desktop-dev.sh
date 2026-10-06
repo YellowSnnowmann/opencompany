@@ -45,6 +45,11 @@ Environment:
                          we ship. Set it empty to build the leaner default:
 
     DESKTOP_FEATURES= ./scripts/desktop-dev.sh
+
+  OPENCOMPANY_SKILL_LIBRARY
+                         The shared skill library. Defaults to this checkout's
+                         companies/, so a skill edited here is what the shell
+                         lists and installs.
 EOF
 }
 
@@ -191,6 +196,7 @@ fi
 # runner is cargo to see that the features land anywhere. `tauri build` has no
 # such flag, which is why the workflow spells it the other way.
 TAURI_CLI="${REPO_ROOT}/frontend/node_modules/.bin/tauri"
+export OPENCOMPANY_SKILL_LIBRARY="${OPENCOMPANY_SKILL_LIBRARY:-${REPO_ROOT}/companies}"
 cd "${REPO_ROOT}/crates/opencompany-app"
 if [ -n "${DESKTOP_FEATURES}" ]; then
     set -- --features "${DESKTOP_FEATURES}"

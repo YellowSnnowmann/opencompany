@@ -210,11 +210,12 @@ WORKDIR /app
 
 COPY --from=builder /out/opencompany /usr/local/bin/opencompany
 # The company definitions the switch chooses from at runtime. They are also
-# the skill registry: the host derives `skills_root` from the loaded company's
-# directory (`companies/<name>` → `companies/`) and lists every bundle's
-# `skills/`, so the console's registry tab and server-authoritative installs
-# come from this tree.
+# the shared skill library: every bundle's `skills/` is what the console's
+# registry tab lists and what an install resolves against.
+# `OPENCOMPANY_SKILL_LIBRARY` names it so a tenant provisioned with no company
+# serves it too.
 COPY companies ./companies
+ENV OPENCOMPANY_SKILL_LIBRARY=/app/companies
 # The built operator console, served at `/` by the host. World-readable so the
 # unprivileged runtime user (uid 10001 under the platform's securityContext)
 # can read it even with a read-only root filesystem.
