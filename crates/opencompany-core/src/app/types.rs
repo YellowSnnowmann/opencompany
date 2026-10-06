@@ -1,12 +1,13 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use serde::Serialize;
 
 use crate::app::config::{AuthMode, BrainMode, EnvSource, redacted};
-use crate::company::{CredentialSource, SkillDoc, TinyhumansTokenSource, load_catalog_skills};
+use crate::company::skill_library::{NoLibrary, SkillLibrary};
+use crate::company::{CredentialSource, SkillDoc, TinyhumansTokenSource};
 use crate::ports::normalize_email;
 use crate::ports::types::{CompanyId, SecretValue};
 use crate::runtime::CompanyRegistry;
@@ -564,15 +565,9 @@ pub struct AppState {
     /// selected (`OPENCOMPANY_STORAGE`). Provisioning injects these into each
     /// new company's builder; `None` means fs defaults.
     stores: Option<crate::store::StorageHandles>,
-    /// The `companies/` directory whose bundles' `skills/` form the skill
-    /// registry (`crate::company::load_catalog_skills`), set on the serve path.
-    /// `None` in platform-provisioned mode (no repo checkout), where the
-    /// `skillRegistry` query degrades to empty.
-    skills_root: Option<std::path::PathBuf>,
-    /// Cache of the skill registry (`companies/*/skills/*/SKILL.md`).
-    /// Populated on first read via [`AppState::skill_registry`]; never
-    /// invalidated because the shipped bundles are immutable at runtime.
-    skill_registry: Arc<OnceLock<Arc<[SkillDoc]>>>,
+    /// The shared skill library this host serves
+    /// ([`crate::company::skill_library`]); [`NoLibrary`] until a host wires one.
+    skill_library: Arc<dyn SkillLibrary>,
     /// The GraphQL read-plane schema, built once at construction and reused for
     /// every `/graphql` request (per-request auth is injected as request data).
     schema: crate::server::graphql::OcSchema,
@@ -708,8 +703,7 @@ impl AppState {
             config_root: None,
             ownership: Arc::new(RwLock::new(HashMap::new())),
             stores: None,
-            skills_root: None,
-            skill_registry: Arc::new(OnceLock::new()),
+            skill_library: Arc::new(NoLibrary),
             instance_id: Arc::new(OnceLock::new()),
             presence: Arc::new(crate::server::presence::PresenceRegistry::new()),
             storage_kind: crate::store::StorageKind::default(),
@@ -898,17 +892,24 @@ impl AppState {
         self.config_root.as_deref().unwrap_or(&self.home)
     }
 
-    /// Sets the `companies/` directory whose bundles' `skills/` back the
-    /// top-level `skillRegistry` query. Set on the serve path; unset in
-    /// platform-provisioned mode.
-    pub fn with_skills_root(mut self, skills_root: impl Into<std::path::PathBuf>) -> Self {
-        self.skills_root = Some(skills_root.into());
+    /// Sets the shared skill library this host serves, resolved by
+    /// [`crate::company::skill_library::for_host`].
+    pub fn with_skill_library(mut self, library: Arc<dyn SkillLibrary>) -> Self {
+        self.skill_library = library;
         self
     }
 
-    /// The repo-level shared skill library directory, when set.
-    pub fn skills_root(&self) -> Option<&std::path::Path> {
-        self.skills_root.as_deref()
+    /// The shared skill library this host serves.
+    pub fn skill_library(&self) -> &Arc<dyn SkillLibrary> {
+        &self.skill_library
+    }
+
+    /// The shared skill library, loaded once so a library that cannot load
+    /// fails the caller here — a boot or a provision — rather than surfacing
+    /// later as an agent with no catalogue.
+    pub fn checked_skill_library(&self) -> crate::Result<Arc<dyn SkillLibrary>> {
+        self.skill_library.snapshot()?;
+        Ok(self.skill_library.clone())
     }
 
     /// Installs the opened storage backend's port handles (non-fs backends).
@@ -948,69 +949,20 @@ impl AppState {
             .get_or_init(|| crate::app::instance::load_or_create(&self.home))
     }
 
-    /// The skill registry, loaded from the `companies/` directory `dir` and
-    /// cached.
+    /// The shared skill library's documents, empty when this host serves none.
     ///
-    /// The first successful call parses every bundle's `skills/*/SKILL.md`
-    /// (`load_catalog_skills`) and caches the result; later calls return the
-    /// cached registry and ignore `dir`, since the shipped bundles are
-    /// immutable at runtime.
-    pub fn skill_registry(&self, dir: &Path) -> crate::Result<Arc<[SkillDoc]>> {
-        if let Some(cached) = self.skill_registry.get() {
-            return Ok(cached.clone());
-        }
-        // A *configured* catalog that is missing or not a directory is a host
-        // misconfiguration, not a parse failure `load_catalog_skills` would flag —
-        // it returns `Ok(empty)` for a nonexistent `dir`, which would silently
-        // downgrade a server-authoritative install to a client-authored one
-        // (the exact invariant `shared_skill_registry`'s doc forbids). Reject it
-        // as `Config` (a 500 / failed boot) before the load can flatten it away.
-        if !dir.is_dir() {
-            return Err(crate::OpenCompanyError::Config(format!(
-                "shared skill library at {} is not a directory",
-                dir.display()
-            )));
-        }
-        // `load_catalog_skills` reports a parse/validation failure via the same
-        // `DataParse`/`DataInvalid` variants a per-company workflow file uses,
-        // where the HTTP mapping (issue #1017) treats them as the *caller's*
-        // bad input (400/422). Here the "file" is the operator-provisioned
-        // shared library, not anything a caller submitted, so that mapping
-        // would misreport a host misconfiguration as a client error. Recast
-        // as `Config` — already the crate's "runtime setup is broken" variant
-        // (see `app/config.rs`) — so it renders the 500 documented above.
-        let registry: Arc<[SkillDoc]> = load_catalog_skills(dir)
-            .map_err(|error| {
-                crate::OpenCompanyError::Config(format!(
-                    "shared skill library at {} failed to load: {error}",
-                    dir.display()
-                ))
-            })?
-            .into();
-        // A concurrent caller may have set it first; keep whichever won.
-        let _ = self.skill_registry.set(registry.clone());
-        Ok(self.skill_registry.get().cloned().unwrap_or(registry))
-    }
-
-    /// The skill registry, empty when nothing backs it.
+    /// Empty means exactly one thing: no library is configured (a
+    /// platform-provisioned tenant with no copy to point at). Callers read that
+    /// as "there is nothing to resolve against" and fall back accordingly — the
+    /// install route, for one, then accepts the client's own metadata.
     ///
-    /// Empty means exactly one thing: no [`skills_root`](Self::skills_root) is
-    /// configured, so this host serves no shared library (platform-provisioned
-    /// mode). Callers read that as "there is nothing to resolve against" and
-    /// fall back accordingly — the install route, for one, then accepts the
-    /// client's own metadata.
-    ///
-    /// A *configured* root that cannot load is therefore never flattened to
-    /// empty: doing so would silently downgrade a server-authoritative install
-    /// into a client-authored one whenever a `SKILL.md` is malformed or the
-    /// directory is unreadable. The load error propagates instead, and callers
-    /// surface it (a server error on the HTTP surfaces, a failed boot on the
-    /// serve path).
+    /// A *configured* library that cannot load is never flattened to empty:
+    /// doing so would silently downgrade a server-authoritative install into a
+    /// client-authored one whenever a `SKILL.md` is malformed or the directory
+    /// is unreadable. The load error propagates instead, and callers surface it
+    /// (a server error on the HTTP surfaces, a failed boot on the serve path).
     pub fn shared_skill_registry(&self) -> crate::Result<Arc<[SkillDoc]>> {
-        let Some(dir) = self.skills_root() else {
-            return Ok(Arc::from([]));
-        };
-        self.skill_registry(dir)
+        self.skill_library.snapshot()
     }
 
     /// Installs the injected connection seams (DNS resolver, mail sender).

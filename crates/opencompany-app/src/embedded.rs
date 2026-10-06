@@ -316,6 +316,9 @@ pub async fn start_with_analytics(
         // host that silently disowns its own account.
         .with_hub_identity(std::sync::Arc::new(
             opencompany::server::hub_identity::HttpHubIdentityExchange::new(api_url),
+        ))
+        .with_skill_library(opencompany::company::skill_library::for_host_from_env(
+            None, None,
         ));
     // Read before `state` moves into `bind`. Minting here rather than on the
     // first `/spec` also means the console can be told who this host is without

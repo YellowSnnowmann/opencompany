@@ -126,6 +126,8 @@ pub mod setup;
 pub mod skill_draft;
 pub mod skill_effective;
 mod skill_file;
+/// The host's shared skill library and which directory a host serves it from.
+pub mod skill_library;
 pub mod skill_provenance;
 /// The scan every skill an operator did not write passes through, and the
 /// sanitizer that renders untrusted catalogue text as data. Always compiled:

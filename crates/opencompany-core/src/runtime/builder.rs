@@ -603,10 +603,11 @@ pub struct RuntimeBuilder {
     /// would quietly turn those assertions into statements about the baseline.
     /// The product entry points turn it on; nothing else does.
     seed_tasks: bool,
-    /// The repo-level shared skill library, passed to the harness so a pre-fix
-    /// registry install (whose stored `SKILL.md` is a one-line stub) is healed
-    /// from the live library. Empty when no repo checkout backs the host.
-    skills_registry: Arc<[crate::company::SkillDoc]>,
+    /// The host's shared skill library, snapshotted into the harness so a
+    /// pre-fix registry install (whose stored `SKILL.md` is a one-line stub) is
+    /// healed from it. [`NoLibrary`](crate::company::skill_library::NoLibrary)
+    /// when the host serves none.
+    skills_registry: Arc<dyn crate::company::skill_library::SkillLibrary>,
     /// Issue #85: the source-template provenance to stamp on this company's
     /// record at *first* launch. Set by the launch path when the manifest was
     /// seeded from a template directory; left `None` for a raw-manifest
@@ -729,7 +730,7 @@ impl RuntimeBuilder {
             hive_store: None,
             seed_dir: None,
             seed_tasks: false,
-            skills_registry: Arc::from([]),
+            skills_registry: Arc::new(crate::company::skill_library::NoLibrary),
             template_provenance: None,
             skip_activation_gate: false,
             feedback: None,
@@ -1093,11 +1094,13 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Sets the repo-level shared skill library (`skills/*/SKILL.md`), used by
-    /// the harness to heal pre-fix registry installs. Unset leaves it empty,
-    /// which simply skips healing.
-    pub fn with_skills_registry(mut self, registry: Arc<[crate::company::SkillDoc]>) -> Self {
-        self.skills_registry = registry;
+    /// Sets the host's shared skill library, used by the harness to heal
+    /// pre-fix registry installs. Unset serves none, which simply skips healing.
+    pub fn with_skills_registry(
+        mut self,
+        library: Arc<dyn crate::company::skill_library::SkillLibrary>,
+    ) -> Self {
+        self.skills_registry = library;
         self
     }
 
@@ -3131,7 +3134,7 @@ impl RuntimeBuilder {
                                 // supplies the committed bundles.
                                 skills: Some(ops.skills.clone()),
                                 skills_source_dir: self.seed_dir.clone(),
-                                skills_registry: self.skills_registry.clone(),
+                                skills_registry: self.skills_registry.snapshot()?,
                                 mcp_servers,
                                 // Orchestrator read surface + delegation queue
                                 // (#53): the company's facts + event log ground

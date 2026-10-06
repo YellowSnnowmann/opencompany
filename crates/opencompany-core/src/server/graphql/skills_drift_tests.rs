@@ -81,7 +81,9 @@ async fn row(
     }
     let state = state_with_company(home)
         .await
-        .with_skills_root(library_root.to_path_buf());
+        .with_skill_library(std::sync::Arc::new(
+            crate::company::skill_library::DirLibrary::explicit(library_root.to_path_buf()),
+        ));
     if let Some((stored, pinned)) = stored {
         seed(&state, stored, pinned).await;
     }
@@ -173,7 +175,9 @@ async fn rest_and_graphql_agree_about_one_install_standing() {
     .await;
     let state = state_with_company(home_dir.path())
         .await
-        .with_skills_root(library_dir.path().to_path_buf());
+        .with_skill_library(std::sync::Arc::new(
+            crate::company::skill_library::DirLibrary::explicit(library_dir.path().to_path_buf()),
+        ));
     seed(&state, &installed, &installed).await;
 
     let gql = query(router(state.clone()), SKILLS_QUERY).await;

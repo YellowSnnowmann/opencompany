@@ -498,10 +498,7 @@ fn desktop_builder(
     // one `DesktopRebuilder` rebuilds — meters into a `NullTracker`, so a
     // desktop that reports `instance_started` would never report a turn.
     .with_analytics(state.analytics())
-    // Empty unless a `skills_root` is set, which a packaged install has no
-    // checkout to supply — so this resolves to the honest "this host serves no
-    // shared registry" rather than inventing a directory to point at.
-    .with_skills_registry(state.shared_skill_registry()?);
+    .with_skills_registry(state.checked_skill_library()?);
     if let Some(stores) = state.stores() {
         builder = builder.with_stores(stores);
     }

@@ -348,17 +348,12 @@ fn company_source_dir(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
-/// The skill-registry catalog root for a company source directory: the
-/// `companies/` dir every bundle's `skills/` lives under.
+/// The skill library root for a company source directory: the `companies/`
+/// dir every bundle's `skills/` lives under.
 ///
-/// Normalizes `dir` with [`std::path::absolute`] first (Codex review, PR
-/// #2326): a relative `--company .` makes `company_source_dir` return `.`,
-/// whose `Path::parent()` is the empty path. An empty `skills_root` is
-/// rejected by `AppState::skill_registry` as "not a directory", taking the
-/// REST/GraphQL skill-registry reads down with a 500 even though the company
-/// loaded fine. `std::path::absolute` is lexical — no filesystem access, so it
-/// cannot fail on a nonexistent path — and joins against the process CWD, so
-/// `.`'s parent resolves to the real containing directory instead of empty.
+/// Normalizes `dir` with [`std::path::absolute`] first, so a relative
+/// `--company .` resolves to its real containing directory rather than the
+/// empty path, which the library refuses as "not a directory".
 fn skills_root_for(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let absolute = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
     absolute.parent().map(Path::to_path_buf)
@@ -522,7 +517,7 @@ fn company_builder(
     // in-place rebuilder and provisioning all get the same one — a
     // `NullTracker` in every build but a hosted tenant's.
     .with_analytics(state.analytics())
-    .with_skills_registry(state.shared_skill_registry()?)
+    .with_skills_registry(state.checked_skill_library()?)
     // The setup cards a real operator should find waiting on a real board. Turned
     // on here rather than inferred from the seed directory, so a test or a
     // fixture that builds a company gets the empty board it is asserting about —
@@ -2047,16 +2042,16 @@ async fn async_main(sso_secret: Option<opencompany::ports::types::SecretValue>) 
             // test send and outbound mail. Absent the features these stay `None`
             // and the surfaces degrade to "not wired yet" (404).
             state = state.with_connections(connections_runtime()?);
-            // The skill registry is every bundle's `skills/` under the
-            // `companies/` dir; derive that dir from the first loaded company's
-            // source dir so the `skillRegistry` query resolves the committed
-            // bundles, the baseline's included. See `skills_root_for`.
-            if let Some(skills_root) = companies
-                .first()
-                .and_then(|path| skills_root_for(&company_source_dir(path)))
-            {
-                state = state.with_skills_root(skills_root);
-            }
+            // The skill library is every bundle's `skills/` under the
+            // `companies/` dir the first loaded company came from, else the
+            // directory `OPENCOMPANY_SKILL_LIBRARY` names. See `skills_root_for`.
+            state =
+                state.with_skill_library(opencompany::company::skill_library::for_host_from_env(
+                    companies
+                        .first()
+                        .and_then(|path| skills_root_for(&company_source_dir(path))),
+                    None,
+                ));
             // Issue #290: with every builder input above now resolved, this host
             // can rebuild a company's runtime in place. Wired BEFORE the
             // companies register, so the very first `PUT …/inference` on a

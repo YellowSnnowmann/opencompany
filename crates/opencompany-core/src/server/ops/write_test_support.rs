@@ -120,11 +120,13 @@ pub(super) fn repo_skills_root() -> std::path::PathBuf {
 }
 
 pub(super) async fn state_with_registry(home: &std::path::Path) -> AppState {
-    // `with_skills_root` consumes and returns the state, so the registered
+    // `with_skill_library` consumes and returns the state, so the registered
     // company and seeded admin move along with it.
     state_with_company(home)
         .await
-        .with_skills_root(repo_skills_root())
+        .with_skill_library(std::sync::Arc::new(
+            crate::company::skill_library::DirLibrary::explicit(repo_skills_root()),
+        ))
 }
 
 /// A state over `home` whose shared skill library is the tree at `library`.
@@ -139,7 +141,9 @@ pub(super) async fn state_with_library(
 ) -> AppState {
     state_with_company(home)
         .await
-        .with_skills_root(library.to_path_buf())
+        .with_skill_library(std::sync::Arc::new(
+            crate::company::skill_library::DirLibrary::explicit(library.to_path_buf()),
+        ))
 }
 
 /// Writes `doc` as the shared library's copy of `slug`.

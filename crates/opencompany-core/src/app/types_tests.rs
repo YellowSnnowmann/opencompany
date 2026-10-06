@@ -414,14 +414,14 @@ fn static_tier_still_answers_and_is_outranked_by_a_projected_file() {
 
 #[test]
 fn skill_registry_loads_the_shipped_bundles_and_caches() {
-    let state = AppState::new(AppConfig::default());
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../companies");
+    let state = AppState::new(AppConfig::default()).with_skill_library(Arc::new(
+        crate::company::skill_library::DirLibrary::explicit(dir),
+    ));
 
-    let first = state.skill_registry(&dir).expect("registry loads");
+    let first = state.shared_skill_registry().expect("registry loads");
     assert!(first.iter().any(|skill| skill.slug == "web-research"));
     assert!(first.iter().any(|skill| skill.slug == "weekly-report"));
-    // The post-call half of the meeting pair (#240): its body must carry the
-    // full contract, not just the frontmatter description.
     let debrief = first
         .iter()
         .find(|skill| skill.slug == "call-debrief")
@@ -431,27 +431,44 @@ fn skill_registry_loads_the_shipped_bundles_and_caches() {
     assert!(debrief.body.contains("## Steps"), "{}", debrief.body);
     assert!(debrief.body.contains("## Output"), "{}", debrief.body);
 
-    // A second call returns the same cached allocation, ignoring the path.
     let second = state
-        .skill_registry(std::path::Path::new("/nonexistent"))
+        .clone()
+        .shared_skill_registry()
         .expect("cached registry");
-    assert!(Arc::ptr_eq(&first, &second));
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "a clone of the state shares the cached load"
+    );
 }
 
 #[test]
 fn skill_registry_rejects_a_configured_but_missing_library() {
-    // A configured `skills_root` that does not exist is a host
-    // misconfiguration. `load_catalog_skills` returns `Ok(empty)` for a missing
-    // dir, so without the `is_dir` guard the registry would silently flatten
-    // to empty — downgrading a server-authoritative install to a
-    // client-authored one, the invariant `shared_skill_registry` forbids.
+    let state = AppState::new(AppConfig::default()).with_skill_library(Arc::new(
+        crate::company::skill_library::DirLibrary::explicit("/nonexistent"),
+    ));
+    for err in [
+        state
+            .shared_skill_registry()
+            .expect_err("a missing configured library must fail, not load empty"),
+        state
+            .checked_skill_library()
+            .expect_err("the boot-time check refuses it too"),
+    ] {
+        assert!(
+            matches!(err, crate::OpenCompanyError::Config(_)),
+            "expected a Config error for a missing library, got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn a_state_with_no_library_serves_an_empty_registry() {
     let state = AppState::new(AppConfig::default());
-    let err = state
-        .skill_registry(std::path::Path::new("/nonexistent"))
-        .expect_err("a missing configured library must fail, not load empty");
-    assert!(
-        matches!(err, crate::OpenCompanyError::Config(_)),
-        "expected a Config error for a missing library, got {err:?}"
+    assert!(state.shared_skill_registry().unwrap().is_empty());
+    assert!(state.checked_skill_library().is_ok());
+    assert_eq!(
+        state.skill_library().origin(),
+        crate::company::skill_library::LibraryOrigin::None
     );
 }
 
