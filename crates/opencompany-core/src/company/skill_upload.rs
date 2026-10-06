@@ -4,7 +4,7 @@
 //! This module answers one question — what document did the operator upload,
 //! and under which slug — and refuses everything it cannot answer that for. It
 //! deliberately stops there: [`skill_validate`](super::skill_validate) decides
-//! whether the document is acceptable and [`skill_scan`](super::skill_scan)
+//! whether the document is acceptable and [`tinyskills::scan_skill`]
 //! decides whether its text is safe, so an upload passes the same two gates a
 //! registry install and a console-authored skill do.
 //!

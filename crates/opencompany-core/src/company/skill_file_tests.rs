@@ -176,3 +176,21 @@ fn a_doc_converts_to_and_from_its_flat_form() {
     assert_eq!(scan.body, "body\n");
     assert_eq!(scan.extra_frontmatter, doc.extra_frontmatter.as_slice());
 }
+
+#[test]
+fn every_shipped_bundle_skill_scans_clean() {
+    let companies = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../companies");
+    let docs = load_catalog_skills(&companies).expect("the bundles parse");
+    assert!(docs.len() >= 14, "sanity: the catalog is populated");
+
+    for doc in &docs {
+        let report = tinyskills::scan_skill(&doc.scan_document(), &[]);
+        assert_eq!(
+            report.verdict(),
+            tinyskills::Verdict::Pass,
+            "`{}` does not scan clean: {:?}",
+            doc.slug,
+            report.messages()
+        );
+    }
+}

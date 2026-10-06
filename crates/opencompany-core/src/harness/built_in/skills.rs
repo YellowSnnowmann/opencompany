@@ -33,11 +33,11 @@ use openhuman_core as oh;
 
 use oh::config::Config;
 use oh::skills::tools::{WorkflowDescribeTool, WorkflowListTool, WorkflowReadResourceTool};
+use tinyskills::sanitize_catalogue_text;
 use tinytools::Tool;
 
 use crate::company::SkillDoc;
 use crate::company::skill_effective::SkillBody;
-use crate::company::skill_scan::sanitize_catalogue_text;
 use crate::error::OpenCompanyError;
 use crate::ports::skills_state::SkillState;
 

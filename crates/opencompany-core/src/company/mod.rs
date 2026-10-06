@@ -129,11 +129,6 @@ mod skill_file;
 /// The host's shared skill library and which directory a host serves it from.
 pub mod skill_library;
 pub mod skill_provenance;
-/// The scan every skill an operator did not write passes through, and the
-/// sanitizer that renders untrusted catalogue text as data. Always compiled:
-/// the write plane runs it on every install in every build, and the sanitizer
-/// is the structural half of the same control.
-pub mod skill_scan;
 /// One skill's answer to "who is this scoped to" — the read-side inversion of
 /// the per-agent allowlist, shared by both transports so a skill's detail panel
 /// and a teammate's page cannot disagree about the same scope.

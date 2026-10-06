@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use crate::company::skill_scan::{Verdict, scan_skill};
+use tinyskills::{Verdict, scan_skill};
+
 use crate::company::skill_validate::validate_skill_md;
 use crate::error::OpenCompanyError;
 use crate::ports::types::CompanyId;
@@ -108,7 +109,7 @@ pub(crate) fn vet_skill(slug: &str, doc: &str, force: bool) -> Result<ScanSummar
     let valid = validate_skill_md(slug, doc).map_err(|problems| VetRefusal::Invalid {
         message: problems.join(" "),
     })?;
-    let report = scan_skill(&valid.doc, &[]);
+    let report = scan_skill(&valid.doc.scan_document(), &[]);
 
     if report.is_blocked() && !force {
         return Err(VetRefusal::Blocked {
