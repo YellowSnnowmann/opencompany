@@ -316,7 +316,11 @@ fn http_status_in(text: &str) -> Option<u16> {
 
 /// Whether the error chain smells like a TLS/certificate failure.
 fn looks_like_tls(err: &anyhow::Error) -> bool {
-    let full = format!("{err:#}").to_ascii_lowercase();
+    text_looks_like_tls(&format!("{err:#}").to_ascii_lowercase())
+}
+
+/// Whether lowercased error text smells like a TLS/certificate failure.
+fn text_looks_like_tls(lowered: &str) -> bool {
     [
         "tls",
         "certificate",
@@ -326,13 +330,63 @@ fn looks_like_tls(err: &anyhow::Error) -> bool {
         "self signed",
     ]
     .iter()
-    .any(|needle| full.contains(needle))
+    .any(|needle| lowered.contains(needle))
+}
+
+/// Classify a failed tool call from its structured outcome, for a call whose
+/// error value is no longer at hand.
+///
+/// `detail` is the call's result text, read for what the outcome does not
+/// carry: the HTTP status, a timeout, a TLS failure. `None` when the outcome is
+/// a refusal rather than a failure of the server — a tool the agent may not
+/// call, or arguments it got wrong — which the agent hears about in the result
+/// and the operator need not.
+pub fn classify_call_error(
+    error: &tinymcp::McpCallError,
+    detail: &str,
+    auth_configured: bool,
+) -> Option<ProbeClass> {
+    use tinymcp::tinymcp_bus::errors;
+
+    let kind = match error.code.as_str() {
+        errors::TOOL_NOT_ALLOWED | errors::INVALID_ARGUMENTS | errors::INVALID_ARGUMENT => {
+            return None;
+        }
+        _ if error.unauthorized || error.code == errors::UNAUTHORIZED => {
+            if error.advertises_oauth {
+                FailureKind::OauthRequired
+            } else {
+                status_kind(401, auth_configured)
+            }
+        }
+        errors::HTTP => http_status_in(detail).map_or(FailureKind::Unknown, |code| {
+            status_kind(code, auth_configured)
+        }),
+        errors::TRANSPORT => {
+            let lowered = detail.to_ascii_lowercase();
+            if lowered.contains("timed out") || lowered.contains("timeout") {
+                FailureKind::Timeout
+            } else if text_looks_like_tls(&lowered) {
+                FailureKind::Tls
+            } else {
+                FailureKind::Unreachable
+            }
+        }
+        errors::MALFORMED_RESPONSE => FailureKind::NotMcp,
+        errors::RPC => FailureKind::ToolCallRejected,
+        _ => FailureKind::Unknown,
+    };
+    Some(ProbeClass {
+        status: kind.status(),
+        auth_hint: kind.auth_hint(),
+        kind,
+    })
 }
 
 /// A short, actionable, operator-facing message for a classified failure. The
 /// caller MUST pass the result through [`scrub`] before persisting or surfacing
 /// it — `err` may embed a body or URL.
-pub fn operator_message(server: &str, class: &ProbeClass, err: &anyhow::Error) -> String {
+pub fn operator_message(server: &str, class: &ProbeClass, err: &dyn std::fmt::Display) -> String {
     match class.kind {
         FailureKind::CredentialRequired => format!(
             "MCP server '{server}' needs a credential. Add its API token (or query-parameter key) in its Token field, then Test again."

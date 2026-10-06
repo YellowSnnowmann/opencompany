@@ -8,6 +8,8 @@
 //!
 //! - [`probe`] — dialling a server once, classifying the failure, and
 //!   recording its health, tool inventory and identity (`openhuman`).
+//! - [`observe`] — what an agent's completed MCP calls did: metering the
+//!   answered ones and recording the failed ones (`openhuman`).
 //! - [`runtime`] — the company-scoped registry store: directory search,
 //!   installs, connections and calls (`openhuman`).
 //! - [`agent`] — what one agent reaches: the servers attached to its spec, the
@@ -22,6 +24,10 @@
 #[cfg(feature = "openhuman")]
 pub mod agent;
 pub mod decl;
+/// Reading a turn's MCP call outcomes into metering and operator-facing
+/// failures.
+#[cfg(feature = "openhuman")]
+pub mod observe;
 /// Per-tool approval policy for MCP servers: the tier vocabulary, the
 /// operator's stored overrides, and the ladder that resolves one from the
 /// other. Ungated — the console route that edits a policy ships without the
