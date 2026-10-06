@@ -7,6 +7,7 @@ use super::*;
 // would read as a dependency the module does not have.
 use super::vet::MAX_SKILL_DOC_BYTES;
 
+use crate::company::skill_effective;
 use crate::company::skill_validate::MAX_SLUG_CHARS;
 use crate::ports::types::CompanyId;
 
@@ -234,17 +235,33 @@ fn the_rest_list_and_the_graphql_resolver_agree() {
 
 /// The test the bug needed: what the console lists and what the harness
 /// writes into an agent's skill tree are the same set.
+///
+/// Every reader is driven through the loader it uses in production: the REST
+/// list, the GraphQL projection, the teammate picker and the document reader
+/// through `load_skill_set`, the harness through `load_skill_deltas` and
+/// `materialize`. A disable arrives both as a stored delta and through
+/// `[globals].disable`, so neither path can drop one the other keeps.
 #[cfg(feature = "openhuman")]
-#[test]
-fn the_rest_list_and_the_harness_effective_set_agree() {
+#[tokio::test]
+async fn the_rest_list_and_the_harness_effective_set_agree() {
+    use crate::company::skill_set::{self, SkillOwner};
+
     let tmp = tempfile::tempdir().unwrap();
     let ws = tempfile::tempdir().unwrap();
+    let store_root = tempfile::tempdir().unwrap();
     write_bundle(
         tmp.path(),
         "onboard",
         "---\nname: Onboard\ndescription: Get set up\n---\n# Onboard\n",
     );
-    let deltas = vec![
+    write_bundle(
+        tmp.path(),
+        "retired",
+        "---\nname: Retired\ndescription: Old\n---\n# Retired\n",
+    );
+    let store = crate::store::FsOps::new(store_root.path());
+    let company = CompanyId::new("agree");
+    for delta in [
         SkillState {
             slug: global_slug(),
             enabled: false,
@@ -263,8 +280,18 @@ fn the_rest_list_and_the_harness_effective_set_agree() {
             install: None,
             updated_at_millis: None,
         },
-    ];
+    ] {
+        crate::ports::skills_state::SkillStateStore::set(&store, &company, &delta)
+            .await
+            .unwrap();
+    }
+    let owner = SkillOwner { company: &company };
+    let disable = vec!["skill:retired".to_string()];
+    let bundle_root = skill_set::bundle_root(Some(tmp.path()));
 
+    let deltas = skill_set::load_skill_deltas(Some(&store), owner, &disable)
+        .await
+        .unwrap();
     crate::harness::skills::EffectiveSkills::materialize(
         ws.path().to_path_buf(),
         Some(tmp.path()),
@@ -274,7 +301,6 @@ fn the_rest_list_and_the_harness_effective_set_agree() {
         None,
     )
     .expect("materializes");
-
     let mut materialized: Vec<String> = std::fs::read_dir(ws.path().join("skills"))
         .expect("skill tree")
         .flatten()
@@ -282,29 +308,76 @@ fn the_rest_list_and_the_harness_effective_set_agree() {
         .collect();
     materialized.sort();
 
-    let mut listed: Vec<String> = list(Some(tmp.path()), &deltas)
-        .into_iter()
-        .filter(|row| row.enabled)
-        .map(|row| row.id)
-        .collect();
-    listed.sort();
+    let set = skill_set::load_skill_set(
+        &store,
+        owner,
+        &disable,
+        bundle_root.as_deref(),
+        Arc::from([]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(set.deltas, deltas, "both loaders fold the same deltas");
+
+    let enabled = |slugs: Vec<(String, bool)>| {
+        let mut out: Vec<String> = slugs
+            .into_iter()
+            .filter(|(_, on)| *on)
+            .map(|(slug, _)| slug)
+            .collect();
+        out.sort();
+        out
+    };
+    let rest = enabled(
+        set.effective
+            .iter()
+            .map(|skill| InstalledSkill::from_effective(skill, &set.library))
+            .map(|row| (row.id, row.enabled))
+            .collect(),
+    );
+    let gql = enabled(
+        crate::server::graphql::skills::project(&set.effective, &set.library, &[])
+            .into_iter()
+            .map(|row| (row.id.0, row.enabled))
+            .collect(),
+    );
+    let picker = enabled(
+        set.effective
+            .iter()
+            .map(|skill| (skill.slug.clone(), skill.enabled))
+            .collect(),
+    );
+    let readable = enabled(
+        set.effective
+            .iter()
+            .map(|skill| (skill.slug.clone(), skill.enabled && skill.content.is_some()))
+            .collect(),
+    );
 
     assert_eq!(
-        listed, materialized,
+        rest, materialized,
         "the console's enabled rows are exactly the skills the agents read"
     );
+    assert_eq!(gql, rest, "GraphQL reports the set REST does");
+    assert_eq!(
+        picker, rest,
+        "the teammate picker offers the set REST lists"
+    );
+    assert_eq!(readable, rest, "every enabled row has a document to read");
     assert!(
         !materialized.contains(&global_slug()),
         "the disabled global really is withheld from the agents"
     );
-    // Pinned against the baseline itself, so an agreement of two empty
-    // halves cannot pass for agreement.
+    assert!(
+        !materialized.contains(&"retired".to_string()),
+        "a `[globals].disable` entry is withheld from the agents"
+    );
     for doc in crate::globals::skills() {
         if doc.slug == global_slug() {
             continue;
         }
         assert!(
-            listed.contains(&doc.slug),
+            rest.contains(&doc.slug),
             "the console lists the global `{}` the agents read",
             doc.slug
         );

@@ -816,16 +816,12 @@ pub(super) async fn company_enabled_skills(
     state: &AppState,
     company: &ScopedCompany,
 ) -> Result<Vec<String>, ApiError> {
-    let mut deltas = company.runtime.skills().list(company.id()).await?;
-    deltas.extend(crate::company::skill_effective::globals_skill_disables(
-        &company.runtime.globals_disable().await?,
-    ));
-    let registry = state.shared_skill_registry()?;
-    Ok(crate::company::skill_set::resolve_company(
-        company.runtime.source_dir(),
-        &registry,
-        &deltas,
-    )?
+    Ok(crate::company::skill_set::load_runtime_skill_set(
+        &company.runtime,
+        state.shared_skill_registry()?,
+    )
+    .await?
+    .effective
     .into_iter()
     .filter(|skill| skill.enabled)
     .map(|skill| skill.slug)

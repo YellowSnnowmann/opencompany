@@ -2931,20 +2931,14 @@ impl HarnessPool {
         // surfaces until a restart (the regression). `build_roster`/`build_agent`
         // stay synchronous and fold these deltas into each agent's effective
         // skill set; the same Vec is reused for the rebuild below (no re-fetch).
-        let mut skill_deltas = match &deps.skills {
-            Some(store) => store.list(&company.id).await?,
-            None => Vec::new(),
-        };
-        // `[globals].disable = ["skill:…"]` reaches the effective set as a
-        // synthesized disabling delta rather than a second opt-out mechanism
-        // inside `EffectiveSkills`: the manifest and the console are then saying
-        // the same thing in the same vocabulary, and a disable always beats an
-        // enable there, so the company's own declaration wins over a console
-        // re-enable of a skill it opted out of.
-        skill_deltas.extend(crate::company::skill_effective::globals_skill_disables(
+        let skill_deltas = crate::company::skill_set::load_skill_deltas(
+            deps.skills.as_deref(),
+            crate::company::skill_set::SkillOwner {
+                company: &company.id,
+            },
             &company.manifest.globals.disable,
-        ));
-        let skill_deltas = skill_deltas;
+        )
+        .await?;
         let skill_fp = skill_delta_fingerprint(&skill_deltas);
 
         // Resolve the routed workspace documents (context routing) before the

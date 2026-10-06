@@ -27,7 +27,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
-use crate::company::skill_effective::{self, EffectiveSkill};
+use crate::company::skill_effective::EffectiveSkill;
 use crate::company::skill_scope::agents_for_skill;
 use crate::company::skill_set;
 use crate::company::skill_validate::{MAX_SLUG_CHARS, slugify, validate_slug, validate_slug_shape};
@@ -175,8 +175,9 @@ impl InstalledSkill {
     }
 
     /// Projects one entry of the company's effective set
-    /// ([`skill_effective::resolve`]) to the console shape. An entry no layer
-    /// supplied a document for is rendered from its slug alone.
+    /// ([`resolve`](crate::company::skill_effective::resolve)) to the console
+    /// shape. An entry no layer supplied a document for is rendered from its
+    /// slug alone.
     ///
     /// `registry` is the host's shared library, which a pinned install is
     /// measured against — the list is where an operator learns that one has
@@ -249,10 +250,10 @@ struct CreateSkill {
 }
 
 /// `GET …/skills` — the company's **effective** skill set, resolved by
-/// [`skill_effective::resolve`]: the global baseline, the company's on-disk
-/// bundles (`companies/<name>/skills/*/SKILL.md`), and the operator's
-/// [`SkillStateStore`] deltas, with the manifest's `[globals].disable` folded in
-/// as disabling deltas.
+/// [`resolve`](crate::company::skill_effective::resolve): the global baseline,
+/// the company's on-disk bundles (`companies/<name>/skills/*/SKILL.md`), and
+/// the operator's [`SkillStateStore`] deltas, with the manifest's
+/// `[globals].disable` folded in as disabling deltas.
 ///
 /// That is the same derivation the harness materializes for every agent, so the
 /// console reports the set the agents actually have — a disabled skill included,
@@ -261,18 +262,14 @@ async fn list_skills(
     State(state): State<AppState>,
     company: ScopedCompany,
 ) -> Result<Json<Vec<InstalledSkill>>, ApiError> {
-    let mut deltas = company.runtime.skills().list(company.id()).await?;
-    deltas.extend(skill_effective::globals_skill_disables(
-        &company.runtime.globals_disable().await?,
-    ));
-    let registry = state.shared_skill_registry()?;
-    let effective = skill_set::resolve_company(company.runtime.source_dir(), &registry, &deltas)?;
+    let set =
+        skill_set::load_runtime_skill_set(&company.runtime, state.shared_skill_registry()?).await?;
     let roster = scope::roster_scopes(&company.runtime).await?;
     Ok(Json(
-        effective
+        set.effective
             .iter()
             .map(|skill| {
-                InstalledSkill::from_effective(skill, &registry).with_agents(agents_for_skill(
+                InstalledSkill::from_effective(skill, &set.library).with_agents(agents_for_skill(
                     &skill.slug,
                     skill.enabled,
                     &roster,
@@ -550,13 +547,10 @@ async fn taken_slugs(
     state: &AppState,
     runtime: &crate::company::runtime::CompanyRuntime,
 ) -> Result<std::collections::HashSet<String>, ApiError> {
-    let mut deltas = runtime.skills().list(runtime.id()).await?;
-    deltas.extend(skill_effective::globals_skill_disables(
-        &runtime.globals_disable().await?,
-    ));
-    let registry = state.shared_skill_registry()?;
     Ok(
-        skill_set::resolve_company(runtime.source_dir(), &registry, &deltas)?
+        skill_set::load_runtime_skill_set(runtime, state.shared_skill_registry()?)
+            .await?
+            .effective
             .into_iter()
             .map(|skill| skill.slug)
             .collect(),
