@@ -29,17 +29,18 @@ import { isDesktopRuntime } from "@/api/transport";
 /**
  * Height of the reserved strip, in px, and the height of the drag band.
  *
- * It is the macOS traffic-light zone. 28px (this constant's prior value) was
- * tuned for an older macOS traffic-light size/spacing; on current macOS the
- * lights sit lower and need more room, so this row's icons centred noticeably
- * above them (operator-observed misalignment, not visually re-verifiable from
- * this sandbox — see `trafficLightPosition` in `tauri.conf.json`). 38px is the
- * value most third-party apps running a hidden/overlay title bar on current
- * macOS use for exactly this strip. `trafficLightPosition.y` in
- * `tauri.conf.json` is tuned against this number — see the note there — so the
- * two move together or the lights sit off-centre in their own strip.
+ * Measured, not estimated (two prior guesses — 28, then 38 — both missed):
+ * `osascript`/System Events against the live window gives the traffic
+ * lights' actual centre as 11px below the window's top edge (window y=30,
+ * light centreY=41, both screen coordinates) on this macOS build — whatever
+ * `trafficLightPosition.y` in `tauri.conf.json` is actually doing, this is
+ * where the lights land. 22 centres this row's icons (flex `items-center`,
+ * so centre is always height/2) at that same 11px, which is the only thing
+ * that has to agree with reality; `trafficLightPosition` itself is left
+ * alone rather than tuned further against an effect not isolated by measuring
+ * it on its own.
  */
-export const WINDOW_CHROME_HEIGHT = 38;
+export const WINDOW_CHROME_HEIGHT = 22;
 
 /**
  * How far into the window the traffic lights reach, in px.
