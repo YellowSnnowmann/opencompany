@@ -11,21 +11,12 @@
 //! ## The archive is the attack surface
 //!
 //! A `.zip` is a list of paths and byte counts supplied by whoever built it,
-//! and every one of those is hostile input. The shape checks here run over the
-//! archive's directory **before** a single entry is decompressed, so a bomb is
-//! refused by arithmetic rather than by running out of memory:
-//!
-//! * an entry count ceiling ([`MAX_ARCHIVE_ENTRIES`]);
-//! * the sum of the declared uncompressed sizes against
-//!   [`MAX_ARCHIVE_BYTES`] — a 10 MB entry inside a 40 KB archive is visible
-//!   here and nowhere later;
-//! * absolute paths, `..` traversal, and backslash-separated paths;
-//! * symlinks, which are how an archive reaches a path it never names;
-//! * an archive nested inside the archive.
-//!
-//! The declared sizes are the archive's own claim, so the one entry that is
-//! read is read through a bounded reader as well, behind whatever the archive
-//! reader itself does with a header that disagrees with its entry.
+//! and every one of those is hostile input. [`tinyskills::read_skill_archive`]
+//! reads it under [`tinyskills::MAX_ARCHIVE_ENTRIES`] and
+//! [`tinyskills::MAX_ARCHIVE_BYTES`], checking every entry's path, link bit,
+//! nesting and declared size before anything is decompressed, and reading
+//! content through a bound. This module turns each refusal into the sentence
+//! the upload dialog shows against the file's row.
 //!
 //! ## Bundled resource files are refused, not dropped
 //!
@@ -35,29 +26,9 @@
 //! and silently discarding the rest would hand the operator a skill whose
 //! procedure references files no agent will ever find.
 
-use std::io::Read;
+use tinyskills::{ArchiveError, ArchiveFormat, ArchiveLimits, SKILL_MD, read_skill_archive};
 
-use super::skill_validate::{MAX_SLUG_CHARS, slugify, validate_slug};
-
-/// The most entries an uploaded archive may declare.
-///
-/// A skill is one document, and — until bundled resources have somewhere to
-/// live — an archive holding one is a `SKILL.md` and the directories above it.
-/// The ceiling is far above that and still low enough that the shape pass is
-/// bounded work on an archive the host has not yet trusted.
-pub const MAX_ARCHIVE_ENTRIES: usize = 64;
-
-/// The most an uploaded archive may hold once expanded, in bytes.
-///
-/// Checked against the sum of the entries' **declared** uncompressed sizes
-/// before anything is decompressed, which is the only point at which a zip bomb
-/// is cheap to refuse. Four times the single-document ceiling, so a legitimate
-/// archive carrying the largest `SKILL.md` the write plane will store has
-/// headroom for the directory entries around it.
-pub const MAX_ARCHIVE_BYTES: u64 = 1024 * 1024;
-
-/// The file name an archive's skill document has to have.
-pub const SKILL_DOC_NAME: &str = "SKILL.md";
+use super::skill_validate::{slugify, validate_slug};
 
 /// A document read off an upload, ready for validation and the scan.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,7 +66,7 @@ pub fn read_upload(filename: &str, bytes: &[u8]) -> Result<UploadedSkill, String
 /// There is no directory to take a slug from, so the document names itself the
 /// same way console authoring does — through [`slugify`] over the display name.
 fn read_markdown(bytes: &[u8]) -> Result<UploadedSkill, String> {
-    let doc = decode(bytes)?;
+    let doc = String::from_utf8(bytes.to_vec()).map_err(|_| NOT_UTF8.to_string())?;
     let name = frontmatter_name(&doc).ok_or(
         "that file has no `name` in its frontmatter, so there is nothing to store it under. A \
          skill starts with a `---` block carrying `name` and `description`.",
@@ -107,229 +78,98 @@ fn read_markdown(bytes: &[u8]) -> Result<UploadedSkill, String> {
 }
 
 /// Reads an archive that carries exactly one `SKILL.md` and nothing else.
-/// Whether an archive entry is macOS bookkeeping rather than skill content.
-///
-/// Right-clicking a folder and choosing Compress is how an operator on a Mac
-/// makes a skill archive, and Finder puts an `__MACOSX/` tree of AppleDouble
-/// sidecars beside the folder plus a `.DS_Store` inside it. Counting those
-/// makes the archive read as two top-level directories carrying bundled
-/// extras, so the upload is refused for a shape the operator cannot see and
-/// did not choose. They are dropped after the path and symlink checks, which
-/// still apply to every entry.
-fn is_mac_metadata(path: &str) -> bool {
-    let mut segments = path.split('/');
-    if segments.clone().any(|segment| segment == "__MACOSX") {
-        return true;
-    }
-    segments
-        .next_back()
-        .is_some_and(|name| name == ".DS_Store" || name.starts_with("._"))
-}
-
 fn read_archive(bytes: &[u8]) -> Result<UploadedSkill, String> {
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-        .map_err(|error| format!("that archive could not be read: {error}."))?;
+    let archive = read_skill_archive(ArchiveFormat::Zip, bytes, &ArchiveLimits::default())
+        .map_err(|error| archive_problem(bytes, error))?;
 
-    if archive.len() > MAX_ARCHIVE_ENTRIES {
-        return Err(format!(
-            "that archive holds {} entries — an uploaded skill may hold {MAX_ARCHIVE_ENTRIES}.",
-            archive.len()
-        ));
-    }
-
-    let mut declared: u64 = 0;
-    let mut files = Vec::new();
-    for index in 0..archive.len() {
-        let entry = archive
-            .by_index_raw(index)
-            .map_err(|error| format!("that archive could not be read: {error}."))?;
-        let path = entry.name().to_string();
-        check_entry_path(&path)?;
-        if is_symlink(entry.unix_mode()) {
-            return Err(format!(
-                "`{path}` in that archive is a symbolic link. An uploaded skill is read as files, \
-                 and a link is how an archive reaches a path it never names."
-            ));
-        }
-        declared = declared.saturating_add(entry.size());
-        if declared > MAX_ARCHIVE_BYTES {
-            return Err(format!(
-                "that archive expands to more than {} KB, which is more than an uploaded skill \
-                 may hold.",
-                MAX_ARCHIVE_BYTES / 1024
-            ));
-        }
-        if entry.is_dir() {
-            continue;
-        }
-        if is_nested_archive(&path) {
-            return Err(format!(
-                "`{path}` in that archive is itself an archive. An uploaded skill is read one \
-                 level deep."
-            ));
-        }
-        if is_mac_metadata(&path) {
-            continue;
-        }
-        files.push(path);
-    }
-
-    let root = single_root(&files)?;
-    let wanted = match &root {
-        Some(dir) => format!("{dir}/{SKILL_DOC_NAME}"),
-        None => SKILL_DOC_NAME.to_string(),
-    };
-    if !files.iter().any(|path| path == &wanted) {
-        return Err(format!(
-            "that archive has no `{SKILL_DOC_NAME}`. A skill archive carries one at the top \
-             level, or inside a single directory."
-        ));
-    }
-
-    let extras: Vec<&str> = files
-        .iter()
-        .filter(|path| *path != &wanted)
-        .map(String::as_str)
-        .collect();
-    if !extras.is_empty() {
+    if !archive.resources.is_empty() {
+        let prefix = archive
+            .root
+            .as_ref()
+            .map(|dir| format!("{dir}/"))
+            .unwrap_or_default();
+        let extras: Vec<String> = archive
+            .resources
+            .iter()
+            .map(|file| format!("{prefix}{}", file.path))
+            .collect();
         return Err(format!(
             "that archive also carries {}. A skill stores one document, so there is nowhere to \
-             keep bundled files — upload a `{SKILL_DOC_NAME}` on its own rather than have them \
+             keep bundled files — upload a `{SKILL_MD}` on its own rather than have them \
              dropped.",
             join_names(&extras)
         ));
     }
 
-    let doc = {
-        let entry = archive
-            .by_name(&wanted)
-            .map_err(|error| format!("`{wanted}` could not be read: {error}."))?;
-        // The sizes above are the archive's own claim about itself. Reading
-        // through a bound turns a header that lies about its entry into a
-        // refusal instead of whatever the entry actually expands to.
-        let mut buffer = Vec::new();
-        entry
-            .take(MAX_ARCHIVE_BYTES + 1)
-            .read_to_end(&mut buffer)
-            .map_err(|error| format!("`{wanted}` could not be read: {error}."))?;
-        if buffer.len() as u64 > MAX_ARCHIVE_BYTES {
-            return Err(format!(
-                "`{wanted}` expands to more than {} KB, which is more than an uploaded skill may \
-                 hold.",
-                MAX_ARCHIVE_BYTES / 1024
-            ));
-        }
-        decode(&buffer)?
-    };
-
-    let slug = match root {
+    let slug = match archive.root {
         Some(dir) => {
             validate_slug(&dir).map_err(|problem| {
                 format!("that archive's directory is not a usable skill name. {problem}")
             })?;
             dir
         }
-        None => slugify(&frontmatter_name(&doc).ok_or_else(|| {
+        None => slugify(&frontmatter_name(&archive.document).ok_or_else(|| {
             format!(
-                "that archive's `{SKILL_DOC_NAME}` has no `name` in its frontmatter, so there is \
+                "that archive's `{SKILL_MD}` has no `name` in its frontmatter, so there is \
                  nothing to store it under."
             )
         })?),
     };
 
-    Ok(UploadedSkill { slug, doc })
+    Ok(UploadedSkill {
+        slug,
+        doc: archive.document,
+    })
 }
 
-/// Refuses an archive entry whose path escapes the archive.
-///
-/// Every form is refused by name rather than by normalizing the path, so the
-/// message says which one was found and a test can aim at one shape each.
-fn check_entry_path(path: &str) -> Result<(), String> {
-    if path.is_empty() {
-        return Err("that archive holds an entry with no name.".to_string());
-    }
-    if path.contains('\\') {
-        return Err(format!(
+const NOT_UTF8: &str = "that file is not UTF-8 text, so it is not a `SKILL.md`.";
+
+/// The upload dialog's sentence for an archive [`read_skill_archive`] refused.
+fn archive_problem(bytes: &[u8], error: ArchiveError) -> String {
+    let inside = "An uploaded skill is read as a directory of its own, so every entry has to sit \
+                  inside it.";
+    let no_single = "A skill archive carries one at the top level, or inside a single directory.";
+    match error {
+        ArchiveError::Unreadable(reason) => format!("that archive could not be read: {reason}."),
+        ArchiveError::TooManyEntries { max } => {
+            let held = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+                .map(|archive| archive.len())
+                .unwrap_or(max + 1);
+            format!("that archive holds {held} entries — an uploaded skill may hold {max}.")
+        }
+        ArchiveError::TooLarge { max_bytes } => format!(
+            "that archive expands to more than {} KB, which is more than an uploaded skill may \
+             hold.",
+            max_bytes / 1024
+        ),
+        ArchiveError::EmptyPath => "that archive holds an entry with no name.".to_string(),
+        ArchiveError::BackslashPath(path) => format!(
             "`{path}` in that archive is not a relative path. Archive entries separate \
              directories with `/`."
-        ));
-    }
-    if path.starts_with('/') || is_windows_absolute(path) {
-        return Err(format!(
-            "`{path}` in that archive is an absolute path. An uploaded skill is read as a \
-             directory of its own, so every entry has to sit inside it."
-        ));
-    }
-    if path.split('/').any(|part| part == "..") {
-        return Err(format!(
-            "`{path}` in that archive points outside it. An uploaded skill is read as a directory \
-             of its own, so every entry has to sit inside it."
-        ));
-    }
-    if path.chars().count() > MAX_SLUG_CHARS * 8 {
-        return Err("that archive holds an entry with an unreasonably long path.".to_string());
-    }
-    Ok(())
-}
-
-/// Whether `path` is a Windows drive-qualified path (`C:\…`, `C:/…`).
-fn is_windows_absolute(path: &str) -> bool {
-    let mut chars = path.chars();
-    matches!((chars.next(), chars.next()), (Some(c), Some(':')) if c.is_ascii_alphabetic())
-}
-
-/// Whether the entry's Unix mode marks it a symbolic link.
-fn is_symlink(mode: Option<u32>) -> bool {
-    mode.is_some_and(|mode| mode & 0o170_000 == 0o120_000)
-}
-
-/// Whether the entry's own name says it is another archive.
-fn is_nested_archive(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    [
-        ".zip", ".skill", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar",
-    ]
-    .iter()
-    .any(|suffix| lower.ends_with(suffix))
-}
-
-/// The single top directory every file sits under, or `None` when they all sit
-/// at the archive's root.
-///
-/// Anything else — two top directories, or a file at the root beside a
-/// directory — is refused, because the spec's shape is a skill directory and
-/// there is no rule that would pick between two of them.
-fn single_root(files: &[String]) -> Result<Option<String>, String> {
-    let mut roots = Vec::new();
-    let mut at_root = false;
-    for path in files {
-        match path.split_once('/') {
-            Some((head, _)) => {
-                if !roots.iter().any(|seen| seen == head) {
-                    roots.push(head.to_string());
-                }
-            }
-            None => at_root = true,
+        ),
+        ArchiveError::AbsolutePath(path) => {
+            format!("`{path}` in that archive is an absolute path. {inside}")
         }
+        ArchiveError::Traversal(path) => {
+            format!("`{path}` in that archive points outside it. {inside}")
+        }
+        ArchiveError::PathTooLong => {
+            "that archive holds an entry with an unreasonably long path.".to_string()
+        }
+        ArchiveError::Link(path) => format!(
+            "`{path}` in that archive is a symbolic link. An uploaded skill is read as files, and \
+             a link is how an archive reaches a path it never names."
+        ),
+        ArchiveError::NestedArchive(path) => format!(
+            "`{path}` in that archive is itself an archive. An uploaded skill is read one level \
+             deep."
+        ),
+        ArchiveError::MultipleRoots => {
+            format!("that archive has no single `{SKILL_MD}`. {no_single}")
+        }
+        ArchiveError::NoSkillDocument => format!("that archive has no `{SKILL_MD}`. {no_single}"),
+        ArchiveError::NotUtf8 => NOT_UTF8.to_string(),
     }
-    match (at_root, roots.len()) {
-        (_, 0) => Ok(None),
-        (false, 1) => Ok(Some(roots.remove(0))),
-        _ => Err(format!(
-            "that archive has no single `{SKILL_DOC_NAME}`. A skill archive carries one at the \
-             top level, or inside a single directory."
-        )),
-    }
-}
-
-/// Decodes upload bytes as UTF-8.
-///
-/// Refused rather than replaced: a document that is not text is not a
-/// `SKILL.md`, and lossy decoding would store replacement characters in every
-/// agent's prompt.
-fn decode(bytes: &[u8]) -> Result<String, String> {
-    String::from_utf8(bytes.to_vec())
-        .map_err(|_| "that file is not UTF-8 text, so it is not a `SKILL.md`.".to_string())
 }
 
 /// The `name` scalar from a document's frontmatter, when it has one.
@@ -343,7 +183,7 @@ fn frontmatter_name(doc: &str) -> Option<String> {
 }
 
 /// Renders a handful of file names as a readable list.
-fn join_names(names: &[&str]) -> String {
+fn join_names(names: &[String]) -> String {
     const SHOWN: usize = 3;
     let shown: Vec<String> = names
         .iter()

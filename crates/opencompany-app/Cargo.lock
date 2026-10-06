@@ -3991,6 +3991,7 @@ dependencies = [
  "tinyinference-llm",
  "tinymcp",
  "tinysearch-bus",
+ "tinyskills",
  "tinytools",
  "tinytools-agent",
  "tinytools-std",
@@ -7608,14 +7609,17 @@ dependencies = [
 name = "tinyskills"
 version = "0.2.7"
 dependencies = [
+ "flate2",
  "rustix",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2 0.11.0",
+ "tar",
  "thiserror 2.0.20",
  "tokio",
  "url",
+ "zip 7.2.0",
 ]
 
 [[package]]
