@@ -214,7 +214,7 @@ pub trait SecretStore: Send + Sync {
 ```
 
 There is no `delete`: callers clear a secret by writing an empty value
-(`src/company/mcp.rs::clear_auth`, `src/company/inference.rs::clear_key`), so an
+(`src/mcp/decl/store.rs::clear_auth`, `src/company/inference.rs::clear_key`), so an
 empty value and an unset key are **different states** and a backend must keep
 them apart — collapsing `""` into `None` would fall back to whatever the
 manifest or the environment supplies and silently undo the operator's

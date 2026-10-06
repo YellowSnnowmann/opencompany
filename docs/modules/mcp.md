@@ -12,6 +12,10 @@ manager to launch one with.
 
 Directory browsing landed in issue #1270; see [The directory](#the-directory).
 
+The code lives under `src/mcp/` — declarations, per-tool policy, probing, the
+registry store and what each agent reaches; see its
+[README](../../src/mcp/README.md).
+
 ## Where servers come from
 
 A company's *effective* MCP servers are the union of the sources below, merged
@@ -44,7 +48,7 @@ its `manifest` badge):
    [The directory](#the-directory).
 
 Validation (manifest + API): unique names, an `http(s)://` endpoint, and no
-stdio `command`. See [`company::mcp`](../../src/company/mcp.rs).
+stdio `command`. See [`mcp::decl`](../../src/mcp/decl/validate.rs).
 
 ## Credentials are write-only
 
@@ -56,18 +60,20 @@ read shape carries only an `authConfigured` boolean.
 The agent-facing surface is redacted too: no company agent's tool scope names
 `mcp_list_servers`, because OpenHuman's own implementation serializes each
 server's credentials into agent-visible output. The persona brief names the
-agent's granted servers instead — names only, no endpoint or auth. A regression
-test drives `mcp_call_tool` against an in-process MCP server and asserts the
-bearer reaches the *server* over the wire but never appears in any `ToolResult`.
+agent's granted servers instead — names only, no endpoint or auth. Regression
+tests drive the native `mcp_call_tool` against an in-process MCP server and
+assert the bearer reaches the *server* over the wire but never appears in any
+`ToolResult`, including when the server reflects it into an error or a success.
 
 ## Per-agent scoping
 
 An agent reaches a server named `<slug>` only when its manifest `tools` grants
 match `mcp:<slug>` — the same glob semantics as every other tool grant
-(`mcp:*` grants all). `registry_for_agent` filters the resolved decls to the
-enabled, granted set and folds them into a one-registry `oh::Config` with
-`gitbooks.enabled = false` (so OpenHuman's default gitbooks server never leaks
-into a tenant agent). An agent with no granted MCP server gets no bridge tools.
+(`mcp:*` grants all). `resolve_for_agent` filters the resolved decls to the
+enabled, granted set and attaches each to the agent's spec, with every tool the
+agent's per-tool policy blocks on its deny list; `gitbooks.enabled = false` keeps
+OpenHuman's default gitbooks server out. An agent with no granted MCP server has
+no `mcp_list_tools` / `mcp_call_tool` in its tool scope.
 
 ```toml
 [[agent]]
@@ -224,8 +230,8 @@ explicit grant that reaches them and the per-install scoping under it live in
 ## Which builds can honour a server (issue #567)
 
 The management routes above are **ungated** — they ship in every build. The
-agent-side bridge is not: `registry_for_agent` is pushed onto a teammate's belt
-behind `#[cfg(feature = "mcp")]`. Three configurations, only one of which the
+agent-side bridge is not: servers are attached to a teammate's spec only behind
+`#[cfg(feature = "mcp")]`. Three configurations, only one of which the
 routes alone distinguish:
 
 | Build | CRUD | Discovery / probe | Agent tools |

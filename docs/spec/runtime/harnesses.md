@@ -314,7 +314,7 @@ of it, so a turn can lose a call without being anywhere near its own limit:
   answered in half a minute has already cost more than the answer is worth. Only
   the bring-your-own providers; the managed tool keeps upstream's own policy.
 - **MCP** — each server declaration's `timeout_secs`, forwarded verbatim to the
-  transport by `server_config` in `src/harness/built_in/mcp.rs`. Per server, set
+  transport by `server_config` in `src/mcp/agent/mod.rs`. Per server, set
   in the company's MCP config, and the one bound on this page an operator can
   actually edit.
 
