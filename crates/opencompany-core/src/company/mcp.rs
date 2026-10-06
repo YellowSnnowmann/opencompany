@@ -131,7 +131,7 @@ pub enum AuthMaterial {
     /// needs zero vendor changes — but it means the credential ends up in the
     /// request URL, which is exactly why the error-surfacing seams strip query
     /// strings before persisting or emitting anything (see
-    /// [`crate::harness::mcp_probe::scrub`]).
+    /// [`crate::redact::scrub`]).
     QueryParam { name: String, value: String },
     /// An OAuth 2.0 (authorization-code + PKCE) credential obtained through the
     /// console's browser sign-in flow ([`crate::company::mcp_oauth`]). The
@@ -170,7 +170,7 @@ impl AuthMaterial {
 
     /// The concrete credential substrings this material carries, for the
     /// scrubber's known-secret set. Never surfaced to any caller that
-    /// serializes — used only to feed [`crate::harness::mcp_probe::scrub`].
+    /// serializes — used only to feed [`crate::redact::scrub`].
     pub fn secret_values(&self) -> Vec<String> {
         match self {
             AuthMaterial::None => Vec::new(),
@@ -608,7 +608,7 @@ impl McpStatus {
 /// The last probe outcome for one MCP server.
 ///
 /// **Security invariant**: `message` is always scrubbed before it reaches this
-/// struct (via [`crate::harness::mcp_probe::scrub`]) and this struct is the only
+/// struct (via [`crate::redact::scrub`]) and this struct is the only
 /// thing [`save_health`] persists — so a credential can never land in the health
 /// key, the console, or an API response. `auth_hint` is a stable reason code
 /// (`oauth_required` / `token_rejected` / `credential_required`), never a URL or
@@ -947,7 +947,7 @@ pub fn normalize_default_servers(raw: &[McpServer]) -> (Vec<McpServer>, Vec<Stri
 }
 
 /// Whether an endpoint's authority carries a `user[:pass]@` userinfo section.
-/// Uses the same cheap authority-splitting as [`crate::harness::mcp_probe::scrub`]
+/// Uses the same cheap authority-splitting as [`crate::redact::scrub`]
 /// so a `?email=a@b` query never trips it.
 fn has_userinfo(url: &str) -> bool {
     let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(url);

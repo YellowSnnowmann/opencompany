@@ -97,8 +97,7 @@ async fn callback(State(state): State<AppState>, Query(query): Query<CallbackQue
         Err(err) => {
             // `complete` never echoes a secret in its error, but scrub anyway
             // against this flow's own known secrets as defence in depth.
-            let scrubbed =
-                crate::harness::mcp_probe::scrub(&err.to_string(), &pending_secret_hints(&pending));
+            let scrubbed = crate::redact::scrub(&err.to_string(), &pending_secret_hints(&pending));
             log::warn!(
                 "[mcp-oauth] token exchange failed for company={} server={}: {scrubbed}",
                 pending.company_id.as_ref(),

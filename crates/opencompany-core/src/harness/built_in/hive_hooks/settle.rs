@@ -318,21 +318,18 @@ impl SettleTurn<'_> {
             let reply = std::mem::take(&mut outcome.reply);
             outcome.reply = match agent.classify_turn(agent.unmask(Ok(reply)), elapsed) {
                 AttemptOutcome::Reply(reply) => reply,
-                AttemptOutcome::Empty => {
-                    crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[])
-                }
+                AttemptOutcome::Empty => crate::redact::scrub(GRACEFUL_EMPTY_REPLY, &[]),
                 AttemptOutcome::BudgetPaused { summary } => {
-                    budget_summary = Some(crate::harness::mcp_probe::redact(&summary, &[]));
+                    budget_summary = Some(crate::redact::redact(&summary, &[]));
                     BUDGET_PAUSED_PLACEHOLDER_REPLY.to_string()
                 }
                 AttemptOutcome::CeilingPaused { summary, elapsed } => {
-                    ceiling = Some((crate::harness::mcp_probe::redact(&summary, &[]), elapsed));
+                    ceiling = Some((crate::redact::redact(&summary, &[]), elapsed));
                     CEILING_PAUSED_PLACEHOLDER_REPLY.to_string()
                 }
-                AttemptOutcome::Hard(error) => crate::harness::mcp_probe::scrub(
-                    &format!("I could not finish this: {error}"),
-                    &[],
-                ),
+                AttemptOutcome::Hard(error) => {
+                    crate::redact::scrub(&format!("I could not finish this: {error}"), &[])
+                }
             };
             outcome
         });

@@ -158,7 +158,7 @@ async fn a_metering_failure_does_not_swallow_a_stale_marker_retirement() {
 /// `summary`.
 ///
 /// Before this fix, only the copy returned as the turn's authored REPLY
-/// was scrubbed (`Ok(mcp_probe::scrub(&summary, &[]))`); the copy stored
+/// was scrubbed (`Ok(redact::scrub(&summary, &[]))`); the copy stored
 /// into the `budget_pause_summary` mutex slot — which becomes
 /// `TurnOutcome::budget_paused.summary`, and from there the durable
 /// `BudgetPauseMarker.summary` AND the chat notice text

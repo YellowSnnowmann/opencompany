@@ -5,9 +5,9 @@
 //!
 //! `composio_list_tools` serialized the backend's whole `ComposioToolsResponse`
 //! with `serde_json::to_string_pretty` and passed it to
-//! [`scrub`](crate::harness::mcp_probe::scrub) on the way out. `scrub` is the
+//! [`scrub`](crate::redact::scrub) on the way out. `scrub` is the
 //! MCP *message* sanitiser: its third pass caps at
-//! [`SCRUB_MAX_BYTES`](crate::harness::mcp_probe::SCRUB_MAX_BYTES) — **300
+//! [`SCRUB_MAX_BYTES`](crate::redact::SCRUB_MAX_BYTES) — **300
 //! bytes**, the right size for a one-line failure sentence and three orders of
 //! magnitude too small for a catalogue.
 //!
@@ -36,7 +36,7 @@
 //!
 //! The fix is in two halves. The *security* half of `scrub` (credential
 //! redaction, URL-query stripping) is unconditional and moves to
-//! [`redact`](crate::harness::mcp_probe::redact), which never shortens. The
+//! [`redact`](crate::redact::redact), which never shortens. The
 //! *length* half moves here, where a body can be sized as a body and a cut can
 //! describe itself.
 //!

@@ -971,8 +971,10 @@ async fn discover_tools(
                 use crate::harness::mcp_probe;
                 let secrets = decl.auth.secret_values();
                 let class = mcp_probe::classify_mcp_error(&err, decl.auth.is_configured(), false);
-                let message =
-                    mcp_probe::scrub(&mcp_probe::operator_message(&name, &class, &err), &secrets);
+                let message = crate::redact::scrub(
+                    &mcp_probe::operator_message(&name, &class, &err),
+                    &secrets,
+                );
                 let health = McpHealth {
                     status: class.status,
                     message: message.clone(),

@@ -77,8 +77,8 @@
 //! ## Write-only credential
 //!
 //! The token is write-only. Whatever value a call resolves is fed to
-//! [`redact`](crate::harness::mcp_probe::redact) (successes) or
-//! [`scrub`](crate::harness::mcp_probe::scrub) (errors) as a known secret, so it
+//! [`redact`](crate::redact::redact) (successes) or
+//! [`scrub`](crate::redact::scrub) (errors) as a known secret, so it
 //! cannot survive into **any** `ToolResult`; it is absent from every tracing
 //! line and from the [`Debug`] impl. Only non-secret status (backend URL,
 //! toolkit allowlist) is ever surfaced.
@@ -579,10 +579,10 @@ mod live {
 
     use crate::company::composio::CatalogEntry;
     use crate::harness::composio_catalog as catalog;
-    use crate::harness::mcp_probe::{redact, scrub};
     use crate::metering::record_oauth_call;
     use crate::ports::UsageMeter;
     use crate::ports::now_millis;
+    use crate::redact::{redact, scrub};
 
     use crate::harness::built_in::composio_module::ManagedComposio;
     use oh::integrations::IntegrationClient;
@@ -1086,7 +1086,7 @@ mod live {
     /// # Why not `scrub` (issue #410)
     ///
     /// This used to call [`scrub`], whose third pass caps its output at
-    /// [`SCRUB_MAX_BYTES`](crate::harness::mcp_probe::SCRUB_MAX_BYTES) — 300
+    /// [`SCRUB_MAX_BYTES`](crate::redact::SCRUB_MAX_BYTES) — 300
     /// bytes, the right size for the one-line MCP failure sentence it was built
     /// for and a catastrophe for a tool body. Every Composio result was cut to
     /// 300 bytes and terminated with a bare `…`: an action listing became the

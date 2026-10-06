@@ -1602,18 +1602,18 @@ impl CompanyAgent {
             turn.send()
         };
         let slot_budget = |summary: String| {
-            let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+            let redacted = crate::redact::redact(&summary, &[]);
             if let Ok(mut slot) = budget_pause_summary.lock() {
                 *slot = Some(redacted.clone());
             }
-            crate::harness::mcp_probe::scrub(&redacted, &[])
+            crate::redact::scrub(&redacted, &[])
         };
         let slot_ceiling = |summary: String, elapsed: Duration| {
-            let redacted = crate::harness::mcp_probe::redact(&summary, &[]);
+            let redacted = crate::redact::redact(&summary, &[]);
             if let Ok(mut slot) = ceiling_pause.lock() {
                 *slot = Some((redacted.clone(), elapsed));
             }
-            crate::harness::mcp_probe::scrub(&redacted, &[])
+            crate::redact::scrub(&redacted, &[])
         };
         let turn_body = async {
             let mut usages: Vec<TurnUsage> = Vec::new();
@@ -1632,7 +1632,7 @@ impl CompanyAgent {
                 }
                 AttemptOutcome::Empty => {
                     if steer.map(|c| c.requested()).unwrap_or(false) || envelope.spend_halted() {
-                        Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
+                        Ok(crate::redact::scrub(GRACEFUL_EMPTY_REPLY, &[]))
                     } else {
                         let retry_started = std::time::Instant::now();
                         let second = send(pump.sender()).await.map(|outcome| outcome.reply);
@@ -1641,7 +1641,7 @@ impl CompanyAgent {
                         match self.classify_turn(self.unmask(second), second_elapsed) {
                             AttemptOutcome::Reply(reply) => Ok(reply),
                             AttemptOutcome::Empty => {
-                                Ok(crate::harness::mcp_probe::scrub(GRACEFUL_EMPTY_REPLY, &[]))
+                                Ok(crate::redact::scrub(GRACEFUL_EMPTY_REPLY, &[]))
                             }
                             AttemptOutcome::BudgetPaused { summary } => Ok(slot_budget(summary)),
                             // A ceiling can fire on the retry too: this arm

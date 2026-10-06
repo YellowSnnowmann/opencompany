@@ -35,10 +35,11 @@ use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult};
 use crate::company::mcp::{AuthMaterial, McpServerDecl};
 use crate::error::OpenCompanyError;
 use crate::harness::mcp_probe::{
-    McpFailure, McpFailureQueue, classify_mcp_error, operator_message, scrub,
+    McpFailure, McpFailureQueue, classify_mcp_error, operator_message,
 };
 use crate::ports::types::CompanyId;
 use crate::ports::usage::UsageMeter;
+use crate::redact::scrub;
 use crate::runtime::tools::grants_cover_server;
 
 mod registry_list;
@@ -102,7 +103,7 @@ pub fn registry_for_agent(
 
 /// The credential substrings from the (enabled, grant-matched) servers this
 /// agent reaches — the known-secret set fed to
-/// [`scrub`](crate::harness::mcp_probe::scrub) so no configured credential can
+/// [`scrub`](crate::redact::scrub) so no configured credential can
 /// survive into an agent-visible error. `grants` must be the same effective
 /// grants passed to [`registry_for_agent`], rather than the raw manifest
 /// request, because an empty request inherits the company belt and therefore
