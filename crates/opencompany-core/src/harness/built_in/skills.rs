@@ -284,5 +284,8 @@ mod catalogue_tests;
 #[path = "skills_scope_tests.rs"]
 mod scope_tests;
 #[cfg(test)]
+#[path = "skills_stale_read_tests.rs"]
+mod stale_read_tests;
+#[cfg(test)]
 #[path = "skills_tests.rs"]
 mod tests;
