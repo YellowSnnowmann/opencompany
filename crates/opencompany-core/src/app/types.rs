@@ -625,21 +625,14 @@ pub struct AppState {
     /// A lock rather than an atomic because [`AuthMode`] is not a primitive;
     /// it is read once per company build, never on a request path.
     auth_mode_override: Arc<RwLock<Option<AuthMode>>>,
-    /// In-flight console MCP OAuth flows, keyed by the opaque `state` the browser
-    /// round-trips (issue #90). The `/mcp/servers/{name}/oauth/start` route parks
-    /// a [`PendingOAuth`](crate::company::mcp_oauth::PendingOAuth) here; the
-    /// unauthenticated `/oauth/mcp/callback` route takes it back out by `state`.
-    /// Gated behind `mcp` so the default build links none of the OAuth path.
-    /// Each entry carries the [`Instant`](std::time::Instant) it was parked so
-    /// abandoned flows (closed tab, double-click, pre-callback error) can be
-    /// swept — they hold a `client_secret` + `code_verifier` that must not live
-    /// in memory forever.
+    /// The console's MCP OAuth flow (issue #90), holding the sign-ins parked
+    /// between the `/mcp/servers/{name}/oauth/start` route and the
+    /// unauthenticated `/oauth/mcp/callback` route, keyed by the opaque `state`
+    /// the browser round-trips. The flow sweeps abandoned sign-ins, which hold
+    /// a `client_secret` + `code_verifier`. Gated behind `mcp` so the default
+    /// build links none of the OAuth path.
     #[cfg(feature = "mcp")]
-    oauth_pending: Arc<
-        std::sync::Mutex<
-            HashMap<String, (std::time::Instant, crate::company::mcp_oauth::PendingOAuth)>,
-        >,
-    >,
+    mcp_oauth: Arc<tinymcp::registry::oauth::OAuthFlow>,
     /// Issue #290: this host's ability to rebuild a registered company's runtime
     /// in place, so a first-time inference config takes effect without a process
     /// restart.
@@ -717,7 +710,7 @@ impl AppState {
             hub_links: Arc::new(crate::server::hub_link::HubLinks::new()),
             cors: crate::server::cors::CorsConfig::default(),
             #[cfg(feature = "mcp")]
-            oauth_pending: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            mcp_oauth: Arc::new(crate::company::mcp_oauth::console_flow()),
             analytics: crate::analytics::null_tracker(),
             rebuilder: None,
             acp_agents: None,
@@ -1172,53 +1165,18 @@ impl AppState {
         &self.schema
     }
 
-    /// How long a parked OAuth flow stays reclaimable before it's swept. Longer
-    /// than any realistic operator round-trip through the authorization server,
-    /// short enough that an abandoned flow's secrets don't linger.
+    /// The console's MCP OAuth flow, shared by the start and callback routes.
     #[cfg(feature = "mcp")]
-    const OAUTH_PENDING_TTL: std::time::Duration = std::time::Duration::from_secs(600);
-
-    /// Parks an in-flight console MCP OAuth flow keyed by its opaque `state`, to
-    /// be reclaimed by the callback route. See issue #90. Sweeps flows older than
-    /// [`OAUTH_PENDING_TTL`](Self::OAUTH_PENDING_TTL) on every park so an
-    /// abandoned sign-in (closed tab, double-click, pre-callback error) can't
-    /// retain its `client_secret`/`code_verifier` for the life of the process.
-    #[cfg(feature = "mcp")]
-    pub fn park_oauth(&self, state: String, pending: crate::company::mcp_oauth::PendingOAuth) {
-        let mut guard = self.oauth_pending.lock().expect("oauth pending poisoned");
-        guard.retain(|_, (parked_at, _)| parked_at.elapsed() < Self::OAUTH_PENDING_TTL);
-        guard.insert(state, (std::time::Instant::now(), pending));
+    pub fn mcp_oauth(&self) -> &tinymcp::registry::oauth::OAuthFlow {
+        &self.mcp_oauth
     }
 
-    /// Takes (removes) a parked console MCP OAuth flow by its `state`. `None` when
-    /// the state is unknown, already consumed (single-use, so a replayed
-    /// callback can't re-exchange), or swept as stale past
-    /// [`OAUTH_PENDING_TTL`](Self::OAUTH_PENDING_TTL).
-    #[cfg(feature = "mcp")]
-    pub fn take_oauth(&self, state: &str) -> Option<crate::company::mcp_oauth::PendingOAuth> {
-        let mut guard = self.oauth_pending.lock().expect("oauth pending poisoned");
-        let entry = guard.remove(state)?;
-        let (parked_at, pending) = entry;
-        // A flow that outlived its TTL is treated as expired, not reclaimable.
-        if parked_at.elapsed() >= Self::OAUTH_PENDING_TTL {
-            return None;
-        }
-        Some(pending)
-    }
-
-    /// Test-only: park a flow with an explicit parked-at instant so the TTL
-    /// expiry + sweep paths can be exercised without waiting real time.
+    /// Replaces the console's MCP OAuth flow, so a test can sign in against
+    /// a loopback authorization server.
     #[cfg(all(test, feature = "mcp"))]
-    fn park_oauth_at(
-        &self,
-        state: String,
-        pending: crate::company::mcp_oauth::PendingOAuth,
-        parked_at: std::time::Instant,
-    ) {
-        self.oauth_pending
-            .lock()
-            .expect("oauth pending poisoned")
-            .insert(state, (parked_at, pending));
+    pub(crate) fn with_mcp_oauth(mut self, flow: tinymcp::registry::oauth::OAuthFlow) -> Self {
+        self.mcp_oauth = Arc::new(flow);
+        self
     }
 
     /// Returns a serializable system specification snapshot.

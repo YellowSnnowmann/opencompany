@@ -1048,7 +1048,8 @@ async fn test_server(company: ScopedCompany, Path(NamePath { name }): Path<NameP
 ///
 /// Resolves the server's effective endpoint, discovers its authorization server,
 /// dynamically registers a client (RFC 7591) + generates PKCE, parks the pending
-/// state on [`AppState`] keyed by the opaque `state`, and returns
+/// state on the host's console [`OAuthFlow`](tinymcp::registry::oauth::OAuthFlow)
+/// keyed by the opaque `state`, and returns
 /// `{ "authorizeUrl": … }` for the console to open in a browser tab. The redirect
 /// URI is derived from the host's public URL (or bind) so it matches what DCR
 /// registered — see [`crate::company::mcp_oauth::callback_redirect_uri`].
@@ -1083,15 +1084,16 @@ async fn start_oauth(
         .ok_or_else(|| ApiError(OpenCompanyError::McpServerNotFound(name.clone())))?;
 
     let redirect_uri = mcp_oauth::callback_redirect_uri(&state.config().host_base_url());
-    let begun = mcp_oauth::begin(&decl.endpoint, runtime.id(), &name, &redirect_uri)
-        .await
-        .map_err(ApiError)?;
-
-    // Park the pending flow; the unauthenticated callback route reclaims it.
-    state.park_oauth(begun.state.clone(), begun.pending);
-    Ok(Json(
-        serde_json::json!({ "authorizeUrl": begun.authorize_url }),
-    ))
+    let authorize_url = mcp_oauth::begin(
+        state.mcp_oauth(),
+        &decl.endpoint,
+        runtime.id(),
+        &name,
+        &redirect_uri,
+    )
+    .await
+    .map_err(ApiError)?;
+    Ok(Json(serde_json::json!({ "authorizeUrl": authorize_url })))
 }
 
 /// Without the `mcp` feature there is no OAuth transport, so starting a sign-in

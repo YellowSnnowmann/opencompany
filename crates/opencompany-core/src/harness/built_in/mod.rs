@@ -4893,8 +4893,8 @@ fn auth_kind(material: &crate::company::mcp::AuthMaterial) -> u8 {
 
 /// Refreshes any near-expiry console-OAuth credential in `decls` before the
 /// registry is built, re-persisting the rotated token **write-only** so agents
-/// never send an expired bearer. Per-tenant analogue of OpenHuman's
-/// `mcp_registry::oauth::refresh_if_expired`. A refresh failure is non-fatal —
+/// never send an expired bearer, through tinymcp's guarded
+/// `OAuthFlow::refresh`. A refresh failure is non-fatal —
 /// the old token is kept and the next `401` re-prompts sign-in.
 #[cfg(feature = "mcp")]
 async fn refresh_oauth_decls(
@@ -4905,9 +4905,6 @@ async fn refresh_oauth_decls(
     use crate::company::mcp_oauth;
 
     for decl in decls.iter_mut() {
-        if !mcp_oauth::needs_refresh(&decl.auth, 60) {
-            continue;
-        }
         let Some(new_material) = mcp_oauth::refresh(&decl.auth).await else {
             continue;
         };

@@ -7,8 +7,8 @@
 //! the route cannot require one. Its trust comes instead from the opaque `state`
 //! it round-trips — an unknown/expired/replayed `state` yields nothing.
 //!
-//! Flow: look up the parked [`PendingOAuth`](crate::company::mcp_oauth::PendingOAuth)
-//! by `state`, exchange the `code` for a token, store it **write-only** under the
+//! Flow: resolve the company and server the console flow parked under `state`,
+//! exchange the `code` for a token, store it **write-only** under the
 //! company's per-server credential key, probe-and-persist the server's health,
 //! and render a small self-contained success (or failure) HTML page for the tab.
 //!
@@ -69,8 +69,13 @@ async fn callback(State(state): State<AppState>, Query(query): Query<CallbackQue
         );
     };
 
-    // 3. Reclaim the parked flow (single-use — a replayed callback finds nothing).
-    let Some(pending) = state.take_oauth(cb_state) else {
+    // 3. Resolve the parked flow (single-use — a replayed callback finds nothing).
+    let Some((company_id, server_name)) = state
+        .mcp_oauth()
+        .pending_server(cb_state)
+        .as_deref()
+        .and_then(mcp_oauth::split_server_id)
+    else {
         return failure_page(
             StatusCode::BAD_REQUEST,
             "Sign-in expired",
@@ -79,10 +84,10 @@ async fn callback(State(state): State<AppState>, Query(query): Query<CallbackQue
     };
 
     // 4. Resolve the company the pending flow targets.
-    let Some(runtime) = state.registry().get(&pending.company_id) else {
+    let Some(runtime) = state.registry().get(&company_id) else {
         log::warn!(
             "[mcp-oauth] callback for unknown company={}",
-            pending.company_id.as_ref()
+            company_id.as_ref()
         );
         return failure_page(
             StatusCode::NOT_FOUND,
@@ -92,16 +97,15 @@ async fn callback(State(state): State<AppState>, Query(query): Query<CallbackQue
     };
 
     // 5. Exchange the code for a token (PKCE verifier + client creds).
-    let material = match mcp_oauth::complete(&pending, code).await {
+    let material = match mcp_oauth::complete(state.mcp_oauth(), cb_state, code).await {
         Ok(material) => material,
         Err(err) => {
-            // `complete` never echoes a secret in its error, but scrub anyway
-            // against this flow's own known secrets as defence in depth.
-            let scrubbed = crate::redact::scrub(&err.to_string(), &pending_secret_hints(&pending));
+            // The flow never echoes a secret in its error; scrub anyway as
+            // defence in depth.
+            let scrubbed = crate::redact::scrub(&err.to_string(), &[]);
             log::warn!(
-                "[mcp-oauth] token exchange failed for company={} server={}: {scrubbed}",
-                pending.company_id.as_ref(),
-                pending.server_name
+                "[mcp-oauth] token exchange failed for company={} server={server_name}: {scrubbed}",
+                company_id.as_ref(),
             );
             return failure_page(
                 StatusCode::BAD_GATEWAY,
@@ -114,16 +118,15 @@ async fn callback(State(state): State<AppState>, Query(query): Query<CallbackQue
     // 6. Store the token WRITE-ONLY under the per-server credential key.
     if let Err(err) = mcp::store_auth(
         runtime.id(),
-        &pending.server_name,
+        &server_name,
         &material,
         runtime.secrets().as_ref(),
     )
     .await
     {
         log::error!(
-            "[mcp-oauth] failed to persist token for company={} server={}: {}",
-            pending.company_id.as_ref(),
-            pending.server_name,
+            "[mcp-oauth] failed to persist token for company={} server={server_name}: {}",
+            company_id.as_ref(),
             err.code()
         );
         return failure_page(
@@ -134,25 +137,18 @@ async fn callback(State(state): State<AppState>, Query(query): Query<CallbackQue
     }
 
     // 7. Probe-and-persist so the console badge flips to green (best-effort).
-    let health = probe_and_persist(&runtime, &pending.server_name).await;
+    let health = probe_and_persist(&runtime, &server_name).await;
 
     log::info!(
-        "[mcp-oauth] callback stored token for company={} server={} (status={})",
-        pending.company_id.as_ref(),
-        pending.server_name,
+        "[mcp-oauth] callback stored token for company={} server={server_name} (status={})",
+        company_id.as_ref(),
         health
             .as_ref()
             .map(|h| h.status.as_str())
             .unwrap_or("unknown"),
     );
 
-    success_page(&pending.server_name)
-}
-
-/// The known-secret set from a pending flow (client secret only — the tokens
-/// aren't known until after exchange). Feeds the scrubber on the error path.
-fn pending_secret_hints(pending: &mcp_oauth::PendingOAuth) -> Vec<String> {
-    pending.client_secret.iter().cloned().collect()
+    success_page(&server_name)
 }
 
 /// Probe the server through the same auth-included registry the agent uses, and
