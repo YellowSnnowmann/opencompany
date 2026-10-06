@@ -204,6 +204,11 @@ pub struct SetupDto {
     pub inference: InferenceReadyDto,
     /// What this host can do with a mailbox.
     pub mail: MailReadyDto,
+    /// Whether this GET was authorized by the platform SSO bootstrap session —
+    /// i.e. the console arrived via the dashboard's one-click SSO. When true the
+    /// wizard skips the sign-in step: `apply` signs that owner straight in (see
+    /// [`apply_response`]), so a password they would never use is not asked for.
+    pub sso_bootstrap: bool,
 }
 
 /// What this host can do with a mailbox, so the wizard never offers a
@@ -504,6 +509,14 @@ pub struct AppliedDto {
     ///
     /// `None` when none was sent or no company was seeded.
     pub composio_note: Option<String>,
+    /// A header-carrier session for the owner who arrived via the platform SSO
+    /// bootstrap, so the console lands signed in without a second sign-in.
+    ///
+    /// Set only when this apply was authorized by the SSO bootstrap session, it
+    /// seeded a company, and the caller asked for the header carrier
+    /// (cross-origin). A same-origin caller is signed in by the `Set-Cookie` this
+    /// response carries instead, and this stays `None`. See [`apply`].
+    pub session: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -686,9 +699,13 @@ async fn read(
     headers: HeaderMap,
 ) -> Result<Json<SetupDto>, crate::server::Rejection> {
     authorize(&state, &headers, peer).await?;
-    snapshot(&state, &ProcessEnv)
-        .map(Json)
-        .map_err(|e| ApiError::from(e).into_response().into())
+    // Surface whether this request is on an SSO bootstrap session so the wizard
+    // can skip the sign-in step (the owner is signed in by `apply`, not a
+    // password). Read before the snapshot so the flag rides out with it.
+    let sso_bootstrap = bootstrap_setup_subject(&state, &headers).await?.is_some();
+    let mut dto = snapshot(&state, &ProcessEnv)?;
+    dto.sso_bootstrap = sso_bootstrap;
+    Ok(Json(dto))
 }
 
 /// The manifest the resolution pass runs against.
@@ -749,6 +766,9 @@ fn snapshot(state: &AppState, env: &dyn EnvSource) -> Result<SetupDto, OpenCompa
         .collect();
 
     Ok(SetupDto {
+        // `read` overrides this when the request carries a valid SSO bootstrap
+        // session; `snapshot` has no request headers to tell on its own.
+        sso_bootstrap: false,
         complete: state.setup_complete(),
         config_path: dir
             .join(crate::app::config::CONFIG_FILE)
@@ -880,12 +900,93 @@ async fn apply(
     crate::server::graphql::auth::MaybePeer(peer): crate::server::graphql::auth::MaybePeer,
     headers: HeaderMap,
     Json(req): Json<SetupRequest>,
-) -> Result<Json<AppliedDto>, crate::server::Rejection> {
+) -> Result<axum::response::Response, crate::server::Rejection> {
     authorize(&state, &headers, peer).await?;
-    apply_inner(&state, req, &ProcessEnv)
-        .await
-        .map(Json)
-        .map_err(|e| ApiError::from(e).into_response().into())
+    // Capture the SSO bootstrap owner BEFORE seeding: a bootstrap session only
+    // validates on an empty host, so once `apply_inner` registers the company it
+    // stops validating — this is the one chance to read who it proved.
+    let bootstrap_owner = bootstrap_setup_subject(&state, &headers).await?;
+    let applied = apply_inner(&state, req, &ProcessEnv).await?;
+    apply_response(&state, &headers, bootstrap_owner, applied).await
+}
+
+/// The SSO-bootstrap owner this request proves, or `None` when it did not arrive
+/// on a valid bootstrap session.
+///
+/// Read BEFORE seeding: [`crate::server::sso::bootstrap_session_is_valid`]
+/// requires an empty registry, so a bootstrap session stops validating the
+/// moment setup seeds a company. A valid one proves the per-tenant token's
+/// subject is the deployment's bootstrap admin, so that is who setup signs in.
+async fn bootstrap_setup_subject(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<String>, crate::server::Rejection> {
+    if !state.registry().is_empty() {
+        return Ok(None);
+    }
+    let Some((company, token)) = crate::server::users::cookie::session_from_header(headers) else {
+        return Ok(None);
+    };
+    if !crate::server::sso::bootstrap_session_is_valid(state, &company, &token).await? {
+        return Ok(None);
+    }
+    Ok(state
+        .config()
+        .bootstrap_admin()
+        .map(|admin| crate::ports::users::normalize_email(&admin)))
+}
+
+/// Builds the apply response, signing the SSO-bootstrap owner straight into the
+/// company setup just seeded so the console lands authenticated — no second
+/// sign-in with a password they never needed.
+///
+/// Falls through to the plain `AppliedDto` when there is no bootstrap owner, no
+/// company was seeded, or the owner is not a standing admin of the seeded
+/// company (the same eligibility gate the SSO redeem applies, so setup cannot
+/// mint a session for an address the company would not itself admit). A
+/// same-origin console is signed in by a `Set-Cookie`; a header-carrier caller
+/// gets the session in the body instead.
+async fn apply_response(
+    state: &AppState,
+    headers: &HeaderMap,
+    bootstrap_owner: Option<String>,
+    mut applied: AppliedDto,
+) -> Result<axum::response::Response, crate::server::Rejection> {
+    let Some(owner) = bootstrap_owner else {
+        return Ok(Json(applied).into_response());
+    };
+    let Some(company) = applied.seeded_company.clone() else {
+        return Ok(Json(applied).into_response());
+    };
+    let Some(runtime) = state
+        .registry()
+        .get(&crate::ports::types::CompanyId::new(company.as_str()))
+    else {
+        return Ok(Json(applied).into_response());
+    };
+    let standing = crate::server::users::routes::bootstrap_admins(state.config(), &runtime).await?;
+    if !standing.iter().any(|admin| admin == &owner) {
+        return Ok(Json(applied).into_response());
+    }
+    let now = crate::ports::now_millis();
+    let user = crate::server::users::routes::upsert_from_eligibility(
+        &runtime,
+        &owner,
+        crate::ports::users::UserRole::Admin,
+        now,
+    )
+    .await?;
+    match crate::server::users::routes::mint_session_carrier(state, &runtime, &user, headers)
+        .await?
+    {
+        crate::server::users::routes::SessionCarrier::Header(session) => {
+            applied.session = Some(session);
+            Ok(Json(applied).into_response())
+        }
+        crate::server::users::routes::SessionCarrier::Cookie(set) => {
+            Ok(([(axum::http::header::SET_COOKIE, set)], Json(applied)).into_response())
+        }
+    }
 }
 
 /// Serializes the whole first-run apply, process-wide.
@@ -1258,6 +1359,9 @@ async fn apply_inner(
         credential_note,
         provider_note,
         composio_note,
+        // `apply` fills this in after seeding when the request arrived on an SSO
+        // bootstrap session; `apply_inner` never has the request headers.
+        session: None,
     })
 }
 

@@ -107,6 +107,13 @@ export interface SetupStatus {
   inference: InferenceReady;
   /** What this host can do with a mailbox. */
   mail: MailReady;
+  /**
+   * Whether this GET was authorized by the platform SSO bootstrap session — the
+   * console arrived via the dashboard's one-click SSO. When true the wizard
+   * skips the sign-in step and sends no password: the apply signs that owner in
+   * directly. Absent on a host too old to report it (treated as `false`).
+   */
+  sso_bootstrap?: boolean;
 }
 
 /**
@@ -554,6 +561,16 @@ export interface SetupApplied {
    * sent, and absent on a host predating the field.
    */
   composio_note?: string | null;
+  /**
+   * A header-carrier session for an owner who arrived via the platform SSO
+   * bootstrap, so the console can land signed in without a second sign-in.
+   *
+   * Present only when setup was authorized by the SSO bootstrap session, seeded
+   * a company, and this client asked for the header carrier (cross-origin). A
+   * same-origin console is signed in by the `Set-Cookie` the apply response
+   * carries, so this stays absent there.
+   */
+  session?: string | null;
 }
 
 /** Read this instance's setup state. */

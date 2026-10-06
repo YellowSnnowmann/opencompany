@@ -308,6 +308,101 @@ async fn the_platform_owner_can_redeem_into_setup_on_a_routable_empty_host() {
 }
 
 #[tokio::test]
+async fn setup_via_sso_bootstrap_signs_the_owner_in_without_a_password() {
+    // The one-click dashboard SSO lands on an empty host. The owner must finish
+    // setup signed in — no password step, no second sign-in. GET /setup flags the
+    // bootstrap arrival so the wizard can skip the sign-in step, and the POST
+    // /setup that seeds the company hands back a session that authenticates the
+    // console directly.
+    let home = home();
+    let state = empty_routable_state(home.path());
+
+    // Redeem the per-tenant SSO token to establish the bootstrap session.
+    let redeemed = router(state.clone())
+        .oneshot(post(
+            "/api/v1/sso/redeem",
+            serde_json::json!({ "token": valid_token() }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(redeemed.status(), StatusCode::OK);
+    let session = body_json(redeemed).await["session"]
+        .as_str()
+        .expect("bootstrap session")
+        .to_string();
+
+    // GET /setup on that session advertises the bootstrap arrival.
+    let read = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/setup")
+                .header(SESSION_HEADER, &session)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(read.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(read).await["sso_bootstrap"],
+        serde_json::Value::Bool(true),
+        "GET /setup must flag an SSO bootstrap arrival"
+    );
+
+    // POST /setup seeds a company from a template. It asks for the header carrier
+    // and sends NO admin_password — the owner is signed in by the apply, not a
+    // credential they set.
+    let applied = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/setup")
+                .header("content-type", "application/json")
+                .header(SESSION_HEADER, &session)
+                .header(SESSION_CARRIER_HEADER, "header")
+                .body(Body::from(
+                    serde_json::json!({
+                        "fields": {},
+                        "template": crate::desktop::DEFAULT_PRESET_ID,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(applied.status(), StatusCode::OK);
+    let applied = body_json(applied).await;
+    let seeded = applied["seeded_company"]
+        .as_str()
+        .expect("a company was seeded")
+        .to_string();
+    let minted = applied["session"]
+        .as_str()
+        .expect("apply hands back a session for the SSO owner")
+        .to_string();
+
+    // That minted session authenticates the configured console — signed in,
+    // with no password ever set.
+    let me = router(state)
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/companies/{seeded}/auth/me"))
+                .header(SESSION_HEADER, &minted)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        me.status(),
+        StatusCode::OK,
+        "the minted session must authenticate the configured console without a password"
+    );
+    assert_eq!(body_json(me).await["email"], "ada@example.com");
+}
+
+#[tokio::test]
 async fn a_valid_token_claims_the_admin_on_first_use() {
     // The company starts with no users; a first redemption materializes the
     // standing admin as a passwordless account — the SSO half of the claim.
