@@ -122,10 +122,7 @@ use crate::harness::skills::EffectiveSkills;
 use crate::harness::toolbelt;
 use crate::hive::mcp_server::{McpAttach, attach_opencompany_mcp};
 #[cfg(feature = "mcp")]
-use crate::mcp::agent::{
-    OcMcpCallTool, OcMcpRegistryInstalledListTool, OcMcpRegistryScopedTool, capability_brief,
-    granted_policies, granted_secrets, registry_for_agent,
-};
+use crate::mcp::agent::{OcMcpCallTool, granted_policies, granted_secrets, registry_for_agent};
 use crate::ports::skills_state::SkillState;
 use crate::ports::types::CompanyId;
 use crate::runtime::tools::{NAMESPACE_SEPARATORS, extends_on_boundary};
@@ -370,12 +367,13 @@ pub fn build_agent_with_model(
         }
     };
 
-    // The company's own granted MCP servers, attached directly to the
-    // `AgentSpec` in `agent_spec_for` (plan hive-desks Phase 2 follow-up) —
-    // see `embed_servers_for_agent`'s doc comment for why this exists
-    // alongside (not instead of) `registry_for_agent` below.
     #[cfg(feature = "mcp")]
-    let mut company_mcp_servers: Vec<openhuman_embed::McpServer> = Vec::new();
+    let agent_mcp = crate::mcp::agent::resolve_for_agent(
+        &deps.mcp_servers,
+        &manifest_agent.id,
+        grants,
+        deps.mcp_home.clone(),
+    );
 
     let mut tools: Vec<Box<dyn Tool>> = Vec::new();
     // Belt tools this agent keeps but is not offered — see AgentBlueprint::unadvertised.
@@ -388,82 +386,8 @@ pub fn build_agent_with_model(
             deps.approval_requests.clone(),
         ),
     ));
-    // Installed-MCP-registry surface (`mcp_registry_list_tools` /
-    // `mcp_registry_tool_call`) — distinct from the per-server `mcp:<name>`
-    // bridge below: both tools address an install at call time by a `server_id`
-    // argument rather than by the grant they were wired under. Both are
-    // therefore wrapped in `OcMcpRegistryScopedTool`, which resolves that
-    // argument against the agent's grants (`grants_cover_registry_server`)
-    // before delegating, so a scoped `mcp_registry.<server_id>` grant reaches
-    // one install and a bare `mcp_registry` grant reaches all of them. The same
-    // decorator reads that install's stored tool policy, so a blocked tool is
-    // refused at call time. Two hard gates before either tool is wired,
-    // following the
-    // `composio`/`media`/`search` precedent above:
-    //
-    //  1. an **EXPLICIT** `mcp_registry` grant
-    //     (`grants_mcp_registry_explicit`) — the catch-all `*` does NOT confer
-    //     it, for the same reason it does not confer `composio`: this reaches
-    //     third-party servers and can mutate them, so a broadly-permissioned
-    //     company must still opt in by name.
-    //  2. a configured registry store (`deps.mcp_home`) — the store an install
-    //     writes through. Granted-but-unconfigured wires nothing and warns
-    //     (fail-closed), matching every other explicit namespace in this file.
-    //
-    // `mcp_registry_list_tools` (read-only schema discovery over the same
-    // registry) rides the SAME grant as the mutating call tool rather than a
-    // narrower one of its own — see `grants_mcp_registry_explicit`'s doc
-    // comment for why: every other third-party-reaching family already bundles
-    // its read-only discovery tools under the one grant that covers the
-    // mutating ones, and OpenHuman's own tool description frames the two as a
-    // single discover-then-call workflow.
     #[cfg(feature = "mcp")]
-    let mut mcp_registry_wired = false;
-    #[cfg(feature = "mcp")]
-    let mut mcp_declared_wired = false;
-    #[cfg(feature = "mcp")]
-    if crate::company::grants_mcp_registry_explicit(grants) {
-        match deps.mcp_home.clone() {
-            Some(mcp_home) => {
-                mcp_registry_wired = true;
-                let config = std::sync::Arc::new(crate::mcp::runtime::McpRuntime::config_for(
-                    mcp_home.clone(),
-                ));
-                // Enumeration, so the two tools below have a `server_id` to
-                // name. OpenHuman's own answer to this question carries the
-                // dial string and the install's config blob, so this is our own
-                // tool rather than a decorator over it.
-                tools.push(Box::new(OcMcpRegistryInstalledListTool::new(
-                    std::sync::Arc::new(crate::mcp::runtime::McpRuntime::new(mcp_home)),
-                    grants.to_vec(),
-                )));
-                tools.push(Box::new(OcMcpRegistryScopedTool::new(
-                    Box::new(oh::mcp::registry::tools::McpRegistryListToolsTool::new(
-                        config.clone(),
-                    )),
-                    manifest_agent.id.clone(),
-                    grants.to_vec(),
-                    company.clone(),
-                    deps.secrets.clone(),
-                )));
-                tools.push(Box::new(OcMcpRegistryScopedTool::new(
-                    Box::new(oh::mcp::registry::tools::McpRegistryToolCallTool::new(
-                        config,
-                    )),
-                    manifest_agent.id.clone(),
-                    grants.to_vec(),
-                    company.clone(),
-                    deps.secrets.clone(),
-                )));
-            }
-            None => tracing::warn!(
-                company = %company,
-                agent = %manifest_agent.id,
-                "[build] agent explicitly grants `mcp_registry` but no MCP registry home is \
-                 configured; mcp_registry tools NOT wired (fail-closed)"
-            ),
-        }
-    }
+    tools.extend(agent_mcp.registry_tools(company, deps.secrets.clone()));
 
     // Granted file tools, sandboxed to this agent's own workspace directory. An
     // agent gets them only when its effective grants cover the `files`/`docs`
@@ -1124,18 +1048,6 @@ pub fn build_agent_with_model(
     // per-call gate.
     #[cfg(feature = "mcp")]
     if let Some(registry) = registry_for_agent(&deps.mcp_servers, grants) {
-        // Reaches the model natively: `agent_spec_for` attaches each of these
-        // to the `AgentSpec` via `AgentSpec::mcp`, alongside the internal
-        // `opencompany` server, so OpenHuman's own `mcp_call_tool` /
-        // `mcp_list_tools` — the only implementations of
-        // those names that actually run for a company agent now — can reach
-        // this company's own registered servers by name. See
-        // `embed_servers_for_agent`'s doc comment for the full story.
-        company_mcp_servers = crate::mcp::agent::embed_servers_for_agent(
-            &deps.mcp_servers,
-            &manifest_agent.id,
-            grants,
-        );
         let mcp_security = Arc::new(SecurityPolicy::default());
         // The known-secret set for the scrubber: every credential the agent's
         // granted servers carry, so no configured token can leak into an
@@ -1166,58 +1078,10 @@ pub fn build_agent_with_model(
             },
             mcp_policies,
         )));
-        mcp_declared_wired = true;
     }
 
-    // Stale-memory mitigation, once for whichever families were wired: an agent
-    // holding only a directory install enumerates through different tools and
-    // used to be told nothing at all, because this sat inside the declared arm.
     #[cfg(feature = "mcp")]
-    persona.push_str(&capability_brief(mcp_declared_wired, mcp_registry_wired));
-
-    // Composed from the same inputs the two dispatch tools were wired from, so
-    // the brief is exactly as accurate as the belt it describes. The installs
-    // are read under the same condition that wires `mcp_registry_tool_call`,
-    // so the brief never names a tool this agent does not hold.
-    #[cfg(feature = "mcp")]
-    {
-        let installs: Vec<crate::mcp::decl::families::RegistryServerRow> =
-            match deps.mcp_home.clone() {
-                Some(mcp_home) if crate::company::grants_mcp_registry_explicit(grants) => {
-                    match crate::mcp::runtime::McpRuntime::new(mcp_home).list() {
-                        Ok(installs) => installs
-                            .iter()
-                            .map(|install| crate::mcp::decl::families::RegistryServerRow {
-                                server_id: install.server_id.clone(),
-                                display_name: install.display_name.clone(),
-                                endpoint: install.transport.deployment_url().map(str::to_string),
-                                enabled: install.enabled,
-                            })
-                            .collect(),
-                        // A shorter brief, never a wrong one: the declared half
-                        // is still described, and "no installs" is not inferred
-                        // from a read that failed.
-                        Err(error) => {
-                            tracing::warn!(
-                                company = %company,
-                                agent = %manifest_agent.id,
-                                error = %error,
-                                "[build] MCP registry installs unreadable; the server-family \
-                                 brief names the declared servers only"
-                            );
-                            Vec::new()
-                        }
-                    }
-                }
-                _ => Vec::new(),
-            };
-        persona.push_str(&crate::mcp::decl::families::server_family_brief(
-            &deps.mcp_servers,
-            &installs,
-            grants,
-            &manifest_agent.id,
-        ));
-    }
+    persona.push_str(&agent_mcp.persona_brief(&agent_mcp.registry_installs(company)));
 
     // Orchestrator seam (issues #53 + #67 + #71): the company's orchestrator agent
     // additionally gets the delegating-orchestrator persona + tools. `query_company`
@@ -1377,7 +1241,7 @@ pub fn build_agent_with_model(
         native_tool_names,
         unadvertised,
         #[cfg(feature = "mcp")]
-        company_mcp_servers,
+        company_mcp_servers: agent_mcp.embed_servers(),
         chat_model,
         model,
         workspace,
